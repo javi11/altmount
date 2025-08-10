@@ -12,7 +12,6 @@ const (
 	Par2Extension = ".par2"
 )
 
-
 // Only working for new files and format
 func GetRealFileExtension(name string) string {
 	return filepath.Ext(strings.TrimSuffix(name, filepath.Ext(name)))
@@ -44,7 +43,6 @@ func ReplaceFileExtension(name string, extension string) string {
 func AddNzbExtension(name string) string {
 	return name + NzbExtension
 }
-
 
 func AddStrmExtension(name string) string {
 	return name + StrmExtension

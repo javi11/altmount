@@ -65,6 +65,8 @@ github.com/OpenPeeDeeP/depguard/v2 v2.2.1 h1:vckeWVESWp6Qog7UZSARNqfu/cZqvki8zsu
 github.com/OpenPeeDeeP/depguard/v2 v2.2.1/go.mod h1:q4DKzC4UcVaAvcfd41CZh0PWpGgzrVxUYBlgKNGquUo=
 github.com/Tensai75/subjectparser v0.1.0 h1:6fEWnRov8lDHxJS2EWqY6VonwYfrIRN+k8h8H7fFwHA=
 github.com/Tensai75/subjectparser v0.1.0/go.mod h1:PNBFBnkOGbVDfX+56ZmC4GKSpqoRMCF1Y44xYd7NLGI=
+github.com/acomagu/bufpipe v1.0.4 h1:e3H4WUzM3npvo5uv95QuJM3cQspFNtFBzvJ2oNjKIDQ=
+github.com/acomagu/bufpipe v1.0.4/go.mod h1:mxdxdup/WdsKVreO5GpW4+M/1CE2sMG4jeGJ2sYmHc4=
 github.com/alecthomas/assert/v2 v2.11.0 h1:2Q9r3ki8+JYXvGsDyBXwH3LcJ+WK5D0gc5E8vS6K3D0=
 github.com/alecthomas/assert/v2 v2.11.0/go.mod h1:Bze95FyfUr7x34QZrjL+XP+0qgp/zg8yS+TtBj1WA3k=
 github.com/alecthomas/chroma/v2 v2.19.0 h1:Im+SLRgT8maArxv81mULDWN8oKxkzboH07CHesxElq4=
@@ -90,6 +92,8 @@ github.com/ashanbrown/forbidigo/v2 v2.1.0 h1:NAxZrWqNUQiDz19FKScQ/xvwzmij6BiOw3S
 github.com/ashanbrown/forbidigo/v2 v2.1.0/go.mod h1:0zZfdNAuZIL7rSComLGthgc/9/n2FqspBOH90xlCHdA=
 github.com/ashanbrown/makezero/v2 v2.0.1 h1:r8GtKetWOgoJ4sLyUx97UTwyt2dO7WkGFHizn/Lo8TY=
 github.com/ashanbrown/makezero/v2 v2.0.1/go.mod h1:kKU4IMxmYW1M4fiEHMb2vc5SFoPzXvgbMR9gIp5pjSw=
+github.com/avast/retry-go/v4 v4.6.1 h1:VkOLRubHdisGrHnTu89g08aQEWEgRU7LVEop3GbIcMk=
+github.com/avast/retry-go/v4 v4.6.1/go.mod h1:V6oF8njAwxJ5gRo1Q7Cxab24xs5NCWZBeaHHBklR8mA=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/benbjohnson/clock v1.1.0 h1:Q92kusRqC1XV2MjkWETPvjJVqKetz1OzxZB7mHJLju8=
@@ -221,6 +225,10 @@ github.com/go-xmlfmt/xmlfmt v1.1.3 h1:t8Ey3Uy7jDSEisW2K3somuMKIpzktkWptA0iFCnRUW
 github.com/go-xmlfmt/xmlfmt v1.1.3/go.mod h1:aUCEOzzezBEjDBbFBoSiya/gduyIiWYRP6CnSFIV8AM=
 github.com/gobwas/glob v0.2.3 h1:A4xDbljILXROh+kObIiy5kIaPYD8e96x1tgBhUI5J+Y=
 github.com/gobwas/glob v0.2.3/go.mod h1:d3Ez4x06l9bZtSvzIay5+Yzi0fmZzPgnTbPcKjJAkT8=
+github.com/gofiber/storage/bbolt v1.3.5 h1:9ZDMTbeah5tfj3eX+hFu3F1AHiBO117ce3Gel7tkxlk=
+github.com/gofiber/storage/bbolt v1.3.5/go.mod h1:GibrOAQTFOzzzWWVCgq+V+gS8dUbaPeAMGI4FNZ32sI=
+github.com/gofiber/utils v1.0.1 h1:knct4cXwBipWQqFrOy1Pv6UcgPM+EXo9jDgc66V1Qio=
+github.com/gofiber/utils v1.0.1/go.mod h1:pacRFtghAE3UoknMOUiXh2Io/nLWSUHtQCi/3QASsOc=
 github.com/gofrs/flock v0.12.1 h1:MTLVXXHf8ekldpJk3AKicLij9MdwOWkZ+a/jHHZby9E=
 github.com/gofrs/flock v0.12.1/go.mod h1:9zxTsyu5xtJ9DK+1tFZyibEV7y3uwDxPPfbxeeHCoD0=
 github.com/gogo/protobuf v1.1.1/go.mod h1:r8qH/GZQm5c6nD/R0oafs1akxWv10x8SbQlK7atdtwQ=
@@ -321,8 +329,12 @@ github.com/gostaticanalysis/nilerr v0.1.1/go.mod h1:wZYb6YI5YAxxq0i1+VJbY0s2YONW
 github.com/gostaticanalysis/testutil v0.3.1-0.20210208050101-bfb5c8eec0e4/go.mod h1:D+FIZ+7OahH3ePw/izIEeH5I06eKs1IKI4Xr64/Am3M=
 github.com/gostaticanalysis/testutil v0.5.0 h1:Dq4wT1DdTwTGCQQv3rl3IvD5Ld0E6HiY+3Zh0sUGqw8=
 github.com/gostaticanalysis/testutil v0.5.0/go.mod h1:OLQSbuM6zw2EvCcXTz1lVq5unyoNft372msDY0nY5Hs=
+github.com/hashicorp/errwrap v1.0.0 h1:hLrqtEDnRye3+sgx6z4qVLNuviH3MR5aQ0ykNJa/UYA=
+github.com/hashicorp/errwrap v1.0.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
 github.com/hashicorp/go-immutable-radix/v2 v2.1.0 h1:CUW5RYIcysz+D3B+l1mDeXrQ7fUvGGCwJfdASSzbrfo=
 github.com/hashicorp/go-immutable-radix/v2 v2.1.0/go.mod h1:hgdqLXA4f6NIjRVisM1TJ9aOJVNRqKZj+xDGF6m7PBw=
+github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+lD48awMYo=
+github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
 github.com/hashicorp/go-uuid v1.0.3 h1:2gKiV6YVmrJ1i2CKKa9obLvRieoRGviZFL26PcT/Co8=
 github.com/hashicorp/go-uuid v1.0.3/go.mod h1:6SBZvOh/SIDV7/2o3Jml5SYk/TvGqwFJ/bN7x4byOro=
 github.com/hashicorp/go-version v1.2.1/go.mod h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09ZGVZPK5anwXA=
@@ -339,6 +351,14 @@ github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSo
 github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6/go.mod h1:aSSvb/t6k1mPoxDqO4vJh6VOCGPwU4O0C2/Eqndh1Sc=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
+github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=
+github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
+github.com/javi11/nntp-server-mock v0.0.1 h1:05KbUlFSnzk82CG/sHWLp9s6Vg8exL3wvdAetX8Bwhc=
+github.com/javi11/nntp-server-mock v0.0.1/go.mod h1:+QBpPor0q44ttab8kWo08+/t5C26IHhUpBTC1lZqujA=
+github.com/javi11/nntpcli v1.1.1 h1:uX7uIm40o/fpa1XbdfWTJgyExm3Wyx1SX9eFDIhVpu0=
+github.com/javi11/nntpcli v1.1.1/go.mod h1:ZDb9BCQVrG1UT0XN6ikfOlYYzqrYNxXISIuLg30ZpK0=
+github.com/javi11/nntppool v1.5.1 h1:xVl/0uiGK3AJ0YDOxFPTjNeESOWn1KMkfNeP846PLgI=
+github.com/javi11/nntppool v1.5.1/go.mod h1:lZYpeUrFMGtjIJBTEDAZlQ4Su2wD+BylSk9Np/1aRHs=
 github.com/javi11/nzbparser v0.2.1 h1:GDedRhh/N6f3YrcIw98ZBFbv3bFgTi1t2WSHiHhpWBA=
 github.com/javi11/nzbparser v0.2.1/go.mod h1:1vJtuXY/vz2CALFC/X2MYIdfGLE0BW65sB0SAFclCcI=
 github.com/jgautheron/goconst v1.8.2 h1:y0XF7X8CikZ93fSNT6WBTb/NElBu9IjaY7CCYQrCMX4=
@@ -411,6 +431,7 @@ github.com/maratori/testpackage v1.1.1 h1:S58XVV5AD7HADMmD0fNnziNHqKvSdDuEKdPD1r
 github.com/maratori/testpackage v1.1.1/go.mod h1:s4gRK/ym6AMrqpOa/kEbQTV4Q4jb7WeLZzVhVVVOQMc=
 github.com/matoous/godox v1.1.0 h1:W5mqwbyWrwZv6OQ5Z1a/DHGMOvXYCBP3+Ht7KMoJhq4=
 github.com/matoous/godox v1.1.0/go.mod h1:jgE/3fUXiTurkdHOLT5WEkThTSuE7yxHv5iWPa80afs=
+github.com/matryer/is v1.2.0/go.mod h1:2fLPjFQM9rhQ15aVEtbuwhJinnOqrmgXPNdZsdwlWXA=
 github.com/matryer/is v1.4.0 h1:sosSmIWwkYITGrxZ25ULNDeKiMNzFSr4V/eqBQP0PeE=
 github.com/matryer/is v1.4.0/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
 github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
@@ -429,6 +450,8 @@ github.com/mitchellh/go-homedir v1.1.0 h1:lukF9ziXFxDFPkA1vsr5zpc1XuPDn/wFntq5mG
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
+github.com/mnightingale/rapidyenc v0.0.0-20250628164132-aaf36ba945ef h1:LFK5FupkzCnQqAYEhvy3JMQwCMC6gXDJQe2+jeJyGAM=
+github.com/mnightingale/rapidyenc v0.0.0-20250628164132-aaf36ba945ef/go.mod h1:OwCiJ/ffT27hY2V+WIU4Q6JgCFzGxP89/6UR/WZtJ+E=
 github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/reflect2 v0.0.0-20180701023420-4b7aa43c6742/go.mod h1:bx2lNnkwVCuqBIxFjflWJWanXIb3RllmbCylyMrvgv0=
@@ -639,6 +662,8 @@ go.augendre.info/arangolint v0.2.0 h1:2NP/XudpPmfBhQKX4rMk+zDYIj//qbt4hfZmSSTcpj
 go.augendre.info/arangolint v0.2.0/go.mod h1:Vx4KSJwu48tkE+8uxuf0cbBnAPgnt8O1KWiT7bljq7w=
 go.augendre.info/fatcontext v0.8.0 h1:2dfk6CQbDGeu1YocF59Za5Pia7ULeAM6friJ3LP7lmk=
 go.augendre.info/fatcontext v0.8.0/go.mod h1:oVJfMgwngMsHO+KB2MdgzcO+RvtNdiCEOlWvSFtax/s=
+go.etcd.io/bbolt v1.3.9 h1:8x7aARPEXiXbHmtUwAIv7eV2fQFHrLLavdiJ3uzJXoI=
+go.etcd.io/bbolt v1.3.9/go.mod h1:zaO32+Ti0PK1ivdPtgMESzuzL2VPoIG1PCQNvOdo/dE=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
 go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
 go.opencensus.io v0.22.2/go.mod h1:yxeiOL68Rb0Xd1ddK5vPZ/oVn4vY4Ynel7k9FzqtOIw=
