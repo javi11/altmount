@@ -51,7 +51,7 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 		serviceConfig.PollInterval = 30 * time.Second
 	}
 
-	service, err := nzb.NewService(serviceConfig)
+	service, err := nzb.NewService(serviceConfig, cp)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)

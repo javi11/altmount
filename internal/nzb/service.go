@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/nntppool"
 )
 
 // ServiceConfig holds configuration for the NZB service
@@ -31,7 +32,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB service
-func NewService(config ServiceConfig) (*Service, error) {
+func NewService(config ServiceConfig, cp nntppool.UsenetConnectionPool) (*Service, error) {
 	// Initialize database
 	dbConfig := database.Config{
 		DatabasePath: config.DatabasePath,
@@ -42,8 +43,8 @@ func NewService(config ServiceConfig) (*Service, error) {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
-	// Create processor
-	processor := NewProcessor(db.Repository)
+	// Create processor with connection pool
+	processor := NewProcessor(db.Repository, cp)
 
 	service := &Service{
 		config:    config,

@@ -1,6 +1,7 @@
 package nzb
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/nntppool"
 	"github.com/javi11/nzbparser"
 )
 
@@ -52,11 +54,15 @@ var (
 )
 
 // Parser handles NZB file parsing
-type Parser struct{}
+type Parser struct {
+	cp nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
+}
 
 // NewParser creates a new NZB parser
-func NewParser() *Parser {
-	return &Parser{}
+func NewParser(cp nntppool.UsenetConnectionPool) *Parser {
+	return &Parser{
+		cp: cp,
+	}
 }
 
 // ParseFile parses an NZB file from a reader
@@ -115,7 +121,6 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 func (p *Parser) parseFile(file nzbparser.NzbFile) (*ParsedFile, error) {
 	// Convert segments
 	segments := make([]database.NzbSegment, len(file.Segments))
-	var totalSize int64
 
 	for i, seg := range file.Segments {
 		segments[i] = database.NzbSegment{
@@ -124,7 +129,13 @@ func (p *Parser) parseFile(file nzbparser.NzbFile) (*ParsedFile, error) {
 			MessageID: seg.ID,
 			Groups:    file.Groups,
 		}
-		totalSize += int64(seg.Bytes)
+	}
+
+	// Calculate total size using the sophisticated logic
+	totalSize, err := p.calculateFileSize(file)
+	if err != nil {
+		// If we can't get the actual size, fallback to segment sum
+		totalSize = p.calculateSegmentSum(file)
 	}
 
 	// Extract filename from subject
@@ -143,6 +154,84 @@ func (p *Parser) parseFile(file nzbparser.NzbFile) (*ParsedFile, error) {
 	}
 
 	return parsedFile, nil
+}
+
+// calculateFileSize implements the sophisticated size calculation logic
+func (p *Parser) calculateFileSize(file nzbparser.NzbFile) (int64, error) {
+	// Priority 1: If file.Bytes is present, use that as totalSize
+	if file.Bytes > 0 {
+		return int64(file.Bytes), nil
+	}
+
+	// No file.Bytes available, need to analyze segments
+	if len(file.Segments) < 2 {
+		// Not enough segments to compare, use segment sum
+		return p.calculateSegmentSum(file), nil
+	}
+
+	firstSegSize := int64(file.Segments[0].Bytes)
+	secondSegSize := int64(file.Segments[1].Bytes)
+
+	// Priority 2: If first and second segments have the same size, use segment sum
+	if firstSegSize == secondSegSize {
+		return p.calculateSegmentSum(file), nil
+	}
+
+	// Priority 3: Different segment sizes - fetch yenc header to get actual file size
+	if p.cp != nil {
+		if actualSize, err := p.fetchActualFileSizeFromYencHeader(file); err == nil {
+			return actualSize, nil
+		}
+	}
+
+	// Fallback: use segment sum if yenc header fetch failed
+	return p.calculateSegmentSum(file), nil
+}
+
+// calculateSegmentSum calculates the total size by summing all segment sizes
+func (p *Parser) calculateSegmentSum(file nzbparser.NzbFile) int64 {
+	var segmentSum int64
+	for _, seg := range file.Segments {
+		segmentSum += int64(seg.Bytes)
+	}
+	return segmentSum
+}
+
+// fetchActualFileSizeFromYencHeader fetches the yenc header to get the actual file size
+func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int64, error) {
+	if p.cp == nil {
+		return 0, fmt.Errorf("no connection pool available")
+	}
+
+	if len(file.Segments) == 0 {
+		return 0, fmt.Errorf("no segments available")
+	}
+
+	// Use first segment to get yenc headers
+	firstSegment := file.Segments[0]
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	// Get a connection from the pool
+	r, err := p.cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get body reader: %w", err)
+	}
+	defer r.Close()
+
+	// Get yenc headers
+	h, err := r.GetYencHeaders()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get yenc headers: %w", err)
+	}
+
+	if h.FileSize <= 0 {
+		return 0, fmt.Errorf("invalid file size from yenc header: %d", h.FileSize)
+	}
+
+	return int64(h.FileSize), nil
 }
 
 // determineNzbType analyzes the parsed files to determine the NZB type

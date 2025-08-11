@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/nntppool"
 )
 
 // Processor handles the processing and storage of parsed NZB files
@@ -16,14 +17,16 @@ type Processor struct {
 	parser     *Parser
 	repo       *database.Repository
 	rarHandler *RarHandler
+	cp         nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
 }
 
 // NewProcessor creates a new NZB processor
-func NewProcessor(repo *database.Repository) *Processor {
+func NewProcessor(repo *database.Repository, cp nntppool.UsenetConnectionPool) *Processor {
 	return &Processor{
-		parser:     NewParser(),
+		parser:     NewParser(cp),
 		repo:       repo,
 		rarHandler: NewRarHandler(),
+		cp:         cp,
 	}
 }
 
@@ -88,7 +91,7 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 
 		// Separate PAR2 files from regular files
 		regularFiles, par2Files := proc.separatePar2Files(parsed.Files)
-		
+
 		// Process PAR2 files separately
 		if len(par2Files) > 0 {
 			if err := proc.processPar2Files(txRepo, nzbFile, par2Files); err != nil {
@@ -114,14 +117,9 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 		default:
 			return fmt.Errorf("unknown NZB type: %s", parsed.Type)
 		}
-		
+
 		return nil
 	})
-}
-
-// processSingleFile handles NZBs with a single file (legacy method)
-func (proc *Processor) processSingleFile(repo *database.Repository, nzbFile *database.NzbFile, file ParsedFile) error {
-	return proc.processSingleFileWithDir(repo, nzbFile, file, "/")
 }
 
 // processSingleFileWithDir handles NZBs with a single file in a specific virtual directory
@@ -158,11 +156,6 @@ func (proc *Processor) processSingleFileWithDir(repo *database.Repository, nzbFi
 	}
 
 	return nil
-}
-
-// processMultiFile handles NZBs with multiple files (legacy method)
-func (proc *Processor) processMultiFile(repo *database.Repository, nzbFile *database.NzbFile, files []ParsedFile) error {
-	return proc.processMultiFileWithDir(repo, nzbFile, files, "/")
 }
 
 // processMultiFileWithDir handles NZBs with multiple files in a specific virtual directory
@@ -249,11 +242,6 @@ func (proc *Processor) processMultiFileWithDir(repo *database.Repository, nzbFil
 	return nil
 }
 
-// processRarArchive handles NZBs containing RAR archives (legacy method)
-func (proc *Processor) processRarArchive(repo *database.Repository, nzbFile *database.NzbFile, files []ParsedFile) error {
-	return proc.processRarArchiveWithDir(repo, nzbFile, files, "/")
-}
-
 // processRarArchiveWithDir handles NZBs containing RAR archives in a specific virtual directory
 func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFile *database.NzbFile, files []ParsedFile, virtualDir string) error {
 	// For RAR archives, we create directory structure based on the archive contents
@@ -293,7 +281,7 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 
 		rarDirPath := filepath.Join(virtualDir, baseName)
 		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
-		
+
 		// Get parent directory ID
 		parentDir, err := proc.getOrCreateParentDirectory(repo, virtualDir)
 		if err != nil {
@@ -387,43 +375,6 @@ type DirectoryInfo struct {
 	path   string
 	name   string
 	parent *string
-}
-
-// analyzeDirectoryStructure analyzes files to determine directory structure
-func (proc *Processor) analyzeDirectoryStructure(files []ParsedFile) *DirectoryStructure {
-	// Simple implementation: group files by common prefixes in their filenames
-	pathMap := make(map[string]bool)
-
-	for _, file := range files {
-		dir := filepath.Dir(file.Filename)
-		if dir != "." && dir != "/" {
-			pathMap[dir] = true
-		}
-	}
-
-	var dirs []DirectoryInfo
-	for path := range pathMap {
-		parent := filepath.Dir(path)
-		if parent == "." || parent == "/" {
-			parent = "/"
-		}
-
-		dirs = append(dirs, DirectoryInfo{
-			path:   "/" + path,
-			name:   filepath.Base(path),
-			parent: stringPtr(parent),
-		})
-	}
-
-	return &DirectoryStructure{
-		directories: dirs,
-		commonRoot:  "/",
-	}
-}
-
-// determineFileLocation determines where a file should be placed in the virtual structure (legacy method)
-func (proc *Processor) determineFileLocation(file ParsedFile, dirStructure *DirectoryStructure) (parentPath, filename string) {
-	return proc.determineFileLocationWithBase(file, dirStructure, "/")
 }
 
 // determineFileLocationWithBase determines where a file should be placed in the virtual structure within a base directory
