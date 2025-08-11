@@ -22,6 +22,12 @@ import (
 	"github.com/spf13/afero"
 )
 
+var (
+	ErrInvalidWhence = errors.New("seek: invalid whence")
+	ErrSeekNegative  = errors.New("seek: negative position")
+	ErrSeekTooFar    = errors.New("seek: too far")
+)
+
 // NzbRemoteFileConfig holds configuration for NzbRemoteFile
 type NzbRemoteFileConfig struct {
 	GlobalPassword string // Global password for .bin files
@@ -34,8 +40,6 @@ type NzbRemoteFile struct {
 	cp                 nntppool.UsenetConnectionPool
 	maxDownloadWorkers int
 	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
-	globalPassword     string            // Global password fallback
-	globalSalt         string            // Global salt fallback
 }
 
 // NewNzbRemoteFile creates a new NZB remote file handler with default config
@@ -58,8 +62,6 @@ func NewNzbRemoteFileWithConfig(db *database.DB, cp nntppool.UsenetConnectionPoo
 		cp:                 cp,
 		maxDownloadWorkers: maxDownloadWorkers,
 		rcloneCipher:       rcloneCipher,
-		globalPassword:     config.GlobalPassword,
-		globalSalt:         config.GlobalSalt,
 	}
 }
 
@@ -98,17 +100,22 @@ func (nrf *NzbRemoteFile) OpenFile(ctx context.Context, name string, r utils.Pat
 
 	// Create a virtual file handle
 	virtualFile := &VirtualFile{
-		name:           name,
-		virtualFile:    vf,
-		nzbFile:        nzb, // Can be nil for system directories like root
-		db:             nrf.db,
-		args:           r,
-		cp:             nrf.cp,
-		ctx:            ctx,
-		maxWorkers:     nrf.maxDownloadWorkers,
-		rcloneCipher:   nrf.rcloneCipher,
-		globalPassword: nrf.globalPassword,
-		globalSalt:     nrf.globalSalt,
+		name:         name,
+		virtualFile:  vf,
+		nzbFile:      nzb, // Can be nil for system directories like root
+		db:           nrf.db,
+		args:         r,
+		cp:           nrf.cp,
+		ctx:          ctx,
+		maxWorkers:   nrf.maxDownloadWorkers,
+		rcloneCipher: nrf.rcloneCipher,
+	}
+
+	// Initialize reader immediately with the HTTP range if this is a file (not a directory)
+	if !vf.IsDirectory && nzb != nil {
+		if err := virtualFile.initializeReader(); err != nil {
+			return false, nil, fmt.Errorf("failed to initialize reader: %w", err)
+		}
 	}
 
 	return true, virtualFile, nil
@@ -314,14 +321,12 @@ type VirtualFile struct {
 	position    int64
 
 	// NNTP and reading state
-	cp             nntppool.UsenetConnectionPool
-	reader         io.ReadCloser
-	ctx            context.Context
-	maxWorkers     int
-	rcloneCipher   encryption.Cipher // For encryption/decryption
-	globalPassword string            // Global password fallback
-	globalSalt     string            // Global salt fallback
-	mu             sync.Mutex
+	cp           nntppool.UsenetConnectionPool
+	reader       io.ReadCloser
+	ctx          context.Context
+	maxWorkers   int
+	rcloneCipher encryption.Cipher // For encryption/decryption
+	mu           sync.Mutex
 }
 
 // Close closes the virtual file
@@ -353,17 +358,8 @@ func (l dbSegmentLoader) GetSegment(index int) (segment nzbparser.NzbSegment, gr
 	return nzbparser.NzbSegment{Number: s.Number, Bytes: int(s.Bytes), ID: s.MessageID}, s.Groups, true
 }
 
-func (vf *VirtualFile) ensureReader(start int64) error {
-	// If an existing reader is open for a different position, close and recreate
-	if vf.reader != nil && start != vf.position {
-		_ = vf.reader.Close()
-		vf.reader = nil
-	}
-
-	if vf.reader != nil {
-		return nil
-	}
-
+// initializeReader creates the reader for the virtual file based on HTTP range and encryption
+func (vf *VirtualFile) initializeReader() error {
 	if vf.nzbFile == nil {
 		return fmt.Errorf("no NZB data available for file")
 	}
@@ -372,15 +368,29 @@ func (vf *VirtualFile) ensureReader(start int64) error {
 		return fmt.Errorf("usenet connection pool not configured")
 	}
 
+	// Get range from HTTP request if available
+	rangeStart, rangeEnd, hasRange := vf.getRequestRange()
+	var start, end int64
+
+	if hasRange {
+		start = rangeStart
+		end = rangeEnd
+	} else {
+		// No HTTP range header, use full file range
+		start = 0
+		end = vf.virtualFile.Size - 1
+	}
+
+	// Validate range
 	if start < 0 {
 		start = 0
 	}
-
-	if start >= vf.virtualFile.Size {
-		return io.EOF
+	if end >= vf.virtualFile.Size {
+		end = vf.virtualFile.Size - 1
 	}
-
-	end := vf.virtualFile.Size - 1 // inclusive
+	if start > end {
+		return fmt.Errorf("invalid range: start %d > end %d", start, end)
+	}
 
 	// Check if file is encrypted and wrap with decryption if needed
 	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) {
@@ -406,9 +416,39 @@ func (vf *VirtualFile) ensureReader(start int64) error {
 		vf.reader = ur
 	}
 
-	// align internal position with requested start
+	// Set initial position to the start of the range
 	vf.position = start
 	return nil
+}
+
+// getRequestRange extracts and validates the HTTP Range header from the original request
+// Returns the effective range to use for reader creation, considering file size limits
+func (vf *VirtualFile) getRequestRange() (start, end int64, hasRange bool) {
+	// Try to get range from HTTP request args
+	rangeHeader, err := vf.args.Range()
+	if err != nil || rangeHeader == nil {
+		// No valid range header, return full file range
+		return 0, vf.virtualFile.Size - 1, false
+	}
+
+	// Fix range header to ensure it's within file bounds
+	fixedRange := utils.FixRangeHeader(rangeHeader, vf.virtualFile.Size)
+	if fixedRange == nil {
+		return 0, vf.virtualFile.Size - 1, false
+	}
+
+	// Ensure range is valid
+	if fixedRange.Start < 0 {
+		fixedRange.Start = 0
+	}
+	if fixedRange.End >= vf.virtualFile.Size {
+		fixedRange.End = vf.virtualFile.Size - 1
+	}
+	if fixedRange.Start > fixedRange.End {
+		return 0, vf.virtualFile.Size - 1, false
+	}
+
+	return fixedRange.Start, fixedRange.End, true
 }
 
 // wrapWithEncryption wraps a usenet reader with rclone decryption
@@ -462,25 +502,23 @@ func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, erro
 func (vf *VirtualFile) Read(p []byte) (int, error) {
 	vf.mu.Lock()
 	defer vf.mu.Unlock()
+
 	if len(p) == 0 {
 		return 0, nil
 	}
+
 	if vf.virtualFile == nil {
 		return 0, fmt.Errorf("virtual file not initialized")
 	}
+
 	if vf.virtualFile.IsDirectory {
 		return 0, fmt.Errorf("cannot read from directory")
 	}
-	if vf.nzbFile == nil {
-		return 0, fmt.Errorf("no NZB data available for file")
+
+	if vf.reader == nil {
+		return 0, fmt.Errorf("reader not initialized")
 	}
-	// Ensure reader from current position
-	if err := vf.ensureReader(vf.position); err != nil {
-		if errors.Is(err, io.EOF) {
-			return 0, io.EOF
-		}
-		return 0, err
-	}
+
 	n, err := vf.reader.Read(p)
 	vf.position += int64(n)
 	return n, err
@@ -503,38 +541,62 @@ func (vf *VirtualFile) ReadAt(p []byte, off int64) (int, error) {
 	if off >= vf.virtualFile.Size {
 		return 0, io.EOF
 	}
+
 	// Limit read length to available bytes
 	maxLen := int64(len(p))
 	remain := vf.virtualFile.Size - off
 	if maxLen > remain {
 		maxLen = remain
 	}
+
+	// Early return for zero-length reads to prevent unnecessary reader creation
+	if maxLen <= 0 {
+		return 0, nil
+	}
+
 	end := off + maxLen - 1 // inclusive
 
-	// Wrap with decryption if needed
+	// Get HTTP range constraints to optimize reader creation
+	rangeStart, rangeEnd, hasRange := vf.getRequestRange()
+	if hasRange {
+		// Validate that the requested read is within the HTTP range
+		if off < rangeStart || off > rangeEnd {
+			return 0, fmt.Errorf("read offset %d is outside requested range %d-%d", off, rangeStart, rangeEnd)
+		}
+		// Constrain end to not exceed the HTTP range
+		if end > rangeEnd {
+			end = rangeEnd
+			maxLen = end - off + 1
+		}
+	}
+
+	// Create reader with optimized range
 	var reader io.ReadCloser
+	var err error
+
 	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == "rclone" {
-		decryptedReader, err := vf.wrapWithEncryption(off, end)
+		reader, err = vf.wrapWithEncryption(off, end)
 		if err != nil {
 			return 0, fmt.Errorf("failed to wrap reader with encryption: %w", err)
 		}
-
-		reader = decryptedReader
 	} else {
 		loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
-		// If we have a stored segment size, use it to compute ranges
 		hasFixedSize := vf.nzbFile.SegmentSize > 0
 		segSize := vf.nzbFile.SegmentSize
 		rg := usenet.GetSegmentsInRange(off, end, loader, hasFixedSize, segSize)
-		ur, err := usenet.NewUsenetReader(vf.ctx, vf.cp, rg, vf.maxWorkers)
+		reader, err = usenet.NewUsenetReader(vf.ctx, vf.cp, rg, vf.maxWorkers)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("failed to create usenet reader: %w", err)
 		}
-
-		reader = ur
 	}
 
-	defer reader.Close()
+	// Ensure reader is closed even if we panic or return early
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			// Log error but don't override return values
+		}
+	}()
+
 	buf := p[:maxLen]
 	n := 0
 	for n < len(buf) {
@@ -547,9 +609,11 @@ func (vf *VirtualFile) ReadAt(p []byte, off int64) (int, error) {
 			return n, rerr
 		}
 	}
+
 	if int64(n) < int64(len(p)) {
 		return n, io.EOF
 	}
+
 	return n, nil
 }
 
@@ -611,27 +675,30 @@ func (vf *VirtualFile) Readdirnames(n int) ([]string, error) {
 func (vf *VirtualFile) Seek(offset int64, whence int) (int64, error) {
 	vf.mu.Lock()
 	defer vf.mu.Unlock()
+	var abs int64
+
 	switch whence {
-	case 0: // SEEK_SET
-		vf.position = offset
-	case 1: // SEEK_CUR
-		vf.position += offset
-	case 2: // SEEK_END
-		vf.position = vf.virtualFile.Size + offset
+	case io.SeekStart: // Relative to the origin of the file
+		abs = offset
+	case io.SeekCurrent: // Relative to the current offset
+		abs = vf.position + offset
+	case io.SeekEnd: // Relative to the end
+		abs = int64(vf.virtualFile.Size) + offset
 	default:
-		return 0, fmt.Errorf("invalid whence value")
+		return 0, ErrInvalidWhence
 	}
 
-	if vf.position < 0 {
-		vf.position = 0
-	}
-	// Reset current reader so next Read starts from new position
-	if vf.reader != nil {
-		_ = vf.reader.Close()
-		vf.reader = nil
+	if abs < 0 {
+		return 0, ErrSeekNegative
 	}
 
-	return vf.position, nil
+	if abs > int64(vf.virtualFile.Size) {
+		return 0, ErrSeekTooFar
+	}
+
+	vf.position = abs
+
+	return abs, nil
 }
 
 // Stat returns file information
