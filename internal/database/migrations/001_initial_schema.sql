@@ -15,13 +15,14 @@ CREATE TABLE nzb_files (
 CREATE TABLE virtual_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nzb_file_id INTEGER,
+    parent_id INTEGER,
     virtual_path TEXT NOT NULL,
     filename TEXT NOT NULL,
     size INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     is_directory BOOLEAN NOT NULL DEFAULT FALSE,
-    parent_path TEXT,
-    FOREIGN KEY (nzb_file_id) REFERENCES nzb_files(id) ON DELETE CASCADE
+    FOREIGN KEY (nzb_file_id) REFERENCES nzb_files(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES virtual_files(id) ON DELETE CASCADE
 );
 
 CREATE TABLE rar_contents (

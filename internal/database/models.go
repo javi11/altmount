@@ -73,12 +73,12 @@ type NzbFile struct {
 type VirtualFile struct {
 	ID          int64     `db:"id"`
 	NzbFileID   *int64    `db:"nzb_file_id"` // Pointer to allow NULL for system directories
+	ParentID    *int64    `db:"parent_id"`   // References another VirtualFile ID for directories
 	VirtualPath string    `db:"virtual_path"`
 	Filename    string    `db:"filename"`
 	Size        int64     `db:"size"`
 	CreatedAt   time.Time `db:"created_at"`
 	IsDirectory bool      `db:"is_directory"`
-	ParentPath  *string   `db:"parent_path"`
 }
 
 // RarContent represents a file contained within a RAR archive

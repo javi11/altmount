@@ -67,12 +67,6 @@ func New(config Config) (*DB, error) {
 
 	db.Repository = NewRepository(conn)
 
-	// create root directory
-	if err := db.createRootDirectory(); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to create root directory: %w", err)
-	}
-
 	return db, nil
 }
 
@@ -172,36 +166,6 @@ func cleanMigrationSQL(sql string) string {
 	}
 
 	return strings.Join(cleanLines, "\n")
-}
-
-// createRootDirectory ensures the root directory exists in the database
-func (db *DB) createRootDirectory() error {
-	// Check if root directory already exists
-	existing, err := db.Repository.GetVirtualFileByPath("/")
-	if err != nil {
-		return fmt.Errorf("failed to check root directory: %w", err)
-	}
-
-	if existing != nil {
-		// Root directory already exists
-		return nil
-	}
-
-	// Create root directory entry
-	rootDir := &VirtualFile{
-		NzbFileID:   nil, // NULL for system directories (no associated NZB)
-		VirtualPath: "/",
-		Filename:    "/",
-		Size:        0,
-		IsDirectory: true,
-		ParentPath:  nil, // Root has no parent
-	}
-
-	if err := db.Repository.CreateVirtualFile(rootDir); err != nil {
-		return fmt.Errorf("failed to create root directory: %w", err)
-	}
-
-	return nil
 }
 
 // Close closes the database connection

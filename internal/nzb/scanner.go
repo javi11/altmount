@@ -294,8 +294,8 @@ func (s *Scanner) processFilesParallel(ctx context.Context, files []string, resu
 					result.ExistingFiles = append(result.ExistingFiles, filePath)
 					result.SkippedFiles++
 				} else {
-					// Process new file
-					if err := s.processor.ProcessNzbFile(filePath); err != nil {
+					// Process new file with watch root context
+					if err := s.processor.ProcessNzbFileWithRoot(filePath, s.config.ScanDir); err != nil {
 						result.FailedFiles[filePath] = err.Error()
 						result.Errors = append(result.Errors, err.Error())
 						s.log.ErrorContext(ctx, "Failed to process NZB file", "file", filePath, "error", err)

@@ -132,6 +132,19 @@ func (s *Service) ImportFile(ctx context.Context, nzbPath string) error {
 	return nil
 }
 
+// ImportFileWithRoot imports a single NZB file maintaining folder structure relative to watchRoot
+func (s *Service) ImportFileWithRoot(ctx context.Context, nzbPath, watchRoot string) error {
+	s.log.InfoContext(ctx, "Importing NZB file with root context", "file", nzbPath, "watchRoot", watchRoot)
+
+	if err := s.processor.ProcessNzbFileWithRoot(nzbPath, watchRoot); err != nil {
+		s.log.ErrorContext(ctx, "Failed to import NZB file with root context", "file", nzbPath, "error", err)
+		return fmt.Errorf("failed to import NZB file %s: %w", nzbPath, err)
+	}
+
+	s.log.InfoContext(ctx, "Successfully imported NZB file with root context", "file", nzbPath)
+	return nil
+}
+
 // ImportDirectory imports all NZB files from a directory
 func (s *Service) ImportDirectory(ctx context.Context, dirPath string) (*ImportResult, error) {
 	s.log.InfoContext(ctx, "Importing NZB directory", "dir", dirPath)
@@ -152,7 +165,8 @@ func (s *Service) ImportDirectory(ctx context.Context, dirPath string) (*ImportR
 	s.log.InfoContext(ctx, "Found NZB files for import", "count", len(files), "dir", dirPath)
 
 	for _, file := range files {
-		if err := s.ImportFile(ctx, file); err != nil {
+		// Import with directory context to maintain folder structure
+		if err := s.ImportFileWithRoot(ctx, file, dirPath); err != nil {
 			result.FailedFiles[file] = err.Error()
 			s.log.ErrorContext(ctx, "Failed to import file during directory import", "file", file, "error", err)
 		} else {
