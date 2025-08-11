@@ -676,3 +676,112 @@ func (r *Repository) UpdateVirtualFilePath(virtualFileID int64, newPath string) 
 
 	return nil
 }
+
+// PAR2 File operations
+
+// CreatePar2File inserts a new PAR2 file record
+func (r *Repository) CreatePar2File(par2File *Par2File) error {
+	query := `
+		INSERT INTO par2_files (nzb_file_id, filename, size, segments_data)
+		VALUES (?, ?, ?, ?)
+	`
+
+	result, err := r.db.Exec(query, par2File.NzbFileID, par2File.Filename,
+		par2File.Size, par2File.SegmentsData)
+	if err != nil {
+		return fmt.Errorf("failed to create par2 file: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to get par2 file id: %w", err)
+	}
+
+	par2File.ID = id
+	return nil
+}
+
+// GetPar2FilesByNzbFileID retrieves all PAR2 files associated with an NZB file
+func (r *Repository) GetPar2FilesByNzbFileID(nzbFileID int64) ([]*Par2File, error) {
+	query := `
+		SELECT id, nzb_file_id, filename, size, segments_data, created_at
+		FROM par2_files WHERE nzb_file_id = ? ORDER BY filename ASC
+	`
+
+	rows, err := r.db.Query(query, nzbFileID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list par2 files: %w", err)
+	}
+	defer rows.Close()
+
+	var par2Files []*Par2File
+	for rows.Next() {
+		var pf Par2File
+		err := rows.Scan(
+			&pf.ID, &pf.NzbFileID, &pf.Filename, &pf.Size,
+			&pf.SegmentsData, &pf.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan par2 file: %w", err)
+		}
+		par2Files = append(par2Files, &pf)
+	}
+
+	return par2Files, rows.Err()
+}
+
+// GetPar2FileByID retrieves a PAR2 file by its ID
+func (r *Repository) GetPar2FileByID(id int64) (*Par2File, error) {
+	query := `
+		SELECT id, nzb_file_id, filename, size, segments_data, created_at
+		FROM par2_files WHERE id = ?
+	`
+
+	var pf Par2File
+	err := r.db.QueryRow(query, id).Scan(
+		&pf.ID, &pf.NzbFileID, &pf.Filename, &pf.Size,
+		&pf.SegmentsData, &pf.CreatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get par2 file: %w", err)
+	}
+
+	return &pf, nil
+}
+
+// DeletePar2FilesByNzbFileID removes all PAR2 files associated with an NZB file
+func (r *Repository) DeletePar2FilesByNzbFileID(nzbFileID int64) error {
+	query := `DELETE FROM par2_files WHERE nzb_file_id = ?`
+
+	_, err := r.db.Exec(query, nzbFileID)
+	if err != nil {
+		return fmt.Errorf("failed to delete par2 files: %w", err)
+	}
+
+	return nil
+}
+
+// DeletePar2File removes a specific PAR2 file
+func (r *Repository) DeletePar2File(id int64) error {
+	query := `DELETE FROM par2_files WHERE id = ?`
+
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete par2 file: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("par2 file not found")
+	}
+
+	return nil
+}

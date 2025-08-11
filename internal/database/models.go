@@ -101,3 +101,13 @@ type FileMetadata struct {
 	Value         string    `db:"value"`
 	CreatedAt     time.Time `db:"created_at"`
 }
+
+// Par2File represents a PAR2 repair file associated with an NZB file
+type Par2File struct {
+	ID           int64       `db:"id"`
+	NzbFileID    int64       `db:"nzb_file_id"`
+	Filename     string      `db:"filename"`
+	Size         int64       `db:"size"`
+	SegmentsData NzbSegments `db:"segments_data"`
+	CreatedAt    time.Time   `db:"created_at"`
+}

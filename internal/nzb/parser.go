@@ -219,3 +219,8 @@ func (p *Parser) ConvertToDbSegments(files []ParsedFile) database.NzbSegments {
 
 	return allSegments
 }
+
+// ConvertToDbSegmentsForFile converts segments from a single ParsedFile to database format
+func (p *Parser) ConvertToDbSegmentsForFile(file ParsedFile) database.NzbSegments {
+	return file.Segments
+}

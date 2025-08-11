@@ -86,17 +86,36 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 			return fmt.Errorf("failed to create NZB file record: %w", err)
 		}
 
-		// Process based on NZB type with virtual directory context
+		// Separate PAR2 files from regular files
+		regularFiles, par2Files := proc.separatePar2Files(parsed.Files)
+		
+		// Process PAR2 files separately
+		if len(par2Files) > 0 {
+			if err := proc.processPar2Files(txRepo, nzbFile, par2Files); err != nil {
+				return fmt.Errorf("failed to process PAR2 files: %w", err)
+			}
+		}
+
+		// Process regular files based on NZB type with virtual directory context
+		// Skip processing if all files were PAR2 files
+		if len(regularFiles) == 0 {
+			return nil
+		}
+
 		switch parsed.Type {
 		case database.NzbTypeSingleFile:
-			return proc.processSingleFileWithDir(txRepo, nzbFile, parsed.Files[0], virtualDir)
+			if len(regularFiles) > 0 {
+				return proc.processSingleFileWithDir(txRepo, nzbFile, regularFiles[0], virtualDir)
+			}
 		case database.NzbTypeMultiFile:
-			return proc.processMultiFileWithDir(txRepo, nzbFile, parsed.Files, virtualDir)
+			return proc.processMultiFileWithDir(txRepo, nzbFile, regularFiles, virtualDir)
 		case database.NzbTypeRarArchive:
-			return proc.processRarArchiveWithDir(txRepo, nzbFile, parsed.Files, virtualDir)
+			return proc.processRarArchiveWithDir(txRepo, nzbFile, regularFiles, virtualDir)
 		default:
 			return fmt.Errorf("unknown NZB type: %s", parsed.Type)
 		}
+		
+		return nil
 	})
 }
 
@@ -619,4 +638,47 @@ func (proc *Processor) getOrCreateParentDirectory(repo *database.Repository, vir
 	}
 
 	return &created.ID, nil
+}
+
+// isPar2File checks if a filename is a PAR2 repair file
+func (proc *Processor) isPar2File(filename string) bool {
+	lower := strings.ToLower(filename)
+	return strings.HasSuffix(lower, ".par2")
+}
+
+// separatePar2Files separates PAR2 files from regular files
+func (proc *Processor) separatePar2Files(files []ParsedFile) ([]ParsedFile, []ParsedFile) {
+	var regularFiles []ParsedFile
+	var par2Files []ParsedFile
+
+	for _, file := range files {
+		if proc.isPar2File(file.Filename) {
+			par2Files = append(par2Files, file)
+		} else {
+			regularFiles = append(regularFiles, file)
+		}
+	}
+
+	return regularFiles, par2Files
+}
+
+// processPar2Files processes PAR2 files and stores them separately
+func (proc *Processor) processPar2Files(repo *database.Repository, nzbFile *database.NzbFile, par2Files []ParsedFile) error {
+	for _, file := range par2Files {
+		// Create segments data for this specific file
+		segments := proc.parser.ConvertToDbSegmentsForFile(file)
+
+		par2File := &database.Par2File{
+			NzbFileID:    nzbFile.ID,
+			Filename:     file.Filename,
+			Size:         file.Size,
+			SegmentsData: segments,
+		}
+
+		if err := repo.CreatePar2File(par2File); err != nil {
+			return fmt.Errorf("failed to create PAR2 file %s: %w", file.Filename, err)
+		}
+	}
+
+	return nil
 }
