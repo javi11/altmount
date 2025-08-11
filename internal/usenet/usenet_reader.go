@@ -136,7 +136,7 @@ func (b *usenetReader) downloadManager(
 
 				// Set the item ready to read
 				ctx = slogutil.With(ctx, "segment_id", s.Id)
-				_, err := cp.Body(ctx, s.Id, s.writer, s.groups)
+				_, err := cp.Body(ctx, s.Id, s.Writer(), s.groups)
 				if !errors.Is(err, context.Canceled) {
 					cErr := w.CloseWithError(err)
 					if cErr != nil {

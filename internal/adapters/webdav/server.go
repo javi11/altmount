@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
+	_ "net/http/pprof"
+
 	"github.com/javi11/altmount/internal/adapters/webdav/propfind"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
@@ -37,6 +39,13 @@ func NewServer(
 	}
 
 	mux := http.NewServeMux()
+	// Add pprof endpoints for profiling only in debug mode
+	if config.Debug {
+		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/profile", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		username, password, _ := r.BasicAuth()
 
