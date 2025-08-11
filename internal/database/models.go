@@ -79,6 +79,7 @@ type VirtualFile struct {
 	Size        int64     `db:"size"`
 	CreatedAt   time.Time `db:"created_at"`
 	IsDirectory bool      `db:"is_directory"`
+	Encryption  *string   `db:"encryption"`  // Encryption type (e.g., "rclone"), NULL if not encrypted
 }
 
 // RarContent represents a file contained within a RAR archive

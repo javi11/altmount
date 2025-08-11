@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
@@ -34,6 +35,7 @@ type ParsedFile struct {
 	Groups       []string
 	IsRarArchive bool
 	RarContents  []RarFileEntry // Only populated if IsRarArchive is true
+	Encryption   *string        // Encryption type (e.g., "rclone"), nil if not encrypted
 }
 
 // RarFileEntry represents a file within a RAR archive
@@ -94,7 +96,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 
 	// Process each file in the NZB
 	for _, file := range n.Files {
-		parsedFile, err := p.parseFile(file)
+		parsedFile, err := p.parseFile(file, n.Meta)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse file %s: %w", file.Subject, err)
 		}
@@ -118,7 +120,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 }
 
 // parseFile processes a single file entry from the NZB
-func (p *Parser) parseFile(file nzbparser.NzbFile) (*ParsedFile, error) {
+func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*ParsedFile, error) {
 	// Convert segments
 	segments := make([]database.NzbSegment, len(file.Segments))
 
@@ -138,11 +140,29 @@ func (p *Parser) parseFile(file nzbparser.NzbFile) (*ParsedFile, error) {
 		totalSize = p.calculateSegmentSum(file)
 	}
 
-	// Extract filename from subject
+	// Extract filename - priority: meta file_name > file.Filename
 	filename := file.Filename
+	if meta != nil {
+		if metaFilename, ok := meta["file_name"]; ok && metaFilename != "" {
+			// Clean the filename by removing .bin extension if present
+			if strings.HasSuffix(strings.ToLower(metaFilename), ".bin") {
+				filename = metaFilename[:len(metaFilename)-4]
+			} else {
+				filename = metaFilename
+			}
+		}
+	}
 
 	// Check if this is a RAR file
 	isRarArchive := rarPattern.MatchString(filename)
+
+	// Detect encryption - check if the original filename (before meta processing) has .bin extension
+	var encryption *string
+	originalFilename := file.Filename
+	if strings.HasSuffix(strings.ToLower(originalFilename), ".bin") {
+		encType := "rclone"
+		encryption = &encType
+	}
 
 	parsedFile := &ParsedFile{
 		Subject:      file.Subject,
@@ -151,6 +171,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile) (*ParsedFile, error) {
 		Segments:     segments,
 		Groups:       file.Groups,
 		IsRarArchive: isRarArchive,
+		Encryption:   encryption,
 	}
 
 	return parsedFile, nil

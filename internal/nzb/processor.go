@@ -141,6 +141,7 @@ func (proc *Processor) processSingleFileWithDir(repo *database.Repository, nzbFi
 		Filename:    file.Filename,
 		Size:        file.Size,
 		IsDirectory: false,
+		Encryption:  file.Encryption,
 	}
 
 	if err := repo.CreateVirtualFile(vf); err != nil {
@@ -188,6 +189,7 @@ func (proc *Processor) processMultiFileWithDir(repo *database.Repository, nzbFil
 			Filename:    dir.name,
 			Size:        0,
 			IsDirectory: true,
+			Encryption:  nil, // Directories are not encrypted
 		}
 
 		if err := repo.CreateVirtualFile(vf); err != nil {
@@ -224,6 +226,7 @@ func (proc *Processor) processMultiFileWithDir(repo *database.Repository, nzbFil
 			Filename:    filename,
 			Size:        file.Size,
 			IsDirectory: false,
+			Encryption:  file.Encryption,
 		}
 
 		if err := repo.CreateVirtualFile(vf); err != nil {
@@ -265,6 +268,7 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 				Filename:    file.Filename,
 				Size:        file.Size,
 				IsDirectory: false,
+				Encryption:  file.Encryption,
 			}
 
 			if err := repo.CreateVirtualFile(vf); err != nil {
@@ -296,6 +300,7 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 			Filename:    baseName,
 			Size:        0, // Directory size
 			IsDirectory: true,
+			Encryption:  nil, // Directories are not encrypted
 		}
 
 		if err := repo.CreateVirtualFile(rarDir); err != nil {
@@ -310,6 +315,7 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 			Filename:    file.Filename,
 			Size:        file.Size,
 			IsDirectory: false,
+			Encryption:  file.Encryption,
 		}
 
 		if err := repo.CreateVirtualFile(rarArchiveFile); err != nil {
@@ -347,6 +353,7 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 					Filename:    rarEntry.Filename,
 					Size:        rarEntry.Size,
 					IsDirectory: rarEntry.IsDirectory,
+					Encryption:  nil, // RAR content files are not encrypted with rclone
 				}
 
 				if err := repo.CreateVirtualFile(contentFile); err != nil {
@@ -524,6 +531,7 @@ func (proc *Processor) ensureParentDirectories(repo *database.Repository, virtua
 				Filename:    part,
 				Size:        0,
 				IsDirectory: true,
+				Encryption:  nil, // System directories are not encrypted
 			}
 
 			if err := repo.CreateVirtualFile(dir); err != nil {
