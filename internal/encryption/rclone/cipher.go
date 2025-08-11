@@ -1122,7 +1122,7 @@ func (c *Cipher) DecryptDataSeek(ctx context.Context, open OpenRangeSeek, offset
 }
 
 // EncryptedSize calculates the size of the data when encrypted
-func (c *Cipher) EncryptedSize(size int64) int64 {
+func EncryptedSize(size int64) int64 {
 	blocks, residue := size/blockDataSize, size%blockDataSize
 	encryptedSize := int64(fileHeaderSize) + blocks*(blockHeaderSize+blockDataSize)
 	if residue != 0 {

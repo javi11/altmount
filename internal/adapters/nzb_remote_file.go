@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/encryption"
+	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool"
@@ -20,19 +22,44 @@ import (
 	"github.com/spf13/afero"
 )
 
+// NzbRemoteFileConfig holds configuration for NzbRemoteFile
+type NzbRemoteFileConfig struct {
+	GlobalPassword string // Global password for .bin files
+	GlobalSalt     string // Global salt for .bin files
+}
+
 // NzbRemoteFile implements the RemoteFile interface for NZB-backed virtual files
 type NzbRemoteFile struct {
 	db                 *database.DB
 	cp                 nntppool.UsenetConnectionPool
 	maxDownloadWorkers int
+	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
+	globalPassword     string            // Global password fallback
+	globalSalt         string            // Global salt fallback
 }
 
-// NewNzbRemoteFile creates a new NZB remote file handler
+// NewNzbRemoteFile creates a new NZB remote file handler with default config
 func NewNzbRemoteFile(db *database.DB, cp nntppool.UsenetConnectionPool, maxDownloadWorkers int) *NzbRemoteFile {
+	return NewNzbRemoteFileWithConfig(db, cp, maxDownloadWorkers, NzbRemoteFileConfig{})
+}
+
+// NewNzbRemoteFileWithConfig creates a new NZB remote file handler with configuration
+func NewNzbRemoteFileWithConfig(db *database.DB, cp nntppool.UsenetConnectionPool, maxDownloadWorkers int, config NzbRemoteFileConfig) *NzbRemoteFile {
+	// Initialize rclone cipher with global credentials for encrypted files
+	rcloneConfig := &encryption.Config{
+		RclonePassword: config.GlobalPassword, // Global password fallback
+		RcloneSalt:     config.GlobalSalt,     // Global salt fallback
+	}
+
+	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
+
 	return &NzbRemoteFile{
 		db:                 db,
 		cp:                 cp,
 		maxDownloadWorkers: maxDownloadWorkers,
+		rcloneCipher:       rcloneCipher,
+		globalPassword:     config.GlobalPassword,
+		globalSalt:         config.GlobalSalt,
 	}
 }
 
@@ -71,14 +98,17 @@ func (nrf *NzbRemoteFile) OpenFile(ctx context.Context, name string, r utils.Pat
 
 	// Create a virtual file handle
 	virtualFile := &VirtualFile{
-		name:        name,
-		virtualFile: vf,
-		nzbFile:     nzb, // Can be nil for system directories like root
-		db:          nrf.db,
-		args:        r,
-		cp:          nrf.cp,
-		ctx:         ctx,
-		maxWorkers:  nrf.maxDownloadWorkers,
+		name:           name,
+		virtualFile:    vf,
+		nzbFile:        nzb, // Can be nil for system directories like root
+		db:             nrf.db,
+		args:           r,
+		cp:             nrf.cp,
+		ctx:            ctx,
+		maxWorkers:     nrf.maxDownloadWorkers,
+		rcloneCipher:   nrf.rcloneCipher,
+		globalPassword: nrf.globalPassword,
+		globalSalt:     nrf.globalSalt,
 	}
 
 	return true, virtualFile, nil
@@ -284,11 +314,14 @@ type VirtualFile struct {
 	position    int64
 
 	// NNTP and reading state
-	cp         nntppool.UsenetConnectionPool
-	reader     io.ReadCloser
-	ctx        context.Context
-	maxWorkers int
-	mu         sync.Mutex
+	cp             nntppool.UsenetConnectionPool
+	reader         io.ReadCloser
+	ctx            context.Context
+	maxWorkers     int
+	rcloneCipher   encryption.Cipher // For encryption/decryption
+	globalPassword string            // Global password fallback
+	globalSalt     string            // Global salt fallback
+	mu             sync.Mutex
 }
 
 // Close closes the virtual file
@@ -326,35 +359,103 @@ func (vf *VirtualFile) ensureReader(start int64) error {
 		_ = vf.reader.Close()
 		vf.reader = nil
 	}
+
 	if vf.reader != nil {
 		return nil
 	}
+
 	if vf.nzbFile == nil {
 		return fmt.Errorf("no NZB data available for file")
 	}
+
 	if vf.cp == nil {
 		return fmt.Errorf("usenet connection pool not configured")
 	}
+
 	if start < 0 {
 		start = 0
 	}
+
 	if start >= vf.virtualFile.Size {
 		return io.EOF
 	}
+
 	end := vf.virtualFile.Size - 1 // inclusive
-	loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
-	// If we have a stored segment size, use it to compute ranges
-	hasFixedSize := vf.nzbFile.SegmentSize > 0
-	segSize := vf.nzbFile.SegmentSize
-	rg := usenet.GetSegmentsInRange(start, end, loader, hasFixedSize, segSize)
-	ur, err := usenet.NewUsenetReader(vf.ctx, vf.cp, rg, vf.maxWorkers)
-	if err != nil {
-		return err
+
+	// Check if file is encrypted and wrap with decryption if needed
+	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) {
+		// Wrap the usenet reader with rclone decryption
+		decryptedReader, err := vf.wrapWithEncryption(start, end)
+		if err != nil {
+			return fmt.Errorf("failed to wrap reader with encryption: %w", err)
+		}
+
+		vf.reader = decryptedReader
+	} else {
+		loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
+		// If we have a stored segment size, use it to compute ranges
+		hasFixedSize := vf.nzbFile.SegmentSize > 0
+		segSize := vf.nzbFile.SegmentSize
+
+		rg := usenet.GetSegmentsInRange(start, end, loader, hasFixedSize, segSize)
+		ur, err := usenet.NewUsenetReader(vf.ctx, vf.cp, rg, vf.maxWorkers)
+		if err != nil {
+			return err
+		}
+
+		vf.reader = ur
 	}
-	vf.reader = ur
+
 	// align internal position with requested start
 	vf.position = start
 	return nil
+}
+
+// wrapWithEncryption wraps a usenet reader with rclone decryption
+func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, error) {
+	if vf.rcloneCipher == nil {
+		return nil, fmt.Errorf("no cipher configured for encryption")
+	}
+
+	if vf.nzbFile == nil {
+		return nil, fmt.Errorf("no NZB data available for encryption parameters")
+	}
+
+	// Get password and salt from NZB metadata, with global fallback
+	var password, salt string
+
+	if vf.nzbFile.RclonePassword != nil && *vf.nzbFile.RclonePassword != "" {
+		password = *vf.nzbFile.RclonePassword
+	}
+
+	if vf.nzbFile.RcloneSalt != nil && *vf.nzbFile.RcloneSalt != "" {
+		salt = *vf.nzbFile.RcloneSalt
+	}
+
+	decryptedReader, err := vf.rcloneCipher.Open(
+		vf.ctx,
+		&utils.RangeHeader{
+			Start: start,
+			End:   end,
+		},
+		vf.virtualFile.Size,
+		password,
+		salt,
+		func(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+			// Create a new usenet reader for the specific range
+			loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
+			hasFixedSize := vf.nzbFile.SegmentSize > 0
+			segSize := vf.nzbFile.SegmentSize
+			rg := usenet.GetSegmentsInRange(start, end, loader, hasFixedSize, segSize)
+
+			return usenet.NewUsenetReader(ctx, vf.cp, rg, vf.maxWorkers)
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create decrypt reader: %w", err)
+	}
+
+	return decryptedReader, nil
 }
 
 // Read reads data from the virtual file
@@ -409,20 +510,35 @@ func (vf *VirtualFile) ReadAt(p []byte, off int64) (int, error) {
 		maxLen = remain
 	}
 	end := off + maxLen - 1 // inclusive
-	loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
-	// If we have a stored segment size, use it to compute ranges
-	hasFixedSize := vf.nzbFile.SegmentSize > 0
-	segSize := vf.nzbFile.SegmentSize
-	rg := usenet.GetSegmentsInRange(off, end, loader, hasFixedSize, segSize)
-	ur, err := usenet.NewUsenetReader(vf.ctx, vf.cp, rg, vf.maxWorkers)
-	if err != nil {
-		return 0, err
+
+	// Wrap with decryption if needed
+	var reader io.ReadCloser
+	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == "rclone" {
+		decryptedReader, err := vf.wrapWithEncryption(off, end)
+		if err != nil {
+			return 0, fmt.Errorf("failed to wrap reader with encryption: %w", err)
+		}
+
+		reader = decryptedReader
+	} else {
+		loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
+		// If we have a stored segment size, use it to compute ranges
+		hasFixedSize := vf.nzbFile.SegmentSize > 0
+		segSize := vf.nzbFile.SegmentSize
+		rg := usenet.GetSegmentsInRange(off, end, loader, hasFixedSize, segSize)
+		ur, err := usenet.NewUsenetReader(vf.ctx, vf.cp, rg, vf.maxWorkers)
+		if err != nil {
+			return 0, err
+		}
+
+		reader = ur
 	}
-	defer ur.Close()
+
+	defer reader.Close()
 	buf := p[:maxLen]
 	n := 0
 	for n < len(buf) {
-		nn, rerr := ur.Read(buf[n:])
+		nn, rerr := reader.Read(buf[n:])
 		n += nn
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {

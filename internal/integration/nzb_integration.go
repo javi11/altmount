@@ -14,9 +14,11 @@ import (
 
 // NzbConfig holds configuration for the NZB system
 type NzbConfig struct {
-	DatabasePath string
-	MountPath    string
-	NzbDir       string // Directory containing NZB files
+	DatabasePath   string
+	MountPath      string
+	NzbDir         string // Directory containing NZB files
+	Password string // Global password for .bin files
+	Salt     string // Global salt for .bin files
 }
 
 // NzbSystem represents the complete NZB-backed filesystem
@@ -66,8 +68,11 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 		workers = 15
 	}
 
-	// Create NZB remote file handler
-	nzbRemoteFile := adapters.NewNzbRemoteFile(db, cp, workers)
+	// Create NZB remote file handler with global credentials
+	nzbRemoteFile := adapters.NewNzbRemoteFileWithConfig(db, cp, workers, adapters.NzbRemoteFileConfig{
+		GlobalPassword: config.Password,
+		GlobalSalt:     config.Salt,
+	})
 
 	// Create filesystem directly backed by NZB data
 	fs := adapters.NewNzbFilesystem(nzbRemoteFile)

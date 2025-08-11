@@ -57,16 +57,18 @@ func (ns NzbSegments) Value() (driver.Value, error) {
 
 // NzbFile represents a complete NZB file entry
 type NzbFile struct {
-	ID            int64       `db:"id"`
-	Path          string      `db:"path"`
-	Filename      string      `db:"filename"`
-	Size          int64       `db:"size"`
-	CreatedAt     time.Time   `db:"created_at"`
-	UpdatedAt     time.Time   `db:"updated_at"`
-	NzbType       NzbType     `db:"nzb_type"`
-	SegmentsCount int         `db:"segments_count"`
-	SegmentsData  NzbSegments `db:"segments_data"`
-	SegmentSize   int64       `db:"segment_size"`
+	ID             int64       `db:"id"`
+	Path           string      `db:"path"`
+	Filename       string      `db:"filename"`
+	Size           int64       `db:"size"`
+	CreatedAt      time.Time   `db:"created_at"`
+	UpdatedAt      time.Time   `db:"updated_at"`
+	NzbType        NzbType     `db:"nzb_type"`
+	SegmentsCount  int         `db:"segments_count"`
+	SegmentsData   NzbSegments `db:"segments_data"`
+	SegmentSize    int64       `db:"segment_size"`
+	RclonePassword *string     `db:"rclone_password"` // Password from NZB meta, NULL if not encrypted
+	RcloneSalt     *string     `db:"rclone_salt"`     // Salt from NZB meta, NULL if not encrypted
 }
 
 // VirtualFile represents a virtual file extracted from NZB contents

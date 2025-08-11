@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/nntppool"
 	"github.com/javi11/nzbparser"
 )
@@ -24,6 +25,8 @@ type ParsedNzb struct {
 	Files         []ParsedFile
 	SegmentsCount int
 	SegmentSize   int64
+	Password      *string // Password from NZB meta, nil if not encrypted
+	Salt          *string // Salt from NZB meta, nil if not encrypted
 }
 
 // ParsedFile represents a file extracted from the NZB
@@ -84,6 +87,16 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		Files:    make([]ParsedFile, 0, len(n.Files)),
 	}
 
+	// Extract credentials from metadata if present
+	if n.Meta != nil {
+		if password, ok := n.Meta["password"]; ok && password != "" {
+			parsed.Password = &password
+		}
+		if salt, ok := n.Meta["salt"]; ok && salt != "" {
+			parsed.Salt = &salt
+		}
+	}
+
 	// Determine segment size from meta chunk_size or fallback to first segment size
 	var segSize int64
 	if n.Meta != nil {
@@ -141,12 +154,23 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 	}
 
 	// Extract filename - priority: meta file_name > file.Filename
+	var encryption *string
+
 	filename := file.Filename
 	if meta != nil {
 		if metaFilename, ok := meta["file_name"]; ok && metaFilename != "" {
-			// Clean the filename by removing .bin extension if present
-			if strings.HasSuffix(strings.ToLower(metaFilename), ".bin") {
+			// This will add support for rclone encrypted files
+			if strings.HasSuffix(strings.ToLower(metaFilename), rclone.EncFileExtension) {
 				filename = metaFilename[:len(metaFilename)-4]
+				encType := "rclone"
+				encryption = &encType
+
+				decSize, err := rclone.DecryptedSize(totalSize)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get decrypted size: %w", err)
+				}
+
+				totalSize = decSize
 			} else {
 				filename = metaFilename
 			}
@@ -155,14 +179,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 
 	// Check if this is a RAR file
 	isRarArchive := rarPattern.MatchString(filename)
-
-	// Detect encryption - check if the original filename (before meta processing) has .bin extension
-	var encryption *string
-	originalFilename := file.Filename
-	if strings.HasSuffix(strings.ToLower(originalFilename), ".bin") {
-		encType := "rclone"
-		encryption = &encType
-	}
 
 	parsedFile := &ParsedFile{
 		Subject:      file.Subject,

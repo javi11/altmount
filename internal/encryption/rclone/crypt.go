@@ -48,30 +48,22 @@ func NewRcloneCipher(
 func (o *rcloneCrypt) Open(
 	ctx context.Context,
 	rh *utils.RangeHeader,
-	metadata map[string]string,
+	fileSize int64,
+	password string,
+	salt string,
 	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error),
 ) (rc io.ReadCloser, err error) {
 	log := slog.Default()
-	encryptedFileSize, err := getEncryptedFileSize(metadata)
-	if err != nil {
-		return nil, ErrMissingEncryptedFileSize
-	}
 
-	password, _ := getPassword(metadata)
-	salt, _ := getSalt(metadata)
+	encryptedFileSize := o.EncryptedSize(fileSize)
 
 	var offset, limit int64 = 0, -1
 	if rh != nil {
-		s, err := o.DecryptedSize(encryptedFileSize)
-		if err != nil {
-			return nil, err
-		}
-
-		if rh.End == s-1 {
+		if rh.End == fileSize-1 {
 			rh.End = -1
 		}
 
-		offset, limit = rh.Decode(s)
+		offset, limit = rh.Decode(fileSize)
 	}
 
 	if password == "" && !o.hasGlobalPassword {
@@ -138,11 +130,11 @@ func (o *rcloneCrypt) DecryptedSize(fileSize int64) (int64, error) {
 }
 
 func (o *rcloneCrypt) EncryptedSize(fileSize int64) int64 {
-	return o.cipher.EncryptedSize(fileSize)
+	return EncryptedSize(fileSize)
 }
 
 func (o *rcloneCrypt) OverheadSize(fileSize int64) int64 {
-	return o.cipher.EncryptedSize(fileSize) - fileSize
+	return EncryptedSize(fileSize) - fileSize
 }
 
 func (o *rcloneCrypt) Name() encryption.CipherType {

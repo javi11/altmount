@@ -14,12 +14,8 @@ type CipherType string
 const (
 	// The rclone crypt cipher type, which will encrypt all the file using a password, salt.
 	RCloneCipherType CipherType = "rclone"
-	// @deprecated, The headers crypt cipher type, which will encrypt the first 750000 bytes and the last 750000 bytes of the file
-	HeadersCipherType CipherType = "headers"
 	// The none cipher type, which will not encrypt the file
 	NoneCipherType CipherType = "none"
-	// The rar crypt cipher type, which will read rared files
-	RarCipherType CipherType = "rar"
 )
 
 type Cipher interface {
@@ -29,9 +25,10 @@ type Cipher interface {
 	Open(
 		ctx context.Context,
 		rh *utils.RangeHeader,
-		metadata map[string]string,
+		encryptedFileSize int64,
+		password string,
+		salt string,
 		getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error),
 	) (io.ReadCloser, error)
 	Name() CipherType
-	Reload(cfg *Config) error
 }

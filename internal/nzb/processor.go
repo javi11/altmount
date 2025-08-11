@@ -76,13 +76,15 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 
 		// Create the NZB file record
 		nzbFile := &database.NzbFile{
-			Path:          parsed.Path,
-			Filename:      parsed.Filename,
-			Size:          parsed.TotalSize,
-			NzbType:       parsed.Type,
-			SegmentsCount: parsed.SegmentsCount,
-			SegmentsData:  proc.parser.ConvertToDbSegments(parsed.Files),
-			SegmentSize:   parsed.SegmentSize,
+			Path:           parsed.Path,
+			Filename:       parsed.Filename,
+			Size:           parsed.TotalSize,
+			NzbType:        parsed.Type,
+			SegmentsCount:  parsed.SegmentsCount,
+			SegmentsData:   proc.parser.ConvertToDbSegments(parsed.Files),
+			SegmentSize:    parsed.SegmentSize,
+			RclonePassword: parsed.Password,
+			RcloneSalt:     parsed.Salt,
 		}
 
 		if err := txRepo.CreateNzbFile(nzbFile); err != nil {
