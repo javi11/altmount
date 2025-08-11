@@ -66,12 +66,13 @@ type NzbFile struct {
 	NzbType       NzbType     `db:"nzb_type"`
 	SegmentsCount int         `db:"segments_count"`
 	SegmentsData  NzbSegments `db:"segments_data"`
+	SegmentSize   int64       `db:"segment_size"`
 }
 
 // VirtualFile represents a virtual file extracted from NZB contents
 type VirtualFile struct {
 	ID          int64     `db:"id"`
-	NzbFileID   int64     `db:"nzb_file_id"`
+	NzbFileID   *int64    `db:"nzb_file_id"` // Pointer to allow NULL for system directories
 	VirtualPath string    `db:"virtual_path"`
 	Filename    string    `db:"filename"`
 	Size        int64     `db:"size"`

@@ -15,6 +15,9 @@ CREATE INDEX idx_rar_contents_path ON rar_contents(internal_path);
 
 CREATE INDEX idx_file_metadata_virtual_file_id ON file_metadata(virtual_file_id);
 CREATE INDEX idx_file_metadata_key ON file_metadata(key);
+
+ALTER TABLE nzb_files ADD COLUMN segment_size INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_nzb_files_segment_size ON nzb_files(segment_size);
 -- +goose StatementEnd
 
 -- +goose Down
@@ -30,4 +33,6 @@ DROP INDEX IF EXISTS idx_virtual_files_nzb_id;
 DROP INDEX IF EXISTS idx_nzb_files_type;
 DROP INDEX IF EXISTS idx_nzb_files_filename;
 DROP INDEX IF EXISTS idx_nzb_files_path;
+DROP INDEX IF EXISTS idx_nzb_files_segment_size;
+-- SQLite cannot drop columns; this down migration will leave the column in place.
 -- +goose StatementEnd

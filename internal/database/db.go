@@ -17,7 +17,7 @@ var embedMigrations embed.FS
 
 // DB wraps the database connection and provides access to repositories
 type DB struct {
-	conn *sql.DB
+	conn       *sql.DB
 	Repository *Repository
 }
 
@@ -64,9 +64,15 @@ func New(config Config) (*DB, error) {
 	db := &DB{
 		conn: conn,
 	}
-	
+
 	db.Repository = NewRepository(conn)
-	
+
+	// create root directory
+	if err := db.createRootDirectory(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
 	return db, nil
 }
 
@@ -79,7 +85,7 @@ func runMigrations(db *sql.DB) error {
 			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 	`
-	
+
 	if _, err := db.Exec(createMigrationsTable); err != nil {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
@@ -103,14 +109,14 @@ func runMigrations(db *sql.DB) error {
 	// Apply migrations
 	for _, filename := range migrationFiles {
 		version := strings.TrimSuffix(filename, ".sql")
-		
+
 		// Check if migration is already applied
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = ?", version).Scan(&count)
 		if err != nil {
 			return fmt.Errorf("failed to check migration status: %w", err)
 		}
-		
+
 		if count > 0 {
 			continue // Migration already applied
 		}
@@ -125,7 +131,7 @@ func runMigrations(db *sql.DB) error {
 		// Execute migration (simplified - ignores goose annotations)
 		migrationSQL := string(content)
 		migrationSQL = cleanMigrationSQL(migrationSQL)
-		
+
 		if _, err := db.Exec(migrationSQL); err != nil {
 			return fmt.Errorf("failed to execute migration %s: %w", version, err)
 		}
@@ -143,11 +149,11 @@ func runMigrations(db *sql.DB) error {
 func cleanMigrationSQL(sql string) string {
 	lines := strings.Split(sql, "\n")
 	var cleanLines []string
-	
+
 	inUpSection := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		if strings.HasPrefix(trimmed, "-- +goose Up") {
 			inUpSection = true
 			continue
@@ -155,17 +161,47 @@ func cleanMigrationSQL(sql string) string {
 		if strings.HasPrefix(trimmed, "-- +goose Down") {
 			break // Only process Up section
 		}
-		if strings.HasPrefix(trimmed, "-- +goose StatementBegin") || 
-		   strings.HasPrefix(trimmed, "-- +goose StatementEnd") {
+		if strings.HasPrefix(trimmed, "-- +goose StatementBegin") ||
+			strings.HasPrefix(trimmed, "-- +goose StatementEnd") {
 			continue
 		}
-		
+
 		if inUpSection {
 			cleanLines = append(cleanLines, line)
 		}
 	}
-	
+
 	return strings.Join(cleanLines, "\n")
+}
+
+// createRootDirectory ensures the root directory exists in the database
+func (db *DB) createRootDirectory() error {
+	// Check if root directory already exists
+	existing, err := db.Repository.GetVirtualFileByPath("/")
+	if err != nil {
+		return fmt.Errorf("failed to check root directory: %w", err)
+	}
+
+	if existing != nil {
+		// Root directory already exists
+		return nil
+	}
+
+	// Create root directory entry
+	rootDir := &VirtualFile{
+		NzbFileID:   nil, // NULL for system directories (no associated NZB)
+		VirtualPath: "/",
+		Filename:    "/",
+		Size:        0,
+		IsDirectory: true,
+		ParentPath:  nil, // Root has no parent
+	}
+
+	if err := db.Repository.CreateVirtualFile(rootDir); err != nil {
+		return fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	return nil
 }
 
 // Close closes the database connection

@@ -1,7 +1,6 @@
 package nzb
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,13 +24,9 @@ func NewRarHandler() *RarHandler {
 
 // AnalyzeRarContent analyzes a RAR archive to extract its internal file structure
 // This implementation uses the rardecode library to parse RAR headers and extract file lists
-func (rh *RarHandler) AnalyzeRarContent(rarData []byte, virtualFile *database.VirtualFile, nzbFile *database.NzbFile) ([]database.RarContent, error) {
-	if !rh.IsValidRarArchive(rarData) {
-		return nil, fmt.Errorf("invalid RAR archive data")
-	}
-
+func (rh *RarHandler) AnalyzeRarContent(r io.Reader, virtualFile *database.VirtualFile, nzbFile *database.NzbFile) ([]database.RarContent, error) {
 	// Extract file list from RAR headers
-	fileEntries, err := rh.ExtractRarFileList(rarData)
+	fileEntries, err := rh.ExtractRarFileList(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract RAR file list: %w", err)
 	}
@@ -69,8 +64,7 @@ func (rh *RarHandler) AnalyzeRarContent(rarData []byte, virtualFile *database.Vi
 }
 
 // ExtractRarFileList extracts the file list from RAR headers without full decompression
-func (rh *RarHandler) ExtractRarFileList(rarData []byte) ([]RarFileEntry, error) {
-	reader := bytes.NewReader(rarData)
+func (rh *RarHandler) ExtractRarFileList(reader io.Reader) ([]RarFileEntry, error) {
 	rarReader, err := rardecode.NewReader(reader, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create RAR reader: %w", err)

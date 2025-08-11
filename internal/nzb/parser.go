@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
@@ -19,6 +20,7 @@ type ParsedNzb struct {
 	Type          database.NzbType
 	Files         []ParsedFile
 	SegmentsCount int
+	SegmentSize   int64
 }
 
 // ParsedFile represents a file extracted from the NZB
@@ -74,6 +76,16 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		Files:    make([]ParsedFile, 0, len(n.Files)),
 	}
 
+	// Determine segment size from meta chunk_size or fallback to first segment size
+	var segSize int64
+	if n.Meta != nil {
+		if v, ok := n.Meta["chunk_size"]; ok {
+			if iv, err := strconv.ParseInt(v, 10, 64); err == nil && iv > 0 {
+				segSize = iv
+			}
+		}
+	}
+
 	// Process each file in the NZB
 	for _, file := range n.Files {
 		parsedFile, err := p.parseFile(file)
@@ -84,7 +96,14 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		parsed.Files = append(parsed.Files, *parsedFile)
 		parsed.TotalSize += parsedFile.Size
 		parsed.SegmentsCount += len(parsedFile.Segments)
+
+		if segSize == 0 && len(file.Segments) > 0 {
+			// Fallback to the first segment size encountered
+			segSize = int64(file.Segments[0].Bytes)
+		}
 	}
+
+	parsed.SegmentSize = segSize
 
 	// Determine NZB type based on content analysis
 	parsed.Type = p.determineNzbType(parsed.Files)

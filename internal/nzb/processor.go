@@ -2,8 +2,10 @@ package nzb
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/javi11/altmount/internal/database"
@@ -64,6 +66,7 @@ func (proc *Processor) ProcessNzbFile(nzbPath string) error {
 			NzbType:       parsed.Type,
 			SegmentsCount: parsed.SegmentsCount,
 			SegmentsData:  proc.parser.ConvertToDbSegments(parsed.Files),
+			SegmentSize:   parsed.SegmentSize,
 		}
 
 		if err := txRepo.CreateNzbFile(nzbFile); err != nil {
@@ -86,14 +89,14 @@ func (proc *Processor) ProcessNzbFile(nzbPath string) error {
 
 // processSingleFile handles NZBs with a single file
 func (proc *Processor) processSingleFile(repo *database.Repository, nzbFile *database.NzbFile, file ParsedFile) error {
-	// Create virtual file entry
+	// Create virtual file entry in root directory
 	vf := &database.VirtualFile{
-		NzbFileID:   nzbFile.ID,
+		NzbFileID:   int64Ptr(nzbFile.ID),
 		VirtualPath: "/" + file.Filename,
 		Filename:    file.Filename,
 		Size:        file.Size,
 		IsDirectory: false,
-		ParentPath:  stringPtr("/"),
+		ParentPath:  stringPtr("/"), // Parent is root directory
 	}
 
 	if err := repo.CreateVirtualFile(vf); err != nil {
@@ -120,7 +123,7 @@ func (proc *Processor) processMultiFile(repo *database.Repository, nzbFile *data
 	createdDirs := make(map[string]*database.VirtualFile)
 	for _, dir := range dirStructure.directories {
 		vf := &database.VirtualFile{
-			NzbFileID:   nzbFile.ID,
+			NzbFileID:   int64Ptr(nzbFile.ID),
 			VirtualPath: dir.path,
 			Filename:    dir.name,
 			Size:        0,
@@ -140,7 +143,7 @@ func (proc *Processor) processMultiFile(repo *database.Repository, nzbFile *data
 		parentPath, filename := proc.determineFileLocation(file, dirStructure)
 
 		vf := &database.VirtualFile{
-			NzbFileID:   nzbFile.ID,
+			NzbFileID:   int64Ptr(nzbFile.ID),
 			VirtualPath: filepath.Join(parentPath, filename),
 			Filename:    filename,
 			Size:        file.Size,
@@ -166,19 +169,19 @@ func (proc *Processor) processMultiFile(repo *database.Repository, nzbFile *data
 
 // processRarArchive handles NZBs containing RAR archives
 func (proc *Processor) processRarArchive(repo *database.Repository, nzbFile *database.NzbFile, files []ParsedFile) error {
-	// For RAR archives, we need to analyze the RAR content
-	// For now, we'll create the RAR files and mark them for later processing
+	// For RAR archives, we create directory structure based on the archive contents
+	// Each RAR archive becomes a directory, and we create virtual files for its contents
 
 	for _, file := range files {
 		if !file.IsRarArchive {
-			// Non-RAR file in a RAR archive NZB - treat as regular file
+			// Non-RAR file in a RAR archive NZB - treat as regular file in root
 			vf := &database.VirtualFile{
-				NzbFileID:   nzbFile.ID,
+				NzbFileID:   int64Ptr(nzbFile.ID),
 				VirtualPath: "/" + file.Filename,
 				Filename:    file.Filename,
 				Size:        file.Size,
 				IsDirectory: false,
-				ParentPath:  stringPtr("/"),
+				ParentPath:  stringPtr("/"), // Parent is root directory
 			}
 
 			if err := repo.CreateVirtualFile(vf); err != nil {
@@ -187,32 +190,53 @@ func (proc *Processor) processRarArchive(repo *database.Repository, nzbFile *dat
 			continue
 		}
 
-		// Create virtual file for the RAR archive
-		vf := &database.VirtualFile{
-			NzbFileID:   nzbFile.ID,
-			VirtualPath: "/" + file.Filename,
+		// For RAR files, create a directory structure
+		baseName := strings.TrimSuffix(file.Filename, filepath.Ext(file.Filename))
+		// Remove common RAR suffixes like .part01, .part001, etc.
+		rarDirPattern := regexp.MustCompile(`\.(part\d+|r\d+)$`)
+		baseName = rarDirPattern.ReplaceAllString(baseName, "")
+
+		rarDirPath := "/" + baseName
+		
+		// Create directory for the RAR archive content in root
+		rarDir := &database.VirtualFile{
+			NzbFileID:   int64Ptr(nzbFile.ID),
+			VirtualPath: rarDirPath,
+			Filename:    baseName,
+			Size:        0, // Directory size
+			IsDirectory: true,
+			ParentPath:  stringPtr("/"), // Parent is root directory
+		}
+
+		if err := repo.CreateVirtualFile(rarDir); err != nil {
+			return fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
+		}
+
+		// Create a virtual file representing the RAR archive itself within the directory
+		rarArchiveFile := &database.VirtualFile{
+			NzbFileID:   int64Ptr(nzbFile.ID),
+			VirtualPath: rarDirPath + "/" + file.Filename,
 			Filename:    file.Filename,
 			Size:        file.Size,
 			IsDirectory: false,
-			ParentPath:  stringPtr("/"),
+			ParentPath:  stringPtr(rarDirPath),
 		}
 
-		if err := repo.CreateVirtualFile(vf); err != nil {
-			return fmt.Errorf("failed to create RAR file: %w", err)
+		if err := repo.CreateVirtualFile(rarArchiveFile); err != nil {
+			return fmt.Errorf("failed to create RAR file entry: %w", err)
 		}
 
-		// Attempt to analyze RAR contents
-		// This would typically require downloading and analyzing RAR headers
-		// For now, we'll mark it for later processing
-		if err := repo.SetFileMetadata(vf.ID, "rar_analysis_needed", "true"); err != nil {
+		// Mark for RAR content analysis
+		if err := repo.SetFileMetadata(rarArchiveFile.ID, "rar_analysis_needed", "true"); err != nil {
 			return fmt.Errorf("failed to set RAR analysis flag: %w", err)
 		}
 
-		// If we have pre-analyzed RAR contents, store them
+		// If we have pre-analyzed RAR contents, create virtual files for them
 		if len(file.RarContents) > 0 {
 			for _, rarEntry := range file.RarContents {
+				// Store RAR content metadata
 				rc := &database.RarContent{
-					VirtualFileID:  vf.ID,
+					VirtualFileID:  rarArchiveFile.ID,
 					InternalPath:   rarEntry.Path,
 					Filename:       rarEntry.Filename,
 					Size:           rarEntry.Size,
@@ -222,6 +246,26 @@ func (proc *Processor) processRarArchive(repo *database.Repository, nzbFile *dat
 
 				if err := repo.CreateRarContent(rc); err != nil {
 					return fmt.Errorf("failed to create RAR content entry: %w", err)
+				}
+
+				// Create virtual files for extracted content
+				contentPath := rarDirPath + "/" + rarEntry.Filename
+				contentFile := &database.VirtualFile{
+					NzbFileID:   int64Ptr(nzbFile.ID),
+					VirtualPath: contentPath,
+					Filename:    rarEntry.Filename,
+					Size:        rarEntry.Size,
+					IsDirectory: rarEntry.IsDirectory,
+					ParentPath:  stringPtr(rarDirPath),
+				}
+
+				if err := repo.CreateVirtualFile(contentFile); err != nil {
+					return fmt.Errorf("failed to create RAR content file %s: %w", contentPath, err)
+				}
+
+				// Mark this as extracted from RAR
+				if err := repo.SetFileMetadata(contentFile.ID, "extracted_from_rar", rarArchiveFile.VirtualPath); err != nil {
+					return fmt.Errorf("failed to set RAR extraction metadata: %w", err)
 				}
 			}
 		}
@@ -289,7 +333,7 @@ func (proc *Processor) determineFileLocation(file ParsedFile, _ *DirectoryStruct
 
 // AnalyzeRarContentFromData analyzes RAR content when actual RAR data is available
 // This method can be called after downloading RAR segments to extract the internal file structure
-func (proc *Processor) AnalyzeRarContentFromData(rarData []byte, virtualFileID int64) error {
+func (proc *Processor) AnalyzeRarContentFromData(r io.Reader, virtualFileID int64) error {
 	// Get the virtual file from database
 	virtualFile, err := proc.repo.GetVirtualFile(virtualFileID)
 	if err != nil {
@@ -297,7 +341,7 @@ func (proc *Processor) AnalyzeRarContentFromData(rarData []byte, virtualFileID i
 	}
 
 	// Use RAR handler to analyze content
-	rarContents, err := proc.rarHandler.AnalyzeRarContent(rarData, virtualFile, nil)
+	rarContents, err := proc.rarHandler.AnalyzeRarContent(r, virtualFile, nil)
 	if err != nil {
 		return fmt.Errorf("failed to analyze RAR content: %w", err)
 	}
@@ -328,4 +372,9 @@ func stringPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// Helper function to create int64 pointer
+func int64Ptr(i int64) *int64 {
+	return &i
 }

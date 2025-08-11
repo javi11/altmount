@@ -14,7 +14,7 @@ CREATE TABLE nzb_files (
 
 CREATE TABLE virtual_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nzb_file_id INTEGER NOT NULL,
+    nzb_file_id INTEGER,
     virtual_path TEXT NOT NULL,
     filename TEXT NOT NULL,
     size INTEGER NOT NULL DEFAULT 0,

@@ -3,12 +3,12 @@ package integration
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/javi11/altmount/internal/adapters"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzb"
-	"github.com/javi11/altmount/internal/virtualfs"
-	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/javi11/nntppool"
 	"github.com/spf13/afero"
 )
 
@@ -24,15 +24,16 @@ type NzbSystem struct {
 	db      *database.DB
 	service *nzb.Service
 	fs      afero.Fs
+	pool    nntppool.UsenetConnectionPool
 }
 
 // NewNzbSystem creates a new NZB-backed virtual filesystem
-func NewNzbSystem(config NzbConfig, rcloneCli rclonecli.RcloneRcClient) (*NzbSystem, error) {
+func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers int) (*NzbSystem, error) {
 	// Initialize database
 	dbConfig := database.Config{
 		DatabasePath: config.DatabasePath,
 	}
-	
+
 	db, err := database.New(dbConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
@@ -42,26 +43,40 @@ func NewNzbSystem(config NzbConfig, rcloneCli rclonecli.RcloneRcClient) (*NzbSys
 	serviceConfig := nzb.ServiceConfig{
 		DatabasePath: config.DatabasePath,
 		WatchDir:     config.NzbDir,
-		AutoImport:   false, // Disabled by default, use scanning approach
+		AutoImport:   false, // will enable below if NzbDir provided
 		PollInterval: 0,
 	}
-	
+	if config.NzbDir != "" {
+		serviceConfig.AutoImport = true
+		serviceConfig.PollInterval = 30 * time.Second
+	}
+
 	service, err := nzb.NewService(serviceConfig)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)
 	}
 
-	// Create NZB remote file handler
-	nzbRemoteFile := adapters.NewNzbRemoteFile(db)
+	if cp == nil {
+		_ = service.Close()
+		_ = db.Close()
+		return nil, fmt.Errorf("NNTP pool is required")
+	}
+	if workers <= 0 {
+		workers = 15
+	}
 
-	// Create virtual filesystem with NZB backing
-	fs := virtualfs.New(config.MountPath, nzbRemoteFile, rcloneCli)
+	// Create NZB remote file handler
+	nzbRemoteFile := adapters.NewNzbRemoteFile(db, cp, workers)
+
+	// Create filesystem directly backed by NZB data
+	fs := adapters.NewNzbFilesystem(nzbRemoteFile)
 
 	return &NzbSystem{
 		db:      db,
 		service: service,
 		fs:      fs,
+		pool:    cp,
 	}, nil
 }
 
@@ -124,9 +139,9 @@ func (ns *NzbSystem) Close() error {
 func (ns *NzbSystem) GetStats() (*Stats, error) {
 	// TODO: Implement database queries to get statistics
 	return &Stats{
-		TotalNzbFiles:    0,
+		TotalNzbFiles:     0,
 		TotalVirtualFiles: 0,
-		TotalSize:        0,
+		TotalSize:         0,
 	}, nil
 }
 

@@ -15,8 +15,8 @@ import (
 type ServiceConfig struct {
 	DatabasePath string
 	WatchDir     string
-	AutoImport   bool          // Enable automatic import via file watcher
-	PollInterval time.Duration // Polling interval for watcher
+	AutoImport   bool          // Enable automatic import via background scanner
+	PollInterval time.Duration // Polling interval for background scanner
 }
 
 // Service provides high-level NZB management functionality
@@ -24,7 +24,6 @@ type Service struct {
 	config    ServiceConfig
 	db        *database.DB
 	processor *Processor
-	watcher   *Watcher
 	scanner   *Scanner
 	log       *slog.Logger
 	mu        sync.RWMutex
@@ -53,34 +52,21 @@ func NewService(config ServiceConfig) (*Service, error) {
 		log:       slog.Default().With("component", "nzb-service"),
 	}
 
-	// Initialize scanner with default configuration
+	// Initialize scanner with configuration; it will start background scanning if PollInterval > 0
 	if config.WatchDir != "" {
 		scannerConfig := ScannerConfig{
-			ScanDir:    config.WatchDir,
-			Recursive:  true,
-			Extensions: []string{".nzb"},
-			MaxDepth:   0, // No limit
-			Workers:    3,
-			Timeout:    10 * time.Minute,
+			ScanDir:      config.WatchDir,
+			Recursive:    true,
+			Extensions:   []string{".nzb"},
+			MaxDepth:     0, // No limit
+			Workers:      3,
+			Timeout:      10 * time.Minute,
+			PollInterval: 0,
+		}
+		if config.AutoImport && config.PollInterval > 0 {
+			scannerConfig.PollInterval = config.PollInterval
 		}
 		service.scanner = NewScanner(scannerConfig, processor)
-	}
-
-	// Initialize watcher if auto-import is enabled
-	if config.AutoImport && config.WatchDir != "" {
-		watcherConfig := WatcherConfig{
-			WatchDir:     config.WatchDir,
-			PollInterval: config.PollInterval,
-			Extensions:   []string{".nzb"},
-		}
-
-		watcher, err := NewWatcher(watcherConfig, processor)
-		if err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to create watcher: %w", err)
-		}
-
-		service.watcher = watcher
 	}
 
 	return service, nil
@@ -96,15 +82,6 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	s.log.InfoContext(ctx, "Starting NZB service")
-
-	// Start file watcher if configured
-	if s.watcher != nil {
-		if err := s.watcher.Start(); err != nil {
-			return fmt.Errorf("failed to start file watcher: %w", err)
-		}
-		s.log.InfoContext(ctx, "File watcher started", "watch_dir", s.config.WatchDir)
-	}
-
 	s.started = true
 	s.log.InfoContext(ctx, "NZB service started successfully")
 
@@ -122,13 +99,6 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	s.log.InfoContext(ctx, "Stopping NZB service")
 
-	// Stop file watcher
-	if s.watcher != nil {
-		if err := s.watcher.Stop(); err != nil {
-			s.log.ErrorContext(ctx, "Failed to stop file watcher", "error", err)
-		}
-	}
-
 	s.started = false
 	s.log.InfoContext(ctx, "NZB service stopped")
 
@@ -140,9 +110,9 @@ func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Stop watcher if running
-	if s.watcher != nil && s.watcher.IsRunning() {
-		s.watcher.Stop()
+	// Stop background scanner if any
+	if s.scanner != nil {
+		_ = s.scanner.Close()
 	}
 
 	// Close database
@@ -269,11 +239,6 @@ func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
 		TotalSize:     0, // TODO: Query database
 	}
 
-	if s.watcher != nil {
-		watcherStats := s.watcher.GetStats()
-		stats.WatcherRunning = watcherStats.Running
-	}
-
 	return stats, nil
 }
 
@@ -300,13 +265,13 @@ func (s *Service) isFileProcessed(filePath string) (bool, error) {
 
 // ImportResult holds the result of an import operation
 type ImportResult struct {
-	TotalFiles    int                `json:"total_files"`
-	SuccessCount  int                `json:"success_count"`
-	ImportedFiles []string           `json:"imported_files"`
-	FailedFiles   map[string]string  `json:"failed_files"`
-	StartTime     time.Time          `json:"start_time"`
-	EndTime       time.Time          `json:"end_time"`
-	Duration      time.Duration      `json:"duration"`
+	TotalFiles    int               `json:"total_files"`
+	SuccessCount  int               `json:"success_count"`
+	ImportedFiles []string          `json:"imported_files"`
+	FailedFiles   map[string]string `json:"failed_files"`
+	StartTime     time.Time         `json:"start_time"`
+	EndTime       time.Time         `json:"end_time"`
+	Duration      time.Duration     `json:"duration"`
 }
 
 // ScanFolder performs a comprehensive folder scan for NZB files
@@ -347,12 +312,12 @@ func (s *Service) GetScannerStats() *ScannerStats {
 
 // ServiceStats holds statistics about the service
 type ServiceStats struct {
-	IsRunning      bool           `json:"is_running"`
-	DatabasePath   string         `json:"database_path"`
-	WatchDir       string         `json:"watch_dir"`
-	AutoImport     bool           `json:"auto_import"`
-	WatcherRunning bool           `json:"watcher_running"`
-	TotalNzbFiles  int            `json:"total_nzb_files"`
-	TotalSize      int64          `json:"total_size"`
-	ScannerConfig  *ScannerStats  `json:"scanner_config,omitempty"`
+	IsRunning      bool          `json:"is_running"`
+	DatabasePath   string        `json:"database_path"`
+	WatchDir       string        `json:"watch_dir"`
+	AutoImport     bool          `json:"auto_import"`
+	WatcherRunning bool          `json:"watcher_running"`
+	TotalNzbFiles  int           `json:"total_nzb_files"`
+	TotalSize      int64         `json:"total_size"`
+	ScannerConfig  *ScannerStats `json:"scanner_config,omitempty"`
 }

@@ -13,13 +13,14 @@ import (
 
 // ScannerConfig holds configuration for the NZB folder scanner
 type ScannerConfig struct {
-	ScanDir       string        // Root directory to scan for NZB files
-	Recursive     bool          // Whether to scan subdirectories recursively
-	Extensions    []string      // File extensions to include (default: [".nzb"])
-	MaxDepth      int           // Maximum recursion depth (0 = no limit)
-	Workers       int           // Number of worker goroutines for parallel processing
-	Timeout       time.Duration // Timeout for scanning operation
-	IgnorePatterns []string     // Patterns to ignore (supports wildcards)
+	ScanDir        string        // Root directory to scan for NZB files
+	Recursive      bool          // Whether to scan subdirectories recursively
+	Extensions     []string      // File extensions to include (default: [".nzb"])
+	MaxDepth       int           // Maximum recursion depth (0 = no limit)
+	Workers        int           // Number of worker goroutines for parallel processing
+	Timeout        time.Duration // Timeout for scanning operation
+	IgnorePatterns []string      // Patterns to ignore (supports wildcards)
+	PollInterval   time.Duration // Background scan frequency (0 disables background scanning)
 }
 
 // Scanner provides efficient folder scanning for NZB files
@@ -27,20 +28,26 @@ type Scanner struct {
 	config    ScannerConfig
 	processor *Processor
 	log       *slog.Logger
+	// background runner
+	mu      sync.RWMutex
+	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 // ScanResult contains the results of a folder scan operation
 type ScanResult struct {
-	TotalFiles     int                `json:"total_files"`
-	ProcessedFiles int                `json:"processed_files"`
-	SkippedFiles   int                `json:"skipped_files"`
-	FailedFiles    map[string]string  `json:"failed_files"`
-	NewFiles       []string           `json:"new_files"`
-	ExistingFiles  []string           `json:"existing_files"`
-	StartTime      time.Time          `json:"start_time"`
-	EndTime        time.Time          `json:"end_time"`
-	Duration       time.Duration      `json:"duration"`
-	Errors         []string           `json:"errors"`
+	TotalFiles     int               `json:"total_files"`
+	ProcessedFiles int               `json:"processed_files"`
+	SkippedFiles   int               `json:"skipped_files"`
+	FailedFiles    map[string]string `json:"failed_files"`
+	NewFiles       []string          `json:"new_files"`
+	ExistingFiles  []string          `json:"existing_files"`
+	StartTime      time.Time         `json:"start_time"`
+	EndTime        time.Time         `json:"end_time"`
+	Duration       time.Duration     `json:"duration"`
+	Errors         []string          `json:"errors"`
 }
 
 // ScanProgress provides real-time progress updates during scanning
@@ -53,7 +60,7 @@ type ScanProgress struct {
 	StartTime      time.Time `json:"start_time"`
 }
 
-// NewScanner creates a new NZB folder scanner
+// NewScanner creates a new NZB folder scanner and starts background scanning if PollInterval > 0
 func NewScanner(config ScannerConfig, processor *Processor) *Scanner {
 	// Set defaults
 	if len(config.Extensions) == 0 {
@@ -65,12 +72,46 @@ func NewScanner(config ScannerConfig, processor *Processor) *Scanner {
 	if config.Timeout == 0 {
 		config.Timeout = 10 * time.Minute // Default 10 minute timeout
 	}
+	if config.PollInterval < 0 {
+		config.PollInterval = 0
+	}
 
-	return &Scanner{
+	ctx, cancel := context.WithCancel(context.Background())
+
+	s := &Scanner{
 		config:    config,
 		processor: processor,
 		log:       slog.Default().With("component", "nzb-scanner"),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
+
+	// Start background loop if requested
+	if config.PollInterval > 0 && config.ScanDir != "" {
+		s.startBackground()
+	}
+
+	return s
+}
+
+// Close stops any background scanning and waits for shutdown
+func (s *Scanner) Close() error {
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return nil
+	}
+	s.cancel()
+	s.mu.Unlock()
+
+	s.wg.Wait()
+
+	s.mu.Lock()
+	s.running = false
+	// Renew context so scanner could be restarted later if needed
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.mu.Unlock()
+	return nil
 }
 
 // ScanFolder performs a comprehensive scan of the configured folder
@@ -125,11 +166,11 @@ func (s *Scanner) ScanFolder(ctx context.Context) (*ScanResult, error) {
 // ScanFolderWithProgress scans folder with real-time progress updates
 func (s *Scanner) ScanFolderWithProgress(ctx context.Context, progressChan chan<- ScanProgress) (*ScanResult, error) {
 	result, err := s.ScanFolder(ctx)
-	
+
 	// Send progress updates during processing if channel provided
 	if progressChan != nil {
 		defer close(progressChan)
-		
+
 		// Send initial progress
 		progressChan <- ScanProgress{
 			CurrentFile:    "Starting scan...",
@@ -139,7 +180,7 @@ func (s *Scanner) ScanFolderWithProgress(ctx context.Context, progressChan chan<
 			Errors:         len(result.Errors),
 			StartTime:      result.StartTime,
 		}
-		
+
 		// Send final progress
 		progressChan <- ScanProgress{
 			CurrentFile:    "Scan completed",
@@ -150,7 +191,7 @@ func (s *Scanner) ScanFolderWithProgress(ctx context.Context, progressChan chan<
 			StartTime:      result.StartTime,
 		}
 	}
-	
+
 	return result, err
 }
 
@@ -219,25 +260,25 @@ func (s *Scanner) discoverFiles(ctx context.Context) ([]string, error) {
 func (s *Scanner) processFilesParallel(ctx context.Context, files []string, result *ScanResult) error {
 	// Create work channels
 	workChan := make(chan string, len(files))
-	
+
 	// Start worker goroutines
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	
+
 	for i := 0; i < s.config.Workers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			
+
 			for filePath := range workChan {
 				select {
 				case <-ctx.Done():
 					return
 				default:
 				}
-				
+
 				s.log.DebugContext(ctx, "Processing file", "worker", workerID, "file", filePath)
-				
+
 				// Check if file already exists in database
 				exists, err := s.isFileAlreadyProcessed(filePath)
 				if err != nil {
@@ -247,7 +288,7 @@ func (s *Scanner) processFilesParallel(ctx context.Context, files []string, resu
 					mu.Unlock()
 					continue
 				}
-				
+
 				mu.Lock()
 				if exists {
 					result.ExistingFiles = append(result.ExistingFiles, filePath)
@@ -268,7 +309,7 @@ func (s *Scanner) processFilesParallel(ctx context.Context, files []string, resu
 			}
 		}(i)
 	}
-	
+
 	// Send work to workers
 	go func() {
 		defer close(workChan)
@@ -280,10 +321,10 @@ func (s *Scanner) processFilesParallel(ctx context.Context, files []string, resu
 			}
 		}
 	}()
-	
+
 	// Wait for all workers to complete
 	wg.Wait()
-	
+
 	return ctx.Err()
 }
 
@@ -301,20 +342,20 @@ func (s *Scanner) isValidNzbFile(filePath string) bool {
 // shouldIgnoreFile checks if a file matches any ignore patterns
 func (s *Scanner) shouldIgnoreFile(filePath string) bool {
 	fileName := filepath.Base(filePath)
-	
+
 	for _, pattern := range s.config.IgnorePatterns {
 		matched, err := filepath.Match(pattern, fileName)
 		if err == nil && matched {
 			return true
 		}
-		
+
 		// Also check if the full path matches
 		matched, err = filepath.Match(pattern, filePath)
 		if err == nil && matched {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -349,4 +390,48 @@ type ScannerStats struct {
 	Workers        int           `json:"workers"`
 	Timeout        time.Duration `json:"timeout"`
 	IgnorePatterns []string      `json:"ignore_patterns"`
+}
+
+// startBackground kicks off the periodic scanning loop in a goroutine
+func (s *Scanner) startBackground() {
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return
+	}
+	s.running = true
+	interval := s.config.PollInterval
+	ctx := s.ctx
+	s.mu.Unlock()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		// Optional immediate scan
+		if s.config.ScanDir != "" {
+			if _, err := s.ScanFolder(ctx); err != nil && ctx.Err() == nil {
+				s.log.ErrorContext(ctx, "Background scan failed", "error", err)
+			}
+		}
+
+		if interval == 0 {
+			return
+		}
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if s.config.ScanDir == "" {
+					continue
+				}
+				if _, err := s.ScanFolder(ctx); err != nil && ctx.Err() == nil {
+					s.log.ErrorContext(ctx, "Background scan failed", "error", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }
