@@ -1,4 +1,4 @@
-package adapters
+package nzbfilesystem
 
 import (
 	"context"
@@ -40,6 +40,8 @@ type NzbRemoteFile struct {
 	cp                 nntppool.UsenetConnectionPool
 	maxDownloadWorkers int
 	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
+	globalPassword     string            // Global password fallback
+	globalSalt         string            // Global salt fallback
 }
 
 // NewNzbRemoteFile creates a new NZB remote file handler with default config
@@ -62,6 +64,8 @@ func NewNzbRemoteFileWithConfig(db *database.DB, cp nntppool.UsenetConnectionPoo
 		cp:                 cp,
 		maxDownloadWorkers: maxDownloadWorkers,
 		rcloneCipher:       rcloneCipher,
+		globalPassword:     config.GlobalPassword,
+		globalSalt:         config.GlobalSalt,
 	}
 }
 
@@ -100,23 +104,20 @@ func (nrf *NzbRemoteFile) OpenFile(ctx context.Context, name string, r utils.Pat
 
 	// Create a virtual file handle
 	virtualFile := &VirtualFile{
-		name:         name,
-		virtualFile:  vf,
-		nzbFile:      nzb, // Can be nil for system directories like root
-		db:           nrf.db,
-		args:         r,
-		cp:           nrf.cp,
-		ctx:          ctx,
-		maxWorkers:   nrf.maxDownloadWorkers,
-		rcloneCipher: nrf.rcloneCipher,
+		name:           name,
+		virtualFile:    vf,
+		nzbFile:        nzb, // Can be nil for system directories like root
+		db:             nrf.db,
+		args:           r,
+		cp:             nrf.cp,
+		ctx:            ctx,
+		maxWorkers:     nrf.maxDownloadWorkers,
+		rcloneCipher:   nrf.rcloneCipher,
+		globalPassword: nrf.globalPassword,
+		globalSalt:     nrf.globalSalt,
 	}
 
-	// Initialize reader immediately with the HTTP range if this is a file (not a directory)
-	if !vf.IsDirectory && nzb != nil {
-		if err := virtualFile.initializeReader(); err != nil {
-			return false, nil, fmt.Errorf("failed to initialize reader: %w", err)
-		}
-	}
+	// Note: Reader is now created lazily on first read operation to avoid memory leaks
 
 	return true, virtualFile, nil
 }
@@ -321,12 +322,14 @@ type VirtualFile struct {
 	position    int64
 
 	// NNTP and reading state
-	cp           nntppool.UsenetConnectionPool
-	reader       io.ReadCloser
-	ctx          context.Context
-	maxWorkers   int
-	rcloneCipher encryption.Cipher // For encryption/decryption
-	mu           sync.Mutex
+	cp             nntppool.UsenetConnectionPool
+	reader         io.ReadCloser
+	ctx            context.Context
+	maxWorkers     int
+	rcloneCipher   encryption.Cipher // For encryption/decryption
+	globalPassword string            // Global password fallback
+	globalSalt     string            // Global salt fallback
+	mu             sync.Mutex
 }
 
 // Close closes the virtual file
@@ -358,8 +361,9 @@ func (l dbSegmentLoader) GetSegment(index int) (segment nzbparser.NzbSegment, gr
 	return nzbparser.NzbSegment{Number: s.Number, Bytes: int(s.Bytes), ID: s.MessageID}, s.Groups, true
 }
 
-// initializeReader creates the reader for the virtual file based on HTTP range and encryption
-func (vf *VirtualFile) initializeReader() error {
+// ensureReaderForPosition creates or reuses a reader for the given position with smart chunking
+// This implements lazy loading to avoid memory leaks from pre-caching entire files
+func (vf *VirtualFile) ensureReaderForPosition(position int64) error {
 	if vf.nzbFile == nil {
 		return fmt.Errorf("no NZB data available for file")
 	}
@@ -368,32 +372,30 @@ func (vf *VirtualFile) initializeReader() error {
 		return fmt.Errorf("usenet connection pool not configured")
 	}
 
-	// Get range from HTTP request if available
-	rangeStart, rangeEnd, hasRange := vf.getRequestRange()
-	var start, end int64
-
-	if hasRange {
-		start = rangeStart
-		end = rangeEnd
-	} else {
-		// No HTTP range header, use full file range
-		start = 0
-		end = vf.virtualFile.Size - 1
+	if position < 0 {
+		position = 0
 	}
 
-	// Validate range
-	if start < 0 {
-		start = 0
-	}
-	if end >= vf.virtualFile.Size {
-		end = vf.virtualFile.Size - 1
-	}
-	if start > end {
-		return fmt.Errorf("invalid range: start %d > end %d", start, end)
+	if position >= vf.virtualFile.Size {
+		return io.EOF
 	}
 
-	// Check if file is encrypted and wrap with decryption if needed
-	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) {
+	// Check if current reader can handle this position
+	if vf.reader != nil {
+		// If we have a reader and the position matches our current position, we're good
+		if position == vf.position {
+			return nil
+		}
+		// Position changed, close current reader
+		_ = vf.reader.Close()
+		vf.reader = nil
+	}
+
+	// Calculate smart range based on HTTP Range header and memory constraints
+	start, end := vf.calculateSmartRange(position)
+
+	// Create reader for the calculated range
+	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == "rclone" {
 		// Wrap the usenet reader with rclone decryption
 		decryptedReader, err := vf.wrapWithEncryption(start, end)
 		if err != nil {
@@ -416,9 +418,95 @@ func (vf *VirtualFile) initializeReader() error {
 		vf.reader = ur
 	}
 
-	// Set initial position to the start of the range
+	// Set position to the start of our new reader range
 	vf.position = start
 	return nil
+}
+
+// calculateSmartRange determines the optimal range for a reader based on position and constraints
+func (vf *VirtualFile) calculateSmartRange(position int64) (start, end int64) {
+	// Get HTTP range constraints if available
+	rangeStart, rangeEnd, hasRange := vf.getRequestRange()
+
+	// Define maximum chunk size to prevent memory explosion (100MB limit)
+	const maxChunkSize = 100 * 1024 * 1024 // 100MB
+
+	if hasRange {
+		// Check if HTTP range is reasonable in size
+		rangeSize := rangeEnd - rangeStart + 1
+
+		if rangeSize <= maxChunkSize {
+			// Range is reasonable, use it
+			start = rangeStart
+			end = rangeEnd
+			if position < start {
+				position = start
+			}
+			if position > end {
+				position = end
+			}
+		} else {
+			// Range is too large (likely end=-1 case), use chunking from current position
+			// but respect the range boundaries
+			start = position
+			if start < rangeStart {
+				start = rangeStart
+			}
+
+			// Use smart chunking within the HTTP range
+			chunkSize := vf.getOptimalChunkSize()
+			end = start + chunkSize - 1
+
+			// Don't exceed the HTTP range end
+			if end > rangeEnd {
+				end = rangeEnd
+			}
+		}
+	} else {
+		// No HTTP range - use smart chunking to avoid memory leaks
+		start = position
+		chunkSize := vf.getOptimalChunkSize()
+		end = start + chunkSize - 1
+
+		if end >= vf.virtualFile.Size {
+			end = vf.virtualFile.Size - 1
+		}
+	}
+
+	// Final validation
+	if start < 0 {
+		start = 0
+	}
+	if end >= vf.virtualFile.Size {
+		end = vf.virtualFile.Size - 1
+	}
+	if start > end {
+		// Fallback to just the current position
+		start = position
+		end = position
+	}
+
+	return start, end
+}
+
+// getOptimalChunkSize returns the optimal chunk size based on file size
+func (vf *VirtualFile) getOptimalChunkSize() int64 {
+	fileSize := vf.virtualFile.Size
+
+	switch {
+	case fileSize < 10*1024*1024: // < 10MB
+		// Small files: read entire file
+		return fileSize
+	case fileSize < 100*1024*1024: // < 100MB
+		// Medium files: 10MB chunks
+		return 10 * 1024 * 1024
+	case fileSize < 1024*1024*1024: // < 1GB
+		// Large files: 25MB chunks
+		return 25 * 1024 * 1024
+	default: // >= 1GB
+		// Very large files: 50MB chunks
+		return 50 * 1024 * 1024
+	}
 }
 
 // getRequestRange extracts and validates the HTTP Range header from the original request
@@ -466,10 +554,16 @@ func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, erro
 
 	if vf.nzbFile.RclonePassword != nil && *vf.nzbFile.RclonePassword != "" {
 		password = *vf.nzbFile.RclonePassword
+	} else {
+		// Fallback to global password
+		password = vf.globalPassword
 	}
 
 	if vf.nzbFile.RcloneSalt != nil && *vf.nzbFile.RcloneSalt != "" {
 		salt = *vf.nzbFile.RcloneSalt
+	} else {
+		// Fallback to global salt
+		salt = vf.globalSalt
 	}
 
 	decryptedReader, err := vf.rcloneCipher.Open(
@@ -498,7 +592,7 @@ func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, erro
 	return decryptedReader, nil
 }
 
-// Read reads data from the virtual file
+// Read reads data from the virtual file using lazy reader creation
 func (vf *VirtualFile) Read(p []byte) (int, error) {
 	vf.mu.Lock()
 	defer vf.mu.Unlock()
@@ -515,12 +609,30 @@ func (vf *VirtualFile) Read(p []byte) (int, error) {
 		return 0, fmt.Errorf("cannot read from directory")
 	}
 
-	if vf.reader == nil {
-		return 0, fmt.Errorf("reader not initialized")
+	if vf.nzbFile == nil {
+		return 0, fmt.Errorf("no NZB data available for file")
+	}
+
+	// Ensure we have a reader for the current position
+	if err := vf.ensureReaderForPosition(vf.position); err != nil {
+		if errors.Is(err, io.EOF) {
+			return 0, io.EOF
+		}
+		return 0, err
 	}
 
 	n, err := vf.reader.Read(p)
 	vf.position += int64(n)
+
+	// If we hit EOF but read some data, we might need to create a new reader for the next chunk
+	if err == io.EOF && n > 0 && vf.position < vf.virtualFile.Size {
+		// We've reached the end of this chunk but there's more file to read
+		// Close current reader so next Read() call will create a new reader for next chunk
+		_ = vf.reader.Close()
+		vf.reader = nil
+		err = nil
+	}
+
 	return n, err
 }
 
@@ -671,7 +783,7 @@ func (vf *VirtualFile) Readdirnames(n int) ([]string, error) {
 	return names, nil
 }
 
-// Seek sets the file position
+// Seek sets the file position and invalidates reader if position changes significantly
 func (vf *VirtualFile) Seek(offset int64, whence int) (int64, error) {
 	vf.mu.Lock()
 	defer vf.mu.Unlock()
@@ -696,8 +808,23 @@ func (vf *VirtualFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, ErrSeekTooFar
 	}
 
-	vf.position = abs
+	// If we're seeking to a position far from current reader range, close the reader
+	// This prevents memory leaks from keeping large readers open for distant positions
+	if vf.reader != nil {
+		// Calculate if the new position is outside a reasonable range from current position
+		// Use 1MB threshold - if seeking more than 1MB away, close reader
+		distance := abs - vf.position
+		if distance < 0 {
+			distance = -distance
+		}
 
+		if distance > 1024*1024 { // 1MB threshold
+			_ = vf.reader.Close()
+			vf.reader = nil
+		}
+	}
+
+	vf.position = abs
 	return abs, nil
 }
 

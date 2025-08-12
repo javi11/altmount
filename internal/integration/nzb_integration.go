@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/javi11/altmount/internal/adapters"
+	"github.com/javi11/altmount/internal/adapters/nzbfilesystem"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzb"
 	"github.com/javi11/nntppool"
@@ -14,11 +14,11 @@ import (
 
 // NzbConfig holds configuration for the NZB system
 type NzbConfig struct {
-	DatabasePath   string
-	MountPath      string
-	NzbDir         string // Directory containing NZB files
-	Password string // Global password for .bin files
-	Salt     string // Global salt for .bin files
+	DatabasePath string
+	MountPath    string
+	NzbDir       string // Directory containing NZB files
+	Password     string // Global password for .bin files
+	Salt         string // Global salt for .bin files
 }
 
 // NzbSystem represents the complete NZB-backed filesystem
@@ -69,13 +69,13 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 	}
 
 	// Create NZB remote file handler with global credentials
-	nzbRemoteFile := adapters.NewNzbRemoteFileWithConfig(db, cp, workers, adapters.NzbRemoteFileConfig{
+	nzbRemoteFile := nzbfilesystem.NewNzbRemoteFileWithConfig(db, cp, workers, nzbfilesystem.NzbRemoteFileConfig{
 		GlobalPassword: config.Password,
 		GlobalSalt:     config.Salt,
 	})
 
 	// Create filesystem directly backed by NZB data
-	fs := adapters.NewNzbFilesystem(nzbRemoteFile)
+	fs := nzbfilesystem.NewNzbFilesystem(nzbRemoteFile)
 
 	return &NzbSystem{
 		db:      db,

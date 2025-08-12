@@ -1,4 +1,4 @@
-package adapters
+package nzbfilesystem
 
 import (
 	"context"
@@ -30,23 +30,23 @@ func (nfs *NzbFilesystem) Name() string {
 // Open opens a file for reading
 func (nfs *NzbFilesystem) Open(name string) (afero.File, error) {
 	ctx := context.Background()
-	
+
 	// Parse path with args
 	pr, err := utils.NewPathWithArgsFromString(name)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Try to open with NZB remote file
 	ok, file, err := nfs.remoteFile.OpenFile(ctx, pr.Path, pr)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	
+
 	return file, nil
 }
 
@@ -56,7 +56,7 @@ func (nfs *NzbFilesystem) OpenFile(name string, flag int, perm os.FileMode) (afe
 	if flag != os.O_RDONLY {
 		return nil, os.ErrPermission
 	}
-	
+
 	return nfs.Open(name)
 }
 
@@ -66,11 +66,11 @@ func (nfs *NzbFilesystem) Stat(name string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if !ok {
 		return nil, os.ErrNotExist
 	}
-	
+
 	return info, nil
 }
 
@@ -81,11 +81,11 @@ func (nfs *NzbFilesystem) Remove(name string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if !ok {
 		return os.ErrNotExist
 	}
-	
+
 	return nil
 }
 
@@ -101,11 +101,11 @@ func (nfs *NzbFilesystem) Rename(oldName, newName string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if !ok {
 		return os.ErrNotExist
 	}
-	
+
 	return nil
 }
 
