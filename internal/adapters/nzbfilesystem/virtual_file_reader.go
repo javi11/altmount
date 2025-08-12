@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
+	"github.com/javi11/altmount/internal/usenet"
 )
 
 // Read reads data from the virtual file using lazy reader creation with proper chunk continuation
@@ -66,7 +68,28 @@ func (vf *VirtualFile) Read(p []byte) (int, error) {
 				return 0, io.EOF
 			}
 		} else if err != nil {
-			// Any other error should be returned
+			// Check if this is an ArticleNotFoundError from usenet reader
+			if articleErr, ok := err.(*usenet.ArticleNotFoundError); ok {
+				// Update database status based on bytes read
+				vf.updateFileStatusFromError(articleErr)
+				
+				// Create appropriate error for upper layers
+				if articleErr.BytesRead > 0 || totalRead > 0 {
+					// Some content was read - return partial content error
+					return totalRead, &PartialContentError{
+						BytesRead:     articleErr.BytesRead,
+						TotalExpected: vf.virtualFile.Size,
+						UnderlyingErr: articleErr,
+					}
+				} else {
+					// No content read - return corrupted file error
+					return totalRead, &CorruptedFileError{
+						TotalExpected: vf.virtualFile.Size,
+						UnderlyingErr: articleErr,
+					}
+				}
+			}
+			// Any other error should be returned as-is
 			return totalRead, err
 		}
 
@@ -160,6 +183,27 @@ func (vf *VirtualFile) ReadAt(p []byte, off int64) (int, error) {
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
 				break
+			}
+			// Check if this is an ArticleNotFoundError from usenet reader
+			if articleErr, ok := rerr.(*usenet.ArticleNotFoundError); ok {
+				// Update database status based on bytes read
+				vf.updateFileStatusFromError(articleErr)
+				
+				// Create appropriate error for upper layers
+				if articleErr.BytesRead > 0 || int64(n) > 0 {
+					// Some content was read - return partial content error
+					return n, &PartialContentError{
+						BytesRead:     articleErr.BytesRead,
+						TotalExpected: vf.virtualFile.Size,
+						UnderlyingErr: articleErr,
+					}
+				} else {
+					// No content read - return corrupted file error
+					return n, &CorruptedFileError{
+						TotalExpected: vf.virtualFile.Size,
+						UnderlyingErr: articleErr,
+					}
+				}
 			}
 			return n, rerr
 		}
@@ -271,4 +315,24 @@ func (vf *VirtualFile) ensureReaderForPosition(position int64) error {
 	// Set position to the start of our new reader range
 	vf.position = start
 	return nil
+}
+
+// updateFileStatusFromError updates the virtual file status in the database based on ArticleNotFoundError
+func (vf *VirtualFile) updateFileStatusFromError(articleErr *usenet.ArticleNotFoundError) {
+	if vf.db == nil || vf.virtualFile == nil {
+		return // No database access or virtual file info
+	}
+
+	var status database.FileStatus
+	if articleErr.BytesRead > 0 {
+		// Some content was successfully read before error - mark as partial
+		status = database.FileStatusPartial
+	} else {
+		// No content read - mark as corrupted/missing
+		status = database.FileStatusCorrupted
+	}
+
+	// Update status in database - ignore errors as this is best-effort
+	repo := database.NewRepository(vf.db.Connection())
+	_ = repo.UpdateVirtualFileStatus(vf.virtualFile.ID, status)
 }

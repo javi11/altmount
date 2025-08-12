@@ -20,20 +20,23 @@ import (
 
 type webdavServer struct {
 	srv *http.Server
-	log *slog.Logger
 }
 
 func NewServer(
 	config *Config,
 	fs afero.Fs,
 ) (*webdavServer, error) {
-	log := slog.Default()
+	// Create custom error handler that maps our errors to proper HTTP status codes
+	errorHandler := &customErrorHandler{
+		fileSystem: aferoToWebdavFS(fs),
+	}
+
 	handler := &webdav.Handler{
-		FileSystem: aferoToWebdavFS(fs),
+		FileSystem: errorHandler,
 		LockSystem: webdav.NewMemLS(),
 		Logger: func(r *http.Request, err error) {
 			if err != nil && !errors.Is(err, context.Canceled) {
-				log.DebugContext(r.Context(), "WebDav error", "err", err)
+				slog.DebugContext(r.Context(), "WebDav error", "err", err)
 			}
 		},
 	}
@@ -54,7 +57,7 @@ func NewServer(
 			w.WriteHeader(http.StatusUnauthorized)
 			_, err := w.Write([]byte("401 Unauthorized"))
 			if err != nil {
-				log.ErrorContext(r.Context(), "Error writting the response to the client", "err", err)
+				slog.ErrorContext(r.Context(), "Error writting the response to the client", "err", err)
 			}
 			return
 		}
@@ -87,7 +90,7 @@ func NewServer(
 			}
 
 			if err != nil {
-				log.ErrorContext(r.Context(), "Error handling the request", "err", err)
+				slog.ErrorContext(r.Context(), "Error handling the request", "err", err)
 				return
 			}
 
@@ -107,17 +110,16 @@ func NewServer(
 	}
 
 	return &webdavServer{
-		log: log,
 		srv: srv,
 	}, nil
 }
 
 func (s *webdavServer) Start(ctx context.Context) error {
-	s.log.InfoContext(ctx, fmt.Sprintf("WebDav server started at %s/webdav", s.srv.Addr))
+	slog.InfoContext(ctx, fmt.Sprintf("WebDav server started at %s/webdav", s.srv.Addr))
 
 	if err := s.srv.ListenAndServe(); err != nil {
 		if ctx.Err() == nil {
-			s.log.ErrorContext(ctx, "Failed to start WebDav server", "err", err)
+			slog.ErrorContext(ctx, "Failed to start WebDav server", "err", err)
 		}
 	}
 
@@ -125,7 +127,7 @@ func (s *webdavServer) Start(ctx context.Context) error {
 }
 
 func (s *webdavServer) Stop() {
-	s.log.Info("Stopping WebDav server")
+	slog.Info("Stopping WebDav server")
 
 	// Create a deadline to wait for.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
@@ -133,8 +135,8 @@ func (s *webdavServer) Stop() {
 
 	err := s.srv.Shutdown(ctx)
 	if err != nil {
-		s.log.ErrorContext(ctx, "Failed to shutdown WebDav server", "err", err)
+		slog.ErrorContext(ctx, "Failed to shutdown WebDav server", "err", err)
 	}
 
-	s.log.Info("WebDav server stopped")
+	slog.Info("WebDav server stopped")
 }

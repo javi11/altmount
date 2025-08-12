@@ -71,17 +71,27 @@ type NzbFile struct {
 	RcloneSalt     *string     `db:"rclone_salt"`     // Salt from NZB meta, NULL if not encrypted
 }
 
+// FileStatus represents the status of a file's availability
+type FileStatus string
+
+const (
+	FileStatusHealthy   FileStatus = "healthy"   // All articles found and downloadable
+	FileStatusPartial   FileStatus = "partial"   // Some articles missing but some content available
+	FileStatusCorrupted FileStatus = "corrupted" // No articles found or completely unreadable
+)
+
 // VirtualFile represents a virtual file extracted from NZB contents
 type VirtualFile struct {
-	ID          int64     `db:"id"`
-	NzbFileID   *int64    `db:"nzb_file_id"` // Pointer to allow NULL for system directories
-	ParentID    *int64    `db:"parent_id"`   // References another VirtualFile ID for directories
-	VirtualPath string    `db:"virtual_path"`
-	Filename    string    `db:"filename"`
-	Size        int64     `db:"size"`
-	CreatedAt   time.Time `db:"created_at"`
-	IsDirectory bool      `db:"is_directory"`
-	Encryption  *string   `db:"encryption"`  // Encryption type (e.g., "rclone"), NULL if not encrypted
+	ID          int64      `db:"id"`
+	NzbFileID   *int64     `db:"nzb_file_id"` // Pointer to allow NULL for system directories
+	ParentID    *int64     `db:"parent_id"`   // References another VirtualFile ID for directories
+	VirtualPath string     `db:"virtual_path"`
+	Filename    string     `db:"filename"`
+	Size        int64      `db:"size"`
+	CreatedAt   time.Time  `db:"created_at"`
+	IsDirectory bool       `db:"is_directory"`
+	Encryption  *string    `db:"encryption"` // Encryption type (e.g., "rclone"), NULL if not encrypted
+	Status      FileStatus `db:"status"`     // File availability status
 }
 
 // RarContent represents a file contained within a RAR archive

@@ -87,12 +87,17 @@ func (r *Repository) DeleteNzbFile(id int64) error {
 // CreateVirtualFile inserts a new virtual file record
 func (r *Repository) CreateVirtualFile(vf *VirtualFile) error {
 	query := `
-		INSERT INTO virtual_files (nzb_file_id, parent_id, virtual_path, filename, size, is_directory, encryption)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO virtual_files (nzb_file_id, parent_id, virtual_path, filename, size, is_directory, encryption, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
+	// Set default status if not specified
+	if vf.Status == "" {
+		vf.Status = FileStatusHealthy
+	}
+
 	result, err := r.db.Exec(query, vf.NzbFileID, vf.ParentID, vf.VirtualPath, vf.Filename,
-		vf.Size, vf.IsDirectory, vf.Encryption)
+		vf.Size, vf.IsDirectory, vf.Encryption, vf.Status)
 	if err != nil {
 		return fmt.Errorf("failed to create virtual file: %w", err)
 	}
@@ -109,14 +114,14 @@ func (r *Repository) CreateVirtualFile(vf *VirtualFile) error {
 // GetVirtualFileByPath retrieves a virtual file by its path
 func (r *Repository) GetVirtualFileByPath(path string) (*VirtualFile, error) {
 	query := `
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption
+		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
 		FROM virtual_files WHERE virtual_path = ?
 	`
 
 	var vf VirtualFile
 	err := r.db.QueryRow(query, path).Scan(
 		&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption,
+		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
 	)
 
 	if err != nil {
@@ -137,13 +142,13 @@ func (r *Repository) ListVirtualFilesByParentID(parentID *int64) ([]*VirtualFile
 	if parentID == nil {
 		// List root level files (parent_id IS NULL)
 		query = `
-			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption
+			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
 			FROM virtual_files WHERE parent_id IS NULL ORDER BY is_directory DESC, filename ASC
 		`
 	} else {
 		// List files with specific parent ID
 		query = `
-			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption
+			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
 			FROM virtual_files WHERE parent_id = ? ORDER BY is_directory DESC, filename ASC
 		`
 		args = append(args, *parentID)
@@ -160,7 +165,7 @@ func (r *Repository) ListVirtualFilesByParentID(parentID *int64) ([]*VirtualFile
 		var vf VirtualFile
 		err := rows.Scan(
 			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption,
+			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan virtual file: %w", err)
@@ -193,7 +198,7 @@ func (r *Repository) ListVirtualFilesByParentPath(parentPath string) ([]*Virtual
 // GetVirtualFileWithNzb retrieves a virtual file along with its NZB file data (if any)
 func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile, error) {
 	query := `
-		SELECT vf.id, vf.nzb_file_id, vf.parent_id, vf.virtual_path, vf.filename, vf.size, vf.created_at, vf.is_directory, vf.encryption,
+		SELECT vf.id, vf.nzb_file_id, vf.parent_id, vf.virtual_path, vf.filename, vf.size, vf.created_at, vf.is_directory, vf.encryption, vf.status,
 		       nf.id, nf.path, nf.filename, nf.size, nf.created_at, nf.updated_at, nf.nzb_type, nf.segments_count, nf.segments_data, nf.segment_size
 		FROM virtual_files vf
 		LEFT JOIN nzb_files nf ON vf.nzb_file_id = nf.id
@@ -216,7 +221,7 @@ func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile,
 
 	err := r.db.QueryRow(query, path).Scan(
 		&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption,
+		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
 		&nzbID, &nzbPath, &nzbFilename, &nzbSize,
 		&nzbCreatedAt, &nzbUpdatedAt, &nzbType,
 		&nzbSegmentsCount, &nzbSegmentsData, &nzbSegmentSize,
@@ -448,7 +453,7 @@ func (r *Repository) PathExists(path string) (bool, error) {
 // GetDirectoryTree returns the complete directory tree structure
 func (r *Repository) GetDirectoryTree() (map[int64][]*VirtualFile, error) {
 	query := `
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption
+		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
 		FROM virtual_files ORDER BY parent_id, is_directory DESC, filename ASC
 	`
 
@@ -464,7 +469,7 @@ func (r *Repository) GetDirectoryTree() (map[int64][]*VirtualFile, error) {
 		var vf VirtualFile
 		err := rows.Scan(
 			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption,
+			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan virtual file: %w", err)
@@ -484,14 +489,14 @@ func (r *Repository) GetDirectoryTree() (map[int64][]*VirtualFile, error) {
 // GetVirtualFile retrieves a virtual file by its ID
 func (r *Repository) GetVirtualFile(id int64) (*VirtualFile, error) {
 	query := `
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption
+		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
 		FROM virtual_files WHERE id = ?
 	`
 
 	var vf VirtualFile
 	err := r.db.QueryRow(query, id).Scan(
 		&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption,
+		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
 	)
 
 	if err != nil {
@@ -521,7 +526,7 @@ func (r *Repository) DeleteFileMetadata(virtualFileID int64, key string) error {
 // GetParent retrieves the parent directory of a virtual file
 func (r *Repository) GetParent(virtualFileID int64) (*VirtualFile, error) {
 	query := `
-		SELECT p.id, p.nzb_file_id, p.parent_id, p.virtual_path, p.filename, p.size, p.created_at, p.is_directory, p.encryption
+		SELECT p.id, p.nzb_file_id, p.parent_id, p.virtual_path, p.filename, p.size, p.created_at, p.is_directory, p.encryption, p.status
 		FROM virtual_files vf
 		JOIN virtual_files p ON vf.parent_id = p.id
 		WHERE vf.id = ?
@@ -530,7 +535,7 @@ func (r *Repository) GetParent(virtualFileID int64) (*VirtualFile, error) {
 	var parent VirtualFile
 	err := r.db.QueryRow(query, virtualFileID).Scan(
 		&parent.ID, &parent.NzbFileID, &parent.ParentID, &parent.VirtualPath,
-		&parent.Filename, &parent.Size, &parent.CreatedAt, &parent.IsDirectory, &parent.Encryption,
+		&parent.Filename, &parent.Size, &parent.CreatedAt, &parent.IsDirectory, &parent.Encryption, &parent.Status,
 	)
 
 	if err != nil {
@@ -594,15 +599,15 @@ func (r *Repository) GetFullPath(virtualFileID int64) (string, error) {
 func (r *Repository) GetDescendants(parentID int64) ([]*VirtualFile, error) {
 	query := `
 		WITH RECURSIVE descendants AS (
-			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption
+			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
 			FROM virtual_files 
 			WHERE id = ?
 			UNION ALL
-			SELECT vf.id, vf.nzb_file_id, vf.parent_id, vf.virtual_path, vf.filename, vf.size, vf.created_at, vf.is_directory, vf.encryption
+			SELECT vf.id, vf.nzb_file_id, vf.parent_id, vf.virtual_path, vf.filename, vf.size, vf.created_at, vf.is_directory, vf.encryption, vf.status
 			FROM virtual_files vf
 			JOIN descendants d ON vf.parent_id = d.id
 		)
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption 
+		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status 
 		FROM descendants 
 		WHERE id != ? 
 		ORDER BY virtual_path
@@ -619,7 +624,7 @@ func (r *Repository) GetDescendants(parentID int64) ([]*VirtualFile, error) {
 		var vf VirtualFile
 		err := rows.Scan(
 			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath,
-			&vf.Filename, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption,
+			&vf.Filename, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan descendant: %w", err)
@@ -1291,4 +1296,63 @@ func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) 
 	}
 
 	return int(rowsAffected), nil
+}
+
+// File Status Management operations
+
+// UpdateVirtualFileStatus updates the status of a virtual file
+func (r *Repository) UpdateVirtualFileStatus(virtualFileID int64, status FileStatus) error {
+	query := `UPDATE virtual_files SET status = ? WHERE id = ?`
+	
+	_, err := r.db.Exec(query, status, virtualFileID)
+	if err != nil {
+		return fmt.Errorf("failed to update virtual file status: %w", err)
+	}
+
+	return nil
+}
+
+// GetVirtualFileStatus retrieves the status of a virtual file
+func (r *Repository) GetVirtualFileStatus(virtualFileID int64) (FileStatus, error) {
+	query := `SELECT status FROM virtual_files WHERE id = ?`
+	
+	var status FileStatus
+	err := r.db.QueryRow(query, virtualFileID).Scan(&status)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("virtual file not found")
+		}
+		return "", fmt.Errorf("failed to get virtual file status: %w", err)
+	}
+
+	return status, nil
+}
+
+// GetVirtualFilesByStatus retrieves virtual files by their status
+func (r *Repository) GetVirtualFilesByStatus(status FileStatus) ([]*VirtualFile, error) {
+	query := `
+		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
+		FROM virtual_files WHERE status = ? ORDER BY virtual_path ASC
+	`
+
+	rows, err := r.db.Query(query, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get virtual files by status: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*VirtualFile
+	for rows.Next() {
+		var vf VirtualFile
+		err := rows.Scan(
+			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
+			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan virtual file: %w", err)
+		}
+		files = append(files, &vf)
+	}
+
+	return files, rows.Err()
 }

@@ -18,6 +18,21 @@ var (
 	_ io.ReadCloser = &usenetReader{}
 )
 
+// ArticleNotFoundError represents an error where articles are not found in any providers
+// This wraps the actual nntppool.ErrArticleNotFoundInProviders error
+type ArticleNotFoundError struct {
+	UnderlyingErr error
+	BytesRead     int64
+}
+
+func (e *ArticleNotFoundError) Error() string {
+	return e.UnderlyingErr.Error()
+}
+
+func (e *ArticleNotFoundError) Unwrap() error {
+	return e.UnderlyingErr
+}
+
 type usenetReader struct {
 	log                *slog.Logger
 	wg                 sync.WaitGroup
@@ -26,6 +41,8 @@ type usenetReader struct {
 	maxDownloadWorkers int
 	init               chan any
 	initDownload       sync.Once
+	totalBytesRead     int64
+	mu                 sync.Mutex
 }
 
 func NewUsenetReader(
@@ -82,6 +99,26 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 
 	s, err := b.rg.Get()
 	if err != nil {
+		// Check if this is an article not found error
+		b.mu.Lock()
+		totalRead := b.totalBytesRead
+		b.mu.Unlock()
+
+		if b.isArticleNotFoundError(err) {
+			if totalRead > 0 {
+				// We read some data before failing - this is partial content
+				return 0, &ArticleNotFoundError{
+					UnderlyingErr: err,
+					BytesRead:     totalRead,
+				}
+			} else {
+				// No data read at all - this is corrupted/missing
+				return 0, &ArticleNotFoundError{
+					UnderlyingErr: err,
+					BytesRead:     0,
+				}
+			}
+		}
 		return 0, io.EOF
 	}
 
@@ -89,20 +126,49 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 	for n < len(p) {
 		nn, err := s.GetReader().Read(p[n:])
 		n += nn
+
+		// Track total bytes read
+		b.mu.Lock()
+		b.totalBytesRead += int64(nn)
+		totalRead := b.totalBytesRead
+		b.mu.Unlock()
+
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// Segment is fully read, remove it from the cache
 				s, err = b.rg.Next()
 				if err != nil {
+					// Check if this is an article not found error for next segment
+					if b.isArticleNotFoundError(err) {
+						if totalRead > 0 {
+							// Return what we have read so far and the article error
+							return n, &ArticleNotFoundError{
+								UnderlyingErr: err,
+								BytesRead:     totalRead,
+							}
+						}
+					}
 					return n, io.EOF
 				}
 			} else {
+				// Check if this is an article not found error
+				if b.isArticleNotFoundError(err) {
+					return n, &ArticleNotFoundError{
+						UnderlyingErr: err,
+						BytesRead:     totalRead,
+					}
+				}
 				return n, err
 			}
 		}
 	}
 
 	return n, nil
+}
+
+// isArticleNotFoundError checks if the error indicates articles were not found in providers
+func (b *usenetReader) isArticleNotFoundError(err error) bool {
+	return errors.Is(err, nntppool.ErrArticleNotFoundInProviders)
 }
 
 func (b *usenetReader) downloadManager(

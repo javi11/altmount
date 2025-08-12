@@ -1,6 +1,9 @@
 package nzbfilesystem
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Chunk size constants for memory optimization
 const (
@@ -44,6 +47,39 @@ var (
 	ErrSeekNegative  = errors.New("seek: negative position")
 	ErrSeekTooFar    = errors.New("seek: too far")
 )
+
+// Article availability error types
+
+// PartialContentError represents an error where some articles are missing but some content was read
+type PartialContentError struct {
+	BytesRead    int64
+	TotalExpected int64
+	UnderlyingErr error
+}
+
+func (e *PartialContentError) Error() string {
+	return fmt.Sprintf("partial content: read %d/%d bytes, underlying error: %v", 
+		e.BytesRead, e.TotalExpected, e.UnderlyingErr)
+}
+
+func (e *PartialContentError) Unwrap() error {
+	return e.UnderlyingErr
+}
+
+// CorruptedFileError represents an error where no articles could be read (complete failure)
+type CorruptedFileError struct {
+	TotalExpected int64
+	UnderlyingErr error
+}
+
+func (e *CorruptedFileError) Error() string {
+	return fmt.Sprintf("corrupted file: no content available from %d expected bytes, underlying error: %v",
+		e.TotalExpected, e.UnderlyingErr)
+}
+
+func (e *CorruptedFileError) Unwrap() error {
+	return e.UnderlyingErr
+}
 
 // Error message constants
 var (
