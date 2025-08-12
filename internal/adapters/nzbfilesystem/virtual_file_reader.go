@@ -8,7 +8,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption"
 )
 
-// Read reads data from the virtual file using lazy reader creation
+// Read reads data from the virtual file using lazy reader creation with proper chunk continuation
 func (vf *VirtualFile) Read(p []byte) (int, error) {
 	vf.mu.Lock()
 	defer vf.mu.Unlock()
@@ -29,27 +29,58 @@ func (vf *VirtualFile) Read(p []byte) (int, error) {
 		return 0, ErrNoNzbData
 	}
 
-	// Ensure we have a reader for the current position
-	if err := vf.ensureReaderForPosition(vf.position); err != nil {
-		if errors.Is(err, io.EOF) {
-			return 0, io.EOF
+	totalRead := 0
+	buf := p
+
+	for totalRead < len(p) && vf.position < vf.virtualFile.Size {
+		// Ensure we have a reader for the current position
+		if err := vf.ensureReaderForPosition(vf.position); err != nil {
+			if errors.Is(err, io.EOF) {
+				if totalRead > 0 {
+					return totalRead, nil
+				}
+				return 0, io.EOF
+			}
+			return totalRead, err
 		}
-		return 0, err
+
+		// Read from current reader
+		n, err := vf.reader.Read(buf[totalRead:])
+		totalRead += n
+		vf.position += int64(n)
+
+		// Handle different error conditions
+		if err == io.EOF {
+			if vf.position < vf.virtualFile.Size {
+				// We've reached the end of this chunk but there's more file to read
+				// Close current reader so next iteration will create a new reader for next chunk
+				_ = vf.reader.Close()
+				vf.reader = nil
+				// Continue reading to fill the buffer with the next chunk
+				continue
+			} else {
+				// We've reached the actual end of the file
+				if totalRead > 0 {
+					return totalRead, nil
+				}
+				return 0, io.EOF
+			}
+		} else if err != nil {
+			// Any other error should be returned
+			return totalRead, err
+		}
+
+		// If no error, we successfully read some data
+		// Continue the loop to try to fill the rest of the buffer if needed
 	}
 
-	n, err := vf.reader.Read(p)
-	vf.position += int64(n)
-
-	// If we hit EOF but read some data, we might need to create a new reader for the next chunk
-	if err == io.EOF && n > 0 && vf.position < vf.virtualFile.Size {
-		// We've reached the end of this chunk but there's more file to read
-		// Close current reader so next Read() call will create a new reader for next chunk
-		_ = vf.reader.Close()
-		vf.reader = nil
-		err = nil
+	// If we've read all available data or filled the buffer
+	if totalRead > 0 {
+		return totalRead, nil
 	}
 
-	return n, err
+	// Should not reach here under normal circumstances
+	return 0, io.EOF
 }
 
 // ReadAt reads data at a specific offset

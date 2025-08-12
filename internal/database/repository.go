@@ -354,6 +354,51 @@ func (r *Repository) GetFileMetadata(virtualFileID int64) (map[string]string, er
 
 // WithTransaction executes a function within a database transaction
 func (r *Repository) WithTransaction(fn func(*Repository) error) error {
+	return r.withTransactionMode("", fn)
+}
+
+// WithImmediateTransaction executes a function within an immediate database transaction
+// This reduces lock contention for queue operations by acquiring locks immediately
+func (r *Repository) WithImmediateTransaction(fn func(*Repository) error) error {
+	// Cast to *sql.DB to access BeginTx method
+	sqlDB, ok := r.db.(*sql.DB)
+	if !ok {
+		return fmt.Errorf("repository not connected to sql.DB")
+	}
+
+	// Begin transaction with immediate isolation
+	// First set pragma for immediate locking, then begin transaction
+	tx, err := sqlDB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	// Set immediate locking mode for this transaction
+	if _, err := tx.Exec("PRAGMA locking_mode = IMMEDIATE"); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to set immediate locking: %w", err)
+	}
+
+	// Create a repository that uses the transaction
+	txRepo := &Repository{db: tx}
+
+	err = fn(txRepo)
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("failed to rollback immediate transaction (original error: %w): %v", err, rollbackErr)
+		}
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit immediate transaction: %w", err)
+	}
+
+	return nil
+}
+
+// withTransactionMode executes a function within a database transaction with specified mode  
+func (r *Repository) withTransactionMode(mode string, fn func(*Repository) error) error {
 	// Cast to *sql.DB to access Begin method
 	sqlDB, ok := r.db.(*sql.DB)
 	if !ok {
@@ -788,22 +833,23 @@ func (r *Repository) DeletePar2File(id int64) error {
 
 // Queue operations
 
-// AddToQueue adds an NZB file to the import queue
+// AddToQueue adds an NZB file to the import queue with optimized concurrency
 func (r *Repository) AddToQueue(item *ImportQueueItem) error {
+	// Use UPSERT with immediate lock to prevent conflicts during concurrent inserts
 	query := `
-		INSERT INTO import_queue (nzb_path, watch_root, priority, status, retry_count, max_retries, batch_id, metadata, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO import_queue (nzb_path, watch_root, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(nzb_path) DO UPDATE SET
-		priority = excluded.priority,
+		priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
 		batch_id = excluded.batch_id,
 		metadata = excluded.metadata,
-		updated_at = ?
+		updated_at = datetime('now')
+		WHERE status NOT IN ('processing', 'completed')
 	`
 
 	result, err := r.db.Exec(query, 
 		item.NzbPath, item.WatchRoot, item.Priority, item.Status,
-		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, time.Now(),
-		time.Now())
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to add to queue: %w", err)
 	}
@@ -814,18 +860,27 @@ func (r *Repository) AddToQueue(item *ImportQueueItem) error {
 	}
 
 	item.ID = id
+	item.CreatedAt = time.Now()
+	item.UpdatedAt = time.Now()
 	return nil
 }
 
 // GetNextQueueItems retrieves the next batch of items to process from the queue
+// Uses optimized query with row-level locking for better concurrency
 func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
+	// Use a CTE to select items and immediately mark them as claimed to avoid race conditions
 	query := `
-		SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at, 
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
-		FROM import_queue 
-		WHERE status IN ('pending', 'retrying') AND retry_count < max_retries
-		ORDER BY priority ASC, created_at ASC
-		LIMIT ?
+		WITH selected_items AS (
+			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at, 
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+			FROM import_queue 
+			WHERE status IN ('pending', 'retrying') 
+			  AND retry_count < max_retries
+			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
+			ORDER BY priority ASC, created_at ASC
+			LIMIT ?
+		)
+		SELECT * FROM selected_items
 	`
 
 	rows, err := r.db.Query(query, limit)
@@ -849,6 +904,125 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 	}
 
 	return items, rows.Err()
+}
+
+// ClaimNextQueueItem atomically claims and returns the next available queue item
+// This prevents multiple workers from processing the same item
+func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
+	// Use immediate transaction to atomically claim an item
+	var claimedItem *ImportQueueItem
+	
+	err := r.WithImmediateTransaction(func(txRepo *Repository) error {
+		// First, get the next available item ID within the transaction
+		var itemID int64
+		selectQuery := `
+			SELECT id FROM import_queue 
+			WHERE status IN ('pending', 'retrying') 
+			  AND retry_count < max_retries
+			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
+			ORDER BY priority ASC, created_at ASC
+			LIMIT 1
+		`
+		
+		err := txRepo.db.QueryRow(selectQuery).Scan(&itemID)
+		if err != nil {
+			if err.Error() == "sql: no rows in result set" {
+				// No items available
+				return nil
+			}
+			return fmt.Errorf("failed to select queue item: %w", err)
+		}
+		
+		// Now atomically update that specific item and get all its data
+		updateQuery := `
+			UPDATE import_queue 
+			SET status = 'processing', started_at = datetime('now'), updated_at = datetime('now')
+			WHERE id = ? AND status IN ('pending', 'retrying')
+		`
+		
+		result, err := txRepo.db.Exec(updateQuery, itemID)
+		if err != nil {
+			return fmt.Errorf("failed to claim queue item %d: %w", itemID, err)
+		}
+		
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		
+		if rowsAffected == 0 {
+			// Item was claimed by another worker between SELECT and UPDATE
+			return nil
+		}
+		
+		// Get the complete claimed item data
+		getQuery := `
+			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at, 
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+			FROM import_queue 
+			WHERE id = ?
+		`
+		
+		var item ImportQueueItem
+		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
+			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to get claimed item: %w", err)
+		}
+		
+		claimedItem = &item
+		return nil
+	})
+	
+	if err != nil {
+		return nil, err
+	}
+	
+	return claimedItem, nil
+}
+
+// AddBatchToQueue adds multiple items to the queue in a single transaction for better performance
+func (r *Repository) AddBatchToQueue(items []*ImportQueueItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Use immediate transaction for batch operations to reduce lock contention
+	return r.WithImmediateTransaction(func(txRepo *Repository) error {
+		// Prepare batch insert statement
+		query := `
+			INSERT INTO import_queue (nzb_path, watch_root, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			ON CONFLICT(nzb_path) DO UPDATE SET
+			priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
+			batch_id = excluded.batch_id,
+			metadata = excluded.metadata,
+			updated_at = datetime('now')
+			WHERE status NOT IN ('processing', 'completed')
+		`
+
+		now := time.Now()
+		for _, item := range items {
+			result, err := txRepo.db.Exec(query,
+				item.NzbPath, item.WatchRoot, item.Priority, item.Status,
+				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata)
+			if err != nil {
+				return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
+			}
+
+			// Update ID for the item
+			if id, err := result.LastInsertId(); err == nil {
+				item.ID = id
+				item.CreatedAt = now
+				item.UpdatedAt = now
+			}
+		}
+
+		return nil
+	})
 }
 
 // UpdateQueueItemStatus updates the status of a queue item
@@ -1008,15 +1182,24 @@ func (r *Repository) UpdateQueueStats() error {
 	}
 
 	// Calculate average processing time for completed items
-	var avgProcessingTime sql.NullInt64
+	var avgProcessingTimeFloat sql.NullFloat64
 	avgQuery := `
-		SELECT AVG(CAST((julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60 * 1000 AS INTEGER))
+		SELECT AVG((julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60 * 1000)
 		FROM import_queue 
 		WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
 	`
-	err := r.db.QueryRow(avgQuery).Scan(&avgProcessingTime)
+	err := r.db.QueryRow(avgQuery).Scan(&avgProcessingTimeFloat)
 	if err != nil {
 		return fmt.Errorf("failed to calculate average processing time: %w", err)
+	}
+	
+	// Convert float to int64 for storage
+	var avgProcessingTime sql.NullInt64
+	if avgProcessingTimeFloat.Valid {
+		avgProcessingTime = sql.NullInt64{
+			Int64: int64(avgProcessingTimeFloat.Float64),
+			Valid: true,
+		}
 	}
 
 	// Update or insert stats

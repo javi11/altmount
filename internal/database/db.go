@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -26,12 +27,22 @@ type Config struct {
 	DatabasePath string
 }
 
-// New creates a new database connection and runs migrations
+// New creates a new main database connection and runs migrations (optimized for read-heavy operations)
 func New(config Config) (*DB, error) {
-	conn, err := sql.Open("sqlite3", config.DatabasePath)
+	// Configure connection string optimized for read-heavy main database operations
+	connString := fmt.Sprintf("%s?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=-128000&_temp_store=MEMORY&_busy_timeout=30000", 
+		config.DatabasePath)
+	
+	conn, err := sql.Open("sqlite3", connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
+	// Set connection pool settings optimized for read-heavy WebDAV serving
+	conn.SetMaxOpenConns(15)  // More connections for WebDAV serving
+	conn.SetMaxIdleConns(8)   // Keep more idle connections ready
+	conn.SetConnMaxLifetime(0) // No connection lifetime limit
+	conn.SetConnMaxIdleTime(45 * time.Minute) // Longer idle time for serving
 
 	// Test the connection
 	if err := conn.Ping(); err != nil {
@@ -39,13 +50,18 @@ func New(config Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Set SQLite pragmas for better performance
+	// Set SQLite pragmas optimized for read-heavy main database operations
 	pragmas := []string{
 		"PRAGMA foreign_keys = ON",
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = NORMAL",
-		"PRAGMA cache_size = 10000",
-		"PRAGMA temp_store = MEMORY",
+		"PRAGMA journal_mode = WAL",           // Write-Ahead Logging for better concurrency
+		"PRAGMA synchronous = NORMAL",         // Good balance of safety and performance
+		"PRAGMA cache_size = -128000",         // 128MB cache for read-heavy operations
+		"PRAGMA temp_store = MEMORY",          // Store temp tables in memory
+		"PRAGMA busy_timeout = 30000",         // 30 second timeout for locks
+		"PRAGMA wal_autocheckpoint = 2000",    // Less frequent checkpoints for reads
+		"PRAGMA optimize",                     // Optimize query planner
+		"PRAGMA mmap_size = 536870912",        // 512MB memory map for reads
+		"PRAGMA read_uncommitted = TRUE",      // Allow uncommitted reads for WebDAV serving
 	}
 
 	for _, pragma := range pragmas {

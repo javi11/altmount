@@ -19,10 +19,11 @@ CREATE TABLE import_queue (
 );
 
 -- Indexes for efficient queue processing
-CREATE INDEX idx_import_queue_status_priority ON import_queue(status, priority, created_at);
-CREATE INDEX idx_import_queue_batch_id ON import_queue(batch_id);
-CREATE INDEX idx_import_queue_status ON import_queue(status);
-CREATE INDEX idx_import_queue_retry ON import_queue(status, retry_count, max_retries);
+CREATE INDEX idx_queue_status_priority ON import_queue(status, priority, created_at);
+CREATE INDEX idx_queue_batch_id ON import_queue(batch_id);
+CREATE INDEX idx_queue_status ON import_queue(status);
+CREATE INDEX idx_queue_retry ON import_queue(status, retry_count, max_retries);
+CREATE INDEX idx_queue_nzb_path ON import_queue(nzb_path);
 
 -- Queue statistics table for monitoring
 CREATE TABLE queue_stats (
@@ -42,10 +43,11 @@ VALUES (0, 0, 0, 0);
 
 -- +goose Down
 -- +goose StatementBegin
-DROP INDEX IF EXISTS idx_import_queue_retry;
-DROP INDEX IF EXISTS idx_import_queue_status;
-DROP INDEX IF EXISTS idx_import_queue_batch_id;
-DROP INDEX IF EXISTS idx_import_queue_status_priority;
+DROP INDEX IF EXISTS idx_queue_nzb_path;
+DROP INDEX IF EXISTS idx_queue_retry;
+DROP INDEX IF EXISTS idx_queue_status;
+DROP INDEX IF EXISTS idx_queue_batch_id;
+DROP INDEX IF EXISTS idx_queue_status_priority;
 DROP TABLE IF EXISTS queue_stats;
 DROP TABLE IF EXISTS import_queue;
 -- +goose StatementEnd
