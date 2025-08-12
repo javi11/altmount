@@ -17,9 +17,12 @@ type NzbConfig struct {
 	MainDatabasePath  string
 	QueueDatabasePath string
 	MountPath         string
-	NzbDir            string // Directory containing NZB files
-	Password          string // Global password for .bin files
-	Salt              string // Global salt for .bin files
+	NzbDir            string        // Directory containing NZB files
+	Password          string        // Global password for .bin files
+	Salt              string        // Global salt for .bin files
+	ProcessorWorkers  int           // Number of queue workers (default: 2)
+	DownloadWorkers   int           // Number of download workers (default: 15)
+	ScanInterval      time.Duration // Directory scan interval (default: 30s)
 }
 
 // NzbSystem represents the complete NZB-backed filesystem
@@ -32,7 +35,7 @@ type NzbSystem struct {
 }
 
 // NewNzbSystem creates a new NZB-backed virtual filesystem with two-database architecture
-func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers int) (*NzbSystem, error) {
+func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSystem, error) {
 	// Initialize main database (optimized for serving files)
 	mainDBConfig := database.Config{
 		DatabasePath: config.MainDatabasePath,
@@ -54,11 +57,27 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 		return nil, fmt.Errorf("failed to initialize queue database: %w", err)
 	}
 
+	// Set defaults for workers and scan interval if not configured
+	processorWorkers := config.ProcessorWorkers
+	if processorWorkers <= 0 {
+		processorWorkers = 2 // Default: 2 parallel workers
+	}
+
+	downloadWorkers := config.DownloadWorkers
+	if downloadWorkers <= 0 {
+		downloadWorkers = 15 // Default: 15 download workers
+	}
+
+	scanInterval := config.ScanInterval
+	if scanInterval <= 0 {
+		scanInterval = 30 * time.Second // Default: scan every 30 seconds
+	}
+
 	// Create NZB service using both databases
 	serviceConfig := nzb.ServiceConfig{
 		WatchDir:     config.NzbDir,
-		ScanInterval: 30 * time.Second, // Scan every 30 seconds
-		Workers:      2,                // 2 parallel workers (default)
+		ScanInterval: scanInterval,
+		Workers:      processorWorkers,
 	}
 
 	service, err := nzb.NewService(serviceConfig, mainDB, queueDB, cp)
@@ -74,12 +93,9 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 		_ = queueDB.Close()
 		return nil, fmt.Errorf("NNTP pool is required")
 	}
-	if workers <= 0 {
-		workers = 15
-	}
 
 	// Create NZB remote file handler with global credentials using main database
-	nzbRemoteFile := nzbfilesystem.NewNzbRemoteFileWithConfig(mainDB, cp, workers, nzbfilesystem.NzbRemoteFileConfig{
+	nzbRemoteFile := nzbfilesystem.NewNzbRemoteFileWithConfig(mainDB, cp, downloadWorkers, nzbfilesystem.NzbRemoteFileConfig{
 		GlobalPassword: config.Password,
 		GlobalSalt:     config.Salt,
 	})
@@ -147,7 +163,7 @@ func (ns *NzbSystem) Close() error {
 	if err := ns.service.Close(); err != nil {
 		return err
 	}
-	
+
 	// Close both databases
 	var lastErr error
 	if err := ns.mainDB.Close(); err != nil {
@@ -156,7 +172,7 @@ func (ns *NzbSystem) Close() error {
 	if err := ns.queueDB.Close(); err != nil {
 		lastErr = err
 	}
-	
+
 	return lastErr
 }
 
