@@ -1,0 +1,92 @@
+package nzbfilesystem
+
+import (
+	"context"
+	"io"
+	"strings"
+	"sync"
+
+	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/encryption"
+	"github.com/javi11/altmount/internal/encryption/rclone"
+	"github.com/javi11/altmount/internal/utils"
+	"github.com/javi11/nntppool"
+)
+
+// NzbRemoteFileConfig holds configuration for NzbRemoteFile
+type NzbRemoteFileConfig struct {
+	GlobalPassword string // Global password for .bin files
+	GlobalSalt     string // Global salt for .bin files
+}
+
+// NzbRemoteFile implements the RemoteFile interface for NZB-backed virtual files
+type NzbRemoteFile struct {
+	db                 *database.DB
+	cp                 nntppool.UsenetConnectionPool
+	maxDownloadWorkers int
+	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
+	globalPassword     string            // Global password fallback
+	globalSalt         string            // Global salt fallback
+}
+
+// VirtualFile represents a file backed by NZB data
+type VirtualFile struct {
+	name        string
+	virtualFile *database.VirtualFile
+	nzbFile     *database.NzbFile
+	db          *database.DB
+	args        utils.PathWithArgs
+	position    int64
+
+	// NNTP and reading state
+	cp             nntppool.UsenetConnectionPool
+	reader         io.ReadCloser
+	ctx            context.Context
+	maxWorkers     int
+	rcloneCipher   encryption.Cipher // For encryption/decryption
+	globalPassword string            // Global password fallback
+	globalSalt     string            // Global salt fallback
+	mu             sync.Mutex
+}
+
+// NewNzbRemoteFile creates a new NZB remote file handler with default config
+func NewNzbRemoteFile(db *database.DB, cp nntppool.UsenetConnectionPool, maxDownloadWorkers int) *NzbRemoteFile {
+	return NewNzbRemoteFileWithConfig(db, cp, maxDownloadWorkers, NzbRemoteFileConfig{})
+}
+
+// NewNzbRemoteFileWithConfig creates a new NZB remote file handler with configuration
+func NewNzbRemoteFileWithConfig(db *database.DB, cp nntppool.UsenetConnectionPool, maxDownloadWorkers int, config NzbRemoteFileConfig) *NzbRemoteFile {
+	// Initialize rclone cipher with global credentials for encrypted files
+	rcloneConfig := &encryption.Config{
+		RclonePassword: config.GlobalPassword, // Global password fallback
+		RcloneSalt:     config.GlobalSalt,     // Global salt fallback
+	}
+
+	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
+
+	return &NzbRemoteFile{
+		db:                 db,
+		cp:                 cp,
+		maxDownloadWorkers: maxDownloadWorkers,
+		rcloneCipher:       rcloneCipher,
+		globalPassword:     config.GlobalPassword,
+		globalSalt:         config.GlobalSalt,
+	}
+}
+
+// normalizePath normalizes file paths for consistent database lookups
+// Removes trailing slashes except for root path "/"
+func normalizePath(path string) string {
+	// Handle empty path
+	if path == "" {
+		return RootPath
+	}
+
+	// Handle root path - keep as is
+	if path == RootPath {
+		return path
+	}
+
+	// Remove trailing slashes for all other paths
+	return strings.TrimRight(path, "/")
+}
