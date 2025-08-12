@@ -347,12 +347,39 @@ func (s *Service) processQueueItems(workerID int) {
 		log.Warn("Failed to check if file already processed", "file", item.NzbPath, "error", err)
 		// Continue processing anyway
 	} else if existing != nil {
-		// File already exists in main database, mark queue item as completed
-		log.Info("File already processed, marking queue item complete", "queue_id", item.ID, "file", item.NzbPath)
-		if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-			log.Error("Failed to mark duplicate item as completed", "queue_id", item.ID, "error", err)
+		// Check if existing NZB has unhealthy files
+		hasUnhealthyFiles, err := s.mainDB.Repository.HasUnhealthyVirtualFiles(existing.ID)
+		if err != nil {
+			log.Warn("Failed to check file health status", "file", item.NzbPath, "nzb_id", existing.ID, "error", err)
+			// Mark as completed to avoid infinite retries
+			if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+				log.Error("Failed to mark duplicate item as completed", "queue_id", item.ID, "error", err)
+			}
+			return
 		}
-		return
+
+		if hasUnhealthyFiles {
+			log.Info("File exists but has unhealthy files, allowing reimport", "queue_id", item.ID, "file", item.NzbPath, "nzb_id", existing.ID)
+			// Delete existing NZB and its virtual files to allow clean reimport
+			if err := s.mainDB.Repository.DeleteNzbFile(existing.ID); err != nil {
+				log.Error("Failed to delete existing unhealthy NZB file", "nzb_id", existing.ID, "error", err)
+				// Mark as failed since we can't clean up
+				errMsg := err.Error()
+				if updateErr := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errMsg); updateErr != nil {
+					log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", updateErr)
+				}
+				return
+			}
+			log.Info("Deleted existing unhealthy NZB file for reimport", "nzb_id", existing.ID, "file", item.NzbPath)
+			// Continue to Step 3 to process the new file
+		} else {
+			// File already exists and is healthy, mark queue item as completed
+			log.Info("File already processed and is healthy, marking queue item complete", "queue_id", item.ID, "file", item.NzbPath)
+			if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+				log.Error("Failed to mark duplicate item as completed", "queue_id", item.ID, "error", err)
+			}
+			return
+		}
 	}
 
 	// Step 3: Process the NZB file and write to main database

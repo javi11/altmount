@@ -1356,3 +1356,19 @@ func (r *Repository) GetVirtualFilesByStatus(status FileStatus) ([]*VirtualFile,
 
 	return files, rows.Err()
 }
+
+// HasUnhealthyVirtualFiles checks if an NZB file has any virtual files with status other than 'healthy'
+func (r *Repository) HasUnhealthyVirtualFiles(nzbFileID int64) (bool, error) {
+	query := `
+		SELECT COUNT(*) FROM virtual_files 
+		WHERE nzb_file_id = ? AND status != 'healthy'
+	`
+	
+	var count int
+	err := r.db.QueryRow(query, nzbFileID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to check unhealthy virtual files: %w", err)
+	}
+	
+	return count > 0, nil
+}
