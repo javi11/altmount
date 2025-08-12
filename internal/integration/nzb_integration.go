@@ -41,19 +41,14 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
-	// Create NZB service
+	// Create simplified NZB service using existing database instance
 	serviceConfig := nzb.ServiceConfig{
-		DatabasePath: config.DatabasePath,
 		WatchDir:     config.NzbDir,
-		AutoImport:   false, // will enable below if NzbDir provided
-		PollInterval: 0,
-	}
-	if config.NzbDir != "" {
-		serviceConfig.AutoImport = true
-		serviceConfig.PollInterval = 30 * time.Second
+		ScanInterval: 30 * time.Second, // Scan every 30 seconds
+		Workers:      2,                // 2 parallel workers (default)
 	}
 
-	service, err := nzb.NewService(serviceConfig, cp)
+	service, err := nzb.NewService(serviceConfig, db, cp)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)
@@ -77,6 +72,12 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 	// Create filesystem directly backed by NZB data
 	fs := nzbfilesystem.NewNzbFilesystem(nzbRemoteFile)
 
+	ctx := context.Background()
+
+	if err := service.Start(ctx); err != nil {
+		return nil, fmt.Errorf("failed to start NZB service: %w", err)
+	}
+
 	return &NzbSystem{
 		db:      db,
 		service: service,
@@ -85,26 +86,14 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool, workers in
 	}, nil
 }
 
-// ImportNzbFile imports a single NZB file into the database
-func (ns *NzbSystem) ImportNzbFile(nzbPath string) error {
-	return ns.service.ImportFile(context.Background(), nzbPath)
+// GetQueueStats returns current queue statistics
+func (ns *NzbSystem) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {
+	return ns.service.GetQueueStats(ctx)
 }
 
-// ImportNzbDirectory imports all NZB files from a directory
-func (ns *NzbSystem) ImportNzbDirectory(nzbDir string) error {
-	result, err := ns.service.ImportDirectory(context.Background(), nzbDir)
-	if err != nil {
-		return err
-	}
-
-	if len(result.FailedFiles) > 0 {
-		// Return info about first failed file
-		for file, errMsg := range result.FailedFiles {
-			return fmt.Errorf("failed to import %s: %s", file, errMsg)
-		}
-	}
-
-	return nil
+// GetServiceStats returns service statistics including queue stats
+func (ns *NzbSystem) GetServiceStats(ctx context.Context) (*nzb.ServiceStats, error) {
+	return ns.service.GetStats(ctx)
 }
 
 // FileSystem returns the virtual filesystem interface
@@ -117,19 +106,14 @@ func (ns *NzbSystem) Database() *database.DB {
 	return ns.db
 }
 
-// ScanFolder performs a comprehensive scan of the NZB directory
-func (ns *NzbSystem) ScanFolder(ctx context.Context) (*nzb.ScanResult, error) {
-	return ns.service.ScanFolder(ctx)
+// StartService starts the NZB service (including background scanning and processing)
+func (ns *NzbSystem) StartService(ctx context.Context) error {
+	return ns.service.Start(ctx)
 }
 
-// ScanFolderWithProgress scans the NZB directory with progress updates
-func (ns *NzbSystem) ScanFolderWithProgress(ctx context.Context, progressChan chan<- nzb.ScanProgress) (*nzb.ScanResult, error) {
-	return ns.service.ScanFolderWithProgress(ctx, progressChan)
-}
-
-// ScanCustomFolder scans a custom directory with specific configuration
-func (ns *NzbSystem) ScanCustomFolder(ctx context.Context, scanConfig nzb.ScannerConfig) (*nzb.ScanResult, error) {
-	return ns.service.ScanCustomFolder(ctx, scanConfig)
+// StopService stops the NZB service
+func (ns *NzbSystem) StopService(ctx context.Context) error {
+	return ns.service.Stop(ctx)
 }
 
 // Close closes the NZB system and releases resources

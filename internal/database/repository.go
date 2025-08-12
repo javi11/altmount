@@ -785,3 +785,327 @@ func (r *Repository) DeletePar2File(id int64) error {
 
 	return nil
 }
+
+// Queue operations
+
+// AddToQueue adds an NZB file to the import queue
+func (r *Repository) AddToQueue(item *ImportQueueItem) error {
+	query := `
+		INSERT INTO import_queue (nzb_path, watch_root, priority, status, retry_count, max_retries, batch_id, metadata, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(nzb_path) DO UPDATE SET
+		priority = excluded.priority,
+		batch_id = excluded.batch_id,
+		metadata = excluded.metadata,
+		updated_at = ?
+	`
+
+	result, err := r.db.Exec(query, 
+		item.NzbPath, item.WatchRoot, item.Priority, item.Status,
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, time.Now(),
+		time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to add to queue: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to get queue item id: %w", err)
+	}
+
+	item.ID = id
+	return nil
+}
+
+// GetNextQueueItems retrieves the next batch of items to process from the queue
+func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
+	query := `
+		SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at, 
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+		FROM import_queue 
+		WHERE status IN ('pending', 'retrying') AND retry_count < max_retries
+		ORDER BY priority ASC, created_at ASC
+		LIMIT ?
+	`
+
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get next queue items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	return items, rows.Err()
+}
+
+// UpdateQueueItemStatus updates the status of a queue item
+func (r *Repository) UpdateQueueItemStatus(id int64, status QueueStatus, errorMessage *string) error {
+	now := time.Now()
+	var query string
+	var args []interface{}
+
+	switch status {
+	case QueueStatusProcessing:
+		query = `UPDATE import_queue SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`
+		args = []interface{}{status, now, now, id}
+	case QueueStatusCompleted:
+		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
+		args = []interface{}{status, now, now, id}
+	case QueueStatusFailed, QueueStatusRetrying:
+		query = `UPDATE import_queue SET status = ?, retry_count = retry_count + 1, error_message = ?, updated_at = ? WHERE id = ?`
+		args = []interface{}{status, errorMessage, now, id}
+	default:
+		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
+		args = []interface{}{status, errorMessage, now, id}
+	}
+
+	_, err := r.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item status: %w", err)
+	}
+
+	return nil
+}
+
+// GetQueueItem retrieves a specific queue item by ID
+func (r *Repository) GetQueueItem(id int64) (*ImportQueueItem, error) {
+	query := `
+		SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+		FROM import_queue WHERE id = ?
+	`
+
+	var item ImportQueueItem
+	err := r.db.QueryRow(query, id).Scan(
+		&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get queue item: %w", err)
+	}
+
+	return &item, nil
+}
+
+// GetQueueItemByPath retrieves a queue item by NZB path
+func (r *Repository) GetQueueItemByPath(nzbPath string) (*ImportQueueItem, error) {
+	query := `
+		SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+		FROM import_queue WHERE nzb_path = ?
+	`
+
+	var item ImportQueueItem
+	err := r.db.QueryRow(query, nzbPath).Scan(
+		&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get queue item by path: %w", err)
+	}
+
+	return &item, nil
+}
+
+// RemoveFromQueue removes an item from the queue
+func (r *Repository) RemoveFromQueue(id int64) error {
+	query := `DELETE FROM import_queue WHERE id = ?`
+	
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to remove from queue: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("queue item not found")
+	}
+
+	return nil
+}
+
+// GetQueueStats retrieves current queue statistics
+func (r *Repository) GetQueueStats() (*QueueStats, error) {
+	// Update stats from actual queue data
+	err := r.UpdateQueueStats()
+	if err != nil {
+		return nil, fmt.Errorf("failed to update queue stats: %w", err)
+	}
+
+	query := `
+		SELECT id, total_queued, total_processing, total_completed, total_failed, 
+		       avg_processing_time_ms, last_updated
+		FROM queue_stats ORDER BY id DESC LIMIT 1
+	`
+
+	var stats QueueStats
+	err = r.db.QueryRow(query).Scan(
+		&stats.ID, &stats.TotalQueued, &stats.TotalProcessing, &stats.TotalCompleted,
+		&stats.TotalFailed, &stats.AvgProcessingTimeMs, &stats.LastUpdated,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Initialize default stats if none exist
+			defaultStats := &QueueStats{
+				TotalQueued:     0,
+				TotalProcessing: 0,
+				TotalCompleted:  0,
+				TotalFailed:     0,
+				LastUpdated:     time.Now(),
+			}
+			return defaultStats, nil
+		}
+		return nil, fmt.Errorf("failed to get queue stats: %w", err)
+	}
+
+	return &stats, nil
+}
+
+// UpdateQueueStats updates queue statistics based on current queue state
+func (r *Repository) UpdateQueueStats() error {
+	// Get current counts
+	countQueries := []string{
+		`SELECT COUNT(*) FROM import_queue WHERE status IN ('pending', 'retrying')`,
+		`SELECT COUNT(*) FROM import_queue WHERE status = 'processing'`,
+		`SELECT COUNT(*) FROM import_queue WHERE status = 'completed'`,
+		`SELECT COUNT(*) FROM import_queue WHERE status = 'failed'`,
+	}
+
+	var counts [4]int
+	for i, query := range countQueries {
+		err := r.db.QueryRow(query).Scan(&counts[i])
+		if err != nil {
+			return fmt.Errorf("failed to get count for query %d: %w", i, err)
+		}
+	}
+
+	// Calculate average processing time for completed items
+	var avgProcessingTime sql.NullInt64
+	avgQuery := `
+		SELECT AVG(CAST((julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60 * 1000 AS INTEGER))
+		FROM import_queue 
+		WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+	`
+	err := r.db.QueryRow(avgQuery).Scan(&avgProcessingTime)
+	if err != nil {
+		return fmt.Errorf("failed to calculate average processing time: %w", err)
+	}
+
+	// Update or insert stats
+	updateQuery := `
+		UPDATE queue_stats SET 
+		total_queued = ?, total_processing = ?, total_completed = ?, total_failed = ?,
+		avg_processing_time_ms = ?, last_updated = ?
+		WHERE id = (SELECT MAX(id) FROM queue_stats)
+	`
+
+	var avgTime interface{}
+	if avgProcessingTime.Valid {
+		avgTime = avgProcessingTime.Int64
+	} else {
+		avgTime = nil
+	}
+
+	_, err = r.db.Exec(updateQuery, counts[0], counts[1], counts[2], counts[3], avgTime, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to update queue stats: %w", err)
+	}
+
+	return nil
+}
+
+// ListQueueItems retrieves queue items with optional filtering
+func (r *Repository) ListQueueItems(status *QueueStatus, limit, offset int) ([]*ImportQueueItem, error) {
+	var query string
+	var args []interface{}
+
+	if status != nil {
+		query = `
+			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at,
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+			FROM import_queue WHERE status = ?
+			ORDER BY priority ASC, created_at ASC
+			LIMIT ? OFFSET ?
+		`
+		args = []interface{}{*status, limit, offset}
+	} else {
+		query = `
+			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at,
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+			FROM import_queue 
+			ORDER BY priority ASC, created_at ASC
+			LIMIT ? OFFSET ?
+		`
+		args = []interface{}{limit, offset}
+	}
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list queue items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	return items, rows.Err()
+}
+
+// ClearCompletedQueueItems removes completed and failed items from the queue
+func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) {
+	query := `
+		DELETE FROM import_queue 
+		WHERE status IN ('completed', 'failed') AND updated_at < ?
+	`
+
+	result, err := r.db.Exec(query, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("failed to clear completed queue items: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}

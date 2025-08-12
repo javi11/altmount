@@ -3,8 +3,10 @@ package nzb
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,78 +14,82 @@ import (
 	"github.com/javi11/nntppool"
 )
 
-// ServiceConfig holds configuration for the NZB service
+// ServiceConfig holds configuration for the simplified NZB service
 type ServiceConfig struct {
-	DatabasePath string
-	WatchDir     string
-	AutoImport   bool          // Enable automatic import via background scanner
-	PollInterval time.Duration // Polling interval for background scanner
+	WatchDir     string        // Directory to scan for NZB files
+	ScanInterval time.Duration // How often to scan directory (default: 30s)
+	Workers      int           // Number of parallel workers (default: 2)
 }
 
-// Service provides high-level NZB management functionality
+// Service provides simplified NZB queue-based importing
 type Service struct {
 	config    ServiceConfig
 	db        *database.DB
 	processor *Processor
-	scanner   *Scanner
 	log       *slog.Logger
-	mu        sync.RWMutex
-	started   bool
+
+	// Runtime state
+	mu      sync.RWMutex
+	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
-// NewService creates a new NZB service
-func NewService(config ServiceConfig, cp nntppool.UsenetConnectionPool) (*Service, error) {
-	// Initialize database
-	dbConfig := database.Config{
-		DatabasePath: config.DatabasePath,
+// NewService creates a new simplified NZB service
+func NewService(config ServiceConfig, db *database.DB, cp nntppool.UsenetConnectionPool) (*Service, error) {
+	// Set defaults
+	if config.ScanInterval == 0 {
+		config.ScanInterval = 30 * time.Second
 	}
-
-	db, err := database.New(dbConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	if config.Workers == 0 {
+		config.Workers = 2
 	}
 
 	// Create processor with connection pool
 	processor := NewProcessor(db.Repository, cp)
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	service := &Service{
 		config:    config,
 		db:        db,
 		processor: processor,
 		log:       slog.Default().With("component", "nzb-service"),
-	}
-
-	// Initialize scanner with configuration; it will start background scanning if PollInterval > 0
-	if config.WatchDir != "" {
-		scannerConfig := ScannerConfig{
-			ScanDir:      config.WatchDir,
-			Recursive:    true,
-			Extensions:   []string{".nzb"},
-			MaxDepth:     0, // No limit
-			Workers:      3,
-			Timeout:      10 * time.Minute,
-			PollInterval: 0,
-		}
-		if config.AutoImport && config.PollInterval > 0 {
-			scannerConfig.PollInterval = config.PollInterval
-		}
-		service.scanner = NewScanner(scannerConfig, processor)
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 
 	return service, nil
 }
 
-// Start starts the NZB service
+// Start starts the simplified NZB service
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.started {
+	if s.running {
 		return fmt.Errorf("service is already started")
 	}
 
-	s.log.InfoContext(ctx, "Starting NZB service")
-	s.started = true
+	s.log.InfoContext(ctx, "Starting simplified NZB service",
+		"watch_dir", s.config.WatchDir,
+		"scan_interval", s.config.ScanInterval,
+		"workers", s.config.Workers)
+
+	// Start directory scanner if watch directory is configured
+	if s.config.WatchDir != "" {
+		s.wg.Add(1)
+		go s.scannerLoop()
+	}
+
+	// Start worker pool for processing queue items
+	for i := 0; i < s.config.Workers; i++ {
+		s.wg.Add(1)
+		go s.workerLoop(i)
+	}
+
+	s.running = true
 	s.log.InfoContext(ctx, "NZB service started successfully")
 
 	return nil
@@ -94,13 +100,22 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.started {
+	if !s.running {
 		return nil
 	}
 
 	s.log.InfoContext(ctx, "Stopping NZB service")
 
-	s.started = false
+	// Cancel all goroutines
+	s.cancel()
+
+	// Wait for all goroutines to finish
+	s.wg.Wait()
+
+	// Recreate context for potential restart
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
+	s.running = false
 	s.log.InfoContext(ctx, "NZB service stopped")
 
 	return nil
@@ -111,157 +126,19 @@ func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Stop background scanner if any
-	if s.scanner != nil {
-		_ = s.scanner.Close()
+	if s.running {
+		s.cancel()
+		s.wg.Wait()
 	}
 
-	// Close database
-	return s.db.Close()
-}
-
-// ImportFile imports a single NZB file
-func (s *Service) ImportFile(ctx context.Context, nzbPath string) error {
-	s.log.InfoContext(ctx, "Importing NZB file", "file", nzbPath)
-
-	if err := s.processor.ProcessNzbFile(nzbPath); err != nil {
-		s.log.ErrorContext(ctx, "Failed to import NZB file", "file", nzbPath, "error", err)
-		return fmt.Errorf("failed to import NZB file %s: %w", nzbPath, err)
-	}
-
-	s.log.InfoContext(ctx, "Successfully imported NZB file", "file", nzbPath)
 	return nil
-}
-
-// ImportFileWithRoot imports a single NZB file maintaining folder structure relative to watchRoot
-func (s *Service) ImportFileWithRoot(ctx context.Context, nzbPath, watchRoot string) error {
-	s.log.InfoContext(ctx, "Importing NZB file with root context", "file", nzbPath, "watchRoot", watchRoot)
-
-	if err := s.processor.ProcessNzbFileWithRoot(nzbPath, watchRoot); err != nil {
-		s.log.ErrorContext(ctx, "Failed to import NZB file with root context", "file", nzbPath, "error", err)
-		return fmt.Errorf("failed to import NZB file %s: %w", nzbPath, err)
-	}
-
-	s.log.InfoContext(ctx, "Successfully imported NZB file with root context", "file", nzbPath)
-	return nil
-}
-
-// ImportDirectory imports all NZB files from a directory
-func (s *Service) ImportDirectory(ctx context.Context, dirPath string) (*ImportResult, error) {
-	s.log.InfoContext(ctx, "Importing NZB directory", "dir", dirPath)
-
-	pattern := filepath.Join(dirPath, "*.nzb")
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find NZB files in directory %s: %w", dirPath, err)
-	}
-
-	result := &ImportResult{
-		TotalFiles:    len(files),
-		StartTime:     time.Now(),
-		ImportedFiles: make([]string, 0),
-		FailedFiles:   make(map[string]string),
-	}
-
-	s.log.InfoContext(ctx, "Found NZB files for import", "count", len(files), "dir", dirPath)
-
-	for _, file := range files {
-		// Import with directory context to maintain folder structure
-		if err := s.ImportFileWithRoot(ctx, file, dirPath); err != nil {
-			result.FailedFiles[file] = err.Error()
-			s.log.ErrorContext(ctx, "Failed to import file during directory import", "file", file, "error", err)
-		} else {
-			result.ImportedFiles = append(result.ImportedFiles, file)
-			result.SuccessCount++
-		}
-	}
-
-	result.EndTime = time.Now()
-	result.Duration = result.EndTime.Sub(result.StartTime)
-
-	s.log.InfoContext(ctx, "Directory import completed",
-		"total", result.TotalFiles,
-		"success", result.SuccessCount,
-		"failed", len(result.FailedFiles),
-		"duration", result.Duration,
-	)
-
-	return result, nil
-}
-
-// RescanDirectory rescans a directory and imports any new files
-func (s *Service) RescanDirectory(ctx context.Context, dirPath string) (*ImportResult, error) {
-	s.log.InfoContext(ctx, "Rescanning directory for new files", "dir", dirPath)
-
-	pattern := filepath.Join(dirPath, "*.nzb")
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find NZB files: %w", err)
-	}
-
-	result := &ImportResult{
-		TotalFiles:    len(files),
-		StartTime:     time.Now(),
-		ImportedFiles: make([]string, 0),
-		FailedFiles:   make(map[string]string),
-	}
-
-	for _, file := range files {
-		// Check if already processed
-		exists, err := s.isFileProcessed(file)
-		if err != nil {
-			result.FailedFiles[file] = fmt.Sprintf("failed to check if file exists: %v", err)
-			continue
-		}
-
-		if exists {
-			s.log.DebugContext(ctx, "File already processed, skipping", "file", file)
-			continue
-		}
-
-		if err := s.ImportFile(ctx, file); err != nil {
-			result.FailedFiles[file] = err.Error()
-		} else {
-			result.ImportedFiles = append(result.ImportedFiles, file)
-			result.SuccessCount++
-		}
-	}
-
-	result.EndTime = time.Now()
-	result.Duration = result.EndTime.Sub(result.StartTime)
-
-	s.log.InfoContext(ctx, "Directory rescan completed",
-		"total_found", result.TotalFiles,
-		"new_imported", result.SuccessCount,
-		"failed", len(result.FailedFiles),
-		"duration", result.Duration,
-	)
-
-	return result, nil
-}
-
-// GetStats returns service statistics
-func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
-	// TODO: Implement proper statistics collection
-	// This would involve querying the database for counts and sizes
-
-	stats := &ServiceStats{
-		IsRunning:     s.IsRunning(),
-		DatabasePath:  s.config.DatabasePath,
-		WatchDir:      s.config.WatchDir,
-		AutoImport:    s.config.AutoImport,
-		TotalNzbFiles: 0, // TODO: Query database
-		TotalSize:     0, // TODO: Query database
-	}
-
-	return stats, nil
 }
 
 // IsRunning returns whether the service is running
 func (s *Service) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.started
+	return s.running
 }
 
 // Database returns the database instance
@@ -269,70 +146,242 @@ func (s *Service) Database() *database.DB {
 	return s.db
 }
 
-// isFileProcessed checks if a file has already been processed
-func (s *Service) isFileProcessed(filePath string) (bool, error) {
+// GetQueueStats returns current queue statistics
+func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {
+	return s.db.Repository.GetQueueStats()
+}
+
+// scannerLoop runs in background and scans directory for new NZB files
+func (s *Service) scannerLoop() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(s.config.ScanInterval)
+	defer ticker.Stop()
+
+	s.log.Info("Directory scanner started", "watch_dir", s.config.WatchDir)
+
+	// Do initial scan
+	s.scanDirectory()
+
+	// Regular scanning loop
+	for {
+		select {
+		case <-ticker.C:
+			s.scanDirectory()
+		case <-s.ctx.Done():
+			s.log.Info("Directory scanner stopped")
+			return
+		}
+	}
+}
+
+// scanDirectory scans the watch directory and adds new files to queue
+func (s *Service) scanDirectory() {
+	if s.config.WatchDir == "" {
+		return
+	}
+
+	s.log.Debug("Scanning directory for NZB files", "dir", s.config.WatchDir)
+
+	err := filepath.WalkDir(s.config.WatchDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.log.Warn("Error accessing path", "path", path, "error", err)
+			return nil // Continue walking
+		}
+
+		// Skip directories
+		if d.IsDir() {
+			return nil
+		}
+
+		// Check if it's an NZB file
+		if !strings.HasSuffix(strings.ToLower(path), ".nzb") {
+			return nil
+		}
+
+		// Check if already processed or in queue
+		if s.isFileAlreadyKnown(path) {
+			return nil
+		}
+
+		// Add to queue
+		s.addToQueue(path)
+		return nil
+	})
+
+	if err != nil {
+		s.log.Error("Failed to scan directory", "dir", s.config.WatchDir, "error", err)
+	}
+}
+
+// isFileAlreadyKnown checks if file is already imported or in queue
+func (s *Service) isFileAlreadyKnown(filePath string) bool {
+	// Check if already imported
 	nzb, err := s.db.Repository.GetNzbFileByPath(filePath)
 	if err != nil {
-		return false, err
+		s.log.Warn("Failed to check if file already imported", "file", filePath, "error", err)
+		return false // Assume not known on error
 	}
-	return nzb != nil, nil
-}
-
-// ImportResult holds the result of an import operation
-type ImportResult struct {
-	TotalFiles    int               `json:"total_files"`
-	SuccessCount  int               `json:"success_count"`
-	ImportedFiles []string          `json:"imported_files"`
-	FailedFiles   map[string]string `json:"failed_files"`
-	StartTime     time.Time         `json:"start_time"`
-	EndTime       time.Time         `json:"end_time"`
-	Duration      time.Duration     `json:"duration"`
-}
-
-// ScanFolder performs a comprehensive folder scan for NZB files
-func (s *Service) ScanFolder(ctx context.Context) (*ScanResult, error) {
-	if s.scanner == nil {
-		return nil, fmt.Errorf("scanner not initialized - watch directory not configured")
+	if nzb != nil {
+		return true // Already imported
 	}
 
-	s.log.InfoContext(ctx, "Starting folder scan")
-	return s.scanner.ScanFolder(ctx)
-}
-
-// ScanFolderWithProgress scans folder with real-time progress updates
-func (s *Service) ScanFolderWithProgress(ctx context.Context, progressChan chan<- ScanProgress) (*ScanResult, error) {
-	if s.scanner == nil {
-		return nil, fmt.Errorf("scanner not initialized - watch directory not configured")
+	// Check if already in queue
+	queueItem, err := s.db.Repository.GetQueueItemByPath(filePath)
+	if err != nil {
+		s.log.Warn("Failed to check if file in queue", "file", filePath, "error", err)
+		return false // Assume not known on error
+	}
+	if queueItem != nil {
+		return true // Already in queue
 	}
 
-	s.log.InfoContext(ctx, "Starting folder scan with progress updates")
-	return s.scanner.ScanFolderWithProgress(ctx, progressChan)
+	return false // File is new
 }
 
-// ScanCustomFolder scans a custom directory with specific configuration
-func (s *Service) ScanCustomFolder(ctx context.Context, scanConfig ScannerConfig) (*ScanResult, error) {
-	customScanner := NewScanner(scanConfig, s.processor)
-	s.log.InfoContext(ctx, "Starting custom folder scan", "scan_dir", scanConfig.ScanDir)
-	return customScanner.ScanFolder(ctx)
-}
-
-// GetScannerStats returns scanner configuration and statistics
-func (s *Service) GetScannerStats() *ScannerStats {
-	if s.scanner == nil {
-		return nil
+// addToQueue adds a new NZB file to the import queue
+func (s *Service) addToQueue(filePath string) {
+	item := &database.ImportQueueItem{
+		NzbPath:    filePath,
+		WatchRoot:  &s.config.WatchDir,
+		Priority:   database.QueuePriorityNormal,
+		Status:     database.QueueStatusPending,
+		RetryCount: 0,
+		MaxRetries: 3,
+		CreatedAt:  time.Now(),
 	}
-	stats := s.scanner.GetScannerStats()
-	return &stats
+
+	if err := s.db.Repository.AddToQueue(item); err != nil {
+		s.log.Error("Failed to add file to queue", "file", filePath, "error", err)
+		return
+	}
+
+	s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID)
+}
+
+// workerLoop processes queue items
+func (s *Service) workerLoop(workerID int) {
+	defer s.wg.Done()
+
+	log := s.log.With("worker_id", workerID)
+	log.Info("Queue worker started")
+
+	ticker := time.NewTicker(5 * time.Second) // Check for work every 5 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.processQueueItems(workerID)
+		case <-s.ctx.Done():
+			log.Info("Queue worker stopped")
+			return
+		}
+	}
+}
+
+// processQueueItems gets and processes pending queue items
+func (s *Service) processQueueItems(workerID int) {
+	log := s.log.With("worker_id", workerID)
+
+	// Get next pending item
+	items, err := s.db.Repository.GetNextQueueItems(1) // Get one item at a time
+	if err != nil {
+		log.Error("Failed to get next queue items", "error", err)
+		return
+	}
+
+	if len(items) == 0 {
+		return // No work to do
+	}
+
+	item := items[0]
+	log.Debug("Processing queue item", "queue_id", item.ID, "file", item.NzbPath)
+
+	// Mark as processing
+	if err := s.db.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusProcessing, nil); err != nil {
+		log.Error("Failed to mark item as processing", "queue_id", item.ID, "error", err)
+		return
+	}
+
+	// Process the NZB file
+	var processingErr error
+	if item.WatchRoot != nil {
+		processingErr = s.processor.ProcessNzbFileWithRoot(item.NzbPath, *item.WatchRoot)
+	} else {
+		processingErr = s.processor.ProcessNzbFile(item.NzbPath)
+	}
+
+	if processingErr != nil {
+		// Handle failure
+		s.handleProcessingFailure(item, processingErr, log)
+	} else {
+		// Mark as completed
+		if err := s.db.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
+		} else {
+			log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
+		}
+	}
+}
+
+// handleProcessingFailure handles when processing fails
+func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, processingErr error, log *slog.Logger) {
+	errorMessage := processingErr.Error()
+
+	log.Warn("Processing failed", 
+		"queue_id", item.ID, 
+		"file", item.NzbPath, 
+		"error", processingErr,
+		"retry_count", item.RetryCount,
+		"max_retries", item.MaxRetries)
+
+	// Check if we should retry
+	if item.RetryCount < item.MaxRetries {
+		// Mark for retry
+		if err := s.db.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusRetrying, &errorMessage); err != nil {
+			log.Error("Failed to mark item for retry", "queue_id", item.ID, "error", err)
+		} else {
+			log.Info("Item marked for retry", "queue_id", item.ID, "retry_count", item.RetryCount+1)
+		}
+	} else {
+		// Max retries exceeded, mark as failed
+		if err := s.db.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+			log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", err)
+		} else {
+			log.Error("Item failed permanently after max retries", 
+				"queue_id", item.ID, 
+				"file", item.NzbPath,
+				"retry_count", item.RetryCount)
+		}
+	}
 }
 
 // ServiceStats holds statistics about the service
 type ServiceStats struct {
-	IsRunning      bool          `json:"is_running"`
-	DatabasePath   string        `json:"database_path"`
-	WatchDir       string        `json:"watch_dir"`
-	AutoImport     bool          `json:"auto_import"`
-	WatcherRunning bool          `json:"watcher_running"`
-	TotalNzbFiles  int           `json:"total_nzb_files"`
-	TotalSize      int64         `json:"total_size"`
-	ScannerConfig  *ScannerStats `json:"scanner_config,omitempty"`
+	IsRunning     bool                 `json:"is_running"`
+	WatchDir      string               `json:"watch_dir"`
+	ScanInterval  time.Duration        `json:"scan_interval"`
+	Workers       int                  `json:"workers"`
+	QueueStats    *database.QueueStats `json:"queue_stats,omitempty"`
+}
+
+// GetStats returns service statistics
+func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
+	stats := &ServiceStats{
+		IsRunning:    s.IsRunning(),
+		WatchDir:     s.config.WatchDir,
+		ScanInterval: s.config.ScanInterval,
+		Workers:      s.config.Workers,
+	}
+
+	// Add queue statistics
+	queueStats, err := s.GetQueueStats(ctx)
+	if err != nil {
+		s.log.WarnContext(ctx, "Failed to get queue stats", "error", err)
+	} else {
+		stats.QueueStats = queueStats
+	}
+
+	return stats, nil
 }
