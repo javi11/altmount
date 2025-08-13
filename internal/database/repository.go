@@ -27,12 +27,13 @@ func NewRepository(db *sql.DB) *Repository {
 // CreateNzbFile inserts a new NZB file record
 func (r *Repository) CreateNzbFile(nzbFile *NzbFile) error {
 	query := `
-		INSERT INTO nzb_files (path, filename, size, nzb_type, segments_count, segments_data, segment_size, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO nzb_files (path, filename, size, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := r.db.Exec(query, nzbFile.Path, nzbFile.Filename, nzbFile.Size,
-		nzbFile.NzbType, nzbFile.SegmentsCount, nzbFile.SegmentsData, nzbFile.SegmentSize, time.Now())
+		nzbFile.NzbType, nzbFile.SegmentsCount, nzbFile.SegmentsData, nzbFile.SegmentSize,
+		nzbFile.RclonePassword, nzbFile.RcloneSalt, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to create nzb file: %w", err)
 	}
@@ -49,7 +50,7 @@ func (r *Repository) CreateNzbFile(nzbFile *NzbFile) error {
 // GetNzbFileByPath retrieves an NZB file by its path
 func (r *Repository) GetNzbFileByPath(path string) (*NzbFile, error) {
 	query := `
-		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size
+		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt
 		FROM nzb_files WHERE path = ?
 	`
 
@@ -58,6 +59,7 @@ func (r *Repository) GetNzbFileByPath(path string) (*NzbFile, error) {
 		&nzbFile.ID, &nzbFile.Path, &nzbFile.Filename, &nzbFile.Size,
 		&nzbFile.CreatedAt, &nzbFile.UpdatedAt, &nzbFile.NzbType,
 		&nzbFile.SegmentsCount, &nzbFile.SegmentsData, &nzbFile.SegmentSize,
+		&nzbFile.RclonePassword, &nzbFile.RcloneSalt,
 	)
 
 	if err != nil {
@@ -138,7 +140,7 @@ func (r *Repository) GetVirtualFileByPath(path string) (*VirtualFile, error) {
 func (r *Repository) ListVirtualFilesByParentID(parentID *int64) ([]*VirtualFile, error) {
 	var query string
 	var args []interface{}
-	
+
 	if parentID == nil {
 		// List root level files (parent_id IS NULL)
 		query = `
@@ -199,7 +201,8 @@ func (r *Repository) ListVirtualFilesByParentPath(parentPath string) ([]*Virtual
 func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile, error) {
 	query := `
 		SELECT vf.id, vf.nzb_file_id, vf.parent_id, vf.virtual_path, vf.filename, vf.size, vf.created_at, vf.is_directory, vf.encryption, vf.status,
-		       nf.id, nf.path, nf.filename, nf.size, nf.created_at, nf.updated_at, nf.nzb_type, nf.segments_count, nf.segments_data, nf.segment_size
+		       nf.id, nf.path, nf.filename, nf.size, nf.created_at, nf.updated_at, nf.nzb_type, nf.segments_count, nf.segments_data, nf.segment_size,
+		       nf.rclone_password, nf.rclone_salt
 		FROM virtual_files vf
 		LEFT JOIN nzb_files nf ON vf.nzb_file_id = nf.id
 		WHERE vf.virtual_path = ?
@@ -218,6 +221,8 @@ func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile,
 	var nzbSegmentsCount sql.NullInt64
 	var nzbSegmentsData sql.NullString
 	var nzbSegmentSize sql.NullInt64
+	var nzbRclonePassword sql.NullString
+	var nzbRcloneSalt sql.NullString
 
 	err := r.db.QueryRow(query, path).Scan(
 		&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
@@ -225,6 +230,7 @@ func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile,
 		&nzbID, &nzbPath, &nzbFilename, &nzbSize,
 		&nzbCreatedAt, &nzbUpdatedAt, &nzbType,
 		&nzbSegmentsCount, &nzbSegmentsData, &nzbSegmentSize,
+		&nzbRclonePassword, &nzbRcloneSalt,
 	)
 
 	if err != nil {
@@ -249,7 +255,15 @@ func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile,
 	nf.NzbType = NzbType(nzbType.String)
 	nf.SegmentsCount = int(nzbSegmentsCount.Int64)
 	nf.SegmentSize = nzbSegmentSize.Int64
-	
+
+	if nzbRclonePassword.Valid && nzbRclonePassword.String != "" {
+		nf.RclonePassword = &nzbRclonePassword.String
+	}
+
+	if nzbRcloneSalt.Valid && nzbRcloneSalt.String != "" {
+		nf.RcloneSalt = &nzbRcloneSalt.String
+	}
+
 	// Parse segments data JSON
 	if nzbSegmentsData.Valid && nzbSegmentsData.String != "" {
 		if err := nf.SegmentsData.Scan(nzbSegmentsData.String); err != nil {
@@ -402,7 +416,7 @@ func (r *Repository) WithImmediateTransaction(fn func(*Repository) error) error 
 	return nil
 }
 
-// withTransactionMode executes a function within a database transaction with specified mode  
+// withTransactionMode executes a function within a database transaction with specified mode
 func (r *Repository) withTransactionMode(mode string, fn func(*Repository) error) error {
 	// Cast to *sql.DB to access Begin method
 	sqlDB, ok := r.db.(*sql.DB)
@@ -706,7 +720,7 @@ func (r *Repository) DeleteVirtualFile(virtualFileID int64) error {
 // UpdateVirtualFileFilename updates only the filename field of a virtual file
 func (r *Repository) UpdateVirtualFileFilename(virtualFileID int64, newFilename string) error {
 	query := `UPDATE virtual_files SET filename = ? WHERE id = ?`
-	
+
 	_, err := r.db.Exec(query, newFilename, virtualFileID)
 	if err != nil {
 		return fmt.Errorf("failed to update filename: %w", err)
@@ -718,7 +732,7 @@ func (r *Repository) UpdateVirtualFileFilename(virtualFileID int64, newFilename 
 // UpdateVirtualFilePath updates only the virtual_path field of a virtual file
 func (r *Repository) UpdateVirtualFilePath(virtualFileID int64, newPath string) error {
 	query := `UPDATE virtual_files SET virtual_path = ? WHERE id = ?`
-	
+
 	_, err := r.db.Exec(query, newPath, virtualFileID)
 	if err != nil {
 		return fmt.Errorf("failed to update virtual path: %w", err)
@@ -852,7 +866,7 @@ func (r *Repository) AddToQueue(item *ImportQueueItem) error {
 		WHERE status NOT IN ('processing', 'completed')
 	`
 
-	result, err := r.db.Exec(query, 
+	result, err := r.db.Exec(query,
 		item.NzbPath, item.WatchRoot, item.Priority, item.Status,
 		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata)
 	if err != nil {
@@ -916,7 +930,7 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 	// Use immediate transaction to atomically claim an item
 	var claimedItem *ImportQueueItem
-	
+
 	err := r.WithImmediateTransaction(func(txRepo *Repository) error {
 		// First, get the next available item ID within the transaction
 		var itemID int64
@@ -928,7 +942,7 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			ORDER BY priority ASC, created_at ASC
 			LIMIT 1
 		`
-		
+
 		err := txRepo.db.QueryRow(selectQuery).Scan(&itemID)
 		if err != nil {
 			if err.Error() == "sql: no rows in result set" {
@@ -937,29 +951,29 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			}
 			return fmt.Errorf("failed to select queue item: %w", err)
 		}
-		
+
 		// Now atomically update that specific item and get all its data
 		updateQuery := `
 			UPDATE import_queue 
 			SET status = 'processing', started_at = datetime('now'), updated_at = datetime('now')
 			WHERE id = ? AND status IN ('pending', 'retrying')
 		`
-		
+
 		result, err := txRepo.db.Exec(updateQuery, itemID)
 		if err != nil {
 			return fmt.Errorf("failed to claim queue item %d: %w", itemID, err)
 		}
-		
+
 		rowsAffected, err := result.RowsAffected()
 		if err != nil {
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		}
-		
+
 		if rowsAffected == 0 {
 			// Item was claimed by another worker between SELECT and UPDATE
 			return nil
 		}
-		
+
 		// Get the complete claimed item data
 		getQuery := `
 			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at, 
@@ -967,7 +981,7 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			FROM import_queue 
 			WHERE id = ?
 		`
-		
+
 		var item ImportQueueItem
 		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
 			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
@@ -977,15 +991,15 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		if err != nil {
 			return fmt.Errorf("failed to get claimed item: %w", err)
 		}
-		
+
 		claimedItem = &item
 		return nil
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return claimedItem, nil
 }
 
@@ -1112,7 +1126,7 @@ func (r *Repository) GetQueueItemByPath(nzbPath string) (*ImportQueueItem, error
 // RemoveFromQueue removes an item from the queue
 func (r *Repository) RemoveFromQueue(id int64) error {
 	query := `DELETE FROM import_queue WHERE id = ?`
-	
+
 	result, err := r.db.Exec(query, id)
 	if err != nil {
 		return fmt.Errorf("failed to remove from queue: %w", err)
@@ -1197,7 +1211,7 @@ func (r *Repository) UpdateQueueStats() error {
 	if err != nil {
 		return fmt.Errorf("failed to calculate average processing time: %w", err)
 	}
-	
+
 	// Convert float to int64 for storage
 	var avgProcessingTime sql.NullInt64
 	if avgProcessingTimeFloat.Valid {
@@ -1303,7 +1317,7 @@ func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) 
 // UpdateVirtualFileStatus updates the status of a virtual file
 func (r *Repository) UpdateVirtualFileStatus(virtualFileID int64, status FileStatus) error {
 	query := `UPDATE virtual_files SET status = ? WHERE id = ?`
-	
+
 	_, err := r.db.Exec(query, status, virtualFileID)
 	if err != nil {
 		return fmt.Errorf("failed to update virtual file status: %w", err)
@@ -1315,7 +1329,7 @@ func (r *Repository) UpdateVirtualFileStatus(virtualFileID int64, status FileSta
 // GetVirtualFileStatus retrieves the status of a virtual file
 func (r *Repository) GetVirtualFileStatus(virtualFileID int64) (FileStatus, error) {
 	query := `SELECT status FROM virtual_files WHERE id = ?`
-	
+
 	var status FileStatus
 	err := r.db.QueryRow(query, virtualFileID).Scan(&status)
 	if err != nil {
@@ -1363,12 +1377,12 @@ func (r *Repository) HasUnhealthyVirtualFiles(nzbFileID int64) (bool, error) {
 		SELECT COUNT(*) FROM virtual_files 
 		WHERE nzb_file_id = ? AND status != 'healthy'
 	`
-	
+
 	var count int
 	err := r.db.QueryRow(query, nzbFileID).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("failed to check unhealthy virtual files: %w", err)
 	}
-	
+
 	return count > 0, nil
 }

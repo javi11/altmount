@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/usenet"
 )
 
@@ -72,7 +71,7 @@ func (vf *VirtualFile) Read(p []byte) (int, error) {
 			if articleErr, ok := err.(*usenet.ArticleNotFoundError); ok {
 				// Update database status based on bytes read
 				vf.updateFileStatusFromError(articleErr)
-				
+
 				// Create appropriate error for upper layers
 				if articleErr.BytesRead > 0 || totalRead > 0 {
 					// Some content was read - return partial content error
@@ -156,7 +155,7 @@ func (vf *VirtualFile) ReadAt(p []byte, off int64) (int, error) {
 	var reader io.ReadCloser
 	var err error
 
-	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) {
+	if vf.virtualFile.Encryption != nil {
 		reader, err = vf.wrapWithEncryption(off, end)
 		if err != nil {
 			return 0, fmt.Errorf(ErrMsgFailedWrapEncryption, err)
@@ -188,7 +187,7 @@ func (vf *VirtualFile) ReadAt(p []byte, off int64) (int, error) {
 			if articleErr, ok := rerr.(*usenet.ArticleNotFoundError); ok {
 				// Update database status based on bytes read
 				vf.updateFileStatusFromError(articleErr)
-				
+
 				// Create appropriate error for upper layers
 				if articleErr.BytesRead > 0 || int64(n) > 0 {
 					// Some content was read - return partial content error
@@ -295,7 +294,7 @@ func (vf *VirtualFile) ensureReaderForPosition(position int64) error {
 	start, end := vf.calculateSmartRange(position)
 
 	// Create reader for the calculated range
-	if vf.virtualFile.Encryption != nil && *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) {
+	if vf.virtualFile.Encryption != nil {
 		// Wrap the usenet reader with rclone decryption
 		decryptedReader, err := vf.wrapWithEncryption(start, end)
 		if err != nil {

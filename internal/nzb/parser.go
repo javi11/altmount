@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/nntppool"
 	"github.com/javi11/nzbparser"
@@ -154,7 +155,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 	}
 
 	// Extract filename - priority: meta file_name > file.Filename
-	var encryption *string
+	var enc *string
 
 	filename := file.Filename
 	if meta != nil {
@@ -162,8 +163,8 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 			// This will add support for rclone encrypted files
 			if strings.HasSuffix(strings.ToLower(metaFilename), rclone.EncFileExtension) {
 				filename = metaFilename[:len(metaFilename)-4]
-				encType := "rclone"
-				encryption = &encType
+				encType := string(encryption.RCloneCipherType)
+				enc = &encType
 
 				decSize, err := rclone.DecryptedSize(totalSize)
 				if err != nil {
@@ -175,8 +176,12 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 				filename = metaFilename
 			}
 		}
-	}
 
+		if metaCipher, ok := meta["cipher"]; ok && metaCipher != "" {
+			encType := string(encryption.HeadersCipherType)
+			enc = &encType
+		}
+	}
 	// Check if this is a RAR file
 	isRarArchive := rarPattern.MatchString(filename)
 
@@ -187,7 +192,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		Segments:     segments,
 		Groups:       file.Groups,
 		IsRarArchive: isRarArchive,
-		Encryption:   encryption,
+		Encryption:   enc,
 	}
 
 	return parsedFile, nil

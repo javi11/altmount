@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nzbparser"
 )
@@ -25,7 +26,9 @@ func (l dbSegmentLoader) GetSegment(index int) (segment nzbparser.NzbSegment, gr
 
 // wrapWithEncryption wraps a usenet reader with rclone decryption
 func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, error) {
-	if vf.rcloneCipher == nil {
+	if *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) && vf.rcloneCipher == nil {
+		return nil, ErrNoCipherConfig
+	} else if *vf.virtualFile.Encryption == string(encryption.HeadersCipherType) && vf.headersCipher == nil {
 		return nil, ErrNoCipherConfig
 	}
 
@@ -38,19 +41,22 @@ func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, erro
 
 	if vf.nzbFile.RclonePassword != nil && *vf.nzbFile.RclonePassword != "" {
 		password = *vf.nzbFile.RclonePassword
-	} else {
-		// Fallback to global password
-		password = vf.globalPassword
 	}
 
 	if vf.nzbFile.RcloneSalt != nil && *vf.nzbFile.RcloneSalt != "" {
 		salt = *vf.nzbFile.RcloneSalt
-	} else {
-		// Fallback to global salt
-		salt = vf.globalSalt
 	}
 
-	decryptedReader, err := vf.rcloneCipher.Open(
+	var chypher encryption.Cipher
+	if *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) {
+		chypher = vf.rcloneCipher
+	} else if *vf.virtualFile.Encryption == string(encryption.HeadersCipherType) {
+		chypher = vf.headersCipher
+	} else {
+		return nil, fmt.Errorf("unsupported encryption type: %s", *vf.virtualFile.Encryption)
+	}
+
+	decryptedReader, err := chypher.Open(
 		vf.ctx,
 		&utils.RangeHeader{
 			Start: start,

@@ -39,6 +39,7 @@ func (nrf *NzbRemoteFile) OpenFile(ctx context.Context, name string, r utils.Pat
 		ctx:            ctx,
 		maxWorkers:     nrf.maxDownloadWorkers,
 		rcloneCipher:   nrf.rcloneCipher,
+		headersCipher:  nrf.headersCipher,
 		globalPassword: nrf.globalPassword,
 		globalSalt:     nrf.globalSalt,
 	}

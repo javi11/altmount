@@ -9,7 +9,9 @@ CREATE TABLE nzb_files (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     nzb_type TEXT NOT NULL CHECK(nzb_type IN ('single_file', 'multi_file', 'rar_archive')),
     segments_count INTEGER NOT NULL DEFAULT 0,
-    segments_data TEXT -- JSON data containing NZB segments info
+    segments_data TEXT, -- JSON data containing NZB segments info
+    rclone_password TEXT DEFAULT NULL,
+    rclone_salt TEXT DEFAULT NULL
 );
 
 CREATE TABLE virtual_files (
@@ -21,6 +23,8 @@ CREATE TABLE virtual_files (
     size INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     is_directory BOOLEAN NOT NULL DEFAULT FALSE,
+    status TEXT NOT NULL DEFAULT 'healthy' CHECK(status IN ('healthy', 'partial', 'corrupted')),
+    encryption TEXT DEFAULT NULL, -- Encryption type (e.g., 'rclone', 'headers')
     FOREIGN KEY (nzb_file_id) REFERENCES nzb_files(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES virtual_files(id) ON DELETE CASCADE
 );

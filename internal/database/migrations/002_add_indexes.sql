@@ -10,6 +10,7 @@ CREATE INDEX idx_virtual_files_path ON virtual_files(virtual_path);
 CREATE INDEX idx_virtual_files_directory ON virtual_files(is_directory);
 CREATE INDEX idx_virtual_files_parent_id ON virtual_files(parent_id);
 CREATE INDEX idx_virtual_files_nzb_file_id ON virtual_files(nzb_file_id);
+CREATE INDEX idx_virtual_files_status ON virtual_files(status);
 
 CREATE INDEX idx_rar_contents_virtual_file_id ON rar_contents(virtual_file_id);
 CREATE INDEX idx_rar_contents_path ON rar_contents(internal_path);
@@ -36,5 +37,6 @@ DROP INDEX IF EXISTS idx_nzb_files_type;
 DROP INDEX IF EXISTS idx_nzb_files_filename;
 DROP INDEX IF EXISTS idx_nzb_files_path;
 DROP INDEX IF EXISTS idx_nzb_files_segment_size;
+DROP TABLE IF EXISTS idx_virtual_files_status;
 -- SQLite cannot drop columns; this down migration will leave the column in place.
 -- +goose StatementEnd

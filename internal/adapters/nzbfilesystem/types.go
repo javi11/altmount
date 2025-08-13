@@ -8,6 +8,7 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
+	"github.com/javi11/altmount/internal/encryption/headers"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool"
@@ -25,6 +26,7 @@ type NzbRemoteFile struct {
 	cp                 nntppool.UsenetConnectionPool
 	maxDownloadWorkers int
 	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
+	headersCipher      encryption.Cipher // For headers encryption/decryption
 	globalPassword     string            // Global password fallback
 	globalSalt         string            // Global salt fallback
 }
@@ -44,6 +46,7 @@ type VirtualFile struct {
 	ctx            context.Context
 	maxWorkers     int
 	rcloneCipher   encryption.Cipher // For encryption/decryption
+	headersCipher  encryption.Cipher // For headers encryption/decryption
 	globalPassword string            // Global password fallback
 	globalSalt     string            // Global salt fallback
 	mu             sync.Mutex
@@ -63,12 +66,14 @@ func NewNzbRemoteFileWithConfig(db *database.DB, cp nntppool.UsenetConnectionPoo
 	}
 
 	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
+	headersCipher, _ := headers.NewHeadersCipher()
 
 	return &NzbRemoteFile{
 		db:                 db,
 		cp:                 cp,
 		maxDownloadWorkers: maxDownloadWorkers,
 		rcloneCipher:       rcloneCipher,
+		headersCipher:      headersCipher,
 		globalPassword:     config.GlobalPassword,
 		globalSalt:         config.GlobalSalt,
 	}
