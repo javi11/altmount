@@ -15,8 +15,6 @@ func GetSegmentsInRange(
 	start int64,
 	end int64,
 	ml SegmentLoader,
-	hasWrongSizes bool,
-	segmentSize int64,
 ) segmentRange {
 	size := 0
 	segments := make([]*segment, 0)
@@ -29,10 +27,6 @@ func GetSegmentsInRange(
 
 		// If segmentSize is provided use it since it will be more reliable than the segment size from the nzb.
 		sSize := s.Bytes
-		if hasWrongSizes {
-			sSize = int(segmentSize)
-		}
-
 		size += sSize
 		if size < int(start) {
 			continue

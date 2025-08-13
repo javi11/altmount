@@ -70,7 +70,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 	fileCount := 0
 	for {
 		header, err := rarReader.Next()
-		if err == io.EOF || (err != nil && strings.Contains(err.Error(), "rardecode: RAR signature not found")) {
+		if err == io.EOF || (err != nil && strings.Contains(err.Error(), "rardecode: bad header crc")) {
 			break
 		}
 		if err != nil {
@@ -347,7 +347,7 @@ func (rcr *rarContentReader) Seek(offset int64, whence int) (int64, error) {
 	if rcr.rarReader == nil {
 		return 0, fmt.Errorf("RAR reader is closed")
 	}
-	
+
 	// rardecode.ReadCloser has a Seek method, use it directly
 	return rcr.rarReader.Seek(offset, whence)
 }

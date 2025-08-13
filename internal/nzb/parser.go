@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -61,13 +62,15 @@ var (
 
 // Parser handles NZB file parsing
 type Parser struct {
-	cp nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
+	cp  nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
+	log *slog.Logger                  // Logger for debug/error messages
 }
 
 // NewParser creates a new NZB parser
 func NewParser(cp nntppool.UsenetConnectionPool) *Parser {
 	return &Parser{
-		cp: cp,
+		cp:  cp,
+		log: slog.Default().With("component", "nzb-parser"),
 	}
 }
 
@@ -119,7 +122,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		parsed.TotalSize += parsedFile.Size
 		parsed.SegmentsCount += len(parsedFile.Segments)
 
-		if segSize == 0 && len(file.Segments) > 0 {
+		if len(file.Segments) > 0 && file.Segments[0].Bytes > int(segSize) {
 			// Fallback to the first segment size encountered
 			segSize = int64(file.Segments[0].Bytes)
 		}
@@ -193,6 +196,20 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		Groups:       file.Groups,
 		IsRarArchive: isRarArchive,
 		Encryption:   enc,
+	}
+
+	// Normalize segment sizes using yEnc PartSize headers if needed
+	// This handles cases where NZB segment sizes include yEnc encoding overhead
+	if p.cp != nil && len(file.Segments) >= 2 {
+		err := p.normalizeSegmentSizesWithYenc(parsedFile, file.Segments, file.Groups)
+		if err != nil {
+			// Log the error but continue with original segment sizes
+			// This ensures processing continues even if yEnc header fetching fails
+			p.log.Warn("Failed to normalize segment sizes with yEnc headers",
+				"filename", filename,
+				"error", err,
+				"segments", len(file.Segments))
+		}
 	}
 
 	return parsedFile, nil
@@ -274,6 +291,110 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 	}
 
 	return int64(h.FileSize), nil
+}
+
+// fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment
+func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string) (int64, error) {
+	if p.cp == nil {
+		return 0, fmt.Errorf("no connection pool available")
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	// Get a connection from the pool
+	r, err := p.cp.BodyReader(ctx, segment.ID, groups)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get body reader: %w", err)
+	}
+	defer r.Close()
+
+	// Get yenc headers
+	h, err := r.GetYencHeaders()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get yenc headers: %w", err)
+	}
+
+	if h.PartSize <= 0 {
+		return 0, fmt.Errorf("invalid part size from yenc header: %d", h.PartSize)
+	}
+
+	return int64(h.PartSize), nil
+}
+
+// normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
+// This handles cases where NZB segment sizes include yEnc overhead
+func (p *Parser) normalizeSegmentSizesWithYenc(parsedFile *ParsedFile, originalSegments []nzbparser.NzbSegment, groups []string) error {
+	if len(parsedFile.Segments) < 2 {
+		// Not enough segments to determine if normalization is needed
+		return nil
+	}
+
+	firstSegSize := parsedFile.Segments[0].Bytes
+	secondSegSize := parsedFile.Segments[1].Bytes
+
+	// If first and second segments have the same size, assume no yEnc overhead
+	if firstSegSize == secondSegSize {
+		p.log.Debug("Segments have consistent sizes, skipping yEnc normalization",
+			"filename", parsedFile.Filename,
+			"segment_size", firstSegSize,
+			"segments", len(parsedFile.Segments))
+		return nil
+	}
+
+	p.log.Info("Detected inconsistent segment sizes, normalizing with yEnc headers",
+		"filename", parsedFile.Filename,
+		"first_seg_size", firstSegSize,
+		"second_seg_size", secondSegSize,
+		"total_segments", len(parsedFile.Segments))
+
+	// Different segment sizes detected - fetch yEnc headers to get actual part sizes
+	// Fetch PartSize from first segment
+	firstPartSize, err := p.fetchYencPartSize(originalSegments[0], groups)
+	if err != nil {
+		// If we can't fetch yEnc headers, log and continue with original sizes
+		return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
+	}
+
+	// Fetch PartSize from last segment
+	lastSegmentIndex := len(originalSegments) - 1
+	lastPartSize, err := p.fetchYencPartSize(originalSegments[lastSegmentIndex], groups)
+	if err != nil {
+		// If we can't fetch yEnc headers, log and continue with original sizes
+		return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
+	}
+
+	// Track size changes for recalculation
+	var sizeDiff int64
+	originalFileSize := parsedFile.Size
+
+	// Override all segments except the last one with the first segment's PartSize
+	for i := 0; i < len(parsedFile.Segments)-1; i++ {
+		oldSize := parsedFile.Segments[i].Bytes
+		parsedFile.Segments[i].Bytes = firstPartSize
+		sizeDiff += firstPartSize - oldSize
+	}
+
+	// Override the last segment with its specific PartSize
+	lastSegmentIdx := len(parsedFile.Segments) - 1
+	oldLastSize := parsedFile.Segments[lastSegmentIdx].Bytes
+	parsedFile.Segments[lastSegmentIdx].Bytes = lastPartSize
+	sizeDiff += lastPartSize - oldLastSize
+
+	// Update the file size with the corrected segment sizes
+	parsedFile.Size += sizeDiff
+
+	p.log.Info("Successfully normalized segment sizes using yEnc headers",
+		"filename", parsedFile.Filename,
+		"original_file_size", originalFileSize,
+		"new_file_size", parsedFile.Size,
+		"size_difference", sizeDiff,
+		"first_part_size", firstPartSize,
+		"last_part_size", lastPartSize,
+		"segments_updated", len(parsedFile.Segments))
+
+	return nil
 }
 
 // determineNzbType analyzes the parsed files to determine the NZB type

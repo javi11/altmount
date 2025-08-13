@@ -275,19 +275,17 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 	fileSegments := uf.getFileSegments()
 	loader := dbSegmentLoader{segs: fileSegments}
 
-	// If we have a stored segment size, use it to compute ranges
-	hasFixedSize := uf.nzbFile.SegmentSize > 0
-	segSize := uf.nzbFile.SegmentSize
-
-	rg := usenet.GetSegmentsInRange(start, end, loader, hasFixedSize, segSize)
+	rg := usenet.GetSegmentsInRange(start, end, loader)
 	return usenet.NewUsenetReader(ctx, uf.cp, rg, uf.maxWorkers)
 }
 
 // getFileSegments returns segments specific to this RAR file
+// With the new architecture, each RAR part is stored as a separate NZB record
+// with its own segments, so we can directly return the segments from ParsedFile
 func (uf *UsenetFile) getFileSegments() database.NzbSegments {
-	// This is a simplified approach - in practice, you'd need to map
-	// segments to specific files within the NZB
-	// For now, return the file's segments directly
+	// Return segments specific to this RAR part file
+	// These segments were filtered during NZB processing and stored
+	// in the database as separate records per RAR part
 	return uf.file.Segments
 }
 

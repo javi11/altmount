@@ -124,10 +124,7 @@ func (vf *VirtualFile) getRequestRange() (start, end int64, hasRange bool) {
 // createUsenetReader creates a new usenet reader for the specified range
 func (vf *VirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
-	// If we have a stored segment size, use it to compute ranges
-	hasFixedSize := vf.nzbFile.SegmentSize > 0
-	segSize := vf.nzbFile.SegmentSize
 
-	rg := usenet.GetSegmentsInRange(start, end, loader, hasFixedSize, segSize)
+	rg := usenet.GetSegmentsInRange(start, end, loader)
 	return usenet.NewUsenetReader(ctx, vf.cp, rg, vf.maxWorkers)
 }
