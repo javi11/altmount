@@ -405,12 +405,39 @@ func (vf *VirtualFile) ensureRarReaderForPosition(position int64) error {
 		return fmt.Errorf("failed to create RAR content reader: %w", err)
 	}
 
-	// Seek to the desired position if needed
+	// For sequential reading, don't seek immediately - let the reader position naturally
+	// Only seek if we're not starting from position 0 and this is random access
 	if position > 0 {
+		// Check if this is truly random access vs sequential reading from current position
+		if vf.reader != nil && vf.position == position {
+			// We're already at the right position, no need to create new reader
+			rarReader.Close()
+			return nil
+		}
+
+		// Attempt to seek to the desired position
+		// Note: This seeks within the extracted file content, not the RAR archive structure
 		_, err := rarReader.Seek(position, io.SeekStart)
 		if err != nil {
+			// If seeking fails, close the reader and use a discard approach for positioning
 			rarReader.Close()
-			return fmt.Errorf("failed to seek in RAR content: %w", err)
+
+			// Create a new reader without seeking and discard bytes to reach position
+			newRarReader, err := vf.createRarContentReader()
+			if err != nil {
+				return fmt.Errorf("failed to create RAR content reader for discard positioning: %w", err)
+			}
+
+			// Discard bytes to reach the target position
+			if position > 0 {
+				discarded, err := io.CopyN(io.Discard, newRarReader, position)
+				if err != nil && err != io.EOF {
+					newRarReader.Close()
+					return fmt.Errorf("failed to position RAR reader by discarding %d bytes (discarded %d): %w", position, discarded, err)
+				}
+			}
+
+			rarReader = newRarReader
 		}
 	}
 
@@ -495,13 +522,13 @@ func (vf *VirtualFile) getRarFilesFromNzb() ([]nzb.ParsedFile, error) {
 	// NEW IMPLEMENTATION: Query the database for RAR part NZB files
 	// With the enhanced database schema, each RAR part is stored as a separate NZB record
 	// with its proper filename and corresponding segments
-	
+
 	if vf.db == nil || vf.nzbFile == nil {
 		return nil, fmt.Errorf("missing database or NZB file information")
 	}
 
 	repo := database.NewRepository(vf.db.Connection())
-	
+
 	// Get all RAR part NZB files for this parent NZB
 	rarPartNzbFiles, err := repo.GetRarPartNzbFiles(vf.nzbFile.ID)
 	if err != nil {
@@ -516,10 +543,10 @@ func (vf *VirtualFile) getRarFilesFromNzb() ([]nzb.ParsedFile, error) {
 	var rarFiles []nzb.ParsedFile
 	for _, nzbFile := range rarPartNzbFiles {
 		rarFile := nzb.ParsedFile{
-			Filename:     nzbFile.Filename,    // Actual RAR part filename (movie.rar, movie.r00, etc.)
-			Size:         nzbFile.Size,        // Size of this specific part
+			Filename:     nzbFile.Filename,     // Actual RAR part filename (movie.rar, movie.r00, etc.)
+			Size:         nzbFile.Size,         // Size of this specific part
 			Segments:     nzbFile.SegmentsData, // Only segments for this RAR part
-			IsRarArchive: true,                // All are RAR archive parts
+			IsRarArchive: true,                 // All are RAR archive parts
 		}
 		rarFiles = append(rarFiles, rarFile)
 	}

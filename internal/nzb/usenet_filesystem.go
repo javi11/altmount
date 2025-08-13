@@ -211,11 +211,13 @@ func (uf *UsenetFile) Read(p []byte) (n int, err error) {
 		if err != nil {
 			return 0, fmt.Errorf("failed to create usenet reader: %w", err)
 		}
+
 		uf.reader = reader
 	}
 
 	n, err = uf.reader.Read(p)
 	uf.position += int64(n)
+
 	return n, err
 }
 

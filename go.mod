@@ -14,6 +14,7 @@ require (
 	github.com/acomagu/bufpipe v1.0.4
 	github.com/javi11/nntppool v1.5.1
 	github.com/javi11/nzbparser v0.3.0
+	github.com/javi11/rardecode/v2 v2.1.2-0.20250813182313-036ef9c51e7f
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/rfjakob/eme v1.1.2
@@ -126,7 +127,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/javi11/nntpcli v1.1.1 // indirect
-	github.com/javi11/rardecode/v2 v2.1.2-0.20250813102757-398b769aa856 // indirect
 	github.com/jgautheron/goconst v1.8.2 // indirect
 	github.com/jingyugao/rowserrcheck v1.1.1 // indirect
 	github.com/jjti/go-spancheck v0.6.5 // indirect

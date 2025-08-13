@@ -287,7 +287,10 @@ func (rh *RarHandler) CreateRarContentReader(ctx context.Context, nzbFile *datab
 
 	// Open the RAR archive using the virtual filesystem - this is where rardecode.OpenReader
 	// will call ufs.Open() to access RAR part files, which stream data from Usenet
-	rarReader, err := rardecode.OpenReader(mainRarFile, rardecode.FileSystem(ufs))
+	rarReader, err := rardecode.OpenReader(mainRarFile,
+		rardecode.FileSystem(ufs),
+		rardecode.SetSkipCheck(true),
+		rardecode.SetFOpenFSCheck(false))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open RAR archive %s via Usenet filesystem: %w", mainRarFile, err)
 	}
@@ -349,5 +352,6 @@ func (rcr *rarContentReader) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	// rardecode.ReadCloser has a Seek method, use it directly
-	return rcr.rarReader.Seek(offset, whence)
+	n, err := rcr.rarReader.Seek(offset, whence)
+	return n, err
 }
