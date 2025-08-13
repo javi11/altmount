@@ -27,13 +27,13 @@ func NewRepository(db *sql.DB) *Repository {
 // CreateNzbFile inserts a new NZB file record
 func (r *Repository) CreateNzbFile(nzbFile *NzbFile) error {
 	query := `
-		INSERT INTO nzb_files (path, filename, size, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO nzb_files (path, filename, size, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := r.db.Exec(query, nzbFile.Path, nzbFile.Filename, nzbFile.Size,
 		nzbFile.NzbType, nzbFile.SegmentsCount, nzbFile.SegmentsData, nzbFile.SegmentSize,
-		nzbFile.RclonePassword, nzbFile.RcloneSalt, time.Now())
+		nzbFile.RclonePassword, nzbFile.RcloneSalt, nzbFile.ParentNzbID, nzbFile.PartType, nzbFile.ArchiveName, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to create nzb file: %w", err)
 	}
@@ -50,7 +50,7 @@ func (r *Repository) CreateNzbFile(nzbFile *NzbFile) error {
 // GetNzbFileByPath retrieves an NZB file by its path
 func (r *Repository) GetNzbFileByPath(path string) (*NzbFile, error) {
 	query := `
-		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt
+		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name
 		FROM nzb_files WHERE path = ?
 	`
 
@@ -59,7 +59,7 @@ func (r *Repository) GetNzbFileByPath(path string) (*NzbFile, error) {
 		&nzbFile.ID, &nzbFile.Path, &nzbFile.Filename, &nzbFile.Size,
 		&nzbFile.CreatedAt, &nzbFile.UpdatedAt, &nzbFile.NzbType,
 		&nzbFile.SegmentsCount, &nzbFile.SegmentsData, &nzbFile.SegmentSize,
-		&nzbFile.RclonePassword, &nzbFile.RcloneSalt,
+		&nzbFile.RclonePassword, &nzbFile.RcloneSalt, &nzbFile.ParentNzbID, &nzbFile.PartType, &nzbFile.ArchiveName,
 	)
 
 	if err != nil {
@@ -82,6 +82,89 @@ func (r *Repository) DeleteNzbFile(id int64) error {
 	}
 
 	return nil
+}
+
+// CreateRarPartNzbFile inserts a new RAR part NZB file record
+func (r *Repository) CreateRarPartNzbFile(nzbFile *NzbFile) error {
+	// Ensure this is marked as a RAR part
+	nzbFile.PartType = NzbPartTypeRarPart
+	
+	// Use the existing CreateNzbFile method which now supports the new fields
+	return r.CreateNzbFile(nzbFile)
+}
+
+// GetRarPartNzbFiles retrieves all RAR part NZB files for a given parent NZB
+func (r *Repository) GetRarPartNzbFiles(parentNzbID int64) ([]*NzbFile, error) {
+	query := `
+		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name
+		FROM nzb_files 
+		WHERE parent_nzb_id = ? AND part_type = ?
+		ORDER BY filename
+	`
+
+	rows, err := r.db.Query(query, parentNzbID, NzbPartTypeRarPart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query RAR part NZB files: %w", err)
+	}
+	defer rows.Close()
+
+	var nzbFiles []*NzbFile
+	for rows.Next() {
+		var nzbFile NzbFile
+		err := rows.Scan(
+			&nzbFile.ID, &nzbFile.Path, &nzbFile.Filename, &nzbFile.Size,
+			&nzbFile.CreatedAt, &nzbFile.UpdatedAt, &nzbFile.NzbType,
+			&nzbFile.SegmentsCount, &nzbFile.SegmentsData, &nzbFile.SegmentSize,
+			&nzbFile.RclonePassword, &nzbFile.RcloneSalt, &nzbFile.ParentNzbID, &nzbFile.PartType, &nzbFile.ArchiveName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan RAR part NZB file: %w", err)
+		}
+		nzbFiles = append(nzbFiles, &nzbFile)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate RAR part NZB files: %w", err)
+	}
+
+	return nzbFiles, nil
+}
+
+// GetRarPartNzbFilesByArchiveName retrieves all RAR part NZB files for a given archive name
+func (r *Repository) GetRarPartNzbFilesByArchiveName(parentNzbID int64, archiveName string) ([]*NzbFile, error) {
+	query := `
+		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name
+		FROM nzb_files 
+		WHERE parent_nzb_id = ? AND part_type = ? AND archive_name = ?
+		ORDER BY filename
+	`
+
+	rows, err := r.db.Query(query, parentNzbID, NzbPartTypeRarPart, archiveName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query RAR part NZB files by archive name: %w", err)
+	}
+	defer rows.Close()
+
+	var nzbFiles []*NzbFile
+	for rows.Next() {
+		var nzbFile NzbFile
+		err := rows.Scan(
+			&nzbFile.ID, &nzbFile.Path, &nzbFile.Filename, &nzbFile.Size,
+			&nzbFile.CreatedAt, &nzbFile.UpdatedAt, &nzbFile.NzbType,
+			&nzbFile.SegmentsCount, &nzbFile.SegmentsData, &nzbFile.SegmentSize,
+			&nzbFile.RclonePassword, &nzbFile.RcloneSalt, &nzbFile.ParentNzbID, &nzbFile.PartType, &nzbFile.ArchiveName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan RAR part NZB file: %w", err)
+		}
+		nzbFiles = append(nzbFiles, &nzbFile)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate RAR part NZB files: %w", err)
+	}
+
+	return nzbFiles, nil
 }
 
 // Virtual File operations

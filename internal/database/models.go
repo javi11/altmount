@@ -16,6 +16,15 @@ const (
 	NzbTypeRarArchive NzbType = "rar_archive"
 )
 
+// NzbPartType represents the type of NZB part for multi-part archives
+type NzbPartType string
+
+const (
+	NzbPartTypeMain    NzbPartType = "main"     // Main NZB file containing all content
+	NzbPartTypeRarPart NzbPartType = "rar_part" // Individual RAR part file
+	NzbPartTypePar2    NzbPartType = "par2"     // PAR2 repair file
+)
+
 // NzbSegment represents a single segment within an NZB file
 type NzbSegment struct {
 	Number    int      `json:"number"`
@@ -57,18 +66,22 @@ func (ns NzbSegments) Value() (driver.Value, error) {
 
 // NzbFile represents a complete NZB file entry
 type NzbFile struct {
-	ID             int64       `db:"id"`
-	Path           string      `db:"path"`
-	Filename       string      `db:"filename"`
-	Size           int64       `db:"size"`
-	CreatedAt      time.Time   `db:"created_at"`
-	UpdatedAt      time.Time   `db:"updated_at"`
-	NzbType        NzbType     `db:"nzb_type"`
-	SegmentsCount  int         `db:"segments_count"`
-	SegmentsData   NzbSegments `db:"segments_data"`
-	SegmentSize    int64       `db:"segment_size"`
-	RclonePassword *string     `db:"rclone_password"` // Password from NZB meta, NULL if not encrypted
-	RcloneSalt     *string     `db:"rclone_salt"`     // Salt from NZB meta, NULL if not encrypted
+	ID             int64        `db:"id"`
+	Path           string       `db:"path"`
+	Filename       string       `db:"filename"`
+	Size           int64        `db:"size"`
+	CreatedAt      time.Time    `db:"created_at"`
+	UpdatedAt      time.Time    `db:"updated_at"`
+	NzbType        NzbType      `db:"nzb_type"`
+	SegmentsCount  int          `db:"segments_count"`
+	SegmentsData   NzbSegments  `db:"segments_data"`
+	SegmentSize    int64        `db:"segment_size"`
+	RclonePassword *string      `db:"rclone_password"` // Password from NZB meta, NULL if not encrypted
+	RcloneSalt     *string      `db:"rclone_salt"`     // Salt from NZB meta, NULL if not encrypted
+	// RAR part management fields
+	ParentNzbID    *int64       `db:"parent_nzb_id"`   // References parent NZB for RAR parts, NULL for main files
+	PartType       NzbPartType  `db:"part_type"`       // Type of NZB part (main, rar_part, par2)
+	ArchiveName    *string      `db:"archive_name"`    // Archive name for grouping RAR parts, NULL for non-RAR files
 }
 
 // FileStatus represents the status of a file's availability
@@ -104,6 +117,21 @@ type RarContent struct {
 	CompressedSize int64     `db:"compressed_size"`
 	CRC32          *string   `db:"crc32"`
 	CreatedAt      time.Time `db:"created_at"`
+	// Additional metadata for streaming support
+	FileOffset     *int64    `db:"file_offset"`     // Offset within the RAR archive
+	RarPartIndex   *int      `db:"rar_part_index"`  // Which RAR part contains this file
+	IsDirectory    bool      `db:"is_directory"`    // Whether this entry is a directory
+	ModTime        *time.Time `db:"mod_time"`       // File modification time from RAR
+}
+
+// RarArchiveInfo contains information about a complete RAR archive
+type RarArchiveInfo struct {
+	VirtualFileID  int64             `db:"virtual_file_id"`
+	MainFilename   string            `db:"main_filename"`     // Main RAR file (.rar or .part001.rar)
+	TotalParts     int               `db:"total_parts"`       // Number of RAR parts
+	TotalFiles     int               `db:"total_files"`       // Number of files within archive
+	PartFilenames  []string          `json:"part_filenames"`  // List of all RAR part filenames
+	AnalyzedAt     time.Time         `db:"analyzed_at"`       // When the archive was analyzed
 }
 
 // FileMetadata represents additional metadata for virtual files
