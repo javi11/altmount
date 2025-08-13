@@ -1,0 +1,94 @@
+# AltMount Configuration Sample
+# Copy this file to config.yaml and modify for your setup
+
+# WebDAV server configuration
+webdav:
+  port: 8080
+  user: "usenet"
+  password: "usenet"
+  debug: false
+
+# Database configuration
+database:
+  main_path: "altmount.db"
+  queue_path: "altmount_queue.db"
+
+# Mount path for the virtual filesystem
+mount_path: "/mnt/altmount"
+
+# Directory containing NZB files to process
+nzb_dir: "./nzbs"
+
+# RClone encryption settings (optional)
+rclone:
+  password: ""
+  salt: ""
+
+# Worker configuration
+workers:
+  download: 15      # Number of download workers
+  processor: 2      # Number of queue processor workers
+
+# Global debug mode
+debug: false
+
+# NNTP Providers Configuration
+# Configure multiple providers for redundancy and load balancing
+providers:
+  # Primary provider with SSL
+  - name: "primary-ssl"
+    host: "ssl-news.provider.com"    # Replace with your provider's SSL hostname
+    port: 563
+    username: "your_username"        # Replace with your username
+    password: "your_password"        # Replace with your password
+    max_connections: 20
+    tls: true
+    insecure_tls: false
+    
+  # Backup provider without SSL
+  - name: "backup-standard"
+    host: "news.provider.com"        # Replace with your provider's standard hostname
+    port: 119
+    username: "your_username"        # Replace with your username
+    password: "your_password"        # Replace with your password
+    max_connections: 10
+    tls: false
+    insecure_tls: false
+    
+  # Secondary provider (optional)
+  # - name: "secondary-provider"
+  #   host: "news.otherprovider.com"
+  #   port: 563
+  #   username: "other_username"
+  #   password: "other_password"
+  #   max_connections: 15
+  #   tls: true
+  #   insecure_tls: false
+
+# Configuration Notes:
+# 
+# 1. NNTP Providers:
+#    - At least one provider must be configured
+#    - Multiple providers provide redundancy and load balancing
+#    - SSL/TLS is recommended when available (port 563)
+#    - Standard unencrypted connections typically use port 119
+#
+# 2. Max Connections:
+#    - Set based on your provider's limits
+#    - More connections = faster downloads but higher resource usage
+#    - Typical range: 10-50 connections per provider
+#
+# 3. Workers:
+#    - Download workers: Number of concurrent download threads
+#    - Processor workers: Number of NZB processing threads
+#    - Adjust based on your system resources and provider limits
+#
+# 4. Paths:
+#    - Use absolute paths for production deployments
+#    - Relative paths are relative to the working directory
+#    - Ensure the application has read/write access to all paths
+#
+# 5. Security:
+#    - Store credentials securely
+#    - Consider using environment variables for sensitive data
+#    - Use strong passwords for WebDAV authentication

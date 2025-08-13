@@ -1,0 +1,95 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/javi11/altmount/internal/adapters/webdav"
+	"github.com/javi11/altmount/internal/integration"
+	"github.com/javi11/nntppool"
+	"github.com/spf13/cobra"
+)
+
+func init() {
+	serveCmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the AltMount WebDAV server",
+		Long:  `Start the AltMount WebDAV server using configuration from YAML file.`,
+		RunE:  runServe,
+	}
+
+	rootCmd.AddCommand(serveCmd)
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	logger := slog.Default()
+
+	// Load configuration
+	config, err := LoadConfig(configFile)
+	if err != nil {
+		logger.Error("failed to load config", "err", err)
+		return err
+	}
+
+	// Validate that we have at least one provider
+	if len(config.Providers) == 0 {
+		return fmt.Errorf("no NNTP providers configured in config file")
+	}
+
+	// Convert to nntppool providers
+	providers := config.ToNNTPProviders()
+
+	// Create NNTP connection pool
+	pool, err := nntppool.NewConnectionPool(nntppool.Config{Providers: providers, Logger: logger})
+	if err != nil {
+		logger.Error("failed to create NNTP pool", "err", err)
+		return err
+	}
+	defer pool.Quit()
+
+	// Create NZB system
+	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
+		MainDatabasePath:  config.Database.MainPath,
+		QueueDatabasePath: config.Database.QueuePath,
+		MountPath:         config.MountPath,
+		NzbDir:            config.NZBDir,
+		Password:          config.RClone.Password,
+		Salt:              config.RClone.Salt,
+		DownloadWorkers:   config.Workers.Download,
+		ProcessorWorkers:  config.Workers.Processor,
+	}, pool)
+	if err != nil {
+		logger.Error("failed to init NZB system", "err", err)
+		return err
+	}
+	defer nsys.Close()
+
+	// Create WebDAV server
+	server, err := webdav.NewServer(&webdav.Config{
+		Port:  config.WebDAV.Port,
+		User:  config.WebDAV.User,
+		Pass:  config.WebDAV.Password,
+		Debug: config.WebDAV.Debug || config.Debug,
+	}, nsys.FileSystem())
+	if err != nil {
+		logger.Error("failed to start webdav", "err", err)
+		return err
+	}
+
+	logger.Info("Starting AltMount server",
+		"webdav_port", config.WebDAV.Port,
+		"mount_path", config.MountPath,
+		"providers", len(config.Providers),
+		"download_workers", config.Workers.Download,
+		"processor_workers", config.Workers.Processor)
+
+	ctx := context.Background()
+	if err := server.Start(ctx); err != nil {
+		if ctx.Err() == nil {
+			logger.Error("server exited", "err", err)
+		}
+	}
+
+	return nil
+}
