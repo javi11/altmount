@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/nntppool"
-	"github.com/javi11/rardecode/v2"
+	"github.com/nwaples/rardecode/v2"
 )
 
 // RarHandler handles RAR archive analysis and content extraction
@@ -70,7 +71,9 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 	fileCount := 0
 	for {
 		header, err := rarReader.Next()
-		if err == io.EOF || (err != nil && strings.Contains(err.Error(), "rardecode: bad header crc")) {
+		if err == io.EOF || (err != nil &&
+			(strings.Contains(err.Error(), "rardecode: bad header crc") ||
+				strings.Contains(err.Error(), "RAR signature not found"))) {
 			break
 		}
 		if err != nil {
@@ -287,55 +290,38 @@ func (rh *RarHandler) CreateRarContentReader(ctx context.Context, nzbFile *datab
 
 	// Open the RAR archive using the virtual filesystem - this is where rardecode.OpenReader
 	// will call ufs.Open() to access RAR part files, which stream data from Usenet
-	rarReader, err := rardecode.OpenReader(mainRarFile,
+	rarReader, err := rardecode.OpenFS(mainRarFile,
 		rardecode.FileSystem(ufs),
-		rardecode.SetSkipCheck(true),
-		rardecode.SetFOpenFSCheck(false))
+		rardecode.SkipCheck,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open RAR archive %s via Usenet filesystem: %w", mainRarFile, err)
 	}
 
-	// Find the target file within the RAR archive
-	// Each call to rarReader.Next() may read from different RAR parts via Usenet
-	for {
-		header, err := rarReader.Next()
-		if err == io.EOF {
-			rarReader.Close()
-			return nil, fmt.Errorf("file not found in RAR archive: %s", targetPath)
-		}
-		if err != nil {
-			rarReader.Close()
-			return nil, fmt.Errorf("failed to read RAR header from Usenet stream: %w", err)
-		}
-
-		// Check if this is the target file
-		if filepath.Clean(header.Name) == targetPath || filepath.Base(header.Name) == targetPath {
-			rh.log.Info("Found target file in RAR archive",
-				"file", header.Name,
-				"size", header.UnPackedSize,
-				"compressed", header.PackedSize)
-
-			// Return a reader that streams the file content directly from the RAR archive
-			// The rarReader will read data on-demand from multiple RAR parts via Usenet
-			return &rarContentReader{
-				reader:    rarReader,
-				rarReader: rarReader,
-				header:    header,
-			}, nil
-		}
+	f, err := rarReader.Open(targetPath)
+	if err == io.EOF {
+		return nil, fmt.Errorf("file not found in RAR archive: %s", targetPath)
 	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read RAR header from Usenet stream: %w", err)
+	}
+
+	rh.log.Info("Found target file in RAR archive",
+		"file", targetPath)
+
+	return &rarContentReader{
+		rarReader: f,
+	}, nil
 }
 
 // rarContentReader wraps a rardecode reader for a specific file with seek support
 // Implements RarContentReadSeeker interface for efficient RAR content access
 type rarContentReader struct {
-	reader    io.Reader
-	rarReader *rardecode.ReadCloser
-	header    *rardecode.FileHeader
+	rarReader fs.File
 }
 
 func (rcr *rarContentReader) Read(p []byte) (n int, err error) {
-	return rcr.reader.Read(p)
+	return rcr.rarReader.Read(p)
 }
 
 func (rcr *rarContentReader) Close() error {
@@ -352,6 +338,10 @@ func (rcr *rarContentReader) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	// rardecode.ReadCloser has a Seek method, use it directly
-	n, err := rcr.rarReader.Seek(offset, whence)
-	return n, err
+	if r, ok := rcr.rarReader.(io.Seeker); ok {
+		n, err := r.Seek(offset, whence)
+		return n, err
+	}
+
+	return 0, fmt.Errorf("RAR reader does not support seeking")
 }

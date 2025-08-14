@@ -361,16 +361,6 @@ github.com/javi11/nntppool v1.5.1 h1:xVl/0uiGK3AJ0YDOxFPTjNeESOWn1KMkfNeP846PLgI
 github.com/javi11/nntppool v1.5.1/go.mod h1:lZYpeUrFMGtjIJBTEDAZlQ4Su2wD+BylSk9Np/1aRHs=
 github.com/javi11/nzbparser v0.3.0 h1:tPPzybyXcqZbfhMWpJVASnZvu37ggF3A5HS2BTLHCCU=
 github.com/javi11/nzbparser v0.3.0/go.mod h1:1vJtuXY/vz2CALFC/X2MYIdfGLE0BW65sB0SAFclCcI=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813171556-0f59e1712bea h1:srRpUKZXbTAqR+w4tf0ikAOqNJBQiNc//eu1yWYvQtc=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813171556-0f59e1712bea/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813172707-4f15d3a925fc h1:5gX6GAi3so4Y3XwIYmqOf4mHpNBrniLo+Lir/Bi6Y28=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813172707-4f15d3a925fc/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813172942-8b825340138a h1:MPMTD6YohlXcI5a8rAlt+86JL3LtKfUt0U/6WrWYvrQ=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813172942-8b825340138a/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813173439-33ac38f681af h1:oj94dzeyLQJe9Ay4SNCYqhXI9w/qlmQmiQP/FviBtvk=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813173439-33ac38f681af/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813182313-036ef9c51e7f h1:WJdJrytB9sPOnZ1z9SZG8Eb0yrGUFgXNHFF4WhZw0m4=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250813182313-036ef9c51e7f/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
 github.com/jgautheron/goconst v1.8.2 h1:y0XF7X8CikZ93fSNT6WBTb/NElBu9IjaY7CCYQrCMX4=
 github.com/jgautheron/goconst v1.8.2/go.mod h1:A0oxgBCHy55NQn6sYpO7UdnA9p+h7cPtoOZUmvNIako=
 github.com/jingyugao/rowserrcheck v1.1.1 h1:zibz55j/MJtLsjP1OF4bSdgXxwL1b+Vn7Tjzq7gFzUs=
@@ -483,6 +473,8 @@ github.com/nishanths/predeclared v0.2.2 h1:V2EPdZPliZymNAn79T8RkNApBjMmVKh5XRpLm
 github.com/nishanths/predeclared v0.2.2/go.mod h1:RROzoN6TnGQupbC+lqggsOlcgysk3LMK/HI84Mp280c=
 github.com/nunnatsa/ginkgolinter v0.20.0 h1:OmWLkAFO2HUTYcU6mprnKud1Ey5pVdiVNYGO5HVicx8=
 github.com/nunnatsa/ginkgolinter v0.20.0/go.mod h1:dCIuFlTPfQerXgGUju3VygfAFPdC5aE1mdacCDKDJcQ=
+github.com/nwaples/rardecode/v2 v2.1.2-0.20250517005925-b4fc922c0a09 h1:ResUAJZq86AUo0me/whuF71HbASMO7W6TMdelD6v1TU=
+github.com/nwaples/rardecode/v2 v2.1.2-0.20250517005925-b4fc922c0a09/go.mod h1:7uz379lSxPe6j9nvzxUZ+n7mnJNgjsRNb6IbvGVHRmw=
 github.com/onsi/ginkgo/v2 v2.23.4 h1:ktYTpKJAVZnDT4VjxSbiBenUjmlL/5QkBEocaWXiQus=
 github.com/onsi/ginkgo/v2 v2.23.4/go.mod h1:Bt66ApGPBFzHyR+JO10Zbt0Gsp4uWxu5mIOTusL46e8=
 github.com/onsi/gomega v1.37.0 h1:CdEG8g0S133B4OswTDC/5XPSzE1OeP29QOioj2PID2Y=
