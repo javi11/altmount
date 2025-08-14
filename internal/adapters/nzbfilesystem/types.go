@@ -1,16 +1,12 @@
 package nzbfilesystem
 
 import (
-	"context"
-	"io"
 	"strings"
-	"sync"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/headers"
 	"github.com/javi11/altmount/internal/encryption/rclone"
-	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool"
 )
 
@@ -18,38 +14,6 @@ import (
 type NzbRemoteFileConfig struct {
 	GlobalPassword string // Global password for .bin files
 	GlobalSalt     string // Global salt for .bin files
-}
-
-// NzbRemoteFile implements the RemoteFile interface for NZB-backed virtual files
-type NzbRemoteFile struct {
-	db                 *database.DB
-	cp                 nntppool.UsenetConnectionPool
-	maxDownloadWorkers int
-	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
-	headersCipher      encryption.Cipher // For headers encryption/decryption
-	globalPassword     string            // Global password fallback
-	globalSalt         string            // Global salt fallback
-}
-
-// VirtualFile represents a file backed by NZB data
-type VirtualFile struct {
-	name        string
-	virtualFile *database.VirtualFile
-	nzbFile     *database.NzbFile
-	db          *database.DB
-	args        utils.PathWithArgs
-	position    int64
-
-	// NNTP and reading state
-	cp             nntppool.UsenetConnectionPool
-	reader         io.ReadCloser
-	ctx            context.Context
-	maxWorkers     int
-	rcloneCipher   encryption.Cipher // For encryption/decryption
-	headersCipher  encryption.Cipher // For headers encryption/decryption
-	globalPassword string            // Global password fallback
-	globalSalt     string            // Global salt fallback
-	mu             sync.Mutex
 }
 
 // NewNzbRemoteFile creates a new NZB remote file handler with default config

@@ -8,9 +8,22 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/utils"
+	"github.com/javi11/nntppool"
 	"github.com/spf13/afero"
 )
+
+// NzbRemoteFile implements the RemoteFile interface for NZB-backed virtual files
+type NzbRemoteFile struct {
+	db                 *database.DB
+	cp                 nntppool.UsenetConnectionPool
+	maxDownloadWorkers int
+	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
+	headersCipher      encryption.Cipher // For headers encryption/decryption
+	globalPassword     string            // Global password fallback
+	globalSalt         string            // Global salt fallback
+}
 
 // OpenFile opens a virtual file backed by NZB data
 func (nrf *NzbRemoteFile) OpenFile(ctx context.Context, name string, r utils.PathWithArgs) (bool, afero.File, error) {
