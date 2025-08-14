@@ -283,11 +283,6 @@ func (rh *RarHandler) CreateRarContentReader(ctx context.Context, nzbFile *datab
 	// Start with the first RAR file (usually .rar or .part001.rar)
 	mainRarFile := rarFileNames[0]
 
-	rh.log.Info("Creating streaming reader for RAR content",
-		"target_file", targetPath,
-		"main_rar", mainRarFile,
-		"total_parts", len(rarFileNames))
-
 	// Open the RAR archive using the virtual filesystem - this is where rardecode.OpenReader
 	// will call ufs.Open() to access RAR part files, which stream data from Usenet
 	rarReader, err := rardecode.OpenFS(mainRarFile,
@@ -339,8 +334,7 @@ func (rcr *rarContentReader) Seek(offset int64, whence int) (int64, error) {
 
 	// rardecode.ReadCloser has a Seek method, use it directly
 	if r, ok := rcr.rarReader.(io.Seeker); ok {
-		n, err := r.Seek(offset, whence)
-		return n, err
+		return r.Seek(offset, whence)
 	}
 
 	return 0, fmt.Errorf("RAR reader does not support seeking")
