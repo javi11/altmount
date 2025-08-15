@@ -3,7 +3,6 @@ package nzb
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -474,42 +473,6 @@ func (proc *Processor) analyzeDirectoryStructureWithBase(files []ParsedFile, bas
 		directories: dirs,
 		commonRoot:  baseDir,
 	}
-}
-
-// AnalyzeRarContentFromData analyzes RAR content when actual RAR data is available
-// This method can be called after downloading RAR segments to extract the internal file structure
-func (proc *Processor) AnalyzeRarContentFromData(r io.Reader, virtualFileID int64) error {
-	// Get the virtual file from database
-	virtualFile, err := proc.repo.GetVirtualFile(virtualFileID)
-	if err != nil {
-		return fmt.Errorf("failed to get virtual file: %w", err)
-	}
-
-	// Use RAR handler to analyze content
-	rarContents, err := proc.rarHandler.AnalyzeRarContent(r, virtualFile, nil)
-	if err != nil {
-		return fmt.Errorf("failed to analyze RAR content: %w", err)
-	}
-
-	// Create virtual files for RAR contents
-	return proc.repo.WithTransaction(func(txRepo *database.Repository) error {
-		for _, content := range rarContents {
-			// Create virtual file for this RAR content
-			contentFile := &database.VirtualFile{
-				ParentID:    &virtualFileID,
-				Name:        content.Filename,
-				Size:        content.Size,
-				IsDirectory: content.IsDirectory,
-				Status:      database.FileStatusHealthy,
-			}
-
-			if err := txRepo.CreateVirtualFile(contentFile); err != nil {
-				return fmt.Errorf("failed to create virtual file for RAR content %s: %w", content.Filename, err)
-			}
-		}
-
-		return nil
-	})
 }
 
 // GetPendingRarAnalysis returns virtual files that need RAR content analysis

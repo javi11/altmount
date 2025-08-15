@@ -12,7 +12,6 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
-	"github.com/javi11/altmount/internal/nzb"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/nntppool"
@@ -241,15 +240,11 @@ func (vf *VirtualFile) ensureReader() error {
 		return ErrNoUsenetPool
 	}
 
-	// Check if this file is extracted from a RAR archive
-	isRarFile, err := vf.isExtractedFromRar()
-	if err != nil {
-		return fmt.Errorf("failed to check if file is from RAR: %w", err)
-	}
+	var isRarFile bool
 
 	if isRarFile {
-		// For RAR files, create a RAR content reader instead of direct Usenet reader
-		return vf.ensureRarReader()
+		// TODO handle
+		return nil
 	}
 
 	start, end, _ := vf.getRequestRange()
@@ -349,237 +344,40 @@ func (vf *VirtualFile) updateFileStatusFromError(articleErr *usenet.ArticleNotFo
 	_ = repo.UpdateVirtualFileStatus(vf.virtualFile.ID, status)
 }
 
-// isExtractedFromRar checks if this virtual file was extracted from a RAR archive
-func (vf *VirtualFile) isExtractedFromRar() (bool, error) {
-	if vf.db == nil || vf.virtualFile == nil {
-		return false, nil
+// getRequestRange extracts and validates the HTTP Range header from the original request
+// Returns the effective range to use for reader creation, considering file size limits
+func (vf *VirtualFile) getRequestRange() (start, end int64, hasRange bool) {
+	// Try to get range from HTTP request args
+	rangeHeader, err := vf.args.Range()
+	if err != nil || rangeHeader == nil {
+		// No valid range header, return full file range
+		return 0, vf.virtualFile.Size - 1, false
 	}
 
-	repo := database.NewRepository(vf.db.Connection())
-	metadata, err := repo.GetFileMetadata(vf.virtualFile.ID)
-	if err != nil {
-		// If metadata doesn't exist, it's not an error - just means it's not from RAR
-		return false, nil
+	// Fix range header to ensure it's within file bounds
+	fixedRange := utils.FixRangeHeader(rangeHeader, vf.virtualFile.Size)
+	if fixedRange == nil {
+		return 0, vf.virtualFile.Size - 1, false
 	}
 
-	_, exists := metadata["extracted_from_rar"]
-	return exists, nil
+	// Ensure range is valid
+	if fixedRange.Start < 0 {
+		fixedRange.Start = 0
+	}
+	if fixedRange.End >= vf.virtualFile.Size {
+		fixedRange.End = vf.virtualFile.Size - 1
+	}
+	if fixedRange.Start > fixedRange.End {
+		return 0, vf.virtualFile.Size - 1, false
+	}
+
+	return fixedRange.Start, fixedRange.End, true
 }
 
-// ensureRarReader creates a reader for RAR content with the requested range
-func (vf *VirtualFile) ensureRarReader() error {
-	// Get the requested range from HTTP headers
-	start, end, hasRange := vf.getRequestRange()
+// createUsenetReader creates a new usenet reader for the specified range
+func (vf *VirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+	loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
 
-	if !hasRange {
-		// No range specified, read entire file
-		start = 0
-		end = vf.virtualFile.Size - 1
-	}
-
-	// Create RAR content reader with the calculated range
-	rarReader, err := vf.createRarContentReaderWithRange(start, end)
-	if err != nil {
-		return fmt.Errorf("failed to create RAR content reader: %w", err)
-	}
-
-	vf.reader = rarReader
-	vf.position = start
-	return nil
-}
-
-// createRarContentReaderWithRange creates a streaming reader for a specific range within this RAR-extracted file
-func (vf *VirtualFile) createRarContentReaderWithRange(rangeStart, rangeEnd int64) (nzb.RarContentReadSeeker, error) {
-	if vf.db == nil || vf.virtualFile == nil || vf.nzbFile == nil {
-		return nil, fmt.Errorf("missing database or file information")
-	}
-
-	// Get the RAR directory path from metadata
-	repo := database.NewRepository(vf.db.Connection())
-	metadata, err := repo.GetFileMetadata(vf.virtualFile.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file metadata: %w", err)
-	}
-
-	rarDirPath, exists := metadata["extracted_from_rar"]
-	if !exists || rarDirPath == "" {
-		return nil, fmt.Errorf("file is not extracted from RAR or missing RAR directory metadata")
-	}
-
-	// Get the parent RAR directory to find the RAR content
-	// First, find the RAR directory virtual file
-	rarDirFile, err := repo.GetVirtualFileByPath(rarDirPath)
-	if err != nil || rarDirFile == nil {
-		return nil, fmt.Errorf("failed to find RAR directory: %s", rarDirPath)
-	}
-
-	// Get the RAR content information for this directory
-	rarContents, err := repo.GetRarContentsByVirtualFileID(rarDirFile.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get RAR contents for directory ID %d: %w", rarDirFile.ID, err)
-	}
-
-	if len(rarContents) == 0 {
-		return nil, fmt.Errorf("no RAR contents found for directory %s", rarDirPath)
-	}
-
-	// Find RAR files associated with this NZB
-	rarFiles, err := vf.getRarFilesFromNzb()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get RAR files from NZB: %w", err)
-	}
-
-	if len(rarFiles) == 0 {
-		return nil, fmt.Errorf("no RAR files found in NZB")
-	}
-
-	// Find the RAR content entry for this specific file to get its offset and size
-	var rarContent *database.RarContent
-	for _, content := range rarContents {
-		if content.Filename == vf.virtualFile.Filename || content.InternalPath == vf.virtualFile.Filename {
-			rarContent = content
-			break
-		}
-	}
-
-	if rarContent == nil {
-		return nil, fmt.Errorf("RAR content not found for file: %s", vf.virtualFile.Filename)
-	}
-
-	if rarContent.FileOffset == nil {
-		return nil, fmt.Errorf("file offset not available for RAR file: %s", vf.virtualFile.Filename)
-	}
-
-	// Calculate absolute range within the RAR stream
-	// The file starts at rarContent.FileOffset within the RAR stream
-	// The requested range is relative to the file, so we add it to the file offset
-	absoluteRangeStart := *rarContent.FileOffset + rangeStart
-	rangeSize := rangeEnd - rangeStart + 1
-
-	// Use the RAR handler to create a direct content reader for the specific range
-	rarHandler := nzb.NewRarHandler(vf.cp, vf.maxWorkers)
-	targetFilename := vf.virtualFile.Filename // The filename within the RAR archive
-
-	return rarHandler.CreateDirectRarContentReader(
-		vf.ctx,
-		vf.nzbFile,
-		rarFiles,
-		targetFilename,
-		absoluteRangeStart, // Absolute starting offset of the range within the RAR stream
-		rangeSize,          // Size of the range to read
-	)
-}
-
-// createRarContentReader creates a streaming reader with seek support for this RAR-extracted file (legacy method)
-func (vf *VirtualFile) createRarContentReader() (nzb.RarContentReadSeeker, error) {
-	if vf.db == nil || vf.virtualFile == nil || vf.nzbFile == nil {
-		return nil, fmt.Errorf("missing database or file information")
-	}
-
-	// Get the RAR directory path from metadata
-	repo := database.NewRepository(vf.db.Connection())
-	metadata, err := repo.GetFileMetadata(vf.virtualFile.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file metadata: %w", err)
-	}
-
-	rarDirPath, exists := metadata["extracted_from_rar"]
-	if !exists || rarDirPath == "" {
-		return nil, fmt.Errorf("file is not extracted from RAR or missing RAR directory metadata")
-	}
-
-	// Get the parent RAR directory to find the RAR content
-	// First, find the RAR directory virtual file
-	rarDirFile, err := repo.GetVirtualFileByPath(rarDirPath)
-	if err != nil || rarDirFile == nil {
-		return nil, fmt.Errorf("failed to find RAR directory: %s", rarDirPath)
-	}
-
-	// Get the RAR content information for this directory
-	rarContents, err := repo.GetRarContentsByVirtualFileID(rarDirFile.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get RAR contents for directory ID %d: %w", rarDirFile.ID, err)
-	}
-
-	if len(rarContents) == 0 {
-		return nil, fmt.Errorf("no RAR contents found for directory %s", rarDirPath)
-	}
-
-	// Find RAR files associated with this NZB
-	rarFiles, err := vf.getRarFilesFromNzb()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get RAR files from NZB: %w", err)
-	}
-
-	if len(rarFiles) == 0 {
-		return nil, fmt.Errorf("no RAR files found in NZB")
-	}
-
-	// Find the RAR content entry for this specific file to get its offset and size
-	var rarContent *database.RarContent
-	for _, content := range rarContents {
-		if content.Filename == vf.virtualFile.Filename || content.InternalPath == vf.virtualFile.Filename {
-			rarContent = content
-			break
-		}
-	}
-
-	if rarContent == nil {
-		return nil, fmt.Errorf("RAR content not found for file: %s", vf.virtualFile.Filename)
-	}
-
-	if rarContent.FileOffset == nil {
-		return nil, fmt.Errorf("file offset not available for RAR file: %s", vf.virtualFile.Filename)
-	}
-
-	// Use the RAR handler to create a direct content reader for optimal performance
-	// This bypasses rardecode for content reading and streams directly from Usenet using the file offset
-	rarHandler := nzb.NewRarHandler(vf.cp, vf.maxWorkers)
-	targetFilename := vf.virtualFile.Filename // The filename within the RAR archive
-
-	return rarHandler.CreateDirectRarContentReader(
-		vf.ctx,
-		vf.nzbFile,
-		rarFiles,
-		targetFilename,
-		*rarContent.FileOffset, // Starting offset of the file within the RAR stream
-		rarContent.Size,        // Size of the target file
-	)
-}
-
-// getRarFilesFromNzb extracts RAR file information from the database
-func (vf *VirtualFile) getRarFilesFromNzb() ([]nzb.ParsedFile, error) {
-	// NEW IMPLEMENTATION: Query the database for RAR part NZB files
-	// With the enhanced database schema, each RAR part is stored as a separate NZB record
-	// with its proper filename and corresponding segments
-
-	if vf.db == nil || vf.nzbFile == nil {
-		return nil, fmt.Errorf("missing database or NZB file information")
-	}
-
-	repo := database.NewRepository(vf.db.Connection())
-
-	// Get all RAR part NZB files for this parent NZB
-	rarPartNzbFiles, err := repo.GetRarPartNzbFiles(vf.nzbFile.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get RAR part NZB files: %w", err)
-	}
-
-	if len(rarPartNzbFiles) == 0 {
-		return nil, fmt.Errorf("no RAR part files found for NZB ID %d", vf.nzbFile.ID)
-	}
-
-	// Convert NZB files to ParsedFiles for the RAR handler
-	var rarFiles []nzb.ParsedFile
-	for _, nzbFile := range rarPartNzbFiles {
-		rarFile := nzb.ParsedFile{
-			Filename:     nzbFile.Filename,     // Actual RAR part filename (movie.rar, movie.r00, etc.)
-			Size:         nzbFile.Size,         // Size of this specific part
-			Segments:     nzbFile.SegmentsData, // Only segments for this RAR part
-			IsRarArchive: true,                 // All are RAR archive parts
-		}
-		rarFiles = append(rarFiles, rarFile)
-	}
-
-	return rarFiles, nil
+	rg := usenet.GetSegmentsInRange(start, end, loader)
+	return usenet.NewUsenetReader(ctx, vf.cp, rg, vf.maxWorkers)
 }
