@@ -361,8 +361,8 @@ github.com/javi11/nntppool v1.5.1 h1:xVl/0uiGK3AJ0YDOxFPTjNeESOWn1KMkfNeP846PLgI
 github.com/javi11/nntppool v1.5.1/go.mod h1:lZYpeUrFMGtjIJBTEDAZlQ4Su2wD+BylSk9Np/1aRHs=
 github.com/javi11/nzbparser v0.3.0 h1:tPPzybyXcqZbfhMWpJVASnZvu37ggF3A5HS2BTLHCCU=
 github.com/javi11/nzbparser v0.3.0/go.mod h1:1vJtuXY/vz2CALFC/X2MYIdfGLE0BW65sB0SAFclCcI=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250815142956-75797eb7263d h1:eSikvZNcD2ZxH22P2ntZWnXK/knnfsCZkd2LTr047C4=
-github.com/javi11/rardecode/v2 v2.1.2-0.20250815142956-75797eb7263d/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
+github.com/javi11/rardecode/v2 v2.1.2-0.20250815161843-45d2f4324928 h1:3zkQZ5XoDX7EVG965q0kdXlJBgt4lGvwP+ukaMPRrp8=
+github.com/javi11/rardecode/v2 v2.1.2-0.20250815161843-45d2f4324928/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
 github.com/jgautheron/goconst v1.8.2 h1:y0XF7X8CikZ93fSNT6WBTb/NElBu9IjaY7CCYQrCMX4=
 github.com/jgautheron/goconst v1.8.2/go.mod h1:A0oxgBCHy55NQn6sYpO7UdnA9p+h7cPtoOZUmvNIako=
 github.com/jingyugao/rowserrcheck v1.1.1 h1:zibz55j/MJtLsjP1OF4bSdgXxwL1b+Vn7Tjzq7gFzUs=

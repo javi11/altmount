@@ -88,9 +88,9 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 			SegmentSize:    parsed.SegmentSize,
 			RclonePassword: parsed.Password,
 			RcloneSalt:     parsed.Salt,
-			ParentNzbID:    nil,                          // This is the main NZB file
-			PartType:       database.NzbPartTypeMain,     // Mark as main NZB file
-			ArchiveName:    nil,                          // Not applicable for main NZB
+			ParentNzbID:    nil,                      // This is the main NZB file
+			PartType:       database.NzbPartTypeMain, // Mark as main NZB file
+			ArchiveName:    nil,                      // Not applicable for main NZB
 		}
 
 		if err := txRepo.CreateNzbFile(nzbFile); err != nil {
@@ -288,7 +288,7 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 
 	// Group RAR files by their archive base name
 	rarArchives := proc.groupRarFilesByArchive(files)
-	
+
 	// Process each RAR archive
 	for archiveName, archiveFiles := range rarArchives {
 		// Create individual NZB records for each RAR part file
@@ -325,9 +325,9 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 		// Perform real-time RAR analysis using the newly created RAR part NZB files
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // 5 minute timeout for analysis
 		defer cancel()
-		
+
 		// Analyze RAR content using streaming from Usenet - now use the individual RAR part files
-		rarContents, err := proc.rarHandler.AnalyzeRarContentFromNzb(ctx, nzbFile, archiveFiles, rarDir)
+		rarContents, _, err := proc.rarHandler.AnalyzeRarContentFromNzb(ctx, nzbFile, archiveFiles, rarDir)
 		if err != nil {
 			// If real-time analysis fails, mark for later analysis
 			if err := repo.SetFileMetadata(rarDir.ID, "rar_analysis_needed", "true"); err != nil {
@@ -364,7 +364,7 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 					return fmt.Errorf("failed to set RAR extraction metadata: %w", err)
 				}
 			}
-			
+
 			// Mark analysis as completed
 			if err := repo.SetFileMetadata(rarDir.ID, "rar_analysis_completed", time.Now().UTC().Format(time.RFC3339)); err != nil {
 				return fmt.Errorf("failed to set RAR analysis completed flag: %w", err)
@@ -660,38 +660,38 @@ func splitRarFilenameForComparison(filename string) (base, ext string) {
 	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
 		return matches[1], strings.TrimPrefix(filename, matches[1]+".")
 	}
-	
+
 	// Handle patterns like .rar, .r00, .r01
 	if strings.HasSuffix(strings.ToLower(filename), ".rar") {
 		return strings.TrimSuffix(filename, filepath.Ext(filename)), "rar"
 	}
-	
+
 	rPattern := regexp.MustCompile(`^(.+)\.r(\d+)$`)
 	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
-		return matches[1], "r"+matches[2]
+		return matches[1], "r" + matches[2]
 	}
-	
+
 	return filename, ""
 }
 
 // groupRarFilesByArchive groups RAR files by their archive base name
 func (proc *Processor) groupRarFilesByArchive(files []ParsedFile) map[string][]ParsedFile {
 	rarArchives := make(map[string][]ParsedFile)
-	
+
 	for _, file := range files {
 		if !file.IsRarArchive {
 			continue
 		}
-		
+
 		// Get the base archive name (remove part numbers and extensions)
 		baseName := proc.getRarArchiveBaseName(file.Filename)
 		if baseName == "" {
 			baseName = file.Filename // Fallback to original filename
 		}
-		
+
 		rarArchives[baseName] = append(rarArchives[baseName], file)
 	}
-	
+
 	return rarArchives
 }
 
@@ -702,17 +702,17 @@ func (proc *Processor) getRarArchiveBaseName(filename string) string {
 	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
 		return matches[1]
 	}
-	
+
 	// Handle patterns like movie.rar, movie.r00, movie.r01
 	if strings.HasSuffix(strings.ToLower(filename), ".rar") {
 		return strings.TrimSuffix(filename, filepath.Ext(filename))
 	}
-	
+
 	rPattern := regexp.MustCompile(`^(.+)\.r\d+$`)
 	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 1 {
 		return matches[1]
 	}
-	
+
 	// Fallback: remove common RAR suffixes
 	rarDirPattern := regexp.MustCompile(`\.(part\d+|r\d+)$`)
 	baseName := strings.TrimSuffix(filename, filepath.Ext(filename))
@@ -723,11 +723,11 @@ func (proc *Processor) getRarArchiveBaseName(filename string) string {
 func (proc *Processor) sortRarFiles(files []ParsedFile) []ParsedFile {
 	sorted := make([]ParsedFile, len(files))
 	copy(sorted, files)
-	
+
 	sort.Slice(sorted, func(i, j int) bool {
 		return proc.compareRarFilenames(sorted[i].Filename, sorted[j].Filename)
 	})
-	
+
 	return sorted
 }
 
@@ -736,16 +736,16 @@ func (proc *Processor) compareRarFilenames(a, b string) bool {
 	// Extract base names and extensions
 	aBase, aExt := proc.splitRarFilename(a)
 	bBase, bExt := proc.splitRarFilename(b)
-	
+
 	// If different base names, use lexical order
 	if aBase != bBase {
 		return aBase < bBase
 	}
-	
+
 	// Same base name, sort by extension/part number
 	aNum := proc.extractRarPartNumber(aExt)
 	bNum := proc.extractRarPartNumber(bExt)
-	
+
 	return aNum < bNum
 }
 
@@ -756,17 +756,17 @@ func (proc *Processor) splitRarFilename(filename string) (base, ext string) {
 	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
 		return matches[1], strings.TrimPrefix(filename, matches[1]+".")
 	}
-	
+
 	// Handle patterns like .rar, .r00, .r01
 	if strings.HasSuffix(strings.ToLower(filename), ".rar") {
 		return strings.TrimSuffix(filename, filepath.Ext(filename)), "rar"
 	}
-	
+
 	rPattern := regexp.MustCompile(`^(.+)\.r(\d+)$`)
 	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
-		return matches[1], "r"+matches[2]
+		return matches[1], "r" + matches[2]
 	}
-	
+
 	return filename, ""
 }
 
@@ -776,7 +776,7 @@ func (proc *Processor) extractRarPartNumber(ext string) int {
 	if ext == "rar" {
 		return 0
 	}
-	
+
 	// Extract number from .r00, .r01, etc.
 	rPattern := regexp.MustCompile(`^r(\d+)$`)
 	if matches := rPattern.FindStringSubmatch(ext); len(matches) > 1 {
@@ -784,7 +784,7 @@ func (proc *Processor) extractRarPartNumber(ext string) int {
 			return num + 1 // .r00 becomes 1, .r01 becomes 2, etc.
 		}
 	}
-	
+
 	// Extract number from .part001.rar, .part01.rar, etc.
 	partPattern := regexp.MustCompile(`^part(\d+)\.rar$`)
 	if matches := partPattern.FindStringSubmatch(ext); len(matches) > 1 {
@@ -792,7 +792,7 @@ func (proc *Processor) extractRarPartNumber(ext string) int {
 			return num
 		}
 	}
-	
+
 	return 999999 // Unknown format goes last
 }
 
@@ -813,25 +813,25 @@ func (proc *Processor) parseInt(s string) int {
 func (proc *Processor) createRarPartNzbFiles(repo *database.Repository, parentNzbFile *database.NzbFile, archiveName string, archiveFiles []ParsedFile) error {
 	// First, mark the parent NZB file as main type
 	parentNzbFile.PartType = database.NzbPartTypeMain
-	
+
 	// Sort archive files to ensure proper order
 	sortedFiles := proc.sortRarFiles(archiveFiles)
-	
+
 	for _, rarFile := range sortedFiles {
 		// Create unique path for each RAR part by appending the part filename
 		// Format: "/path/to/parent.nzb#movie.part01.rar"
 		// This ensures UNIQUE constraint compliance while maintaining parent relationship
 		rarPartPath := fmt.Sprintf("%s#%s", parentNzbFile.Path, rarFile.Filename)
-		
+
 		// Create an NZB file record for this RAR part
 		rarPartNzbFile := &database.NzbFile{
-			Path:           rarPartPath,        // Unique path for this RAR part
-			Filename:       rarFile.Filename,   // Actual RAR part filename (movie.rar, movie.r00, etc.)
-			Size:           rarFile.Size,       // Size of this specific part
-			NzbType:        parentNzbFile.NzbType, // Same type as parent
-			SegmentsCount:  len(rarFile.Segments), // Number of segments for this part
-			SegmentsData:   rarFile.Segments,      // Only segments for this specific part
-			SegmentSize:    parentNzbFile.SegmentSize, // Use parent's segment size
+			Path:           rarPartPath,                  // Unique path for this RAR part
+			Filename:       rarFile.Filename,             // Actual RAR part filename (movie.rar, movie.r00, etc.)
+			Size:           rarFile.Size,                 // Size of this specific part
+			NzbType:        parentNzbFile.NzbType,        // Same type as parent
+			SegmentsCount:  len(rarFile.Segments),        // Number of segments for this part
+			SegmentsData:   rarFile.Segments,             // Only segments for this specific part
+			SegmentSize:    parentNzbFile.SegmentSize,    // Use parent's segment size
 			RclonePassword: parentNzbFile.RclonePassword, // Inherit encryption settings
 			RcloneSalt:     parentNzbFile.RcloneSalt,     // Inherit encryption settings
 			ParentNzbID:    &parentNzbFile.ID,            // Link to parent NZB

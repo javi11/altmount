@@ -36,7 +36,7 @@ func NewRarHandler(cp nntppool.UsenetConnectionPool, maxWorkers int) *RarHandler
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses rardecode.OpenReader with a virtual filesystem to stream RAR data from Usenet
 // The virtualFile parameter is the directory that will contain the extracted files (not the RAR file itself)
-func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *database.NzbFile, rarFiles []ParsedFile, virtualDir *database.VirtualFile) ([]database.RarContent, error) {
+func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *database.NzbFile, rarFiles []ParsedFile, virtualDir *database.VirtualFile) ([]database.RarContent, []rardecode.VolumeHeader, error) {
 	// Create Usenet filesystem for RAR access - this is the key component that enables
 	// rardecode.OpenReader to read RAR parts directly from Usenet without downloading
 	ufs := NewUsenetFileSystem(ctx, rh.cp, nzbFile, rarFiles, rh.maxWorkers)
@@ -44,7 +44,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 	// Get sorted RAR files for proper multi-part reading
 	rarFileNames := ufs.GetRarFiles()
 	if len(rarFileNames) == 0 {
-		return nil, fmt.Errorf("no RAR files found in the archive")
+		return nil, nil, fmt.Errorf("no RAR files found in the archive")
 	}
 
 	// Start with the first RAR file (usually .rar or .part001.rar)
@@ -60,7 +60,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 	// from Usenet using createUsenetReader() - no local file storage required!
 	rarReader, err := rardecode.OpenReader(mainRarFile, rardecode.FileSystem(ufs))
 	if err != nil {
-		return nil, fmt.Errorf("failed to open RAR archive %s via Usenet filesystem: %w", mainRarFile, err)
+		return nil, nil, fmt.Errorf("failed to open RAR archive %s via Usenet filesystem: %w", mainRarFile, err)
 	}
 	defer rarReader.Close()
 
@@ -79,7 +79,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to read RAR header from Usenet stream: %w", err)
+			return nil, nil, fmt.Errorf("failed to read RAR header from Usenet stream: %w", err)
 		}
 
 		// Skip directories - focus on files
@@ -139,7 +139,12 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 		}(),
 	)
 
-	return rarContents, nil
+	vol, err := rarReader.VolumeHeaders()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read RAR volume headers: %w", err)
+	}
+
+	return rarContents, vol, nil
 }
 
 // AnalyzeRarContent analyzes a RAR archive to extract its internal file structure (legacy method)
@@ -258,10 +263,9 @@ func (rh *RarHandler) GetRarVersion(data []byte) (int, error) {
 	return version, nil
 }
 
-// RarContentReadSeeker combines io.ReadCloser and io.Seeker for RAR content access
+// RarContentReadSeeker provides read access for RAR content
 type RarContentReadSeeker interface {
 	io.ReadCloser
-	io.Seeker
 }
 
 // Compile-time interface check
@@ -312,27 +316,29 @@ func (rh *RarHandler) CreateRarContentReader(ctx context.Context, nzbFile *datab
 }
 
 // CreateDirectRarContentReader creates a direct streaming reader that bypasses rardecode for content reading
-// This method provides optimal performance by using the file offset from RAR analysis to stream directly from Usenet
-func (rh *RarHandler) CreateDirectRarContentReader(ctx context.Context, nzbFile *database.NzbFile, rarFiles []ParsedFile, targetFilename string, fileOffset, fileSize int64) (RarContentReadSeeker, error) {
+// This method provides optimal performance by using range parameters to stream directly from Usenet
+func (rh *RarHandler) CreateDirectRarContentReader(ctx context.Context, nzbFile *database.NzbFile, rarFiles []ParsedFile, targetFilename string, rangeOffset, rangeSize int64) (RarContentReadSeeker, error) {
 	rh.log.Debug("Creating direct RAR content reader",
 		"target_file", targetFilename,
-		"file_offset", fileOffset,
-		"file_size", fileSize,
+		"range_offset", rangeOffset,
+		"range_size", rangeSize,
 		"rar_parts", len(rarFiles))
 
 	return &DirectRarContentReader{
-		ctx:            ctx,
-		cp:             rh.cp,
-		nzbFile:        nzbFile,
-		rarFiles:       rarFiles,
-		targetFilename: targetFilename,
-		fileOffset:     fileOffset,
-		fileSize:       fileSize,
-		currentPos:     0,
-		maxWorkers:     rh.maxWorkers,
-		log:            rh.log.With("target_file", targetFilename),
-		partBoundaries: nil, // Will be calculated on first use
-		currentReader:  nil,
+		ctx:              ctx,
+		cp:               rh.cp,
+		nzbFile:          nzbFile,
+		rarFiles:         rarFiles,
+		targetFilename:   targetFilename,
+		rangeOffset:      rangeOffset,
+		rangeSize:        rangeSize,
+		maxWorkers:       rh.maxWorkers,
+		log:              rh.log.With("target_file", targetFilename),
+		partBoundaries:   nil, // Will be calculated on first use
+		currentReader:    nil,
+		currentPosition:  0,  // Start at the beginning of the range
+		bytesRead:        0,  // No bytes read initially
+		currentPartIndex: -1, // No part selected initially
 	}, nil
 }
 
@@ -343,22 +349,24 @@ type rarContentReader struct {
 }
 
 // DirectRarContentReader provides direct Usenet streaming for RAR content without rardecode overhead
-// This implementation uses the file offset from RAR analysis to stream directly from Usenet
+// This implementation uses range parameters to stream directly from Usenet
 type DirectRarContentReader struct {
 	ctx            context.Context
 	cp             nntppool.UsenetConnectionPool
 	nzbFile        *database.NzbFile
 	rarFiles       []ParsedFile
 	targetFilename string
-	fileOffset     int64  // Starting offset of the file within the RAR stream
-	fileSize       int64  // Size of the target file
-	currentPos     int64  // Current reading position within the file
+	rangeOffset    int64 // Starting offset of the range within the RAR stream
+	rangeSize      int64 // Size of the range to read
 	maxWorkers     int
 	log            *slog.Logger
-	
+
 	// RAR part information for multi-volume handling
-	partBoundaries []RarPartBoundary
-	currentReader  io.ReadCloser // Current Usenet reader
+	partBoundaries   []RarPartBoundary
+	currentReader    io.ReadCloser // Current Usenet reader
+	currentPosition  int64         // Current position within the overall range
+	bytesRead        int64         // Total bytes read so far
+	currentPartIndex int           // Index of the current RAR part being read
 }
 
 // RarPartBoundary represents the byte boundaries of each RAR part
@@ -375,117 +383,72 @@ var _ RarContentReadSeeker = (*DirectRarContentReader)(nil)
 
 // Read implements io.Reader for DirectRarContentReader
 func (drcr *DirectRarContentReader) Read(p []byte) (int, error) {
-	if drcr.currentPos >= drcr.fileSize {
-		return 0, io.EOF
+	if drcr.bytesRead >= drcr.rangeSize {
+		return 0, io.EOF // We've read all requested data
 	}
-	
-	// Calculate how much we can read without exceeding the file size
-	remaining := drcr.fileSize - drcr.currentPos
-	if int64(len(p)) > remaining {
-		p = p[:remaining]
-	}
-	
-	totalRead := 0
-	for totalRead < len(p) && drcr.currentPos < drcr.fileSize {
-		// Ensure we have a reader for the current position
-		if err := drcr.ensureReaderForPosition(); err != nil {
-			if totalRead > 0 {
-				// Return partial read if we've read some data
-				return totalRead, nil
-			}
-			return 0, err
-		}
-		
-		// Try to read from the current reader
-		n, err := drcr.currentReader.Read(p[totalRead:])
-		totalRead += n
-		drcr.currentPos += int64(n)
-		
-		if err == io.EOF {
-			// Current reader reached EOF, check if we need to continue from next part
-			if drcr.currentPos < drcr.fileSize {
-				// File continues in next RAR part, transition to next part
-				drcr.log.Debug("Current RAR part exhausted, transitioning to next part",
-					"current_pos", drcr.currentPos,
-					"file_size", drcr.fileSize,
-					"bytes_read", totalRead)
-				
-				// Close current reader and clear it to force creation of new reader for next part
-				if err := drcr.closeCurrentReader(); err != nil {
-					drcr.log.Debug("Error closing reader during part transition", "error", err)
-					// Continue anyway - we want to try the next part
-				}
-				
-				// Continue the loop to read from next part
-				continue
-			} else {
-				// We've reached the end of the file
-				if totalRead > 0 {
-					// Return the data we've read
-					return totalRead, nil
-				}
-				return 0, io.EOF
-			}
-		} else if err != nil {
-			// Any other error
-			if totalRead > 0 {
-				// Return partial read if we've read some data
-				return totalRead, nil
-			}
-			return 0, err
-		}
-		
-		// If we filled the buffer or read all data, break
-		if totalRead == len(p) {
-			break
-		}
-	}
-	
-	return totalRead, nil
-}
 
-// Seek implements io.Seeker for DirectRarContentReader
-func (drcr *DirectRarContentReader) Seek(offset int64, whence int) (int64, error) {
-	var newPos int64
-	
-	switch whence {
-	case io.SeekStart:
-		newPos = offset
-	case io.SeekCurrent:
-		newPos = drcr.currentPos + offset
-	case io.SeekEnd:
-		newPos = drcr.fileSize + offset
-	default:
-		return 0, fmt.Errorf("invalid whence value: %d", whence)
+	// Ensure we have a reader for the current position
+	if err := drcr.ensureReaderForCurrentPosition(); err != nil {
+		return 0, err
 	}
-	
-	if newPos < 0 {
-		return 0, fmt.Errorf("negative seek position: %d", newPos)
+
+	// Calculate how many bytes we can read (don't exceed the total range size)
+	remainingBytes := drcr.rangeSize - drcr.bytesRead
+	bytesToRead := int64(len(p))
+	if bytesToRead > remainingBytes {
+		bytesToRead = remainingBytes
 	}
-	
-	if newPos > drcr.fileSize {
-		return 0, fmt.Errorf("seek position %d exceeds file size %d", newPos, drcr.fileSize)
+
+	// Read from current reader
+	n, err := drcr.currentReader.Read(p[:bytesToRead])
+	drcr.bytesRead += int64(n)
+	drcr.currentPosition += int64(n)
+
+	drcr.log.Debug("Read bytes from RAR part",
+		"bytes_read", n,
+		"total_bytes_read", drcr.bytesRead,
+		"current_position", drcr.currentPosition,
+		"part_index", drcr.currentPartIndex)
+
+	// If we got EOF from current reader, try to move to next part
+	if err == io.EOF && drcr.bytesRead < drcr.rangeSize {
+		drcr.log.Debug("EOF reached on current RAR part, attempting to move to next part",
+			"current_part_index", drcr.currentPartIndex,
+			"bytes_read", drcr.bytesRead,
+			"total_range_size", drcr.rangeSize)
+
+		// Close current reader
+		if closeErr := drcr.closeCurrentReader(); closeErr != nil {
+			drcr.log.Debug("Error closing current reader", "error", closeErr)
+		}
+
+		// Try to move to next part
+		if err := drcr.moveToNextPart(); err != nil {
+			if err == io.EOF {
+				return n, io.EOF // No more parts available
+			}
+			return n, err
+		}
+
+		// If we successfully moved to next part and haven't read enough bytes yet,
+		// try reading more from the new part
+		if n < len(p) && drcr.bytesRead < drcr.rangeSize {
+			additionalBytes, additionalErr := drcr.Read(p[n:])
+			n += additionalBytes
+			if additionalErr != nil && additionalErr != io.EOF {
+				return n, additionalErr
+			}
+
+			return n, nil
+		}
 	}
-	
-	// Update position first
-	oldPos := drcr.currentPos
-	drcr.currentPos = newPos
-	
-	// Close current reader as position changed significantly
-	if err := drcr.closeCurrentReader(); err != nil {
-		drcr.log.Debug("Error closing reader during seek",
-			"old_pos", oldPos,
-			"new_pos", newPos,
-			"error", err)
-		// Continue anyway - seeking should still work
+
+	// Return EOF if we've read all requested bytes
+	if drcr.bytesRead >= drcr.rangeSize {
+		return n, io.EOF
 	}
-	
-	drcr.log.Debug("Seek completed across RAR parts",
-		"old_pos", oldPos,
-		"new_pos", newPos,
-		"file_size", drcr.fileSize)
-	
-	return newPos, nil
+
+	return n, err
 }
 
 // Close implements io.Closer for DirectRarContentReader
@@ -497,12 +460,12 @@ func (drcr *DirectRarContentReader) Close() error {
 func (drcr *DirectRarContentReader) closeCurrentReader() error {
 	if drcr.currentReader != nil {
 		drcr.log.Debug("Closing current Usenet reader",
-			"current_pos", drcr.currentPos,
-			"file_size", drcr.fileSize)
-		
+			"range_offset", drcr.rangeOffset,
+			"range_size", drcr.rangeSize)
+
 		err := drcr.currentReader.Close()
 		drcr.currentReader = nil
-		
+
 		if err != nil {
 			drcr.log.Debug("Error closing Usenet reader", "error", err)
 			return err
@@ -517,10 +480,10 @@ func (drcr *DirectRarContentReader) calculatePartBoundaries() error {
 	if len(drcr.partBoundaries) > 0 {
 		return nil // Already calculated
 	}
-	
+
 	drcr.partBoundaries = make([]RarPartBoundary, len(drcr.rarFiles))
 	var cumulativeOffset int64 = 0
-	
+
 	for i, rarFile := range drcr.rarFiles {
 		boundary := RarPartBoundary{
 			PartIndex:   i,
@@ -529,10 +492,10 @@ func (drcr *DirectRarContentReader) calculatePartBoundaries() error {
 			Size:        rarFile.Size,
 			EndOffset:   cumulativeOffset + rarFile.Size - 1,
 		}
-		
+
 		drcr.partBoundaries[i] = boundary
 		cumulativeOffset += rarFile.Size
-		
+
 		drcr.log.Debug("Calculated RAR part boundary",
 			"part", i,
 			"filename", rarFile.Filename,
@@ -540,7 +503,7 @@ func (drcr *DirectRarContentReader) calculatePartBoundaries() error {
 			"end_offset", boundary.EndOffset,
 			"size", boundary.Size)
 	}
-	
+
 	return nil
 }
 
@@ -549,127 +512,130 @@ func (drcr *DirectRarContentReader) findPartForOffset(offset int64) (*RarPartBou
 	if err := drcr.calculatePartBoundaries(); err != nil {
 		return nil, err
 	}
-	
+
 	for i := range drcr.partBoundaries {
 		part := &drcr.partBoundaries[i]
 		if offset >= part.StartOffset && offset <= part.EndOffset {
 			return part, nil
 		}
 	}
-	
+
 	return nil, fmt.Errorf("offset %d not found in any RAR part", offset)
 }
 
-// ensureReaderForPosition ensures we have a Usenet reader positioned correctly for the current file position
-func (drcr *DirectRarContentReader) ensureReaderForPosition() error {
+// ensureReaderForCurrentPosition ensures we have a Usenet reader for the current position
+func (drcr *DirectRarContentReader) ensureReaderForCurrentPosition() error {
 	if drcr.currentReader != nil {
 		return nil // Already have a reader
 	}
-	
-	// Calculate absolute offset in the RAR stream
-	absoluteOffset := drcr.fileOffset + drcr.currentPos
-	
+
+	// Calculate the actual offset in the RAR stream
+	actualOffset := drcr.rangeOffset + drcr.currentPosition
+
 	// Find which RAR part contains this offset
-	part, err := drcr.findPartForOffset(absoluteOffset)
-	if err != nil {
-		return fmt.Errorf("failed to find RAR part for offset %d: %w", absoluteOffset, err)
+	if err := drcr.calculatePartBoundaries(); err != nil {
+		return err
 	}
-	
+
+	targetPart, err := drcr.findPartForOffset(actualOffset)
+	if err != nil {
+		return fmt.Errorf("failed to find RAR part for position %d (offset %d): %w",
+			drcr.currentPosition, actualOffset, err)
+	}
+
+	drcr.currentPartIndex = targetPart.PartIndex
+
 	// Calculate offset within this specific RAR part
-	offsetInPart := absoluteOffset - part.StartOffset
-	
-	drcr.log.Debug("Creating Usenet reader for RAR content",
-		"target_file", drcr.targetFilename,
-		"file_offset", drcr.fileOffset,
-		"current_pos", drcr.currentPos,
-		"absolute_offset", absoluteOffset,
-		"rar_part", part.Filename,
-		"offset_in_part", offsetInPart)
-	
-	// Create Usenet reader for this specific RAR part starting at the calculated offset
-	reader, err := drcr.createUsenetReaderForPart(part.PartIndex, offsetInPart)
-	if err != nil {
-		return fmt.Errorf("failed to create Usenet reader for part %s at offset %d: %w", 
-			part.Filename, offsetInPart, err)
+	offsetInPart := actualOffset - targetPart.StartOffset
+
+	// Calculate how much we can read from this part
+	remainingInPart := targetPart.Size - offsetInPart
+	remainingInRange := drcr.rangeSize - drcr.bytesRead
+	bytesToRead := remainingInRange
+	if bytesToRead > remainingInPart {
+		bytesToRead = remainingInPart
 	}
-	
+
+	partEndOffset := offsetInPart + bytesToRead - 1
+
+	drcr.log.Debug("Creating Usenet reader for current position",
+		"position", drcr.currentPosition,
+		"actual_offset", actualOffset,
+		"part_index", targetPart.PartIndex,
+		"part_filename", targetPart.Filename,
+		"offset_in_part", offsetInPart,
+		"part_end_offset", partEndOffset,
+		"bytes_to_read", bytesToRead)
+
+	// Create segment loader for this specific RAR part
+	rarFile := drcr.rarFiles[targetPart.PartIndex]
+	loader := rarFileSegmentLoader{segs: rarFile.Segments}
+
+	// Get segments in the specified range for this part
+	rg := usenet.GetSegmentsInRange(offsetInPart, partEndOffset, loader)
+
+	// Create the Usenet reader for the calculated range
+	reader, err := usenet.NewUsenetReader(drcr.ctx, drcr.cp, rg, drcr.maxWorkers)
+	if err != nil {
+		return fmt.Errorf("failed to create Usenet reader for part %s: %w", targetPart.Filename, err)
+	}
+
 	drcr.currentReader = reader
 	return nil
 }
 
-// shouldTransitionToNextPart checks if we should transition to the next RAR part
-func (drcr *DirectRarContentReader) shouldTransitionToNextPart() (bool, error) {
-	if drcr.currentPos >= drcr.fileSize {
-		return false, nil // Already at end of file
+// moveToNextPart moves to the next RAR part and creates a new reader
+func (drcr *DirectRarContentReader) moveToNextPart() error {
+	if err := drcr.calculatePartBoundaries(); err != nil {
+		return err
 	}
-	
-	// Calculate absolute offset in the RAR stream
-	absoluteOffset := drcr.fileOffset + drcr.currentPos
-	
-	// Find which RAR part should contain this offset
-	_, err := drcr.findPartForOffset(absoluteOffset)
-	if err != nil {
-		return false, fmt.Errorf("failed to find RAR part for offset %d: %w", absoluteOffset, err)
-	}
-	
-	// If we can find a part for this offset, we should transition
-	return true, nil
-}
 
-// transitionToNextPart handles the transition to the next RAR part
-func (drcr *DirectRarContentReader) transitionToNextPart() error {
-	// Close current reader using the improved cleanup method
-	if err := drcr.closeCurrentReader(); err != nil {
-		drcr.log.Debug("Error closing current reader during transition", "error", err)
-		// Continue anyway - we want to try the next part
+	// Check if we have a next part
+	nextPartIndex := drcr.currentPartIndex + 1
+	if nextPartIndex >= len(drcr.partBoundaries) {
+		drcr.log.Debug("No more RAR parts available")
+		return io.EOF
 	}
-	
-	drcr.log.Debug("Transitioning to next RAR part",
-		"current_pos", drcr.currentPos,
-		"file_offset", drcr.fileOffset,
-		"absolute_offset", drcr.fileOffset+drcr.currentPos)
-	
-	// ensureReaderForPosition will create a new reader for the current position
-	return drcr.ensureReaderForPosition()
-}
 
-// createUsenetReaderForPart creates a Usenet reader for a specific RAR part starting at the given offset
-func (drcr *DirectRarContentReader) createUsenetReaderForPart(partIndex int, offsetInPart int64) (io.ReadCloser, error) {
-	if partIndex >= len(drcr.rarFiles) {
-		return nil, fmt.Errorf("part index %d exceeds available parts %d", partIndex, len(drcr.rarFiles))
+	// Move to next part
+	drcr.currentPartIndex = nextPartIndex
+	nextPart := &drcr.partBoundaries[nextPartIndex]
+
+	// Update current position to the start of the next part
+	actualOffset := nextPart.StartOffset
+	drcr.currentPosition = actualOffset - drcr.rangeOffset
+
+	// Calculate how much we can read from this part
+	remainingInRange := drcr.rangeSize - drcr.bytesRead
+	bytesToRead := remainingInRange
+	if bytesToRead > nextPart.Size {
+		bytesToRead = nextPart.Size
 	}
-	
-	rarFile := drcr.rarFiles[partIndex]
-	
-	// Calculate the byte range to read from this part
-	// We want to read from offsetInPart to the end of the part, but we may need to limit
-	// based on how much of the target file remains
-	remainingInFile := drcr.fileSize - drcr.currentPos
-	remainingInPart := rarFile.Size - offsetInPart
-	
-	// Read until either we reach the end of the file or the end of this part
-	bytesToRead := remainingInFile
-	if bytesToRead > remainingInPart {
-		bytesToRead = remainingInPart
-	}
-	
-	endOffset := offsetInPart + bytesToRead - 1
-	
-	drcr.log.Debug("Creating Usenet reader for RAR part",
-		"part_filename", rarFile.Filename,
-		"part_size", rarFile.Size,
-		"offset_in_part", offsetInPart,
-		"end_offset", endOffset,
+
+	partEndOffset := bytesToRead - 1
+
+	drcr.log.Debug("Moving to next RAR part",
+		"part_index", nextPartIndex,
+		"part_filename", nextPart.Filename,
+		"part_start_offset", nextPart.StartOffset,
+		"current_position", drcr.currentPosition,
 		"bytes_to_read", bytesToRead)
-	
-	// Create segment loader for this specific RAR part
+
+	// Create segment loader for this RAR part
+	rarFile := drcr.rarFiles[nextPartIndex]
 	loader := rarFileSegmentLoader{segs: rarFile.Segments}
-	
-	// Get segments in the specified range for this part
-	rg := usenet.GetSegmentsInRange(offsetInPart, endOffset, loader)
-	
-	// Create the Usenet reader for the calculated range
-	return usenet.NewUsenetReader(drcr.ctx, drcr.cp, rg, drcr.maxWorkers)
+
+	// Get segments for this part (starting from beginning since it's a new part)
+	rg := usenet.GetSegmentsInRange(0, partEndOffset, loader)
+
+	// Create the Usenet reader for the new part
+	reader, err := usenet.NewUsenetReader(drcr.ctx, drcr.cp, rg, drcr.maxWorkers)
+	if err != nil {
+		return fmt.Errorf("failed to create Usenet reader for next part %s: %w", nextPart.Filename, err)
+	}
+
+	drcr.currentReader = reader
+	return nil
 }
 
 // rarFileSegmentLoader adapts RAR file segments to the usenet.SegmentLoader interface

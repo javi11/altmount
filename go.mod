@@ -14,7 +14,7 @@ require (
 	github.com/acomagu/bufpipe v1.0.4
 	github.com/javi11/nntppool v1.5.1
 	github.com/javi11/nzbparser v0.3.0
-	github.com/javi11/rardecode/v2 v2.1.2-0.20250815142956-75797eb7263d
+	github.com/javi11/rardecode/v2 v2.1.2-0.20250815161843-45d2f4324928
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/rfjakob/eme v1.1.2
