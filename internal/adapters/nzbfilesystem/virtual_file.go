@@ -56,7 +56,7 @@ func (vf *VirtualFile) Name() string {
 // Stat returns file information
 func (vf *VirtualFile) Stat() (fs.FileInfo, error) {
 	return &VirtualFileInfo{
-		name:    vf.virtualFile.Filename,
+		name:    vf.virtualFile.Name,
 		size:    vf.virtualFile.Size,
 		modTime: vf.virtualFile.CreatedAt,
 		isDir:   vf.virtualFile.IsDirectory,
@@ -250,7 +250,7 @@ func (vf *VirtualFile) ensureReader() error {
 	start, end, _ := vf.getRequestRange()
 
 	// Create reader for the calculated range
-	if vf.virtualFile.Encryption != nil {
+	if vf.nzbFile != nil && vf.nzbFile.Encryption != nil {
 		// Wrap the usenet reader with rclone decryption
 		decryptedReader, err := vf.wrapWithEncryption(start, end)
 		if err != nil {
@@ -279,7 +279,7 @@ func (vf *VirtualFile) Readdir(n int) ([]os.FileInfo, error) {
 	// For root directory ("/"), list items with parent_id = NULL
 	// For other directories, list items with parent_id = directory ID
 	var parentID *int64
-	if vf.virtualFile.VirtualPath == RootPath {
+	if vf.virtualFile.ParentID == nil { // Root directories have parent_id = NULL
 		parentID = nil // Root level items have parent_id = NULL
 	} else {
 		parentID = &vf.virtualFile.ID
@@ -293,7 +293,7 @@ func (vf *VirtualFile) Readdir(n int) ([]os.FileInfo, error) {
 	var infos []os.FileInfo
 	for _, child := range children {
 		info := &VirtualFileInfo{
-			name:    child.Filename,
+			name:    child.Name,
 			size:    child.Size,
 			modTime: child.CreatedAt,
 			isDir:   child.IsDirectory,
@@ -376,7 +376,11 @@ func (vf *VirtualFile) getRequestRange() (start, end int64, hasRange bool) {
 
 // createUsenetReader creates a new usenet reader for the specified range
 func (vf *VirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
-	loader := dbSegmentLoader{segs: vf.nzbFile.SegmentsData}
+	if vf.nzbFile == nil || vf.nzbFile.SegmentsData == nil {
+		return nil, ErrNoNzbData
+	}
+
+	loader := newSegmentDataLoader(vf.nzbFile.SegmentsData)
 
 	rg := usenet.GetSegmentsInRange(start, end, loader)
 	return usenet.NewUsenetReader(ctx, vf.cp, rg, vf.maxWorkers)

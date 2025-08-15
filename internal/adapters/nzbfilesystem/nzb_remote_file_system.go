@@ -31,7 +31,7 @@ func (nrf *NzbRemoteFile) OpenFile(ctx context.Context, name string, r utils.Pat
 	normalizedName := normalizePath(name)
 
 	// Check if this is a virtual file in our database
-	vf, nzb, err := nrf.db.Repository.GetVirtualFileWithNzb(normalizedName)
+	vf, err := nrf.db.Repository.GetVirtualFileByPath(normalizedName)
 	if err != nil {
 		return false, nil, fmt.Errorf(ErrMsgFailedQueryVirtualFile, err)
 	}
@@ -39,6 +39,15 @@ func (nrf *NzbRemoteFile) OpenFile(ctx context.Context, name string, r utils.Pat
 	if vf == nil {
 		// File not found in database
 		return false, nil, nil
+	}
+
+	// Get NZB data if this virtual file has associated NZB data
+	var nzb *database.NzbFile
+	if !vf.IsDirectory {
+		nzb, err = nrf.db.Repository.GetNzbFileByID(vf.ID)
+		if err != nil {
+			return false, nil, fmt.Errorf("failed to get NZB file: %w", err)
+		}
 	}
 
 	// Create a virtual file handle
@@ -173,47 +182,22 @@ func (nrf *NzbRemoteFile) RenameFile(ctx context.Context, fileName, newFileName 
 			newParentID = &parentDir.ID
 		}
 
-		// Update the virtual file
-		if err := txRepo.MoveFile(vf.ID, newParentID, normalizedNewName); err != nil {
+		// Update the virtual file (move to new parent)
+		if err := txRepo.MoveFile(vf.ID, newParentID); err != nil {
 			return fmt.Errorf(ErrMsgFailedMoveFile, err)
 		}
 
 		// Update the filename if it changed
-		if newFilename != vf.Filename {
-			if err := txRepo.UpdateVirtualFileFilename(vf.ID, newFilename); err != nil {
+		if newFilename != vf.Name {
+			if err := txRepo.UpdateVirtualFileName(vf.ID, newFilename); err != nil {
 				return fmt.Errorf(ErrMsgFailedUpdateFilename, err)
 			}
 		}
 
-		// If this is a directory, we need to update all descendant paths
-		if vf.IsDirectory {
-			descendants, err := txRepo.GetDescendants(vf.ID)
-			if err != nil {
-				return fmt.Errorf(ErrMsgFailedGetDescendants, err)
-			}
-
-			for _, desc := range descendants {
-				// Update descendant paths by replacing the old prefix with the new prefix
-				oldPrefix := normalizedOldName
-				if !strings.HasSuffix(oldPrefix, "/") {
-					oldPrefix += "/"
-				}
-
-				newPrefix := normalizedNewName
-				if !strings.HasSuffix(newPrefix, "/") {
-					newPrefix += "/"
-				}
-
-				if strings.HasPrefix(desc.VirtualPath, oldPrefix) {
-					newDescPath := strings.Replace(desc.VirtualPath, oldPrefix, newPrefix, 1)
-
-					// Update descendant path
-					if err := txRepo.UpdateVirtualFilePath(desc.ID, newDescPath); err != nil {
-						return fmt.Errorf(ErrMsgFailedUpdateDescPath, err)
-					}
-				}
-			}
-		}
+		// If this is a directory, the descendants will automatically have
+		// the correct parent relationships due to the hierarchical structure.
+		// No need to update paths since they are calculated on demand.
+		// The descendants are already correctly positioned under the moved directory.
 
 		return nil
 	})
@@ -243,7 +227,7 @@ func (nrf *NzbRemoteFile) Stat(fileName string) (bool, fs.FileInfo, error) {
 
 	// Create virtual file info
 	virtualStat := &VirtualFileInfo{
-		name:    vf.Filename,
+		name:    vf.Name,
 		size:    vf.Size,
 		modTime: vf.CreatedAt,
 		isDir:   vf.IsDirectory,

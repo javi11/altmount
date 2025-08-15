@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
@@ -24,36 +25,85 @@ func (l dbSegmentLoader) GetSegment(index int) (segment nzbparser.NzbSegment, gr
 	return nzbparser.NzbSegment{Number: s.Number, Bytes: int(s.Bytes), ID: s.MessageID}, s.Groups, true
 }
 
-// wrapWithEncryption wraps a usenet reader with rclone decryption
-func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, error) {
-	if *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) && vf.rcloneCipher == nil {
-		return nil, ErrNoCipherConfig
-	} else if *vf.virtualFile.Encryption == string(encryption.HeadersCipherType) && vf.headersCipher == nil {
-		return nil, ErrNoCipherConfig
+// segmentDataLoader adapts the new SegmentData format to the usenet.SegmentLoader interface
+type segmentDataLoader struct {
+	segmentData *database.SegmentData
+	messageIDs  []string
+}
+
+func newSegmentDataLoader(segmentData *database.SegmentData) *segmentDataLoader {
+	if segmentData == nil || segmentData.ID == "" {
+		return &segmentDataLoader{
+			segmentData: segmentData,
+			messageIDs:  []string{},
+		}
 	}
 
-	if vf.nzbFile == nil {
+	// Split comma-separated message IDs
+	messageIDs := strings.Split(segmentData.ID, ",")
+	for i, id := range messageIDs {
+		messageIDs[i] = strings.TrimSpace(id)
+	}
+
+	return &segmentDataLoader{
+		segmentData: segmentData,
+		messageIDs:  messageIDs,
+	}
+}
+
+func (l *segmentDataLoader) GetSegment(index int) (segment nzbparser.NzbSegment, groups []string, ok bool) {
+	if l.segmentData == nil || index < 0 || index >= len(l.messageIDs) {
+		return nzbparser.NzbSegment{}, nil, false
+	}
+
+	// Calculate approximate bytes per segment (total bytes divided by number of segments)
+	bytesPerSegment := l.segmentData.Bytes
+	if len(l.messageIDs) > 0 {
+		bytesPerSegment = l.segmentData.Bytes / int64(len(l.messageIDs))
+	}
+
+	return nzbparser.NzbSegment{
+		Number: index + 1, // 1-based numbering
+		Bytes:  int(bytesPerSegment),
+		ID:     l.messageIDs[index],
+	}, []string{}, true // Empty groups for now - this might need to be stored separately
+}
+
+// wrapWithEncryption wraps a usenet reader with rclone decryption
+func (vf *VirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, error) {
+	if vf.nzbFile == nil || vf.nzbFile.Encryption == nil {
 		return nil, ErrNoEncryptionParams
+	}
+
+	encryptionType := *vf.nzbFile.Encryption
+	if encryptionType == string(encryption.RCloneCipherType) && vf.rcloneCipher == nil {
+		return nil, ErrNoCipherConfig
+	} else if encryptionType == string(encryption.HeadersCipherType) && vf.headersCipher == nil {
+		return nil, ErrNoCipherConfig
 	}
 
 	// Get password and salt from NZB metadata, with global fallback
 	var password, salt string
 
-	if vf.nzbFile.RclonePassword != nil && *vf.nzbFile.RclonePassword != "" {
-		password = *vf.nzbFile.RclonePassword
+	if vf.nzbFile.Password != nil && *vf.nzbFile.Password != "" {
+		password = *vf.nzbFile.Password
+	} else {
+		password = vf.globalPassword
 	}
 
-	if vf.nzbFile.RcloneSalt != nil && *vf.nzbFile.RcloneSalt != "" {
-		salt = *vf.nzbFile.RcloneSalt
+	if vf.nzbFile.Salt != nil && *vf.nzbFile.Salt != "" {
+		salt = *vf.nzbFile.Salt
+	} else {
+		salt = vf.globalSalt
 	}
 
 	var chypher encryption.Cipher
-	if *vf.virtualFile.Encryption == string(encryption.RCloneCipherType) {
+	if encryptionType == string(encryption.RCloneCipherType) {
 		chypher = vf.rcloneCipher
-	} else if *vf.virtualFile.Encryption == string(encryption.HeadersCipherType) {
+	} else if encryptionType == string(encryption.HeadersCipherType) {
 		chypher = vf.headersCipher
 	} else {
-		return nil, fmt.Errorf("unsupported encryption type: %s", *vf.virtualFile.Encryption)
+		return nil, fmt.Errorf("unsupported encryption type: %s", encryptionType)
 	}
 
 	decryptedReader, err := chypher.Open(
