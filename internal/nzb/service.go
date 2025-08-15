@@ -342,7 +342,8 @@ func (s *Service) processQueueItems(workerID int) {
 	log.Debug("Processing claimed queue item", "queue_id", item.ID, "file", item.NzbPath)
 
 	// Step 2: Check main database for duplicates (safety net)
-	existing, err := s.mainDB.Repository.GetNzbFileByPath(item.NzbPath)
+	nzbFilename := filepath.Base(item.NzbPath)
+	existing, err := s.mainDB.Repository.GetNzbFileByName(nzbFilename)
 	if err != nil {
 		log.Warn("Failed to check if file already processed", "file", item.NzbPath, "error", err)
 		// Continue processing anyway

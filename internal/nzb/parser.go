@@ -18,12 +18,21 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
+// NzbType represents the type of NZB content
+type NzbType string
+
+const (
+	NzbTypeSingleFile  NzbType = "single_file"
+	NzbTypeMultiFile   NzbType = "multi_file"
+	NzbTypeRarArchive  NzbType = "rar_archive"
+)
+
 // ParsedNzb contains the parsed NZB data and extracted metadata
 type ParsedNzb struct {
 	Path          string
 	Filename      string
 	TotalSize     int64
-	Type          database.NzbType
+	Type          NzbType
 	Files         []ParsedFile
 	SegmentsCount int
 	SegmentSize   int64
@@ -36,7 +45,7 @@ type ParsedFile struct {
 	Subject      string
 	Filename     string
 	Size         int64
-	Segments     []database.NzbSegment
+	Segments     database.NzbSegments
 	Groups       []string
 	IsRarArchive bool
 	RarContents  []RarFileEntry // Only populated if IsRarArchive is true
@@ -139,7 +148,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 // parseFile processes a single file entry from the NZB
 func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*ParsedFile, error) {
 	// Convert segments
-	segments := make([]database.NzbSegment, len(file.Segments))
+	segments := make(database.NzbSegments, len(file.Segments))
 
 	for i, seg := range file.Segments {
 		segments[i] = database.NzbSegment{
@@ -382,13 +391,13 @@ func (p *Parser) normalizeSegmentSizesWithYenc(parsedFile *ParsedFile, originalS
 }
 
 // determineNzbType analyzes the parsed files to determine the NZB type
-func (p *Parser) determineNzbType(files []ParsedFile) database.NzbType {
+func (p *Parser) determineNzbType(files []ParsedFile) NzbType {
 	if len(files) == 1 {
 		// Single file NZB
 		if files[0].IsRarArchive {
-			return database.NzbTypeRarArchive
+			return NzbTypeRarArchive
 		}
-		return database.NzbTypeSingleFile
+		return NzbTypeSingleFile
 	}
 
 	// Multiple files - check if any are RAR archives
@@ -401,10 +410,10 @@ func (p *Parser) determineNzbType(files []ParsedFile) database.NzbType {
 	}
 
 	if hasRarFiles {
-		return database.NzbTypeRarArchive
+		return NzbTypeRarArchive
 	}
 
-	return database.NzbTypeMultiFile
+	return NzbTypeMultiFile
 }
 
 // GetMetadata extracts metadata from the NZB head section
@@ -459,4 +468,26 @@ func (p *Parser) ConvertToDbSegments(files []ParsedFile) database.NzbSegments {
 // ConvertToDbSegmentsForFile converts segments from a single ParsedFile to database format
 func (p *Parser) ConvertToDbSegmentsForFile(file ParsedFile) database.NzbSegments {
 	return file.Segments
+}
+
+// ConvertToSegmentsData converts ParsedFile segments to new SegmentsData JSON format
+func (p *Parser) ConvertToSegmentsData(file ParsedFile) database.SegmentData {
+	return file.Segments.ConvertToSegmentsData()
+}
+
+// ConvertFilesToRarParts converts RAR ParsedFiles to RarParts JSON format
+func (p *Parser) ConvertFilesToRarParts(files []ParsedFile) database.RarParts {
+	var rarFiles []database.ParsedRarFile
+	
+	for _, file := range files {
+		if file.IsRarArchive {
+			rarFiles = append(rarFiles, database.ParsedRarFile{
+				Filename: file.Filename,
+				Size:     file.Size,
+				Segments: file.Segments,
+			})
+		}
+	}
+	
+	return database.ConvertToRarParts(rarFiles)
 }

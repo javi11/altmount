@@ -22,44 +22,86 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// NZB File operations
+// VirtualFile operations
 
-// CreateNzbFile inserts a new NZB file record
-func (r *Repository) CreateNzbFile(nzbFile *NzbFile) error {
+// CreateVirtualFile inserts a new virtual file record
+func (r *Repository) CreateVirtualFile(vf *VirtualFile) error {
 	query := `
-		INSERT INTO nzb_files (path, filename, size, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO virtual_files (parent_id, name, size, is_directory, status)
+		VALUES (?, ?, ?, ?, ?)
 	`
 
-	result, err := r.db.Exec(query, nzbFile.Path, nzbFile.Filename, nzbFile.Size,
-		nzbFile.NzbType, nzbFile.SegmentsCount, nzbFile.SegmentsData, nzbFile.SegmentSize,
-		nzbFile.RclonePassword, nzbFile.RcloneSalt, nzbFile.ParentNzbID, nzbFile.PartType, nzbFile.ArchiveName, time.Now())
+	// Set default status if not specified
+	if vf.Status == "" {
+		vf.Status = FileStatusHealthy
+	}
+
+	result, err := r.db.Exec(query, vf.ParentID, vf.Name, vf.Size, vf.IsDirectory, vf.Status)
 	if err != nil {
-		return fmt.Errorf("failed to create nzb file: %w", err)
+		return fmt.Errorf("failed to create virtual file: %w", err)
 	}
 
 	id, err := result.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("failed to get nzb file id: %w", err)
+		return fmt.Errorf("failed to get virtual file id: %w", err)
 	}
 
-	nzbFile.ID = id
+	vf.ID = id
 	return nil
 }
 
-// GetNzbFileByPath retrieves an NZB file by its path
-func (r *Repository) GetNzbFileByPath(path string) (*NzbFile, error) {
+// NZB File operations
+
+// CreateNzbFile inserts a new NZB file record (requires existing virtual file)
+func (r *Repository) CreateNzbFile(nzbFile *NzbFile) error {
 	query := `
-		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name
-		FROM nzb_files WHERE path = ?
+		INSERT INTO nzb_files (id, name, segments_data, password, encryption, salt, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := r.db.Exec(query, nzbFile.ID, nzbFile.Name, nzbFile.SegmentsData,
+		nzbFile.Password, nzbFile.Encryption, nzbFile.Salt, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to create nzb file: %w", err)
+	}
+
+	return nil
+}
+
+// GetNzbFileByName retrieves an NZB file by its name
+func (r *Repository) GetNzbFileByName(name string) (*NzbFile, error) {
+	query := `
+		SELECT id, name, created_at, updated_at, segments_data, password, encryption, salt
+		FROM nzb_files WHERE name = ?
 	`
 
 	var nzbFile NzbFile
-	err := r.db.QueryRow(query, path).Scan(
-		&nzbFile.ID, &nzbFile.Path, &nzbFile.Filename, &nzbFile.Size,
-		&nzbFile.CreatedAt, &nzbFile.UpdatedAt, &nzbFile.NzbType,
-		&nzbFile.SegmentsCount, &nzbFile.SegmentsData, &nzbFile.SegmentSize,
-		&nzbFile.RclonePassword, &nzbFile.RcloneSalt, &nzbFile.ParentNzbID, &nzbFile.PartType, &nzbFile.ArchiveName,
+	err := r.db.QueryRow(query, name).Scan(
+		&nzbFile.ID, &nzbFile.Name, &nzbFile.CreatedAt, &nzbFile.UpdatedAt,
+		&nzbFile.SegmentsData, &nzbFile.Password, &nzbFile.Encryption, &nzbFile.Salt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get nzb file: %w", err)
+	}
+
+	return &nzbFile, nil
+}
+
+// GetNzbFileByID retrieves an NZB file by its ID
+func (r *Repository) GetNzbFileByID(id int64) (*NzbFile, error) {
+	query := `
+		SELECT id, name, created_at, updated_at, segments_data, password, encryption, salt
+		FROM nzb_files WHERE id = ?
+	`
+
+	var nzbFile NzbFile
+	err := r.db.QueryRow(query, id).Scan(
+		&nzbFile.ID, &nzbFile.Name, &nzbFile.CreatedAt, &nzbFile.UpdatedAt,
+		&nzbFile.SegmentsData, &nzbFile.Password, &nzbFile.Encryption, &nzbFile.Salt,
 	)
 
 	if err != nil {
@@ -84,129 +126,92 @@ func (r *Repository) DeleteNzbFile(id int64) error {
 	return nil
 }
 
-// CreateRarPartNzbFile inserts a new RAR part NZB file record
-func (r *Repository) CreateRarPartNzbFile(nzbFile *NzbFile) error {
-	// Ensure this is marked as a RAR part
-	nzbFile.PartType = NzbPartTypeRarPart
+// NZB RAR File operations
 
-	// Use the existing CreateNzbFile method which now supports the new fields
-	return r.CreateNzbFile(nzbFile)
-}
-
-// GetRarPartNzbFiles retrieves all RAR part NZB files for a given parent NZB
-func (r *Repository) GetRarPartNzbFiles(parentNzbID int64) ([]*NzbFile, error) {
+// CreateNzbRarFile inserts a new NZB RAR file record (requires existing virtual file)
+func (r *Repository) CreateNzbRarFile(nzbRarFile *NzbRarFile) error {
 	query := `
-		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name
-		FROM nzb_files 
-		WHERE parent_nzb_id = ? AND part_type = ?
-		ORDER BY filename
+		INSERT INTO nzb_rar_files (id, name, rar_parts, updated_at)
+		VALUES (?, ?, ?, ?)
 	`
 
-	rows, err := r.db.Query(query, parentNzbID, NzbPartTypeRarPart)
+	_, err := r.db.Exec(query, nzbRarFile.ID, nzbRarFile.Name, nzbRarFile.RarParts, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("failed to query RAR part NZB files: %w", err)
-	}
-	defer rows.Close()
-
-	var nzbFiles []*NzbFile
-	for rows.Next() {
-		var nzbFile NzbFile
-		err := rows.Scan(
-			&nzbFile.ID, &nzbFile.Path, &nzbFile.Filename, &nzbFile.Size,
-			&nzbFile.CreatedAt, &nzbFile.UpdatedAt, &nzbFile.NzbType,
-			&nzbFile.SegmentsCount, &nzbFile.SegmentsData, &nzbFile.SegmentSize,
-			&nzbFile.RclonePassword, &nzbFile.RcloneSalt, &nzbFile.ParentNzbID, &nzbFile.PartType, &nzbFile.ArchiveName,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan RAR part NZB file: %w", err)
-		}
-		nzbFiles = append(nzbFiles, &nzbFile)
+		return fmt.Errorf("failed to create nzb rar file: %w", err)
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate RAR part NZB files: %w", err)
-	}
-
-	return nzbFiles, nil
-}
-
-// GetRarPartNzbFilesByArchiveName retrieves all RAR part NZB files for a given archive name
-func (r *Repository) GetRarPartNzbFilesByArchiveName(parentNzbID int64, archiveName string) ([]*NzbFile, error) {
-	query := `
-		SELECT id, path, filename, size, created_at, updated_at, nzb_type, segments_count, segments_data, segment_size, rclone_password, rclone_salt, parent_nzb_id, part_type, archive_name
-		FROM nzb_files 
-		WHERE parent_nzb_id = ? AND part_type = ? AND archive_name = ?
-		ORDER BY filename
-	`
-
-	rows, err := r.db.Query(query, parentNzbID, NzbPartTypeRarPart, archiveName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query RAR part NZB files by archive name: %w", err)
-	}
-	defer rows.Close()
-
-	var nzbFiles []*NzbFile
-	for rows.Next() {
-		var nzbFile NzbFile
-		err := rows.Scan(
-			&nzbFile.ID, &nzbFile.Path, &nzbFile.Filename, &nzbFile.Size,
-			&nzbFile.CreatedAt, &nzbFile.UpdatedAt, &nzbFile.NzbType,
-			&nzbFile.SegmentsCount, &nzbFile.SegmentsData, &nzbFile.SegmentSize,
-			&nzbFile.RclonePassword, &nzbFile.RcloneSalt, &nzbFile.ParentNzbID, &nzbFile.PartType, &nzbFile.ArchiveName,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan RAR part NZB file: %w", err)
-		}
-		nzbFiles = append(nzbFiles, &nzbFile)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate RAR part NZB files: %w", err)
-	}
-
-	return nzbFiles, nil
-}
-
-// Virtual File operations
-
-// CreateVirtualFile inserts a new virtual file record
-func (r *Repository) CreateVirtualFile(vf *VirtualFile) error {
-	query := `
-		INSERT INTO virtual_files (nzb_file_id, parent_id, virtual_path, filename, size, is_directory, encryption, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	// Set default status if not specified
-	if vf.Status == "" {
-		vf.Status = FileStatusHealthy
-	}
-
-	result, err := r.db.Exec(query, vf.NzbFileID, vf.ParentID, vf.VirtualPath, vf.Filename,
-		vf.Size, vf.IsDirectory, vf.Encryption, vf.Status)
-	if err != nil {
-		return fmt.Errorf("failed to create virtual file: %w", err)
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get virtual file id: %w", err)
-	}
-
-	vf.ID = id
 	return nil
 }
 
-// GetVirtualFileByPath retrieves a virtual file by its path
-func (r *Repository) GetVirtualFileByPath(path string) (*VirtualFile, error) {
+// GetNzbRarFileByName retrieves an NZB RAR file by its name
+func (r *Repository) GetNzbRarFileByName(name string) (*NzbRarFile, error) {
 	query := `
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
-		FROM virtual_files WHERE virtual_path = ?
+		SELECT id, name, created_at, updated_at, rar_parts
+		FROM nzb_rar_files WHERE name = ?
+	`
+
+	var nzbRarFile NzbRarFile
+	err := r.db.QueryRow(query, name).Scan(
+		&nzbRarFile.ID, &nzbRarFile.Name, &nzbRarFile.CreatedAt,
+		&nzbRarFile.UpdatedAt, &nzbRarFile.RarParts,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get nzb rar file: %w", err)
+	}
+
+	return &nzbRarFile, nil
+}
+
+// GetNzbRarFileByID retrieves an NZB RAR file by its ID
+func (r *Repository) GetNzbRarFileByID(id int64) (*NzbRarFile, error) {
+	query := `
+		SELECT id, name, created_at, updated_at, rar_parts
+		FROM nzb_rar_files WHERE id = ?
+	`
+
+	var nzbRarFile NzbRarFile
+	err := r.db.QueryRow(query, id).Scan(
+		&nzbRarFile.ID, &nzbRarFile.Name, &nzbRarFile.CreatedAt,
+		&nzbRarFile.UpdatedAt, &nzbRarFile.RarParts,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get nzb rar file: %w", err)
+	}
+
+	return &nzbRarFile, nil
+}
+
+// DeleteNzbRarFile removes an NZB RAR file
+func (r *Repository) DeleteNzbRarFile(id int64) error {
+	query := `DELETE FROM nzb_rar_files WHERE id = ?`
+
+	_, err := r.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete nzb rar file: %w", err)
+	}
+
+	return nil
+}
+
+
+// GetVirtualFileByName retrieves a virtual file by its name
+func (r *Repository) GetVirtualFileByName(name string) (*VirtualFile, error) {
+	query := `
+		SELECT id, parent_id, name, size, created_at, is_directory, status
+		FROM virtual_files WHERE name = ? LIMIT 1
 	`
 
 	var vf VirtualFile
-	err := r.db.QueryRow(query, path).Scan(
-		&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
+	err := r.db.QueryRow(query, name).Scan(
+		&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status,
 	)
 
 	if err != nil {
@@ -219,6 +224,55 @@ func (r *Repository) GetVirtualFileByPath(path string) (*VirtualFile, error) {
 	return &vf, nil
 }
 
+// GetVirtualFileByID retrieves a virtual file by its ID
+func (r *Repository) GetVirtualFileByID(id int64) (*VirtualFile, error) {
+	query := `
+		SELECT id, parent_id, name, size, created_at, is_directory, status
+		FROM virtual_files WHERE id = ?
+	`
+
+	var vf VirtualFile
+	err := r.db.QueryRow(query, id).Scan(
+		&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get virtual file: %w", err)
+	}
+
+	return &vf, nil
+}
+
+// GetVirtualFileByPath retrieves a virtual file by its path (recursively building path)
+func (r *Repository) GetVirtualFileByPath(path string) (*VirtualFile, error) {
+	// Handle root case
+	if path == "/" || path == "" {
+		query := `SELECT id, parent_id, name, size, created_at, is_directory, status FROM virtual_files WHERE parent_id IS NULL LIMIT 1`
+		var vf VirtualFile
+		err := r.db.QueryRow(query).Scan(&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to get root virtual file: %w", err)
+		}
+		return &vf, nil
+	}
+
+	// For now, use a simplified approach - find by name for non-root paths
+	// This is a placeholder implementation that would need to be enhanced
+	// for proper path traversal in a production system
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) > 0 {
+		return r.GetVirtualFileByName(parts[len(parts)-1])
+	}
+
+	return nil, fmt.Errorf("invalid path: %s", path)
+}
+
 // ListVirtualFilesByParentID retrieves virtual files under a parent directory by parent ID
 func (r *Repository) ListVirtualFilesByParentID(parentID *int64) ([]*VirtualFile, error) {
 	var query string
@@ -227,14 +281,14 @@ func (r *Repository) ListVirtualFilesByParentID(parentID *int64) ([]*VirtualFile
 	if parentID == nil {
 		// List root level files (parent_id IS NULL)
 		query = `
-			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
-			FROM virtual_files WHERE parent_id IS NULL ORDER BY is_directory DESC, filename ASC
+			SELECT id, parent_id, name, size, created_at, is_directory, status
+			FROM virtual_files WHERE parent_id IS NULL ORDER BY is_directory DESC, name ASC
 		`
 	} else {
 		// List files with specific parent ID
 		query = `
-			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
-			FROM virtual_files WHERE parent_id = ? ORDER BY is_directory DESC, filename ASC
+			SELECT id, parent_id, name, size, created_at, is_directory, status
+			FROM virtual_files WHERE parent_id = ? ORDER BY is_directory DESC, name ASC
 		`
 		args = append(args, *parentID)
 	}
@@ -249,8 +303,7 @@ func (r *Repository) ListVirtualFilesByParentID(parentID *int64) ([]*VirtualFile
 	for rows.Next() {
 		var vf VirtualFile
 		err := rows.Scan(
-			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
+			&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan virtual file: %w", err)
@@ -278,179 +331,6 @@ func (r *Repository) ListVirtualFilesByParentPath(parentPath string) ([]*Virtual
 	}
 
 	return r.ListVirtualFilesByParentID(&parent.ID)
-}
-
-// GetVirtualFileWithNzb retrieves a virtual file along with its NZB file data (if any)
-func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile, error) {
-	query := `
-		SELECT vf.id, vf.nzb_file_id, vf.parent_id, vf.virtual_path, vf.filename, vf.size, vf.created_at, vf.is_directory, vf.encryption, vf.status,
-		       nf.id, nf.path, nf.filename, nf.size, nf.created_at, nf.updated_at, nf.nzb_type, nf.segments_count, nf.segments_data, nf.segment_size,
-		       nf.rclone_password, nf.rclone_salt
-		FROM virtual_files vf
-		LEFT JOIN nzb_files nf ON vf.nzb_file_id = nf.id
-		WHERE vf.virtual_path = ?
-	`
-
-	var vf VirtualFile
-	var nf NzbFile
-	// Use nullable types for NZB fields since they might be NULL due to LEFT JOIN
-	var nzbID sql.NullInt64
-	var nzbPath sql.NullString
-	var nzbFilename sql.NullString
-	var nzbSize sql.NullInt64
-	var nzbCreatedAt sql.NullTime
-	var nzbUpdatedAt sql.NullTime
-	var nzbType sql.NullString
-	var nzbSegmentsCount sql.NullInt64
-	var nzbSegmentsData sql.NullString
-	var nzbSegmentSize sql.NullInt64
-	var nzbRclonePassword sql.NullString
-	var nzbRcloneSalt sql.NullString
-
-	err := r.db.QueryRow(query, path).Scan(
-		&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
-		&nzbID, &nzbPath, &nzbFilename, &nzbSize,
-		&nzbCreatedAt, &nzbUpdatedAt, &nzbType,
-		&nzbSegmentsCount, &nzbSegmentsData, &nzbSegmentSize,
-		&nzbRclonePassword, &nzbRcloneSalt,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil, nil
-		}
-		return nil, nil, fmt.Errorf("failed to get virtual file with nzb: %w", err)
-	}
-
-	// If no NZB data (system directory like root), return virtual file only
-	if !nzbID.Valid {
-		return &vf, nil, nil
-	}
-
-	// Convert nullable types to NzbFile struct
-	nf.ID = nzbID.Int64
-	nf.Path = nzbPath.String
-	nf.Filename = nzbFilename.String
-	nf.Size = nzbSize.Int64
-	nf.CreatedAt = nzbCreatedAt.Time
-	nf.UpdatedAt = nzbUpdatedAt.Time
-	nf.NzbType = NzbType(nzbType.String)
-	nf.SegmentsCount = int(nzbSegmentsCount.Int64)
-	nf.SegmentSize = nzbSegmentSize.Int64
-
-	if nzbRclonePassword.Valid && nzbRclonePassword.String != "" {
-		nf.RclonePassword = &nzbRclonePassword.String
-	}
-
-	if nzbRcloneSalt.Valid && nzbRcloneSalt.String != "" {
-		nf.RcloneSalt = &nzbRcloneSalt.String
-	}
-
-	// Parse segments data JSON
-	if nzbSegmentsData.Valid && nzbSegmentsData.String != "" {
-		if err := nf.SegmentsData.Scan(nzbSegmentsData.String); err != nil {
-			return nil, nil, fmt.Errorf("failed to parse segments data: %w", err)
-		}
-	}
-
-	return &vf, &nf, nil
-}
-
-// RAR Content operations
-
-// CreateRarContent inserts a new RAR content record
-func (r *Repository) CreateRarContent(rc *RarContent) error {
-	query := `
-		INSERT INTO rar_contents (virtual_file_id, internal_path, filename, size, compressed_size, crc32, file_offset)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`
-
-	result, err := r.db.Exec(query, rc.VirtualFileID, rc.InternalPath, rc.Filename,
-		rc.Size, rc.CompressedSize, rc.CRC32, rc.FileOffset)
-	if err != nil {
-		return fmt.Errorf("failed to create rar content: %w", err)
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get rar content id: %w", err)
-	}
-
-	rc.ID = id
-	return nil
-}
-
-// GetRarContentsByVirtualFileID retrieves RAR contents for a virtual file
-func (r *Repository) GetRarContentsByVirtualFileID(virtualFileID int64) ([]*RarContent, error) {
-	query := `
-		SELECT id, virtual_file_id, internal_path, filename, size, compressed_size, crc32, created_at, file_offset
-		FROM rar_contents WHERE virtual_file_id = ? ORDER BY internal_path ASC
-	`
-
-	rows, err := r.db.Query(query, virtualFileID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list rar contents: %w", err)
-	}
-	defer rows.Close()
-
-	var contents []*RarContent
-	for rows.Next() {
-		var rc RarContent
-		err := rows.Scan(
-			&rc.ID, &rc.VirtualFileID, &rc.InternalPath, &rc.Filename,
-			&rc.Size, &rc.CompressedSize, &rc.CRC32, &rc.CreatedAt,
-			&rc.FileOffset,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan rar content: %w", err)
-		}
-		contents = append(contents, &rc)
-	}
-
-	return contents, rows.Err()
-}
-
-// File Metadata operations
-
-// SetFileMetadata sets a metadata key-value pair for a virtual file
-func (r *Repository) SetFileMetadata(virtualFileID int64, key, value string) error {
-	query := `
-		INSERT OR REPLACE INTO file_metadata (virtual_file_id, key, value, created_at)
-		VALUES (?, ?, ?, ?)
-	`
-
-	_, err := r.db.Exec(query, virtualFileID, key, value, time.Now())
-	if err != nil {
-		return fmt.Errorf("failed to set file metadata: %w", err)
-	}
-
-	return nil
-}
-
-// GetFileMetadata retrieves metadata for a virtual file
-func (r *Repository) GetFileMetadata(virtualFileID int64) (map[string]string, error) {
-	query := `
-		SELECT key, value FROM file_metadata WHERE virtual_file_id = ?
-	`
-
-	rows, err := r.db.Query(query, virtualFileID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file metadata: %w", err)
-	}
-	defer rows.Close()
-
-	metadata := make(map[string]string)
-	for rows.Next() {
-		var key, value string
-		err := rows.Scan(&key, &value)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan metadata: %w", err)
-		}
-		metadata[key] = value
-	}
-
-	return metadata, rows.Err()
 }
 
 // Transaction support
@@ -551,8 +431,8 @@ func (r *Repository) PathExists(path string) (bool, error) {
 // GetDirectoryTree returns the complete directory tree structure
 func (r *Repository) GetDirectoryTree() (map[int64][]*VirtualFile, error) {
 	query := `
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
-		FROM virtual_files ORDER BY parent_id, is_directory DESC, filename ASC
+		SELECT id, parent_id, name, size, created_at, is_directory, status
+		FROM virtual_files ORDER BY parent_id, is_directory DESC, name ASC
 	`
 
 	rows, err := r.db.Query(query)
@@ -566,8 +446,7 @@ func (r *Repository) GetDirectoryTree() (map[int64][]*VirtualFile, error) {
 	for rows.Next() {
 		var vf VirtualFile
 		err := rows.Scan(
-			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
+			&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan virtual file: %w", err)
@@ -587,14 +466,13 @@ func (r *Repository) GetDirectoryTree() (map[int64][]*VirtualFile, error) {
 // GetVirtualFile retrieves a virtual file by its ID
 func (r *Repository) GetVirtualFile(id int64) (*VirtualFile, error) {
 	query := `
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
+		SELECT id, parent_id, name, size, created_at, is_directory, status
 		FROM virtual_files WHERE id = ?
 	`
 
 	var vf VirtualFile
 	err := r.db.QueryRow(query, id).Scan(
-		&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-		&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
+		&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status,
 	)
 
 	if err != nil {
@@ -607,24 +485,12 @@ func (r *Repository) GetVirtualFile(id int64) (*VirtualFile, error) {
 	return &vf, nil
 }
 
-// DeleteFileMetadata removes a specific metadata key for a virtual file
-func (r *Repository) DeleteFileMetadata(virtualFileID int64, key string) error {
-	query := `DELETE FROM file_metadata WHERE virtual_file_id = ? AND key = ?`
-
-	_, err := r.db.Exec(query, virtualFileID, key)
-	if err != nil {
-		return fmt.Errorf("failed to delete file metadata: %w", err)
-	}
-
-	return nil
-}
-
 // Tree traversal and hierarchy methods
 
 // GetParent retrieves the parent directory of a virtual file
 func (r *Repository) GetParent(virtualFileID int64) (*VirtualFile, error) {
 	query := `
-		SELECT p.id, p.nzb_file_id, p.parent_id, p.virtual_path, p.filename, p.size, p.created_at, p.is_directory, p.encryption, p.status
+		SELECT p.id, p.parent_id, p.name, p.size, p.created_at, p.is_directory, p.status
 		FROM virtual_files vf
 		JOIN virtual_files p ON vf.parent_id = p.id
 		WHERE vf.id = ?
@@ -632,8 +498,7 @@ func (r *Repository) GetParent(virtualFileID int64) (*VirtualFile, error) {
 
 	var parent VirtualFile
 	err := r.db.QueryRow(query, virtualFileID).Scan(
-		&parent.ID, &parent.NzbFileID, &parent.ParentID, &parent.VirtualPath,
-		&parent.Filename, &parent.Size, &parent.CreatedAt, &parent.IsDirectory, &parent.Encryption, &parent.Status,
+		&parent.ID, &parent.ParentID, &parent.Name, &parent.Size, &parent.CreatedAt, &parent.IsDirectory, &parent.Status,
 	)
 
 	if err != nil {
@@ -653,14 +518,14 @@ func (r *Repository) GetChildren(parentID int64) ([]*VirtualFile, error) {
 
 // GetFullPath builds the complete path for a virtual file by traversing up the tree
 func (r *Repository) GetFullPath(virtualFileID int64) (string, error) {
-	// Use recursive CTE to build the full path
+	// Use recursive CTE to build the full path by going up from child to parent
 	query := `
-		WITH RECURSIVE path_builder(id, filename, full_path, level) AS (
-			SELECT id, filename, filename, 0 
+		WITH RECURSIVE path_builder(id, name, parent_id, full_path, level) AS (
+			SELECT id, name, parent_id, name, 0 
 			FROM virtual_files 
 			WHERE id = ?
 			UNION ALL
-			SELECT vf.id, vf.filename, vf.filename || '/' || pb.full_path, pb.level + 1
+			SELECT vf.id, vf.name, vf.parent_id, vf.name || '/' || pb.full_path, pb.level + 1
 			FROM virtual_files vf
 			JOIN path_builder pb ON vf.id = pb.parent_id
 		)
@@ -672,15 +537,8 @@ func (r *Repository) GetFullPath(virtualFileID int64) (string, error) {
 	err := r.db.QueryRow(query, virtualFileID).Scan(&fullPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Fallback: get the file and use its virtual_path
-			vf, err := r.GetVirtualFile(virtualFileID)
-			if err != nil {
-				return "", fmt.Errorf("failed to get virtual file for path: %w", err)
-			}
-			if vf == nil {
-				return "", fmt.Errorf("virtual file not found")
-			}
-			return vf.VirtualPath, nil
+			// Fallback: simple iterative approach
+			return r.buildPathIteratively(virtualFileID)
 		}
 		return "", fmt.Errorf("failed to build full path: %w", err)
 	}
@@ -693,22 +551,54 @@ func (r *Repository) GetFullPath(virtualFileID int64) (string, error) {
 	return fullPath, nil
 }
 
+// buildPathIteratively builds path by iteratively going up the parent chain
+func (r *Repository) buildPathIteratively(virtualFileID int64) (string, error) {
+	var pathParts []string
+	currentID := virtualFileID
+
+	for currentID != 0 {
+		vf, err := r.GetVirtualFile(currentID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get virtual file %d: %w", currentID, err)
+		}
+		if vf == nil {
+			break
+		}
+
+		// For root directory (empty name and no parent), don't add to path
+		if vf.Name != "" || vf.ParentID != nil {
+			pathParts = append([]string{vf.Name}, pathParts...)
+		}
+
+		if vf.ParentID == nil {
+			break
+		}
+		currentID = *vf.ParentID
+	}
+
+	if len(pathParts) == 0 {
+		return "/", nil
+	}
+
+	return "/" + strings.Join(pathParts, "/"), nil
+}
+
 // GetDescendants retrieves all descendants (children, grandchildren, etc.) of a directory
 func (r *Repository) GetDescendants(parentID int64) ([]*VirtualFile, error) {
 	query := `
 		WITH RECURSIVE descendants AS (
-			SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
+			SELECT id, parent_id, name, size, created_at, is_directory, status
 			FROM virtual_files 
 			WHERE id = ?
 			UNION ALL
-			SELECT vf.id, vf.nzb_file_id, vf.parent_id, vf.virtual_path, vf.filename, vf.size, vf.created_at, vf.is_directory, vf.encryption, vf.status
+			SELECT vf.id, vf.parent_id, vf.name, vf.size, vf.created_at, vf.is_directory, vf.status
 			FROM virtual_files vf
 			JOIN descendants d ON vf.parent_id = d.id
 		)
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status 
+		SELECT id, parent_id, name, size, created_at, is_directory, status 
 		FROM descendants 
 		WHERE id != ? 
-		ORDER BY virtual_path
+		ORDER BY name
 	`
 
 	rows, err := r.db.Query(query, parentID, parentID)
@@ -721,8 +611,7 @@ func (r *Repository) GetDescendants(parentID int64) ([]*VirtualFile, error) {
 	for rows.Next() {
 		var vf VirtualFile
 		err := rows.Scan(
-			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath,
-			&vf.Filename, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
+			&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan descendant: %w", err)
@@ -749,14 +638,17 @@ func (r *Repository) GetOrCreateDirectory(virtualPath string, parentID *int64) (
 	}
 
 	// Create new directory
-	filename := filepath.Base(virtualPath)
+	name := filepath.Base(virtualPath)
+	if name == "/" || name == "." {
+		name = ""
+	}
+
 	dir := &VirtualFile{
-		NzbFileID:   nil, // System directory
 		ParentID:    parentID,
-		VirtualPath: virtualPath,
-		Filename:    filename,
+		Name:        name,
 		Size:        0,
 		IsDirectory: true,
+		Status:      FileStatusHealthy,
 	}
 
 	if err := r.CreateVirtualFile(dir); err != nil {
@@ -767,10 +659,10 @@ func (r *Repository) GetOrCreateDirectory(virtualPath string, parentID *int64) (
 }
 
 // MoveFile moves a file/directory to a new parent (updates parent_id)
-func (r *Repository) MoveFile(virtualFileID int64, newParentID *int64, newVirtualPath string) error {
-	query := `UPDATE virtual_files SET parent_id = ?, virtual_path = ? WHERE id = ?`
+func (r *Repository) MoveFile(virtualFileID int64, newParentID *int64) error {
+	query := `UPDATE virtual_files SET parent_id = ? WHERE id = ?`
 
-	_, err := r.db.Exec(query, newParentID, newVirtualPath, virtualFileID)
+	_, err := r.db.Exec(query, newParentID, virtualFileID)
 	if err != nil {
 		return fmt.Errorf("failed to move file: %w", err)
 	}
@@ -801,25 +693,13 @@ func (r *Repository) DeleteVirtualFile(virtualFileID int64) error {
 	return nil
 }
 
-// UpdateVirtualFileFilename updates only the filename field of a virtual file
-func (r *Repository) UpdateVirtualFileFilename(virtualFileID int64, newFilename string) error {
-	query := `UPDATE virtual_files SET filename = ? WHERE id = ?`
+// UpdateVirtualFileName updates only the name field of a virtual file
+func (r *Repository) UpdateVirtualFileName(virtualFileID int64, newName string) error {
+	query := `UPDATE virtual_files SET name = ? WHERE id = ?`
 
-	_, err := r.db.Exec(query, newFilename, virtualFileID)
+	_, err := r.db.Exec(query, newName, virtualFileID)
 	if err != nil {
-		return fmt.Errorf("failed to update filename: %w", err)
-	}
-
-	return nil
-}
-
-// UpdateVirtualFilePath updates only the virtual_path field of a virtual file
-func (r *Repository) UpdateVirtualFilePath(virtualFileID int64, newPath string) error {
-	query := `UPDATE virtual_files SET virtual_path = ? WHERE id = ?`
-
-	_, err := r.db.Exec(query, newPath, virtualFileID)
-	if err != nil {
-		return fmt.Errorf("failed to update virtual path: %w", err)
+		return fmt.Errorf("failed to update name: %w", err)
 	}
 
 	return nil
@@ -827,68 +707,31 @@ func (r *Repository) UpdateVirtualFilePath(virtualFileID int64, newPath string) 
 
 // PAR2 File operations
 
-// CreatePar2File inserts a new PAR2 file record
+// CreatePar2File inserts a new PAR2 file record (requires existing virtual file)
 func (r *Repository) CreatePar2File(par2File *Par2File) error {
 	query := `
-		INSERT INTO par2_files (nzb_file_id, filename, size, segments_data)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO par2_files (id, name, segments_data)
+		VALUES (?, ?, ?)
 	`
 
-	result, err := r.db.Exec(query, par2File.NzbFileID, par2File.Filename,
-		par2File.Size, par2File.SegmentsData)
+	_, err := r.db.Exec(query, par2File.ID, par2File.Name, par2File.SegmentsData)
 	if err != nil {
 		return fmt.Errorf("failed to create par2 file: %w", err)
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get par2 file id: %w", err)
-	}
-
-	par2File.ID = id
 	return nil
 }
 
-// GetPar2FilesByNzbFileID retrieves all PAR2 files associated with an NZB file
-func (r *Repository) GetPar2FilesByNzbFileID(nzbFileID int64) ([]*Par2File, error) {
+// GetPar2FileByName retrieves a PAR2 file by its name
+func (r *Repository) GetPar2FileByName(name string) (*Par2File, error) {
 	query := `
-		SELECT id, nzb_file_id, filename, size, segments_data, created_at
-		FROM par2_files WHERE nzb_file_id = ? ORDER BY filename ASC
-	`
-
-	rows, err := r.db.Query(query, nzbFileID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list par2 files: %w", err)
-	}
-	defer rows.Close()
-
-	var par2Files []*Par2File
-	for rows.Next() {
-		var pf Par2File
-		err := rows.Scan(
-			&pf.ID, &pf.NzbFileID, &pf.Filename, &pf.Size,
-			&pf.SegmentsData, &pf.CreatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan par2 file: %w", err)
-		}
-		par2Files = append(par2Files, &pf)
-	}
-
-	return par2Files, rows.Err()
-}
-
-// GetPar2FileByID retrieves a PAR2 file by its ID
-func (r *Repository) GetPar2FileByID(id int64) (*Par2File, error) {
-	query := `
-		SELECT id, nzb_file_id, filename, size, segments_data, created_at
-		FROM par2_files WHERE id = ?
+		SELECT id, name, segments_data, created_at
+		FROM par2_files WHERE name = ?
 	`
 
 	var pf Par2File
-	err := r.db.QueryRow(query, id).Scan(
-		&pf.ID, &pf.NzbFileID, &pf.Filename, &pf.Size,
-		&pf.SegmentsData, &pf.CreatedAt,
+	err := r.db.QueryRow(query, name).Scan(
+		&pf.ID, &pf.Name, &pf.SegmentsData, &pf.CreatedAt,
 	)
 
 	if err != nil {
@@ -901,16 +744,26 @@ func (r *Repository) GetPar2FileByID(id int64) (*Par2File, error) {
 	return &pf, nil
 }
 
-// DeletePar2FilesByNzbFileID removes all PAR2 files associated with an NZB file
-func (r *Repository) DeletePar2FilesByNzbFileID(nzbFileID int64) error {
-	query := `DELETE FROM par2_files WHERE nzb_file_id = ?`
+// GetPar2FileByID retrieves a PAR2 file by its ID
+func (r *Repository) GetPar2FileByID(id int64) (*Par2File, error) {
+	query := `
+		SELECT id, name, segments_data, created_at
+		FROM par2_files WHERE id = ?
+	`
 
-	_, err := r.db.Exec(query, nzbFileID)
+	var pf Par2File
+	err := r.db.QueryRow(query, id).Scan(
+		&pf.ID, &pf.Name, &pf.SegmentsData, &pf.CreatedAt,
+	)
+
 	if err != nil {
-		return fmt.Errorf("failed to delete par2 files: %w", err)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get par2 file: %w", err)
 	}
 
-	return nil
+	return &pf, nil
 }
 
 // DeletePar2File removes a specific PAR2 file
@@ -1429,8 +1282,8 @@ func (r *Repository) GetVirtualFileStatus(virtualFileID int64) (FileStatus, erro
 // GetVirtualFilesByStatus retrieves virtual files by their status
 func (r *Repository) GetVirtualFilesByStatus(status FileStatus) ([]*VirtualFile, error) {
 	query := `
-		SELECT id, nzb_file_id, parent_id, virtual_path, filename, size, created_at, is_directory, encryption, status
-		FROM virtual_files WHERE status = ? ORDER BY virtual_path ASC
+		SELECT id, parent_id, name, size, created_at, is_directory, status
+		FROM virtual_files WHERE status = ? ORDER BY name ASC
 	`
 
 	rows, err := r.db.Query(query, status)
@@ -1443,8 +1296,7 @@ func (r *Repository) GetVirtualFilesByStatus(status FileStatus) ([]*VirtualFile,
 	for rows.Next() {
 		var vf VirtualFile
 		err := rows.Scan(
-			&vf.ID, &vf.NzbFileID, &vf.ParentID, &vf.VirtualPath, &vf.Filename,
-			&vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Encryption, &vf.Status,
+			&vf.ID, &vf.ParentID, &vf.Name, &vf.Size, &vf.CreatedAt, &vf.IsDirectory, &vf.Status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan virtual file: %w", err)
@@ -1455,18 +1307,21 @@ func (r *Repository) GetVirtualFilesByStatus(status FileStatus) ([]*VirtualFile,
 	return files, rows.Err()
 }
 
-// HasUnhealthyVirtualFiles checks if an NZB file has any virtual files with status other than 'healthy'
-func (r *Repository) HasUnhealthyVirtualFiles(nzbFileID int64) (bool, error) {
+// HasUnhealthyVirtualFiles checks if a virtual file with given ID has unhealthy status
+func (r *Repository) HasUnhealthyVirtualFiles(virtualFileID int64) (bool, error) {
 	query := `
-		SELECT COUNT(*) FROM virtual_files 
-		WHERE nzb_file_id = ? AND status != 'healthy'
+		SELECT status FROM virtual_files 
+		WHERE id = ?
 	`
 
-	var count int
-	err := r.db.QueryRow(query, nzbFileID).Scan(&count)
+	var status string
+	err := r.db.QueryRow(query, virtualFileID).Scan(&status)
 	if err != nil {
-		return false, fmt.Errorf("failed to check unhealthy virtual files: %w", err)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check virtual file status: %w", err)
 	}
 
-	return count > 0, nil
+	return status != "healthy", nil
 }

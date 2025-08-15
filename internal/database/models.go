@@ -4,42 +4,20 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
-// NzbType represents the type of NZB file
-type NzbType string
-
-const (
-	NzbTypeSingleFile NzbType = "single_file"
-	NzbTypeMultiFile  NzbType = "multi_file"
-	NzbTypeRarArchive NzbType = "rar_archive"
-)
-
-// NzbPartType represents the type of NZB part for multi-part archives
-type NzbPartType string
-
-const (
-	NzbPartTypeMain    NzbPartType = "main"     // Main NZB file containing all content
-	NzbPartTypeRarPart NzbPartType = "rar_part" // Individual RAR part file
-	NzbPartTypePar2    NzbPartType = "par2"     // PAR2 repair file
-)
-
-// NzbSegment represents a single segment within an NZB file
-type NzbSegment struct {
-	Number    int      `json:"number"`
-	Bytes     int64    `json:"bytes"`
-	MessageID string   `json:"message_id"`
-	Groups    []string `json:"groups"`
+// SegmentData represents segment information
+type SegmentData struct {
+	Bytes int64  `json:"bytes"`
+	ID    string `json:"id"`
 }
 
-// NzbSegments is a slice of NzbSegment that implements database scanning
-type NzbSegments []NzbSegment
-
 // Scan implements the sql.Scanner interface
-func (ns *NzbSegments) Scan(value interface{}) error {
+func (sd *SegmentData) Scan(value interface{}) error {
 	if value == nil {
-		*ns = nil
+		*sd = SegmentData{}
 		return nil
 	}
 
@@ -50,39 +28,59 @@ func (ns *NzbSegments) Scan(value interface{}) error {
 	case string:
 		bytes = []byte(v)
 	default:
-		return errors.New("cannot scan non-string value into NzbSegments")
+		return errors.New("cannot scan non-string value into SegmentData")
 	}
 
-	return json.Unmarshal(bytes, ns)
+	return json.Unmarshal(bytes, sd)
 }
 
 // Value implements the driver.Valuer interface
-func (ns NzbSegments) Value() (driver.Value, error) {
-	if len(ns) == 0 {
+func (sd SegmentData) Value() (driver.Value, error) {
+	if sd.Bytes == 0 && sd.ID == "" {
 		return nil, nil
 	}
-	return json.Marshal(ns)
+	return json.Marshal(sd)
 }
 
-// NzbFile represents a complete NZB file entry
-type NzbFile struct {
-	ID             int64       `db:"id"`
-	Path           string      `db:"path"`
-	Filename       string      `db:"filename"`
-	Size           int64       `db:"size"`
-	CreatedAt      time.Time   `db:"created_at"`
-	UpdatedAt      time.Time   `db:"updated_at"`
-	NzbType        NzbType     `db:"nzb_type"`
-	SegmentsCount  int         `db:"segments_count"`
-	SegmentsData   NzbSegments `db:"segments_data"`
-	SegmentSize    int64       `db:"segment_size"`
-	RclonePassword *string     `db:"rclone_password"` // Password from NZB meta, NULL if not encrypted
-	RcloneSalt     *string     `db:"rclone_salt"`     // Salt from NZB meta, NULL if not encrypted
-	// RAR part management fields
-	ParentNzbID *int64      `db:"parent_nzb_id"` // References parent NZB for RAR parts, NULL for main files
-	PartType    NzbPartType `db:"part_type"`     // Type of NZB part (main, rar_part, par2)
-	ArchiveName *string     `db:"archive_name"`  // Archive name for grouping RAR parts, NULL for non-RAR files
+// RarPart represents a single RAR part with its segments
+type RarPart struct {
+	SegmentData SegmentData `json:"segment_data"`
+	PartSize    int64       `json:"part_size"`
+	Offset      int64       `json:"offset"`
+	ByteCount   int64       `json:"bytecount"`
 }
+
+// RarParts is a slice of RarPart for JSON marshaling
+type RarParts []RarPart
+
+// Scan implements the sql.Scanner interface
+func (rp *RarParts) Scan(value interface{}) error {
+	if value == nil {
+		*rp = nil
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return errors.New("cannot scan non-string value into RarParts")
+	}
+
+	return json.Unmarshal(bytes, rp)
+}
+
+// Value implements the driver.Valuer interface
+func (rp RarParts) Value() (driver.Value, error) {
+	if len(rp) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(rp)
+}
+
 
 // FileStatus represents the status of a file's availability
 type FileStatus string
@@ -93,65 +91,109 @@ const (
 	FileStatusCorrupted FileStatus = "corrupted" // No articles found or completely unreadable
 )
 
-// VirtualFile represents a virtual file extracted from NZB contents
+// VirtualFile represents a virtual file in the filesystem
 type VirtualFile struct {
 	ID          int64      `db:"id"`
-	NzbFileID   *int64     `db:"nzb_file_id"` // Pointer to allow NULL for system directories
-	ParentID    *int64     `db:"parent_id"`   // References another VirtualFile ID for directories
-	VirtualPath string     `db:"virtual_path"`
-	Filename    string     `db:"filename"`
+	ParentID    *int64     `db:"parent_id"`
+	Name        string     `db:"name"`
 	Size        int64      `db:"size"`
 	CreatedAt   time.Time  `db:"created_at"`
 	IsDirectory bool       `db:"is_directory"`
-	Encryption  *string    `db:"encryption"` // Encryption type (e.g., "rclone"), NULL if not encrypted
-	Status      FileStatus `db:"status"`     // File availability status
+	Status      FileStatus `db:"status"`
 }
 
-// RarContent represents a file contained within a RAR archive
-type RarContent struct {
-	ID             int64     `db:"id"`
-	VirtualFileID  int64     `db:"virtual_file_id"`
-	InternalPath   string    `db:"internal_path"`
-	Filename       string    `db:"filename"`
-	Size           int64     `db:"size"`
-	CompressedSize int64     `db:"compressed_size"`
-	CRC32          *string   `db:"crc32"`
-	CreatedAt      time.Time `db:"created_at"`
-	// Additional metadata for streaming support
-	FileOffset   *int64     `db:"file_offset"`    // Offset within the RAR archive
-	RarPartIndex *int       `db:"rar_part_index"` // Which RAR part contains this file
-	IsDirectory  bool       `db:"is_directory"`   // Whether this entry is a directory
-	ModTime      *time.Time `db:"mod_time"`       // File modification time from RAR
+// NzbFile represents an NZB file that references a virtual file
+type NzbFile struct {
+	ID           int64        `db:"id"`
+	Name         string       `db:"name"`
+	CreatedAt    time.Time    `db:"created_at"`
+	UpdatedAt    time.Time    `db:"updated_at"`
+	SegmentsData *SegmentData `db:"segments_data"`
+	Password     *string      `db:"password"`
+	Encryption   *string      `db:"encryption"`
+	Salt         *string      `db:"salt"`
 }
 
-// RarArchiveInfo contains information about a complete RAR archive
-type RarArchiveInfo struct {
-	VirtualFileID int64     `db:"virtual_file_id"`
-	MainFilename  string    `db:"main_filename"`    // Main RAR file (.rar or .part001.rar)
-	TotalParts    int       `db:"total_parts"`      // Number of RAR parts
-	TotalFiles    int       `db:"total_files"`      // Number of files within archive
-	PartFilenames []string  `json:"part_filenames"` // List of all RAR part filenames
-	AnalyzedAt    time.Time `db:"analyzed_at"`      // When the archive was analyzed
+// NzbRarFile represents an NZB RAR file that references a virtual file
+type NzbRarFile struct {
+	ID        int64     `db:"id"`
+	Name      string    `db:"name"`
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
+	RarParts  RarParts  `db:"rar_parts"`
 }
 
-// FileMetadata represents additional metadata for virtual files
-type FileMetadata struct {
-	ID            int64     `db:"id"`
-	VirtualFileID int64     `db:"virtual_file_id"`
-	Key           string    `db:"key"`
-	Value         string    `db:"value"`
-	CreatedAt     time.Time `db:"created_at"`
-}
-
-// Par2File represents a PAR2 repair file associated with an NZB file
+// Par2File represents a PAR2 repair file that references a virtual file
 type Par2File struct {
 	ID           int64       `db:"id"`
-	NzbFileID    int64       `db:"nzb_file_id"`
-	Filename     string      `db:"filename"`
-	Size         int64       `db:"size"`
-	SegmentsData NzbSegments `db:"segments_data"`
+	Name         string      `db:"name"`
+	SegmentsData SegmentData `db:"segments_data"`
 	CreatedAt    time.Time   `db:"created_at"`
 }
+
+// NzbSegment represents a segment from the old schema for conversion
+type NzbSegment struct {
+	Number    int      `json:"number"`
+	Bytes     int64    `json:"bytes"`
+	MessageID string   `json:"message_id"`
+	Groups    []string `json:"groups"`
+}
+
+// NzbSegments is a slice of NzbSegment for easier handling
+type NzbSegments []NzbSegment
+
+// ConvertToSegmentsData converts old NzbSegments to new SegmentsData JSON format
+func (segments NzbSegments) ConvertToSegmentsData() SegmentData {
+	if len(segments) == 0 {
+		return SegmentData{}
+	}
+	
+	// Calculate total bytes and collect all message IDs
+	var totalBytes int64
+	var messageIDs []string
+	
+	for _, seg := range segments {
+		totalBytes += seg.Bytes
+		messageIDs = append(messageIDs, seg.MessageID)
+	}
+	
+	// Create segments data with total bytes and comma-separated message IDs
+	return SegmentData{
+		Bytes: totalBytes,
+		ID:    strings.Join(messageIDs, ","),
+	}
+}
+
+// ConvertToRarParts converts RAR file segments to RarParts JSON format
+func ConvertToRarParts(rarFiles []ParsedRarFile) RarParts {
+	var rarParts RarParts
+	
+	var cumulativeOffset int64
+	for _, rarFile := range rarFiles {
+		// Convert segments to SegmentData
+		segmentData := rarFile.Segments.ConvertToSegmentsData()
+		
+		rarPart := RarPart{
+			SegmentData: segmentData,
+			PartSize:    rarFile.Size,
+			Offset:      cumulativeOffset,
+			ByteCount:   segmentData.Bytes,
+		}
+		
+		rarParts = append(rarParts, rarPart)
+		cumulativeOffset += rarFile.Size
+	}
+	
+	return rarParts
+}
+
+// ParsedRarFile represents a single RAR file for conversion
+type ParsedRarFile struct {
+	Filename string
+	Size     int64
+	Segments NzbSegments
+}
+
 
 // QueueStatus represents the status of a queued import
 type QueueStatus string

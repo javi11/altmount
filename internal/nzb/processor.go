@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ type Processor struct {
 	repo       *database.Repository
 	rarHandler *RarHandler
 	cp         nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
+	log        *slog.Logger
 }
 
 // NewProcessor creates a new NZB processor
@@ -30,6 +32,7 @@ func NewProcessor(repo *database.Repository, cp nntppool.UsenetConnectionPool) *
 		repo:       repo,
 		rarHandler: NewRarHandler(cp, 10), // 10 max workers for RAR analysis
 		cp:         cp,
+		log:        slog.Default().With("component", "nzb-processor"),
 	}
 }
 
@@ -41,7 +44,8 @@ func (proc *Processor) ProcessNzbFile(nzbPath string) error {
 // ProcessNzbFileWithRoot processes an NZB file maintaining the folder structure relative to watchRoot
 func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 	// Check if NZB file already exists in database
-	existing, err := proc.repo.GetNzbFileByPath(nzbPath)
+	nzbFilename := filepath.Base(nzbPath)
+	existing, err := proc.repo.GetNzbFileByName(nzbFilename)
 	if err != nil {
 		return fmt.Errorf("failed to check existing NZB: %w", err)
 	}
@@ -77,20 +81,27 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 			return fmt.Errorf("failed to create parent directories: %w", err)
 		}
 
-		// Create the NZB file record
+		// Create the main virtual file entry for the NZB
+		nzbVirtualFile := &database.VirtualFile{
+			ParentID:    proc.getParentDirID(txRepo, virtualDir), // Get parent directory ID
+			Name:        parsed.Filename,
+			Size:        parsed.TotalSize,
+			IsDirectory: false,
+			Status:      database.FileStatusHealthy,
+		}
+
+		if err := txRepo.CreateVirtualFile(nzbVirtualFile); err != nil {
+			return fmt.Errorf("failed to create virtual file for NZB: %w", err)
+		}
+
+		// Create the NZB file record linked to the virtual file
 		nzbFile := &database.NzbFile{
-			Path:           parsed.Path,
-			Filename:       parsed.Filename,
-			Size:           parsed.TotalSize,
-			NzbType:        parsed.Type,
-			SegmentsCount:  parsed.SegmentsCount,
-			SegmentsData:   proc.parser.ConvertToDbSegments(parsed.Files),
-			SegmentSize:    parsed.SegmentSize,
-			RclonePassword: parsed.Password,
-			RcloneSalt:     parsed.Salt,
-			ParentNzbID:    nil,                      // This is the main NZB file
-			PartType:       database.NzbPartTypeMain, // Mark as main NZB file
-			ArchiveName:    nil,                      // Not applicable for main NZB
+			ID:           nzbVirtualFile.ID, // Link to virtual file
+			Name:         parsed.Filename,
+			SegmentsData: nil, // Will be filled by individual file processing
+			Password:     parsed.Password,
+			Encryption:   determineEncryption(parsed.Files),
+			Salt:         parsed.Salt,
 		}
 
 		if err := txRepo.CreateNzbFile(nzbFile); err != nil {
@@ -114,13 +125,13 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 		}
 
 		switch parsed.Type {
-		case database.NzbTypeSingleFile:
+		case NzbTypeSingleFile:
 			if len(regularFiles) > 0 {
 				return proc.processSingleFileWithDir(txRepo, nzbFile, regularFiles[0], virtualDir)
 			}
-		case database.NzbTypeMultiFile:
+		case NzbTypeMultiFile:
 			return proc.processMultiFileWithDir(txRepo, nzbFile, regularFiles, virtualDir)
-		case database.NzbTypeRarArchive:
+		case NzbTypeRarArchive:
 			return proc.processRarArchiveWithDir(txRepo, nzbFile, regularFiles, virtualDir)
 		default:
 			return fmt.Errorf("unknown NZB type: %s", parsed.Type)
@@ -139,29 +150,38 @@ func (proc *Processor) processSingleFileWithDir(repo *database.Repository, nzbFi
 	}
 
 	// Create virtual file entry in the specified directory
-	virtualPath := filepath.Join(virtualDir, file.Filename)
-	virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
-
 	vf := &database.VirtualFile{
-		NzbFileID:   int64Ptr(nzbFile.ID),
 		ParentID:    parentDir,
-		VirtualPath: virtualPath,
-		Filename:    file.Filename,
+		Name:        file.Filename,
 		Size:        file.Size,
 		IsDirectory: false,
-		Encryption:  file.Encryption,
+		Status:      database.FileStatusHealthy,
 	}
 
 	if err := repo.CreateVirtualFile(vf); err != nil {
 		return fmt.Errorf("failed to create virtual file for single file: %w", err)
 	}
 
+	// Create nzb_files entry for this single file
+	segmentData := proc.parser.ConvertToSegmentsData(file)
+
+	singleNzbFile := &database.NzbFile{
+		ID:           vf.ID,
+		Name:         file.Filename,
+		SegmentsData: &segmentData,
+		Password:     nzbFile.Password,
+		Encryption:   file.Encryption,
+		Salt:         nzbFile.Salt,
+	}
+
+	if err := repo.CreateNzbFile(singleNzbFile); err != nil {
+		return fmt.Errorf("failed to create NZB file entry for single file: %w", err)
+	}
+
 	// Store additional metadata if needed
 	if len(file.Groups) > 0 {
-		groupsStr := strings.Join(file.Groups, ",")
-		if err := repo.SetFileMetadata(vf.ID, "groups", groupsStr); err != nil {
-			return fmt.Errorf("failed to set groups metadata: %w", err)
-		}
+		// Note: Metadata storage not available in new schema
+		proc.log.Debug("Groups metadata", "file", file.Filename, "groups", strings.Join(file.Groups, ","))
 	}
 
 	return nil
@@ -191,13 +211,11 @@ func (proc *Processor) processMultiFileWithDir(repo *database.Repository, nzbFil
 		}
 
 		vf := &database.VirtualFile{
-			NzbFileID:   int64Ptr(nzbFile.ID),
 			ParentID:    parentID,
-			VirtualPath: dir.path,
-			Filename:    dir.name,
+			Name:        dir.name,
 			Size:        0,
 			IsDirectory: true,
-			Encryption:  nil, // Directories are not encrypted
+			Status:      database.FileStatusHealthy,
 		}
 
 		if err := repo.CreateVirtualFile(vf); err != nil {
@@ -228,25 +246,37 @@ func (proc *Processor) processMultiFileWithDir(repo *database.Repository, nzbFil
 		virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 
 		vf := &database.VirtualFile{
-			NzbFileID:   int64Ptr(nzbFile.ID),
 			ParentID:    parentID,
-			VirtualPath: virtualPath,
-			Filename:    filename,
+			Name:        filename,
 			Size:        file.Size,
 			IsDirectory: false,
-			Encryption:  file.Encryption,
+			Status:      database.FileStatusHealthy,
 		}
 
 		if err := repo.CreateVirtualFile(vf); err != nil {
 			return fmt.Errorf("failed to create virtual file %s: %w", filename, err)
 		}
 
+		// Create nzb_files entry for this file
+		segmentData := proc.parser.ConvertToSegmentsData(file)
+
+		fileNzbFile := &database.NzbFile{
+			ID:           vf.ID,
+			Name:         filename,
+			SegmentsData: &segmentData,
+			Password:     nzbFile.Password,
+			Encryption:   file.Encryption,
+			Salt:         nzbFile.Salt,
+		}
+
+		if err := repo.CreateNzbFile(fileNzbFile); err != nil {
+			return fmt.Errorf("failed to create NZB file entry for %s: %w", filename, err)
+		}
+
 		// Store metadata
 		if len(file.Groups) > 0 {
-			groupsStr := strings.Join(file.Groups, ",")
-			if err := repo.SetFileMetadata(vf.ID, "groups", groupsStr); err != nil {
-				return fmt.Errorf("failed to set groups metadata: %w", err)
-			}
+			// Note: Metadata storage not available in new schema
+			proc.log.Debug("Groups metadata", "file", filename, "groups", strings.Join(file.Groups, ","))
 		}
 	}
 
@@ -267,21 +297,32 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 				return fmt.Errorf("failed to get parent directory: %w", err)
 			}
 
-			virtualPath := filepath.Join(virtualDir, file.Filename)
-			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
-
 			vf := &database.VirtualFile{
-				NzbFileID:   int64Ptr(nzbFile.ID),
 				ParentID:    parentDir,
-				VirtualPath: virtualPath,
-				Filename:    file.Filename,
+				Name:        file.Filename,
 				Size:        file.Size,
 				IsDirectory: false,
-				Encryption:  file.Encryption,
+				Status:      database.FileStatusHealthy,
 			}
 
 			if err := repo.CreateVirtualFile(vf); err != nil {
 				return fmt.Errorf("failed to create non-RAR file: %w", err)
+			}
+
+			// Create nzb_files entry for this non-RAR file
+			segmentData := proc.parser.ConvertToSegmentsData(file)
+
+			fileNzbFile := &database.NzbFile{
+				ID:           vf.ID,
+				Name:         file.Filename,
+				SegmentsData: &segmentData,
+				Password:     nzbFile.Password,
+				Encryption:   file.Encryption,
+				Salt:         nzbFile.Salt,
+			}
+
+			if err := repo.CreateNzbFile(fileNzbFile); err != nil {
+				return fmt.Errorf("failed to create NZB file entry for non-RAR file %s: %w", file.Filename, err)
 			}
 		}
 	}
@@ -291,16 +332,6 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 
 	// Process each RAR archive
 	for archiveName, archiveFiles := range rarArchives {
-		// Create individual NZB records for each RAR part file
-		err := proc.createRarPartNzbFiles(repo, nzbFile, archiveName, archiveFiles)
-		if err != nil {
-			return fmt.Errorf("failed to create RAR part NZB files for archive %s: %w", archiveName, err)
-		}
-
-		// Create directory for the RAR archive content
-		rarDirPath := filepath.Join(virtualDir, archiveName)
-		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
-
 		// Get parent directory ID
 		parentDir, err := proc.getOrCreateParentDirectory(repo, virtualDir)
 		if err != nil {
@@ -309,66 +340,74 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, nzbFi
 
 		// Create directory for the RAR archive content in virtual directory
 		rarDir := &database.VirtualFile{
-			NzbFileID:   int64Ptr(nzbFile.ID),
 			ParentID:    parentDir,
-			VirtualPath: rarDirPath,
-			Filename:    archiveName,
+			Name:        archiveName,
 			Size:        0, // Directory size
 			IsDirectory: true,
-			Encryption:  nil, // Directories are not encrypted
+			Status:      database.FileStatusHealthy,
 		}
 
 		if err := repo.CreateVirtualFile(rarDir); err != nil {
-			return fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
+			return fmt.Errorf("failed to create RAR directory %s: %w", archiveName, err)
 		}
 
-		// Perform real-time RAR analysis using the newly created RAR part NZB files
+		// Perform real-time RAR analysis to get individual files
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // 5 minute timeout for analysis
 		defer cancel()
 
-		// Analyze RAR content using streaming from Usenet - now use the individual RAR part files
-		rarContents, _, err := proc.rarHandler.AnalyzeRarContentFromNzb(ctx, nzbFile, archiveFiles, rarDir)
+		// Analyze RAR content using streaming from Usenet
+		var parsedArchiveFiles []ParsedFile
+		parsedArchiveFiles = append(parsedArchiveFiles, archiveFiles...)
+
+		rarContents, err := proc.rarHandler.AnalyzeRarContentFromNzb(ctx, nzbFile, parsedArchiveFiles, rarDir)
 		if err != nil {
-			// If real-time analysis fails, mark for later analysis
-			if err := repo.SetFileMetadata(rarDir.ID, "rar_analysis_needed", "true"); err != nil {
-				return fmt.Errorf("failed to set RAR analysis flag: %w", err)
-			}
-			if err := repo.SetFileMetadata(rarDir.ID, "rar_analysis_error", err.Error()); err != nil {
-				return fmt.Errorf("failed to set RAR analysis error: %w", err)
-			}
+			// If real-time analysis fails, log error and continue
+			proc.log.Warn("Failed to analyze RAR content", "archive", archiveName, "error", err)
 		} else {
-			// Successfully analyzed - store the content
+			// Successfully analyzed - create one nzb_rar_file per file inside the RAR
 			for _, rarContent := range rarContents {
-				if err := repo.CreateRarContent(&rarContent); err != nil {
-					return fmt.Errorf("failed to create RAR content entry: %w", err)
+				// Skip directories
+				if rarContent.IsDirectory {
+					continue
 				}
 
-				// Create virtual files for extracted content
-				contentPath := rarDirPath + "/" + rarContent.Filename
+				// Create virtual file for this file inside the RAR archive
 				contentFile := &database.VirtualFile{
-					NzbFileID:   int64Ptr(nzbFile.ID),
 					ParentID:    &rarDir.ID,
-					VirtualPath: contentPath,
-					Filename:    rarContent.Filename,
+					Name:        rarContent.Filename,
 					Size:        rarContent.Size,
 					IsDirectory: rarContent.IsDirectory,
-					Encryption:  nil, // RAR content files are not encrypted with rclone
+					Status:      database.FileStatusHealthy,
 				}
 
 				if err := repo.CreateVirtualFile(contentFile); err != nil {
-					return fmt.Errorf("failed to create RAR content file %s: %w", contentPath, err)
+					return fmt.Errorf("failed to create RAR content file %s: %w", rarContent.Filename, err)
 				}
 
-				// Mark this as extracted from RAR
-				if err := repo.SetFileMetadata(contentFile.ID, "extracted_from_rar", rarDirPath); err != nil {
-					return fmt.Errorf("failed to set RAR extraction metadata: %w", err)
+				// Create RarParts for this specific file using part mapping
+				rarParts := proc.rarHandler.CreateRarPartsForFile(parsedArchiveFiles, rarContent.PartMapping)
+
+				// Create nzb_rar_file entry for this specific file
+				fileNzbRarFile := &database.NzbRarFile{
+					ID:       contentFile.ID, // Link to the virtual file for this specific file
+					Name:     rarContent.Filename,
+					RarParts: rarParts, // Only the parts that contain this file's data
 				}
+
+				if err := repo.CreateNzbRarFile(fileNzbRarFile); err != nil {
+					return fmt.Errorf("failed to create NZB RAR file for %s: %w", rarContent.Filename, err)
+				}
+
+				proc.log.Info("Created nzb_rar_file for individual file",
+					"file", rarContent.Filename,
+					"size", rarContent.Size,
+					"parts_needed", len(rarContent.PartMapping),
+					"rar_parts", len(rarParts))
 			}
 
-			// Mark analysis as completed
-			if err := repo.SetFileMetadata(rarDir.ID, "rar_analysis_completed", time.Now().UTC().Format(time.RFC3339)); err != nil {
-				return fmt.Errorf("failed to set RAR analysis completed flag: %w", err)
-			}
+			proc.log.Info("Successfully processed RAR archive with per-file mapping",
+				"archive", archiveName,
+				"files_processed", len(rarContents))
 		}
 	}
 
@@ -452,16 +491,24 @@ func (proc *Processor) AnalyzeRarContentFromData(r io.Reader, virtualFileID int6
 		return fmt.Errorf("failed to analyze RAR content: %w", err)
 	}
 
-	// Store RAR contents in database
+	// Create virtual files for RAR contents
 	return proc.repo.WithTransaction(func(txRepo *database.Repository) error {
 		for _, content := range rarContents {
-			if err := txRepo.CreateRarContent(&content); err != nil {
-				return fmt.Errorf("failed to store RAR content entry %s: %w", content.Filename, err)
+			// Create virtual file for this RAR content
+			contentFile := &database.VirtualFile{
+				ParentID:    &virtualFileID,
+				Name:        content.Filename,
+				Size:        content.Size,
+				IsDirectory: content.IsDirectory,
+				Status:      database.FileStatusHealthy,
+			}
+
+			if err := txRepo.CreateVirtualFile(contentFile); err != nil {
+				return fmt.Errorf("failed to create virtual file for RAR content %s: %w", content.Filename, err)
 			}
 		}
 
-		// Remove the analysis needed flag
-		return txRepo.DeleteFileMetadata(virtualFileID, "rar_analysis_needed")
+		return nil
 	})
 }
 
@@ -529,13 +576,11 @@ func (proc *Processor) ensureParentDirectories(repo *database.Repository, virtua
 		if existing == nil {
 			// Create directory
 			dir := &database.VirtualFile{
-				NzbFileID:   nil, // System directory, no associated NZB
 				ParentID:    currentParentID,
-				VirtualPath: virtualPath,
-				Filename:    part,
+				Name:        part,
 				Size:        0,
 				IsDirectory: true,
-				Encryption:  nil, // System directories are not encrypted
+				Status:      database.FileStatusHealthy,
 			}
 
 			if err := repo.CreateVirtualFile(dir); err != nil {
@@ -559,11 +604,6 @@ func stringPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// Helper function to create int64 pointer
-func int64Ptr(i int64) *int64 {
-	return &i
 }
 
 // getOrCreateParentDirectory gets or creates a parent directory and returns its ID
@@ -628,14 +668,26 @@ func (proc *Processor) separatePar2Files(files []ParsedFile) ([]ParsedFile, []Pa
 // processPar2Files processes PAR2 files and stores them separately
 func (proc *Processor) processPar2Files(repo *database.Repository, nzbFile *database.NzbFile, par2Files []ParsedFile) error {
 	for _, file := range par2Files {
-		// Create segments data for this specific file
-		segments := proc.parser.ConvertToDbSegmentsForFile(file)
+		// Create virtual file for PAR2 file
+		par2VirtualFile := &database.VirtualFile{
+			ParentID:    &nzbFile.ID, // Parent is the main NZB virtual file
+			Name:        file.Filename,
+			Size:        file.Size,
+			IsDirectory: false,
+			Status:      database.FileStatusHealthy,
+		}
+
+		if err := repo.CreateVirtualFile(par2VirtualFile); err != nil {
+			return fmt.Errorf("failed to create virtual file for PAR2 %s: %w", file.Filename, err)
+		}
+
+		// Convert segments to SegmentData format
+		segmentData := proc.parser.ConvertToSegmentsData(file)
 
 		par2File := &database.Par2File{
-			NzbFileID:    nzbFile.ID,
-			Filename:     file.Filename,
-			Size:         file.Size,
-			SegmentsData: segments,
+			ID:           par2VirtualFile.ID,
+			Name:         file.Filename,
+			SegmentsData: segmentData,
 		}
 
 		if err := repo.CreatePar2File(par2File); err != nil {
@@ -811,40 +863,66 @@ func (proc *Processor) parseInt(s string) int {
 
 // createRarPartNzbFiles creates individual NZB file records for each RAR part
 func (proc *Processor) createRarPartNzbFiles(repo *database.Repository, parentNzbFile *database.NzbFile, archiveName string, archiveFiles []ParsedFile) error {
-	// First, mark the parent NZB file as main type
-	parentNzbFile.PartType = database.NzbPartTypeMain
-
 	// Sort archive files to ensure proper order
 	sortedFiles := proc.sortRarFiles(archiveFiles)
 
 	for _, rarFile := range sortedFiles {
-		// Create unique path for each RAR part by appending the part filename
-		// Format: "/path/to/parent.nzb#movie.part01.rar"
-		// This ensures UNIQUE constraint compliance while maintaining parent relationship
-		rarPartPath := fmt.Sprintf("%s#%s", parentNzbFile.Path, rarFile.Filename)
-
-		// Create an NZB file record for this RAR part
-		rarPartNzbFile := &database.NzbFile{
-			Path:           rarPartPath,                  // Unique path for this RAR part
-			Filename:       rarFile.Filename,             // Actual RAR part filename (movie.rar, movie.r00, etc.)
-			Size:           rarFile.Size,                 // Size of this specific part
-			NzbType:        parentNzbFile.NzbType,        // Same type as parent
-			SegmentsCount:  len(rarFile.Segments),        // Number of segments for this part
-			SegmentsData:   rarFile.Segments,             // Only segments for this specific part
-			SegmentSize:    parentNzbFile.SegmentSize,    // Use parent's segment size
-			RclonePassword: parentNzbFile.RclonePassword, // Inherit encryption settings
-			RcloneSalt:     parentNzbFile.RcloneSalt,     // Inherit encryption settings
-			ParentNzbID:    &parentNzbFile.ID,            // Link to parent NZB
-			PartType:       database.NzbPartTypeRarPart,  // Mark as RAR part
-			ArchiveName:    &archiveName,                 // Archive group name
+		// Create virtual file for each RAR part
+		rarVirtualFile := &database.VirtualFile{
+			ParentID:    &parentNzbFile.ID, // Parent is the main NZB virtual file
+			Name:        rarFile.Filename,
+			Size:        rarFile.Size,
+			IsDirectory: false,
+			Status:      database.FileStatusHealthy,
 		}
 
-		// Create the RAR part NZB file record
-		err := repo.CreateRarPartNzbFile(rarPartNzbFile)
-		if err != nil {
+		if err := repo.CreateVirtualFile(rarVirtualFile); err != nil {
+			return fmt.Errorf("failed to create virtual file for RAR part %s: %w", rarFile.Filename, err)
+		}
+
+		// Create NZB file record for this RAR part
+		rarPartNzbFile := &database.NzbFile{
+			ID:           rarVirtualFile.ID,
+			Name:         rarFile.Filename,
+			SegmentsData: &database.SegmentData{}, // Individual segments for this part
+			Password:     parentNzbFile.Password,
+			Encryption:   parentNzbFile.Encryption,
+			Salt:         parentNzbFile.Salt,
+		}
+
+		// Convert segments to SegmentData format
+		segmentData := proc.parser.ConvertToSegmentsData(rarFile)
+		rarPartNzbFile.SegmentsData = &segmentData
+
+		if err := repo.CreateNzbFile(rarPartNzbFile); err != nil {
 			return fmt.Errorf("failed to create RAR part NZB file for %s: %w", rarFile.Filename, err)
 		}
 	}
 
+	return nil
+}
+
+// getParentDirID gets the parent directory ID for a virtual directory path
+func (proc *Processor) getParentDirID(repo *database.Repository, virtualDir string) *int64 {
+	if virtualDir == "/" {
+		return nil // Root directory has no parent
+	}
+
+	// Get or create parent directory
+	parentID, err := proc.getOrCreateParentDirectory(repo, virtualDir)
+	if err != nil {
+		return nil // Return nil if we can't determine parent
+	}
+
+	return parentID
+}
+
+// determineEncryption determines encryption type from parsed files
+func determineEncryption(files []ParsedFile) *string {
+	for _, file := range files {
+		if file.Encryption != nil {
+			return file.Encryption
+		}
+	}
 	return nil
 }

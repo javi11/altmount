@@ -17,6 +17,29 @@ import (
 	"github.com/javi11/rardecode/v2"
 )
 
+// RarPartInfo represents information about which RAR part contains file data
+type RarPartInfo struct {
+	PartIndex       int    `json:"part_index"`        // Index in rarFiles array
+	PartFilename    string `json:"part_filename"`     // e.g., "movie.part001.rar"
+	FileStartOffset int64  `json:"file_start_offset"` // Where this file starts in this part (skipping headers)
+	FileEndOffset   int64  `json:"file_end_offset"`   // Where this file ends in this part
+	DataSize        int64  `json:"data_size"`         // How much of the file is in this part
+}
+
+// RarContent represents a file within a RAR archive for processing
+type RarContent struct {
+	VirtualFileID  int64         `json:"virtual_file_id"`
+	InternalPath   string        `json:"internal_path"`
+	Filename       string        `json:"filename"`
+	Size           int64         `json:"size"`
+	CompressedSize *int64        `json:"compressed_size,omitempty"`
+	FileOffset     *int64        `json:"file_offset,omitempty"`
+	CRC32          *string       `json:"crc32,omitempty"`
+	IsDirectory    bool          `json:"is_directory"`
+	ModTime        *time.Time    `json:"mod_time,omitempty"`
+	PartMapping    []RarPartInfo `json:"part_mapping"` // Which parts contain this file's data
+}
+
 // RarHandler handles RAR archive analysis and content extraction
 type RarHandler struct {
 	log        *slog.Logger
@@ -33,10 +56,98 @@ func NewRarHandler(cp nntppool.UsenetConnectionPool, maxWorkers int) *RarHandler
 	}
 }
 
+// calculateFilePartMapping determines which RAR parts contain file data and calculates offsets
+func (rh *RarHandler) calculateFilePartMapping(
+	fileOffset int64,
+	fileSize int64,
+	rarFiles []ParsedFile,
+	volumeHeaders []rardecode.VolumeHeader,
+) []RarPartInfo {
+	var partMapping []RarPartInfo
+	var cumulativeDataOffset int64 // Data-only cumulative offset (excluding headers)
+
+	rh.log.Debug("Calculating file part mapping",
+		"file_offset", fileOffset,
+		"file_size", fileSize,
+		"total_parts", len(rarFiles))
+
+	for i, rarPart := range rarFiles {
+		// Get header size for this part
+		var headerSize int64
+		if i < len(volumeHeaders) {
+			headerSize = volumeHeaders[i].HeaderSize
+		} else {
+			// Fallback if no volume header available
+			headerSize = int64(512)
+		}
+
+		// Calculate data size (excluding headers)
+		dataSize := rarPart.Size - headerSize
+		if dataSize < 0 {
+			dataSize = 0 // Safety check
+		}
+
+		dataStart := cumulativeDataOffset
+		dataEnd := cumulativeDataOffset + dataSize
+
+		// Check if file overlaps with this part's DATA section
+		fileEnd := fileOffset + fileSize
+		if fileOffset < dataEnd && fileEnd > dataStart {
+			// Calculate intersection with data section
+			fileStartInData := int64(0)
+			if fileOffset > dataStart {
+				fileStartInData = fileOffset - dataStart
+			}
+
+			fileEndInData := dataSize
+			if fileEnd < dataEnd {
+				fileEndInData = fileEnd - dataStart
+			}
+
+			// Ensure we don't have negative values
+			if fileEndInData > fileStartInData && fileStartInData >= 0 {
+				dataLength := fileEndInData - fileStartInData
+
+				partInfo := RarPartInfo{
+					PartIndex:       i,
+					PartFilename:    rarPart.Filename,
+					FileStartOffset: headerSize + fileStartInData, // Skip header!
+					FileEndOffset:   headerSize + fileEndInData,   // Skip header!
+					DataSize:        dataLength,
+				}
+
+				partMapping = append(partMapping, partInfo)
+
+				rh.log.Debug("File spans RAR part",
+					"part_index", i,
+					"part_filename", rarPart.Filename,
+					"file_start_offset", partInfo.FileStartOffset,
+					"file_end_offset", partInfo.FileEndOffset,
+					"data_size", partInfo.DataSize,
+					"header_size", headerSize)
+			}
+		}
+
+		cumulativeDataOffset += dataSize // Only count data, not headers
+	}
+
+	rh.log.Debug("Completed file part mapping",
+		"total_parts_with_file", len(partMapping),
+		"total_data_size", func() int64 {
+			var total int64
+			for _, pm := range partMapping {
+				total += pm.DataSize
+			}
+			return total
+		}())
+
+	return partMapping
+}
+
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses rardecode.OpenReader with a virtual filesystem to stream RAR data from Usenet
 // The virtualFile parameter is the directory that will contain the extracted files (not the RAR file itself)
-func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *database.NzbFile, rarFiles []ParsedFile, virtualDir *database.VirtualFile) ([]database.RarContent, []rardecode.VolumeHeader, error) {
+func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *database.NzbFile, rarFiles []ParsedFile, virtualDir *database.VirtualFile) ([]RarContent, error) {
 	// Create Usenet filesystem for RAR access - this is the key component that enables
 	// rardecode.OpenReader to read RAR parts directly from Usenet without downloading
 	ufs := NewUsenetFileSystem(ctx, rh.cp, nzbFile, rarFiles, rh.maxWorkers)
@@ -44,7 +155,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 	// Get sorted RAR files for proper multi-part reading
 	rarFileNames := ufs.GetRarFiles()
 	if len(rarFileNames) == 0 {
-		return nil, nil, fmt.Errorf("no RAR files found in the archive")
+		return nil, fmt.Errorf("no RAR files found in the archive")
 	}
 
 	// Start with the first RAR file (usually .rar or .part001.rar)
@@ -53,23 +164,29 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 	rh.log.Info("Starting RAR analysis via Usenet streaming",
 		"main_file", mainRarFile,
 		"total_parts", len(rarFileNames),
-		"nzb_segments", len(nzbFile.SegmentsData))
+		"rar_files", len(rarFiles))
 
 	// This is where the magic happens: rardecode.OpenReader will call ufs.Open() to access
 	// RAR part files, which in turn creates UsenetFile instances that stream data directly
 	// from Usenet using createUsenetReader() - no local file storage required!
 	rarReader, err := rardecode.OpenReader(mainRarFile, rardecode.FileSystem(ufs))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open RAR archive %s via Usenet filesystem: %w", mainRarFile, err)
+		return nil, fmt.Errorf("failed to open RAR archive %s via Usenet filesystem: %w", mainRarFile, err)
 	}
 	defer rarReader.Close()
 
 	rh.log.Debug("Successfully opened RAR archive via Usenet streaming", "main_file", mainRarFile)
 
+	// Get volume headers first for part mapping calculations
+	vol, err := rarReader.VolumeHeaders()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read RAR volume headers: %w", err)
+	}
+
 	// Extract file entries from the RAR archive
 	// Each call to rarReader.Next() may trigger reading from different RAR parts,
 	// all streamed transparently from Usenet via our virtual filesystem
-	var rarContents []database.RarContent
+	var rarContents []RarContent
 	fileCount := 0
 	for {
 		header, err := rarReader.Next()
@@ -79,7 +196,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 			break
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read RAR header from Usenet stream: %w", err)
+			return nil, fmt.Errorf("failed to read RAR header from Usenet stream: %w", err)
 		}
 
 		// Skip directories - focus on files
@@ -105,7 +222,15 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 			modTimePtr = &header.ModificationTime
 		}
 
-		rarContent := database.RarContent{
+		// Calculate part mapping for this file using VolumeHeaders
+		partMapping := rh.calculateFilePartMapping(
+			header.Offset,
+			header.UnPackedSize,
+			rarFiles,
+			vol,
+		)
+
+		rarContent := RarContent{
 			VirtualFileID: virtualDir.ID,
 			InternalPath:  filepath.Clean(header.Name),
 			Filename:      filepath.Base(header.Name),
@@ -114,7 +239,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 			CRC32:         crc32Ptr,
 			IsDirectory:   header.IsDir,
 			ModTime:       modTimePtr,
-			// Note: FileOffset and RarPartIndex could be populated if needed for advanced streaming
+			PartMapping:   partMapping, // Add the calculated part mapping
 		}
 
 		rarContents = append(rarContents, rarContent)
@@ -123,11 +248,23 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 			"path", rarContent.InternalPath,
 			"size", rarContent.Size,
 			"compressed", rarContent.CompressedSize,
+			"parts_containing_file", len(partMapping),
+			"part_mapping", func() string {
+				if len(partMapping) == 0 {
+					return "no parts"
+				}
+				var parts []string
+				for _, pm := range partMapping {
+					parts = append(parts, fmt.Sprintf("%s[%d:%d](%d bytes)",
+						pm.PartFilename, pm.FileStartOffset, pm.FileEndOffset, pm.DataSize))
+				}
+				return strings.Join(parts, ", ")
+			}(),
 		)
 	}
 
 	rh.log.Info("Successfully analyzed RAR content via Usenet streaming",
-		"archive_dir", virtualDir.VirtualPath,
+		"archive_dir", virtualDir.Name,
 		"files_found", len(rarContents),
 		"rar_parts", len(rarFileNames),
 		"total_bytes_in_rar", func() int64 {
@@ -137,19 +274,57 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *dat
 			}
 			return total
 		}(),
+		"part_mapping_summary", func() string {
+			var totalMappings int
+			for _, rc := range rarContents {
+				totalMappings += len(rc.PartMapping)
+			}
+			return fmt.Sprintf("%d files with %d total part mappings", len(rarContents), totalMappings)
+		}(),
 	)
 
-	vol, err := rarReader.VolumeHeaders()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read RAR volume headers: %w", err)
+	return rarContents, nil
+}
+
+// CreateRarPartsForFile creates RarParts for a specific file using part mapping information
+func (rh *RarHandler) CreateRarPartsForFile(archiveFiles []ParsedFile, partMapping []RarPartInfo) database.RarParts {
+	if len(partMapping) == 0 {
+		return database.RarParts{}
 	}
 
-	return rarContents, vol, nil
+	rarParts := make(database.RarParts, len(partMapping))
+	for i, pm := range partMapping {
+		// Find the corresponding archive file
+		if pm.PartIndex < len(archiveFiles) {
+			archiveFile := archiveFiles[pm.PartIndex]
+
+			// Convert segments for this part
+			segmentData := database.SegmentData{
+				Bytes: archiveFile.Size,
+				ID:    "", // Will be filled with segments data
+			}
+
+			// Use the actual segments from the ParsedFile
+			if len(archiveFile.Segments) > 0 {
+				// For simplicity, we'll use the segment data conversion
+				segmentData = archiveFile.Segments.ConvertToSegmentsData()
+			}
+
+			rarParts[i] = database.RarPart{
+				SegmentData: segmentData,
+				PartSize:    archiveFile.Size,
+				Offset:      pm.FileStartOffset, // File-specific offset (header-aware)
+				ByteCount:   pm.DataSize,        // Bytes of this file in this part
+			}
+		}
+	}
+
+	return rarParts
 }
 
 // AnalyzeRarContent analyzes a RAR archive to extract its internal file structure (legacy method)
 // This implementation uses the rardecode library to parse RAR headers and extract file lists
-func (rh *RarHandler) AnalyzeRarContent(r io.Reader, virtualFile *database.VirtualFile, nzbFile *database.NzbFile) ([]database.RarContent, error) {
+func (rh *RarHandler) AnalyzeRarContent(r io.Reader, virtualFile *database.VirtualFile, nzbFile *database.NzbFile) ([]RarContent, error) {
 	// Extract file list from RAR headers
 	fileEntries, err := rh.ExtractRarFileList(r)
 	if err != nil {
@@ -157,7 +332,7 @@ func (rh *RarHandler) AnalyzeRarContent(r io.Reader, virtualFile *database.Virtu
 	}
 
 	// Convert to database format
-	rarContents := make([]database.RarContent, 0, len(fileEntries))
+	rarContents := make([]RarContent, 0, len(fileEntries))
 	for _, entry := range fileEntries {
 		// Skip directories for now - focus on files
 		if entry.IsDirectory {
@@ -169,19 +344,20 @@ func (rh *RarHandler) AnalyzeRarContent(r io.Reader, virtualFile *database.Virtu
 			crc32Ptr = &entry.CRC32
 		}
 
-		rarContent := database.RarContent{
+		rarContent := RarContent{
 			VirtualFileID:  virtualFile.ID,
 			InternalPath:   entry.Path,
 			Filename:       entry.Filename,
 			Size:           entry.Size,
-			CompressedSize: entry.CompressedSize,
+			CompressedSize: &entry.CompressedSize,
 			CRC32:          crc32Ptr,
+			IsDirectory:    entry.IsDirectory,
 		}
 		rarContents = append(rarContents, rarContent)
 	}
 
 	rh.log.Info("Successfully analyzed RAR content",
-		"archive", virtualFile.VirtualPath,
+		"archive", virtualFile.Name,
 		"files_found", len(rarContents),
 	)
 

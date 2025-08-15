@@ -283,17 +283,22 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 
 // getFileSegments returns segments specific to this RAR file
 // With the new architecture, each RAR part is stored as a separate NZB record
-// with its own segments, so we can directly return the segments from ParsedFile
-func (uf *UsenetFile) getFileSegments() database.NzbSegments {
-	// Return segments specific to this RAR part file
-	// These segments were filtered during NZB processing and stored
-	// in the database as separate records per RAR part
-	return uf.file.Segments
+// with its own segments, so we can convert the segments from ParsedFile format
+func (uf *UsenetFile) getFileSegments() []database.SegmentData {
+	// Convert NzbSegments to SegmentData format
+	segmentData := make([]database.SegmentData, len(uf.file.Segments))
+	for i, seg := range uf.file.Segments {
+		segmentData[i] = database.SegmentData{
+			Bytes: seg.Bytes,
+			ID:    seg.MessageID,
+		}
+	}
+	return segmentData
 }
 
 // dbSegmentLoader implements the segment loader interface for database segments
 type dbSegmentLoader struct {
-	segs database.NzbSegments
+	segs []database.SegmentData
 }
 
 func (dl dbSegmentLoader) GetSegmentCount() int {
@@ -306,11 +311,10 @@ func (dl dbSegmentLoader) GetSegment(index int) (segment nzbparser.NzbSegment, g
 	}
 	seg := dl.segs[index]
 	nzbSeg := nzbparser.NzbSegment{
-		Number: seg.Number,
-		Bytes:  int(seg.Bytes),
-		ID:     seg.MessageID,
+		Bytes: int(seg.Bytes),
+		ID:    seg.ID,
 	}
-	return nzbSeg, seg.Groups, true
+	return nzbSeg, nil, true
 }
 
 // UsenetFileInfo methods implementing fs.FileInfo interface
