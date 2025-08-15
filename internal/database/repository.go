@@ -88,7 +88,7 @@ func (r *Repository) DeleteNzbFile(id int64) error {
 func (r *Repository) CreateRarPartNzbFile(nzbFile *NzbFile) error {
 	// Ensure this is marked as a RAR part
 	nzbFile.PartType = NzbPartTypeRarPart
-	
+
 	// Use the existing CreateNzbFile method which now supports the new fields
 	return r.CreateNzbFile(nzbFile)
 }
@@ -362,12 +362,12 @@ func (r *Repository) GetVirtualFileWithNzb(path string) (*VirtualFile, *NzbFile,
 // CreateRarContent inserts a new RAR content record
 func (r *Repository) CreateRarContent(rc *RarContent) error {
 	query := `
-		INSERT INTO rar_contents (virtual_file_id, internal_path, filename, size, compressed_size, crc32)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO rar_contents (virtual_file_id, internal_path, filename, size, compressed_size, crc32, file_offset)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := r.db.Exec(query, rc.VirtualFileID, rc.InternalPath, rc.Filename,
-		rc.Size, rc.CompressedSize, rc.CRC32)
+		rc.Size, rc.CompressedSize, rc.CRC32, rc.FileOffset)
 	if err != nil {
 		return fmt.Errorf("failed to create rar content: %w", err)
 	}
@@ -384,7 +384,7 @@ func (r *Repository) CreateRarContent(rc *RarContent) error {
 // GetRarContentsByVirtualFileID retrieves RAR contents for a virtual file
 func (r *Repository) GetRarContentsByVirtualFileID(virtualFileID int64) ([]*RarContent, error) {
 	query := `
-		SELECT id, virtual_file_id, internal_path, filename, size, compressed_size, crc32, created_at
+		SELECT id, virtual_file_id, internal_path, filename, size, compressed_size, crc32, created_at, file_offset
 		FROM rar_contents WHERE virtual_file_id = ? ORDER BY internal_path ASC
 	`
 
@@ -400,6 +400,7 @@ func (r *Repository) GetRarContentsByVirtualFileID(virtualFileID int64) ([]*RarC
 		err := rows.Scan(
 			&rc.ID, &rc.VirtualFileID, &rc.InternalPath, &rc.Filename,
 			&rc.Size, &rc.CompressedSize, &rc.CRC32, &rc.CreatedAt,
+			&rc.FileOffset,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan rar content: %w", err)

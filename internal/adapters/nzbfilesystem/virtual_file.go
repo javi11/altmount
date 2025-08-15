@@ -451,11 +451,36 @@ func (vf *VirtualFile) createRarContentReader() (nzb.RarContentReadSeeker, error
 		return nil, fmt.Errorf("no RAR files found in NZB")
 	}
 
-	// Use the RAR handler to create a content reader for this specific file
-	rarHandler := nzb.NewRarHandler(vf.cp, vf.maxWorkers)
-	targetPath := vf.virtualFile.Filename // The filename within the RAR archive
+	// Find the RAR content entry for this specific file to get its offset and size
+	var rarContent *database.RarContent
+	for _, content := range rarContents {
+		if content.Filename == vf.virtualFile.Filename || content.InternalPath == vf.virtualFile.Filename {
+			rarContent = content
+			break
+		}
+	}
 
-	return rarHandler.CreateRarContentReader(vf.ctx, vf.nzbFile, rarFiles, targetPath)
+	if rarContent == nil {
+		return nil, fmt.Errorf("RAR content not found for file: %s", vf.virtualFile.Filename)
+	}
+
+	if rarContent.FileOffset == nil {
+		return nil, fmt.Errorf("file offset not available for RAR file: %s", vf.virtualFile.Filename)
+	}
+
+	// Use the RAR handler to create a direct content reader for optimal performance
+	// This bypasses rardecode for content reading and streams directly from Usenet using the file offset
+	rarHandler := nzb.NewRarHandler(vf.cp, vf.maxWorkers)
+	targetFilename := vf.virtualFile.Filename // The filename within the RAR archive
+
+	return rarHandler.CreateDirectRarContentReader(
+		vf.ctx,
+		vf.nzbFile,
+		rarFiles,
+		targetFilename,
+		*rarContent.FileOffset, // Starting offset of the file within the RAR stream
+		rarContent.Size,        // Size of the target file
+	)
 }
 
 // getRarFilesFromNzb extracts RAR file information from the database

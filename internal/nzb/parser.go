@@ -343,12 +343,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(parsedFile *ParsedFile, originalS
 		return nil
 	}
 
-	p.log.Info("Detected inconsistent segment sizes, normalizing with yEnc headers",
-		"filename", parsedFile.Filename,
-		"first_seg_size", firstSegSize,
-		"second_seg_size", secondSegSize,
-		"total_segments", len(parsedFile.Segments))
-
 	// Different segment sizes detected - fetch yEnc headers to get actual part sizes
 	// Fetch PartSize from first segment
 	firstPartSize, err := p.fetchYencPartSize(originalSegments[0], groups)
@@ -367,7 +361,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(parsedFile *ParsedFile, originalS
 
 	// Track size changes for recalculation
 	var sizeDiff int64
-	originalFileSize := parsedFile.Size
 
 	// Override all segments except the last one with the first segment's PartSize
 	for i := 0; i < len(parsedFile.Segments)-1; i++ {
@@ -384,15 +377,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(parsedFile *ParsedFile, originalS
 
 	// Update the file size with the corrected segment sizes
 	parsedFile.Size += sizeDiff
-
-	p.log.Info("Successfully normalized segment sizes using yEnc headers",
-		"filename", parsedFile.Filename,
-		"original_file_size", originalFileSize,
-		"new_file_size", parsedFile.Size,
-		"size_difference", sizeDiff,
-		"first_part_size", firstPartSize,
-		"last_part_size", lastPartSize,
-		"segments_updated", len(parsedFile.Segments))
 
 	return nil
 }
