@@ -201,7 +201,6 @@ func (r *Repository) DeleteNzbRarFile(id int64) error {
 	return nil
 }
 
-
 // GetVirtualFileByName retrieves a virtual file by its name
 func (r *Repository) GetVirtualFileByName(name string) (*VirtualFile, error) {
 	query := `

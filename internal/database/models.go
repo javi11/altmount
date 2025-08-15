@@ -81,7 +81,6 @@ func (rp RarParts) Value() (driver.Value, error) {
 	return json.Marshal(rp)
 }
 
-
 // FileStatus represents the status of a file's availability
 type FileStatus string
 
@@ -125,10 +124,11 @@ type NzbRarFile struct {
 
 // Par2File represents a PAR2 repair file that references a virtual file
 type Par2File struct {
-	ID           int64       `db:"id"`
-	Name         string      `db:"name"`
-	SegmentsData SegmentData `db:"segments_data"`
-	CreatedAt    time.Time   `db:"created_at"`
+	ID            int64       `db:"id"`
+	Name          string      `db:"name"`
+	SegmentsData  SegmentData `db:"segments_data"`
+	CreatedAt     time.Time   `db:"created_at"`
+	VirtualFileID int64       `db:"virtual_file_id"`
 }
 
 // NzbSegment represents a segment from the old schema for conversion
@@ -147,16 +147,16 @@ func (segments NzbSegments) ConvertToSegmentsData() SegmentData {
 	if len(segments) == 0 {
 		return SegmentData{}
 	}
-	
+
 	// Calculate total bytes and collect all message IDs
 	var totalBytes int64
 	var messageIDs []string
-	
+
 	for _, seg := range segments {
 		totalBytes += seg.Bytes
 		messageIDs = append(messageIDs, seg.MessageID)
 	}
-	
+
 	// Create segments data with total bytes and comma-separated message IDs
 	return SegmentData{
 		Bytes: totalBytes,
@@ -167,23 +167,23 @@ func (segments NzbSegments) ConvertToSegmentsData() SegmentData {
 // ConvertToRarParts converts RAR file segments to RarParts JSON format
 func ConvertToRarParts(rarFiles []ParsedRarFile) RarParts {
 	var rarParts RarParts
-	
+
 	var cumulativeOffset int64
 	for _, rarFile := range rarFiles {
 		// Convert segments to SegmentData
 		segmentData := rarFile.Segments.ConvertToSegmentsData()
-		
+
 		rarPart := RarPart{
 			SegmentData: segmentData,
 			PartSize:    rarFile.Size,
 			Offset:      cumulativeOffset,
 			ByteCount:   segmentData.Bytes,
 		}
-		
+
 		rarParts = append(rarParts, rarPart)
 		cumulativeOffset += rarFile.Size
 	}
-	
+
 	return rarParts
 }
 
@@ -193,7 +193,6 @@ type ParsedRarFile struct {
 	Size     int64
 	Segments NzbSegments
 }
-
 
 // QueueStatus represents the status of a queued import
 type QueueStatus string

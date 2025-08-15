@@ -16,7 +16,9 @@ CREATE TABLE nzb_files (
     name TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    segments_data TEXT, -- JSON data containing NZB segments info
+    segment_ids TEXT, -- segment IDs separated by commas
+    first_segment_size INTEGER NOT NULL DEFAULT 0,
+    last_segment_size INTEGER NOT NULL DEFAULT 0,
     password TEXT DEFAULT NULL,
     encryption TEXT DEFAULT NULL, -- Encryption type (e.g., 'rclone', 'headers')
     salt TEXT DEFAULT NULL,
@@ -37,7 +39,8 @@ CREATE TABLE par2_files (
     name TEXT NOT NULL,
     segments_data TEXT NOT NULL, -- JSON data containing NZB segments info for this par2 file
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (id) REFERENCES virtual_files(id) ON DELETE CASCADE
+    virtual_file_id INTEGER NOT NULL,
+    FOREIGN KEY (virtual_file_id) REFERENCES virtual_files(id) ON DELETE CASCADE
 );
 
 -- Create indexes for performance

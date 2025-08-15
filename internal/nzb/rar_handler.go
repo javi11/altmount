@@ -144,10 +144,10 @@ func (rh *RarHandler) calculateFilePartMapping(
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses rardecode.OpenReader with a virtual filesystem to stream RAR data from Usenet
 // The virtualFile parameter is the directory that will contain the extracted files (not the RAR file itself)
-func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, nzbFile *database.NzbFile, rarFiles []ParsedFile, virtualDir *database.VirtualFile) ([]RarContent, error) {
+func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile, virtualDir *database.VirtualFile) ([]RarContent, error) {
 	// Create Usenet filesystem for RAR access - this is the key component that enables
 	// rardecode.OpenReader to read RAR parts directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, rh.cp, nzbFile, rarFiles, rh.maxWorkers)
+	ufs := NewUsenetFileSystem(ctx, rh.cp, rarFiles, rh.maxWorkers)
 
 	// Get sorted RAR files for proper multi-part reading
 	rarFileNames := ufs.GetRarFiles()

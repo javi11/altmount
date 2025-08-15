@@ -30,7 +30,6 @@ var (
 type UsenetFileSystem struct {
 	ctx        context.Context
 	cp         nntppool.UsenetConnectionPool
-	nzbFile    *database.NzbFile
 	files      []ParsedFile
 	maxWorkers int
 }
@@ -40,7 +39,6 @@ type UsenetFileSystem struct {
 type UsenetFile struct {
 	name       string
 	file       *ParsedFile
-	nzbFile    *database.NzbFile
 	cp         nntppool.UsenetConnectionPool
 	ctx        context.Context
 	maxWorkers int
@@ -57,11 +55,10 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, nzbFile *database.NzbFile, files []ParsedFile, maxWorkers int) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, files []ParsedFile, maxWorkers int) *UsenetFileSystem {
 	return &UsenetFileSystem{
 		ctx:        ctx,
 		cp:         cp,
-		nzbFile:    nzbFile,
 		files:      files,
 		maxWorkers: maxWorkers,
 	}
@@ -77,7 +74,6 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 			return &UsenetFile{
 				name:       name,
 				file:       &file,
-				nzbFile:    ufs.nzbFile,
 				cp:         ufs.cp,
 				ctx:        ufs.ctx,
 				maxWorkers: ufs.maxWorkers,
