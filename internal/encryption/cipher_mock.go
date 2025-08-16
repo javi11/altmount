@@ -86,18 +86,18 @@ func (mr *MockCipherMockRecorder) Name() *gomock.Call {
 }
 
 // Open mocks base method.
-func (m *MockCipher) Open(ctx context.Context, rh *utils.RangeHeader, metadata map[string]string, getReader func(context.Context, int64, int64) (io.ReadCloser, error)) (io.ReadCloser, error) {
+func (m *MockCipher) Open(ctx context.Context, rh *utils.RangeHeader, encryptedFileSize int64, password, salt string, getReader func(context.Context, int64, int64) (io.ReadCloser, error)) (io.ReadCloser, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Open", ctx, rh, metadata, getReader)
+	ret := m.ctrl.Call(m, "Open", ctx, rh, encryptedFileSize, password, salt, getReader)
 	ret0, _ := ret[0].(io.ReadCloser)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Open indicates an expected call of Open.
-func (mr *MockCipherMockRecorder) Open(ctx, rh, metadata, getReader any) *gomock.Call {
+func (mr *MockCipherMockRecorder) Open(ctx, rh, encryptedFileSize, password, salt, getReader any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Open", reflect.TypeOf((*MockCipher)(nil).Open), ctx, rh, metadata, getReader)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Open", reflect.TypeOf((*MockCipher)(nil).Open), ctx, rh, encryptedFileSize, password, salt, getReader)
 }
 
 // OverheadSize mocks base method.
@@ -112,18 +112,4 @@ func (m *MockCipher) OverheadSize(fileSize int64) int64 {
 func (mr *MockCipherMockRecorder) OverheadSize(fileSize any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OverheadSize", reflect.TypeOf((*MockCipher)(nil).OverheadSize), fileSize)
-}
-
-// Reload mocks base method.
-func (m *MockCipher) Reload(cfg *Config) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Reload", cfg)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Reload indicates an expected call of Reload.
-func (mr *MockCipherMockRecorder) Reload(cfg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reload", reflect.TypeOf((*MockCipher)(nil).Reload), cfg)
 }

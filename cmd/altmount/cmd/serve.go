@@ -48,10 +48,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer pool.Quit()
 
-	// Create NZB system
+	// Create NZB system with metadata + queue
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
-		MainDatabasePath:  config.Database.MainPath,
 		QueueDatabasePath: config.Database.QueuePath,
+		MetadataRootPath:  config.Metadata.RootPath,
+		MetadataCacheSize: config.Metadata.CacheSize,
 		MountPath:         config.MountPath,
 		NzbDir:            config.NZBDir,
 		Password:          config.RClone.Password,

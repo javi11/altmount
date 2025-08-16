@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/nntppool"
 	"github.com/javi11/nzbparser"
 )
@@ -22,9 +21,9 @@ import (
 type NzbType string
 
 const (
-	NzbTypeSingleFile  NzbType = "single_file"
-	NzbTypeMultiFile   NzbType = "multi_file"
-	NzbTypeRarArchive  NzbType = "rar_archive"
+	NzbTypeSingleFile NzbType = "single_file"
+	NzbTypeMultiFile  NzbType = "multi_file"
+	NzbTypeRarArchive NzbType = "rar_archive"
 )
 
 // ParsedNzb contains the parsed NZB data and extracted metadata
@@ -36,8 +35,6 @@ type ParsedNzb struct {
 	Files         []ParsedFile
 	SegmentsCount int
 	SegmentSize   int64
-	Password      *string // Password from NZB meta, nil if not encrypted
-	Salt          *string // Salt from NZB meta, nil if not encrypted
 }
 
 // ParsedFile represents a file extracted from the NZB
@@ -45,23 +42,23 @@ type ParsedFile struct {
 	Subject      string
 	Filename     string
 	Size         int64
-	Segments     database.NzbSegments
+	Segments     []*metapb.SegmentData
 	Groups       []string
 	IsRarArchive bool
-	RarContents  []RarFileEntry // Only populated if IsRarArchive is true
-	Encryption   *string        // Encryption type (e.g., "rclone"), nil if not encrypted
+	RarContents  []RarFileEntry    // Only populated if IsRarArchive is true
+	Encryption   metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
+	Password     string            // Password from NZB meta, nil if not encrypted
+	Salt         string            // Salt from NZB meta, nil if not encrypted
 }
 
 // RarFileEntry represents a file within a RAR archive
 type RarFileEntry struct {
-	Path           string
-	Filename       string
-	Size           int64
-	CompressedSize int64
-	CRC32          string
-	IsDirectory    bool
-	ModTime        time.Time
-	Attributes     uint8
+	Path        string
+	Filename    string
+	Size        int64
+	IsDirectory bool
+	ModTime     time.Time
+	Attributes  uint8
 }
 
 var (
@@ -99,17 +96,6 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		Filename: filepath.Base(nzbPath),
 		Files:    make([]ParsedFile, 0, len(n.Files)),
 	}
-
-	// Extract credentials from metadata if present
-	if n.Meta != nil {
-		if password, ok := n.Meta["password"]; ok && password != "" {
-			parsed.Password = &password
-		}
-		if salt, ok := n.Meta["salt"]; ok && salt != "" {
-			parsed.Salt = &salt
-		}
-	}
-
 	// Determine segment size from meta chunk_size or fallback to first segment size
 	var segSize int64
 	if n.Meta != nil {
@@ -147,18 +133,30 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 
 // parseFile processes a single file entry from the NZB
 func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*ParsedFile, error) {
-	// Convert segments
-	segments := make(database.NzbSegments, len(file.Segments))
 
-	for i, seg := range file.Segments {
-		segments[i] = database.NzbSegment{
-			Number:    seg.Number,
-			Bytes:     int64(seg.Bytes),
-			MessageID: seg.ID,
-			Groups:    file.Groups,
+	// Normalize segment sizes using yEnc PartSize headers if needed
+	// This handles cases where NZB segment sizes include yEnc encoding overhead
+	if p.cp != nil && len(file.Segments) >= 2 {
+		err := p.normalizeSegmentSizesWithYenc(file.Segments)
+		if err != nil {
+			// Log the error but continue with original segment sizes
+			// This ensures processing continues even if yEnc header fetching fails
+			p.log.Warn("Failed to normalize segment sizes with yEnc headers",
+				"error", err,
+				"segments", len(file.Segments))
 		}
 	}
 
+	// Convert segments
+	segments := make([]*metapb.SegmentData, len(file.Segments))
+
+	for i, seg := range file.Segments {
+		segments[i] = &metapb.SegmentData{
+			Id:          seg.ID,
+			StartOffset: int64(0),
+			EndOffset:   int64(seg.Bytes - 1),
+		}
+	}
 	// Calculate total size using the sophisticated logic
 	totalSize, err := p.calculateFileSize(file)
 	if err != nil {
@@ -166,8 +164,21 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		totalSize = p.calculateSegmentSum(file)
 	}
 
+	var (
+		password string
+		salt     string
+	)
+	if meta != nil {
+		if pwd, ok := meta["password"]; ok && pwd != "" {
+			password = pwd
+		}
+		if s, ok := meta["salt"]; ok && s != "" {
+			salt = s
+		}
+	}
+
 	// Extract filename - priority: meta file_name > file.Filename
-	var enc *string
+	var enc metapb.Encryption
 
 	filename := file.Filename
 	if meta != nil {
@@ -175,8 +186,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 			// This will add support for rclone encrypted files
 			if strings.HasSuffix(strings.ToLower(metaFilename), rclone.EncFileExtension) {
 				filename = metaFilename[:len(metaFilename)-4]
-				encType := string(encryption.RCloneCipherType)
-				enc = &encType
+				enc = metapb.Encryption_RCLONE
 
 				decSize, err := rclone.DecryptedSize(totalSize)
 				if err != nil {
@@ -190,8 +200,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		}
 
 		if metaCipher, ok := meta["cipher"]; ok && metaCipher != "" {
-			encType := string(encryption.HeadersCipherType)
-			enc = &encType
+			enc = metapb.Encryption_HEADERS
 		}
 	}
 	// Check if this is a RAR file
@@ -205,20 +214,8 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		Groups:       file.Groups,
 		IsRarArchive: isRarArchive,
 		Encryption:   enc,
-	}
-
-	// Normalize segment sizes using yEnc PartSize headers if needed
-	// This handles cases where NZB segment sizes include yEnc encoding overhead
-	if p.cp != nil && len(file.Segments) >= 2 {
-		err := p.normalizeSegmentSizesWithYenc(parsedFile, file.Segments, file.Groups)
-		if err != nil {
-			// Log the error but continue with original segment sizes
-			// This ensures processing continues even if yEnc header fetching fails
-			p.log.Warn("Failed to normalize segment sizes with yEnc headers",
-				"filename", filename,
-				"error", err,
-				"segments", len(file.Segments))
-		}
+		Password:     password,
+		Salt:         salt,
 	}
 
 	return parsedFile, nil
@@ -334,58 +331,45 @@ func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string
 
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
 // This handles cases where NZB segment sizes include yEnc overhead
-func (p *Parser) normalizeSegmentSizesWithYenc(parsedFile *ParsedFile, originalSegments []nzbparser.NzbSegment, groups []string) error {
-	if len(parsedFile.Segments) < 2 {
+func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment) error {
+	if len(segments) < 2 {
 		// Not enough segments to determine if normalization is needed
 		return nil
 	}
 
-	firstSegSize := parsedFile.Segments[0].Bytes
-	secondSegSize := parsedFile.Segments[1].Bytes
+	firstSegSize := segments[0].Bytes
+	secondSegSize := segments[1].Bytes
 
 	// If first and second segments have the same size, assume no yEnc overhead
 	if firstSegSize == secondSegSize {
-		p.log.Debug("Segments have consistent sizes, skipping yEnc normalization",
-			"filename", parsedFile.Filename,
-			"segment_size", firstSegSize,
-			"segments", len(parsedFile.Segments))
+		p.log.Debug("Segments have consistent sizes, skipping yEnc normalization")
 		return nil
 	}
 
 	// Different segment sizes detected - fetch yEnc headers to get actual part sizes
 	// Fetch PartSize from first segment
-	firstPartSize, err := p.fetchYencPartSize(originalSegments[0], groups)
+	firstPartSize, err := p.fetchYencPartSize(segments[0], nil)
 	if err != nil {
 		// If we can't fetch yEnc headers, log and continue with original sizes
 		return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
 	}
 
 	// Fetch PartSize from last segment
-	lastSegmentIndex := len(originalSegments) - 1
-	lastPartSize, err := p.fetchYencPartSize(originalSegments[lastSegmentIndex], groups)
+	lastSegmentIndex := len(segments) - 1
+	lastPartSize, err := p.fetchYencPartSize(segments[lastSegmentIndex], nil)
 	if err != nil {
 		// If we can't fetch yEnc headers, log and continue with original sizes
 		return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
 	}
 
-	// Track size changes for recalculation
-	var sizeDiff int64
-
 	// Override all segments except the last one with the first segment's PartSize
-	for i := 0; i < len(parsedFile.Segments)-1; i++ {
-		oldSize := parsedFile.Segments[i].Bytes
-		parsedFile.Segments[i].Bytes = firstPartSize
-		sizeDiff += firstPartSize - oldSize
+	for i := 0; i < len(segments)-1; i++ {
+		segments[i].Bytes = int(firstPartSize)
 	}
 
 	// Override the last segment with its specific PartSize
-	lastSegmentIdx := len(parsedFile.Segments) - 1
-	oldLastSize := parsedFile.Segments[lastSegmentIdx].Bytes
-	parsedFile.Segments[lastSegmentIdx].Bytes = lastPartSize
-	sizeDiff += lastPartSize - oldLastSize
-
-	// Update the file size with the corrected segment sizes
-	parsedFile.Size += sizeDiff
+	lastSegmentIdx := len(segments) - 1
+	segments[lastSegmentIdx].Bytes = int(lastPartSize)
 
 	return nil
 }
@@ -452,42 +436,4 @@ func (p *Parser) ValidateNzb(parsed *ParsedNzb) error {
 	}
 
 	return nil
-}
-
-// ConvertToDbSegments converts ParsedFile segments to database format
-func (p *Parser) ConvertToDbSegments(files []ParsedFile) database.NzbSegments {
-	var allSegments database.NzbSegments
-
-	for _, file := range files {
-		allSegments = append(allSegments, file.Segments...)
-	}
-
-	return allSegments
-}
-
-// ConvertToDbSegmentsForFile converts segments from a single ParsedFile to database format
-func (p *Parser) ConvertToDbSegmentsForFile(file ParsedFile) database.NzbSegments {
-	return file.Segments
-}
-
-// ConvertToSegmentsData converts ParsedFile segments to new SegmentsData JSON format
-func (p *Parser) ConvertToSegmentsData(file ParsedFile) database.SegmentData {
-	return file.Segments.ConvertToSegmentsData()
-}
-
-// ConvertFilesToRarParts converts RAR ParsedFiles to RarParts JSON format
-func (p *Parser) ConvertFilesToRarParts(files []ParsedFile) database.RarParts {
-	var rarFiles []database.ParsedRarFile
-	
-	for _, file := range files {
-		if file.IsRarArchive {
-			rarFiles = append(rarFiles, database.ParsedRarFile{
-				Filename: file.Filename,
-				Size:     file.Size,
-				Segments: file.Segments,
-			})
-		}
-	}
-	
-	return database.ConvertToRarParts(rarFiles)
 }

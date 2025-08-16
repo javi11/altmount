@@ -12,10 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/nntppool"
-	"github.com/javi11/nzbparser"
 )
 
 // Compile-time interface checks
@@ -270,47 +269,32 @@ func (uf *UsenetFile) Seek(offset int64, whence int) (int64, error) {
 // createUsenetReader creates a Usenet reader for the specified range
 func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	// Filter segments for this specific file
-	fileSegments := uf.getFileSegments()
-	loader := dbSegmentLoader{segs: fileSegments}
+	loader := dbSegmentLoader{segs: uf.file.Segments}
 
 	rg := usenet.GetSegmentsInRange(start, end, loader)
 	return usenet.NewUsenetReader(ctx, uf.cp, rg, uf.maxWorkers)
 }
 
-// getFileSegments returns segments specific to this RAR file
-// With the new architecture, each RAR part is stored as a separate NZB record
-// with its own segments, so we can convert the segments from ParsedFile format
-func (uf *UsenetFile) getFileSegments() []database.SegmentData {
-	// Convert NzbSegments to SegmentData format
-	segmentData := make([]database.SegmentData, len(uf.file.Segments))
-	for i, seg := range uf.file.Segments {
-		segmentData[i] = database.SegmentData{
-			Bytes: seg.Bytes,
-			ID:    seg.MessageID,
-		}
-	}
-	return segmentData
-}
-
 // dbSegmentLoader implements the segment loader interface for database segments
 type dbSegmentLoader struct {
-	segs []database.SegmentData
+	segs []*metapb.SegmentData
 }
 
 func (dl dbSegmentLoader) GetSegmentCount() int {
 	return len(dl.segs)
 }
 
-func (dl dbSegmentLoader) GetSegment(index int) (segment nzbparser.NzbSegment, groups []string, ok bool) {
+func (dl dbSegmentLoader) GetSegment(index int) (segment usenet.Segment, groups []string, ok bool) {
 	if index < 0 || index >= len(dl.segs) {
-		return nzbparser.NzbSegment{}, nil, false
+		return usenet.Segment{}, nil, false
 	}
 	seg := dl.segs[index]
-	nzbSeg := nzbparser.NzbSegment{
-		Bytes: int(seg.Bytes),
-		ID:    seg.ID,
-	}
-	return nzbSeg, nil, true
+
+	return usenet.Segment{
+		Id:    seg.GetId(),
+		Start: seg.GetStartOffset(),
+		End:   seg.GetEndOffset(),
+	}, nil, true
 }
 
 // UsenetFileInfo methods implementing fs.FileInfo interface

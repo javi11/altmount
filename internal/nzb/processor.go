@@ -1,7 +1,6 @@
 package nzb
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,29 +8,29 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/nntppool"
 )
 
-// Processor handles the processing and storage of parsed NZB files
+// Processor handles the processing and storage of parsed NZB files using metadata storage
 type Processor struct {
-	parser     *Parser
-	repo       *database.Repository
-	rarHandler *RarHandler
-	cp         nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
-	log        *slog.Logger
+	parser          *Parser
+	metadataService *metadata.MetadataService
+	rarHandler      *RarHandler
+	cp              nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
+	log             *slog.Logger
 }
 
-// NewProcessor creates a new NZB processor
-func NewProcessor(repo *database.Repository, cp nntppool.UsenetConnectionPool) *Processor {
+// NewProcessor creates a new NZB processor using metadata storage
+func NewProcessor(metadataService *metadata.MetadataService, cp nntppool.UsenetConnectionPool) *Processor {
 	return &Processor{
-		parser:     NewParser(cp),
-		repo:       repo,
-		rarHandler: NewRarHandler(cp, 10), // 10 max workers for RAR analysis
-		cp:         cp,
-		log:        slog.Default().With("component", "nzb-processor"),
+		parser:          NewParser(cp),
+		metadataService: metadataService,
+		rarHandler:      NewRarHandler(cp, 10), // 10 max workers for RAR analysis
+		cp:              cp,
+		log:             slog.Default().With("component", "nzb-processor"),
 	}
 }
 
@@ -42,17 +41,6 @@ func (proc *Processor) ProcessNzbFile(nzbPath string) error {
 
 // ProcessNzbFileWithRoot processes an NZB file maintaining the folder structure relative to watchRoot
 func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
-	// Check if NZB file already exists in database
-	nzbFilename := filepath.Base(nzbPath)
-	existing, err := proc.repo.GetNzbFileByName(nzbFilename)
-	if err != nil {
-		return fmt.Errorf("failed to check existing NZB: %w", err)
-	}
-
-	if existing != nil {
-		return fmt.Errorf("NZB file already processed: %s", nzbPath)
-	}
-
 	// Open and parse the NZB file
 	file, err := os.Open(nzbPath)
 	if err != nil {
@@ -73,184 +61,133 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 	// Calculate the relative virtual directory path for this NZB
 	virtualDir := proc.calculateVirtualDirectory(nzbPath, watchRoot)
 
-	// Process within a transaction
-	return proc.repo.WithTransaction(func(txRepo *database.Repository) error {
-		switch parsed.Type {
-		case NzbTypeSingleFile:
-			return proc.processSingleFileWithDir(txRepo, parsed, virtualDir)
-		case NzbTypeMultiFile:
-			return proc.processMultiFileWithDir(txRepo, parsed, virtualDir)
-		case NzbTypeRarArchive:
-			return proc.processRarArchiveWithDir(txRepo, parsed, virtualDir)
-		default:
-			return fmt.Errorf("unknown NZB type: %s", parsed.Type)
-		}
+	proc.log.Info("Processing NZB file",
+		"nzb_path", nzbPath,
+		"virtual_dir", virtualDir,
+		"type", parsed.Type,
+		"total_size", parsed.TotalSize,
+		"files", len(parsed.Files))
 
-		return nil
-	})
+	// Process based on NZB type
+	switch parsed.Type {
+	case NzbTypeSingleFile:
+		return proc.processSingleFileWithDir(parsed, virtualDir)
+	case NzbTypeMultiFile:
+		return proc.processMultiFileWithDir(parsed, virtualDir)
+	case NzbTypeRarArchive:
+		return proc.processRarArchiveWithDir(parsed, virtualDir)
+	default:
+		return fmt.Errorf("unknown NZB type: %s", parsed.Type)
+	}
 }
 
 // processSingleFileWithDir handles NZBs with a single file in a specific virtual directory
-func (proc *Processor) processSingleFileWithDir(repo *database.Repository, parsed *ParsedNzb, virtualDir string) error {
-
-	regularFiles, par2Files := proc.separatePar2Files(parsed.Files)
+func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir string) error {
+	regularFiles, _ := proc.separatePar2Files(parsed.Files)
 
 	file := regularFiles[0] // Single file NZB, take the first regular file
 
-	// Get parent directory
-	parentDir, err := proc.getOrCreateParentDirectory(repo, virtualDir)
-	if err != nil {
-		return fmt.Errorf("failed to get parent directory: %w", err)
+	// Create the directory structure if needed
+	if err := proc.ensureDirectoryExists(virtualDir); err != nil {
+		return fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
-	// Create virtual file entry in the specified directory
-	vf := &database.VirtualFile{
-		ParentID:    parentDir,
-		Name:        file.Filename,
-		Size:        file.Size,
-		IsDirectory: false,
-		Status:      database.FileStatusHealthy,
-	}
+	// Create virtual file path
+	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+	// Create file metadata using simplified schema
+	fileMeta := proc.metadataService.CreateFileMetadata(
+		file.Size,
+		parsed.Path,
+		metapb.FileStatus_FILE_STATUS_HEALTHY,
+		file.Segments,
+		file.Encryption,
+		file.Password,
+		file.Salt,
+	)
 
-	if err := repo.CreateVirtualFile(vf); err != nil {
-		return fmt.Errorf("failed to create virtual file for single file: %w", err)
-	}
-
-	// Create nzb_files entry for this single file
-	segmentData := proc.parser.ConvertToSegmentsData(file)
-
-	singleNzbFile := &database.NzbFile{
-		ID:           vf.ID,
-		Name:         file.Filename,
-		SegmentsData: &segmentData,
-		Password:     parsed.Password,
-		Encryption:   file.Encryption,
-		Salt:         parsed.Salt,
-	}
-
-	if err := repo.CreateNzbFile(singleNzbFile); err != nil {
-		return fmt.Errorf("failed to create NZB file entry for single file: %w", err)
+	// Write file metadata to disk
+	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+		return fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)
 	}
 
 	// Store additional metadata if needed
 	if len(file.Groups) > 0 {
-		// Note: Metadata storage not available in new schema
 		proc.log.Debug("Groups metadata", "file", file.Filename, "groups", strings.Join(file.Groups, ","))
 	}
 
-	// Handle PAR2 files if any
-	return proc.processPar2Files(repo, vf.ID, par2Files)
+	proc.log.Info("Successfully processed single file NZB",
+		"file", file.Filename,
+		"virtual_path", virtualFilePath,
+		"size", file.Size)
+
+	return nil
 }
 
 // processMultiFileWithDir handles NZBs with multiple files in a specific virtual directory
-func (proc *Processor) processMultiFileWithDir(repo *database.Repository, parsed *ParsedNzb, virtualDir string) error {
+func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir string) error {
 	// Create directory structure based on common path prefixes within the virtual directory
 	dirStructure := proc.analyzeDirectoryStructureWithBase(parsed.Files, virtualDir)
 
-	// Create directories first, tracking parent relationships
-	createdDirs := make(map[string]*database.VirtualFile)
+	// Create directories first using real filesystem
 	for _, dir := range dirStructure.directories {
-		// Get parent directory ID
-		var parentID *int64
-		if dir.parent != nil {
-			if parentVF, exists := createdDirs[*dir.parent]; exists {
-				parentID = &parentVF.ID
-			} else {
-				// Get or create parent directory
-				parentDir, err := proc.getOrCreateParentDirectory(repo, *dir.parent)
-				if err != nil {
-					return fmt.Errorf("failed to get parent directory %s: %w", *dir.parent, err)
-				}
-				parentID = parentDir
-			}
-		}
-
-		vf := &database.VirtualFile{
-			ParentID:    parentID,
-			Name:        dir.name,
-			Size:        0,
-			IsDirectory: true,
-			Status:      database.FileStatusHealthy,
-		}
-
-		if err := repo.CreateVirtualFile(vf); err != nil {
+		if err := proc.ensureDirectoryExists(dir.path); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir.path, err)
 		}
-
-		createdDirs[dir.path] = vf
 	}
 
-	regularFiles, par2Files := proc.separatePar2Files(parsed.Files)
+	regularFiles, _ := proc.separatePar2Files(parsed.Files)
 
 	// Create file entries
 	for _, file := range regularFiles {
 		parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, virtualDir)
 
-		// Get parent directory ID
-		var parentID *int64
-		if parentVF, exists := createdDirs[parentPath]; exists {
-			parentID = &parentVF.ID
-		} else {
-			// Get or create parent directory
-			parentDir, err := proc.getOrCreateParentDirectory(repo, parentPath)
-			if err != nil {
-				return fmt.Errorf("failed to get parent directory %s: %w", parentPath, err)
-			}
-			parentID = parentDir
+		// Ensure parent directory exists
+		if err := proc.ensureDirectoryExists(parentPath); err != nil {
+			return fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
 		}
 
+		// Create virtual file path
 		virtualPath := filepath.Join(parentPath, filename)
 		virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 
-		vf := &database.VirtualFile{
-			ParentID:    parentID,
-			Name:        filename,
-			Size:        file.Size,
-			IsDirectory: false,
-			Status:      database.FileStatusHealthy,
+		// Create file metadata using simplified schema
+		fileMeta := proc.metadataService.CreateFileMetadata(
+			file.Size,
+			parsed.Path,
+			metapb.FileStatus_FILE_STATUS_HEALTHY,
+			file.Segments,
+			file.Encryption,
+			file.Password,
+			file.Salt,
+		)
+
+		// Write file metadata to disk
+		if err := proc.metadataService.WriteFileMetadata(virtualPath, fileMeta); err != nil {
+			return fmt.Errorf("failed to write metadata for file %s: %w", filename, err)
 		}
 
-		if err := repo.CreateVirtualFile(vf); err != nil {
-			return fmt.Errorf("failed to create virtual file %s: %w", filename, err)
-		}
-
-		// Create nzb_files entry for this file
-		segmentData := proc.parser.ConvertToSegmentsData(file)
-
-		fileNzbFile := &database.NzbFile{
-			ID:           vf.ID,
-			Name:         filename,
-			SegmentsData: &segmentData,
-			Password:     parsed.Password,
-			Encryption:   file.Encryption,
-			Salt:         parsed.Salt,
-		}
-
-		if err := repo.CreateNzbFile(fileNzbFile); err != nil {
-			return fmt.Errorf("failed to create NZB file entry for %s: %w", filename, err)
-		}
-
-		// Store metadata
+		// Store additional metadata if needed
 		if len(file.Groups) > 0 {
-			// Note: Metadata storage not available in new schema
 			proc.log.Debug("Groups metadata", "file", filename, "groups", strings.Join(file.Groups, ","))
 		}
 
-		// Handle PAR2 files if any
-		if len(par2Files) > 0 {
-			par2ForThisFile := proc.filterPar2FilesForFile(par2Files, file.Filename)
-
-			if err := proc.processPar2Files(repo, vf.ID, par2ForThisFile); err != nil {
-				return fmt.Errorf("failed to process PAR2 files for %s: %w", filename, err)
-			}
-		}
+		proc.log.Debug("Created metadata file",
+			"file", filename,
+			"virtual_path", virtualPath,
+			"size", file.Size)
 	}
+
+	proc.log.Info("Successfully processed multi-file NZB",
+		"virtual_dir", virtualDir,
+		"files", len(regularFiles),
+		"directories", len(dirStructure.directories))
 
 	return nil
 }
 
 // processRarArchiveWithDir handles NZBs containing RAR archives in a specific virtual directory
-func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, parsed *ParsedNzb, virtualDir string) error {
+func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir string) error {
 	// For RAR archives, we group files by their base archive name and process only the first part
 	// of each archive to get all the files inside, since RAR parts contain the same file listing
 	// Group RAR files by their archive base name
@@ -258,84 +195,56 @@ func (proc *Processor) processRarArchiveWithDir(repo *database.Repository, parse
 
 	// Process each RAR archive
 	for archiveName, archiveFiles := range rarArchives {
-		// Get parent directory ID
-		parentDir, err := proc.getOrCreateParentDirectory(repo, virtualDir)
-		if err != nil {
-			return fmt.Errorf("failed to get parent directory: %w", err)
-		}
-
 		// Create directory for the RAR archive content in virtual directory
-		rarDir := &database.VirtualFile{
-			ParentID:    parentDir,
-			Name:        archiveName,
-			Size:        0, // Directory size
-			IsDirectory: true,
-			Status:      database.FileStatusHealthy,
+		rarDirPath := filepath.Join(virtualDir, archiveName)
+		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
+
+		// Ensure RAR archive directory exists
+		if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
+			return fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
 		}
 
-		if err := repo.CreateVirtualFile(rarDir); err != nil {
-			return fmt.Errorf("failed to create RAR directory %s: %w", archiveName, err)
-		}
+		// For now, we'll simplify RAR handling until we can update the RAR handler
+		// TODO: Implement real-time RAR analysis with metadata system
+		// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		// defer cancel()
 
-		// Perform real-time RAR analysis to get individual files
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // 5 minute timeout for analysis
-		defer cancel()
+		proc.log.Info("Processing RAR archive (simplified mode)",
+			"archive", archiveName,
+			"parts", len(archiveFiles),
+			"rar_dir", rarDirPath)
 
-		// Analyze RAR content using streaming from Usenet
-		var parsedArchiveFiles []ParsedFile
-		parsedArchiveFiles = append(parsedArchiveFiles, archiveFiles...)
+		// For now, create metadata files for each RAR part
+		// TODO: Implement proper RAR content analysis with metadata system
+		for _, rarFile := range archiveFiles {
+			virtualFilePath := filepath.Join(rarDirPath, rarFile.Filename)
+			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
-		rarContents, err := proc.rarHandler.AnalyzeRarContentFromNzb(ctx, parsedArchiveFiles, rarDir)
-		if err != nil {
-			// If real-time analysis fails, log error and continue
-			proc.log.Warn("Failed to analyze RAR content", "archive", archiveName, "error", err)
-		} else {
-			// Successfully analyzed - create one nzb_rar_file per file inside the RAR
-			for _, rarContent := range rarContents {
-				// Skip directories
-				if rarContent.IsDirectory {
-					continue
-				}
+			// Create file metadata for the RAR part
+			fileMeta := proc.metadataService.CreateFileMetadata(
+				rarFile.Size,
+				parsed.Path,
+				metapb.FileStatus_FILE_STATUS_HEALTHY,
+				rarFile.Segments,
+				rarFile.Encryption,
+				rarFile.Password,
+				rarFile.Salt,
+			)
 
-				// Create virtual file for this file inside the RAR archive
-				contentFile := &database.VirtualFile{
-					ParentID:    &rarDir.ID,
-					Name:        rarContent.Filename,
-					Size:        rarContent.Size,
-					IsDirectory: rarContent.IsDirectory,
-					Status:      database.FileStatusHealthy,
-				}
-
-				if err := repo.CreateVirtualFile(contentFile); err != nil {
-					return fmt.Errorf("failed to create RAR content file %s: %w", rarContent.Filename, err)
-				}
-
-				// Create RarParts for this specific file using part mapping
-				rarParts := proc.rarHandler.CreateRarPartsForFile(parsedArchiveFiles, rarContent.PartMapping)
-
-				// Create nzb_rar_file entry for this specific file
-				fileNzbRarFile := &database.NzbRarFile{
-					ID:       contentFile.ID, // Link to the virtual file for this specific file
-					Name:     rarContent.Filename,
-					RarParts: rarParts, // Only the parts that contain this file's data
-				}
-
-				if err := repo.CreateNzbRarFile(fileNzbRarFile); err != nil {
-					return fmt.Errorf("failed to create NZB RAR file for %s: %w", rarContent.Filename, err)
-				}
-
-				proc.log.Info("Created nzb_rar_file for individual file",
-					"file", rarContent.Filename,
-					"size", rarContent.Size,
-					"parts_needed", len(rarContent.PartMapping),
-					"rar_parts", len(rarParts))
-
+			// Write file metadata to disk
+			if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+				return fmt.Errorf("failed to write metadata for RAR part %s: %w", rarFile.Filename, err)
 			}
 
-			proc.log.Info("Successfully processed RAR archive with per-file mapping",
-				"archive", archiveName,
-				"files_processed", len(rarContents))
+			proc.log.Debug("Created metadata for RAR part",
+				"file", rarFile.Filename,
+				"virtual_path", virtualFilePath,
+				"size", rarFile.Size)
 		}
+
+		proc.log.Info("Successfully processed RAR archive (simplified mode)",
+			"archive", archiveName,
+			"parts_processed", len(archiveFiles))
 	}
 
 	return nil
@@ -417,13 +326,6 @@ func (proc *Processor) analyzeDirectoryStructureWithBase(files []ParsedFile, bas
 	}
 }
 
-// GetPendingRarAnalysis returns virtual files that need RAR content analysis
-func (proc *Processor) GetPendingRarAnalysis() ([]*database.VirtualFile, error) {
-	// This would query the database for files with "rar_analysis_needed" metadata
-	// Implementation depends on having a method to query by metadata in the repository
-	return nil, fmt.Errorf("pending RAR analysis query not implemented")
-}
-
 // calculateVirtualDirectory determines the virtual directory path based on NZB file location relative to watch root
 func (proc *Processor) calculateVirtualDirectory(nzbPath, watchRoot string) string {
 	if watchRoot == "" {
@@ -456,48 +358,19 @@ func (proc *Processor) calculateVirtualDirectory(nzbPath, watchRoot string) stri
 	return filepath.Clean(virtualPath)
 }
 
-// ensureParentDirectories creates all necessary parent directories in the virtual filesystem
-func (proc *Processor) ensureParentDirectories(repo *database.Repository, virtualDir string) error {
+// ensureDirectoryExists creates directory structure in the metadata filesystem
+func (proc *Processor) ensureDirectoryExists(virtualDir string) error {
 	if virtualDir == "/" {
-		// Root directory already exists, nothing to do
+		// Root directory always exists
 		return nil
 	}
 
-	// Split path into components and create each level
-	parts := strings.Split(strings.Trim(virtualDir, "/"), "/")
-	currentPath := ""
-	var currentParentID *int64 // Root level has nil parent
+	// Get the actual filesystem path for this virtual directory
+	metadataDir := proc.metadataService.GetMetadataDirectoryPath(virtualDir)
 
-	for _, part := range parts {
-		currentPath = filepath.Join(currentPath, part)
-		virtualPath := "/" + strings.ReplaceAll(currentPath, string(filepath.Separator), "/")
-
-		// Check if directory already exists
-		existing, err := repo.GetVirtualFileByPath(virtualPath)
-		if err != nil {
-			return fmt.Errorf("failed to check directory %s: %w", virtualPath, err)
-		}
-
-		if existing == nil {
-			// Create directory
-			dir := &database.VirtualFile{
-				ParentID:    currentParentID,
-				Name:        part,
-				Size:        0,
-				IsDirectory: true,
-				Status:      database.FileStatusHealthy,
-			}
-
-			if err := repo.CreateVirtualFile(dir); err != nil {
-				return fmt.Errorf("failed to create directory %s: %w", virtualPath, err)
-			}
-
-			// Update parent ID for next iteration
-			currentParentID = &dir.ID
-		} else {
-			// Directory exists, use its ID as parent for next iteration
-			currentParentID = &existing.ID
-		}
+	// Create the directory structure using os.MkdirAll
+	if err := os.MkdirAll(metadataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create metadata directory %s: %w", metadataDir, err)
 	}
 
 	return nil
@@ -509,43 +382,6 @@ func stringPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// getOrCreateParentDirectory gets or creates a parent directory and returns its ID
-func (proc *Processor) getOrCreateParentDirectory(repo *database.Repository, virtualDir string) (*int64, error) {
-	if virtualDir == "/" {
-		// Root directory - parent_id is NULL
-		return nil, nil
-	}
-
-	// Check if directory exists
-	existing, err := repo.GetVirtualFileByPath(virtualDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check directory %s: %w", virtualDir, err)
-	}
-
-	if existing != nil {
-		if !existing.IsDirectory {
-			return nil, fmt.Errorf("path exists but is not a directory: %s", virtualDir)
-		}
-		return &existing.ID, nil
-	}
-
-	// Directory doesn't exist, ensure parent directories first
-	if err := proc.ensureParentDirectories(repo, virtualDir); err != nil {
-		return nil, fmt.Errorf("failed to create parent directories: %w", err)
-	}
-
-	// Now get the directory that was just created
-	created, err := repo.GetVirtualFileByPath(virtualDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get created directory: %w", err)
-	}
-	if created == nil {
-		return nil, fmt.Errorf("directory was not created: %s", virtualDir)
-	}
-
-	return &created.ID, nil
 }
 
 // isPar2File checks if a filename is a PAR2 repair file
@@ -568,26 +404,6 @@ func (proc *Processor) separatePar2Files(files []ParsedFile) ([]ParsedFile, []Pa
 	}
 
 	return regularFiles, par2Files
-}
-
-// processPar2Files processes PAR2 files and stores them separately
-func (proc *Processor) processPar2Files(repo *database.Repository, virtualFileID int64, par2Files []ParsedFile) error {
-	for _, file := range par2Files {
-		// Convert segments to SegmentData format
-		segmentData := proc.parser.ConvertToSegmentsData(file)
-
-		par2File := &database.Par2File{
-			Name:          file.Filename,
-			SegmentsData:  segmentData,
-			VirtualFileID: virtualFileID, // Link to the main NZB virtual file
-		}
-
-		if err := repo.CreatePar2File(par2File); err != nil {
-			return fmt.Errorf("failed to create PAR2 file %s: %w", file.Filename, err)
-		}
-	}
-
-	return nil
 }
 
 // isPartOfSameRarSet determines if two RAR files are part of the same multi-part archive
@@ -751,70 +567,4 @@ func (proc *Processor) parseInt(s string) int {
 		}
 	}
 	return num
-}
-
-// createRarPartNzbFiles creates individual NZB file records for each RAR part
-func (proc *Processor) createRarPartNzbFiles(repo *database.Repository, parentNzbFile *database.NzbFile, archiveName string, archiveFiles []ParsedFile) error {
-	// Sort archive files to ensure proper order
-	sortedFiles := proc.sortRarFiles(archiveFiles)
-
-	for _, rarFile := range sortedFiles {
-		// Create virtual file for each RAR part
-		rarVirtualFile := &database.VirtualFile{
-			ParentID:    &parentNzbFile.ID, // Parent is the main NZB virtual file
-			Name:        rarFile.Filename,
-			Size:        rarFile.Size,
-			IsDirectory: false,
-			Status:      database.FileStatusHealthy,
-		}
-
-		if err := repo.CreateVirtualFile(rarVirtualFile); err != nil {
-			return fmt.Errorf("failed to create virtual file for RAR part %s: %w", rarFile.Filename, err)
-		}
-
-		// Create NZB file record for this RAR part
-		rarPartNzbFile := &database.NzbFile{
-			ID:           rarVirtualFile.ID,
-			Name:         rarFile.Filename,
-			SegmentsData: &database.SegmentData{}, // Individual segments for this part
-			Password:     parentNzbFile.Password,
-			Encryption:   parentNzbFile.Encryption,
-			Salt:         parentNzbFile.Salt,
-		}
-
-		// Convert segments to SegmentData format
-		segmentData := proc.parser.ConvertToSegmentsData(rarFile)
-		rarPartNzbFile.SegmentsData = &segmentData
-
-		if err := repo.CreateNzbFile(rarPartNzbFile); err != nil {
-			return fmt.Errorf("failed to create RAR part NZB file for %s: %w", rarFile.Filename, err)
-		}
-	}
-
-	return nil
-}
-
-// getParentDirID gets the parent directory ID for a virtual directory path
-func (proc *Processor) getParentDirID(repo *database.Repository, virtualDir string) *int64 {
-	if virtualDir == "/" {
-		return nil // Root directory has no parent
-	}
-
-	// Get or create parent directory
-	parentID, err := proc.getOrCreateParentDirectory(repo, virtualDir)
-	if err != nil {
-		return nil // Return nil if we can't determine parent
-	}
-
-	return parentID
-}
-
-// determineEncryption determines encryption type from parsed files
-func determineEncryption(files []ParsedFile) *string {
-	for _, file := range files {
-		if file.Encryption != nil {
-			return file.Encryption
-		}
-	}
-	return nil
 }

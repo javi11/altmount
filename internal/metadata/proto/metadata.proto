@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package metadata;
+
+option go_package = "./";
+
+enum Encryption {
+  NONE = 0; // No encryption
+  RCLONE = 1;      // Rclone encryption
+  HEADERS = 2;        // Headers encryption
+}
+
+// FileStatus represents the health status of a file
+enum FileStatus {
+  FILE_STATUS_UNSPECIFIED = 0;
+  FILE_STATUS_HEALTHY = 1;     // All segments available
+  FILE_STATUS_PARTIAL = 2;     // Some segments missing
+  FILE_STATUS_CORRUPTED = 3;   // No segments available or corrupted
+}
+
+// SegmentData contains Usenet segment information with byte offsets
+message SegmentData {
+  int64 start_offset = 1;       // Start byte offset in the data stream
+  int64 end_offset = 2;         // End byte offset in the data stream
+  string id = 3;                // Usenet message ID
+}
+
+// FileMetadata represents a single virtual file in the filesystem
+// The filename comes from the actual metadata filename on disk
+message FileMetadata {
+  int64 file_size = 1;          // Size of the virtual file in bytes
+  string source_nzb_path = 2;   // Path to source NZB file
+  FileStatus status = 3;        // Health status of the file
+  int64 created_at = 4;         // Unix timestamp when metadata was created
+  int64 modified_at = 5;        // Unix timestamp when last modified
+  string password = 6;          // Password for encrypted files (if any)
+  string salt = 7;              // Salt for encrypted files (if any)
+  Encryption encryption = 8;    // Encryption type used for the file
+  repeated SegmentData segment_data = 9;  // Segment information (lazy-loaded)
+}

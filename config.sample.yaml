@@ -8,10 +8,14 @@ webdav:
   password: "usenet"
   debug: false
 
-# Database configuration
+# Database configuration (queue only)
 database:
-  main_path: "altmount.db"
-  queue_path: "altmount_queue.db"
+  queue_path: "altmount_queue.db"  # Queue database for processing workflows
+
+# Metadata filesystem configuration
+metadata:
+  root_path: "./metadata"   # Directory to store metadata files (required)
+  cache_size: 1000          # Number of metadata entries to cache in memory
 
 # Mount path for the virtual filesystem
 mount_path: "/mnt/altmount"
@@ -67,28 +71,34 @@ providers:
 
 # Configuration Notes:
 # 
-# 1. NNTP Providers:
+# 1. Architecture:
+#    - Uses filesystem-based metadata instead of main database
+#    - Queue database still used for processing workflows
+#    - Better performance and scalability than database approach
+#
+# 2. NNTP Providers:
 #    - At least one provider must be configured
 #    - Multiple providers provide redundancy and load balancing
 #    - SSL/TLS is recommended when available (port 563)
 #    - Standard unencrypted connections typically use port 119
 #
-# 2. Max Connections:
+# 3. Max Connections:
 #    - Set based on your provider's limits
 #    - More connections = faster downloads but higher resource usage
 #    - Typical range: 10-50 connections per provider
 #
-# 3. Workers:
+# 4. Workers:
 #    - Download workers: Number of concurrent download threads
 #    - Processor workers: Number of NZB processing threads
 #    - Adjust based on your system resources and provider limits
 #
-# 4. Paths:
+# 5. Paths:
 #    - Use absolute paths for production deployments
 #    - Relative paths are relative to the working directory
 #    - Ensure the application has read/write access to all paths
+#    - Metadata directory will be created automatically
 #
-# 5. Security:
+# 6. Security:
 #    - Store credentials securely
 #    - Consider using environment variables for sensitive data
 #    - Use strong passwords for WebDAV authentication

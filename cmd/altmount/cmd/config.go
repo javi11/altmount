@@ -9,14 +9,15 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav"`
-	Database  DatabaseConfig   `yaml:"database" mapstructure:"database"`
-	MountPath string           `yaml:"mount_path" mapstructure:"mount_path"`
-	NZBDir    string           `yaml:"nzb_dir" mapstructure:"nzb_dir"`
-	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
-	Workers   WorkersConfig    `yaml:"workers" mapstructure:"workers"`
-	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
-	Debug     bool             `yaml:"debug" mapstructure:"debug"`
+	WebDAV      WebDAVConfig     `yaml:"webdav" mapstructure:"webdav"`
+	Database    DatabaseConfig   `yaml:"database" mapstructure:"database"`
+	Metadata    MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
+	MountPath   string           `yaml:"mount_path" mapstructure:"mount_path"`
+	NZBDir      string           `yaml:"nzb_dir" mapstructure:"nzb_dir"`
+	RClone      RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
+	Workers     WorkersConfig    `yaml:"workers" mapstructure:"workers"`
+	Providers   []ProviderConfig `yaml:"providers" mapstructure:"providers"`
+	Debug       bool             `yaml:"debug" mapstructure:"debug"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -27,10 +28,15 @@ type WebDAVConfig struct {
 	Debug    bool   `yaml:"debug" mapstructure:"debug"`
 }
 
-// DatabaseConfig represents database configuration
+// DatabaseConfig represents database configuration (queue only)
 type DatabaseConfig struct {
-	MainPath  string `yaml:"main_path" mapstructure:"main_path"`
 	QueuePath string `yaml:"queue_path" mapstructure:"queue_path"`
+}
+
+// MetadataConfig represents metadata filesystem configuration
+type MetadataConfig struct {
+	RootPath  string `yaml:"root_path" mapstructure:"root_path"`
+	CacheSize int    `yaml:"cache_size" mapstructure:"cache_size"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -67,8 +73,11 @@ func DefaultConfig() *Config {
 			Debug:    false,
 		},
 		Database: DatabaseConfig{
-			MainPath:  "altmount.db",
 			QueuePath: "altmount_queue.db",
+		},
+		Metadata: MetadataConfig{
+			RootPath:  "./metadata",
+			CacheSize: 1000, // Default cache size for metadata entries
 		},
 		MountPath: "/mnt/altmount",
 		RClone: RCloneConfig{
@@ -131,6 +140,15 @@ func (c *Config) Validate() error {
 
 	if c.Workers.Processor <= 0 {
 		return fmt.Errorf("processor workers must be greater than 0")
+	}
+
+	// Validate metadata configuration (now required)
+	if c.Metadata.RootPath == "" {
+		return fmt.Errorf("metadata root_path cannot be empty")
+	}
+	
+	if c.Metadata.CacheSize < 0 {
+		return fmt.Errorf("metadata cache_size must be non-negative")
 	}
 
 	// Validate each provider

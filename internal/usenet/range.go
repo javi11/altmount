@@ -2,13 +2,12 @@ package usenet
 
 import (
 	"github.com/acomagu/bufpipe"
-	"github.com/javi11/nzbparser"
 )
 
 type SegmentLoader interface {
 	// GetSegment returns the segment with the given index.
 	// If the segment is not found, it returns false.
-	GetSegment(index int) (segment nzbparser.NzbSegment, groups []string, ok bool)
+	GetSegment(index int) (segment Segment, groups []string, ok bool)
 }
 
 func GetSegmentsInRange(
@@ -16,7 +15,6 @@ func GetSegmentsInRange(
 	end int64,
 	ml SegmentLoader,
 ) segmentRange {
-	size := 0
 	segments := make([]*segment, 0)
 
 	for i := 0; ; i++ {
@@ -25,34 +23,37 @@ func GetSegmentsInRange(
 			break
 		}
 
-		// If segmentSize is provided use it since it will be more reliable than the segment size from the nzb.
-		sSize := s.Bytes
-		size += sSize
-		if size < int(start) {
+		// Check if this segment overlaps with the requested range
+		if s.End < start || s.Start > end {
 			continue
 		}
 
+		segmentSize := s.End - s.Start + 1
 		r, w := bufpipe.New(nil)
 		p := &segment{
-			Id:          s.ID,
+			Id:          s.Id,
 			Start:       0,
-			End:         int64(sSize - 1),
-			SegmentSize: int64(sSize),
+			End:         segmentSize - 1,
+			SegmentSize: segmentSize,
 			groups:      groups,
 			reader:      r,
 			writer:      w,
 		}
 
-		// Handles the first segment within the range.
-		if len(segments) == 0 {
-			p.Start = start - int64(size-sSize)
+		// Adjust start offset if this is the first segment that overlaps
+		if s.Start < start {
+			p.Start = start - s.Start
+		}
+
+		// Adjust end offset if this is the last segment that overlaps
+		if s.End > end {
+			p.End = end - s.Start
 		}
 
 		segments = append(segments, p)
 
-		// Handles the last segment within the range.
-		if size >= int(end) {
-			p.End = int64(s.Bytes) - (int64(size) - end)
+		// If we've reached the end of the requested range, we can stop
+		if s.End >= end {
 			break
 		}
 	}

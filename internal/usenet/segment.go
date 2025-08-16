@@ -8,6 +8,12 @@ import (
 	"github.com/acomagu/bufpipe"
 )
 
+type Segment struct {
+	Id    string
+	Start int64
+	End   int64
+}
+
 var (
 	ErrBufferNotReady = errors.New("buffer not ready")
 	ErrSegmentLimit   = errors.New("segment limit reached")

@@ -2,8 +2,12 @@ GO ?= go
 
 .DEFAULT_GOAL := check
 
+.PHONY: proto
+proto:
+	protoc --go_out=./internal/metadata/proto/ internal/metadata/proto/metadata.proto
+
 .PHONY: generate
-generate:
+generate: proto
 	go generate ./...
 
 .PHONY: govulncheck

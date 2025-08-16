@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/nntppool"
 )
 
@@ -23,11 +24,11 @@ type ServiceConfig struct {
 
 // Service provides simplified NZB queue-based importing
 type Service struct {
-	config    ServiceConfig
-	mainDB    *database.DB      // Main database for serving files
-	queueDB   *database.QueueDB // Queue database for processing queue
-	processor *Processor
-	log       *slog.Logger
+	config          ServiceConfig
+	queueDB         *database.QueueDB         // Queue database for processing queue
+	metadataService *metadata.MetadataService // Metadata service for file processing
+	processor       *Processor
+	log             *slog.Logger
 
 	// Runtime state
 	mu      sync.RWMutex
@@ -38,7 +39,7 @@ type Service struct {
 }
 
 // NewService creates a new simplified NZB service with separate main and queue databases
-func NewService(config ServiceConfig, mainDB *database.DB, queueDB *database.QueueDB, cp nntppool.UsenetConnectionPool) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, queueDB *database.QueueDB, cp nntppool.UsenetConnectionPool) (*Service, error) {
 	// Set defaults
 	if config.ScanInterval == 0 {
 		config.ScanInterval = 30 * time.Second
@@ -48,18 +49,18 @@ func NewService(config ServiceConfig, mainDB *database.DB, queueDB *database.Que
 	}
 
 	// Create processor with main database repository (for processed files)
-	processor := NewProcessor(mainDB.Repository, cp)
+	processor := NewProcessor(metadataService, cp)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	service := &Service{
-		config:    config,
-		mainDB:    mainDB,
-		queueDB:   queueDB,
-		processor: processor,
-		log:       slog.Default().With("component", "nzb-service"),
-		ctx:       ctx,
-		cancel:    cancel,
+		config:          config,
+		metadataService: metadataService,
+		queueDB:         queueDB,
+		processor:       processor,
+		log:             slog.Default().With("component", "nzb-service"),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	return service, nil
@@ -141,11 +142,6 @@ func (s *Service) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
-}
-
-// MainDatabase returns the main database instance for serving files
-func (s *Service) MainDatabase() *database.DB {
-	return s.mainDB
 }
 
 // QueueDatabase returns the queue database instance for processing
@@ -287,9 +283,9 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 		}
 
 		// Check if this is a database contention error
-		if strings.Contains(err.Error(), "database is locked") || 
-		   strings.Contains(err.Error(), "database is busy") {
-			
+		if strings.Contains(err.Error(), "database is locked") ||
+			strings.Contains(err.Error(), "database is busy") {
+
 			if attempt == maxRetries-1 {
 				// Final attempt failed, return the error
 				return nil, fmt.Errorf("failed to claim queue item after %d attempts: %w", maxRetries, err)
@@ -300,13 +296,13 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 			if delay > maxDelay {
 				delay = maxDelay
 			}
-			
+
 			// Add random jitter (0-50% of delay) to prevent thundering herd
 			jitter := time.Duration(float64(delay) * (0.5 * float64(workerID%10) / 10.0))
 			delay += jitter
 
-			log.Debug("Database contention, retrying claim", 
-				"attempt", attempt+1, 
+			log.Debug("Database contention, retrying claim",
+				"attempt", attempt+1,
 				"delay", delay,
 				"worker_id", workerID)
 
@@ -341,48 +337,6 @@ func (s *Service) processQueueItems(workerID int) {
 
 	log.Debug("Processing claimed queue item", "queue_id", item.ID, "file", item.NzbPath)
 
-	// Step 2: Check main database for duplicates (safety net)
-	nzbFilename := filepath.Base(item.NzbPath)
-	existing, err := s.mainDB.Repository.GetNzbFileByName(nzbFilename)
-	if err != nil {
-		log.Warn("Failed to check if file already processed", "file", item.NzbPath, "error", err)
-		// Continue processing anyway
-	} else if existing != nil {
-		// Check if existing NZB has unhealthy files
-		hasUnhealthyFiles, err := s.mainDB.Repository.HasUnhealthyVirtualFiles(existing.ID)
-		if err != nil {
-			log.Warn("Failed to check file health status", "file", item.NzbPath, "nzb_id", existing.ID, "error", err)
-			// Mark as completed to avoid infinite retries
-			if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-				log.Error("Failed to mark duplicate item as completed", "queue_id", item.ID, "error", err)
-			}
-			return
-		}
-
-		if hasUnhealthyFiles {
-			log.Info("File exists but has unhealthy files, allowing reimport", "queue_id", item.ID, "file", item.NzbPath, "nzb_id", existing.ID)
-			// Delete existing NZB and its virtual files to allow clean reimport
-			if err := s.mainDB.Repository.DeleteNzbFile(existing.ID); err != nil {
-				log.Error("Failed to delete existing unhealthy NZB file", "nzb_id", existing.ID, "error", err)
-				// Mark as failed since we can't clean up
-				errMsg := err.Error()
-				if updateErr := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errMsg); updateErr != nil {
-					log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", updateErr)
-				}
-				return
-			}
-			log.Info("Deleted existing unhealthy NZB file for reimport", "nzb_id", existing.ID, "file", item.NzbPath)
-			// Continue to Step 3 to process the new file
-		} else {
-			// File already exists and is healthy, mark queue item as completed
-			log.Info("File already processed and is healthy, marking queue item complete", "queue_id", item.ID, "file", item.NzbPath)
-			if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-				log.Error("Failed to mark duplicate item as completed", "queue_id", item.ID, "error", err)
-			}
-			return
-		}
-	}
-
 	// Step 3: Process the NZB file and write to main database
 	var processingErr error
 	if item.WatchRoot != nil {
@@ -409,9 +363,9 @@ func (s *Service) processQueueItems(workerID int) {
 func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, processingErr error, log *slog.Logger) {
 	errorMessage := processingErr.Error()
 
-	log.Warn("Processing failed", 
-		"queue_id", item.ID, 
-		"file", item.NzbPath, 
+	log.Warn("Processing failed",
+		"queue_id", item.ID,
+		"file", item.NzbPath,
 		"error", processingErr,
 		"retry_count", item.RetryCount,
 		"max_retries", item.MaxRetries)
@@ -429,8 +383,8 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 		if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
 			log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", err)
 		} else {
-			log.Error("Item failed permanently after max retries", 
-				"queue_id", item.ID, 
+			log.Error("Item failed permanently after max retries",
+				"queue_id", item.ID,
 				"file", item.NzbPath,
 				"retry_count", item.RetryCount)
 		}
@@ -439,11 +393,11 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 
 // ServiceStats holds statistics about the service
 type ServiceStats struct {
-	IsRunning     bool                 `json:"is_running"`
-	WatchDir      string               `json:"watch_dir"`
-	ScanInterval  time.Duration        `json:"scan_interval"`
-	Workers       int                  `json:"workers"`
-	QueueStats    *database.QueueStats `json:"queue_stats,omitempty"`
+	IsRunning    bool                 `json:"is_running"`
+	WatchDir     string               `json:"watch_dir"`
+	ScanInterval time.Duration        `json:"scan_interval"`
+	Workers      int                  `json:"workers"`
+	QueueStats   *database.QueueStats `json:"queue_stats,omitempty"`
 }
 
 // GetStats returns service statistics
