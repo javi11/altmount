@@ -10,13 +10,13 @@ import (
 	"github.com/spf13/afero"
 )
 
-// NzbFilesystem implements afero.Fs interface directly using the NZB database
+// NzbFilesystem implements afero.Fs interface directly using the metadata service
 type NzbFilesystem struct {
-	remoteFile *NzbRemoteFile
+	remoteFile *MetadataRemoteFile
 }
 
-// NewNzbFilesystem creates a new filesystem backed directly by NZB data
-func NewNzbFilesystem(remoteFile *NzbRemoteFile) afero.Fs {
+// NewNzbFilesystem creates a new filesystem backed directly by metadata
+func NewNzbFilesystem(remoteFile *MetadataRemoteFile) afero.Fs {
 	return &NzbFilesystem{
 		remoteFile: remoteFile,
 	}

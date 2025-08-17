@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/nntppool"
@@ -64,6 +65,8 @@ type RarFileEntry struct {
 var (
 	// Pattern to detect RAR files
 	rarPattern = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
+	// Pattern to detect PAR2 files
+	par2Pattern = regexp.MustCompile(`(?i)\.par2$|\.p\d+$|\.vol\d+\+\d+\.par2$`)
 )
 
 // Parser handles NZB file parsing
@@ -108,6 +111,11 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 
 	// Process each file in the NZB
 	for _, file := range n.Files {
+		// Skip PAR2 files
+		if par2Pattern.MatchString(file.Filename) {
+			continue
+		}
+
 		parsedFile, err := p.parseFile(file, n.Meta)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse file %s: %w", file.Subject, err)
@@ -178,7 +186,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 	}
 
 	// Extract filename - priority: meta file_name > file.Filename
-	var enc metapb.Encryption
+	enc := metapb.Encryption_NONE // Default to no encryption
 
 	filename := file.Filename
 	if meta != nil {
@@ -200,7 +208,11 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		}
 
 		if metaCipher, ok := meta["cipher"]; ok && metaCipher != "" {
-			enc = metapb.Encryption_HEADERS
+			if metaCipher == string(encryption.RCloneCipherType) {
+				enc = metapb.Encryption_RCLONE
+			} else if metaCipher == string(encryption.HeadersCipherType) {
+				enc = metapb.Encryption_HEADERS
+			}
 		}
 	}
 	// Check if this is a RAR file
@@ -223,11 +235,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 
 // calculateFileSize implements the sophisticated size calculation logic
 func (p *Parser) calculateFileSize(file nzbparser.NzbFile) (int64, error) {
-	// Priority 1: If file.Bytes is present, use that as totalSize
-	if file.Bytes > 0 {
-		return int64(file.Bytes), nil
-	}
-
 	// No file.Bytes available, need to analyze segments
 	if len(file.Segments) < 2 {
 		// Not enough segments to compare, use segment sum

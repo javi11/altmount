@@ -17,43 +17,61 @@ func GetSegmentsInRange(
 ) segmentRange {
 	segments := make([]*segment, 0)
 
+	// Track the accumulative file position as we iterate through segments
+	filePosition := int64(0)
+
 	for i := 0; ; i++ {
 		s, groups, ok := ml.GetSegment(i)
 		if !ok {
 			break
 		}
 
+		segmentSize := s.End - s.Start + 1
+
+		// Calculate the absolute positions of this segment in the file
+		segmentFileStart := filePosition + s.Start
+		segmentFileEnd := filePosition + segmentSize - 1
+
 		// Check if this segment overlaps with the requested range
-		if s.End < start || s.Start > end {
+		if segmentFileEnd < start || segmentFileStart > end {
+			filePosition += segmentSize
 			continue
 		}
 
-		segmentSize := s.End - s.Start + 1
 		r, w := bufpipe.New(nil)
+
+		// Calculate the portion of this segment that overlaps with the requested range
+		// All positions here are relative to the segment's data stream (0-based)
+		segmentStart := s.Start
+		segmentEnd := segmentSize - 1
+
+		// Adjust start offset if the requested range starts after this segment begins
+		if segmentFileStart < start {
+			segmentStart = start - segmentFileStart
+		}
+
+		// Adjust end offset if the requested range ends before this segment ends
+		if segmentFileEnd > end {
+			segmentEnd = end - segmentFileStart
+		}
+
 		p := &segment{
 			Id:          s.Id,
-			Start:       0,
-			End:         segmentSize - 1,
+			Start:       segmentStart,
+			End:         segmentEnd,
 			SegmentSize: segmentSize,
 			groups:      groups,
 			reader:      r,
 			writer:      w,
 		}
 
-		// Adjust start offset if this is the first segment that overlaps
-		if s.Start < start {
-			p.Start = start - s.Start
-		}
-
-		// Adjust end offset if this is the last segment that overlaps
-		if s.End > end {
-			p.End = end - s.Start
-		}
-
 		segments = append(segments, p)
 
+		// Move to the next segment position in the file
+		filePosition += segmentSize
+
 		// If we've reached the end of the requested range, we can stop
-		if s.End >= end {
+		if segmentFileEnd >= end {
 			break
 		}
 	}

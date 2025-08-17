@@ -14,9 +14,10 @@ require (
 	github.com/acomagu/bufpipe v1.0.4
 	github.com/javi11/nntppool v1.5.1
 	github.com/javi11/nzbparser v0.3.0
-	github.com/javi11/rardecode/v2 v2.1.2-0.20250815161843-45d2f4324928
+	github.com/javi11/rardecode/v2 v2.1.2-0.20250817154037-719a5180701e
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
+	github.com/pressly/goose/v3 v3.24.3
 	github.com/rfjakob/eme v1.1.2
 	github.com/sethvargo/go-password v0.3.1
 	github.com/sourcegraph/conc v0.3.0
@@ -172,7 +173,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/polyfloyd/go-errorlint v1.8.0 // indirect
-	github.com/pressly/goose/v3 v3.24.3 // indirect
 	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.32.1 // indirect

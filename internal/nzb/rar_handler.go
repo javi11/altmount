@@ -1,3 +1,19 @@
+// Package nzb provides RAR archive analysis and content extraction capabilities.
+//
+// The RarHandler is responsible for analyzing RAR archives directly from NZB data
+// without downloading the entire archive. It uses rardecode.OpenReader with a virtual
+// filesystem to stream RAR data directly from Usenet.
+//
+// Key functionality:
+// - AnalyzeRarContentFromNzb: Analyzes RAR archives and returns file metadata with segments
+// - createSegmentsFromPartMapping: Creates segment data for each file based on RAR part mapping
+// - CreateFileMetadataFromRarContent: Converts RarContent to protobuf FileMetadata
+//
+// The segment calculation takes into account:
+// - RAR part header offsets
+// - File start/end positions within each part
+// - Proper segment intersection calculations
+// - Header-aware offset calculations
 package nzb
 
 import (
@@ -9,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/database"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/nntppool"
 	"github.com/javi11/rardecode/v2"
 )
@@ -25,16 +41,16 @@ type RarPartInfo struct {
 
 // RarContent represents a file within a RAR archive for processing
 type RarContent struct {
-	VirtualFileID  int64         `json:"virtual_file_id"`
-	InternalPath   string        `json:"internal_path"`
-	Filename       string        `json:"filename"`
-	Size           int64         `json:"size"`
-	CompressedSize *int64        `json:"compressed_size,omitempty"`
-	FileOffset     *int64        `json:"file_offset,omitempty"`
-	CRC32          *string       `json:"crc32,omitempty"`
-	IsDirectory    bool          `json:"is_directory"`
-	ModTime        *time.Time    `json:"mod_time,omitempty"`
-	PartMapping    []RarPartInfo `json:"part_mapping"` // Which parts contain this file's data
+	InternalPath   string                `json:"internal_path"`
+	Filename       string                `json:"filename"`
+	Size           int64                 `json:"size"`
+	CompressedSize *int64                `json:"compressed_size,omitempty"`
+	FileOffset     *int64                `json:"file_offset,omitempty"`
+	CRC32          *string               `json:"crc32,omitempty"`
+	IsDirectory    bool                  `json:"is_directory"`
+	ModTime        *time.Time            `json:"mod_time,omitempty"`
+	PartMapping    []RarPartInfo         `json:"part_mapping"` // Which parts contain this file's data
+	Segments       []*metapb.SegmentData `json:"segments"`     // Segment data for this file
 }
 
 // RarHandler handles RAR archive analysis and content extraction
@@ -58,7 +74,6 @@ func (rh *RarHandler) calculateFilePartMapping(
 	fileOffset int64,
 	fileSize int64,
 	rarFiles []ParsedFile,
-	volumeHeaders []rardecode.VolumeHeader,
 ) []RarPartInfo {
 	var partMapping []RarPartInfo
 	var cumulativeDataOffset int64 // Data-only cumulative offset (excluding headers)
@@ -70,16 +85,9 @@ func (rh *RarHandler) calculateFilePartMapping(
 
 	for i, rarPart := range rarFiles {
 		// Get header size for this part
-		var headerSize int64
-		if i < len(volumeHeaders) {
-			headerSize = volumeHeaders[i].HeaderSize
-		} else {
-			// Fallback if no volume header available
-			headerSize = int64(512)
-		}
 
 		// Calculate data size (excluding headers)
-		dataSize := rarPart.Size - headerSize
+		dataSize := rarPart.Size
 		if dataSize < 0 {
 			dataSize = 0 // Safety check
 		}
@@ -108,8 +116,8 @@ func (rh *RarHandler) calculateFilePartMapping(
 				partInfo := RarPartInfo{
 					PartIndex:       i,
 					PartFilename:    rarPart.Filename,
-					FileStartOffset: headerSize + fileStartInData, // Skip header!
-					FileEndOffset:   headerSize + fileEndInData,   // Skip header!
+					FileStartOffset: fileStartInData, // Skip header!
+					FileEndOffset:   fileEndInData,   // Skip header!
 					DataSize:        dataLength,
 				}
 
@@ -120,8 +128,7 @@ func (rh *RarHandler) calculateFilePartMapping(
 					"part_filename", rarPart.Filename,
 					"file_start_offset", partInfo.FileStartOffset,
 					"file_end_offset", partInfo.FileEndOffset,
-					"data_size", partInfo.DataSize,
-					"header_size", headerSize)
+					"data_size", partInfo.DataSize)
 			}
 		}
 
@@ -141,10 +148,172 @@ func (rh *RarHandler) calculateFilePartMapping(
 	return partMapping
 }
 
+// createSegmentsFromPartMapping creates SegmentData slices for a file based on its part mapping
+func (rh *RarHandler) createSegmentsFromPartMapping(
+	fileSize int64,
+	partMapping []RarPartInfo,
+	rarFiles []ParsedFile,
+) []*metapb.SegmentData {
+	var segments []*metapb.SegmentData
+	var totalDataProcessed int64
+
+	rh.log.Debug("Creating segments from part mapping",
+		"part_count", len(partMapping),
+		"file_size", fileSize)
+
+	for _, pm := range partMapping {
+		// Check if we've already fulfilled the file's total size
+		if totalDataProcessed >= fileSize {
+			rh.log.Debug("File size already fulfilled, breaking loop",
+				"total_processed", totalDataProcessed,
+				"file_size", fileSize)
+			break
+		}
+
+		if pm.PartIndex >= len(rarFiles) {
+			rh.log.Warn("Part index out of range",
+				"part_index", pm.PartIndex,
+				"rar_files_count", len(rarFiles))
+			continue
+		}
+
+		archiveFile := rarFiles[pm.PartIndex]
+
+		rh.log.Debug("Processing RAR part for segments",
+			"part_index", pm.PartIndex,
+			"part_filename", pm.PartFilename,
+			"file_start_offset", pm.FileStartOffset,
+			"file_end_offset", pm.FileEndOffset,
+			"data_size", pm.DataSize,
+			"original_segments", len(archiveFile.Segments),
+			"total_processed", totalDataProcessed)
+
+		var firstSegmentAjusted bool
+
+		// Create segments for this part of the file
+		// Each segment from the original RAR part needs to be adjusted for the file's offset within that part
+		for _, originalSeg := range archiveFile.Segments {
+			// Check again if we've fulfilled the file size during segment processing
+			if totalDataProcessed >= fileSize {
+				rh.log.Debug("File size fulfilled during segment processing, breaking",
+					"total_processed", totalDataProcessed,
+					"file_size", fileSize)
+				break
+			}
+
+			// Calculate the intersection of this segment with the file's data range in this part
+			segStart := originalSeg.StartOffset
+			segEnd := originalSeg.EndOffset
+
+			// Adjust segment offsets to account for the file's position within the RAR part
+			// The file starts at pm.FileStartOffset within this RAR part
+			// and contains pm.DataSize bytes
+			partDataStart := pm.FileStartOffset
+			partDataEnd := pm.FileEndOffset
+
+			// Check if this segment overlaps with the file's data in this part
+			if segEnd >= partDataStart && segStart < partDataEnd {
+				// Calculate intersection
+				adjustedStart := segStart
+				adjustedEnd := segEnd
+
+				// Trim segment to file's data range within this part
+				if !firstSegmentAjusted && adjustedStart < partDataStart {
+					adjustedStart = partDataStart
+					firstSegmentAjusted = true
+				}
+				if adjustedEnd > partDataEnd {
+					adjustedEnd = partDataEnd
+				}
+
+				// Only create segment if there's actual data
+				if adjustedEnd > adjustedStart {
+					segmentSize := adjustedEnd - adjustedStart
+
+					// Ensure we don't exceed the file size
+					remainingBytes := fileSize - totalDataProcessed
+					if segmentSize > remainingBytes {
+						adjustedEnd = adjustedStart + remainingBytes
+						segmentSize = remainingBytes
+					}
+
+					segment := &metapb.SegmentData{
+						StartOffset: adjustedStart,
+						EndOffset:   adjustedEnd,
+						Id:          originalSeg.Id,
+					}
+					segments = append(segments, segment)
+					totalDataProcessed += segmentSize
+
+					rh.log.Debug("Created segment for file",
+						"original_start", segStart,
+						"original_end", segEnd,
+						"adjusted_start", adjustedStart,
+						"adjusted_end", adjustedEnd,
+						"segment_size", segmentSize,
+						"total_processed", totalDataProcessed,
+						"segment_id", originalSeg.Id)
+
+					// Break if we've reached the file size
+					if totalDataProcessed >= fileSize {
+						rh.log.Debug("File size reached, stopping segment creation",
+							"total_processed", totalDataProcessed,
+							"file_size", fileSize)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	rh.log.Debug("Completed segment creation",
+		"total_segments", len(segments),
+		"total_data_processed", totalDataProcessed,
+		"file_size", fileSize)
+
+	return segments
+}
+
+// CreateFileMetadataFromRarContent creates FileMetadata from RarContent for the metadata system
+func (rh *RarHandler) CreateFileMetadataFromRarContent(
+	rarContent RarContent,
+	sourceNzbPath string,
+) *metapb.FileMetadata {
+	now := time.Now().Unix()
+
+	return &metapb.FileMetadata{
+		FileSize:      rarContent.Size,
+		SourceNzbPath: sourceNzbPath,
+		Status:        metapb.FileStatus_FILE_STATUS_HEALTHY,
+		CreatedAt:     now,
+		ModifiedAt:    now,
+		SegmentData:   rarContent.Segments,
+	}
+}
+
+// ValidateSegments validates that segments are properly ordered and non-overlapping
+func (rh *RarHandler) ValidateSegments(segments []*metapb.SegmentData) error {
+	if len(segments) == 0 {
+		return nil
+	}
+
+	for i := 1; i < len(segments); i++ {
+		prev := segments[i-1]
+		curr := segments[i]
+
+		if curr.StartOffset < prev.EndOffset {
+			return fmt.Errorf("segments overlap: segment %d ends at %d but segment %d starts at %d",
+				i-1, prev.EndOffset, i, curr.StartOffset)
+		}
+	}
+
+	return nil
+}
+
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses rardecode.OpenReader with a virtual filesystem to stream RAR data from Usenet
-// The virtualFile parameter is the directory that will contain the extracted files (not the RAR file itself)
-func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile, virtualDir *database.VirtualFile) ([]RarContent, error) {
+// Returns an array of files to be added to the metadata with all the info and segments for each file
+func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]RarContent, error) {
 	// Create Usenet filesystem for RAR access - this is the key component that enables
 	// rardecode.OpenReader to read RAR parts directly from Usenet without downloading
 	ufs := NewUsenetFileSystem(ctx, rh.cp, rarFiles, rh.maxWorkers)
@@ -174,16 +343,10 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 
 	rh.log.Debug("Successfully opened RAR archive via Usenet streaming", "main_file", mainRarFile)
 
-	// Get volume headers first for part mapping calculations
-	vol, err := rarReader.VolumeHeaders()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read RAR volume headers: %w", err)
-	}
-
 	// Extract file entries from the RAR archive
 	// Each call to rarReader.Next() may trigger reading from different RAR parts,
 	// all streamed transparently from Usenet via our virtual filesystem
-	var rarContents []RarContent
+	var headers []*rardecode.FileHeader
 	fileCount := 0
 	for {
 		header, err := rarReader.Next()
@@ -203,6 +366,18 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 		}
 
 		fileCount++
+
+		rh.log.Debug("Found RAR file header",
+			"path", header.Name,
+			"size", header.UnPackedSize,
+			"offset", header.Offset,
+			"file_num", fileCount)
+
+		headers = append(headers, header)
+	}
+
+	var rarContents []RarContent
+	for _, header := range headers {
 		rh.log.Debug("Streaming RAR file header from Usenet",
 			"file", header.Name,
 			"size", header.UnPackedSize,
@@ -224,19 +399,21 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 			header.Offset,
 			header.UnPackedSize,
 			rarFiles,
-			vol,
 		)
 
+		// Create segments for this file based on part mapping
+		segments := rh.createSegmentsFromPartMapping(header.UnPackedSize, partMapping, rarFiles)
+
 		rarContent := RarContent{
-			VirtualFileID: virtualDir.ID,
-			InternalPath:  filepath.Clean(header.Name),
-			Filename:      filepath.Base(header.Name),
-			Size:          header.UnPackedSize,
-			FileOffset:    &header.Offset,
-			CRC32:         crc32Ptr,
-			IsDirectory:   header.IsDir,
-			ModTime:       modTimePtr,
-			PartMapping:   partMapping, // Add the calculated part mapping
+			InternalPath: filepath.Clean(header.Name),
+			Filename:     filepath.Base(header.Name),
+			Size:         header.UnPackedSize,
+			FileOffset:   &header.Offset,
+			CRC32:        crc32Ptr,
+			IsDirectory:  header.IsDir,
+			ModTime:      modTimePtr,
+			PartMapping:  partMapping, // Add the calculated part mapping
+			Segments:     segments,    // Add the calculated segments
 		}
 
 		rarContents = append(rarContents, rarContent)
@@ -246,6 +423,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 			"size", rarContent.Size,
 			"compressed", rarContent.CompressedSize,
 			"parts_containing_file", len(partMapping),
+			"segments_count", len(segments),
 			"part_mapping", func() string {
 				if len(partMapping) == 0 {
 					return "no parts"
@@ -261,7 +439,6 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 	}
 
 	rh.log.Info("Successfully analyzed RAR content via Usenet streaming",
-		"archive_dir", virtualDir.Name,
 		"files_found", len(rarContents),
 		"rar_parts", len(rarFileNames),
 		"total_bytes_in_rar", func() int64 {
@@ -281,40 +458,4 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 	)
 
 	return rarContents, nil
-}
-
-// CreateRarPartsForFile creates RarParts for a specific file using part mapping information
-func (rh *RarHandler) CreateRarPartsForFile(archiveFiles []ParsedFile, partMapping []RarPartInfo) database.RarParts {
-	if len(partMapping) == 0 {
-		return database.RarParts{}
-	}
-
-	rarParts := make(database.RarParts, len(partMapping))
-	for i, pm := range partMapping {
-		// Find the corresponding archive file
-		if pm.PartIndex < len(archiveFiles) {
-			archiveFile := archiveFiles[pm.PartIndex]
-
-			// Convert segments for this part
-			segmentData := database.SegmentData{
-				Bytes: archiveFile.Size,
-				ID:    "", // Will be filled with segments data
-			}
-
-			// Use the actual segments from the ParsedFile
-			if len(archiveFile.Segments) > 0 {
-				// For simplicity, we'll use the segment data conversion
-				segmentData = archiveFile.Segments.ConvertToSegmentsData()
-			}
-
-			rarParts[i] = database.RarPart{
-				SegmentData: segmentData,
-				PartSize:    archiveFile.Size,
-				Offset:      pm.FileStartOffset, // File-specific offset (header-aware)
-				ByteCount:   pm.DataSize,        // Bytes of this file in this part
-			}
-		}
-	}
-
-	return rarParts
 }

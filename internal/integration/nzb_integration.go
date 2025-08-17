@@ -16,8 +16,8 @@ import (
 // NzbConfig holds configuration for the NZB system
 type NzbConfig struct {
 	QueueDatabasePath string
-	MetadataRootPath  string        // Path to metadata root directory
-	MetadataCacheSize int           // Cache size for metadata operations
+	MetadataRootPath  string // Path to metadata root directory
+	MetadataCacheSize int    // Cache size for metadata operations
 	MountPath         string
 	NzbDir            string        // Directory containing NZB files
 	Password          string        // Global password for .bin files
@@ -29,7 +29,7 @@ type NzbConfig struct {
 
 // NzbSystem represents the complete NZB-backed filesystem
 type NzbSystem struct {
-	queueDB        *database.QueueDB     // Queue database for processing queue
+	queueDB        *database.QueueDB        // Queue database for processing queue
 	metadataReader *metadata.MetadataReader // Metadata reader for serving files
 	service        *nzb.Service
 	fs             afero.Fs
@@ -77,7 +77,7 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 
 	// For now, we'll need to create a service that uses MetadataProcessor
 	// This will be updated when we modify the NZB service
-	service, err := nzb.NewService(serviceConfig, nil, queueDB, cp) // nil for mainDB since we're using metadata
+	service, err := nzb.NewService(serviceConfig, metadataService, queueDB, cp) // nil for mainDB since we're using metadata
 	if err != nil {
 		queueDB.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)
@@ -91,7 +91,7 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 
 	// Create metadata-based remote file handler
 	metadataRemoteFile := nzbfilesystem.NewMetadataRemoteFile(
-		metadataReader,
+		metadataService,
 		cp,
 		downloadWorkers,
 		nzbfilesystem.MetadataRemoteFileConfig{
@@ -141,11 +141,6 @@ func (ns *NzbSystem) MetadataReader() *metadata.MetadataReader {
 // QueueDatabase returns the queue database instance (for processing queue)
 func (ns *NzbSystem) QueueDatabase() *database.QueueDB {
 	return ns.queueDB
-}
-
-// Database returns nil since we no longer use a main database (backward compatibility)
-func (ns *NzbSystem) Database() *database.DB {
-	return nil
 }
 
 // StartService starts the NZB service (including background scanning and processing)
