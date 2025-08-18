@@ -1,4 +1,4 @@
-package nzb
+package importer
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func NewProcessor(metadataService *metadata.MetadataService, cp nntppool.UsenetC
 	return &Processor{
 		parser:          NewParser(cp),
 		metadataService: metadataService,
-		rarProcessor:    NewRarHandler(cp, 10), // 10 max workers for RAR analysis
+		rarProcessor:    NewRarProcessor(cp, 10), // 10 max workers for RAR analysis
 		cp:              cp,
 		log:             slog.Default().With("component", "nzb-processor"),
 	}
@@ -187,86 +187,151 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 	return nil
 }
 
-// processRarArchiveWithDir handles NZBs containing RAR archives in a specific virtual directory
+// processRarArchiveWithDir handles NZBs containing RAR archives and regular files in a specific virtual directory
 func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir string) error {
-	// Group RAR files by their archive base name
-	rarArchives := proc.groupRarFilesByArchive(parsed.Files)
+	// Separate RAR files from regular files
+	regularFiles, rarFiles := proc.separateRarFiles(parsed.Files)
 
-	// Process each RAR archive
-	for archiveName, archiveFiles := range rarArchives {
-		// Create directory for the RAR archive content in virtual directory
-		rarDirPath := filepath.Join(virtualDir, archiveName)
-		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
+	// Filter out PAR2 files from regular files
+	regularFiles, _ = proc.separatePar2Files(regularFiles)
 
-		// Ensure RAR archive directory exists
-		if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
-			return fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
+	// Process regular files first (non-RAR files like MKV, MP4, etc.)
+	if len(regularFiles) > 0 {
+		proc.log.Info("Processing regular files in RAR archive NZB",
+			"virtual_dir", virtualDir,
+			"regular_files", len(regularFiles))
+
+		// Create directory structure for regular files
+		dirStructure := proc.analyzeDirectoryStructureWithBase(regularFiles, virtualDir)
+
+		// Create directories first
+		for _, dir := range dirStructure.directories {
+			if err := proc.ensureDirectoryExists(dir.path); err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", dir.path, err)
+			}
 		}
 
-		proc.log.Info("Processing RAR archive with content analysis",
-			"archive", archiveName,
-			"parts", len(archiveFiles),
-			"rar_dir", rarDirPath)
+		// Process each regular file
+		for _, file := range regularFiles {
+			parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, virtualDir)
 
-		// Sort RAR files for proper analysis
-		sortedRarFiles := proc.sortRarFiles(archiveFiles)
-
-		// Analyze RAR content using the new RAR handler
-		ctx := context.Background()
-		rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, sortedRarFiles)
-		if err != nil {
-			proc.log.Error("Failed to analyze RAR archive content, falling back to simplified mode",
-				"archive", archiveName,
-				"error", err)
-			// Fallback to simplified mode if RAR analysis fails
-			return err
-		}
-
-		proc.log.Info("Successfully analyzed RAR archive content",
-			"archive", archiveName,
-			"files_in_archive", len(rarContents))
-
-		// Process each file found in the RAR archive
-		for _, rarContent := range rarContents {
-			// Skip directories
-			if rarContent.IsDirectory {
-				proc.log.Debug("Skipping directory in RAR archive", "path", rarContent.InternalPath)
-				continue
+			// Ensure parent directory exists
+			if err := proc.ensureDirectoryExists(parentPath); err != nil {
+				return fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
 			}
 
-			// Determine the virtual file path for this extracted file
-			// The file path should be relative to the RAR directory
-			virtualFilePath := filepath.Join(rarDirPath, rarContent.InternalPath)
-			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+			// Create virtual file path
+			virtualPath := filepath.Join(parentPath, filename)
+			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 
-			// Ensure parent directory exists for nested files
-			parentDir := filepath.Dir(virtualFilePath)
-			if err := proc.ensureDirectoryExists(parentDir); err != nil {
-				return fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
-			}
-
-			// Create file metadata using the RAR handler's helper function
-			fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
-				rarContent,
+			// Create file metadata
+			fileMeta := proc.metadataService.CreateFileMetadata(
+				file.Size,
 				parsed.Path,
+				metapb.FileStatus_FILE_STATUS_HEALTHY,
+				file.Segments,
+				file.Encryption,
+				file.Password,
+				file.Salt,
 			)
 
 			// Write file metadata to disk
-			if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-				return fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
+			if err := proc.metadataService.WriteFileMetadata(virtualPath, fileMeta); err != nil {
+				return fmt.Errorf("failed to write metadata for regular file %s: %w", filename, err)
 			}
 
-			proc.log.Debug("Created metadata for RAR extracted file",
-				"file", rarContent.Filename,
-				"internal_path", rarContent.InternalPath,
-				"virtual_path", virtualFilePath,
-				"size", rarContent.Size,
-				"segments", len(rarContent.Segments))
+			proc.log.Debug("Created metadata for regular file",
+				"file", filename,
+				"virtual_path", virtualPath,
+				"size", file.Size)
 		}
 
-		proc.log.Info("Successfully processed RAR archive with content analysis",
-			"archive", archiveName,
-			"files_processed", len(rarContents))
+		proc.log.Info("Successfully processed regular files",
+			"virtual_dir", virtualDir,
+			"files_processed", len(regularFiles))
+	}
+
+	// Process RAR archives if any exist
+	if len(rarFiles) > 0 {
+		// Group RAR files by their archive base name
+		rarArchives := proc.groupRarFilesByArchive(rarFiles)
+
+		// Process each RAR archive
+		for archiveName, archiveFiles := range rarArchives {
+			// Create directory for the RAR archive content in virtual directory
+			rarDirPath := filepath.Join(virtualDir, archiveName)
+			rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
+
+			// Ensure RAR archive directory exists
+			if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
+				return fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
+			}
+
+			proc.log.Info("Processing RAR archive with content analysis",
+				"archive", archiveName,
+				"parts", len(archiveFiles),
+				"rar_dir", rarDirPath)
+
+			// Sort RAR files for proper analysis
+			sortedRarFiles := proc.sortRarFiles(archiveFiles)
+
+			// Analyze RAR content using the new RAR handler
+			ctx := context.Background()
+			rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, sortedRarFiles)
+			if err != nil {
+				proc.log.Error("Failed to analyze RAR archive content, falling back to simplified mode",
+					"archive", archiveName,
+					"error", err)
+				// Fallback to simplified mode if RAR analysis fails
+				return err
+			}
+
+			proc.log.Info("Successfully analyzed RAR archive content",
+				"archive", archiveName,
+				"files_in_archive", len(rarContents))
+
+			// Process each file found in the RAR archive
+			for _, rarContent := range rarContents {
+				// Skip directories
+				if rarContent.IsDirectory {
+					proc.log.Debug("Skipping directory in RAR archive", "path", rarContent.InternalPath)
+					continue
+				}
+
+				// Determine the virtual file path for this extracted file
+				// The file path should be relative to the RAR directory
+				virtualFilePath := filepath.Join(rarDirPath, rarContent.InternalPath)
+				virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+				// Ensure parent directory exists for nested files
+				parentDir := filepath.Dir(virtualFilePath)
+				if err := proc.ensureDirectoryExists(parentDir); err != nil {
+					return fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
+				}
+
+				// Create file metadata using the RAR handler's helper function
+				fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
+					rarContent,
+					parsed.Path,
+				)
+
+				// Write file metadata to disk
+				if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+					return fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
+				}
+
+				proc.log.Debug("Created metadata for RAR extracted file",
+					"file", rarContent.Filename,
+					"internal_path", rarContent.InternalPath,
+					"virtual_path", virtualFilePath,
+					"size", rarContent.Size,
+					"segments", len(rarContent.Segments))
+			}
+
+			proc.log.Info("Successfully processed RAR archive with content analysis",
+				"archive", archiveName,
+				"files_processed", len(rarContents))
+		}
 	}
 
 	return nil
@@ -412,6 +477,22 @@ func (proc *Processor) separatePar2Files(files []ParsedFile) ([]ParsedFile, []Pa
 	}
 
 	return regularFiles, par2Files
+}
+
+// separateRarFiles separates RAR files from regular files
+func (proc *Processor) separateRarFiles(files []ParsedFile) ([]ParsedFile, []ParsedFile) {
+	var regularFiles []ParsedFile
+	var rarFiles []ParsedFile
+
+	for _, file := range files {
+		if file.IsRarArchive {
+			rarFiles = append(rarFiles, file)
+		} else {
+			regularFiles = append(regularFiles, file)
+		}
+	}
+
+	return regularFiles, rarFiles
 }
 
 // groupRarFilesByArchive groups RAR files by their archive base name

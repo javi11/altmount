@@ -1,4 +1,4 @@
-package nzb
+package importer
 
 import (
 	"context"
@@ -46,20 +46,9 @@ type ParsedFile struct {
 	Segments     []*metapb.SegmentData
 	Groups       []string
 	IsRarArchive bool
-	RarContents  []RarFileEntry    // Only populated if IsRarArchive is true
 	Encryption   metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
 	Password     string            // Password from NZB meta, nil if not encrypted
 	Salt         string            // Salt from NZB meta, nil if not encrypted
-}
-
-// RarFileEntry represents a file within a RAR archive
-type RarFileEntry struct {
-	Path        string
-	Filename    string
-	Size        int64
-	IsDirectory bool
-	ModTime     time.Time
-	Attributes  uint8
 }
 
 var (

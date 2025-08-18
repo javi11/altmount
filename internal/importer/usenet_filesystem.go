@@ -1,4 +1,4 @@
-package nzb
+package importer
 
 import (
 	"context"
@@ -92,7 +92,7 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 }
 
 // Stat returns file information for a file in the Usenet filesystem
-// This implements the rarindex.FileSystem interface
+// This implements the rarlist.FileSystem interface
 func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 	path = filepath.Clean(path)
 

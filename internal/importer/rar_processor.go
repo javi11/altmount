@@ -1,20 +1,4 @@
-// Package nzb provides RAR archive analysis and content extraction capabilities.
-//
-// The RarHandler is responsible for analyzing RAR archives directly from NZB data
-// without downloading the entire archive. It uses the rarindex package with a virtual
-// filesystem to analyze RAR structure and stream data directly from Usenet.
-//
-// Key functionality:
-// - AnalyzeRarContentFromNzb: Analyzes RAR archives using rarindex and returns file metadata with segments
-// - convertAggregatedFilesToRarContent: Converts rarindex results to RarContent format
-// - CreateFileMetadataFromRarContent: Converts RarContent to protobuf FileMetadata
-//
-// The segment calculation takes into account:
-// - RAR part header offsets from rarindex analysis
-// - File start/end positions within each part
-// - Proper segment intersection calculations
-// - Header-aware offset calculations using rarindex data
-package nzb
+package importer
 
 import (
 	"context"
@@ -24,8 +8,8 @@ import (
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/pkg/rarindex"
 	"github.com/javi11/nntppool"
+	"github.com/javi11/rarlist"
 )
 
 type RarProcessor interface {
@@ -53,10 +37,10 @@ type rarProcessor struct {
 	maxWorkers int
 }
 
-// NewRarHandler creates a new RAR handler
-func NewRarHandler(cp nntppool.UsenetConnectionPool, maxWorkers int) RarProcessor {
+// NewRarProcessor creates a new RAR processor
+func NewRarProcessor(cp nntppool.UsenetConnectionPool, maxWorkers int) RarProcessor {
 	return &rarProcessor{
-		log:        slog.Default().With("component", "rar-handler"),
+		log:        slog.Default().With("component", "rar-processor"),
 		cp:         cp,
 		maxWorkers: maxWorkers,
 	}
@@ -80,10 +64,10 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 }
 
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
-// This implementation uses rarindex with UsenetFileSystem to analyze RAR structure and stream data from Usenet
+// This implementation uses rarlist with UsenetFileSystem to analyze RAR structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
 func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]rarContent, error) {
-	// Create Usenet filesystem for RAR access - this enables rarindex to access
+	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
 	ufs := NewUsenetFileSystem(ctx, rh.cp, rarFiles, rh.maxWorkers)
 
@@ -96,35 +80,35 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Start with the first RAR file (usually .rar or .part001.rar)
 	mainRarFile := rarFileNames[0]
 
-	rh.log.Info("Starting RAR analysis via rarindex with Usenet streaming",
+	rh.log.Info("Starting RAR analysis via rarlist with Usenet streaming",
 		"main_file", mainRarFile,
 		"total_parts", len(rarFileNames),
 		"rar_files", len(rarFiles))
 
-	aggregatedFiles, err := rarindex.AggregateFromFirstFS(ufs, mainRarFile)
+	aggregatedFiles, err := rarlist.ListFilesFS(ufs, mainRarFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate RAR files: %w", err)
 	}
 
 	if len(aggregatedFiles) == 0 {
-		return nil, fmt.Errorf("no files found in RAR archive")
+		return nil, fmt.Errorf("no valid files found in RAR archive. Compressed or encrypted RARs are not supported")
 	}
 
-	rh.log.Debug("Successfully analyzed RAR archive via rarindex",
+	rh.log.Debug("Successfully analyzed RAR archive via rarlist",
 		"main_file", mainRarFile,
 		"files_found", len(aggregatedFiles))
 
-	// Convert rarindex results to RarContent
+	// Convert rarlist results to RarContent
 	rarContents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert rarindex results to RarContent: %w", err)
+		return nil, fmt.Errorf("failed to convert rarlist results to RarContent: %w", err)
 	}
 
 	return rarContents, nil
 }
 
-// convertAggregatedFilesToRarContent converts rarindex.AggregatedFile results to RarContent
-func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rarindex.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
+// convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
+func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rarlist.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
 	var rarContents []rarContent
 
 	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)

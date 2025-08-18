@@ -1,4 +1,4 @@
-package nzb
+package importer
 
 import (
 	"context"

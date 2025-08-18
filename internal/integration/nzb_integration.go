@@ -7,8 +7,8 @@ import (
 
 	"github.com/javi11/altmount/internal/adapters/nzbfilesystem"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/nzb"
 	"github.com/javi11/nntppool"
 	"github.com/spf13/afero"
 )
@@ -31,7 +31,7 @@ type NzbConfig struct {
 type NzbSystem struct {
 	queueDB        *database.QueueDB        // Queue database for processing queue
 	metadataReader *metadata.MetadataReader // Metadata reader for serving files
-	service        *nzb.Service
+	service        *importer.Service
 	fs             afero.Fs
 	pool           nntppool.UsenetConnectionPool
 }
@@ -69,7 +69,7 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 	}
 
 	// Create NZB service using metadata + queue
-	serviceConfig := nzb.ServiceConfig{
+	serviceConfig := importer.ServiceConfig{
 		WatchDir:     config.NzbDir,
 		ScanInterval: scanInterval,
 		Workers:      processorWorkers,
@@ -77,7 +77,7 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 
 	// For now, we'll need to create a service that uses MetadataProcessor
 	// This will be updated when we modify the NZB service
-	service, err := nzb.NewService(serviceConfig, metadataService, queueDB, cp) // nil for mainDB since we're using metadata
+	service, err := importer.NewService(serviceConfig, metadataService, queueDB, cp) // nil for mainDB since we're using metadata
 	if err != nil {
 		queueDB.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)
@@ -124,7 +124,7 @@ func (ns *NzbSystem) GetQueueStats(ctx context.Context) (*database.QueueStats, e
 }
 
 // GetServiceStats returns service statistics including queue stats
-func (ns *NzbSystem) GetServiceStats(ctx context.Context) (*nzb.ServiceStats, error) {
+func (ns *NzbSystem) GetServiceStats(ctx context.Context) (*importer.ServiceStats, error) {
 	return ns.service.GetStats(ctx)
 }
 
