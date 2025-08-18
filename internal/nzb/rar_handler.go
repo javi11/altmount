@@ -80,7 +80,8 @@ func (rh *RarHandler) ValidateSegments(segments []*metapb.SegmentData) error {
 		prev := segments[i-1]
 		curr := segments[i]
 
-		if curr.StartOffset < prev.EndOffset {
+		// EndOffset is inclusive. Overlap exists if current start <= previous end.
+		if curr.StartOffset <= prev.EndOffset {
 			return fmt.Errorf("segments overlap: segment %d ends at %d but segment %d starts at %d",
 				i-1, prev.EndOffset, i, curr.StartOffset)
 		}
@@ -137,129 +138,116 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 func (rh *RarHandler) convertAggregatedFilesToRarContent(aggregatedFiles []rarindex.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
 	var rarContents []rarContent
 
-	for _, aggregatedFile := range aggregatedFiles {
-		rh.log.Debug("Converting aggregated file to RAR content",
-			"file", aggregatedFile.Name,
-			"total_packed_size", aggregatedFile.TotalPackedSize,
-			"parts_count", len(aggregatedFile.Parts))
+	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
+	for i := range rarFiles {
+		pf := &rarFiles[i]
+		fileIndex[pf.Filename] = pf
+		fileIndex[filepath.Base(pf.Filename)] = pf
+	}
 
-		// Convert AggregatedFilePart to RarPartInfo
-		rarContent := rarContent{
+	for _, aggregatedFile := range aggregatedFiles {
+		rc := rarContent{
 			InternalPath: aggregatedFile.Name,
 			Filename:     filepath.Base(aggregatedFile.Name),
 			Size:         aggregatedFile.TotalUnpackedSize,
 		}
 
-		var (
-			totalSize int64
-			segments  []*metapb.SegmentData
-		)
+		var segments []*metapb.SegmentData
+		remaining := aggregatedFile.TotalUnpackedSize
+
 		for _, part := range aggregatedFile.Parts {
-			// Find corresponding ParsedFile by path matching
-			parsedFile := rh.findParsedFileByPath(part.Path, rarFiles)
+			if remaining <= 0 {
+				break
+			}
+
+			parsedFile := fileIndex[part.Path]
 			if parsedFile == nil {
-				rh.log.Warn("Could not find corresponding ParsedFile for RAR part",
-					"part_path", part.Path)
+				parsedFile = fileIndex[filepath.Base(part.Path)]
+			}
+			if parsedFile == nil {
+				rh.log.Warn("RAR part file not found among NZB parsed files", "part_path", part.Path)
 				continue
 			}
 
-			var (
-				totalRead     int64
-				offsetApplyed bool
-			)
-			for _, originalSeg := range parsedFile.Segments {
-				sSize := originalSeg.EndOffset - originalSeg.StartOffset
-
-				if totalRead == part.PackedSize {
-					break // No more data to read from this part
-				}
-
-				if totalRead < part.DataOffset && sSize+totalRead <= part.DataOffset {
-					totalRead += sSize
-					continue // Skip segments that are before the part's data offset
-				}
-
-				start := originalSeg.StartOffset
-				if !offsetApplyed {
-					start += part.DataOffset - totalRead
-					offsetApplyed = true // Apply offset only once for the first segment
-				}
-
-				end := originalSeg.EndOffset
-				if part.PackedSize < totalRead+sSize-start {
-					end = start + (part.PackedSize - totalRead)
-				}
-
-				// Create segments for this RAR part
-				segment := &metapb.SegmentData{
-					StartOffset: start,
-					EndOffset:   end,
-					Id:          originalSeg.Id,
-				}
-
-				// Add segment - it represents the Usenet download range for this RAR part
-				segments = append(segments, segment)
-				totalRead += end - start
+			partContribution := part.PackedSize
+			if partContribution > remaining {
+				partContribution = remaining
+			}
+			if partContribution <= 0 {
+				continue
 			}
 
-			// Update total size read from this part
-			totalSize += totalRead
+			// Desired inclusive byte range inside this part
+			rangeStart := part.DataOffset
+			rangeEnd := part.DataOffset + partContribution - 1
+
+			filePos := int64(0)
+			for _, origSeg := range parsedFile.Segments {
+				segSize := (origSeg.EndOffset - origSeg.StartOffset) + 1 // inclusive size
+				if segSize <= 0 {
+					continue
+				}
+
+				segFileStart := filePos + origSeg.StartOffset
+				segFileEnd := filePos + origSeg.EndOffset // inclusive
+
+				// Skip if no overlap
+				if segFileEnd < rangeStart {
+					filePos += segSize
+					continue
+				}
+				if segFileStart > rangeEnd {
+					break
+				}
+
+				// Overlap slice
+				sliceStart := segFileStart
+				if sliceStart < rangeStart {
+					sliceStart = rangeStart
+				}
+				sliceEnd := segFileEnd
+				if sliceEnd > rangeEnd {
+					sliceEnd = rangeEnd
+				}
+
+				trimStart := origSeg.StartOffset + (sliceStart - segFileStart)
+				trimEnd := origSeg.StartOffset + (sliceEnd - segFileStart) // inclusive
+				if trimEnd > origSeg.EndOffset {
+					trimEnd = origSeg.EndOffset
+				}
+				if trimStart < origSeg.StartOffset {
+					trimStart = origSeg.StartOffset
+				}
+				if trimEnd >= trimStart {
+					segments = append(segments, &metapb.SegmentData{
+						Id:          origSeg.Id,
+						StartOffset: trimStart,
+						EndOffset:   trimEnd,
+					})
+				}
+
+				filePos += segSize
+				if segFileEnd >= rangeEnd {
+					break
+				}
+			}
+
+			remaining -= partContribution
 		}
 
-		rarContent.Segments = segments
-		rarContent.Size = totalSize
+		// Compute size from segments (inclusive semantics)
+		var computed int64
+		for _, s := range segments {
+			computed += (s.EndOffset - s.StartOffset + 1)
+		}
+		if aggregatedFile.TotalUnpackedSize > 0 && computed != aggregatedFile.TotalUnpackedSize {
+			rh.log.Warn("Segment size sum does not match unpacked size", "file", aggregatedFile.Name, "expected", aggregatedFile.TotalUnpackedSize, "got", computed)
+		}
 
-		rarContents = append(rarContents, rarContent)
+		rc.Size = computed
+		rc.Segments = segments
+		rarContents = append(rarContents, rc)
 	}
 
 	return rarContents, nil
-}
-
-// findParsedFileByPath finds a ParsedFile by matching the file path
-func (rh *RarHandler) findParsedFileByPath(path string, rarFiles []ParsedFile) *ParsedFile {
-	baseName := filepath.Base(path)
-
-	for i := range rarFiles {
-		if rarFiles[i].Filename == path || filepath.Base(rarFiles[i].Filename) == baseName {
-			return &rarFiles[i]
-		}
-	}
-
-	return nil
-}
-
-// createSegmentsFromAggregatedParts creates segments from rarindex AggregatedFile data
-func (rh *RarHandler) createSegmentsFromAggregatedParts(aggregatedFile rarindex.AggregatedFile, rarFiles []ParsedFile) []*metapb.SegmentData {
-	var segments []*metapb.SegmentData
-
-	for _, part := range aggregatedFile.Parts {
-		// Find corresponding ParsedFile by path matching
-		parsedFile := rh.findParsedFileByPath(part.Path, rarFiles)
-		if parsedFile == nil {
-			rh.log.Warn("Could not find corresponding ParsedFile for segment creation",
-				"part_path", part.Path)
-			continue
-		}
-
-		// Create segments for this RAR part
-		// Segments represent Usenet download ranges, not RAR file offsets
-		// The part.DataOffset will be used during file reconstruction to seek within the downloaded RAR data
-		for _, originalSeg := range parsedFile.Segments {
-			// Use original segment offsets - these are the correct Usenet download positions
-			segment := &metapb.SegmentData{
-				StartOffset: originalSeg.StartOffset,
-				EndOffset:   originalSeg.EndOffset,
-				Id:          originalSeg.Id,
-			}
-
-			// Add segment - it represents the Usenet download range for this RAR part
-			segments = append(segments, segment)
-		}
-	}
-
-	rh.log.Debug("Created segments from aggregated parts",
-		"file", aggregatedFile.Name,
-		"total_segments", len(segments))
-
-	return segments
 }
