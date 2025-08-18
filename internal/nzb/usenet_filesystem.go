@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -86,6 +87,28 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	return nil, &fs.PathError{
 		Op:   "open",
 		Path: name,
+		Err:  fs.ErrNotExist,
+	}
+}
+
+// Stat returns file information for a file in the Usenet filesystem
+// This implements the rarindex.FileSystem interface
+func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
+	path = filepath.Clean(path)
+
+	// Find the corresponding RAR file
+	for _, file := range ufs.files {
+		if file.Filename == path || filepath.Base(file.Filename) == path {
+			return &UsenetFileInfo{
+				name: filepath.Base(file.Filename),
+				size: file.Size,
+			}, nil
+		}
+	}
+
+	return nil, &fs.PathError{
+		Op:   "stat",
+		Path: path,
 		Err:  fs.ErrNotExist,
 	}
 }
