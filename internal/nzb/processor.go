@@ -19,7 +19,7 @@ import (
 type Processor struct {
 	parser          *Parser
 	metadataService *metadata.MetadataService
-	rarHandler      *RarHandler
+	rarProcessor    RarProcessor
 	cp              nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
 	log             *slog.Logger
 }
@@ -29,7 +29,7 @@ func NewProcessor(metadataService *metadata.MetadataService, cp nntppool.UsenetC
 	return &Processor{
 		parser:          NewParser(cp),
 		metadataService: metadataService,
-		rarHandler:      NewRarHandler(cp, 10), // 10 max workers for RAR analysis
+		rarProcessor:    NewRarHandler(cp, 10), // 10 max workers for RAR analysis
 		cp:              cp,
 		log:             slog.Default().With("component", "nzb-processor"),
 	}
@@ -213,7 +213,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 		// Analyze RAR content using the new RAR handler
 		ctx := context.Background()
-		rarContents, err := proc.rarHandler.AnalyzeRarContentFromNzb(ctx, sortedRarFiles)
+		rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, sortedRarFiles)
 		if err != nil {
 			proc.log.Error("Failed to analyze RAR archive content, falling back to simplified mode",
 				"archive", archiveName,
@@ -246,7 +246,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			}
 
 			// Create file metadata using the RAR handler's helper function
-			fileMeta := proc.rarHandler.CreateFileMetadataFromRarContent(
+			fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
 				rarContent,
 				parsed.Path,
 			)

@@ -28,6 +28,15 @@ import (
 	"github.com/javi11/nntppool"
 )
 
+type RarProcessor interface {
+	// AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data
+	// without downloading. Returns an array of RarContent with file metadata and segments.
+	AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]rarContent, error)
+	// CreateFileMetadataFromRarContent creates FileMetadata from RarContent for the metadata
+	// system. This is used to convert RarContent into the protobuf format used by the metadata system.
+	CreateFileMetadataFromRarContent(rarContent rarContent, sourceNzbPath string) *metapb.FileMetadata
+}
+
 // RarContent represents a file within a RAR archive for processing
 type rarContent struct {
 	InternalPath string                `json:"internal_path"`
@@ -37,16 +46,16 @@ type rarContent struct {
 	IsDirectory  bool                  `json:"is_directory,omitempty"` // Indicates if this is a directory
 }
 
-// RarHandler handles RAR archive analysis and content extraction
-type RarHandler struct {
+// rarProcessor handles RAR archive analysis and content extraction
+type rarProcessor struct {
 	log        *slog.Logger
 	cp         nntppool.UsenetConnectionPool
 	maxWorkers int
 }
 
 // NewRarHandler creates a new RAR handler
-func NewRarHandler(cp nntppool.UsenetConnectionPool, maxWorkers int) *RarHandler {
-	return &RarHandler{
+func NewRarHandler(cp nntppool.UsenetConnectionPool, maxWorkers int) RarProcessor {
+	return &rarProcessor{
 		log:        slog.Default().With("component", "rar-handler"),
 		cp:         cp,
 		maxWorkers: maxWorkers,
@@ -54,7 +63,7 @@ func NewRarHandler(cp nntppool.UsenetConnectionPool, maxWorkers int) *RarHandler
 }
 
 // CreateFileMetadataFromRarContent creates FileMetadata from RarContent for the metadata system
-func (rh *RarHandler) CreateFileMetadataFromRarContent(
+func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 	rarContent rarContent,
 	sourceNzbPath string,
 ) *metapb.FileMetadata {
@@ -70,30 +79,10 @@ func (rh *RarHandler) CreateFileMetadataFromRarContent(
 	}
 }
 
-// ValidateSegments validates that segments are properly ordered and non-overlapping
-func (rh *RarHandler) ValidateSegments(segments []*metapb.SegmentData) error {
-	if len(segments) == 0 {
-		return nil
-	}
-
-	for i := 1; i < len(segments); i++ {
-		prev := segments[i-1]
-		curr := segments[i]
-
-		// EndOffset is inclusive. Overlap exists if current start <= previous end.
-		if curr.StartOffset <= prev.EndOffset {
-			return fmt.Errorf("segments overlap: segment %d ends at %d but segment %d starts at %d",
-				i-1, prev.EndOffset, i, curr.StartOffset)
-		}
-	}
-
-	return nil
-}
-
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses rarindex with UsenetFileSystem to analyze RAR structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
-func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]rarContent, error) {
+func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]rarContent, error) {
 	// Create Usenet filesystem for RAR access - this enables rarindex to access
 	// RAR part files directly from Usenet without downloading
 	ufs := NewUsenetFileSystem(ctx, rh.cp, rarFiles, rh.maxWorkers)
@@ -135,7 +124,7 @@ func (rh *RarHandler) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []P
 }
 
 // convertAggregatedFilesToRarContent converts rarindex.AggregatedFile results to RarContent
-func (rh *RarHandler) convertAggregatedFilesToRarContent(aggregatedFiles []rarindex.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
+func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rarindex.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
 	var rarContents []rarContent
 
 	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
