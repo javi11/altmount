@@ -5,36 +5,6 @@ import (
 	"fmt"
 )
 
-// Chunk size constants for memory optimization
-const (
-	// MaxChunkSize defines maximum chunk size to prevent memory explosion (100MB limit)
-	MaxChunkSize = 100 * 1024 * 1024 // 100MB
-
-	// Small file threshold - files under this size are read entirely
-	SmallFileThreshold = 10 * 1024 * 1024 // 10MB
-
-	// Medium file threshold - files under this size use medium chunks
-	MediumFileThreshold = 100 * 1024 * 1024 // 100MB
-
-	// Large file threshold - files under this size use large chunks
-	LargeFileThreshold = 1024 * 1024 * 1024 // 1GB
-
-	// SmallFileChunkSize - chunk size for small files (entire file)
-	SmallFileChunkSize = SmallFileThreshold
-
-	// MediumFileChunkSize - chunk size for medium files
-	MediumFileChunkSize = 10 * 1024 * 1024 // 10MB
-
-	// LargeFileChunkSize - chunk size for large files
-	LargeFileChunkSize = 25 * 1024 * 1024 // 25MB
-
-	// VeryLargeFileChunkSize - chunk size for very large files (>=1GB)
-	VeryLargeFileChunkSize = 50 * 1024 * 1024 // 50MB
-
-	// SeekThreshold - if seeking more than this distance, close reader
-	SeekThreshold = 1024 * 1024 // 1MB
-)
-
 // File system constants
 const (
 	// RootPath represents the root directory path
@@ -52,13 +22,13 @@ var (
 
 // PartialContentError represents an error where some articles are missing but some content was read
 type PartialContentError struct {
-	BytesRead    int64
+	BytesRead     int64
 	TotalExpected int64
 	UnderlyingErr error
 }
 
 func (e *PartialContentError) Error() string {
-	return fmt.Sprintf("partial content: read %d/%d bytes, underlying error: %v", 
+	return fmt.Sprintf("partial content: read %d/%d bytes, underlying error: %v",
 		e.BytesRead, e.TotalExpected, e.UnderlyingErr)
 }
 
