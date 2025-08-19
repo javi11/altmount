@@ -100,17 +100,17 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
-		name:               name,
-		fileMeta:           fileMeta,
-		metadataService:    mrf.metadataService,
-		args:               r,
-		cp:                 mrf.cp,
-		ctx:                ctx,
-		maxWorkers:         mrf.maxDownloadWorkers,
-		rcloneCipher:       mrf.rcloneCipher,
-		headersCipher:      mrf.headersCipher,
-		globalPassword:     mrf.globalPassword,
-		globalSalt:         mrf.globalSalt,
+		name:            name,
+		fileMeta:        fileMeta,
+		metadataService: mrf.metadataService,
+		args:            r,
+		cp:              mrf.cp,
+		ctx:             ctx,
+		maxWorkers:      mrf.maxDownloadWorkers,
+		rcloneCipher:    mrf.rcloneCipher,
+		headersCipher:   mrf.headersCipher,
+		globalPassword:  mrf.globalPassword,
+		globalSalt:      mrf.globalSalt,
 	}
 
 	return true, virtualFile, nil
@@ -291,15 +291,15 @@ func (mvd *MetadataVirtualDirectory) Name() string {
 func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 	// Create metadata reader for directory operations
 	reader := metadata.NewMetadataReader(mvd.metadataService)
-	
+
 	// Get directory contents - we only need the directory infos, not the file metadata
 	dirInfos, _, err := reader.ListDirectoryContents(mvd.normalizedPath)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var infos []fs.FileInfo
-	
+
 	// Add directories first
 	for _, dirInfo := range dirInfos {
 		infos = append(infos, dirInfo)
@@ -307,7 +307,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 			return infos, nil
 		}
 	}
-	
+
 	// Add files - we need to get the virtual filename from the metadata path
 	// Since ListDirectoryContents already reads the metadata files, we need to get the filenames differently
 	// Let's use the metadata service directly to list files in the directory
@@ -315,14 +315,14 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for _, fileName := range fileNames {
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
 		fileMeta, err := mvd.metadataService.ReadFileMetadata(virtualFilePath)
 		if err != nil || fileMeta == nil {
 			continue
 		}
-		
+
 		info := &MetadataFileInfo{
 			name:    fileName, // Use the actual virtual filename from the metadata filesystem
 			size:    fileMeta.FileSize,
@@ -335,7 +335,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 			return infos, nil
 		}
 	}
-	
+
 	return infos, nil
 }
 
@@ -393,23 +393,23 @@ func (mvd *MetadataVirtualDirectory) Truncate(size int64) error {
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
 type MetadataVirtualFile struct {
-	name               string
-	fileMeta           *metapb.FileMetadata
-	metadataService    *metadata.MetadataService
-	args               utils.PathWithArgs
-	cp                 nntppool.UsenetConnectionPool
-	ctx                context.Context
-	maxWorkers         int
-	rcloneCipher       encryption.Cipher
-	headersCipher      encryption.Cipher
-	globalPassword     string
-	globalSalt         string
-	
+	name            string
+	fileMeta        *metapb.FileMetadata
+	metadataService *metadata.MetadataService
+	args            utils.PathWithArgs
+	cp              nntppool.UsenetConnectionPool
+	ctx             context.Context
+	maxWorkers      int
+	rcloneCipher    encryption.Cipher
+	headersCipher   encryption.Cipher
+	globalPassword  string
+	globalSalt      string
+
 	// Reader state and position tracking
-	reader             io.ReadCloser
-	readerInitialized  bool
-	position           int64
-	mu                 sync.Mutex
+	reader            io.ReadCloser
+	readerInitialized bool
+	position          int64
+	mu                sync.Mutex
 }
 
 // Read implements afero.File.Read

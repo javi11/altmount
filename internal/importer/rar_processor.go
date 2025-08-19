@@ -12,6 +12,7 @@ import (
 	"github.com/javi11/rarlist"
 )
 
+// RarProcessor interface for analyzing RAR content from NZB data
 type RarProcessor interface {
 	// AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data
 	// without downloading. Returns an array of RarContent with file metadata and segments.
@@ -119,18 +120,33 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 	}
 
 	for _, aggregatedFile := range aggregatedFiles {
+		// Compute total packed size (logical file size we care about for stored data)
+		var totalPacked int64
+		for _, p := range aggregatedFile.Parts {
+			if p.PackedSize > 0 {
+				totalPacked += p.PackedSize
+			}
+		}
+		if totalPacked <= 0 {
+			rh.log.Warn("Aggregated file has no packed size, skipping", "file", aggregatedFile.Name)
+			continue
+		}
+
 		rc := rarContent{
 			InternalPath: aggregatedFile.Name,
 			Filename:     filepath.Base(aggregatedFile.Name),
-			Size:         aggregatedFile.TotalUnpackedSize,
+			Size:         totalPacked, // initial logical size based on packed bytes
 		}
 
 		var segments []*metapb.SegmentData
-		remaining := aggregatedFile.TotalUnpackedSize
+		remaining := totalPacked
 
 		for _, part := range aggregatedFile.Parts {
 			if remaining <= 0 {
 				break
+			}
+			if part.PackedSize <= 0 {
+				continue
 			}
 
 			parsedFile := fileIndex[part.Path]
@@ -146,13 +162,13 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 			if partContribution > remaining {
 				partContribution = remaining
 			}
-			if partContribution <= 0 {
-				continue
-			}
 
-			// Desired inclusive byte range inside this part
+			// Desired inclusive byte range inside this part (only the portion contributing to remaining)
 			rangeStart := part.DataOffset
 			rangeEnd := part.DataOffset + partContribution - 1
+			if rangeEnd < rangeStart { // safety
+				continue
+			}
 
 			filePos := int64(0)
 			for _, origSeg := range parsedFile.Segments {
@@ -208,16 +224,17 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 			remaining -= partContribution
 		}
 
-		// Compute size from segments (inclusive semantics)
-		var computed int64
+		// Compute packed size represented by segments (inclusive semantics)
+		var computedPacked int64
 		for _, s := range segments {
-			computed += (s.EndOffset - s.StartOffset + 1)
-		}
-		if aggregatedFile.TotalUnpackedSize > 0 && computed != aggregatedFile.TotalUnpackedSize {
-			rh.log.Warn("Segment size sum does not match unpacked size", "file", aggregatedFile.Name, "expected", aggregatedFile.TotalUnpackedSize, "got", computed)
+			computedPacked += (s.EndOffset - s.StartOffset + 1)
 		}
 
-		rc.Size = computed
+		if computedPacked != totalPacked {
+			rh.log.Warn("Segment size sum does not match total packed size", "file", aggregatedFile.Name, "expected_packed", totalPacked, "got", computedPacked, "unpacked_reported", aggregatedFile.TotalUnpackedSize)
+		}
+
+		// Keep logical size as totalPacked; do not overwrite with computed to surface inconsistencies.
 		rc.Segments = segments
 		rarContents = append(rarContents, rc)
 	}

@@ -138,10 +138,10 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 				// Segment is fully read, remove it from the cache
 				s, err = b.rg.Next()
 				if err != nil {
-
 					if n > 0 {
 						return n, nil
 					}
+
 					// Check if this is an article not found error for next segment
 					if b.isArticleNotFoundError(err) {
 						if totalRead > 0 {
