@@ -197,8 +197,9 @@ func (s *Service) scanDirectory() {
 			return nil
 		}
 
-		// Check if it's an NZB file
-		if !strings.HasSuffix(strings.ToLower(path), ".nzb") {
+		// Check if it's an NZB or STRM file
+		ext := strings.ToLower(path)
+		if !strings.HasSuffix(ext, ".nzb") && !strings.HasSuffix(ext, ".strm") {
 			return nil
 		}
 

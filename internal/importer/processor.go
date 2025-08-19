@@ -18,6 +18,7 @@ import (
 // Processor handles the processing and storage of parsed NZB files using metadata storage
 type Processor struct {
 	parser          *Parser
+	strmParser      *StrmParser
 	metadataService *metadata.MetadataService
 	rarProcessor    RarProcessor
 	cp              nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
@@ -28,6 +29,7 @@ type Processor struct {
 func NewProcessor(metadataService *metadata.MetadataService, cp nntppool.UsenetConnectionPool) *Processor {
 	return &Processor{
 		parser:          NewParser(cp),
+		strmParser:      NewStrmParser(),
 		metadataService: metadataService,
 		rarProcessor:    NewRarProcessor(cp, 10), // 10 max workers for RAR analysis
 		cp:              cp,
@@ -40,36 +42,51 @@ func (proc *Processor) ProcessNzbFile(nzbPath string) error {
 	return proc.ProcessNzbFileWithRoot(nzbPath, "")
 }
 
-// ProcessNzbFileWithRoot processes an NZB file maintaining the folder structure relative to watchRoot
-func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
-	// Open and parse the NZB file
-	file, err := os.Open(nzbPath)
+// ProcessNzbFileWithRoot processes an NZB or STRM file maintaining the folder structure relative to watchRoot
+func (proc *Processor) ProcessNzbFileWithRoot(filePath, watchRoot string) error {
+	// Open and parse the file
+	file, err := os.Open(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to open NZB file: %w", err)
+		return fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
 
-	parsed, err := proc.parser.ParseFile(file, nzbPath)
-	if err != nil {
-		return fmt.Errorf("failed to parse NZB file: %w", err)
+	var parsed *ParsedNzb
+
+	// Determine file type and parse accordingly
+	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
+		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
+		if err != nil {
+			return fmt.Errorf("failed to parse STRM file: %w", err)
+		}
+
+		// Validate the parsed STRM
+		if err := proc.strmParser.ValidateStrmFile(parsed); err != nil {
+			return fmt.Errorf("STRM validation failed: %w", err)
+		}
+	} else {
+		parsed, err = proc.parser.ParseFile(file, filePath)
+		if err != nil {
+			return fmt.Errorf("failed to parse NZB file: %w", err)
+		}
+
+		// Validate the parsed NZB
+		if err := proc.parser.ValidateNzb(parsed); err != nil {
+			return fmt.Errorf("NZB validation failed: %w", err)
+		}
 	}
 
-	// Validate the parsed NZB
-	if err := proc.parser.ValidateNzb(parsed); err != nil {
-		return fmt.Errorf("NZB validation failed: %w", err)
-	}
+	// Calculate the relative virtual directory path for this file
+	virtualDir := proc.calculateVirtualDirectory(filePath, watchRoot)
 
-	// Calculate the relative virtual directory path for this NZB
-	virtualDir := proc.calculateVirtualDirectory(nzbPath, watchRoot)
-
-	proc.log.Info("Processing NZB file",
-		"nzb_path", nzbPath,
+	proc.log.Info("Processing file",
+		"file_path", filePath,
 		"virtual_dir", virtualDir,
 		"type", parsed.Type,
 		"total_size", parsed.TotalSize,
 		"files", len(parsed.Files))
 
-	// Process based on NZB type
+	// Process based on file type
 	switch parsed.Type {
 	case NzbTypeSingleFile:
 		return proc.processSingleFileWithDir(parsed, virtualDir)
@@ -77,8 +94,10 @@ func (proc *Processor) ProcessNzbFileWithRoot(nzbPath, watchRoot string) error {
 		return proc.processMultiFileWithDir(parsed, virtualDir)
 	case NzbTypeRarArchive:
 		return proc.processRarArchiveWithDir(parsed, virtualDir)
+	case NzbTypeStrm:
+		return proc.processStrmFileWithDir(parsed, virtualDir)
 	default:
-		return fmt.Errorf("unknown NZB type: %s", parsed.Type)
+		return fmt.Errorf("unknown file type: %s", parsed.Type)
 	}
 }
 
@@ -628,4 +647,46 @@ func (proc *Processor) parseInt(s string) int {
 		}
 	}
 	return num
+}
+
+// processStrmFileWithDir handles STRM files (single file from NXG link) in a specific virtual directory
+func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string) error {
+	if len(parsed.Files) != 1 {
+		return fmt.Errorf("STRM file should contain exactly one file, got %d", len(parsed.Files))
+	}
+
+	file := parsed.Files[0]
+
+	// Create the directory structure if needed
+	if err := proc.ensureDirectoryExists(virtualDir); err != nil {
+		return fmt.Errorf("failed to create directory structure: %w", err)
+	}
+
+	// Create virtual file path
+	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+	// Create file metadata using simplified schema
+	fileMeta := proc.metadataService.CreateFileMetadata(
+		file.Size,
+		parsed.Path,
+		metapb.FileStatus_FILE_STATUS_HEALTHY,
+		file.Segments,
+		file.Encryption,
+		file.Password,
+		file.Salt,
+	)
+
+	// Write file metadata to disk
+	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+		return fmt.Errorf("failed to write metadata for STRM file %s: %w", file.Filename, err)
+	}
+
+	proc.log.Info("Successfully processed STRM file",
+		"file", file.Filename,
+		"virtual_path", virtualFilePath,
+		"size", file.Size,
+		"segments", len(file.Segments))
+
+	return nil
 }

@@ -25,6 +25,7 @@ const (
 	NzbTypeSingleFile NzbType = "single_file"
 	NzbTypeMultiFile  NzbType = "multi_file"
 	NzbTypeRarArchive NzbType = "rar_archive"
+	NzbTypeStrm       NzbType = "strm_file"
 )
 
 // ParsedNzb contains the parsed NZB data and extracted metadata
