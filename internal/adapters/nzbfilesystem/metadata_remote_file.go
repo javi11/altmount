@@ -2,6 +2,7 @@ package nzbfilesystem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/encryption"
-	"github.com/javi11/altmount/internal/encryption/headers"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -27,7 +27,6 @@ type MetadataRemoteFile struct {
 	cp                 nntppool.UsenetConnectionPool
 	maxDownloadWorkers int
 	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
-	headersCipher      encryption.Cipher // For headers encryption/decryption
 	globalPassword     string            // Global password fallback
 	globalSalt         string            // Global salt fallback
 }
@@ -52,14 +51,12 @@ func NewMetadataRemoteFile(
 	}
 
 	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
-	headersCipher, _ := headers.NewHeadersCipher()
 
 	return &MetadataRemoteFile{
 		metadataService:    metadataService,
 		cp:                 cp,
 		maxDownloadWorkers: maxDownloadWorkers,
 		rcloneCipher:       rcloneCipher,
-		headersCipher:      headersCipher,
 		globalPassword:     config.GlobalPassword,
 		globalSalt:         config.GlobalSalt,
 	}
@@ -108,7 +105,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		ctx:             ctx,
 		maxWorkers:      mrf.maxDownloadWorkers,
 		rcloneCipher:    mrf.rcloneCipher,
-		headersCipher:   mrf.headersCipher,
 		globalPassword:  mrf.globalPassword,
 		globalSalt:      mrf.globalSalt,
 	}
@@ -401,7 +397,6 @@ type MetadataVirtualFile struct {
 	ctx             context.Context
 	maxWorkers      int
 	rcloneCipher    encryption.Cipher
-	headersCipher   encryption.Cipher
 	globalPassword  string
 	globalSalt      string
 
@@ -427,8 +422,9 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 
 	totalRead, err := mvf.reader.Read(p)
 	if err != nil {
+		var articleErr *usenet.ArticleNotFoundError
 		// Handle UsenetReader errors the same way as VirtualFile
-		if articleErr, ok := err.(*usenet.ArticleNotFoundError); ok {
+		if errors.As(err, &articleErr) {
 			if articleErr.BytesRead > 0 || totalRead > 0 {
 				// Some content was read - return partial content error
 				return totalRead, &PartialContentError{
@@ -646,11 +642,6 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 			return nil, ErrNoCipherConfig
 		}
 		cipher = mvf.rcloneCipher
-	case metapb.Encryption_HEADERS:
-		if mvf.headersCipher == nil {
-			return nil, ErrNoCipherConfig
-		}
-		cipher = mvf.headersCipher
 	default:
 		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.fileMeta.Encryption)
 	}

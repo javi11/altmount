@@ -129,8 +129,6 @@ nxglnk://?h=TzlIY1lxNVFNQ0MyOXE6NjYyMzow&chunk_size=1048576&file_size=1000000&na
 				assert.Equal(t, "RCLONE", file.Encryption.String())
 				assert.NotEmpty(t, file.Password)
 				assert.NotEmpty(t, file.Salt)
-			case "headers":
-				assert.Equal(t, "HEADERS", file.Encryption.String())
 			default:
 				assert.Equal(t, "NONE", file.Encryption.String())
 			}

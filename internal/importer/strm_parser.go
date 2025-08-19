@@ -188,8 +188,6 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 			}
 			actualFileSize = decSize
 		}
-	case string(encryption.HeadersCipherType):
-		enc = metapb.Encryption_HEADERS
 	default:
 		enc = metapb.Encryption_NONE
 	}

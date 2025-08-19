@@ -14,8 +14,6 @@ type CipherType string
 const (
 	// The rclone crypt cipher type, which will encrypt all the file using a password, salt.
 	RCloneCipherType CipherType = "rclone"
-	// Deprecated: The headers cipher type, which will encrypt the first and last 750000 bytes of the file
-	HeadersCipherType CipherType = "headers"
 	// The none cipher type, which will not encrypt the file
 	NoneCipherType CipherType = "none"
 )

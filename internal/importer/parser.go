@@ -201,8 +201,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		if metaCipher, ok := meta["cipher"]; ok && metaCipher != "" {
 			if metaCipher == string(encryption.RCloneCipherType) {
 				enc = metapb.Encryption_RCLONE
-			} else if metaCipher == string(encryption.HeadersCipherType) {
-				enc = metapb.Encryption_HEADERS
 			}
 		}
 	}

@@ -18,8 +18,6 @@ var (
 	_ io.ReadCloser = &usenetReader{}
 )
 
-// ArticleNotFoundError represents an error where articles are not found in any providers
-// This wraps the actual nntppool.ErrArticleNotFoundInProviders error
 type ArticleNotFoundError struct {
 	UnderlyingErr error
 	BytesRead     int64

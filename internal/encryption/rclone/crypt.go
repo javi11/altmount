@@ -99,12 +99,14 @@ func (o *rcloneCrypt) Open(
 				}
 			}
 
-			rh := *utils.FixRangeHeader(&utils.RangeHeader{
-				Start: underlyingOffset,
-				End:   end,
-			}, encryptedFileSize)
-
-			reader, err := getReader(ctx, rh.Start, rh.End)
+			// Convert end=-1 to actual end position for getReader
+			// getReader expects inclusive end positions, not -1
+			actualEnd := end
+			if end == -1 {
+				actualEnd = encryptedFileSize - 1
+			}
+			
+			reader, err := getReader(ctx, underlyingOffset, actualEnd)
 			if err != nil {
 				return nil, err
 			}
