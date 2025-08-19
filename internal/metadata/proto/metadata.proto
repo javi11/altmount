@@ -20,9 +20,10 @@ enum FileStatus {
 
 // SegmentData contains Usenet segment information with byte offsets
 message SegmentData {
-  int64 start_offset = 1;       // Start byte offset in the data stream
-  int64 end_offset = 2;         // End byte offset in the data stream
-  string id = 3;                // Usenet message ID
+  int64 segment_size = 1;       // Size of the segment in bytes
+  int64 start_offset = 3;       // Start byte offset in the data stream
+  int64 end_offset = 4;         // End byte offset in the data stream
+  string id = 5;                // Usenet message ID
 }
 
 // FileMetadata represents a single virtual file in the filesystem

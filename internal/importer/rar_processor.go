@@ -120,26 +120,14 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 	}
 
 	for _, aggregatedFile := range aggregatedFiles {
-		// Compute total packed size (logical file size we care about for stored data)
-		var totalPacked int64
-		for _, p := range aggregatedFile.Parts {
-			if p.PackedSize > 0 {
-				totalPacked += p.PackedSize
-			}
-		}
-		if totalPacked <= 0 {
-			rh.log.Warn("Aggregated file has no packed size, skipping", "file", aggregatedFile.Name)
-			continue
-		}
-
 		rc := rarContent{
 			InternalPath: aggregatedFile.Name,
 			Filename:     filepath.Base(aggregatedFile.Name),
-			Size:         totalPacked, // initial logical size based on packed bytes
+			Size:         aggregatedFile.TotalPackedSize, // initial logical size based on packed bytes
 		}
 
 		var segments []*metapb.SegmentData
-		remaining := totalPacked
+		remaining := aggregatedFile.TotalPackedSize
 
 		for _, part := range aggregatedFile.Parts {
 			if remaining <= 0 {
@@ -212,6 +200,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 						Id:          origSeg.Id,
 						StartOffset: trimStart,
 						EndOffset:   trimEnd,
+						SegmentSize: origSeg.SegmentSize,
 					})
 				}
 
@@ -230,8 +219,8 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 			computedPacked += (s.EndOffset - s.StartOffset + 1)
 		}
 
-		if computedPacked != totalPacked {
-			rh.log.Warn("Segment size sum does not match total packed size", "file", aggregatedFile.Name, "expected_packed", totalPacked, "got", computedPacked, "unpacked_reported", aggregatedFile.TotalUnpackedSize)
+		if computedPacked != aggregatedFile.TotalPackedSize {
+			rh.log.Warn("Segment size sum does not match total packed size", "file", aggregatedFile.Name, "expected_packed", aggregatedFile.TotalPackedSize, "got", computedPacked, "unpacked_reported", aggregatedFile.TotalUnpackedSize)
 		}
 
 		// Keep logical size as totalPacked; do not overwrite with computed to surface inconsistencies.

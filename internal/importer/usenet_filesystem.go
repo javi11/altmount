@@ -316,7 +316,7 @@ func (dl dbSegmentLoader) GetSegment(index int) (segment usenet.Segment, groups 
 	return usenet.Segment{
 		Id:    seg.GetId(),
 		Start: seg.GetStartOffset(),
-		End:   seg.GetEndOffset(),
+		Size:  seg.GetEndOffset() - seg.GetStartOffset() + 1,
 	}, nil, true
 }
 

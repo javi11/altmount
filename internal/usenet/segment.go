@@ -11,7 +11,7 @@ import (
 type Segment struct {
 	Id    string
 	Start int64
-	End   int64
+	Size  int64 // Size of the segment in bytes
 }
 
 var (
@@ -71,7 +71,7 @@ type segment struct {
 	mx          sync.Mutex
 }
 
-func (s *segment) GetReader() *bufpipe.PipeReader {
+func (s *segment) GetReader() io.Reader {
 	s.once.Do(func() {
 		if s.Start > 0 {
 			// Seek to the start of the segment
@@ -79,7 +79,7 @@ func (s *segment) GetReader() *bufpipe.PipeReader {
 		}
 	})
 
-	return s.reader
+	return io.LimitReader(s.reader, s.End+1)
 }
 
 func (s *segment) Close() error {

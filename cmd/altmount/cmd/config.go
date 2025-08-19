@@ -9,15 +9,15 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV      WebDAVConfig     `yaml:"webdav" mapstructure:"webdav"`
-	Database    DatabaseConfig   `yaml:"database" mapstructure:"database"`
-	Metadata    MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
-	MountPath   string           `yaml:"mount_path" mapstructure:"mount_path"`
-	NZBDir      string           `yaml:"nzb_dir" mapstructure:"nzb_dir"`
-	RClone      RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
-	Workers     WorkersConfig    `yaml:"workers" mapstructure:"workers"`
-	Providers   []ProviderConfig `yaml:"providers" mapstructure:"providers"`
-	Debug       bool             `yaml:"debug" mapstructure:"debug"`
+	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav"`
+	Database  DatabaseConfig   `yaml:"database" mapstructure:"database"`
+	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
+	MountPath string           `yaml:"mount_path" mapstructure:"mount_path"`
+	NZBDir    string           `yaml:"nzb_dir" mapstructure:"nzb_dir"`
+	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
+	Workers   WorkersConfig    `yaml:"workers" mapstructure:"workers"`
+	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
+	Debug     bool             `yaml:"debug" mapstructure:"debug"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -146,7 +146,7 @@ func (c *Config) Validate() error {
 	if c.Metadata.RootPath == "" {
 		return fmt.Errorf("metadata root_path cannot be empty")
 	}
-	
+
 	if c.Metadata.CacheSize < 0 {
 		return fmt.Errorf("metadata cache_size must be non-negative")
 	}
@@ -180,6 +180,7 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 			MaxConnectionIdleTimeInSeconds: 300, // Default idle timeout
 			TLS:                            p.TLS,
 			InsecureSSL:                    p.InsecureTLS,
+			MaxConnectionTTLInSeconds:      3600, // Default connection TTL
 		}
 	}
 	return providers

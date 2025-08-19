@@ -166,6 +166,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 			Id:          segmentID,
 			StartOffset: currentOffset,
 			EndOffset:   currentOffset + segmentSize - 1,
+			SegmentSize: segmentSize,
 		}
 		currentOffset += segmentSize
 	}

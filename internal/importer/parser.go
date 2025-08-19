@@ -153,6 +153,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 			Id:          seg.ID,
 			StartOffset: int64(0),
 			EndOffset:   int64(seg.Bytes - 1),
+			SegmentSize: int64(seg.Bytes),
 		}
 	}
 	// Calculate total size using the sophisticated logic

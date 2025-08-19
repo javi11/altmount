@@ -251,7 +251,7 @@ func (msl *MetadataSegmentLoader) GetSegment(index int) (segment usenet.Segment,
 	return usenet.Segment{
 		Id:    seg.Id,
 		Start: seg.StartOffset,
-		End:   seg.EndOffset,
+		Size:  seg.SegmentSize,
 	}, []string{}, true // Empty groups for now - could be stored in metadata if needed
 }
 
@@ -576,7 +576,7 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	}
 
 	// Get request range from args or use default range starting from current position
-	start, end, _ := mvf.getRequestRange()
+	start, end := mvf.getRequestRange()
 
 	// Create reader for the calculated range using metadata segments
 	if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
@@ -600,32 +600,26 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 }
 
 // getRequestRange gets the range for reader creation based on HTTP range or current position
-func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64, hasRange bool) {
+func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 	// Try to get range from HTTP request args
 	rangeHeader, err := mvf.args.Range()
 	if err != nil || rangeHeader == nil {
 		// No valid range header, return range from current position to end
-		return mvf.position, mvf.fileMeta.FileSize - 1, false
+		return 0, mvf.fileMeta.FileSize - 1
 	}
 
-	// Fix range header to ensure it's within file bounds
-	fixedRange := utils.FixRangeHeader(rangeHeader, mvf.fileMeta.FileSize)
-	if fixedRange == nil {
-		return mvf.position, mvf.fileMeta.FileSize - 1, false
+	start = rangeHeader.Start
+	end = rangeHeader.End
+
+	if start < 0 {
+		start = 0
 	}
 
-	// Ensure range is valid
-	if fixedRange.Start < 0 {
-		fixedRange.Start = 0
-	}
-	if fixedRange.End >= mvf.fileMeta.FileSize {
-		fixedRange.End = mvf.fileMeta.FileSize - 1
-	}
-	if fixedRange.Start > fixedRange.End {
-		return mvf.position, mvf.fileMeta.FileSize - 1, false
+	if end == -1 {
+		end = mvf.fileMeta.FileSize - 1
 	}
 
-	return fixedRange.Start, fixedRange.End, true
+	return start, end
 }
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments

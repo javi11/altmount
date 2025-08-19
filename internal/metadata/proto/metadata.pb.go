@@ -126,9 +126,10 @@ func (FileStatus) EnumDescriptor() ([]byte, []int) {
 // SegmentData contains Usenet segment information with byte offsets
 type SegmentData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StartOffset   int64                  `protobuf:"varint,1,opt,name=start_offset,json=startOffset,proto3" json:"start_offset,omitempty"` // Start byte offset in the data stream
-	EndOffset     int64                  `protobuf:"varint,2,opt,name=end_offset,json=endOffset,proto3" json:"end_offset,omitempty"`       // End byte offset in the data stream
-	Id            string                 `protobuf:"bytes,3,opt,name=id,proto3" json:"id,omitempty"`                                       // Usenet message ID
+	SegmentSize   int64                  `protobuf:"varint,1,opt,name=segment_size,json=segmentSize,proto3" json:"segment_size,omitempty"` // Size of the segment in bytes
+	StartOffset   int64                  `protobuf:"varint,3,opt,name=start_offset,json=startOffset,proto3" json:"start_offset,omitempty"` // Start byte offset in the data stream
+	EndOffset     int64                  `protobuf:"varint,4,opt,name=end_offset,json=endOffset,proto3" json:"end_offset,omitempty"`       // End byte offset in the data stream
+	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`                                       // Usenet message ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -161,6 +162,13 @@ func (x *SegmentData) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SegmentData.ProtoReflect.Descriptor instead.
 func (*SegmentData) Descriptor() ([]byte, []int) {
 	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SegmentData) GetSegmentSize() int64 {
+	if x != nil {
+		return x.SegmentSize
+	}
+	return 0
 }
 
 func (x *SegmentData) GetStartOffset() int64 {
@@ -298,12 +306,13 @@ var File_internal_metadata_proto_metadata_proto protoreflect.FileDescriptor
 
 const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\n" +
-	"&internal/metadata/proto/metadata.proto\x12\bmetadata\"_\n" +
+	"&internal/metadata/proto/metadata.proto\x12\bmetadata\"\x82\x01\n" +
 	"\vSegmentData\x12!\n" +
-	"\fstart_offset\x18\x01 \x01(\x03R\vstartOffset\x12\x1d\n" +
+	"\fsegment_size\x18\x01 \x01(\x03R\vsegmentSize\x12!\n" +
+	"\fstart_offset\x18\x03 \x01(\x03R\vstartOffset\x12\x1d\n" +
 	"\n" +
-	"end_offset\x18\x02 \x01(\x03R\tendOffset\x12\x0e\n" +
-	"\x02id\x18\x03 \x01(\tR\x02id\"\xe1\x02\n" +
+	"end_offset\x18\x04 \x01(\x03R\tendOffset\x12\x0e\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\"\xe1\x02\n" +
 	"\fFileMetadata\x12\x1b\n" +
 	"\tfile_size\x18\x01 \x01(\x03R\bfileSize\x12&\n" +
 	"\x0fsource_nzb_path\x18\x02 \x01(\tR\rsourceNzbPath\x12,\n" +
