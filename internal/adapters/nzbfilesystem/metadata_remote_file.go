@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/metadata"
@@ -25,6 +26,7 @@ import (
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
 	metadataService    *metadata.MetadataService
+	healthRepository   *database.HealthRepository
 	cp                 nntppool.UsenetConnectionPool
 	maxDownloadWorkers int
 	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
@@ -45,6 +47,7 @@ type MetadataRemoteFileConfig struct {
 // NewMetadataRemoteFile creates a new metadata-based remote file handler
 func NewMetadataRemoteFile(
 	metadataService *metadata.MetadataService,
+	healthRepository *database.HealthRepository,
 	cp nntppool.UsenetConnectionPool,
 	maxDownloadWorkers int,
 	config MetadataRemoteFileConfig,
@@ -70,6 +73,7 @@ func NewMetadataRemoteFile(
 
 	return &MetadataRemoteFile{
 		metadataService:    metadataService,
+		healthRepository:   healthRepository,
 		cp:                 cp,
 		maxDownloadWorkers: maxDownloadWorkers,
 		rcloneCipher:       rcloneCipher,
@@ -118,6 +122,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		name:               name,
 		fileMeta:           fileMeta,
 		metadataService:    mrf.metadataService,
+		healthRepository:   mrf.healthRepository,
 		args:               r,
 		cp:                 mrf.cp,
 		ctx:                ctx,
@@ -419,16 +424,17 @@ func (mvd *MetadataVirtualDirectory) Truncate(size int64) error {
 
 // MetadataVirtualFile implements afero.File for metadata-backed virtual files
 type MetadataVirtualFile struct {
-	name            string
-	fileMeta        *metapb.FileMetadata
-	metadataService *metadata.MetadataService
-	args            utils.PathWithArgs
-	cp              nntppool.UsenetConnectionPool
-	ctx             context.Context
-	maxWorkers      int
-	rcloneCipher    encryption.Cipher
-	globalPassword  string
-	globalSalt      string
+	name             string
+	fileMeta         *metapb.FileMetadata
+	metadataService  *metadata.MetadataService
+	healthRepository *database.HealthRepository
+	args             utils.PathWithArgs
+	cp               nntppool.UsenetConnectionPool
+	ctx              context.Context
+	maxWorkers       int
+	rcloneCipher     encryption.Cipher
+	globalPassword   string
+	globalSalt       string
 
 	// Reader state and position tracking
 	reader            io.ReadCloser
@@ -487,6 +493,9 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		var articleErr *usenet.ArticleNotFoundError
 		// Handle UsenetReader errors the same way as VirtualFile
 		if errors.As(err, &articleErr) {
+			// Update file health status and database tracking
+			mvf.updateFileHealthOnError(articleErr, articleErr.BytesRead > 0 || totalRead > 0)
+			
 			if articleErr.BytesRead > 0 || totalRead > 0 {
 				// Some content was read - return partial content error
 				return totalRead, &PartialContentError{
@@ -830,4 +839,52 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 	}
 
 	return decryptedReader, nil
+}
+
+// updateFileHealthOnError updates both metadata and database health status when corruption is detected
+func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.ArticleNotFoundError, hasPartialContent bool) {
+	// Determine the appropriate status
+	var metadataStatus metapb.FileStatus
+	var dbStatus database.HealthStatus
+	
+	if hasPartialContent {
+		metadataStatus = metapb.FileStatus_FILE_STATUS_PARTIAL
+		dbStatus = database.HealthStatusPartial
+	} else {
+		metadataStatus = metapb.FileStatus_FILE_STATUS_CORRUPTED
+		dbStatus = database.HealthStatusCorrupted
+	}
+	
+	// Update metadata status (non-blocking)
+	go func() {
+		if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
+			// Log error but don't fail the read operation
+			fmt.Printf("Warning: failed to update metadata status for %s: %v\n", mvf.name, err)
+		}
+	}()
+	
+	// Update database health tracking (non-blocking)
+	if mvf.healthRepository != nil {
+		go func() {
+			errorMsg := articleErr.Error()
+			sourceNzbPath := &mvf.fileMeta.SourceNzbPath
+			if *sourceNzbPath == "" {
+				sourceNzbPath = nil
+			}
+			
+			// Create error details JSON
+			errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`, 
+				1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
+			
+			if err := mvf.healthRepository.UpdateFileHealth(
+				mvf.name, 
+				dbStatus, 
+				&errorMsg, 
+				sourceNzbPath, 
+				&errorDetails,
+			); err != nil {
+				fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
+			}
+		}()
+	}
 }

@@ -182,6 +182,13 @@ func (ms *MetadataService) UpdateFileMetadata(virtualPath string, updateFunc fun
 	return ms.WriteFileMetadata(virtualPath, metadata)
 }
 
+// UpdateFileStatus updates the status of a file in metadata
+func (ms *MetadataService) UpdateFileStatus(virtualPath string, status metapb.FileStatus) error {
+	return ms.UpdateFileMetadata(virtualPath, func(metadata *metapb.FileMetadata) {
+		metadata.Status = status
+	})
+}
+
 // DeleteFileMetadata deletes a metadata file
 func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
 	filename := filepath.Base(virtualPath)

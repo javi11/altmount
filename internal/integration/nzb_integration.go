@@ -90,9 +90,13 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 		return nil, fmt.Errorf("NNTP pool is required")
 	}
 
+	// Create health repository for file health tracking
+	healthRepo := database.NewHealthRepository(queueDB.Connection())
+
 	// Create metadata-based remote file handler
 	metadataRemoteFile := nzbfilesystem.NewMetadataRemoteFile(
 		metadataService,
+		healthRepo,
 		cp,
 		downloadWorkers,
 		nzbfilesystem.MetadataRemoteFileConfig{

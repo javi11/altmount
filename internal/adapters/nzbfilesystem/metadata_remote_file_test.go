@@ -407,7 +407,7 @@ func TestMetadataRemoteFileConfigDefaults(t *testing.T) {
 		StreamingChunkSize: 0, // Use default
 	}
 	
-	mrf := NewMetadataRemoteFile(nil, nil, 10, config)
+	mrf := NewMetadataRemoteFile(nil, nil, nil, 10, config)
 	
 	if mrf.maxRangeSize != DefaultMaxRangeSize {
 		t.Errorf("Expected default max range size %d, got %d", DefaultMaxRangeSize, mrf.maxRangeSize)
@@ -424,7 +424,7 @@ func TestMetadataRemoteFileConfigDefaults(t *testing.T) {
 		StreamingChunkSize: 4 * 1024 * 1024,  // 4MB
 	}
 	
-	customMrf := NewMetadataRemoteFile(nil, nil, 10, customConfig)
+	customMrf := NewMetadataRemoteFile(nil, nil, nil, 10, customConfig)
 	
 	if customMrf.maxRangeSize != 16*1024*1024 {
 		t.Errorf("Expected custom max range size %d, got %d", 16*1024*1024, customMrf.maxRangeSize)

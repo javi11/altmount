@@ -52,3 +52,28 @@ type QueueStats struct {
 	AvgProcessingTimeMs *int      `db:"avg_processing_time_ms"`
 	LastUpdated         time.Time `db:"last_updated"`
 }
+
+// HealthStatus represents the health status of a file
+type HealthStatus string
+
+const (
+	HealthStatusHealthy   HealthStatus = "healthy"
+	HealthStatusPartial   HealthStatus = "partial"
+	HealthStatusCorrupted HealthStatus = "corrupted"
+)
+
+// FileHealth represents the health tracking of files in the filesystem
+type FileHealth struct {
+	ID            int64         `db:"id"`
+	FilePath      string        `db:"file_path"`
+	Status        HealthStatus  `db:"status"`
+	LastChecked   time.Time     `db:"last_checked"`
+	LastError     *string       `db:"last_error"`
+	RetryCount    int           `db:"retry_count"`
+	MaxRetries    int           `db:"max_retries"`
+	NextRetryAt   *time.Time    `db:"next_retry_at"`
+	SourceNzbPath *string       `db:"source_nzb_path"`
+	ErrorDetails  *string       `db:"error_details"` // JSON error details
+	CreatedAt     time.Time     `db:"created_at"`
+	UpdatedAt     time.Time     `db:"updated_at"`
+}
