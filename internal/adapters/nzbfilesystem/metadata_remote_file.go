@@ -244,10 +244,20 @@ func (msl *MetadataSegmentLoader) GetSegment(index int) (segment usenet.Segment,
 	}
 
 	seg := msl.segments[index]
+
+	// Important: range builder only knows (Start, Size) and assumes usable bytes are [Start, Size-1].
+	// Our metadata may have a trimmed EndOffset (< SegmentSize-1). Provide a synthetic Size = EndOffset+1
+	// so usable length becomes (EndOffset - StartOffset + 1) and no extra tail bytes are exposed.
+	size := seg.SegmentSize
+	if seg.EndOffset > 0 && seg.EndOffset < seg.SegmentSize-1 {
+		size = seg.EndOffset + 1
+	}
+
+	// Keep original start offset (could be >0 due to RAR processing) and size
 	return usenet.Segment{
 		Id:    seg.Id,
 		Start: seg.StartOffset,
-		Size:  seg.SegmentSize,
+		Size:  size,
 	}, []string{}, true // Empty groups for now - could be stored in metadata if needed
 }
 

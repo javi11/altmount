@@ -1,9 +1,6 @@
 package usenet
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/acomagu/bufpipe"
 )
 
@@ -13,104 +10,116 @@ type SegmentLoader interface {
 	GetSegment(index int) (segment Segment, groups []string, ok bool)
 }
 
-func GetSegmentsInRange(
-	start int64,
-	end int64,
-	ml SegmentLoader,
-) segmentRange {
-	segments := make([]*segment, 0)
+// GetSegmentsInRange returns a segmentRange representing the requested byte range [start,end]
+// across the underlying ordered segments provided by the SegmentLoader.
+// Behaviour / rules:
+//   - start and end are inclusive; caller guarantees 0 <= start <= end < filesize (filesize not passed here)
+//   - Each loader Segment indicates:
+//   - Start: offset (in bytes) within the physical segment where valid data for the file begins (can be > 0)
+//   - Size:  full physical segment size (in bytes)
+//     Therefore the usable data length contributed to the logical file by a loader segment is (Size - Start).
+//   - We build output *segment objects (internal) with Start & End (inclusive) relative to the physical segment
+//     so the reader will skip Start bytes and read up to End+1 bytes.
+//   - First and last returned segments are trimmed so the concatenation of (End-Start+1) bytes across
+//     returned segments equals the requested range length (unless the range lies fully outside available
+//     data, in which case zero segments are returned).
+func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
+	// Defensive handling of invalid input ranges
+	if start < 0 || end < start {
+		return segmentRange{start: start, end: end, segments: nil}
+	}
 
-	// Track the accumulative file position as we iterate through segments
-	filePosition := int64(0)
+	requestedLen := end - start + 1
+	segments := make([]*segment, 0, 4)
 
-	// Track coverage within requested range
-	var totalCovered int64
+	// logicalFilePos tracks the starting file offset of the next loader segment's usable data
+	var logicalFilePos int64 = 0
 
-	for i := 0; ; i++ {
-		s, groups, ok := ml.GetSegment(i)
-		if !ok {
+	for idx := 0; ; idx++ {
+		src, groups, ok := ml.GetSegment(idx)
+		if !ok { // no more segments
 			break
 		}
 
-		segmentSize := s.Size
+		// Usable data inside this segment starts at src.Start (may be >0) and ends at src.Size-1 inclusive.
+		// Length contributed to file:
+		usableLen := src.Size - src.Start
+		if usableLen <= 0 { // nothing useful; skip
+			continue
+		}
 
-		// Calculate the absolute positions of this segment in the file
-		segmentFileStart := filePosition + s.Start
-		segmentFileEnd := filePosition + segmentSize
+		segFileStart := logicalFilePos             // first file offset covered by this segment's usable data
+		segFileEnd := segFileStart + usableLen - 1 // last file offset covered
 
-		// Check if this segment overlaps with the requested range
-		if segmentFileEnd < start {
-			filePosition += segmentSize
+		// If this segment's data ends before the requested start, skip it and advance file position
+		if segFileEnd < start {
+			logicalFilePos += usableLen
+			continue
+		}
+		// If this segment starts after the requested end, we are done
+		if segFileStart > end {
+			break
+		}
+
+		// Determine read window inside the physical segment
+		// Start with full usable window (src.Start .. src.Size-1)
+		readStart := src.Start
+		readEnd := src.Size - 1
+
+		// Trim front if request starts inside this segment
+		if start > segFileStart {
+			// Offset (bytes) into this segment's usable data where we begin
+			delta := start - segFileStart
+			readStart = src.Start + delta
+		}
+		// Trim tail if request ends inside this segment
+		if end < segFileEnd {
+			delta := segFileEnd - end
+			readEnd = (src.Size - 1) - delta
+		}
+
+		if readStart > readEnd { // safety; shouldn't happen
+			logicalFilePos += usableLen
 			continue
 		}
 
 		r, w := bufpipe.New(nil)
-
-		// Calculate the portion of this segment that overlaps with the requested range
-		// All positions here are relative to the segment's data stream (0-based)
-		segmentStart := s.Start
-
-		// Adjust start offset if the requested range starts after this segment begins
-		if segmentFileStart < start {
-			segmentStart = start - segmentFileStart
-		}
-
-		p := &segment{
-			Id:          s.Id,
-			Start:       segmentStart,
-			SegmentSize: segmentSize,
-			End:         segmentSize - 1,
+		seg := &segment{
+			Id:          src.Id,
+			Start:       readStart,
+			End:         readEnd,
+			SegmentSize: src.Size,
 			groups:      groups,
 			reader:      r,
 			writer:      w,
 		}
+		segments = append(segments, seg)
 
-		segments = append(segments, p)
+		// If we've satisfied the full request length, stop
+		// (Check by seeing if this segment covered the end)
+		if segFileEnd >= end {
+			break
+		}
 
-		totalCovered += segmentSize - (segmentStart + 1)
-		// Move to the next segment position in the file
-		filePosition += segmentSize
-
-		// If we've reached the end of the requested range, we can stop
-		if segmentFileEnd >= end {
-			p.End = segmentSize - (segmentFileEnd - end)
+		logicalFilePos += usableLen
+		// If we've already accumulated requestedLen bytes across segments we could also break early
+		if int64AccumulatedLen(segments) >= requestedLen { // redundancy safeguard
 			break
 		}
 	}
 
-	requestedSize := end - start + 1
-	diff := requestedSize - totalCovered
+	return segmentRange{segments: segments, start: start, end: end}
+}
 
-	fmt.Printf("GetSegmentsInRange summary requested_start=%d requested_end=%d requested_size=%d segments_count=%d total_covered=%d size_difference=%d\n",
-		start,
-		end,
-		requestedSize,
-		len(segments),
-		totalCovered,
-		diff)
-
-	return segmentRange{
-		segments: segments,
-		start:    start,
-		end:      end,
+// int64AccumulatedLen calculates total bytes represented by current slice of segments
+// based on (End-Start+1) for each.
+func int64AccumulatedLen(segs []*segment) int64 {
+	var total int64
+	for _, s := range segs {
+		total += (s.End - s.Start + 1)
 	}
+	return total
 }
 
 // Helper functions (avoid importing math for simple min/max & allocating in fmt for int to string)
-func maxInt64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func itoa(i int64) string { // minimal allocation integer to string
-	return strconv.FormatInt(i, 10)
-}
+// (helper functions removed after refactor; restore if future code requires min/max/itoa)

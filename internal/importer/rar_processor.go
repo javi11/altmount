@@ -110,8 +110,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
 func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rarlist.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
-	var rarContents []rarContent
-
+	// Build quick lookup for rar part ParsedFile by both full path and base name
 	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
 	for i := range rarFiles {
 		pf := &rarFiles[i]
@@ -119,114 +118,130 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 		fileIndex[filepath.Base(pf.Filename)] = pf
 	}
 
-	for _, aggregatedFile := range aggregatedFiles {
+	out := make([]rarContent, 0, len(aggregatedFiles))
+
+	for _, af := range aggregatedFiles {
 		rc := rarContent{
-			InternalPath: aggregatedFile.Name,
-			Filename:     filepath.Base(aggregatedFile.Name),
-			Size:         aggregatedFile.TotalPackedSize, // initial logical size based on packed bytes
+			InternalPath: af.Name,
+			Filename:     filepath.Base(af.Name),
+			Size:         af.TotalPackedSize,
 		}
 
-		var segments []*metapb.SegmentData
-		remaining := aggregatedFile.TotalPackedSize
+		var fileSegments []*metapb.SegmentData
+		var accumulated int64
 
-		for _, part := range aggregatedFile.Parts {
-			if remaining <= 0 {
-				break
-			}
+		for partIdx, part := range af.Parts {
 			if part.PackedSize <= 0 {
 				continue
 			}
 
-			parsedFile := fileIndex[part.Path]
-			if parsedFile == nil {
-				parsedFile = fileIndex[filepath.Base(part.Path)]
+			pf := fileIndex[part.Path]
+			if pf == nil {
+				pf = fileIndex[filepath.Base(part.Path)]
 			}
-			if parsedFile == nil {
-				rh.log.Warn("RAR part file not found among NZB parsed files", "part_path", part.Path)
+			if pf == nil {
+				rh.log.Warn("RAR part not found among parsed NZB files", "part_path", part.Path, "file", af.Name)
 				continue
 			}
 
-			partContribution := part.PackedSize
-			if partContribution > remaining {
-				partContribution = remaining
-			}
-
-			// Desired inclusive byte range inside this part (only the portion contributing to remaining)
-			rangeStart := part.DataOffset
-			rangeEnd := part.DataOffset + partContribution - 1
-			if rangeEnd < rangeStart { // safety
+			// Extract the slice of this part's bytes that belong to the aggregated file.
+			sliced, covered, err := slicePartSegments(pf.Segments, part.DataOffset, part.PackedSize)
+			if err != nil {
+				rh.log.Warn("Failed slicing part segments", "error", err, "part_path", part.Path, "file", af.Name)
 				continue
 			}
+			// Append maintaining order: parts order then segment order within part.
+			fileSegments = append(fileSegments, sliced...)
+			accumulated += covered
 
-			filePos := int64(0)
-			for _, origSeg := range parsedFile.Segments {
-				segSize := (origSeg.EndOffset - origSeg.StartOffset) + 1 // inclusive size
-				if segSize <= 0 {
-					continue
-				}
-
-				segFileStart := filePos + origSeg.StartOffset
-				segFileEnd := filePos + origSeg.EndOffset // inclusive
-
-				// Skip if no overlap
-				if segFileEnd < rangeStart {
-					filePos += segSize
-					continue
-				}
-				if segFileStart > rangeEnd {
-					break
-				}
-
-				// Overlap slice
-				sliceStart := segFileStart
-				if sliceStart < rangeStart {
-					sliceStart = rangeStart
-				}
-				sliceEnd := segFileEnd
-				if sliceEnd > rangeEnd {
-					sliceEnd = rangeEnd
-				}
-
-				trimStart := origSeg.StartOffset + (sliceStart - segFileStart)
-				trimEnd := origSeg.StartOffset + (sliceEnd - segFileStart) // inclusive
-				if trimEnd > origSeg.EndOffset {
-					trimEnd = origSeg.EndOffset
-				}
-				if trimStart < origSeg.StartOffset {
-					trimStart = origSeg.StartOffset
-				}
-				if trimEnd >= trimStart {
-					segments = append(segments, &metapb.SegmentData{
-						Id:          origSeg.Id,
-						StartOffset: trimStart,
-						EndOffset:   trimEnd,
-						SegmentSize: origSeg.SegmentSize,
-					})
-				}
-
-				filePos += segSize
-				if segFileEnd >= rangeEnd {
-					break
-				}
+			if covered != part.PackedSize {
+				rh.log.Warn("Part coverage mismatch", "file", af.Name, "part_index", partIdx, "expected", part.PackedSize, "covered", covered, "data_offset", part.DataOffset)
 			}
-
-			remaining -= partContribution
 		}
 
-		// Compute packed size represented by segments (inclusive semantics)
-		var computedPacked int64
-		for _, s := range segments {
-			computedPacked += (s.EndOffset - s.StartOffset + 1)
+		// Validation: sum of trimmed segment lengths should match total packed size.
+		var sum int64
+		for _, s := range fileSegments {
+			sum += (s.EndOffset - s.StartOffset + 1)
 		}
-
-		if computedPacked != aggregatedFile.TotalPackedSize {
-			rh.log.Warn("Segment size sum does not match total packed size", "file", aggregatedFile.Name, "expected_packed", aggregatedFile.TotalPackedSize, "got", computedPacked, "unpacked_reported", aggregatedFile.TotalUnpackedSize)
+		if sum != af.TotalPackedSize {
+			rh.log.Warn("Aggregated file coverage mismatch", "file", af.Name, "expected", af.TotalPackedSize, "got", sum)
 		}
-
-		// Keep logical size as totalPacked; do not overwrite with computed to surface inconsistencies.
-		rc.Segments = segments
-		rarContents = append(rarContents, rc)
+		rc.Segments = fileSegments
+		out = append(out, rc)
 	}
 
-	return rarContents, nil
+	return out, nil
+}
+
+// slicePartSegments returns the slice of segment ranges (cloned and trimmed) covering
+// [dataOffset, dataOffset+length-1] within a part file represented by ordered segments.
+// Assumes each segment's Start/End offsets are relative to the segment itself starting at 0
+// and that segments are contiguous in the original order. Returns covered bytes actually found.
+func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length int64) ([]*metapb.SegmentData, int64, error) {
+	if length <= 0 {
+		return nil, 0, nil
+	}
+	if dataOffset < 0 {
+		return nil, 0, fmt.Errorf("negative dataOffset")
+	}
+
+	targetStart := dataOffset
+	targetEnd := dataOffset + length - 1
+	var covered int64
+	out := []*metapb.SegmentData{}
+
+	// cumulative absolute position inside the part file
+	var absPos int64
+	for _, seg := range segments {
+		segSize := (seg.EndOffset - seg.StartOffset + 1)
+		if segSize <= 0 {
+			continue
+		}
+		segAbsStart := absPos + seg.StartOffset // usually absPos
+		segAbsEnd := absPos + seg.EndOffset
+
+		// If segment ends before target range starts, skip
+		if segAbsEnd < targetStart {
+			absPos += segSize
+			continue
+		}
+		// If segment starts after target range ends, we can stop.
+		if segAbsStart > targetEnd {
+			break
+		}
+
+		overlapStart := segAbsStart
+		if overlapStart < targetStart {
+			overlapStart = targetStart
+		}
+		overlapEnd := segAbsEnd
+		if overlapEnd > targetEnd {
+			overlapEnd = targetEnd
+		}
+		if overlapEnd >= overlapStart {
+			// Translate back to segment-relative offsets.
+			relStart := seg.StartOffset + (overlapStart - segAbsStart)
+			relEnd := seg.StartOffset + (overlapEnd - segAbsStart)
+			if relStart < seg.StartOffset {
+				relStart = seg.StartOffset
+			}
+			if relEnd > seg.EndOffset {
+				relEnd = seg.EndOffset
+			}
+			out = append(out, &metapb.SegmentData{
+				Id:          seg.Id,
+				StartOffset: relStart,
+				EndOffset:   relEnd,
+				SegmentSize: seg.SegmentSize,
+			})
+			covered += (relEnd - relStart + 1)
+			if overlapEnd == targetEnd { // done
+				break
+			}
+		}
+		absPos += segSize
+	}
+
+	return out, covered, nil
 }
