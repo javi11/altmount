@@ -117,13 +117,35 @@ func NewServer(
 func (s *webdavServer) Start(ctx context.Context) error {
 	slog.InfoContext(ctx, fmt.Sprintf("WebDav server started at %s/webdav", s.srv.Addr))
 
-	if err := s.srv.ListenAndServe(); err != nil {
-		if ctx.Err() == nil {
-			slog.ErrorContext(ctx, "Failed to start WebDav server", "err", err)
+	// Start server in goroutine
+	serverErr := make(chan error, 1)
+	go func() {
+		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			serverErr <- err
 		}
-	}
+		close(serverErr)
+	}()
 
-	return nil
+	// Wait for context cancellation or server error
+	select {
+	case <-ctx.Done():
+		slog.InfoContext(ctx, "WebDav server received shutdown signal")
+		// Shutdown server gracefully
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := s.srv.Shutdown(shutdownCtx); err != nil {
+			slog.ErrorContext(ctx, "Error during WebDav server shutdown", "err", err)
+			return err
+		}
+		slog.InfoContext(ctx, "WebDav server stopped gracefully")
+		return nil
+	case err := <-serverErr:
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to start WebDav server", "err", err)
+			return err
+		}
+		return nil
+	}
 }
 
 func (s *webdavServer) Stop() {

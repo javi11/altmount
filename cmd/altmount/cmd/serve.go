@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/javi11/altmount/internal/adapters/webdav"
 	"github.com/javi11/altmount/internal/integration"
@@ -85,12 +88,39 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"download_workers", config.Workers.Download,
 		"processor_workers", config.Workers.Processor)
 
-	ctx := context.Background()
-	if err := server.Start(ctx); err != nil {
-		if ctx.Err() == nil {
-			logger.Error("server exited", "err", err)
-		}
-	}
+	// Create context with cancellation for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start server in goroutine
+	go func() {
+		if err := server.Start(ctx); err != nil {
+			slog.Error("WebDAV server error", "err", err)
+		}
+	}()
+
+	// Wait for shutdown signal or server error
+	signalHandler(ctx)
+
+	server.Stop()
+
+	logger.Info("AltMount server shutting down gracefully")
 	return nil
+}
+
+func signalHandler(ctx context.Context) {
+	c := make(chan os.Signal, 1)
+	// We'll accept graceful shutdowns when quit via SIGINT (Ctrl+C)
+	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
+	signal.Notify(c, os.Interrupt)
+
+	// Block until we receive our signal.
+	select {
+	case <-ctx.Done():
+	case <-c:
+	}
 }
