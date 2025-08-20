@@ -53,7 +53,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create NZB system with metadata + queue
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
-		QueueDatabasePath:  config.Database.QueuePath,
+		QueueDatabasePath:  config.Database.Path,
 		MetadataRootPath:   config.Metadata.RootPath,
 		MaxRangeSize:       config.Metadata.MaxRangeSize,
 		StreamingChunkSize: config.Metadata.StreamingChunkSize,

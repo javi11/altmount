@@ -28,9 +28,9 @@ type WebDAVConfig struct {
 	Debug    bool   `yaml:"debug" mapstructure:"debug"`
 }
 
-// DatabaseConfig represents database configuration (queue only)
+// DatabaseConfig represents database configuration
 type DatabaseConfig struct {
-	QueuePath string `yaml:"queue_path" mapstructure:"queue_path"`
+	Path string `yaml:"path" mapstructure:"path"`
 }
 
 // MetadataConfig represents metadata filesystem configuration
@@ -74,7 +74,7 @@ func DefaultConfig() *Config {
 			Debug:    false,
 		},
 		Database: DatabaseConfig{
-			QueuePath: "altmount_queue.db",
+			Path: "altmount.db",
 		},
 		Metadata: MetadataConfig{
 			RootPath:           "./metadata",

@@ -864,27 +864,25 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 	}()
 	
 	// Update database health tracking (non-blocking)
-	if mvf.healthRepository != nil {
-		go func() {
-			errorMsg := articleErr.Error()
-			sourceNzbPath := &mvf.fileMeta.SourceNzbPath
-			if *sourceNzbPath == "" {
-				sourceNzbPath = nil
-			}
-			
-			// Create error details JSON
-			errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`, 
-				1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
-			
-			if err := mvf.healthRepository.UpdateFileHealth(
-				mvf.name, 
-				dbStatus, 
-				&errorMsg, 
-				sourceNzbPath, 
-				&errorDetails,
-			); err != nil {
-				fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
-			}
-		}()
-	}
+	go func() {
+		errorMsg := articleErr.Error()
+		sourceNzbPath := &mvf.fileMeta.SourceNzbPath
+		if *sourceNzbPath == "" {
+			sourceNzbPath = nil
+		}
+		
+		// Create error details JSON
+		errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`, 
+			1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
+		
+		if err := mvf.healthRepository.UpdateFileHealth(
+			mvf.name, 
+			dbStatus, 
+			&errorMsg, 
+			sourceNzbPath, 
+			&errorDetails,
+		); err != nil {
+			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
+		}
+	}()
 }

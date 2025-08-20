@@ -30,7 +30,7 @@ type NzbConfig struct {
 
 // NzbSystem represents the complete NZB-backed filesystem
 type NzbSystem struct {
-	queueDB        *database.QueueDB        // Queue database for processing queue
+	database       *database.DB             // Database for processing queue
 	metadataReader *metadata.MetadataReader // Metadata reader for serving files
 	service        *importer.Service
 	fs             afero.Fs
@@ -43,14 +43,14 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 	metadataService := metadata.NewMetadataService(config.MetadataRootPath)
 	metadataReader := metadata.NewMetadataReader(metadataService)
 
-	// Initialize queue database (for processing queue)
-	queueDBConfig := database.QueueConfig{
+	// Initialize database (for processing queue)
+	dbConfig := database.Config{
 		DatabasePath: config.QueueDatabasePath,
 	}
 
-	queueDB, err := database.NewQueueDB(queueDBConfig)
+	db, err := database.NewDB(dbConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize queue database: %w", err)
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
 	// Set defaults for workers and scan interval if not configured
@@ -78,20 +78,20 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 
 	// For now, we'll need to create a service that uses MetadataProcessor
 	// This will be updated when we modify the NZB service
-	service, err := importer.NewService(serviceConfig, metadataService, queueDB, cp) // nil for mainDB since we're using metadata
+	service, err := importer.NewService(serviceConfig, metadataService, db, cp) // nil for mainDB since we're using metadata
 	if err != nil {
-		queueDB.Close()
+		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)
 	}
 
 	if cp == nil {
 		_ = service.Close()
-		_ = queueDB.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("NNTP pool is required")
 	}
 
 	// Create health repository for file health tracking
-	healthRepo := database.NewHealthRepository(queueDB.Connection())
+	healthRepo := database.NewHealthRepository(db.Connection())
 
 	// Create metadata-based remote file handler
 	metadataRemoteFile := nzbfilesystem.NewMetadataRemoteFile(
@@ -117,7 +117,7 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 	}
 
 	return &NzbSystem{
-		queueDB:        queueDB,
+		database:       db,
 		metadataReader: metadataReader,
 		service:        service,
 		fs:             fs,
@@ -145,9 +145,9 @@ func (ns *NzbSystem) MetadataReader() *metadata.MetadataReader {
 	return ns.metadataReader
 }
 
-// QueueDatabase returns the queue database instance (for processing queue)
-func (ns *NzbSystem) QueueDatabase() *database.QueueDB {
-	return ns.queueDB
+// Database returns the database instance (for processing queue)
+func (ns *NzbSystem) Database() *database.DB {
+	return ns.database
 }
 
 // StartService starts the NZB service (including background scanning and processing)
@@ -166,8 +166,8 @@ func (ns *NzbSystem) Close() error {
 		return err
 	}
 
-	// Close queue database (metadata doesn't need closing)
-	if err := ns.queueDB.Close(); err != nil {
+	// Close database (metadata doesn't need closing)
+	if err := ns.database.Close(); err != nil {
 		return err
 	}
 

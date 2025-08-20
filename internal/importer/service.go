@@ -25,7 +25,7 @@ type ServiceConfig struct {
 // Service provides simplified NZB queue-based importing
 type Service struct {
 	config          ServiceConfig
-	queueDB         *database.QueueDB         // Queue database for processing queue
+	database        *database.DB              // Database for processing queue
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
 	log             *slog.Logger
@@ -38,8 +38,8 @@ type Service struct {
 	wg      sync.WaitGroup
 }
 
-// NewService creates a new simplified NZB service with separate main and queue databases
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, queueDB *database.QueueDB, cp nntppool.UsenetConnectionPool) (*Service, error) {
+// NewService creates a new simplified NZB service with separate main and database
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, cp nntppool.UsenetConnectionPool) (*Service, error) {
 	// Set defaults
 	if config.ScanInterval == 0 {
 		config.ScanInterval = 30 * time.Second
@@ -56,7 +56,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	service := &Service{
 		config:          config,
 		metadataService: metadataService,
-		queueDB:         queueDB,
+		database:        database,
 		processor:       processor,
 		log:             slog.Default().With("component", "nzb-service"),
 		ctx:             ctx,
@@ -144,14 +144,14 @@ func (s *Service) IsRunning() bool {
 	return s.running
 }
 
-// QueueDatabase returns the queue database instance for processing
-func (s *Service) QueueDatabase() *database.QueueDB {
-	return s.queueDB
+// Database returns the database instance for processing
+func (s *Service) Database() *database.DB {
+	return s.database
 }
 
-// GetQueueStats returns current queue statistics from queue database
+// GetQueueStats returns current queue statistics from database
 func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {
-	return s.queueDB.Repository.GetQueueStats()
+	return s.database.Repository.GetQueueStats()
 }
 
 // scannerLoop runs in background and scans directory for new NZB files
@@ -222,7 +222,7 @@ func (s *Service) scanDirectory() {
 func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 	// Only check queue database during scanning for performance
 	// The processor will check main database for duplicates when processing
-	inQueue, err := s.queueDB.Repository.IsFileInQueue(filePath)
+	inQueue, err := s.database.Repository.IsFileInQueue(filePath)
 	if err != nil {
 		s.log.Warn("Failed to check if file in queue", "file", filePath, "error", err)
 		return false // Assume not in queue on error
@@ -242,7 +242,7 @@ func (s *Service) addToQueue(filePath string) {
 		CreatedAt:  time.Now(),
 	}
 
-	if err := s.queueDB.Repository.AddToQueue(item); err != nil {
+	if err := s.database.Repository.AddToQueue(item); err != nil {
 		s.log.Error("Failed to add file to queue", "file", filePath, "error", err)
 		return
 	}
@@ -278,7 +278,7 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 	const maxDelay = 500 * time.Millisecond
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		item, err := s.queueDB.Repository.ClaimNextQueueItem()
+		item, err := s.database.Repository.ClaimNextQueueItem()
 		if err == nil {
 			return item, nil
 		}
@@ -352,7 +352,7 @@ func (s *Service) processQueueItems(workerID int) {
 		s.handleProcessingFailure(item, processingErr, log)
 	} else {
 		// Mark as completed in queue database
-		if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
 			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
 		} else {
 			log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
@@ -374,14 +374,14 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 	// Check if we should retry
 	if item.RetryCount < item.MaxRetries {
 		// Mark for retry in queue database
-		if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusRetrying, &errorMessage); err != nil {
+		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusRetrying, &errorMessage); err != nil {
 			log.Error("Failed to mark item for retry", "queue_id", item.ID, "error", err)
 		} else {
 			log.Info("Item marked for retry", "queue_id", item.ID, "retry_count", item.RetryCount+1)
 		}
 	} else {
 		// Max retries exceeded, mark as failed in queue database
-		if err := s.queueDB.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
 			log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", err)
 		} else {
 			log.Error("Item failed permanently after max retries",

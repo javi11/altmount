@@ -8,9 +8,9 @@ webdav:
   password: "usenet"
   debug: false
 
-# Database configuration (queue only)
+# Database configuration
 database:
-  queue_path: "altmount_queue.db"  # Queue database for processing workflows
+  path: "altmount.db"  # Database for processing workflows
 
 # Metadata filesystem configuration
 metadata:
