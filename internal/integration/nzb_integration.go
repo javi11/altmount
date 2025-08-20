@@ -15,16 +15,17 @@ import (
 
 // NzbConfig holds configuration for the NZB system
 type NzbConfig struct {
-	QueueDatabasePath string
-	MetadataRootPath  string // Path to metadata root directory
-	MetadataCacheSize int    // Cache size for metadata operations
-	MountPath         string
-	NzbDir            string        // Directory containing NZB files
-	Password          string        // Global password for .bin files
-	Salt              string        // Global salt for .bin files
-	ProcessorWorkers  int           // Number of queue workers (default: 2)
-	DownloadWorkers   int           // Number of download workers (default: 15)
-	ScanInterval      time.Duration // Directory scan interval (default: 30s)
+	QueueDatabasePath  string
+	MetadataRootPath   string // Path to metadata root directory
+	MaxRangeSize       int64  // Maximum range size for a single request
+	StreamingChunkSize int64  // Chunk size for streaming when end=-1
+	MountPath          string
+	NzbDir             string        // Directory containing NZB files
+	Password           string        // Global password for .bin files
+	Salt               string        // Global salt for .bin files
+	ProcessorWorkers   int           // Number of queue workers (default: 2)
+	DownloadWorkers    int           // Number of download workers (default: 15)
+	ScanInterval       time.Duration // Directory scan interval (default: 30s)
 }
 
 // NzbSystem represents the complete NZB-backed filesystem
@@ -95,8 +96,10 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 		cp,
 		downloadWorkers,
 		nzbfilesystem.MetadataRemoteFileConfig{
-			GlobalPassword: config.Password,
-			GlobalSalt:     config.Salt,
+			GlobalPassword:     config.Password,
+			GlobalSalt:         config.Salt,
+			MaxRangeSize:       config.MaxRangeSize,
+			StreamingChunkSize: config.StreamingChunkSize,
 		},
 	)
 

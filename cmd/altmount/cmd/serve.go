@@ -53,15 +53,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create NZB system with metadata + queue
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
-		QueueDatabasePath: config.Database.QueuePath,
-		MetadataRootPath:  config.Metadata.RootPath,
-		MetadataCacheSize: config.Metadata.CacheSize,
-		MountPath:         config.MountPath,
-		NzbDir:            config.NZBDir,
-		Password:          config.RClone.Password,
-		Salt:              config.RClone.Salt,
-		DownloadWorkers:   config.Workers.Download,
-		ProcessorWorkers:  config.Workers.Processor,
+		QueueDatabasePath:  config.Database.QueuePath,
+		MetadataRootPath:   config.Metadata.RootPath,
+		MaxRangeSize:       config.Metadata.MaxRangeSize,
+		StreamingChunkSize: config.Metadata.StreamingChunkSize,
+		MountPath:          config.MountPath,
+		NzbDir:             config.NZBDir,
+		Password:           config.RClone.Password,
+		Salt:               config.RClone.Salt,
+		DownloadWorkers:    config.Workers.Download,
+		ProcessorWorkers:   config.Workers.Processor,
 	}, pool)
 	if err != nil {
 		logger.Error("failed to init NZB system", "err", err)

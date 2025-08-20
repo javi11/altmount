@@ -35,8 +35,9 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath  string `yaml:"root_path" mapstructure:"root_path"`
-	CacheSize int    `yaml:"cache_size" mapstructure:"cache_size"`
+	RootPath           string `yaml:"root_path" mapstructure:"root_path"`
+	MaxRangeSize       int64  `yaml:"max_range_size" mapstructure:"max_range_size"`
+	StreamingChunkSize int64  `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -76,8 +77,9 @@ func DefaultConfig() *Config {
 			QueuePath: "altmount_queue.db",
 		},
 		Metadata: MetadataConfig{
-			RootPath:  "./metadata",
-			CacheSize: 1000, // Default cache size for metadata entries
+			RootPath:           "./metadata",
+			MaxRangeSize:       33554432, // 32MB - Maximum range size for a single request
+			StreamingChunkSize: 8388608,  // 8MB - Chunk size for streaming when end=-1
 		},
 		MountPath: "/mnt/altmount",
 		RClone: RCloneConfig{
@@ -147,8 +149,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("metadata root_path cannot be empty")
 	}
 
-	if c.Metadata.CacheSize < 0 {
-		return fmt.Errorf("metadata cache_size must be non-negative")
+	if c.Metadata.MaxRangeSize < 0 {
+		return fmt.Errorf("metadata max_range_size must be non-negative")
+	}
+
+	if c.Metadata.StreamingChunkSize < 0 {
+		return fmt.Errorf("metadata streaming_chunk_size must be non-negative")
 	}
 
 	// Validate each provider

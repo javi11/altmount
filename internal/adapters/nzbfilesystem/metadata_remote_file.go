@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/afero"
 )
 
+
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
 	metadataService    *metadata.MetadataService
@@ -29,12 +30,16 @@ type MetadataRemoteFile struct {
 	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
 	globalPassword     string            // Global password fallback
 	globalSalt         string            // Global salt fallback
+	maxRangeSize       int64             // Configurable maximum range size
+	streamingChunkSize int64             // Configurable streaming chunk size
 }
 
 // MetadataRemoteFileConfig holds configuration for MetadataRemoteFile
 type MetadataRemoteFileConfig struct {
-	GlobalPassword string
-	GlobalSalt     string
+	GlobalPassword         string
+	GlobalSalt             string
+	MaxRangeSize          int64 // Maximum range size for a single request (0 = use default)
+	StreamingChunkSize    int64 // Chunk size for streaming when end=-1 (0 = use default)
 }
 
 // NewMetadataRemoteFile creates a new metadata-based remote file handler
@@ -52,6 +57,17 @@ func NewMetadataRemoteFile(
 
 	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
 
+	// Use configurable range sizes from config with fallback to defaults
+	maxRangeSize := config.MaxRangeSize
+	if maxRangeSize <= 0 {
+		maxRangeSize = 33554432 // Default 32MB
+	}
+
+	streamingChunkSize := config.StreamingChunkSize
+	if streamingChunkSize <= 0 {
+		streamingChunkSize = 8388608 // Default 8MB
+	}
+
 	return &MetadataRemoteFile{
 		metadataService:    metadataService,
 		cp:                 cp,
@@ -59,6 +75,8 @@ func NewMetadataRemoteFile(
 		rcloneCipher:       rcloneCipher,
 		globalPassword:     config.GlobalPassword,
 		globalSalt:         config.GlobalSalt,
+		maxRangeSize:       maxRangeSize,
+		streamingChunkSize: streamingChunkSize,
 	}
 }
 
@@ -97,16 +115,18 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
-		name:            name,
-		fileMeta:        fileMeta,
-		metadataService: mrf.metadataService,
-		args:            r,
-		cp:              mrf.cp,
-		ctx:             ctx,
-		maxWorkers:      mrf.maxDownloadWorkers,
-		rcloneCipher:    mrf.rcloneCipher,
-		globalPassword:  mrf.globalPassword,
-		globalSalt:      mrf.globalSalt,
+		name:               name,
+		fileMeta:           fileMeta,
+		metadataService:    mrf.metadataService,
+		args:               r,
+		cp:                 mrf.cp,
+		ctx:                ctx,
+		maxWorkers:         mrf.maxDownloadWorkers,
+		rcloneCipher:       mrf.rcloneCipher,
+		globalPassword:     mrf.globalPassword,
+		globalSalt:         mrf.globalSalt,
+		maxRangeSize:       mrf.maxRangeSize,
+		streamingChunkSize: mrf.streamingChunkSize,
 	}
 
 	return true, virtualFile, nil
@@ -414,6 +434,14 @@ type MetadataVirtualFile struct {
 	reader            io.ReadCloser
 	readerInitialized bool
 	position          int64
+	currentRangeStart int64 // Start of current reader's range
+	currentRangeEnd   int64 // End of current reader's range  
+	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
+	
+	// Configurable range settings
+	maxRangeSize       int64 // Maximum range size for a single request
+	streamingChunkSize int64 // Chunk size for streaming when end=-1
+	
 	mu                sync.Mutex
 }
 
@@ -432,6 +460,30 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 
 	totalRead, err := mvf.reader.Read(p)
 	if err != nil {
+		// Check if this is EOF and we have more data to read
+		if errors.Is(err, io.EOF) && mvf.hasMoreDataToRead() {
+			// Close current reader and create a new one for the next range
+			mvf.closeCurrentReader()
+			
+			// Try to create a new reader for the remaining data
+			if newReaderErr := mvf.ensureReader(); newReaderErr != nil {
+				// If we can't create a new reader, return what we have
+				mvf.position += int64(totalRead)
+				return totalRead, err
+			}
+			
+			// Try to read more data with the new reader
+			if totalRead < len(p) {
+				additionalRead, newErr := mvf.reader.Read(p[totalRead:])
+				totalRead += additionalRead
+				if newErr != nil && !errors.Is(newErr, io.EOF) {
+					err = newErr
+				} else if newErr == nil {
+					err = nil // Clear EOF if we successfully read more
+				}
+			}
+		}
+		
 		var articleErr *usenet.ArticleNotFoundError
 		// Handle UsenetReader errors the same way as VirtualFile
 		if errors.As(err, &articleErr) {
@@ -450,6 +502,9 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				}
 			}
 		}
+		
+		// Update position even on error if we read some data
+		mvf.position += int64(totalRead)
 		return totalRead, err
 	}
 
@@ -489,7 +544,13 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, ErrSeekTooFar
 	}
 
-	// Update position - reader will handle the actual seeking
+	// Check if the new position is outside our current reader's range
+	if mvf.readerInitialized && (abs < mvf.currentRangeStart || abs > mvf.currentRangeEnd) {
+		// Position is outside current range, need to recreate reader
+		mvf.closeCurrentReader()
+	}
+
+	// Update position - new reader will be created on next read if needed
 	mvf.position = abs
 	return abs, nil
 }
@@ -571,6 +632,28 @@ func (mvf *MetadataVirtualFile) Truncate(size int64) error {
 	return fmt.Errorf("truncate not supported")
 }
 
+// hasMoreDataToRead checks if there's more data to read beyond current range
+func (mvf *MetadataVirtualFile) hasMoreDataToRead() bool {
+	// If we have an original range end and haven't reached it, there's more to read
+	if mvf.originalRangeEnd != -1 && mvf.position < mvf.originalRangeEnd {
+		return true
+	}
+	// If original range was unbounded (-1) and we haven't reached file end, there's more to read
+	if mvf.originalRangeEnd == -1 && mvf.position < mvf.fileMeta.FileSize {
+		return true
+	}
+	return false
+}
+
+// closeCurrentReader closes the current reader and marks it uninitialized
+func (mvf *MetadataVirtualFile) closeCurrentReader() {
+	if mvf.reader != nil {
+		mvf.reader.Close()
+		mvf.reader = nil
+	}
+	mvf.readerInitialized = false
+}
+
 // ensureReader ensures we have a reader initialized for the current position with range support
 func (mvf *MetadataVirtualFile) ensureReader() error {
 	if mvf.readerInitialized {
@@ -583,6 +666,10 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 
 	// Get request range from args or use default range starting from current position
 	start, end := mvf.getRequestRange()
+
+	// Track the current reader's range for progressive reading
+	mvf.currentRangeStart = start
+	mvf.currentRangeEnd = end
 
 	// Create reader for the calculated range using metadata segments
 	if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
@@ -606,23 +693,81 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 }
 
 // getRequestRange gets the range for reader creation based on HTTP range or current position
+// Implements intelligent range limiting to prevent excessive memory usage when end=-1 or ranges are too large
 func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
-	// Try to get range from HTTP request args
-	rangeHeader, err := mvf.args.Range()
-	if err != nil || rangeHeader == nil {
-		// No valid range header, return range from current position to end
-		return 0, mvf.fileMeta.FileSize - 1
+	// If this is the first read, check for HTTP range header and save original end
+	if !mvf.readerInitialized && mvf.originalRangeEnd == 0 {
+		rangeHeader, err := mvf.args.Range()
+		if err == nil && rangeHeader != nil {
+			mvf.originalRangeEnd = rangeHeader.End
+			return mvf.calculateIntelligentRange(rangeHeader.Start, rangeHeader.End)
+		} else {
+			// No range header, set unbounded
+			mvf.originalRangeEnd = -1
+			return mvf.calculateIntelligentRange(mvf.position, -1)
+		}
 	}
 
-	start = rangeHeader.Start
-	end = rangeHeader.End
+	// For subsequent reads, use current position and respect original range
+	var targetEnd int64
+	if mvf.originalRangeEnd == -1 {
+		// Original was unbounded, continue unbounded
+		targetEnd = -1
+	} else {
+		// Original had an end, respect it
+		targetEnd = mvf.originalRangeEnd
+	}
 
+	return mvf.calculateIntelligentRange(mvf.position, targetEnd)
+}
+
+// calculateIntelligentRange applies intelligent range limiting to prevent excessive memory usage
+// Only applies limiting when end=-1 or when the requested range exceeds safe memory limits
+func (mvf *MetadataVirtualFile) calculateIntelligentRange(start, end int64) (int64, int64) {
+	fileSize := mvf.fileMeta.FileSize
+	
+	// Handle empty files - return invalid range that will result in no segments
+	if fileSize == 0 {
+		return 0, -1 // Invalid range for empty file
+	}
+	
+	// Ensure start is within bounds
 	if start < 0 {
 		start = 0
 	}
+	if start >= fileSize {
+		start = fileSize - 1
+	}
 
+	// Handle end = -1 (to end of file) with intelligent limiting
 	if end == -1 {
-		end = mvf.fileMeta.FileSize - 1
+		// Calculate a reasonable chunk size based on remaining file size
+		remaining := fileSize - start
+		
+		// If remaining size is smaller than configured streaming chunk size, use all remaining
+		if remaining <= mvf.streamingChunkSize {
+			end = fileSize - 1
+		} else {
+			// Limit to configured streaming chunk size to prevent excessive memory usage
+			end = start + mvf.streamingChunkSize - 1
+		}
+	} else {
+		// Ensure end is within file bounds
+		if end >= fileSize {
+			end = fileSize - 1
+		}
+		
+		// Only apply maximum range size limit if the requested range is excessively large
+		// This preserves the original range request for reasonable sizes
+		rangeSize := end - start + 1
+		if rangeSize > mvf.maxRangeSize {
+			end = start + mvf.maxRangeSize - 1
+			// Ensure we don't exceed file size
+			if end >= fileSize {
+				end = fileSize - 1
+			}
+		}
+		// If rangeSize <= maxRangeSize, preserve the original range as-is
 	}
 
 	return start, end
