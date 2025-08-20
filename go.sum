@@ -241,8 +241,8 @@ github.com/javi11/nntp-server-mock v0.0.1 h1:05KbUlFSnzk82CG/sHWLp9s6Vg8exL3wvdA
 github.com/javi11/nntp-server-mock v0.0.1/go.mod h1:+QBpPor0q44ttab8kWo08+/t5C26IHhUpBTC1lZqujA=
 github.com/javi11/nntpcli v1.1.1 h1:uX7uIm40o/fpa1XbdfWTJgyExm3Wyx1SX9eFDIhVpu0=
 github.com/javi11/nntpcli v1.1.1/go.mod h1:ZDb9BCQVrG1UT0XN6ikfOlYYzqrYNxXISIuLg30ZpK0=
-github.com/javi11/nntppool v1.5.1 h1:xVl/0uiGK3AJ0YDOxFPTjNeESOWn1KMkfNeP846PLgI=
-github.com/javi11/nntppool v1.5.1/go.mod h1:lZYpeUrFMGtjIJBTEDAZlQ4Su2wD+BylSk9Np/1aRHs=
+github.com/javi11/nntppool v1.5.2 h1:veY5587Oa50APmO/vVeZUh7Yi09FbXTU4Hh2Esy96DM=
+github.com/javi11/nntppool v1.5.2/go.mod h1:XSfVn0dfyZ+w5JZ2wO6DM4cRhXBToaIgqtrHxpQRrcA=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=
 github.com/javi11/nxg v0.1.0/go.mod h1:+GvYpp+y1oq+qBOWxFMvfTjtin/0zCeomWfjiPkiu8A=
 github.com/javi11/nzbparser v0.4.0 h1:O21gOPE/8n+DtNnH04HuZ73BxRQtu07PZyyilXXusUk=
@@ -304,8 +304,9 @@ github.com/maratori/testpackage v1.1.1/go.mod h1:s4gRK/ym6AMrqpOa/kEbQTV4Q4jb7We
 github.com/matoous/godox v1.1.0 h1:W5mqwbyWrwZv6OQ5Z1a/DHGMOvXYCBP3+Ht7KMoJhq4=
 github.com/matoous/godox v1.1.0/go.mod h1:jgE/3fUXiTurkdHOLT5WEkThTSuE7yxHv5iWPa80afs=
 github.com/matryer/is v1.2.0/go.mod h1:2fLPjFQM9rhQ15aVEtbuwhJinnOqrmgXPNdZsdwlWXA=
-github.com/matryer/is v1.4.0 h1:sosSmIWwkYITGrxZ25ULNDeKiMNzFSr4V/eqBQP0PeE=
 github.com/matryer/is v1.4.0/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
+github.com/matryer/is v1.4.1 h1:55ehd8zaGABKLXQUe2awZ99BD/PTc2ls+KV/dXphgEQ=
+github.com/matryer/is v1.4.1/go.mod h1:8I/i5uYgLzgsgEloJE1U6xx5HkBQpAZvepWuujKwMRU=
 github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=

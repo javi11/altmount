@@ -12,7 +12,7 @@ tool (
 require (
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/acomagu/bufpipe v1.0.4
-	github.com/javi11/nntppool v1.5.1
+	github.com/javi11/nntppool v1.5.2
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.0
 	github.com/javi11/rarlist v1.0.2-0.20250818144055-979aecfdff9e
