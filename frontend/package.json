@@ -1,0 +1,43 @@
+{
+	"name": "frontend",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "tsc -b && vite build",
+		"lint": "biome check .",
+		"preview": "vite preview"
+	},
+	"dependencies": {
+		"@hookform/resolvers": "^5.2.1",
+		"@tanstack/react-query": "^5.85.5",
+		"@tanstack/react-query-devtools": "^5.85.5",
+		"clsx": "^2.1.1",
+		"date-fns": "^4.1.0",
+		"lucide-react": "^0.540.0",
+		"react": "^19.1.1",
+		"react-dom": "^19.1.1",
+		"react-hook-form": "^7.62.0",
+		"react-router-dom": "^7.8.1",
+		"recharts": "^3.1.2",
+		"zod": "^4.0.17"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.33.0",
+		"@tailwindcss/typography": "^0.5.16",
+		"@tailwindcss/vite": "^4.1.12",
+		"@types/react": "^19.1.10",
+		"@types/react-dom": "^19.1.7",
+		"@vitejs/plugin-react": "^5.0.0",
+		"daisyui": "^5.0.50",
+		"eslint": "^9.33.0",
+		"eslint-plugin-react-hooks": "^5.2.0",
+		"eslint-plugin-react-refresh": "^0.4.20",
+		"globals": "^16.3.0",
+		"tailwindcss": "^4.1.12",
+		"typescript": "~5.8.3",
+		"typescript-eslint": "^8.39.1",
+		"vite": "^7.1.2"
+	}
+}

@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+	/* biome-ignore lint/correctness/noUnknownProperty: wrong error */
+	themes:
+		cupcake --default,
+		dim --prefersdark,
+		cupcake,
+		bumblebee,
+		emerald,
+		corporate,
+		dim,
+		dracula;
+}
+@plugin "@tailwindcss/typography";

@@ -1,0 +1,184 @@
+import type { APIResponse, FileHealth, HealthStats, QueueItem, QueueStats, SystemHealth, SystemInfo } from "../types/api";
+
+export class APIError extends Error {
+	public status: number;
+
+	constructor(status: number, message: string) {
+		super(message);
+		this.status = status;
+		this.name = "APIError";
+	}
+}
+
+export class APIClient {
+	private baseURL: string;
+
+	constructor(baseURL: string = "/api") {
+		this.baseURL = baseURL;
+	}
+
+	private async request<T>(
+		endpoint: string,
+		options: RequestInit = {},
+	): Promise<T> {
+		const url = `${this.baseURL}${endpoint}`;
+
+		const config: RequestInit = {
+			headers: {
+				"Content-Type": "application/json",
+				...options.headers,
+			},
+			...options,
+		};
+
+		try {
+			const response = await fetch(url, config);
+
+			if (!response.ok) {
+				throw new APIError(
+					response.status,
+					`HTTP ${response.status}: ${response.statusText}`,
+				);
+			}
+
+			const data: APIResponse<T> = await response.json();
+
+			if (!data.success) {
+				throw new APIError(response.status, data.error || "API request failed");
+			}
+
+			return data.data as T;
+		} catch (error) {
+			if (error instanceof APIError) {
+				throw error;
+			}
+			throw new APIError(
+				0,
+				error instanceof Error ? error.message : "Network error",
+			);
+		}
+	}
+
+	// Queue endpoints
+	async getQueue(params?: {
+		limit?: number;
+		offset?: number;
+		status?: string;
+		since?: string;
+	}) {
+		const searchParams = new URLSearchParams();
+		if (params?.limit) searchParams.set("limit", params.limit.toString());
+		if (params?.offset) searchParams.set("offset", params.offset.toString());
+		if (params?.status) searchParams.set("status", params.status);
+		if (params?.since) searchParams.set("since", params.since);
+
+		const query = searchParams.toString();
+		return this.request<QueueItem[]>(`/queue${query ? `?${query}` : ""}`);
+	}
+
+	async getQueueItem(id: number) {
+		return this.request<QueueItem>(`/queue/${id}`);
+	}
+
+	async deleteQueueItem(id: number) {
+		return this.request<QueueItem>(`/queue/${id}`, { method: "DELETE" });
+	}
+
+	async retryQueueItem(id: number, resetRetryCount?: boolean) {
+		return this.request<QueueItem>(`/queue/${id}/retry`, {
+			method: "POST",
+			body: JSON.stringify({ reset_retry_count: resetRetryCount }),
+		});
+	}
+
+	async getQueueStats() {
+		return this.request<QueueStats>("/queue/stats");
+	}
+
+	async clearCompletedQueue(olderThan?: string) {
+		const searchParams = new URLSearchParams();
+		if (olderThan) searchParams.set("older_than", olderThan);
+
+		const query = searchParams.toString();
+		return this.request<QueueStats>(`/queue/completed${query ? `?${query}` : ""}`, {
+			method: "DELETE",
+		});
+	}
+
+	// Health endpoints
+	async getHealth(params?: {
+		limit?: number;
+		offset?: number;
+		status?: string;
+		since?: string;
+	}) {
+		const searchParams = new URLSearchParams();
+		if (params?.limit) searchParams.set("limit", params.limit.toString());
+		if (params?.offset) searchParams.set("offset", params.offset.toString());
+		if (params?.status) searchParams.set("status", params.status);
+		if (params?.since) searchParams.set("since", params.since);
+
+		const query = searchParams.toString();
+		return this.request<FileHealth[]>(`/health${query ? `?${query}` : ""}`);
+	}
+
+	async getHealthItem(id: string) {
+		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`);
+	}
+
+	async deleteHealthItem(id: string) {
+		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`, {
+			method: "DELETE",
+		});
+	}
+
+	async retryHealthItem(id: string, resetStatus?: boolean) {
+		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/retry`, {
+			method: "POST",
+			body: JSON.stringify({ reset_status: resetStatus }),
+		});
+	}
+
+	async getCorruptedFiles(params?: { limit?: number; offset?: number }) {
+		const searchParams = new URLSearchParams();
+		if (params?.limit) searchParams.set("limit", params.limit.toString());
+		if (params?.offset) searchParams.set("offset", params.offset.toString());
+
+		const query = searchParams.toString();
+		return this.request<FileHealth[]>(`/health/corrupted${query ? `?${query}` : ""}`);
+	}
+
+	async getHealthStats() {
+		return this.request<HealthStats>("/health/stats");
+	}
+
+	async cleanupHealth(params?: { older_than?: string; status?: string }) {
+		return this.request<HealthStats>("/health/cleanup", {
+			method: "DELETE",
+			body: JSON.stringify(params),
+		});
+	}
+
+	// System endpoints
+	async getSystemStats() {
+		return this.request<SystemInfo>("/system/stats");
+	}
+
+	async getSystemHealth() {
+		return this.request<SystemHealth>("/system/health");
+	}
+
+	async cleanupSystem(params?: {
+		queue_older_than?: string;
+		health_older_than?: string;
+		health_status?: string;
+	}) {
+		return this.request<SystemHealth>("/system/cleanup", {
+			method: "POST",
+			body: JSON.stringify(params),
+		});
+	}
+}
+
+// Export a default instance
+export const apiClient = new APIClient();
