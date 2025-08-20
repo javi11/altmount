@@ -1,0 +1,249 @@
+package api
+
+import (
+	"time"
+
+	"github.com/javi11/altmount/internal/database"
+)
+
+// Common API response structures
+
+// APIResponse represents a standard API response wrapper
+type APIResponse struct {
+	Success bool        `json:"success"`
+	Data    interface{} `json:"data,omitempty"`
+	Error   *APIError   `json:"error,omitempty"`
+	Meta    *APIMeta    `json:"meta,omitempty"`
+}
+
+// APIError represents an error response
+type APIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
+}
+
+// APIMeta represents metadata for paginated responses
+type APIMeta struct {
+	Total  int `json:"total,omitempty"`
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
+	Count  int `json:"count,omitempty"`
+}
+
+// Pagination represents pagination parameters
+type Pagination struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
+// DefaultPagination returns default pagination settings
+func DefaultPagination() Pagination {
+	return Pagination{
+		Limit:  50,
+		Offset: 0,
+	}
+}
+
+// Queue API Types
+
+// QueueItemResponse represents a queue item in API responses
+type QueueItemResponse struct {
+	ID           int64                    `json:"id"`
+	NzbPath      string                   `json:"nzb_path"`
+	WatchRoot    *string                  `json:"watch_root"`
+	Priority     database.QueuePriority   `json:"priority"`
+	Status       database.QueueStatus     `json:"status"`
+	CreatedAt    time.Time                `json:"created_at"`
+	UpdatedAt    time.Time                `json:"updated_at"`
+	StartedAt    *time.Time               `json:"started_at"`
+	CompletedAt  *time.Time               `json:"completed_at"`
+	RetryCount   int                      `json:"retry_count"`
+	MaxRetries   int                      `json:"max_retries"`
+	ErrorMessage *string                  `json:"error_message"`
+	BatchID      *string                  `json:"batch_id"`
+	Metadata     *string                  `json:"metadata"`
+}
+
+// QueueListRequest represents request parameters for listing queue items
+type QueueListRequest struct {
+	Status *database.QueueStatus `json:"status"`
+	Since  *time.Time            `json:"since"`
+	Pagination
+}
+
+// QueueStatsResponse represents queue statistics in API responses
+type QueueStatsResponse struct {
+	TotalQueued         int `json:"total_queued"`
+	TotalProcessing     int `json:"total_processing"`
+	TotalCompleted      int `json:"total_completed"`
+	TotalFailed         int `json:"total_failed"`
+	AvgProcessingTimeMs *int `json:"avg_processing_time_ms"`
+	LastUpdated         time.Time `json:"last_updated"`
+}
+
+// QueueRetryRequest represents request to retry a queue item
+type QueueRetryRequest struct {
+	ResetRetryCount bool `json:"reset_retry_count,omitempty"`
+}
+
+// Health API Types
+
+// HealthItemResponse represents a health record in API responses
+type HealthItemResponse struct {
+	ID            int64                   `json:"id"`
+	FilePath      string                  `json:"file_path"`
+	Status        database.HealthStatus   `json:"status"`
+	LastChecked   time.Time               `json:"last_checked"`
+	LastError     *string                 `json:"last_error"`
+	RetryCount    int                     `json:"retry_count"`
+	MaxRetries    int                     `json:"max_retries"`
+	NextRetryAt   *time.Time              `json:"next_retry_at"`
+	SourceNzbPath *string                 `json:"source_nzb_path"`
+	ErrorDetails  *string                 `json:"error_details"`
+	CreatedAt     time.Time               `json:"created_at"`
+	UpdatedAt     time.Time               `json:"updated_at"`
+}
+
+// HealthListRequest represents request parameters for listing health records
+type HealthListRequest struct {
+	Status *database.HealthStatus `json:"status"`
+	Since  *time.Time             `json:"since"`
+	Pagination
+}
+
+// HealthStatsResponse represents health statistics in API responses
+type HealthStatsResponse struct {
+	Healthy   int `json:"healthy"`
+	Partial   int `json:"partial"`
+	Corrupted int `json:"corrupted"`
+	Total     int `json:"total"`
+}
+
+// HealthRetryRequest represents request to retry a corrupted file
+type HealthRetryRequest struct {
+	ResetRetryCount bool `json:"reset_retry_count,omitempty"`
+}
+
+// HealthCleanupRequest represents request to cleanup health records
+type HealthCleanupRequest struct {
+	OlderThan *time.Time `json:"older_than"`
+	Status    *database.HealthStatus `json:"status"`
+}
+
+// System API Types
+
+// SystemStatsResponse represents combined system statistics
+type SystemStatsResponse struct {
+	Queue  QueueStatsResponse  `json:"queue"`
+	Health HealthStatsResponse `json:"health"`
+	System SystemInfoResponse  `json:"system"`
+}
+
+// SystemInfoResponse represents system information
+type SystemInfoResponse struct {
+	Version    string    `json:"version,omitempty"`
+	StartTime  time.Time `json:"start_time"`
+	Uptime     string    `json:"uptime"`
+	GoVersion  string    `json:"go_version,omitempty"`
+}
+
+// SystemHealthResponse represents system health check result
+type SystemHealthResponse struct {
+	Status     string                 `json:"status"` // "healthy", "degraded", "unhealthy"
+	Timestamp  time.Time              `json:"timestamp"`
+	Components map[string]ComponentHealth `json:"components"`
+}
+
+// ComponentHealth represents health of a system component
+type ComponentHealth struct {
+	Status  string `json:"status"` // "healthy", "degraded", "unhealthy"
+	Message string `json:"message,omitempty"`
+	Details string `json:"details,omitempty"`
+}
+
+// SystemCleanupRequest represents request for system cleanup
+type SystemCleanupRequest struct {
+	QueueOlderThan  *time.Time `json:"queue_older_than"`
+	HealthOlderThan *time.Time `json:"health_older_than"`
+	DryRun          bool       `json:"dry_run,omitempty"`
+}
+
+// SystemCleanupResponse represents cleanup operation results
+type SystemCleanupResponse struct {
+	QueueItemsRemoved  int `json:"queue_items_removed"`
+	HealthRecordsRemoved int `json:"health_records_removed"`
+	DryRun            bool `json:"dry_run"`
+}
+
+// Converter functions
+
+// ToQueueItemResponse converts database.ImportQueueItem to QueueItemResponse
+func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
+	if item == nil {
+		return nil
+	}
+	return &QueueItemResponse{
+		ID:           item.ID,
+		NzbPath:      item.NzbPath,
+		WatchRoot:    item.WatchRoot,
+		Priority:     item.Priority,
+		Status:       item.Status,
+		CreatedAt:    item.CreatedAt,
+		UpdatedAt:    item.UpdatedAt,
+		StartedAt:    item.StartedAt,
+		CompletedAt:  item.CompletedAt,
+		RetryCount:   item.RetryCount,
+		MaxRetries:   item.MaxRetries,
+		ErrorMessage: item.ErrorMessage,
+		BatchID:      item.BatchID,
+		Metadata:     item.Metadata,
+	}
+}
+
+// ToQueueStatsResponse converts database.QueueStats to QueueStatsResponse
+func ToQueueStatsResponse(stats *database.QueueStats) *QueueStatsResponse {
+	if stats == nil {
+		return nil
+	}
+	return &QueueStatsResponse{
+		TotalQueued:         stats.TotalQueued,
+		TotalProcessing:     stats.TotalProcessing,
+		TotalCompleted:      stats.TotalCompleted,
+		TotalFailed:         stats.TotalFailed,
+		AvgProcessingTimeMs: stats.AvgProcessingTimeMs,
+		LastUpdated:         stats.LastUpdated,
+	}
+}
+
+// ToHealthItemResponse converts database.FileHealth to HealthItemResponse
+func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
+	if item == nil {
+		return nil
+	}
+	return &HealthItemResponse{
+		ID:            item.ID,
+		FilePath:      item.FilePath,
+		Status:        item.Status,
+		LastChecked:   item.LastChecked,
+		LastError:     item.LastError,
+		RetryCount:    item.RetryCount,
+		MaxRetries:    item.MaxRetries,
+		NextRetryAt:   item.NextRetryAt,
+		SourceNzbPath: item.SourceNzbPath,
+		ErrorDetails:  item.ErrorDetails,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
+	}
+}
+
+// ToHealthStatsResponse converts health stats map to HealthStatsResponse
+func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResponse {
+	response := &HealthStatsResponse{
+		Healthy:   stats[database.HealthStatusHealthy],
+		Partial:   stats[database.HealthStatusPartial],
+		Corrupted: stats[database.HealthStatusCorrupted],
+	}
+	response.Total = response.Healthy + response.Partial + response.Corrupted
+	return response
+}

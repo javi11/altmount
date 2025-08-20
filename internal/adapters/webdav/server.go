@@ -25,6 +25,7 @@ type webdavServer struct {
 func NewServer(
 	config *Config,
 	fs afero.Fs,
+	mux *http.ServeMux, // Use shared mux instead
 ) (*webdavServer, error) {
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
@@ -41,7 +42,6 @@ func NewServer(
 		},
 	}
 
-	mux := http.NewServeMux()
 	// Add pprof endpoints for profiling only in debug mode
 	if config.Debug {
 		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)

@@ -10,6 +10,7 @@ import (
 // Config represents the complete application configuration
 type Config struct {
 	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav"`
+	API       APIConfig        `yaml:"api" mapstructure:"api"`
 	Database  DatabaseConfig   `yaml:"database" mapstructure:"database"`
 	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
 	MountPath string           `yaml:"mount_path" mapstructure:"mount_path"`
@@ -26,6 +27,14 @@ type WebDAVConfig struct {
 	User     string `yaml:"user" mapstructure:"user"`
 	Password string `yaml:"password" mapstructure:"password"`
 	Debug    bool   `yaml:"debug" mapstructure:"debug"`
+}
+
+// APIConfig represents REST API configuration
+type APIConfig struct {
+	Enabled  bool   `yaml:"enabled" mapstructure:"enabled"`
+	Prefix   string `yaml:"prefix" mapstructure:"prefix"`
+	Username string `yaml:"username" mapstructure:"username"`
+	Password string `yaml:"password" mapstructure:"password"`
 }
 
 // DatabaseConfig represents database configuration
@@ -72,6 +81,12 @@ func DefaultConfig() *Config {
 			User:     "usenet",
 			Password: "usenet",
 			Debug:    false,
+		},
+		API: APIConfig{
+			Enabled:  true,
+			Prefix:   "/api",
+			Username: "", // Default: no authentication
+			Password: "", // Default: no authentication
 		},
 		Database: DatabaseConfig{
 			Path: "altmount.db",

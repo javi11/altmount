@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/javi11/altmount/internal/adapters/webdav"
+	"github.com/javi11/altmount/internal/api"
+	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/nntppool"
 	"github.com/spf13/cobra"
@@ -70,13 +73,36 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer nsys.Close()
 
-	// Create WebDAV server
+	// Create shared HTTP mux
+	mux := http.NewServeMux()
+
+	// Create API server if enabled
+	if config.API.Enabled {
+		// Create repositories for API access
+		dbConn := nsys.Database().Connection()
+		mainRepo := database.NewRepository(dbConn)
+		healthRepo := database.NewHealthRepository(dbConn)
+		
+		// Create API server configuration
+		apiConfig := &api.Config{
+			Enabled:  config.API.Enabled,
+			Prefix:   config.API.Prefix,
+			Username: config.API.Username,
+			Password: config.API.Password,
+		}
+		
+		// Create API server with shared mux
+		api.NewServer(apiConfig, mainRepo, healthRepo, mux)
+		logger.Info("API server enabled", "prefix", config.API.Prefix)
+	}
+	
+	// Create WebDAV server with shared mux
 	server, err := webdav.NewServer(&webdav.Config{
 		Port:  config.WebDAV.Port,
 		User:  config.WebDAV.User,
 		Pass:  config.WebDAV.Password,
 		Debug: config.WebDAV.Debug || config.Debug,
-	}, nsys.FileSystem())
+	}, nsys.FileSystem(), mux)
 	if err != nil {
 		logger.Error("failed to start webdav", "err", err)
 		return err
