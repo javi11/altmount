@@ -2,10 +2,10 @@ import {
 	Activity,
 	AlertTriangle,
 	Database,
+	Folder,
 	Heart,
 	Home,
 	List,
-	Server,
 	Settings,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -26,6 +26,11 @@ const navigation = [
 		name: "Health",
 		href: "/health",
 		icon: Heart,
+	},
+	{
+		name: "Files",
+		href: "/files",
+		icon: Folder,
 	},
 	{
 		name: "System",
@@ -66,13 +71,16 @@ export function Sidebar() {
 			<div className="p-4">
 				<div className="flex items-center space-x-3 mb-8">
 					<div className="avatar placeholder">
-						<div className="bg-primary text-primary-content rounded-full w-10">
-							<Server className="h-6 w-6" />
+						<div className=" w-12 h-12 flex items-center justify-center overflow-hidden">
+							<img
+								src="/logo.png"
+								alt="AltMount Logo"
+								className="w-12 h-12 object-contain"
+							/>
 						</div>
 					</div>
 					<div>
 						<h2 className="font-bold text-lg">AltMount</h2>
-						<p className="text-sm text-base-content/70">Media Server</p>
 					</div>
 				</div>
 

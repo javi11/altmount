@@ -1,4 +1,12 @@
-import type { APIResponse, FileHealth, HealthStats, QueueItem, QueueStats, SystemHealth, SystemInfo } from "../types/api";
+import type {
+	APIResponse,
+	FileHealth,
+	HealthStats,
+	QueueItem,
+	QueueStats,
+	SystemHealth,
+	SystemInfo,
+} from "../types/api";
 
 export class APIError extends Error {
 	public status: number;
@@ -100,9 +108,12 @@ export class APIClient {
 		if (olderThan) searchParams.set("older_than", olderThan);
 
 		const query = searchParams.toString();
-		return this.request<QueueStats>(`/queue/completed${query ? `?${query}` : ""}`, {
-			method: "DELETE",
-		});
+		return this.request<QueueStats>(
+			`/queue/completed${query ? `?${query}` : ""}`,
+			{
+				method: "DELETE",
+			},
+		);
 	}
 
 	// Health endpoints
@@ -145,7 +156,9 @@ export class APIClient {
 		if (params?.offset) searchParams.set("offset", params.offset.toString());
 
 		const query = searchParams.toString();
-		return this.request<FileHealth[]>(`/health/corrupted${query ? `?${query}` : ""}`);
+		return this.request<FileHealth[]>(
+			`/health/corrupted${query ? `?${query}` : ""}`,
+		);
 	}
 
 	async getHealthStats() {

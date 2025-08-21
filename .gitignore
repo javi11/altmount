@@ -34,3 +34,4 @@ example/
 
 ./altmount
 *.db*
+frontend/node_modules

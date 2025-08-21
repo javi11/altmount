@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/layout/Layout";
 import { queryClient } from "./lib/queryClient";
 import { Dashboard } from "./pages/Dashboard";
+import { FilesPage } from "./pages/FilesPage";
 import { HealthPage } from "./pages/HealthPage";
 import { QueuePage } from "./pages/QueuePage";
 import { SystemPage } from "./pages/SystemPage";
@@ -18,6 +19,7 @@ function App() {
 							<Route index element={<Dashboard />} />
 							<Route path="queue" element={<QueuePage />} />
 							<Route path="health" element={<HealthPage />} />
+							<Route path="files" element={<FilesPage />} />
 							<Route path="system" element={<SystemPage />} />
 						</Route>
 					</Routes>

@@ -49,7 +49,7 @@ func NewServer(
 		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
 		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
 	}
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/webdav", func(w http.ResponseWriter, r *http.Request) {
 		username, password, _ := r.BasicAuth()
 
 		if username != config.User || password != config.Pass {

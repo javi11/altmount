@@ -247,9 +247,7 @@ export function QueuePage() {
 													>
 														<MoreHorizontal className="h-4 w-4" />
 													</button>
-													<ul
-														className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48"
-													>
+													<ul className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48">
 														{(item.status === QueueStatus.FAILED ||
 															item.status === QueueStatus.COMPLETED) && (
 															<>
@@ -327,7 +325,11 @@ export function QueuePage() {
 						<button type="button" className="join-item btn btn-active">
 							Page {page + 1}
 						</button>
-						<button type="button" className="join-item btn" onClick={() => setPage(page + 1)}>
+						<button
+							type="button"
+							className="join-item btn"
+							onClick={() => setPage(page + 1)}
+						>
 							Next
 						</button>
 					</div>

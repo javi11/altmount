@@ -100,7 +100,8 @@ export function HealthPage() {
 				<div>
 					<h1 className="text-3xl font-bold">Health Monitoring</h1>
 					<p className="text-base-content/70">
-						Monitor file integrity and health status
+						Monitor file integrity - healthy files are automatically removed
+						from tracking
 					</p>
 				</div>
 				<div className="flex gap-2">
@@ -116,7 +117,7 @@ export function HealthPage() {
 						Refresh
 					</button>
 					<button
-						type="button"	
+						type="button"
 						className="btn btn-warning"
 						onClick={handleCleanup}
 						disabled={cleanupHealth.isPending}
@@ -131,19 +132,14 @@ export function HealthPage() {
 			{stats && (
 				<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 					<div className="stat bg-base-100 rounded-box shadow">
-						<div className="stat-title">Total Files</div>
+						<div className="stat-title">Files Tracked</div>
 						<div className="stat-value text-primary">{stats.total}</div>
-						<div className="stat-desc">Being monitored</div>
+						<div className="stat-desc">Issues being monitored</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
-						<div className="stat-title">Healthy</div>
+						<div className="stat-title">Recently Healed</div>
 						<div className="stat-value text-success">{stats.healthy}</div>
-						<div className="stat-desc">
-							{stats.total > 0
-								? Math.round((stats.healthy / stats.total) * 100)
-								: 0}
-							% of total
-						</div>
+						<div className="stat-desc">Auto-removed from tracking</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Partial</div>
@@ -298,9 +294,7 @@ export function HealthPage() {
 													>
 														<MoreHorizontal className="h-4 w-4" />
 													</button>
-													<ul
-														className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48"
-													>
+													<ul className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48">
 														{(item.status === HealthStatus.CORRUPTED ||
 															item.status === HealthStatus.PARTIAL) && (
 															<>
@@ -363,7 +357,7 @@ export function HealthPage() {
 									? "Try adjusting your filters"
 									: showCorruptedOnly
 										? "All your files are healthy!"
-										: "No files are being monitored yet"}
+										: "No unhealthy files - healthy files are auto-removed"}
 							</p>
 						</div>
 					)}
@@ -385,7 +379,11 @@ export function HealthPage() {
 						<button type="button" className="join-item btn btn-active">
 							Page {page + 1}
 						</button>
-						<button type="button" className="join-item btn" onClick={() => setPage(page + 1)}>
+						<button
+							type="button"
+							className="join-item btn"
+							onClick={() => setPage(page + 1)}
+						>
 							Next
 						</button>
 					</div>

@@ -200,6 +200,27 @@ func (r *HealthRepository) GetHealthStats() (map[HealthStatus]int, error) {
 	return stats, nil
 }
 
+// DeleteHealthRecord removes a specific health record from the database
+func (r *HealthRepository) DeleteHealthRecord(filePath string) error {
+	query := `DELETE FROM file_health WHERE file_path = ?`
+	
+	result, err := r.db.Exec(query, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to delete health record: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no health record found to delete: %s", filePath)
+	}
+
+	return nil
+}
+
 // CleanupHealthRecords removes health records for files that no longer exist
 func (r *HealthRepository) CleanupHealthRecords(existingFiles []string) error {
 	if len(existingFiles) == 0 {

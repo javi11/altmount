@@ -38,15 +38,17 @@ export function Navbar({ onMenuClick }: NavbarProps) {
 
 				{/* Notifications */}
 				<div className="dropdown dropdown-end">
-					<button type="button" tabIndex={0} className="btn btn-ghost btn-circle">
+					<button
+						type="button"
+						tabIndex={0}
+						className="btn btn-ghost btn-circle"
+					>
 						<div className="indicator">
 							<Bell className="h-5 w-5" />
 							<span className="badge badge-xs badge-primary indicator-item"></span>
 						</div>
 					</button>
-					<div
-						className="dropdown-content card card-compact bg-base-100 shadow-lg w-64 mt-3"
-					>
+					<div className="dropdown-content card card-compact bg-base-100 shadow-lg w-64 mt-3">
 						<div className="card-body">
 							<span className="font-bold text-lg">Notifications</span>
 							<span className="text-info">No new notifications</span>
@@ -56,12 +58,14 @@ export function Navbar({ onMenuClick }: NavbarProps) {
 
 				{/* Settings */}
 				<div className="dropdown dropdown-end">
-					<button type="button" tabIndex={0} className="btn btn-ghost btn-circle">
+					<button
+						type="button"
+						tabIndex={0}
+						className="btn btn-ghost btn-circle"
+					>
 						<Settings className="h-5 w-5" />
 					</button>
-					<ul
-						className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-52 mt-3"
-					>
+					<ul className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-52 mt-3">
 						<li>
 							<span className="flex items-center">
 								<User className="h-4 w-4" />

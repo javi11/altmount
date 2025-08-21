@@ -310,7 +310,7 @@ export function SystemPage() {
 									<span className="label-text">System Maintenance</span>
 								</label>
 								<button
-								type="button"
+									type="button"
 									className="btn btn-outline btn-warning"
 									onClick={handleSystemCleanup}
 									disabled={cleanupLoading}

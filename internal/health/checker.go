@@ -369,7 +369,7 @@ func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID strin
 func (hc *HealthChecker) handleHealthCheckResult(event HealthEvent, fileHealth *database.FileHealth) {
 	switch event.Type {
 	case EventTypeFileRecovered:
-		// File is now healthy - update both metadata and database
+		// File is now healthy - update metadata and delete from health database
 		log.Printf("File recovered: %s", event.FilePath)
 		
 		// Update metadata status
@@ -377,9 +377,11 @@ func (hc *HealthChecker) handleHealthCheckResult(event HealthEvent, fileHealth *
 			log.Printf("Failed to update metadata status for %s: %v", event.FilePath, err)
 		}
 		
-		// Update database status
-		if err := hc.healthRepo.UpdateFileHealth(event.FilePath, database.HealthStatusHealthy, nil, nil, nil); err != nil {
-			log.Printf("Failed to update health status for %s: %v", event.FilePath, err)
+		// Delete health record since file is now healthy
+		if err := hc.healthRepo.DeleteHealthRecord(event.FilePath); err != nil {
+			log.Printf("Failed to delete health record for recovered file %s: %v", event.FilePath, err)
+		} else {
+			log.Printf("Removed health record for recovered file: %s", event.FilePath)
 		}
 
 	case EventTypeFileCorrupted:

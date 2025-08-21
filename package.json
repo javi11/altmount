@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "webdav": "^5.8.0"
+  }
+}
