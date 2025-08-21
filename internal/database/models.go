@@ -77,3 +77,19 @@ type FileHealth struct {
 	CreatedAt     time.Time     `db:"created_at"`
 	UpdatedAt     time.Time     `db:"updated_at"`
 }
+
+// User represents a user account in the system
+type User struct {
+	ID           int64      `db:"id"`
+	UserID       string     `db:"user_id"`        // Unique identifier from auth provider
+	Email        *string    `db:"email"`          // User email address (nullable)
+	Name         *string    `db:"name"`           // User display name (nullable)
+	AvatarURL    *string    `db:"avatar_url"`     // User avatar image URL (nullable)
+	Provider     string     `db:"provider"`       // Auth provider (direct, github, google, dev, etc.)
+	ProviderID   *string    `db:"provider_id"`    // Provider-specific user ID (nullable)
+	PasswordHash *string    `db:"password_hash"`  // Bcrypt password hash for direct auth (nullable)
+	IsAdmin      bool       `db:"is_admin"`       // Admin privileges flag
+	CreatedAt    time.Time  `db:"created_at"`     // Account creation timestamp
+	UpdatedAt    time.Time  `db:"updated_at"`     // Last profile update timestamp
+	LastLogin    *time.Time `db:"last_login"`     // Last login timestamp (nullable)
+}

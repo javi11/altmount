@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
 )
 
@@ -30,22 +31,26 @@ type Server struct {
 	config          *Config
 	queueRepo       *database.Repository
 	healthRepo      *database.HealthRepository
+	authService     *auth.Service
+	userRepo        *database.UserRepository
 	startTime       time.Time
 	mux             *http.ServeMux
 }
 
 // NewServer creates a new API server that registers routes on the provided mux
-func NewServer(config *Config, queueRepo *database.Repository, healthRepo *database.HealthRepository, mux *http.ServeMux) *Server {
+func NewServer(config *Config, queueRepo *database.Repository, healthRepo *database.HealthRepository, authService *auth.Service, userRepo *database.UserRepository, mux *http.ServeMux) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
 	server := &Server{
-		config:     config,
-		queueRepo:  queueRepo,
-		healthRepo: healthRepo,
-		startTime:  time.Now(),
-		mux:        mux,
+		config:      config,
+		queueRepo:   queueRepo,
+		healthRepo:  healthRepo,
+		authService: authService,
+		userRepo:    userRepo,
+		startTime:   time.Now(),
+		mux:         mux,
 	}
 
 	server.setupRoutes()
@@ -90,6 +95,28 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	apiMux.HandleFunc("GET /system/stats", s.handleGetSystemStats)
 	apiMux.HandleFunc("GET /system/health", s.handleGetSystemHealth)
 	apiMux.HandleFunc("POST /system/cleanup", s.handleSystemCleanup)
+
+	// Authentication endpoints (if auth service is available)
+	if s.authService != nil {
+		// Direct authentication endpoints
+		apiMux.HandleFunc("POST /auth/login", s.handleDirectLogin)
+		apiMux.HandleFunc("POST /auth/register", s.handleRegister)
+		apiMux.HandleFunc("GET /auth/registration-status", s.handleCheckRegistration)
+		
+		// Protected API endpoints for user management (require authentication)
+		tokenService := s.authService.TokenService()
+		if tokenService != nil {
+			authMiddleware := auth.RequireAuth(tokenService, s.userRepo)
+			apiMux.Handle("GET /user", authMiddleware(http.HandlerFunc(s.handleAuthUser)))
+			apiMux.Handle("POST /user/refresh", authMiddleware(http.HandlerFunc(s.handleAuthRefresh)))
+			apiMux.Handle("POST /user/logout", authMiddleware(http.HandlerFunc(s.handleAuthLogout)))
+			
+			// Admin endpoints (require admin privileges)
+			adminMiddleware := auth.RequireAdmin(tokenService, s.userRepo)
+			apiMux.Handle("GET /users", adminMiddleware(http.HandlerFunc(s.handleListUsers)))
+			apiMux.Handle("PUT /users/{user_id}/admin", adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdmin)))
+		}
+	}
 	
 	apiMux.ServeHTTP(w, r)
 }
@@ -102,7 +129,15 @@ func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
 	handler = ContentTypeMiddleware(handler)
 	handler = CORSMiddleware(handler)
 	
-	// Apply authentication if configured
+	// Apply JWT authentication middleware for user context (optional)
+	if s.authService != nil && s.userRepo != nil {
+		tokenService := s.authService.TokenService()
+		if tokenService != nil {
+			handler = auth.JWTMiddleware(tokenService, s.userRepo)(handler)
+		}
+	}
+	
+	// Apply basic authentication if configured
 	if s.config.Username != "" && s.config.Password != "" {
 		handler = BasicAuthMiddleware(s.config.Username, s.config.Password)(handler)
 	}

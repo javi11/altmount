@@ -30,11 +30,10 @@ export function QueueChart() {
 	}
 
 	const data = [
-		{ name: "Pending", value: stats.pending, fill: "#f59e0b" },
-		{ name: "Processing", value: stats.processing, fill: "#3b82f6" },
-		{ name: "Completed", value: stats.completed, fill: "#10b981" },
-		{ name: "Failed", value: stats.failed, fill: "#ef4444" },
-		{ name: "Retrying", value: stats.retrying, fill: "#f97316" },
+		{ name: "Queued", value: stats.total_queued, fill: "#f59e0b" },
+		{ name: "Processing", value: stats.total_processing, fill: "#3b82f6" },
+		{ name: "Completed", value: stats.total_completed, fill: "#10b981" },
+		{ name: "Failed", value: stats.total_failed, fill: "#ef4444" },
 	];
 
 	return (

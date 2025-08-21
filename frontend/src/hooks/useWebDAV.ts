@@ -1,52 +1,76 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { webdavClient } from "../services/webdavClient";
-import type { WebDAVConnection, WebDAVDirectory } from "../types/webdav";
+import type { WebDAVDirectory } from "../types/webdav";
 
 export function useWebDAVConnection() {
 	const [isConnected, setIsConnected] = useState(false);
+	const [hasConnectionFailed, setHasConnectionFailed] = useState(false);
 	const queryClient = useQueryClient();
 
 	const connect = useMutation({
-		mutationFn: async (connection: WebDAVConnection) => {
-			webdavClient.connect(connection);
+		mutationFn: async () => {
+			webdavClient.connect(); // Connect using cookie authentication
 			const success = await webdavClient.testConnection();
 			if (!success) {
-				throw new Error("Failed to connect to WebDAV server");
+				throw new Error("Failed to connect to WebDAV server - authentication required");
 			}
 			return success;
 		},
 		onSuccess: () => {
 			setIsConnected(true);
+			setHasConnectionFailed(false); // Reset failure flag on success
 			// Invalidate all WebDAV queries to refresh with new connection
 			queryClient.invalidateQueries({ queryKey: ["webdav"] });
 		},
 		onError: () => {
 			setIsConnected(false);
+			setHasConnectionFailed(true); // Mark connection as failed
 		},
 	});
 
 	return {
 		isConnected,
+		hasConnectionFailed,
 		connect: connect.mutate,
-		isConnecting: connect.isPending,
+		isConnecting: connect.isPending && !isConnected,
 		connectionError: connect.error,
 	};
 }
 
-export function useWebDAVDirectory(path: string) {
+export function useWebDAVDirectory(path: string, isConnected = true, hasConnectionFailed = false) {
 	return useQuery<WebDAVDirectory>({
 		queryKey: ["webdav", "directory", path],
 		queryFn: () => webdavClient.listDirectory(path),
-		enabled: webdavClient.isConnected(),
+		// Only enable based on React state - the mutationFn already verifies connection
+		enabled: isConnected && !hasConnectionFailed,
 		staleTime: 30000, // 30 seconds
 		retry: (failureCount, error) => {
-			// Don't retry on authentication errors
-			if (error.message.includes("401") || error.message.includes("403")) {
+			// Don't retry on client errors (4xx) or server errors (5xx)
+			const errorMessage = error.message.toLowerCase();
+			
+			// Client errors - don't retry
+			if (errorMessage.includes("401") || 
+				errorMessage.includes("403") || 
+				errorMessage.includes("404") || 
+				errorMessage.includes("400")) {
 				return false;
 			}
-			return failureCount < 2;
+			
+			// Server errors - don't retry to prevent bombardment
+			if (errorMessage.includes("500") || 
+				errorMessage.includes("502") || 
+				errorMessage.includes("503") || 
+				errorMessage.includes("504")) {
+				return false;
+			}
+			
+			// Connection/network errors - only retry once
+			return failureCount < 1;
 		},
+		// Disable background refetching on error to prevent bombardment
+		refetchOnWindowFocus: false,
+		refetchOnReconnect: false,
 	});
 }
 

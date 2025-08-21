@@ -1,19 +1,71 @@
 import { AuthType, createClient, type FileStat } from "webdav";
 import type {
-	WebDAVConnection,
 	WebDAVDirectory,
 	WebDAVFile,
 } from "../types/webdav";
 
 export class WebDAVClient {
 	private client: ReturnType<typeof createClient> | null = null;
+	
+	// Parse and enhance error messages for better handling
+	private parseError(error: any, operation: string, path?: string): Error {
+		const pathInfo = path ? ` (path: ${path})` : '';
+		
+		// Handle network/connection errors
+		if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+			return new Error(`Network error during ${operation}${pathInfo}: Unable to connect to WebDAV server`);
+		}
+		
+		// Handle HTTP status errors
+		if (error.status || error.response?.status) {
+			const status = error.status || error.response.status;
+			switch (status) {
+				case 401:
+					return new Error(`401 Unauthorized: Authentication required for ${operation}${pathInfo}`);
+				case 403:
+					return new Error(`403 Forbidden: Access denied for ${operation}${pathInfo}`);
+				case 404:
+					return new Error(`404 Not Found: Path does not exist for ${operation}${pathInfo}`);
+				case 500:
+					return new Error(`500 Server Error: WebDAV server error during ${operation}${pathInfo}`);
+				case 502:
+					return new Error(`502 Bad Gateway: WebDAV server unavailable during ${operation}${pathInfo}`);
+				case 503:
+					return new Error(`503 Service Unavailable: WebDAV server overloaded during ${operation}${pathInfo}`);
+				default:
+					return new Error(`${status} Error: HTTP error during ${operation}${pathInfo}`);
+			}
+		}
+		
+		// Handle timeout errors
+		if (error.message && error.message.toLowerCase().includes('timeout')) {
+			return new Error(`Timeout error during ${operation}${pathInfo}: Request took too long`);
+		}
+		
+		// Handle other WebDAV-specific errors
+		if (error.message) {
+			return new Error(`${operation} failed${pathInfo}: ${error.message}`);
+		}
+		
+		// Fallback
+		return new Error(`Unknown error during ${operation}${pathInfo}`);
+	}
 
-	connect(connection: WebDAVConnection) {
-		this.client = createClient(connection.url, {
+	connect() {
+		// Use relative /webdav path and let browser handle authentication via cookies
+		// No credentials needed since we use cookie-based authentication
+		const clientOptions = {
 			authType: AuthType.Auto,
-			username: connection.username,
-			password: connection.password,
-		});
+			// Add timeout to prevent hanging requests
+			timeout: 10000, // 10 seconds
+			// Add headers for better error handling
+			headers: {
+				'Accept': 'application/xml,text/xml,*/*',
+				'Content-Type': 'application/xml; charset=utf-8',
+			},
+		};
+
+		this.client = createClient("/webdav", clientOptions);
 	}
 
 	isConnected(): boolean {
@@ -50,7 +102,7 @@ export class WebDAVClient {
 			};
 		} catch (error) {
 			console.error("Failed to list directory:", error);
-			throw new Error(`Failed to list directory: ${path}`);
+			throw this.parseError(error, 'list directory', path);
 		}
 	}
 
@@ -66,7 +118,7 @@ export class WebDAVClient {
 			return new Blob([buffer as ArrayBuffer]);
 		} catch (error) {
 			console.error("Failed to download file:", error);
-			throw new Error(`Failed to download file: ${path}`);
+			throw this.parseError(error, 'download file', path);
 		}
 	}
 
@@ -88,7 +140,7 @@ export class WebDAVClient {
 			};
 		} catch (error) {
 			console.error("Failed to get file info:", error);
-			throw new Error(`Failed to get file info: ${path}`);
+			throw this.parseError(error, 'get file info', path);
 		}
 	}
 
@@ -101,7 +153,7 @@ export class WebDAVClient {
 			await this.client.deleteFile(path);
 		} catch (error) {
 			console.error("Failed to delete file:", error);
-			throw new Error(`Failed to delete file: ${path}`);
+			throw this.parseError(error, 'delete file', path);
 		}
 	}
 
@@ -115,6 +167,7 @@ export class WebDAVClient {
 			return true;
 		} catch (error) {
 			console.error("WebDAV connection test failed:", error);
+			// Don't throw error for connection test, just return false
 			return false;
 		}
 	}

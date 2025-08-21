@@ -143,36 +143,3 @@ export const useCleanupHealth = () => {
 		},
 	});
 };
-
-// System hooks
-export const useSystemStats = () => {
-	return useQuery({
-		queryKey: ["system", "stats"],
-		queryFn: () => apiClient.getSystemStats(),
-		refetchInterval: 30000, // Refetch every 30 seconds
-	});
-};
-
-export const useSystemHealth = () => {
-	return useQuery({
-		queryKey: ["system", "health"],
-		queryFn: () => apiClient.getSystemHealth(),
-		refetchInterval: 10000, // Refetch every 10 seconds
-	});
-};
-
-export const useSystemCleanup = () => {
-	const queryClient = useQueryClient();
-
-	return useMutation({
-		mutationFn: (params?: {
-			queue_older_than?: string;
-			health_older_than?: string;
-			health_status?: string;
-		}) => apiClient.cleanupSystem(params),
-		onSuccess: () => {
-			// Invalidate all queries to refresh data after cleanup
-			queryClient.invalidateQueries();
-		},
-	});
-};

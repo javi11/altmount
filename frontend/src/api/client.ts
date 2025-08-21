@@ -1,11 +1,12 @@
 import type {
 	APIResponse,
+	AuthResponse,
 	FileHealth,
 	HealthStats,
 	QueueItem,
 	QueueStats,
-	SystemHealth,
-	SystemInfo,
+	User,
+	UserAdminUpdateRequest,
 } from "../types/api";
 
 export class APIError extends Error {
@@ -172,24 +173,60 @@ export class APIClient {
 		});
 	}
 
-	// System endpoints
-	async getSystemStats() {
-		return this.request<SystemInfo>("/system/stats");
+	// Authentication endpoints
+	async getCurrentUser() {
+		return this.request<User>("/user");
 	}
 
-	async getSystemHealth() {
-		return this.request<SystemHealth>("/system/health");
-	}
-
-	async cleanupSystem(params?: {
-		queue_older_than?: string;
-		health_older_than?: string;
-		health_status?: string;
-	}) {
-		return this.request<SystemHealth>("/system/cleanup", {
+	async refreshToken() {
+		return this.request<AuthResponse>("/user/refresh", {
 			method: "POST",
-			body: JSON.stringify(params),
 		});
+	}
+
+	async logout() {
+		return this.request<AuthResponse>("/user/logout", {
+			method: "POST",
+		});
+	}
+
+	async getUsers(params?: { limit?: number; offset?: number }) {
+		const searchParams = new URLSearchParams();
+		if (params?.limit) searchParams.set("limit", params.limit.toString());
+		if (params?.offset) searchParams.set("offset", params.offset.toString());
+
+		const query = searchParams.toString();
+		return this.request<User[]>(`/users${query ? `?${query}` : ""}`);
+	}
+
+	async updateUserAdmin(userId: string, data: UserAdminUpdateRequest) {
+		return this.request<AuthResponse>(`/users/${userId}/admin`, {
+			method: "PUT",
+			body: JSON.stringify(data),
+		});
+	}
+
+	// Direct authentication methods
+	async login(username: string, password: string) {
+		return this.request<AuthResponse>("/auth/login", {
+			method: "POST",
+			body: JSON.stringify({ username, password }),
+		});
+	}
+
+	async register(username: string, email: string | undefined, password: string) {
+		return this.request<AuthResponse>("/auth/register", {
+			method: "POST",
+			body: JSON.stringify({ 
+				username, 
+				email: email || undefined, 
+				password
+			}),
+		});
+	}
+
+	async checkRegistrationStatus() {
+		return this.request<{ registration_enabled: boolean; user_count: number }>("/auth/registration-status");
 	}
 }
 

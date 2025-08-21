@@ -13,12 +13,6 @@ export interface WebDAVDirectory {
 	files: WebDAVFile[];
 }
 
-export interface WebDAVConnection {
-	url: string;
-	username: string;
-	password: string;
-}
-
 export interface BreadcrumbItem {
 	name: string;
 	path: string;

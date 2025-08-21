@@ -9,8 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/internal/adapters/webdav"
 	"github.com/javi11/altmount/internal/api"
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/nntppool"
@@ -76,12 +78,35 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create shared HTTP mux
 	mux := http.NewServeMux()
 
+	// Declare auth services at function scope so WebDAV can access them
+	var authService *auth.Service
+	var userRepo *database.UserRepository
+
 	// Create API server if enabled
 	if config.API.Enabled {
 		// Create repositories for API access
 		dbConn := nsys.Database().Connection()
 		mainRepo := database.NewRepository(dbConn)
 		healthRepo := database.NewHealthRepository(dbConn)
+		userRepo = database.NewUserRepository(dbConn)
+		
+		// Create authentication service
+		authConfig := auth.LoadConfigFromEnv()
+		if authConfig != nil {
+			var err error
+			authService, err = auth.NewService(authConfig, userRepo)
+			if err != nil {
+				logger.Warn("Failed to create authentication service", "err", err)
+			} else {
+				// Setup OAuth providers
+				err = authService.SetupProviders(authConfig)
+				if err != nil {
+					logger.Warn("Failed to setup OAuth providers", "err", err)
+				} else {
+					logger.Info("Authentication service initialized")
+				}
+			}
+		}
 		
 		// Create API server configuration
 		apiConfig := &api.Config{
@@ -92,17 +117,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 		
 		// Create API server with shared mux
-		api.NewServer(apiConfig, mainRepo, healthRepo, mux)
+		api.NewServer(apiConfig, mainRepo, healthRepo, authService, userRepo, mux)
 		logger.Info("API server enabled", "prefix", config.API.Prefix)
 	}
 	
 	// Create WebDAV server with shared mux
+	var tokenService *token.Service
+	var webdavUserRepo *database.UserRepository
+	
+	// Pass authentication services if available
+	if authService != nil {
+		tokenService = authService.TokenService()
+		webdavUserRepo = userRepo
+	}
+	
 	server, err := webdav.NewServer(&webdav.Config{
 		Port:  config.WebDAV.Port,
 		User:  config.WebDAV.User,
 		Pass:  config.WebDAV.Password,
 		Debug: config.WebDAV.Debug || config.Debug,
-	}, nsys.FileSystem(), mux)
+	}, nsys.FileSystem(), mux, tokenService, webdavUserRepo)
 	if err != nil {
 		logger.Error("failed to start webdav", "err", err)
 		return err

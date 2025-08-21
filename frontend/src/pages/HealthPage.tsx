@@ -1,12 +1,9 @@
 import {
-	Activity,
 	AlertTriangle,
-	Filter,
 	Heart,
 	MoreHorizontal,
 	PlayCircle,
 	RefreshCw,
-	Search,
 	Shield,
 	Trash2,
 } from "lucide-react";
@@ -18,7 +15,6 @@ import {
 	useCleanupHealth,
 	useCorruptedFiles,
 	useDeleteHealthItem,
-	useHealth,
 	useHealthStats,
 	useRetryHealthItem,
 } from "../hooks/useApi";
@@ -27,23 +23,10 @@ import { type FileHealth, HealthStatus } from "../types/api";
 
 export function HealthPage() {
 	const [page, setPage] = useState(0);
-	const [statusFilter, setStatusFilter] = useState<string>("");
 	const [searchTerm, setSearchTerm] = useState("");
-	const [showCorruptedOnly, setShowCorruptedOnly] = useState(false);
 
 	const pageSize = 20;
-	const {
-		data: healthData,
-		isLoading,
-		error,
-		refetch,
-	} = useHealth({
-		limit: pageSize,
-		offset: page * pageSize,
-		status: statusFilter || undefined,
-	});
-
-	const { data: corruptedData, isLoading: corruptedLoading } =
+	const { data, isLoading, refetch, error } =
 		useCorruptedFiles({
 			limit: pageSize,
 			offset: page * pageSize,
@@ -74,10 +57,7 @@ export function HealthPage() {
 		}
 	};
 
-	const displayData = showCorruptedOnly ? corruptedData : healthData;
-	const displayLoading = showCorruptedOnly ? corruptedLoading : isLoading;
-
-	const filteredData = displayData?.filter(
+	const filteredData = data?.filter(
 		(item: FileHealth) =>
 			!searchTerm ||
 			item.file_path.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -109,10 +89,10 @@ export function HealthPage() {
 						type="button"
 						className="btn btn-outline"
 						onClick={() => refetch()}
-						disabled={displayLoading}
+						disabled={isLoading}
 					>
 						<RefreshCw
-							className={`h-4 w-4 ${displayLoading ? "animate-spin" : ""}`}
+							className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
 						/>
 						Refresh
 					</button>
@@ -137,11 +117,6 @@ export function HealthPage() {
 						<div className="stat-desc">Issues being monitored</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
-						<div className="stat-title">Recently Healed</div>
-						<div className="stat-value text-success">{stats.healthy}</div>
-						<div className="stat-desc">Auto-removed from tracking</div>
-					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Partial</div>
 						<div className="stat-value text-warning">{stats.partial}</div>
 						<div className="stat-desc">Need attention</div>
@@ -154,26 +129,6 @@ export function HealthPage() {
 				</div>
 			)}
 
-			{/* View Toggle */}
-			<div className="tabs tabs-boxed bg-base-100 shadow-lg">
-				<button
-					type="button"
-					className={`tab ${!showCorruptedOnly ? "tab-active" : ""}`}
-					onClick={() => setShowCorruptedOnly(false)}
-				>
-					<Activity className="h-4 w-4 mr-2" />
-					All Files
-				</button>
-				<button
-					type="button"
-					className={`tab ${showCorruptedOnly ? "tab-active" : ""}`}
-					onClick={() => setShowCorruptedOnly(true)}
-				>
-					<AlertTriangle className="h-4 w-4 mr-2" />
-					Corrupted Only ({stats?.corrupted || 0})
-				</button>
-			</div>
-
 			{/* Filters and Search */}
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body">
@@ -181,9 +136,6 @@ export function HealthPage() {
 						{/* Search */}
 						<div className="form-control flex-1">
 							<div className="input-group">
-								<span>
-									<Search className="h-4 w-4" />
-								</span>
 								<input
 									type="text"
 									placeholder="Search files..."
@@ -193,27 +145,6 @@ export function HealthPage() {
 								/>
 							</div>
 						</div>
-
-						{/* Status Filter - only show if not in corrupted-only mode */}
-						{!showCorruptedOnly && (
-							<div className="form-control">
-								<div className="input-group">
-									<span>
-										<Filter className="h-4 w-4" />
-									</span>
-									<select
-										className="select select-bordered"
-										value={statusFilter}
-										onChange={(e) => setStatusFilter(e.target.value)}
-									>
-										<option value="">All Status</option>
-										<option value={HealthStatus.HEALTHY}>Healthy</option>
-										<option value={HealthStatus.PARTIAL}>Partial</option>
-										<option value={HealthStatus.CORRUPTED}>Corrupted</option>
-									</select>
-								</div>
-							</div>
-						)}
 					</div>
 				</div>
 			</div>
@@ -221,7 +152,7 @@ export function HealthPage() {
 			{/* Health Table */}
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body p-0">
-					{displayLoading ? (
+					{isLoading ? (
 						<LoadingTable columns={6} />
 					) : filteredData && filteredData.length > 0 ? (
 						<div className="overflow-x-auto">
@@ -348,16 +279,12 @@ export function HealthPage() {
 						<div className="flex flex-col items-center justify-center py-12">
 							<Shield className="h-12 w-12 text-base-content/30 mb-4" />
 							<h3 className="text-lg font-semibold text-base-content/70">
-								{showCorruptedOnly
-									? "No corrupted files found"
-									: "No health records found"}
+								No corrupted files found
 							</h3>
 							<p className="text-base-content/50">
-								{searchTerm || statusFilter
+								{searchTerm 
 									? "Try adjusting your filters"
-									: showCorruptedOnly
-										? "All your files are healthy!"
-										: "No unhealthy files - healthy files are auto-removed"}
+									: "All your files are healthy!"}
 							</p>
 						</div>
 					)}

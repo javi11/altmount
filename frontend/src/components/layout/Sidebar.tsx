@@ -6,7 +6,6 @@ import {
 	Heart,
 	Home,
 	List,
-	Settings,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useHealthStats, useQueueStats } from "../../hooks/useApi";
@@ -31,12 +30,7 @@ const navigation = [
 		name: "Files",
 		href: "/files",
 		icon: Folder,
-	},
-	{
-		name: "System",
-		href: "/system",
-		icon: Settings,
-	},
+	}
 ];
 
 export function Sidebar() {
@@ -46,7 +40,7 @@ export function Sidebar() {
 	const getBadgeCount = (path: string) => {
 		switch (path) {
 			case "/queue":
-				return queueStats ? queueStats.failed + queueStats.retrying : 0;
+				return queueStats ? queueStats.total_failed: 0;
 			case "/health":
 				return healthStats ? healthStats.corrupted + healthStats.partial : 0;
 			default:
@@ -131,7 +125,7 @@ export function Sidebar() {
 									<span className="text-sm">Queue</span>
 								</div>
 								<div className="text-sm text-base-content/70">
-									{queueStats.processing} / {queueStats.total}
+									{queueStats.total_processing} / {queueStats.total_queued}
 								</div>
 							</div>
 						)}

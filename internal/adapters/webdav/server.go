@@ -8,11 +8,14 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "net/http/pprof"
 
+	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/internal/adapters/webdav/propfind"
+	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
@@ -26,6 +29,8 @@ func NewServer(
 	config *Config,
 	fs afero.Fs,
 	mux *http.ServeMux, // Use shared mux instead
+	tokenService *token.Service, // Optional token service for JWT auth
+	userRepo *database.UserRepository, // Optional user repository for JWT auth
 ) (*webdavServer, error) {
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
@@ -49,18 +54,45 @@ func NewServer(
 		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
 		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
 	}
-	mux.HandleFunc("/webdav", func(w http.ResponseWriter, r *http.Request) {
-		username, password, _ := r.BasicAuth()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Fallback to basic authentication if JWT failed
+		username, password, hasBasicAuth := r.BasicAuth()
 
-		if username != config.User || password != config.Pass {
+		var authenticated bool
+		if !hasBasicAuth {
+			// Try JWT token authentication first (if services are available)
+			if tokenService != nil && userRepo != nil {
+				claims, _, err := tokenService.Get(r)
+				if err == nil && claims.User != nil {
+					// Valid token found, check user exists in database
+					userID := claims.User.ID
+					if userID == "" {
+						userID = claims.Subject
+					}
+
+					if userID != "" {
+						user, err := userRepo.GetUserByID(userID)
+						if err == nil && user != nil {
+							authenticated = true
+						}
+					}
+				}
+			}
+		} else if username == config.User && password == config.Pass {
+			authenticated = true
+		}
+
+		if !authenticated {
 			w.Header().Set("WWW-Authenticate", `Basic realm="BASIC WebDAV REALM"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			_, err := w.Write([]byte("401 Unauthorized"))
 			if err != nil {
-				slog.ErrorContext(r.Context(), "Error writting the response to the client", "err", err)
+				slog.ErrorContext(r.Context(), "Error writing the response to the client", "err", err)
 			}
 			return
 		}
+
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/webdav")
 
 		// This will prevent webdav internal seeks which is not supported by usenet reader
 		ext := filepath.Ext(r.URL.Path)

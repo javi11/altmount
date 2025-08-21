@@ -1,10 +1,8 @@
 import {
 	Download,
-	Filter,
 	MoreHorizontal,
 	PlayCircle,
 	RefreshCw,
-	Search,
 	Trash2,
 } from "lucide-react";
 import { useState } from "react";
@@ -97,7 +95,7 @@ export function QueuePage() {
 						/>
 						Refresh
 					</button>
-					{stats && stats.completed > 0 && (
+					{stats && stats.total_completed > 0 && (
 						<button
 							type="button"
 							className="btn btn-warning"
@@ -116,23 +114,23 @@ export function QueuePage() {
 				<div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Total</div>
-						<div className="stat-value text-primary">{stats.total}</div>
+						<div className="stat-value text-primary">{stats.total_completed}</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Pending</div>
-						<div className="stat-value text-warning">{stats.pending}</div>
+						<div className="stat-value text-warning">{stats.total_queued}</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Processing</div>
-						<div className="stat-value text-info">{stats.processing}</div>
+						<div className="stat-value text-info">{stats.total_processing}</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Completed</div>
-						<div className="stat-value text-success">{stats.completed}</div>
+						<div className="stat-value text-success">{stats.total_completed}</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Failed</div>
-						<div className="stat-value text-error">{stats.failed}</div>
+						<div className="stat-value text-error">{stats.total_failed}</div>
 					</div>
 				</div>
 			)}
@@ -144,9 +142,6 @@ export function QueuePage() {
 						{/* Search */}
 						<div className="form-control flex-1">
 							<div className="input-group">
-								<span>
-									<Search className="h-4 w-4" />
-								</span>
 								<input
 									type="text"
 									placeholder="Search queue items..."
@@ -160,9 +155,6 @@ export function QueuePage() {
 						{/* Status Filter */}
 						<div className="form-control">
 							<div className="input-group">
-								<span>
-									<Filter className="h-4 w-4" />
-								</span>
 								<select
 									className="select select-bordered"
 									value={statusFilter}

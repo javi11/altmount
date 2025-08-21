@@ -36,12 +36,12 @@ export interface QueueItem {
 }
 
 export interface QueueStats {
-	total: number;
-	pending: number;
-	processing: number;
-	completed: number;
-	failed: number;
-	retrying: number;
+	total_queued: number;
+	total_processing: number;
+	total_completed: number;
+	total_failed: number;
+	avg_processing_time_ms: number;
+	last_updated: string;
 }
 
 export interface QueueRetryRequest {
@@ -125,4 +125,29 @@ export interface QueueFilters extends PaginationParams {
 export interface HealthFilters extends PaginationParams {
 	status?: HealthStatus;
 	since?: string;
+}
+
+// Authentication types
+export interface User {
+	id: string;
+	email?: string;
+	name: string;
+	avatar_url?: string;
+	provider: string;
+	is_admin: boolean;
+	last_login?: string;
+}
+
+export interface AuthResponse {
+	user?: User;
+	redirect_url?: string;
+	message?: string;
+}
+
+export interface LoginRequest {
+	provider: string;
+}
+
+export interface UserAdminUpdateRequest {
+	is_admin: boolean;
 }

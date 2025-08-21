@@ -11,10 +11,19 @@ import { FileList } from "./FileList";
 
 interface FileExplorerProps {
 	isConnected: boolean;
-	onConnect: () => void;
+	hasConnectionFailed: boolean;
+	isConnecting: boolean;
+	connectionError: Error | null;
+	onRetryConnection: () => void;
 }
 
-export function FileExplorer({ isConnected, onConnect }: FileExplorerProps) {
+export function FileExplorer({ 
+	isConnected, 
+	hasConnectionFailed,
+	isConnecting, 
+	connectionError, 
+	onRetryConnection 
+}: FileExplorerProps) {
 	const [currentPath, setCurrentPath] = useState("/");
 
 	const {
@@ -22,7 +31,7 @@ export function FileExplorer({ isConnected, onConnect }: FileExplorerProps) {
 		isLoading,
 		error,
 		refetch,
-	} = useWebDAVDirectory(currentPath);
+	} = useWebDAVDirectory(currentPath, isConnected, hasConnectionFailed);
 
 	const {
 		downloadFile,
@@ -52,6 +61,49 @@ export function FileExplorer({ isConnected, onConnect }: FileExplorerProps) {
 		console.log("File info for:", path);
 	};
 
+	// Show connecting state
+	if (isConnecting) {
+		return (
+			<div className="flex flex-col items-center justify-center py-16">
+				<Wifi className="h-16 w-16 text-primary animate-pulse mb-4" />
+				<h3 className="text-xl font-semibold text-base-content/70 mb-2">
+					Connecting...
+				</h3>
+				<p className="text-base-content/50 mb-6">
+					Authenticating with WebDAV server
+				</p>
+				<LoadingSpinner />
+			</div>
+		);
+	}
+
+	// Show connection error state
+	if (!isConnected && connectionError) {
+		return (
+			<div className="flex flex-col items-center justify-center py-16">
+				<WifiOff className="h-16 w-16 text-error mb-4" />
+				<h3 className="text-xl font-semibold text-base-content/70 mb-2">
+					Connection Failed
+				</h3>
+				<p className="text-base-content/50 mb-4">
+					{connectionError.message || "Unable to connect to WebDAV server"}
+				</p>
+				<p className="text-base-content/40 mb-6">
+					Make sure you're logged in to the application
+				</p>
+				<button 
+					type="button" 
+					className="btn btn-primary" 
+					onClick={onRetryConnection}
+				>
+					<RefreshCw className="h-4 w-4" />
+					Retry Connection
+				</button>
+			</div>
+		);
+	}
+
+	// Show generic not connected state (shouldn't normally happen with auto-connect)
 	if (!isConnected) {
 		return (
 			<div className="flex flex-col items-center justify-center py-16">
@@ -60,11 +112,15 @@ export function FileExplorer({ isConnected, onConnect }: FileExplorerProps) {
 					Not Connected
 				</h3>
 				<p className="text-base-content/50 mb-6">
-					Connect to WebDAV server to browse files
+					WebDAV connection required to browse files
 				</p>
-				<button type="button" className="btn btn-primary" onClick={onConnect}>
+				<button 
+					type="button" 
+					className="btn btn-primary" 
+					onClick={onRetryConnection}
+				>
 					<Wifi className="h-4 w-4" />
-					Connect to WebDAV
+					Connect
 				</button>
 			</div>
 		);
@@ -139,7 +195,7 @@ export function FileExplorer({ isConnected, onConnect }: FileExplorerProps) {
 			{/* File List */}
 			<div className="card bg-base-100 shadow-md">
 				<div className="card-body p-6">
-					{isLoading ? (
+					{(isLoading && isConnected) ? (
 						<LoadingSpinner />
 					) : directory ? (
 						<FileList
