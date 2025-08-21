@@ -99,7 +99,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 				dispatch({ type: "AUTH_START" });
 				const user = await apiClient.getCurrentUser();
 				dispatch({ type: "AUTH_SUCCESS", payload: user });
-			} catch (error) {
+			} catch (_error) {
 				// If getCurrentUser fails, user is not authenticated
 				// Don't dispatch error for this case since it's expected
 				dispatch({ type: "AUTH_LOGOUT" });
@@ -158,7 +158,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 			dispatch({ type: "AUTH_START" });
 			await apiClient.logout();
 			dispatch({ type: "AUTH_LOGOUT" });
-		} catch (error) {
+		} catch (_error) {
 			// Even if logout fails on server, clear local state
 			dispatch({ type: "AUTH_LOGOUT" });
 		}

@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, Settings, User, Users } from "lucide-react";
+import { ChevronDown, LogOut, User, Users } from "lucide-react";
 import { useAuth, useIsAdmin } from "../../hooks/useAuth";
 
 export function UserMenu() {

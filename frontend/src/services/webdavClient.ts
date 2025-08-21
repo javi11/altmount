@@ -8,17 +8,18 @@ export class WebDAVClient {
 	private client: ReturnType<typeof createClient> | null = null;
 	
 	// Parse and enhance error messages for better handling
-	private parseError(error: any, operation: string, path?: string): Error {
+	private parseError(error: unknown, operation: string, path?: string): Error {
 		const pathInfo = path ? ` (path: ${path})` : '';
-		
+		const err = error as { status?: number; response?: { status: number }, name?: string, message?: string };
+
 		// Handle network/connection errors
-		if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+		if (err.name === 'TypeError' && err.message?.includes('Failed to fetch')) {
 			return new Error(`Network error during ${operation}${pathInfo}: Unable to connect to WebDAV server`);
 		}
 		
 		// Handle HTTP status errors
-		if (error.status || error.response?.status) {
-			const status = error.status || error.response.status;
+		if (err.status || err.response?.status) {
+			const status = err.status || err.response?.status;
 			switch (status) {
 				case 401:
 					return new Error(`401 Unauthorized: Authentication required for ${operation}${pathInfo}`);
@@ -38,13 +39,13 @@ export class WebDAVClient {
 		}
 		
 		// Handle timeout errors
-		if (error.message && error.message.toLowerCase().includes('timeout')) {
+		if (err.message?.toLowerCase().includes('timeout')) {
 			return new Error(`Timeout error during ${operation}${pathInfo}: Request took too long`);
 		}
 		
 		// Handle other WebDAV-specific errors
-		if (error.message) {
-			return new Error(`${operation} failed${pathInfo}: ${error.message}`);
+		if (err.message) {
+			return new Error(`${operation} failed${pathInfo}: ${err.message}`);
 		}
 		
 		// Fallback
