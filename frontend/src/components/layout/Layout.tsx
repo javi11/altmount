@@ -5,11 +5,7 @@ import { Sidebar } from "./Sidebar";
 export function Layout() {
 	return (
 		<div className="drawer lg:drawer-open">
-			<input
-				id="sidebar-toggle"
-				type="checkbox"
-				className="drawer-toggle"
-			/>
+			<input id="sidebar-toggle" type="checkbox" className="drawer-toggle" />
 
 			<div className="drawer-content flex flex-col">
 				{/* Navbar */}
@@ -23,7 +19,11 @@ export function Layout() {
 
 			{/* Sidebar */}
 			<div className="drawer-side">
-    			<label htmlFor="sidebar-toggle" aria-label="close sidebar" className="drawer-overlay" />
+				<label
+					htmlFor="sidebar-toggle"
+					aria-label="close sidebar"
+					className="drawer-overlay"
+				/>
 				<Sidebar />
 			</div>
 		</div>

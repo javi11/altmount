@@ -3,12 +3,14 @@ package integration
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/javi11/altmount/internal/adapters/nzbfilesystem"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/nntppool"
 	"github.com/spf13/afero"
 )
@@ -16,11 +18,10 @@ import (
 // NzbConfig holds configuration for the NZB system
 type NzbConfig struct {
 	QueueDatabasePath  string
-	MetadataRootPath   string // Path to metadata root directory
-	MaxRangeSize       int64  // Maximum range size for a single request
-	StreamingChunkSize int64  // Chunk size for streaming when end=-1
-	MountPath          string
-	NzbDir             string        // Directory containing NZB files
+	MetadataRootPath   string        // Path to metadata root directory
+	MaxRangeSize       int64         // Maximum range size for a single request
+	StreamingChunkSize int64         // Chunk size for streaming when end=-1
+	WatchPath          string        // Directory containing NZB files
 	Password           string        // Global password for .bin files
 	Salt               string        // Global salt for .bin files
 	ProcessorWorkers   int           // Number of queue workers (default: 2)
@@ -34,11 +35,16 @@ type NzbSystem struct {
 	metadataReader *metadata.MetadataReader // Metadata reader for serving files
 	service        *importer.Service
 	fs             afero.Fs
-	pool           nntppool.UsenetConnectionPool
+	poolManager    pool.Manager
+
+	// Configuration tracking for dynamic updates
+	downloadWorkers  int
+	processorWorkers int
+	configMutex      sync.RWMutex
 }
 
 // NewNzbSystem creates a new NZB-backed virtual filesystem with metadata + queue architecture
-func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSystem, error) {
+func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error) {
 	// Initialize metadata service for serving files
 	metadataService := metadata.NewMetadataService(config.MetadataRootPath)
 	metadataReader := metadata.NewMetadataReader(metadataService)
@@ -71,9 +77,15 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 
 	// Create NZB service using metadata + queue
 	serviceConfig := importer.ServiceConfig{
-		WatchDir:     config.NzbDir,
+		WatchDir:     config.WatchPath,
 		ScanInterval: scanInterval,
 		Workers:      processorWorkers,
+	}
+
+	// Get connection pool from manager - pass nil if not available
+	var cp nntppool.UsenetConnectionPool
+	if poolManager != nil {
+		cp, _ = poolManager.GetPool() // Ignore error - we handle nil pool below
 	}
 
 	// For now, we'll need to create a service that uses MetadataProcessor
@@ -82,12 +94,6 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)
-	}
-
-	if cp == nil {
-		_ = service.Close()
-		_ = db.Close()
-		return nil, fmt.Errorf("NNTP pool is required")
 	}
 
 	// Create health repository for file health tracking
@@ -117,11 +123,13 @@ func NewNzbSystem(config NzbConfig, cp nntppool.UsenetConnectionPool) (*NzbSyste
 	}
 
 	return &NzbSystem{
-		database:       db,
-		metadataReader: metadataReader,
-		service:        service,
-		fs:             fs,
-		pool:           cp,
+		database:         db,
+		metadataReader:   metadataReader,
+		service:          service,
+		fs:               fs,
+		poolManager:      poolManager,
+		downloadWorkers:  downloadWorkers,
+		processorWorkers: processorWorkers,
 	}, nil
 }
 
@@ -190,4 +198,58 @@ type Stats struct {
 	TotalNzbFiles     int
 	TotalVirtualFiles int
 	TotalSize         int64
+}
+
+// UpdateDownloadWorkers implements config.WorkerPoolUpdater
+func (ns *NzbSystem) UpdateDownloadWorkers(count int) error {
+	ns.configMutex.Lock()
+	defer ns.configMutex.Unlock()
+
+	if count <= 0 {
+		return fmt.Errorf("download workers count must be greater than 0")
+	}
+
+	oldCount := ns.downloadWorkers
+	ns.downloadWorkers = count
+
+	// Note: For now we store the new count, but actual worker pool resizing
+	// would require recreating the MetadataRemoteFile component with new worker count.
+	// This is a placeholder for future implementation of dynamic worker resizing.
+
+	_ = oldCount // Avoid unused variable warning
+	return nil
+}
+
+// UpdateProcessorWorkers implements config.WorkerPoolUpdater
+func (ns *NzbSystem) UpdateProcessorWorkers(count int) error {
+	ns.configMutex.Lock()
+	defer ns.configMutex.Unlock()
+
+	if count <= 0 {
+		return fmt.Errorf("processor workers count must be greater than 0")
+	}
+
+	oldCount := ns.processorWorkers
+	ns.processorWorkers = count
+
+	// Note: For now we store the new count, but actual worker pool resizing
+	// in the importer service would require stopping and restarting workers.
+	// This is a placeholder for future implementation of dynamic worker resizing.
+
+	_ = oldCount // Avoid unused variable warning
+	return nil
+}
+
+// GetDownloadWorkers returns the current download worker count
+func (ns *NzbSystem) GetDownloadWorkers() int {
+	ns.configMutex.RLock()
+	defer ns.configMutex.RUnlock()
+	return ns.downloadWorkers
+}
+
+// GetProcessorWorkers returns the current processor worker count
+func (ns *NzbSystem) GetProcessorWorkers() int {
+	ns.configMutex.RLock()
+	defer ns.configMutex.RUnlock()
+	return ns.processorWorkers
 }

@@ -73,11 +73,18 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 // Auth context interface
 interface AuthContextType extends AuthState {
 	login: (username: string, password: string) => Promise<boolean>;
-	register: (username: string, email: string | undefined, password: string) => Promise<boolean>;
+	register: (
+		username: string,
+		email: string | undefined,
+		password: string,
+	) => Promise<boolean>;
 	logout: () => Promise<void>;
 	refreshToken: () => Promise<void>;
 	clearError: () => void;
-	checkRegistrationStatus: () => Promise<{ registration_enabled: boolean; user_count: number }>;
+	checkRegistrationStatus: () => Promise<{
+		registration_enabled: boolean;
+		user_count: number;
+	}>;
 }
 
 // Create context
@@ -110,7 +117,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	}, []);
 
 	// Login function (direct authentication)
-	const login = async (username: string, password: string): Promise<boolean> => {
+	const login = async (
+		username: string,
+		password: string,
+	): Promise<boolean> => {
 		try {
 			dispatch({ type: "AUTH_START" });
 			const response = await apiClient.login(username, password);
@@ -122,14 +132,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
 				return false;
 			}
 		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : "Login failed";
+			const errorMessage =
+				error instanceof Error ? error.message : "Login failed";
 			dispatch({ type: "AUTH_ERROR", payload: errorMessage });
 			return false;
 		}
 	};
 
 	// Register function (first user only)
-	const register = async (username: string, email: string | undefined, password: string): Promise<boolean> => {
+	const register = async (
+		username: string,
+		email: string | undefined,
+		password: string,
+	): Promise<boolean> => {
 		try {
 			dispatch({ type: "AUTH_START" });
 			const response = await apiClient.register(username, email, password);
@@ -141,14 +156,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 				return false;
 			}
 		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : "Registration failed";
+			const errorMessage =
+				error instanceof Error ? error.message : "Registration failed";
 			dispatch({ type: "AUTH_ERROR", payload: errorMessage });
 			return false;
 		}
 	};
 
 	// Check registration status
-	const checkRegistrationStatus = async (): Promise<{ registration_enabled: boolean; user_count: number }> => {
+	const checkRegistrationStatus = async (): Promise<{
+		registration_enabled: boolean;
+		user_count: number;
+	}> => {
 		return await apiClient.checkRegistrationStatus();
 	};
 
@@ -173,7 +192,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 			const user = await apiClient.getCurrentUser();
 			dispatch({ type: "AUTH_SUCCESS", payload: user });
 		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : "Token refresh failed";
+			const errorMessage =
+				error instanceof Error ? error.message : "Token refresh failed";
 			dispatch({ type: "AUTH_ERROR", payload: errorMessage });
 		}
 	};
@@ -194,9 +214,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	};
 
 	return (
-		<AuthContext.Provider value={contextValue}>
-			{children}
-		</AuthContext.Provider>
+		<AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
 	);
 }
 

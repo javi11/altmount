@@ -5,10 +5,13 @@ export function Navbar() {
 	return (
 		<div className="navbar bg-base-100 shadow-lg border-b border-base-200 px-4 lg:px-6">
 			<div className="navbar-start">
-				<label htmlFor="sidebar-toggle" className="btn btn-square btn-ghost lg:hidden hover:bg-base-200 transition-colors">
+				<label
+					htmlFor="sidebar-toggle"
+					className="btn btn-square btn-ghost lg:hidden hover:bg-base-200 transition-colors"
+				>
 					<Menu className="h-5 w-5" />
 				</label>
-				
+
 				{/* Logo and title */}
 				<div className="flex items-center gap-3 ml-2 lg:ml-0">
 					<div className="flex flex-col">

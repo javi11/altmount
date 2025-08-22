@@ -35,3 +35,4 @@ example/
 ./altmount
 *.db*
 *node_modules*
+.git

@@ -142,6 +142,19 @@ func (s *Server) handleSystemCleanup(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, response, nil)
 }
 
+// handleSystemRestart handles POST /api/system/restart
+func (s *Server) handleSystemRestart(w http.ResponseWriter, r *http.Request) {
+	// For now, we'll return a message indicating the restart command was received
+	// In a production system, this would trigger a graceful shutdown and restart
+	response := map[string]interface{}{
+		"message": "Restart command received. Please restart the server manually.",
+		"timestamp": time.Now(),
+		"note": "Automatic restart is not implemented for safety. Please use your process manager or restart manually.",
+	}
+	
+	WriteSuccess(w, response, nil)
+}
+
 // Additional system management endpoints could be added here, such as:
 // - handleGetSystemConfig - GET /api/system/config - Get system configuration
 // - handleUpdateSystemConfig - PUT /api/system/config - Update system configuration

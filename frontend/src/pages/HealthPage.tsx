@@ -26,11 +26,10 @@ export function HealthPage() {
 	const [searchTerm, setSearchTerm] = useState("");
 
 	const pageSize = 20;
-	const { data, isLoading, refetch, error } =
-		useCorruptedFiles({
-			limit: pageSize,
-			offset: page * pageSize,
-		});
+	const { data, isLoading, refetch, error } = useCorruptedFiles({
+		limit: pageSize,
+		offset: page * pageSize,
+	});
 
 	const { data: stats } = useHealthStats();
 	const deleteItem = useDeleteHealthItem();
@@ -282,7 +281,7 @@ export function HealthPage() {
 								No corrupted files found
 							</h3>
 							<p className="text-base-content/50">
-								{searchTerm 
+								{searchTerm
 									? "Try adjusting your filters"
 									: "All your files are healthy!"}
 							</p>

@@ -3,12 +3,17 @@ import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
 
 export function FilesPage() {
-	const { isConnected, hasConnectionFailed, connect, isConnecting, connectionError } =
-		useWebDAVConnection();
-	
+	const {
+		isConnected,
+		hasConnectionFailed,
+		connect,
+		isConnecting,
+		connectionError,
+	} = useWebDAVConnection();
+
 	// Track connection attempts to prevent rapid retries
 	const connectionAttempted = useRef(false);
-	
+
 	// Stable connect function to prevent useEffect loops
 	const handleConnect = useCallback(() => {
 		if (!connectionAttempted.current && !isConnected && !isConnecting) {
@@ -21,7 +26,7 @@ export function FilesPage() {
 	useEffect(() => {
 		handleConnect();
 	}, [handleConnect]);
-	
+
 	// Reset connection attempt flag when connection state changes
 	useEffect(() => {
 		if (isConnected || connectionError) {

@@ -1,53 +1,73 @@
 import { AuthType, createClient, type FileStat } from "webdav";
-import type {
-	WebDAVDirectory,
-	WebDAVFile,
-} from "../types/webdav";
+import type { WebDAVDirectory, WebDAVFile } from "../types/webdav";
 
 export class WebDAVClient {
 	private client: ReturnType<typeof createClient> | null = null;
-	
+
 	// Parse and enhance error messages for better handling
 	private parseError(error: unknown, operation: string, path?: string): Error {
-		const pathInfo = path ? ` (path: ${path})` : '';
-		const err = error as { status?: number; response?: { status: number }, name?: string, message?: string };
+		const pathInfo = path ? ` (path: ${path})` : "";
+		const err = error as {
+			status?: number;
+			response?: { status: number };
+			name?: string;
+			message?: string;
+		};
 
 		// Handle network/connection errors
-		if (err.name === 'TypeError' && err.message?.includes('Failed to fetch')) {
-			return new Error(`Network error during ${operation}${pathInfo}: Unable to connect to WebDAV server`);
+		if (err.name === "TypeError" && err.message?.includes("Failed to fetch")) {
+			return new Error(
+				`Network error during ${operation}${pathInfo}: Unable to connect to WebDAV server`,
+			);
 		}
-		
+
 		// Handle HTTP status errors
 		if (err.status || err.response?.status) {
 			const status = err.status || err.response?.status;
 			switch (status) {
 				case 401:
-					return new Error(`401 Unauthorized: Authentication required for ${operation}${pathInfo}`);
+					return new Error(
+						`401 Unauthorized: Authentication required for ${operation}${pathInfo}`,
+					);
 				case 403:
-					return new Error(`403 Forbidden: Access denied for ${operation}${pathInfo}`);
+					return new Error(
+						`403 Forbidden: Access denied for ${operation}${pathInfo}`,
+					);
 				case 404:
-					return new Error(`404 Not Found: Path does not exist for ${operation}${pathInfo}`);
+					return new Error(
+						`404 Not Found: Path does not exist for ${operation}${pathInfo}`,
+					);
 				case 500:
-					return new Error(`500 Server Error: WebDAV server error during ${operation}${pathInfo}`);
+					return new Error(
+						`500 Server Error: WebDAV server error during ${operation}${pathInfo}`,
+					);
 				case 502:
-					return new Error(`502 Bad Gateway: WebDAV server unavailable during ${operation}${pathInfo}`);
+					return new Error(
+						`502 Bad Gateway: WebDAV server unavailable during ${operation}${pathInfo}`,
+					);
 				case 503:
-					return new Error(`503 Service Unavailable: WebDAV server overloaded during ${operation}${pathInfo}`);
+					return new Error(
+						`503 Service Unavailable: WebDAV server overloaded during ${operation}${pathInfo}`,
+					);
 				default:
-					return new Error(`${status} Error: HTTP error during ${operation}${pathInfo}`);
+					return new Error(
+						`${status} Error: HTTP error during ${operation}${pathInfo}`,
+					);
 			}
 		}
-		
+
 		// Handle timeout errors
-		if (err.message?.toLowerCase().includes('timeout')) {
-			return new Error(`Timeout error during ${operation}${pathInfo}: Request took too long`);
+		if (err.message?.toLowerCase().includes("timeout")) {
+			return new Error(
+				`Timeout error during ${operation}${pathInfo}: Request took too long`,
+			);
 		}
-		
+
 		// Handle other WebDAV-specific errors
 		if (err.message) {
 			return new Error(`${operation} failed${pathInfo}: ${err.message}`);
 		}
-		
+
 		// Fallback
 		return new Error(`Unknown error during ${operation}${pathInfo}`);
 	}
@@ -61,8 +81,8 @@ export class WebDAVClient {
 			timeout: 10000, // 10 seconds
 			// Add headers for better error handling
 			headers: {
-				'Accept': 'application/xml,text/xml,*/*',
-				'Content-Type': 'application/xml; charset=utf-8',
+				Accept: "application/xml,text/xml,*/*",
+				"Content-Type": "application/xml; charset=utf-8",
 			},
 		};
 
@@ -103,7 +123,7 @@ export class WebDAVClient {
 			};
 		} catch (error) {
 			console.error("Failed to list directory:", error);
-			throw this.parseError(error, 'list directory', path);
+			throw this.parseError(error, "list directory", path);
 		}
 	}
 
@@ -119,7 +139,7 @@ export class WebDAVClient {
 			return new Blob([buffer as ArrayBuffer]);
 		} catch (error) {
 			console.error("Failed to download file:", error);
-			throw this.parseError(error, 'download file', path);
+			throw this.parseError(error, "download file", path);
 		}
 	}
 
@@ -141,7 +161,7 @@ export class WebDAVClient {
 			};
 		} catch (error) {
 			console.error("Failed to get file info:", error);
-			throw this.parseError(error, 'get file info', path);
+			throw this.parseError(error, "get file info", path);
 		}
 	}
 
@@ -154,7 +174,7 @@ export class WebDAVClient {
 			await this.client.deleteFile(path);
 		} catch (error) {
 			console.error("Failed to delete file:", error);
-			throw this.parseError(error, 'delete file', path);
+			throw this.parseError(error, "delete file", path);
 		}
 	}
 

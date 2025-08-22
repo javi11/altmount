@@ -49,20 +49,20 @@ func DefaultPagination() Pagination {
 
 // QueueItemResponse represents a queue item in API responses
 type QueueItemResponse struct {
-	ID           int64                    `json:"id"`
-	NzbPath      string                   `json:"nzb_path"`
-	WatchRoot    *string                  `json:"watch_root"`
-	Priority     database.QueuePriority   `json:"priority"`
-	Status       database.QueueStatus     `json:"status"`
-	CreatedAt    time.Time                `json:"created_at"`
-	UpdatedAt    time.Time                `json:"updated_at"`
-	StartedAt    *time.Time               `json:"started_at"`
-	CompletedAt  *time.Time               `json:"completed_at"`
-	RetryCount   int                      `json:"retry_count"`
-	MaxRetries   int                      `json:"max_retries"`
-	ErrorMessage *string                  `json:"error_message"`
-	BatchID      *string                  `json:"batch_id"`
-	Metadata     *string                  `json:"metadata"`
+	ID           int64                  `json:"id"`
+	NzbPath      string                 `json:"nzb_path"`
+	WatchRoot    *string                `json:"watch_root"`
+	Priority     database.QueuePriority `json:"priority"`
+	Status       database.QueueStatus   `json:"status"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	StartedAt    *time.Time             `json:"started_at"`
+	CompletedAt  *time.Time             `json:"completed_at"`
+	RetryCount   int                    `json:"retry_count"`
+	MaxRetries   int                    `json:"max_retries"`
+	ErrorMessage *string                `json:"error_message"`
+	BatchID      *string                `json:"batch_id"`
+	Metadata     *string                `json:"metadata"`
 }
 
 // QueueListRequest represents request parameters for listing queue items
@@ -74,11 +74,11 @@ type QueueListRequest struct {
 
 // QueueStatsResponse represents queue statistics in API responses
 type QueueStatsResponse struct {
-	TotalQueued         int `json:"total_queued"`
-	TotalProcessing     int `json:"total_processing"`
-	TotalCompleted      int `json:"total_completed"`
-	TotalFailed         int `json:"total_failed"`
-	AvgProcessingTimeMs *int `json:"avg_processing_time_ms"`
+	TotalQueued         int       `json:"total_queued"`
+	TotalProcessing     int       `json:"total_processing"`
+	TotalCompleted      int       `json:"total_completed"`
+	TotalFailed         int       `json:"total_failed"`
+	AvgProcessingTimeMs *int      `json:"avg_processing_time_ms"`
 	LastUpdated         time.Time `json:"last_updated"`
 }
 
@@ -91,18 +91,18 @@ type QueueRetryRequest struct {
 
 // HealthItemResponse represents a health record in API responses
 type HealthItemResponse struct {
-	ID            int64                   `json:"id"`
-	FilePath      string                  `json:"file_path"`
-	Status        database.HealthStatus   `json:"status"`
-	LastChecked   time.Time               `json:"last_checked"`
-	LastError     *string                 `json:"last_error"`
-	RetryCount    int                     `json:"retry_count"`
-	MaxRetries    int                     `json:"max_retries"`
-	NextRetryAt   *time.Time              `json:"next_retry_at"`
-	SourceNzbPath *string                 `json:"source_nzb_path"`
-	ErrorDetails  *string                 `json:"error_details"`
-	CreatedAt     time.Time               `json:"created_at"`
-	UpdatedAt     time.Time               `json:"updated_at"`
+	ID            int64                 `json:"id"`
+	FilePath      string                `json:"file_path"`
+	Status        database.HealthStatus `json:"status"`
+	LastChecked   time.Time             `json:"last_checked"`
+	LastError     *string               `json:"last_error"`
+	RetryCount    int                   `json:"retry_count"`
+	MaxRetries    int                   `json:"max_retries"`
+	NextRetryAt   *time.Time            `json:"next_retry_at"`
+	SourceNzbPath *string               `json:"source_nzb_path"`
+	ErrorDetails  *string               `json:"error_details"`
+	CreatedAt     time.Time             `json:"created_at"`
+	UpdatedAt     time.Time             `json:"updated_at"`
 }
 
 // HealthListRequest represents request parameters for listing health records
@@ -127,7 +127,7 @@ type HealthRetryRequest struct {
 
 // HealthCleanupRequest represents request to cleanup health records
 type HealthCleanupRequest struct {
-	OlderThan *time.Time `json:"older_than"`
+	OlderThan *time.Time             `json:"older_than"`
 	Status    *database.HealthStatus `json:"status"`
 }
 
@@ -142,16 +142,16 @@ type SystemStatsResponse struct {
 
 // SystemInfoResponse represents system information
 type SystemInfoResponse struct {
-	Version    string    `json:"version,omitempty"`
-	StartTime  time.Time `json:"start_time"`
-	Uptime     string    `json:"uptime"`
-	GoVersion  string    `json:"go_version,omitempty"`
+	Version   string    `json:"version,omitempty"`
+	StartTime time.Time `json:"start_time"`
+	Uptime    string    `json:"uptime"`
+	GoVersion string    `json:"go_version,omitempty"`
 }
 
 // SystemHealthResponse represents system health check result
 type SystemHealthResponse struct {
-	Status     string                 `json:"status"` // "healthy", "degraded", "unhealthy"
-	Timestamp  time.Time              `json:"timestamp"`
+	Status     string                     `json:"status"` // "healthy", "degraded", "unhealthy"
+	Timestamp  time.Time                  `json:"timestamp"`
 	Components map[string]ComponentHealth `json:"components"`
 }
 
@@ -171,9 +171,151 @@ type SystemCleanupRequest struct {
 
 // SystemCleanupResponse represents cleanup operation results
 type SystemCleanupResponse struct {
-	QueueItemsRemoved  int `json:"queue_items_removed"`
-	HealthRecordsRemoved int `json:"health_records_removed"`
-	DryRun            bool `json:"dry_run"`
+	QueueItemsRemoved    int  `json:"queue_items_removed"`
+	HealthRecordsRemoved int  `json:"health_records_removed"`
+	DryRun               bool `json:"dry_run"`
+}
+
+// Configuration API Types
+
+// ConfigResponse represents the configuration in API responses
+type ConfigResponse struct {
+	WebDAV    WebDAVConfigResponse     `json:"webdav"`
+	API       APIConfigResponse        `json:"api"`
+	Database  DatabaseConfigResponse   `json:"database"`
+	Metadata  MetadataConfigResponse   `json:"metadata"`
+	WatchPath string                   `json:"watch_path"`
+	RClone    RCloneConfigResponse     `json:"rclone"`
+	Workers   WorkersConfigResponse    `json:"workers"`
+	Providers []ProviderConfigResponse `json:"providers"`
+	Debug     bool                     `json:"debug"`
+}
+
+// WebDAVConfigResponse represents WebDAV server configuration in API responses
+type WebDAVConfigResponse struct {
+	Port  int    `json:"port"`
+	User  string `json:"user"`
+	Debug bool   `json:"debug"`
+}
+
+// APIConfigResponse represents REST API configuration in API responses
+type APIConfigResponse struct {
+	Prefix string `json:"prefix"`
+}
+
+// DatabaseConfigResponse represents database configuration in API responses
+type DatabaseConfigResponse struct {
+	Path string `json:"path"`
+}
+
+// MetadataConfigResponse represents metadata configuration in API responses
+type MetadataConfigResponse struct {
+	RootPath           string `json:"root_path"`
+	MaxRangeSize       int64  `json:"max_range_size"`
+	StreamingChunkSize int64  `json:"streaming_chunk_size"`
+}
+
+// RCloneConfigResponse represents rclone configuration in API responses (sanitized)
+type RCloneConfigResponse struct {
+	PasswordSet bool `json:"password_set"`
+	SaltSet     bool `json:"salt_set"`
+}
+
+// WorkersConfigResponse represents worker configuration in API responses
+type WorkersConfigResponse struct {
+	Download  int `json:"download"`
+	Processor int `json:"processor"`
+}
+
+// ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
+type ProviderConfigResponse struct {
+	Name           string `json:"name"`
+	Host           string `json:"host"`
+	Port           int    `json:"port"`
+	Username       string `json:"username"`
+	MaxConnections int    `json:"max_connections"`
+	TLS            bool   `json:"tls"`
+	InsecureTLS    bool   `json:"insecure_tls"`
+	PasswordSet    bool   `json:"password_set"`
+}
+
+// ConfigUpdateRequest represents a request to update configuration
+type ConfigUpdateRequest struct {
+	WebDAV    *WebDAVConfigRequest     `json:"webdav,omitempty"`
+	API       *APIConfigRequest        `json:"api,omitempty"`
+	Database  *DatabaseConfigRequest   `json:"database,omitempty"`
+	Metadata  *MetadataConfigRequest   `json:"metadata,omitempty"`
+	WatchPath *string                  `json:"watch_path,omitempty"`
+	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
+	Workers   *WorkersConfigRequest    `json:"workers,omitempty"`
+	Providers *[]ProviderConfigRequest `json:"providers,omitempty"`
+	Debug     *bool                    `json:"debug,omitempty"`
+}
+
+// WebDAVConfigRequest represents WebDAV server configuration in update requests
+type WebDAVConfigRequest struct {
+	Port     *int    `json:"port,omitempty"`
+	User     *string `json:"user,omitempty"`
+	Password *string `json:"password,omitempty"`
+	Debug    *bool   `json:"debug,omitempty"`
+}
+
+// APIConfigRequest represents REST API configuration in update requests
+type APIConfigRequest struct {
+	Prefix *string `json:"prefix,omitempty"`
+}
+
+// DatabaseConfigRequest represents database configuration in update requests
+type DatabaseConfigRequest struct {
+	Path *string `json:"path,omitempty"`
+}
+
+// MetadataConfigRequest represents metadata configuration in update requests
+type MetadataConfigRequest struct {
+	RootPath           *string `json:"root_path,omitempty"`
+	MaxRangeSize       *int64  `json:"max_range_size,omitempty"`
+	StreamingChunkSize *int64  `json:"streaming_chunk_size,omitempty"`
+}
+
+// RCloneConfigRequest represents rclone configuration in update requests
+type RCloneConfigRequest struct {
+	Password *string `json:"password,omitempty"`
+	Salt     *string `json:"salt,omitempty"`
+}
+
+// WorkersConfigRequest represents worker configuration in update requests
+type WorkersConfigRequest struct {
+	Download  *int `json:"download,omitempty"`
+	Processor *int `json:"processor,omitempty"`
+}
+
+// ProviderConfigRequest represents a single NNTP provider configuration in update requests
+type ProviderConfigRequest struct {
+	Name           *string `json:"name,omitempty"`
+	Host           *string `json:"host,omitempty"`
+	Port           *int    `json:"port,omitempty"`
+	Username       *string `json:"username,omitempty"`
+	Password       *string `json:"password,omitempty"`
+	MaxConnections *int    `json:"max_connections,omitempty"`
+	TLS            *bool   `json:"tls,omitempty"`
+	InsecureTLS    *bool   `json:"insecure_tls,omitempty"`
+}
+
+// ConfigValidateRequest represents a request to validate configuration
+type ConfigValidateRequest struct {
+	Config interface{} `json:"config"`
+}
+
+// ConfigValidateResponse represents the result of configuration validation
+type ConfigValidateResponse struct {
+	Valid  bool                    `json:"valid"`
+	Errors []ConfigValidationError `json:"errors,omitempty"`
+}
+
+// ConfigValidationError represents a configuration validation error
+type ConfigValidationError struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
 }
 
 // Converter functions

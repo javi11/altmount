@@ -24,11 +24,8 @@ metadata:
   root_path: "./metadata"   # Directory to store metadata files (required)
   cache_size: 1000          # Number of metadata entries to cache in memory
 
-# Mount path for the virtual filesystem
-mount_path: "/mnt/altmount"
-
 # Directory containing NZB files to process
-nzb_dir: "./nzbs"
+watch_path: "./nzbs"
 
 # RClone encryption settings (optional)
 rclone:

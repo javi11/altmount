@@ -9,6 +9,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { FilesPage } from "./pages/FilesPage";
 import { HealthPage } from "./pages/HealthPage";
 import { QueuePage } from "./pages/QueuePage";
+import { ConfigurationPage } from "./pages/ConfigurationPage";
 
 function App() {
 	return (
@@ -18,22 +19,36 @@ function App() {
 					<div className="min-h-screen bg-base-100" data-theme="light">
 						<Routes>
 							{/* Protected routes */}
-							<Route path="/" element={
-								<ProtectedRoute>
-									<Layout />
-								</ProtectedRoute>
-							}>
+							<Route
+								path="/"
+								element={
+									<ProtectedRoute>
+										<Layout />
+									</ProtectedRoute>
+								}
+							>
 								<Route index element={<Dashboard />} />
 								<Route path="queue" element={<QueuePage />} />
 								<Route path="health" element={<HealthPage />} />
 								<Route path="files" element={<FilesPage />} />
-								
+
 								{/* Admin-only routes */}
-								<Route path="admin" element={
-									<ProtectedRoute requireAdmin>
-										<UserManagement />
-									</ProtectedRoute>
-								} />
+								<Route
+									path="admin"
+									element={
+										<ProtectedRoute requireAdmin>
+											<UserManagement />
+										</ProtectedRoute>
+									}
+								/>
+								<Route
+									path="config"
+									element={
+										<ProtectedRoute requireAdmin>
+											<ConfigurationPage />
+										</ProtectedRoute>
+									}
+								/>
 							</Route>
 						</Routes>
 					</div>

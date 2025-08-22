@@ -1,22 +1,15 @@
-import {
-	AlertTriangle,
-	CheckCircle,
-	Download,
-} from "lucide-react";
+import { AlertTriangle, CheckCircle, Download } from "lucide-react";
 import { HealthChart, QueueChart } from "../components/charts/QueueChart";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { StatusBadge } from "../components/ui/StatusBadge";
-import {
-	useHealthStats,
-	useQueueStats,
-} from "../hooks/useApi";
+import { useHealthStats, useQueueStats } from "../hooks/useApi";
 
 export function Dashboard() {
 	const { data: queueStats, error: queueError } = useQueueStats();
 	const { data: healthStats, error: healthError } = useHealthStats();
 
-	const hasError = queueError || healthError
+	const hasError = queueError || healthError;
 
 	if (hasError) {
 		return (
@@ -59,7 +52,8 @@ export function Dashboard() {
 						{queueStats && (
 							<div className="mt-2">
 								<div className="text-sm text-base-content/70">
-									{queueStats.total_completed} completed, {queueStats.total_failed} failed
+									{queueStats.total_completed} completed,{" "}
+									{queueStats.total_failed} failed
 								</div>
 								<progress
 									className="progress progress-primary w-full mt-2"
@@ -117,7 +111,9 @@ export function Dashboard() {
 								</div>
 								<div className="flex justify-between items-center">
 									<span>Processing</span>
-									<StatusBadge status={`${queueStats.total_processing} items`} />
+									<StatusBadge
+										status={`${queueStats.total_processing} items`}
+									/>
 								</div>
 								<div className="flex justify-between items-center">
 									<span>Completed</span>

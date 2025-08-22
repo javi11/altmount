@@ -13,7 +13,9 @@ export function useWebDAVConnection() {
 			webdavClient.connect(); // Connect using cookie authentication
 			const success = await webdavClient.testConnection();
 			if (!success) {
-				throw new Error("Failed to connect to WebDAV server - authentication required");
+				throw new Error(
+					"Failed to connect to WebDAV server - authentication required",
+				);
 			}
 			return success;
 		},
@@ -38,7 +40,11 @@ export function useWebDAVConnection() {
 	};
 }
 
-export function useWebDAVDirectory(path: string, isConnected = true, hasConnectionFailed = false) {
+export function useWebDAVDirectory(
+	path: string,
+	isConnected = true,
+	hasConnectionFailed = false,
+) {
 	return useQuery<WebDAVDirectory>({
 		queryKey: ["webdav", "directory", path],
 		queryFn: () => webdavClient.listDirectory(path),
@@ -48,23 +54,27 @@ export function useWebDAVDirectory(path: string, isConnected = true, hasConnecti
 		retry: (failureCount, error) => {
 			// Don't retry on client errors (4xx) or server errors (5xx)
 			const errorMessage = error.message.toLowerCase();
-			
+
 			// Client errors - don't retry
-			if (errorMessage.includes("401") || 
-				errorMessage.includes("403") || 
-				errorMessage.includes("404") || 
-				errorMessage.includes("400")) {
+			if (
+				errorMessage.includes("401") ||
+				errorMessage.includes("403") ||
+				errorMessage.includes("404") ||
+				errorMessage.includes("400")
+			) {
 				return false;
 			}
-			
+
 			// Server errors - don't retry to prevent bombardment
-			if (errorMessage.includes("500") || 
-				errorMessage.includes("502") || 
-				errorMessage.includes("503") || 
-				errorMessage.includes("504")) {
+			if (
+				errorMessage.includes("500") ||
+				errorMessage.includes("502") ||
+				errorMessage.includes("503") ||
+				errorMessage.includes("504")
+			) {
 				return false;
 			}
-			
+
 			// Connection/network errors - only retry once
 			return failureCount < 1;
 		},

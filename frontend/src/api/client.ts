@@ -8,6 +8,13 @@ import type {
 	User,
 	UserAdminUpdateRequest,
 } from "../types/api";
+import type {
+	ConfigResponse,
+	ConfigUpdateRequest,
+	ConfigValidateRequest,
+	ConfigValidateResponse,
+	ConfigSection,
+} from "../types/config";
 
 export class APIError extends Error {
 	public status: number;
@@ -214,19 +221,60 @@ export class APIClient {
 		});
 	}
 
-	async register(username: string, email: string | undefined, password: string) {
+	async register(
+		username: string,
+		email: string | undefined,
+		password: string,
+	) {
 		return this.request<AuthResponse>("/auth/register", {
 			method: "POST",
-			body: JSON.stringify({ 
-				username, 
-				email: email || undefined, 
-				password
+			body: JSON.stringify({
+				username,
+				email: email || undefined,
+				password,
 			}),
 		});
 	}
 
 	async checkRegistrationStatus() {
-		return this.request<{ registration_enabled: boolean; user_count: number }>("/auth/registration-status");
+		return this.request<{ registration_enabled: boolean; user_count: number }>(
+			"/auth/registration-status",
+		);
+	}
+
+	// Configuration endpoints
+	async getConfig() {
+		return this.request<ConfigResponse>("/config");
+	}
+
+	async updateConfig(config: ConfigUpdateRequest) {
+		return this.request<ConfigResponse>("/config", {
+			method: "PUT",
+			body: JSON.stringify(config),
+		});
+	}
+
+	async updateConfigSection(
+		section: ConfigSection,
+		config: ConfigUpdateRequest,
+	) {
+		return this.request<ConfigResponse>(`/config/${section}`, {
+			method: "PATCH",
+			body: JSON.stringify(config),
+		});
+	}
+
+	async validateConfig(config: ConfigValidateRequest) {
+		return this.request<ConfigValidateResponse>("/config/validate", {
+			method: "POST",
+			body: JSON.stringify(config),
+		});
+	}
+
+	async reloadConfig() {
+		return this.request<ConfigResponse>("/config/reload", {
+			method: "POST",
+		});
 	}
 }
 

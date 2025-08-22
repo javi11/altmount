@@ -30,13 +30,13 @@ export function UserManagement() {
 		try {
 			setUpdatingUserId(userId);
 			await apiClient.updateUserAdmin(userId, { is_admin: !currentStatus });
-			
+
 			// Update local state
-			setUsers(users.map(user => 
-				user.id === userId 
-					? { ...user, is_admin: !currentStatus }
-					: user
-			));
+			setUsers(
+				users.map((user) =>
+					user.id === userId ? { ...user, is_admin: !currentStatus } : user,
+				),
+			);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to update user");
 		} finally {
@@ -83,60 +83,59 @@ export function UserManagement() {
 			<div className="card bg-base-100 shadow-xl">
 				<div className="card-body p-0">
 					<ul className="divide-y divide-base-300">
-					{users.map((user) => (
-						<li key={user.id} className="px-6 py-4">
-							<div className="flex items-center justify-between">
-								<div className="flex items-center">
-									<div className="avatar placeholder">
-										<UserIcon className="w-5 h-5" />
-									</div>
-									<div className="ml-4">
-										<div className="flex items-center gap-2">
-											<p className="text-sm font-medium">
-												{user.name}
-											</p>
-											{user.is_admin && (
-												<div className="badge badge-primary badge-sm">
-													Admin
-												</div>
-											)}
+						{users.map((user) => (
+							<li key={user.id} className="px-6 py-4">
+								<div className="flex items-center justify-between">
+									<div className="flex items-center">
+										<div className="avatar placeholder">
+											<UserIcon className="w-5 h-5" />
 										</div>
-										<p className="text-sm text-base-content/70">{user.email}</p>
-										<p className="text-xs text-base-content/50 capitalize">
-											via {user.provider}
-											{user.last_login && (
-												<span className="ml-2">
-													• Last login: {new Date(user.last_login).toLocaleDateString()}
-												</span>
-											)}
-										</p>
+										<div className="ml-4">
+											<div className="flex items-center gap-2">
+												<p className="text-sm font-medium">{user.name}</p>
+												{user.is_admin && (
+													<div className="badge badge-primary badge-sm">
+														Admin
+													</div>
+												)}
+											</div>
+											<p className="text-sm text-base-content/70">
+												{user.email}
+											</p>
+											<p className="text-xs text-base-content/50 capitalize">
+												via {user.provider}
+												{user.last_login && (
+													<span className="ml-2">
+														• Last login:{" "}
+														{new Date(user.last_login).toLocaleDateString()}
+													</span>
+												)}
+											</p>
+										</div>
+									</div>
+
+									<div className="flex items-center gap-2">
+										<button
+											type="button"
+											onClick={() => toggleAdminStatus(user.id, user.is_admin)}
+											disabled={updatingUserId === user.id}
+											className={`btn btn-xs ${
+												user.is_admin
+													? "btn-error btn-outline"
+													: "btn-success btn-outline"
+											} ${updatingUserId === user.id ? "loading" : ""}`}
+										>
+											{updatingUserId === user.id
+												? "Updating..."
+												: user.is_admin
+													? "Remove Admin"
+													: "Make Admin"}
+										</button>
 									</div>
 								</div>
-								
-								<div className="flex items-center gap-2">
-									<button
-										type="button"
-										onClick={() => toggleAdminStatus(user.id, user.is_admin)}
-										disabled={updatingUserId === user.id}
-										className={`btn btn-xs ${
-											user.is_admin
-												? "btn-error btn-outline"
-												: "btn-success btn-outline"
-										} ${updatingUserId === user.id ? "loading" : ""}`}
-									>
-										{updatingUserId === user.id ? (
-											"Updating..."
-										) : user.is_admin ? (
-											"Remove Admin"
-										) : (
-											"Make Admin"
-										)}
-									</button>
-								</div>
-							</div>
-						</li>
-					))}
-				</ul>
+							</li>
+						))}
+					</ul>
 				</div>
 			</div>
 

@@ -114,7 +114,9 @@ export function QueuePage() {
 				<div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Total</div>
-						<div className="stat-value text-primary">{stats.total_completed}</div>
+						<div className="stat-value text-primary">
+							{stats.total_completed}
+						</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Pending</div>
@@ -126,7 +128,9 @@ export function QueuePage() {
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Completed</div>
-						<div className="stat-value text-success">{stats.total_completed}</div>
+						<div className="stat-value text-success">
+							{stats.total_completed}
+						</div>
 					</div>
 					<div className="stat bg-base-100 rounded-box shadow">
 						<div className="stat-title">Failed</div>

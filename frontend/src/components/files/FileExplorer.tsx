@@ -17,12 +17,12 @@ interface FileExplorerProps {
 	onRetryConnection: () => void;
 }
 
-export function FileExplorer({ 
-	isConnected, 
+export function FileExplorer({
+	isConnected,
 	hasConnectionFailed,
-	isConnecting, 
-	connectionError, 
-	onRetryConnection 
+	isConnecting,
+	connectionError,
+	onRetryConnection,
 }: FileExplorerProps) {
 	const [currentPath, setCurrentPath] = useState("/");
 
@@ -91,9 +91,9 @@ export function FileExplorer({
 				<p className="text-base-content/40 mb-6">
 					Make sure you're logged in to the application
 				</p>
-				<button 
-					type="button" 
-					className="btn btn-primary" 
+				<button
+					type="button"
+					className="btn btn-primary"
 					onClick={onRetryConnection}
 				>
 					<RefreshCw className="h-4 w-4" />
@@ -114,9 +114,9 @@ export function FileExplorer({
 				<p className="text-base-content/50 mb-6">
 					WebDAV connection required to browse files
 				</p>
-				<button 
-					type="button" 
-					className="btn btn-primary" 
+				<button
+					type="button"
+					className="btn btn-primary"
 					onClick={onRetryConnection}
 				>
 					<Wifi className="h-4 w-4" />
@@ -195,7 +195,7 @@ export function FileExplorer({
 			{/* File List */}
 			<div className="card bg-base-100 shadow-md">
 				<div className="card-body p-6">
-					{(isLoading && isConnected) ? (
+					{isLoading && isConnected ? (
 						<LoadingSpinner />
 					) : directory ? (
 						<FileList

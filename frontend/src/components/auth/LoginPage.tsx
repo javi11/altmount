@@ -6,7 +6,8 @@ import { Logo } from "../ui/Logo";
 
 export function LoginPage() {
 	const { isAuthenticated, checkRegistrationStatus } = useAuth();
-	const [registrationEnabled, setRegistrationEnabled] = useState<boolean>(false);
+	const [registrationEnabled, setRegistrationEnabled] =
+		useState<boolean>(false);
 	const [userCount, setUserCount] = useState<number>(0);
 	const [isLoading, setIsLoading] = useState(true);
 	const [showRegister, setShowRegister] = useState(false);
@@ -56,25 +57,24 @@ export function LoginPage() {
 						{showRegister ? "Create Admin Account" : "Sign in to Altmount"}
 					</h2>
 					<p className="mt-2 text-sm text-gray-600">
-						{showRegister 
-							? "Set up your administrator account to get started" 
-							: userCount === 0 
-							? "No users found - please create an admin account" 
-							: "Enter your credentials to continue"
-						}
+						{showRegister
+							? "Set up your administrator account to get started"
+							: userCount === 0
+								? "No users found - please create an admin account"
+								: "Enter your credentials to continue"}
 					</p>
 				</div>
 
 				{userCount === 0 || showRegister ? (
 					// Registration form (only for first user)
 					<div>
-						<RegisterForm 
+						<RegisterForm
 							onSuccess={() => {
 								// After successful registration, user will be logged in automatically
 								// The auth context will handle the redirect
-							}} 
+							}}
 						/>
-						
+
 						{userCount > 0 && (
 							<div className="mt-4 text-center">
 								<button
@@ -90,13 +90,13 @@ export function LoginPage() {
 				) : (
 					// Login form (for existing users)
 					<div>
-						<DirectLoginForm 
+						<DirectLoginForm
 							onSuccess={() => {
 								// After successful login, user will be redirected automatically
 								// The auth context will handle the redirect
-							}} 
+							}}
 						/>
-						
+
 						{registrationEnabled && (
 							<div className="mt-4 text-center">
 								<button
@@ -115,7 +115,8 @@ export function LoginPage() {
 					<p>By signing in, you agree to use this application responsibly.</p>
 					{userCount === 0 && (
 						<p className="mt-1 text-blue-600">
-							The first user will automatically receive administrator privileges.
+							The first user will automatically receive administrator
+							privileges.
 						</p>
 					)}
 				</div>

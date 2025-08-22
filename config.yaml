@@ -17,11 +17,8 @@ api:
 database:
   path: "/Users/javi/mio/altmount/example/altmount.db"
 
-# Mount path for the virtual filesystem
-mount_path: "/mnt/altmount"
-
 # Directory containing NZB files to process
-nzb_dir: "/Users/javi/mio/altmount/example/nzbs"
+watch_path: "/Users/javi/mio/altmount/example/nzbs"
 
 # RClone encryption settings (optional)
 rclone:

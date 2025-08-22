@@ -6,8 +6,10 @@ import {
 	Heart,
 	Home,
 	List,
+	Settings,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 import { useHealthStats, useQueueStats } from "../../hooks/useApi";
 
 const navigation = [
@@ -30,17 +32,29 @@ const navigation = [
 		name: "Files",
 		href: "/files",
 		icon: Folder,
-	}
+	},
+	{
+		name: "Configuration",
+		href: "/config",
+		icon: Settings,
+		adminOnly: true,
+	},
 ];
 
 export function Sidebar() {
+	const { user } = useAuth();
 	const { data: queueStats } = useQueueStats();
 	const { data: healthStats } = useHealthStats();
+
+	// Filter navigation items based on admin status
+	const visibleNavigation = navigation.filter(
+		(item) => !item.adminOnly || (user?.is_admin ?? false),
+	);
 
 	const getBadgeCount = (path: string) => {
 		switch (path) {
 			case "/queue":
-				return queueStats ? queueStats.total_failed: 0;
+				return queueStats ? queueStats.total_failed : 0;
 			case "/health":
 				return healthStats ? healthStats.corrupted + healthStats.partial : 0;
 			default:
@@ -79,7 +93,7 @@ export function Sidebar() {
 				</div>
 
 				<nav className="space-y-2">
-					{navigation.map((item) => {
+					{visibleNavigation.map((item) => {
 						const badgeCount = getBadgeCount(item.href);
 						const badgeColor = getBadgeColor(item.href, badgeCount);
 

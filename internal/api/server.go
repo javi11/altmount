@@ -12,17 +12,13 @@ import (
 
 // Config represents API server configuration
 type Config struct {
-	Enabled  bool   // Whether API is enabled
-	Prefix   string // API path prefix (default: "/api")
-	Username string // Optional basic auth username
-	Password string // Optional basic auth password
+	Prefix string // API path prefix (default: "/api")
 }
 
 // DefaultConfig returns default API configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Enabled: true,
-		Prefix:  "/api",
+		Prefix: "/api",
 	}
 }
 
@@ -33,24 +29,26 @@ type Server struct {
 	healthRepo      *database.HealthRepository
 	authService     *auth.Service
 	userRepo        *database.UserRepository
+	configManager   ConfigManager
 	startTime       time.Time
 	mux             *http.ServeMux
 }
 
 // NewServer creates a new API server that registers routes on the provided mux
-func NewServer(config *Config, queueRepo *database.Repository, healthRepo *database.HealthRepository, authService *auth.Service, userRepo *database.UserRepository, mux *http.ServeMux) *Server {
+func NewServer(config *Config, queueRepo *database.Repository, healthRepo *database.HealthRepository, authService *auth.Service, userRepo *database.UserRepository, configManager ConfigManager, mux *http.ServeMux) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
 	server := &Server{
-		config:      config,
-		queueRepo:   queueRepo,
-		healthRepo:  healthRepo,
-		authService: authService,
-		userRepo:    userRepo,
-		startTime:   time.Now(),
-		mux:         mux,
+		config:        config,
+		queueRepo:     queueRepo,
+		healthRepo:    healthRepo,
+		authService:   authService,
+		userRepo:      userRepo,
+		configManager: configManager,
+		startTime:     time.Now(),
+		mux:           mux,
 	}
 
 	server.setupRoutes()
@@ -95,7 +93,17 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	apiMux.HandleFunc("GET /system/stats", s.handleGetSystemStats)
 	apiMux.HandleFunc("GET /system/health", s.handleGetSystemHealth)
 	apiMux.HandleFunc("POST /system/cleanup", s.handleSystemCleanup)
+	apiMux.HandleFunc("POST /system/restart", s.handleSystemRestart)
 
+	// Configuration endpoints (if config manager is available)
+	if s.configManager != nil {
+		apiMux.HandleFunc("GET /config", s.handleGetConfig)
+		apiMux.HandleFunc("PUT /config", s.handleUpdateConfig)
+		apiMux.HandleFunc("PATCH /config/{section}", s.handlePatchConfigSection)
+		apiMux.HandleFunc("POST /config/reload", s.handleReloadConfig)
+		apiMux.HandleFunc("POST /config/validate", s.handleValidateConfig)
+	}
+	
 	// Authentication endpoints (if auth service is available)
 	if s.authService != nil {
 		// Direct authentication endpoints
@@ -137,10 +145,7 @@ func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
 		}
 	}
 	
-	// Apply basic authentication if configured
-	if s.config.Username != "" && s.config.Password != "" {
-		handler = BasicAuthMiddleware(s.config.Username, s.config.Password)(handler)
-	}
+	// Basic authentication is now handled by OAuth flow only
 	
 	return handler
 }

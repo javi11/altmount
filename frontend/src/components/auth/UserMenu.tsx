@@ -17,12 +17,11 @@ export function UserMenu() {
 		}
 	};
 
-
 	return (
 		<div className="dropdown dropdown-end">
 			<button
-			    type="button" 
-				tabIndex={0} 
+				type="button"
+				tabIndex={0}
 				className="btn btn-ghost gap-2 hover:bg-base-200 transition-colors duration-200"
 			>
 				{/* Avatar */}
@@ -50,15 +49,11 @@ export function UserMenu() {
 								{user.name}
 							</div>
 							{user.email && (
-								<div className="text-xs text-base-content/60">
-									{user.email}
-								</div>
+								<div className="text-xs text-base-content/60">{user.email}</div>
 							)}
 							<div className="flex items-center gap-1 mt-1">
 								{isAdmin && (
-									<div className="badge badge-primary badge-xs">
-										Admin
-									</div>
+									<div className="badge badge-primary badge-xs">Admin</div>
 								)}
 								<div className="text-xs text-base-content/50 capitalize">
 									via {user.provider}
@@ -73,13 +68,15 @@ export function UserMenu() {
 				{/* Menu items */}
 				{isAdmin && (
 					<li>
-						<a 
+						<a
 							href="/admin"
 							className="flex items-center gap-3 py-2 hover:bg-base-200 transition-colors"
 						>
 							<Users className="h-4 w-4" />
 							<span>Manage Users</span>
-							<div className="badge badge-secondary badge-sm ml-auto">Admin</div>
+							<div className="badge badge-secondary badge-sm ml-auto">
+								Admin
+							</div>
 						</a>
 					</li>
 				)}
