@@ -144,35 +144,33 @@ export function QueuePage() {
 				<div className="card-body">
 					<div className="flex flex-col sm:flex-row gap-4">
 						{/* Search */}
-						<div className="form-control flex-1">
-							<div className="input-group">
-								<input
-									type="text"
-									placeholder="Search queue items..."
-									className="input input-bordered flex-1"
-									value={searchTerm}
-									onChange={(e) => setSearchTerm(e.target.value)}
-								/>
-							</div>
-						</div>
+						<fieldset className="fieldset flex-1">
+							<legend className="fieldset-legend">Search Queue Items</legend>
+							<input
+								type="text"
+								placeholder="Search queue items..."
+								className="input"
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+							/>
+						</fieldset>
 
 						{/* Status Filter */}
-						<div className="form-control">
-							<div className="input-group">
-								<select
-									className="select select-bordered"
-									value={statusFilter}
-									onChange={(e) => setStatusFilter(e.target.value)}
-								>
-									<option value="">All Status</option>
-									<option value={QueueStatus.PENDING}>Pending</option>
-									<option value={QueueStatus.PROCESSING}>Processing</option>
-									<option value={QueueStatus.COMPLETED}>Completed</option>
-									<option value={QueueStatus.FAILED}>Failed</option>
-									<option value={QueueStatus.RETRYING}>Retrying</option>
-								</select>
-							</div>
-						</div>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Filter by Status</legend>
+							<select
+								className="select"
+								value={statusFilter}
+								onChange={(e) => setStatusFilter(e.target.value)}
+							>
+								<option value="">All Status</option>
+								<option value={QueueStatus.PENDING}>Pending</option>
+								<option value={QueueStatus.PROCESSING}>Processing</option>
+								<option value={QueueStatus.COMPLETED}>Completed</option>
+								<option value={QueueStatus.FAILED}>Failed</option>
+								<option value={QueueStatus.RETRYING}>Retrying</option>
+							</select>
+						</fieldset>
 					</div>
 				</div>
 			</div>

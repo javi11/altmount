@@ -17,6 +17,7 @@ export interface ConfigResponse {
 export interface WebDAVConfig {
 	port: number;
 	user: string;
+	password: string;
 	debug: boolean;
 }
 

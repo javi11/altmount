@@ -133,17 +133,16 @@ export function HealthPage() {
 				<div className="card-body">
 					<div className="flex flex-col sm:flex-row gap-4">
 						{/* Search */}
-						<div className="form-control flex-1">
-							<div className="input-group">
-								<input
-									type="text"
-									placeholder="Search files..."
-									className="input input-bordered flex-1"
-									value={searchTerm}
-									onChange={(e) => setSearchTerm(e.target.value)}
-								/>
-							</div>
-						</div>
+						<fieldset className="fieldset flex-1">
+							<legend className="fieldset-legend">Search Files</legend>
+							<input
+								type="text"
+								placeholder="Search files..."
+								className="input"
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+							/>
+						</fieldset>
 					</div>
 				</div>
 			</div>

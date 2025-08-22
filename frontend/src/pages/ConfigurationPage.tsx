@@ -12,6 +12,10 @@ import {
 	X,
 } from "lucide-react";
 import { useState } from "react";
+import { ComingSoonSection } from "../components/config/ComingSoonSection";
+import { SystemConfigSection } from "../components/config/SystemConfigSection";
+import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
+import { WorkersConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { useConfig, useReloadConfig } from "../hooks/useConfig";
@@ -235,141 +239,24 @@ export function ConfigurationPage() {
 							{/* Configuration Form Content */}
 							<div className="space-y-6">
 								{activeSection === "webdav" && (
-									<div className="space-y-4">
-										<h3 className="text-lg font-semibold">
-											WebDAV Server Settings
-										</h3>
-										<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-											<div className="form-control">
-												<label htmlFor="webdav-port" className="label">
-													<span className="label-text">Port</span>
-												</label>
-												<input
-													type="number"
-													className="input input-bordered"
-													value={config.webdav.port}
-													readOnly
-												/>
-												<label htmlFor="webdav-port" className="label">
-													<span className="label-text-alt">
-														WebDAV server port (requires restart to change)
-													</span>
-												</label>
-											</div>
-											<div className="form-control">
-												<label htmlFor="webdav-username" className="label">
-													<span className="label-text">Username</span>
-												</label>
-												<input
-													type="text"
-													className="input input-bordered"
-													value={config.webdav.user}
-													readOnly
-												/>
-											</div>
-										</div>
-										<div className="form-control">
-											<label className="cursor-pointer label">
-												<span className="label-text">Debug Mode</span>
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={config.webdav.debug}
-													readOnly
-												/>
-											</label>
-										</div>
-									</div>
+									<WebDAVConfigSection config={config} />
 								)}
 
 								{activeSection === "workers" && (
-									<div className="space-y-4">
-										<h3 className="text-lg font-semibold">
-											Worker Configuration
-										</h3>
-										<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-											<div className="form-control">
-												<label htmlFor="download-workers" className="label">
-													<span className="label-text">Download Workers</span>
-												</label>
-												<input
-													type="number"
-													className="input input-bordered"
-													value={config.workers.download}
-													readOnly
-												/>
-												<label htmlFor="download-workers" className="label">
-													<span className="label-text-alt">
-														Number of concurrent download threads
-													</span>
-												</label>
-											</div>
-											<div className="form-control">
-												<label htmlFor="processor-workers" className="label">
-													<span className="label-text">Processor Workers</span>
-												</label>
-												<input
-													type="number"
-													className="input input-bordered"
-													value={config.workers.processor}
-													readOnly
-												/>
-												<label htmlFor="processor-workers" className="label">
-													<span className="label-text-alt">
-														Number of NZB processing threads
-													</span>
-												</label>
-											</div>
-										</div>
-									</div>
+									<WorkersConfigSection config={config} />
 								)}
 
 								{activeSection === "system" && (
-									<div className="space-y-4">
-										<h3 className="text-lg font-semibold">System Paths</h3>
-										<div className="space-y-4">
-											<div className="form-control">
-												<label htmlFor="watch-path" className="label">
-													<span className="label-text">Watch path</span>
-												</label>
-												<input
-													type="text"
-													className="input input-bordered"
-													value={config.watch_path}
-													readOnly
-												/>
-												<label htmlFor="watch-path" className="label">
-													<span className="label-text-alt">
-														Directory containing the files to be imported.
-													</span>
-												</label>
-											</div>
-										</div>
-										<div className="form-control">
-											<label className="cursor-pointer label">
-												<span className="label-text">Global Debug Mode</span>
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={config.debug}
-													readOnly
-												/>
-											</label>
-										</div>
-									</div>
+									<SystemConfigSection config={config} />
 								)}
 
 								{/* Placeholder for other sections */}
 								{!["webdav", "database", "workers", "system"].includes(
 									activeSection,
 								) && (
-									<div className="text-center py-8">
-										<div className="text-4xl mb-4">🚧</div>
-										<h3 className="text-lg font-semibold mb-2">Coming Soon</h3>
-										<p className="text-base-content/70">
-											This configuration section is not yet implemented.
-										</p>
-									</div>
+									<ComingSoonSection 
+										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection} 
+									/>
 								)}
 							</div>
 						</div>
