@@ -102,6 +102,13 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("PATCH /config/{section}", s.handlePatchConfigSection)
 		apiMux.HandleFunc("POST /config/reload", s.handleReloadConfig)
 		apiMux.HandleFunc("POST /config/validate", s.handleValidateConfig)
+		
+		// Provider management endpoints
+		apiMux.HandleFunc("POST /providers/test", s.handleTestProvider)
+		apiMux.HandleFunc("POST /providers", s.handleCreateProvider)
+		apiMux.HandleFunc("PUT /providers/{id}", s.handleUpdateProvider)
+		apiMux.HandleFunc("DELETE /providers/{id}", s.handleDeleteProvider)
+		apiMux.HandleFunc("PUT /providers/reorder", s.handleReorderProviders)
 	}
 	
 	// Authentication endpoints (if auth service is available)

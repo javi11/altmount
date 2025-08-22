@@ -1,33 +1,66 @@
-import type { ConfigResponse } from "../../types/config";
+import { Save } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { ConfigResponse, WebDAVConfig } from "../../types/config";
 
 interface WebDAVConfigSectionProps {
 	config: ConfigResponse;
-	onUpdate?: (section: string, data: any) => void;
+	onUpdate?: (section: string, data: WebDAVConfig) => Promise<void>;
 	isReadOnly?: boolean;
+	isUpdating?: boolean;
 }
 
 export function WebDAVConfigSection({
 	config,
 	onUpdate,
-	isReadOnly = true,
+	isReadOnly = false, // WebDAV credentials are editable by default
+	isUpdating = false,
 }: WebDAVConfigSectionProps) {
+	const [formData, setFormData] = useState<WebDAVConfig>(config.webdav);
+	const [hasChanges, setHasChanges] = useState(false);
+
+	// Sync form data when config changes from external sources (reload)
+	useEffect(() => {
+		setFormData(config.webdav);
+		setHasChanges(false);
+	}, [config.webdav]);
+
+	const handleInputChange = (
+		field: keyof WebDAVConfig,
+		value: string | boolean | number,
+	) => {
+		const newData = { ...formData, [field]: value };
+		setFormData(newData);
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.webdav));
+	};
+
+	const handleSave = async () => {
+		if (onUpdate && hasChanges) {
+			await onUpdate("webdav", formData);
+			setHasChanges(false);
+		}
+	};
 	return (
 		<div className="space-y-4">
 			<h3 className="text-lg font-semibold">WebDAV Server Settings</h3>
-			<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Port</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.port}
+						readOnly={true} // Port always requires restart
+					/>
+					<p className="label">Server restart required to change port</p>
+				</fieldset>
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Username</legend>
 					<input
 						type="text"
 						className="input"
-						value={config.webdav.user}
+						value={formData.user}
 						readOnly={isReadOnly}
-						onChange={(e) =>
-							onUpdate?.("webdav", {
-								...config.webdav,
-								user: e.target.value,
-							})
-						}
+						onChange={(e) => handleInputChange("user", e.target.value)}
 					/>
 				</fieldset>
 				<fieldset className="fieldset">
@@ -35,14 +68,9 @@ export function WebDAVConfigSection({
 					<input
 						type="password"
 						className="input"
-						value={config.webdav.password}
+						value={formData.password}
 						readOnly={isReadOnly}
-						onChange={(e) =>
-							onUpdate?.("webdav", {
-								...config.webdav,
-								password: e.target.value,
-							})
-						}
+						onChange={(e) => handleInputChange("password", e.target.value)}
 					/>
 					<p className="label">WebDAV server password</p>
 				</fieldset>
@@ -54,17 +82,31 @@ export function WebDAVConfigSection({
 					<input
 						type="checkbox"
 						className="checkbox"
-						checked={config.webdav.debug}
+						checked={formData.debug}
 						disabled={isReadOnly}
-						onChange={(e) =>
-							onUpdate?.("webdav", {
-								...config.webdav,
-								debug: e.target.checked,
-							})
-						}
+						onChange={(e) => handleInputChange("debug", e.target.checked)}
 					/>
 				</label>
 			</fieldset>
+
+			{/* Save Button */}
+			{!isReadOnly && (
+				<div className="flex justify-end">
+					<button
+						type="button"
+						className="btn btn-primary"
+						onClick={handleSave}
+						disabled={!hasChanges || isUpdating}
+					>
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
+						{isUpdating ? "Saving..." : "Save Changes"}
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }

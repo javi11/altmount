@@ -11,7 +11,6 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/nntppool"
 	"github.com/spf13/afero"
 )
 
@@ -82,15 +81,8 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 		Workers:      processorWorkers,
 	}
 
-	// Get connection pool from manager - pass nil if not available
-	var cp nntppool.UsenetConnectionPool
-	if poolManager != nil {
-		cp, _ = poolManager.GetPool() // Ignore error - we handle nil pool below
-	}
-
-	// For now, we'll need to create a service that uses MetadataProcessor
-	// This will be updated when we modify the NZB service
-	service, err := importer.NewService(serviceConfig, metadataService, db, cp) // nil for mainDB since we're using metadata
+	// Create service with poolManager for dynamic pool access
+	service, err := importer.NewService(serviceConfig, metadataService, db, poolManager)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)
@@ -103,7 +95,7 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 	metadataRemoteFile := nzbfilesystem.NewMetadataRemoteFile(
 		metadataService,
 		healthRepo,
-		cp,
+		poolManager,
 		downloadWorkers,
 		nzbfilesystem.MetadataRemoteFileConfig{
 			GlobalPassword:     config.Password,

@@ -5,11 +5,11 @@ import { ProtectedRoute, UserManagement } from "./components/auth";
 import { Layout } from "./components/layout/Layout";
 import { AuthProvider } from "./contexts/AuthContext";
 import { queryClient } from "./lib/queryClient";
+import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { Dashboard } from "./pages/Dashboard";
 import { FilesPage } from "./pages/FilesPage";
 import { HealthPage } from "./pages/HealthPage";
 import { QueuePage } from "./pages/QueuePage";
-import { ConfigurationPage } from "./pages/ConfigurationPage";
 
 function App() {
 	return (

@@ -1,5 +1,6 @@
-import { Download, Info, MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, Eye, Info, MoreHorizontal, Trash2 } from "lucide-react";
 import type { WebDAVFile } from "../../types/webdav";
+import { getFileTypeInfo } from "../../utils/fileUtils";
 
 interface FileActionsProps {
 	file: WebDAVFile;
@@ -7,6 +8,7 @@ interface FileActionsProps {
 	onDownload: (path: string, filename: string) => void;
 	onDelete: (path: string) => void;
 	onInfo: (path: string) => void;
+	onPreview?: (file: WebDAVFile, currentPath: string) => void;
 	isDownloading?: boolean;
 	isDeleting?: boolean;
 }
@@ -17,6 +19,7 @@ export function FileActions({
 	onDownload,
 	onDelete,
 	onInfo,
+	onPreview,
 	isDownloading = false,
 	isDeleting = false,
 }: FileActionsProps) {
@@ -38,6 +41,16 @@ export function FileActions({
 		onInfo(filePath);
 	};
 
+	const handlePreview = () => {
+		if (file.type === "file" && onPreview) {
+			onPreview(file, currentPath);
+		}
+	};
+
+	const fileInfo = getFileTypeInfo(file.basename, file.mime);
+	const canPreview =
+		file.type === "file" && fileInfo.isPreviewable && onPreview;
+
 	return (
 		<div className="dropdown dropdown-end">
 			<button
@@ -55,6 +68,14 @@ export function FileActions({
 						File Info
 					</button>
 				</li>
+				{canPreview && (
+					<li>
+						<button type="button" onClick={handlePreview}>
+							<Eye className="h-4 w-4" />
+							Preview
+						</button>
+					</li>
+				)}
 				{file.type === "file" && (
 					<li>
 						<button

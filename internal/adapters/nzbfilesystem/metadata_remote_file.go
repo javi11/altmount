@@ -16,9 +16,9 @@ import (
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
-	"github.com/javi11/nntppool"
 	"github.com/spf13/afero"
 )
 
@@ -27,7 +27,7 @@ import (
 type MetadataRemoteFile struct {
 	metadataService    *metadata.MetadataService
 	healthRepository   *database.HealthRepository
-	cp                 nntppool.UsenetConnectionPool
+	poolManager        pool.Manager      // Pool manager for dynamic pool access
 	maxDownloadWorkers int
 	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
 	globalPassword     string            // Global password fallback
@@ -48,7 +48,7 @@ type MetadataRemoteFileConfig struct {
 func NewMetadataRemoteFile(
 	metadataService *metadata.MetadataService,
 	healthRepository *database.HealthRepository,
-	cp nntppool.UsenetConnectionPool,
+	poolManager pool.Manager,
 	maxDownloadWorkers int,
 	config MetadataRemoteFileConfig,
 ) *MetadataRemoteFile {
@@ -74,7 +74,7 @@ func NewMetadataRemoteFile(
 	return &MetadataRemoteFile{
 		metadataService:    metadataService,
 		healthRepository:   healthRepository,
-		cp:                 cp,
+		poolManager:        poolManager,
 		maxDownloadWorkers: maxDownloadWorkers,
 		rcloneCipher:       rcloneCipher,
 		globalPassword:     config.GlobalPassword,
@@ -124,7 +124,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		metadataService:    mrf.metadataService,
 		healthRepository:   mrf.healthRepository,
 		args:               r,
-		cp:                 mrf.cp,
+		poolManager:        mrf.poolManager,
 		ctx:                ctx,
 		maxWorkers:         mrf.maxDownloadWorkers,
 		rcloneCipher:       mrf.rcloneCipher,
@@ -333,6 +333,10 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 
 	// Add directories first
 	for _, dirInfo := range dirInfos {
+		// Skip the current directory itself
+		if dirInfo.Name() == filepath.Base(mvd.normalizedPath) || dirInfo.Name() == "." {
+			continue
+		}
 		infos = append(infos, dirInfo)
 		if count > 0 && len(infos) >= count {
 			return infos, nil
@@ -429,7 +433,7 @@ type MetadataVirtualFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
 	args             utils.PathWithArgs
-	cp               nntppool.UsenetConnectionPool
+	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
 	maxWorkers       int
 	rcloneCipher     encryption.Cipher
@@ -669,7 +673,7 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 		return nil
 	}
 
-	if mvf.cp == nil {
+	if mvf.poolManager == nil {
 		return ErrNoUsenetPool
 	}
 
@@ -788,9 +792,15 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, ErrNoNzbData
 	}
 
+	// Get connection pool dynamically from pool manager
+	cp, err := mvf.poolManager.GetPool()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection pool: %w", err)
+	}
+
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, mvf.cp, rg, mvf.maxWorkers)
+	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

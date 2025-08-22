@@ -143,6 +143,29 @@ export class WebDAVClient {
 		}
 	}
 
+	async getFileContents(path: string, asText = false): Promise<Blob | string> {
+		if (!this.client) {
+			throw new Error("WebDAV client not connected");
+		}
+
+		try {
+			if (asText) {
+				const content = await this.client.getFileContents(path, {
+					format: "text",
+				});
+				return content as string;
+			} else {
+				const buffer = await this.client.getFileContents(path, {
+					format: "binary",
+				});
+				return new Blob([buffer as ArrayBuffer]);
+			}
+		} catch (error) {
+			console.error("Failed to get file contents:", error);
+			throw this.parseError(error, "get file contents", path);
+		}
+	}
+
 	async getFileInfo(path: string): Promise<WebDAVFile> {
 		if (!this.client) {
 			throw new Error("WebDAV client not connected");

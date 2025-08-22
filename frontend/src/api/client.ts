@@ -10,10 +10,16 @@ import type {
 } from "../types/api";
 import type {
 	ConfigResponse,
+	ConfigSection,
 	ConfigUpdateRequest,
 	ConfigValidateRequest,
 	ConfigValidateResponse,
-	ConfigSection,
+	ProviderConfig,
+	ProviderCreateRequest,
+	ProviderReorderRequest,
+	ProviderTestRequest,
+	ProviderTestResponse,
+	ProviderUpdateRequest,
 } from "../types/config";
 
 export class APIError extends Error {
@@ -274,6 +280,41 @@ export class APIClient {
 	async reloadConfig() {
 		return this.request<ConfigResponse>("/config/reload", {
 			method: "POST",
+		});
+	}
+
+	// Provider endpoints
+	async testProvider(data: ProviderTestRequest) {
+		return this.request<ProviderTestResponse>("/providers/test", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async createProvider(data: ProviderCreateRequest) {
+		return this.request<ProviderConfig>("/providers", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async updateProvider(id: string, data: Partial<ProviderUpdateRequest>) {
+		return this.request<ProviderConfig>(`/providers/${id}`, {
+			method: "PUT",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async deleteProvider(id: string) {
+		return this.request<{ message: string }>(`/providers/${id}`, {
+			method: "DELETE",
+		});
+	}
+
+	async reorderProviders(data: ProviderReorderRequest) {
+		return this.request<ProviderConfig[]>("/providers/reorder", {
+			method: "PUT",
+			body: JSON.stringify(data),
 		});
 	}
 }

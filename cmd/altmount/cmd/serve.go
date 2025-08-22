@@ -67,8 +67,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 					break
 				}
 				newProvider := newConfig.Providers[i]
-				if oldProvider.Name != newProvider.Name ||
-					oldProvider.Host != newProvider.Host ||
+				if oldProvider.Host != newProvider.Host ||
 					oldProvider.Port != newProvider.Port ||
 					oldProvider.Username != newProvider.Username ||
 					oldProvider.Password != newProvider.Password ||
@@ -127,8 +126,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
 		QueueDatabasePath:  cfg.Database.Path,
 		MetadataRootPath:   cfg.Metadata.RootPath,
-		MaxRangeSize:       cfg.Metadata.MaxRangeSize,
-		StreamingChunkSize: cfg.Metadata.StreamingChunkSize,
+		MaxRangeSize:       cfg.Streaming.MaxRangeSize,
+		StreamingChunkSize: cfg.Streaming.StreamingChunkSize,
 		WatchPath:          cfg.WatchPath,
 		Password:           cfg.RClone.Password,
 		Salt:               cfg.RClone.Salt,
@@ -210,8 +209,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Register WebDAV auth updater (placeholder implementation)
+	// Register WebDAV auth updater with dynamic credentials
 	webdavAuthUpdater := webdav.NewAuthUpdater()
+	webdavAuthUpdater.SetAuthCredentials(server.GetAuthCredentials())
 	componentRegistry.RegisterWebDAV(webdavAuthUpdater)
 
 	logger.Info("Starting AltMount server",

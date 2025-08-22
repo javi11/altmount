@@ -168,12 +168,15 @@ func makePropstatResponse(href string, pstats []webdav.Propstat) *response {
 // walkFn returns filepath.SkipDir, walkFS will skip traversal of this node.
 func walkFS(ctx context.Context, fs webdav.FileSystem, depth int, name string, info os.FileInfo, walkFn filepath.WalkFunc) error {
 	// This implementation is based on Walk's code in the standard path/filepath package.
-	err := walkFn(name, info, nil)
-	if err != nil {
-		if info.IsDir() && err == filepath.SkipDir {
-			return nil
+	// Only include the directory itself if depth is 0 (i.e., stat request, not listing contents)
+	if depth == 0 {
+		err := walkFn(name, info, nil)
+		if err != nil {
+			if info.IsDir() && err == filepath.SkipDir {
+				return nil
+			}
+			return err
 		}
-		return err
 	}
 	if !info.IsDir() || depth == 0 {
 		return nil

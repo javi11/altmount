@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import type {
 	ConfigResponse,
+	ConfigSection,
 	ConfigUpdateRequest,
 	ConfigValidateRequest,
-	ConfigSection,
 } from "../types/config";
 
 // Query keys for React Query

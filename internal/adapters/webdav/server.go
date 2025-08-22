@@ -22,7 +22,8 @@ import (
 )
 
 type webdavServer struct {
-	srv *http.Server
+	srv         *http.Server
+	authCreds   *AuthCredentials
 }
 
 func NewServer(
@@ -32,6 +33,8 @@ func NewServer(
 	tokenService *token.Service, // Optional token service for JWT auth
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
 ) (*webdavServer, error) {
+	// Create dynamic auth credentials
+	authCreds := NewAuthCredentials(config.User, config.Pass)
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
 		fileSystem: aferoToWebdavFS(fs),
@@ -78,8 +81,12 @@ func NewServer(
 					}
 				}
 			}
-		} else if username == config.User && password == config.Pass {
-			authenticated = true
+		} else {
+			// Check against dynamic credentials
+			currentUser, currentPass := authCreds.GetCredentials()
+			if username == currentUser && password == currentPass {
+				authenticated = true
+			}
 		}
 
 		if !authenticated {
@@ -142,7 +149,8 @@ func NewServer(
 	}
 
 	return &webdavServer{
-		srv: srv,
+		srv:       srv,
+		authCreds: authCreds,
 	}, nil
 }
 
@@ -193,4 +201,9 @@ func (s *webdavServer) Stop() {
 	}
 
 	slog.Info("WebDav server stopped")
+}
+
+// GetAuthCredentials returns the auth credentials for dynamic updates
+func (s *webdavServer) GetAuthCredentials() *AuthCredentials {
+	return s.authCreds
 }

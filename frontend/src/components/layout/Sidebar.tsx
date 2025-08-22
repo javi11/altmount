@@ -9,8 +9,8 @@ import {
 	Settings,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { useAuth } from "../../hooks/useAuth";
 import { useHealthStats, useQueueStats } from "../../hooks/useApi";
+import { useAuth } from "../../hooks/useAuth";
 
 const navigation = [
 	{

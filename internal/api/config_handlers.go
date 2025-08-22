@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/nntppool"
 )
 
 // ConfigManager interface defines methods for configuration management
@@ -210,7 +212,7 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 	providers := make([]ProviderConfigResponse, len(config.Providers))
 	for i, p := range config.Providers {
 		providers[i] = ProviderConfigResponse{
-			Name:           p.Name,
+			ID:             p.ID,
 			Host:           p.Host,
 			Port:           p.Port,
 			Username:       p.Username,
@@ -218,14 +220,16 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			TLS:            p.TLS,
 			InsecureTLS:    p.InsecureTLS,
 			PasswordSet:    p.Password != "",
+			Enabled:        p.Enabled,
 		}
 	}
 
 	return &ConfigResponse{
 		WebDAV: WebDAVConfigResponse{
-			Port:  config.WebDAV.Port,
-			User:  config.WebDAV.User,
-			Debug: config.WebDAV.Debug,
+			Port:     config.WebDAV.Port,
+			User:     config.WebDAV.User,
+			Password: config.WebDAV.Password, // Include password for admin editing
+			Debug:    config.WebDAV.Debug,
 		},
 		API: APIConfigResponse{
 			Prefix: "/api", // Always hardcoded to /api
@@ -234,9 +238,11 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			Path: config.Database.Path,
 		},
 		Metadata: MetadataConfigResponse{
-			RootPath:           config.Metadata.RootPath,
-			MaxRangeSize:       config.Metadata.MaxRangeSize,
-			StreamingChunkSize: config.Metadata.StreamingChunkSize,
+			RootPath: config.Metadata.RootPath,
+		},
+		Streaming: StreamingConfigResponse{
+			MaxRangeSize:       config.Streaming.MaxRangeSize,
+			StreamingChunkSize: config.Streaming.StreamingChunkSize,
 		},
 		WatchPath: config.WatchPath,
 		RClone: RCloneConfigResponse{
@@ -284,11 +290,14 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		if updates.Metadata.RootPath != nil {
 			cfg.Metadata.RootPath = *updates.Metadata.RootPath
 		}
-		if updates.Metadata.MaxRangeSize != nil {
-			cfg.Metadata.MaxRangeSize = *updates.Metadata.MaxRangeSize
+	}
+
+	if updates.Streaming != nil {
+		if updates.Streaming.MaxRangeSize != nil {
+			cfg.Streaming.MaxRangeSize = *updates.Streaming.MaxRangeSize
 		}
-		if updates.Metadata.StreamingChunkSize != nil {
-			cfg.Metadata.StreamingChunkSize = *updates.Metadata.StreamingChunkSize
+		if updates.Streaming.StreamingChunkSize != nil {
+			cfg.Streaming.StreamingChunkSize = *updates.Streaming.StreamingChunkSize
 		}
 	}
 
@@ -318,8 +327,8 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		providers := make([]config.ProviderConfig, len(*updates.Providers))
 		for i, p := range *updates.Providers {
 			provider := config.ProviderConfig{}
-			if p.Name != nil {
-				provider.Name = *p.Name
+			if p.ID != nil {
+				provider.ID = *p.ID
 			}
 			if p.Host != nil {
 				provider.Host = *p.Host
@@ -341,6 +350,9 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 			}
 			if p.InsecureTLS != nil {
 				provider.InsecureTLS = *p.InsecureTLS
+			}
+			if p.Enabled != nil {
+				provider.Enabled = *p.Enabled
 			}
 			providers[i] = provider
 		}
@@ -386,11 +398,14 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 			if updates.Metadata.RootPath != nil {
 				cfg.Metadata.RootPath = *updates.Metadata.RootPath
 			}
-			if updates.Metadata.MaxRangeSize != nil {
-				cfg.Metadata.MaxRangeSize = *updates.Metadata.MaxRangeSize
+		}
+	case "streaming":
+		if updates.Streaming != nil {
+			if updates.Streaming.MaxRangeSize != nil {
+				cfg.Streaming.MaxRangeSize = *updates.Streaming.MaxRangeSize
 			}
-			if updates.Metadata.StreamingChunkSize != nil {
-				cfg.Metadata.StreamingChunkSize = *updates.Metadata.StreamingChunkSize
+			if updates.Streaming.StreamingChunkSize != nil {
+				cfg.Streaming.StreamingChunkSize = *updates.Streaming.StreamingChunkSize
 			}
 		}
 	case "rclone":
@@ -416,9 +431,6 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 			providers := make([]config.ProviderConfig, len(*updates.Providers))
 			for i, p := range *updates.Providers {
 				provider := config.ProviderConfig{}
-				if p.Name != nil {
-					provider.Name = *p.Name
-				}
 				if p.Host != nil {
 					provider.Host = *p.Host
 				}
@@ -448,4 +460,408 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 		return fmt.Errorf("invalid section: %s", section)
 	}
 	return nil
+}
+
+// handleTestProvider tests NNTP provider connectivity
+func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var testReq ProviderTestRequest
+	if err := json.NewDecoder(r.Body).Decode(&testReq); err != nil {
+		WriteValidationError(w, "Invalid JSON in request body", err.Error())
+		return
+	}
+
+	// Test provider connectivity using nntppool
+	start := time.Now()
+	err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
+		Host:        testReq.Host,
+		Port:        testReq.Port,
+		Username:    testReq.Username,
+		Password:    testReq.Password,
+		TLS:         testReq.TLS,
+		InsecureSSL: testReq.InsecureTLS,
+	}, nil, nil)
+	latency := time.Since(start).Milliseconds()
+
+	response := ProviderTestResponse{
+		Success: err == nil,
+		Latency: latency,
+	}
+
+	if err != nil {
+		response.ErrorMessage = err.Error()
+	}
+
+	WriteSuccess(w, response, nil)
+}
+
+// handleCreateProvider creates a new NNTP provider
+func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if s.configManager == nil {
+		WriteInternalError(w, "Configuration management not available", "CONFIG_UNAVAILABLE")
+		return
+	}
+
+	var createReq ProviderCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
+		WriteValidationError(w, "Invalid JSON in request body", err.Error())
+		return
+	}
+
+	// Test provider connectivity before creating
+	err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
+		Host:        createReq.Host,
+		Port:        createReq.Port,
+		Username:    createReq.Username,
+		Password:    createReq.Password,
+		TLS:         createReq.TLS,
+		InsecureSSL: createReq.InsecureTLS,
+	}, nil, nil)
+	if err != nil {
+		WriteValidationError(w, "Provider connectivity test failed", err.Error())
+		return
+	}
+
+	// Get current config
+	currentConfig := s.configManager.GetConfig()
+	if currentConfig == nil {
+		WriteInternalError(w, "Configuration not available", "CONFIG_NOT_FOUND")
+		return
+	}
+
+	// Create new provider with hash-generated ID
+	providerID := config.GenerateProviderID(createReq.Host, createReq.Port, createReq.Username)
+	newProvider := config.ProviderConfig{
+		ID:             providerID,
+		Host:           createReq.Host,
+		Port:           createReq.Port,
+		Username:       createReq.Username,
+		Password:       createReq.Password,
+		MaxConnections: createReq.MaxConnections,
+		TLS:            createReq.TLS,
+		InsecureTLS:    createReq.InsecureTLS,
+		Enabled:        createReq.Enabled,
+	}
+
+	// Create a copy of current config and add new provider
+	newConfig := *currentConfig
+	newConfig.Providers = append(newConfig.Providers, newProvider)
+
+	// Validate the new configuration
+	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+		WriteValidationError(w, "Configuration validation failed", err.Error())
+		return
+	}
+
+	// Update the configuration
+	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+		WriteInternalError(w, "Failed to update configuration", err.Error())
+		return
+	}
+
+	// Save to file
+	if err := s.configManager.SaveConfig(); err != nil {
+		WriteInternalError(w, "Failed to save configuration", err.Error())
+		return
+	}
+
+	// Return the new provider
+	providerResponse := ProviderConfigResponse{
+		ID:             newProvider.ID,
+		Host:           newProvider.Host,
+		Port:           newProvider.Port,
+		Username:       newProvider.Username,
+		MaxConnections: newProvider.MaxConnections,
+		TLS:            newProvider.TLS,
+		InsecureTLS:    newProvider.InsecureTLS,
+		PasswordSet:    newProvider.Password != "",
+		Enabled:        newProvider.Enabled,
+	}
+
+	WriteSuccess(w, providerResponse, nil)
+}
+
+// handleUpdateProvider updates an existing NNTP provider
+func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if s.configManager == nil {
+		WriteInternalError(w, "Configuration management not available", "CONFIG_UNAVAILABLE")
+		return
+	}
+
+	// Extract provider ID from URL path parameter
+	providerID := r.PathValue("id")
+	if providerID == "" {
+		WriteValidationError(w, "Provider ID is required", "MISSING_PROVIDER_ID")
+		return
+	}
+
+	var updateReq ProviderUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
+		WriteValidationError(w, "Invalid JSON in request body", err.Error())
+		return
+	}
+
+	// Get current config
+	currentConfig := s.configManager.GetConfig()
+	if currentConfig == nil {
+		WriteInternalError(w, "Configuration not available", "CONFIG_NOT_FOUND")
+		return
+	}
+
+	// Find the provider to update
+	newConfig := *currentConfig
+	var updatedProvider *config.ProviderConfig
+	for i := range newConfig.Providers {
+		if newConfig.Providers[i].ID == providerID {
+			updatedProvider = &newConfig.Providers[i]
+			break
+		}
+	}
+
+	if updatedProvider == nil {
+		WriteNotFound(w, "Provider not found", "PROVIDER_NOT_FOUND")
+		return
+	}
+
+	// Apply updates
+	hostChanged := false
+	portChanged := false
+	usernameChanged := false
+	
+	if updateReq.Host != nil {
+		updatedProvider.Host = *updateReq.Host
+		hostChanged = true
+	}
+	if updateReq.Port != nil {
+		updatedProvider.Port = *updateReq.Port
+		portChanged = true
+	}
+	if updateReq.Username != nil {
+		updatedProvider.Username = *updateReq.Username
+		usernameChanged = true
+	}
+	if updateReq.Password != nil {
+		updatedProvider.Password = *updateReq.Password
+	}
+	if updateReq.MaxConnections != nil {
+		updatedProvider.MaxConnections = *updateReq.MaxConnections
+	}
+	if updateReq.TLS != nil {
+		updatedProvider.TLS = *updateReq.TLS
+	}
+	if updateReq.InsecureTLS != nil {
+		updatedProvider.InsecureTLS = *updateReq.InsecureTLS
+	}
+	if updateReq.Enabled != nil {
+		updatedProvider.Enabled = *updateReq.Enabled
+	}
+
+	// Regenerate ID if any identifying fields changed
+	if hostChanged || portChanged || usernameChanged {
+		updatedProvider.ID = config.GenerateProviderID(updatedProvider.Host, updatedProvider.Port, updatedProvider.Username)
+	}
+
+	// Test provider connectivity if connection details changed
+	if updateReq.Host != nil || updateReq.Port != nil || updateReq.Username != nil ||
+		updateReq.Password != nil || updateReq.TLS != nil || updateReq.InsecureTLS != nil {
+		err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
+			Host:        updatedProvider.Host,
+			Port:        updatedProvider.Port,
+			Username:    updatedProvider.Username,
+			Password:    updatedProvider.Password,
+			TLS:         updatedProvider.TLS,
+			InsecureSSL: updatedProvider.InsecureTLS,
+		}, nil, nil)
+		if err != nil {
+			WriteValidationError(w, "Provider connectivity test failed", err.Error())
+			return
+		}
+	}
+
+	// Validate the new configuration
+	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+		WriteValidationError(w, "Configuration validation failed", err.Error())
+		return
+	}
+
+	// Update the configuration
+	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+		WriteInternalError(w, "Failed to update configuration", err.Error())
+		return
+	}
+
+	// Save to file
+	if err := s.configManager.SaveConfig(); err != nil {
+		WriteInternalError(w, "Failed to save configuration", err.Error())
+		return
+	}
+
+	// Return the updated provider
+	providerResponse := ProviderConfigResponse{
+		ID:             updatedProvider.ID,
+		Host:           updatedProvider.Host,
+		Port:           updatedProvider.Port,
+		Username:       updatedProvider.Username,
+		MaxConnections: updatedProvider.MaxConnections,
+		TLS:            updatedProvider.TLS,
+		InsecureTLS:    updatedProvider.InsecureTLS,
+		PasswordSet:    updatedProvider.Password != "",
+		Enabled:        updatedProvider.Enabled,
+	}
+
+	WriteSuccess(w, providerResponse, nil)
+}
+
+// handleDeleteProvider deletes an NNTP provider
+func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
+	if s.configManager == nil {
+		WriteInternalError(w, "Configuration management not available", "CONFIG_UNAVAILABLE")
+		return
+	}
+
+	// Extract provider ID from URL path parameter
+	providerID := r.PathValue("id")
+	if providerID == "" {
+		WriteValidationError(w, "Provider ID is required", "MISSING_PROVIDER_ID")
+		return
+	}
+
+	// Get current config
+	currentConfig := s.configManager.GetConfig()
+	if currentConfig == nil {
+		WriteInternalError(w, "Configuration not available", "CONFIG_NOT_FOUND")
+		return
+	}
+
+	// Find and remove the provider
+	newConfig := *currentConfig
+	var providerIndex = -1
+	for i, provider := range newConfig.Providers {
+		if provider.ID == providerID {
+			providerIndex = i
+			break
+		}
+	}
+
+	if providerIndex == -1 {
+		WriteNotFound(w, "Provider not found", "PROVIDER_NOT_FOUND")
+		return
+	}
+
+	// Remove provider from slice
+	newConfig.Providers = append(newConfig.Providers[:providerIndex], newConfig.Providers[providerIndex+1:]...)
+
+	// Validate the new configuration
+	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+		WriteValidationError(w, "Configuration validation failed", err.Error())
+		return
+	}
+
+	// Update the configuration
+	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+		WriteInternalError(w, "Failed to update configuration", err.Error())
+		return
+	}
+
+	// Save to file
+	if err := s.configManager.SaveConfig(); err != nil {
+		WriteInternalError(w, "Failed to save configuration", err.Error())
+		return
+	}
+
+	WriteSuccess(w, map[string]string{"message": "Provider deleted successfully"}, nil)
+}
+
+// handleReorderProviders reorders NNTP providers
+func (s *Server) handleReorderProviders(w http.ResponseWriter, r *http.Request) {
+	if s.configManager == nil {
+		WriteInternalError(w, "Configuration management not available", "CONFIG_UNAVAILABLE")
+		return
+	}
+
+	var reorderReq ProviderReorderRequest
+	if err := json.NewDecoder(r.Body).Decode(&reorderReq); err != nil {
+		WriteValidationError(w, "Invalid JSON in request body", err.Error())
+		return
+	}
+
+	// Validate request
+	if len(reorderReq.ProviderIDs) == 0 {
+		WriteValidationError(w, "Provider IDs array cannot be empty", "EMPTY_PROVIDER_IDS")
+		return
+	}
+
+	// Get current config
+	currentConfig := s.configManager.GetConfig()
+	if currentConfig == nil {
+		WriteInternalError(w, "Configuration not available", "CONFIG_NOT_FOUND")
+		return
+	}
+
+	// Validate that all provided IDs exist and match current providers
+	if len(reorderReq.ProviderIDs) != len(currentConfig.Providers) {
+		WriteValidationError(w, "Provider IDs count must match existing providers count", "PROVIDER_COUNT_MISMATCH")
+		return
+	}
+
+	// Create a map of current providers by ID
+	providerMap := make(map[string]config.ProviderConfig)
+	for _, provider := range currentConfig.Providers {
+		providerMap[provider.ID] = provider
+	}
+
+	// Validate all IDs exist and create reordered slice
+	reorderedProviders := make([]config.ProviderConfig, 0, len(reorderReq.ProviderIDs))
+	for _, id := range reorderReq.ProviderIDs {
+		if provider, exists := providerMap[id]; exists {
+			reorderedProviders = append(reorderedProviders, provider)
+		} else {
+			WriteValidationError(w, fmt.Sprintf("Provider ID '%s' not found", id), "PROVIDER_NOT_FOUND")
+			return
+		}
+	}
+
+	// Create new configuration with reordered providers
+	newConfig := *currentConfig
+	newConfig.Providers = reorderedProviders
+
+	// Validate the new configuration
+	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+		WriteValidationError(w, "Configuration validation failed", err.Error())
+		return
+	}
+
+	// Update the configuration
+	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+		WriteInternalError(w, "Failed to update configuration", err.Error())
+		return
+	}
+
+	// Save to file
+	if err := s.configManager.SaveConfig(); err != nil {
+		WriteInternalError(w, "Failed to save configuration", err.Error())
+		return
+	}
+
+	// Return updated provider list
+	response := make([]ProviderConfigResponse, len(newConfig.Providers))
+	for i, provider := range newConfig.Providers {
+		response[i] = ProviderConfigResponse{
+			ID:             provider.ID,
+			Host:           provider.Host,
+			Port:           provider.Port,
+			Username:       provider.Username,
+			MaxConnections: provider.MaxConnections,
+			TLS:            provider.TLS,
+			InsecureTLS:    provider.InsecureTLS,
+			PasswordSet:    provider.Password != "",
+			Enabled:        provider.Enabled,
+		}
+	}
+
+	WriteSuccess(w, response, nil)
 }

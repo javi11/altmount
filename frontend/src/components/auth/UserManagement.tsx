@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
 import { RefreshCcw, User as UserIcon } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
 import type { User } from "../../types/api";
 

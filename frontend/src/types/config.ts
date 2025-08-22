@@ -6,6 +6,7 @@ export interface ConfigResponse {
 	api: APIConfig;
 	database: DatabaseConfig;
 	metadata: MetadataConfig;
+	streaming: StreamingConfig;
 	watch_path: string;
 	rclone: RCloneConfig;
 	workers: WorkersConfig;
@@ -34,6 +35,10 @@ export interface DatabaseConfig {
 // Metadata configuration
 export interface MetadataConfig {
 	root_path: string;
+}
+
+// Streaming configuration
+export interface StreamingConfig {
 	max_range_size: number;
 	streaming_chunk_size: number;
 }
@@ -52,7 +57,7 @@ export interface WorkersConfig {
 
 // NNTP Provider configuration (sanitized)
 export interface ProviderConfig {
-	name: string;
+	id: string;
 	host: string;
 	port: number;
 	username: string;
@@ -60,6 +65,7 @@ export interface ProviderConfig {
 	tls: boolean;
 	insecure_tls: boolean;
 	password_set: boolean;
+	enabled: boolean;
 }
 
 // Configuration update request types
@@ -68,6 +74,7 @@ export interface ConfigUpdateRequest {
 	api?: APIUpdateRequest;
 	database?: DatabaseUpdateRequest;
 	metadata?: MetadataUpdateRequest;
+	streaming?: StreamingUpdateRequest;
 	watch_path?: string;
 	rclone?: RCloneUpdateRequest;
 	workers?: WorkersUpdateRequest;
@@ -96,6 +103,10 @@ export interface DatabaseUpdateRequest {
 // Metadata update request
 export interface MetadataUpdateRequest {
 	root_path?: string;
+}
+
+// Streaming update request
+export interface StreamingUpdateRequest {
 	max_range_size?: number;
 	streaming_chunk_size?: number;
 }
@@ -122,6 +133,7 @@ export interface ProviderUpdateRequest {
 	max_connections?: number;
 	tls?: boolean;
 	insecure_tls?: boolean;
+	enabled?: boolean;
 }
 
 // Configuration validation request
@@ -145,6 +157,7 @@ export interface ConfigValidationError {
 export type ConfigSection =
 	| "webdav"
 	| "metadata"
+	| "streaming"
 	| "rclone"
 	| "workers"
 	| "providers";
@@ -168,6 +181,9 @@ export interface WorkersFormData {
 
 export interface MetadataFormData {
 	root_path: string;
+}
+
+export interface StreamingFormData {
 	max_range_size: number;
 	streaming_chunk_size: number;
 }
@@ -178,7 +194,6 @@ export interface RCloneFormData {
 }
 
 export interface ProviderFormData {
-	name: string;
 	host: string;
 	port: number;
 	username: string;
@@ -186,6 +201,7 @@ export interface ProviderFormData {
 	max_connections: number;
 	tls: boolean;
 	insecure_tls: boolean;
+	enabled: boolean;
 }
 
 export interface SystemFormData {
@@ -203,6 +219,37 @@ export interface ConfigSectionInfo {
 }
 
 // Configuration sections metadata
+// Provider management types
+export interface ProviderTestRequest {
+	host: string;
+	port: number;
+	username: string;
+	password: string;
+	tls: boolean;
+	insecure_tls: boolean;
+}
+
+export interface ProviderTestResponse {
+	success: boolean;
+	error_message?: string;
+	latency_ms?: number;
+}
+
+export interface ProviderCreateRequest {
+	host: string;
+	port: number;
+	username: string;
+	password: string;
+	max_connections: number;
+	tls: boolean;
+	insecure_tls: boolean;
+	enabled: boolean;
+}
+
+export interface ProviderReorderRequest {
+	provider_ids: string[];
+}
+
 export const CONFIG_SECTIONS: Record<
 	ConfigSection | "system",
 	ConfigSectionInfo
@@ -216,8 +263,14 @@ export const CONFIG_SECTIONS: Record<
 	},
 	metadata: {
 		title: "Metadata",
-		description: "File metadata storage and processing settings",
+		description: "File metadata storage settings",
 		icon: "Folder",
+		canEdit: true,
+	},
+	streaming: {
+		title: "Streaming",
+		description: "File streaming and chunking configuration",
+		icon: "Download",
 		canEdit: true,
 	},
 	rclone: {

@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { Logo } from "../ui/Logo";
 import { DirectLoginForm } from "./DirectLoginForm";
 import { RegisterForm } from "./RegisterForm";
-import { Logo } from "../ui/Logo";
 
 export function LoginPage() {
 	const { isAuthenticated, checkRegistrationStatus } = useAuth();

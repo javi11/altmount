@@ -184,6 +184,7 @@ type ConfigResponse struct {
 	API       APIConfigResponse        `json:"api"`
 	Database  DatabaseConfigResponse   `json:"database"`
 	Metadata  MetadataConfigResponse   `json:"metadata"`
+	Streaming StreamingConfigResponse  `json:"streaming"`
 	WatchPath string                   `json:"watch_path"`
 	RClone    RCloneConfigResponse     `json:"rclone"`
 	Workers   WorkersConfigResponse    `json:"workers"`
@@ -193,9 +194,10 @@ type ConfigResponse struct {
 
 // WebDAVConfigResponse represents WebDAV server configuration in API responses
 type WebDAVConfigResponse struct {
-	Port  int    `json:"port"`
-	User  string `json:"user"`
-	Debug bool   `json:"debug"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	Debug    bool   `json:"debug"`
 }
 
 // APIConfigResponse represents REST API configuration in API responses
@@ -210,9 +212,13 @@ type DatabaseConfigResponse struct {
 
 // MetadataConfigResponse represents metadata configuration in API responses
 type MetadataConfigResponse struct {
-	RootPath           string `json:"root_path"`
-	MaxRangeSize       int64  `json:"max_range_size"`
-	StreamingChunkSize int64  `json:"streaming_chunk_size"`
+	RootPath string `json:"root_path"`
+}
+
+// StreamingConfigResponse represents streaming configuration in API responses
+type StreamingConfigResponse struct {
+	MaxRangeSize       int64 `json:"max_range_size"`
+	StreamingChunkSize int64 `json:"streaming_chunk_size"`
 }
 
 // RCloneConfigResponse represents rclone configuration in API responses (sanitized)
@@ -229,7 +235,7 @@ type WorkersConfigResponse struct {
 
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
 type ProviderConfigResponse struct {
-	Name           string `json:"name"`
+	ID             string `json:"id"`
 	Host           string `json:"host"`
 	Port           int    `json:"port"`
 	Username       string `json:"username"`
@@ -237,6 +243,7 @@ type ProviderConfigResponse struct {
 	TLS            bool   `json:"tls"`
 	InsecureTLS    bool   `json:"insecure_tls"`
 	PasswordSet    bool   `json:"password_set"`
+	Enabled        bool   `json:"enabled"`
 }
 
 // ConfigUpdateRequest represents a request to update configuration
@@ -245,6 +252,7 @@ type ConfigUpdateRequest struct {
 	API       *APIConfigRequest        `json:"api,omitempty"`
 	Database  *DatabaseConfigRequest   `json:"database,omitempty"`
 	Metadata  *MetadataConfigRequest   `json:"metadata,omitempty"`
+	Streaming *StreamingConfigRequest  `json:"streaming,omitempty"`
 	WatchPath *string                  `json:"watch_path,omitempty"`
 	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
 	Workers   *WorkersConfigRequest    `json:"workers,omitempty"`
@@ -272,9 +280,13 @@ type DatabaseConfigRequest struct {
 
 // MetadataConfigRequest represents metadata configuration in update requests
 type MetadataConfigRequest struct {
-	RootPath           *string `json:"root_path,omitempty"`
-	MaxRangeSize       *int64  `json:"max_range_size,omitempty"`
-	StreamingChunkSize *int64  `json:"streaming_chunk_size,omitempty"`
+	RootPath *string `json:"root_path,omitempty"`
+}
+
+// StreamingConfigRequest represents streaming configuration in update requests
+type StreamingConfigRequest struct {
+	MaxRangeSize       *int64 `json:"max_range_size,omitempty"`
+	StreamingChunkSize *int64 `json:"streaming_chunk_size,omitempty"`
 }
 
 // RCloneConfigRequest represents rclone configuration in update requests
@@ -291,7 +303,7 @@ type WorkersConfigRequest struct {
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests
 type ProviderConfigRequest struct {
-	Name           *string `json:"name,omitempty"`
+	ID             *string `json:"id,omitempty"`
 	Host           *string `json:"host,omitempty"`
 	Port           *int    `json:"port,omitempty"`
 	Username       *string `json:"username,omitempty"`
@@ -299,6 +311,7 @@ type ProviderConfigRequest struct {
 	MaxConnections *int    `json:"max_connections,omitempty"`
 	TLS            *bool   `json:"tls,omitempty"`
 	InsecureTLS    *bool   `json:"insecure_tls,omitempty"`
+	Enabled        *bool   `json:"enabled,omitempty"`
 }
 
 // ConfigValidateRequest represents a request to validate configuration
@@ -388,4 +401,52 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 	}
 	response.Total = response.Healthy + response.Partial + response.Corrupted
 	return response
+}
+
+// Provider Management API Types
+
+// ProviderTestRequest represents a request to test provider connectivity
+type ProviderTestRequest struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	TLS         bool   `json:"tls"`
+	InsecureTLS bool   `json:"insecure_tls"`
+}
+
+// ProviderTestResponse represents the result of testing provider connectivity
+type ProviderTestResponse struct {
+	Success      bool   `json:"success"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	Latency      int64  `json:"latency_ms,omitempty"`
+}
+
+// ProviderCreateRequest represents a request to create a new provider
+type ProviderCreateRequest struct {
+	Host           string `json:"host"`
+	Port           int    `json:"port"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	MaxConnections int    `json:"max_connections"`
+	TLS            bool   `json:"tls"`
+	InsecureTLS    bool   `json:"insecure_tls"`
+	Enabled        bool   `json:"enabled"`
+}
+
+// ProviderUpdateRequest represents a request to update an existing provider
+type ProviderUpdateRequest struct {
+	Host           *string `json:"host,omitempty"`
+	Port           *int    `json:"port,omitempty"`
+	Username       *string `json:"username,omitempty"`
+	Password       *string `json:"password,omitempty"`
+	MaxConnections *int    `json:"max_connections,omitempty"`
+	TLS            *bool   `json:"tls,omitempty"`
+	InsecureTLS    *bool   `json:"insecure_tls,omitempty"`
+	Enabled        *bool   `json:"enabled,omitempty"`
+}
+
+// ProviderReorderRequest represents a request to reorder providers
+type ProviderReorderRequest struct {
+	ProviderIDs []string `json:"provider_ids"`
 }

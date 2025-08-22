@@ -12,7 +12,7 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/altmount/internal/pool"
 )
 
 // ServiceConfig holds configuration for the simplified NZB service
@@ -39,7 +39,7 @@ type Service struct {
 }
 
 // NewService creates a new simplified NZB service with separate main and database
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, cp nntppool.UsenetConnectionPool) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager) (*Service, error) {
 	// Set defaults
 	if config.ScanInterval == 0 {
 		config.ScanInterval = 30 * time.Second
@@ -48,8 +48,8 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		config.Workers = 2
 	}
 
-	// Create processor with main database repository (for processed files)
-	processor := NewProcessor(metadataService, cp)
+	// Create processor with poolManager for dynamic pool access
+	processor := NewProcessor(metadataService, poolManager)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

@@ -12,7 +12,7 @@ import (
 
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/altmount/internal/pool"
 )
 
 // Processor handles the processing and storage of parsed NZB files using metadata storage
@@ -21,18 +21,18 @@ type Processor struct {
 	strmParser      *StrmParser
 	metadataService *metadata.MetadataService
 	rarProcessor    RarProcessor
-	cp              nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
+	poolManager     pool.Manager // Pool manager for dynamic pool access
 	log             *slog.Logger
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, cp nntppool.UsenetConnectionPool) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager) *Processor {
 	return &Processor{
-		parser:          NewParser(cp),
+		parser:          NewParser(poolManager),
 		strmParser:      NewStrmParser(),
 		metadataService: metadataService,
-		rarProcessor:    NewRarProcessor(cp, 10), // 10 max workers for RAR analysis
-		cp:              cp,
+		rarProcessor:    NewRarProcessor(poolManager, 10), // 10 max workers for RAR analysis
+		poolManager:     poolManager,
 		log:             slog.Default().With("component", "nzb-processor"),
 	}
 }

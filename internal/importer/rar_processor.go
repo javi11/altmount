@@ -8,7 +8,7 @@ import (
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/rarlist"
 )
 
@@ -33,17 +33,17 @@ type rarContent struct {
 
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
-	log        *slog.Logger
-	cp         nntppool.UsenetConnectionPool
-	maxWorkers int
+	log         *slog.Logger
+	poolManager pool.Manager
+	maxWorkers  int
 }
 
 // NewRarProcessor creates a new RAR processor
-func NewRarProcessor(cp nntppool.UsenetConnectionPool, maxWorkers int) RarProcessor {
+func NewRarProcessor(poolManager pool.Manager, maxWorkers int) RarProcessor {
 	return &rarProcessor{
-		log:        slog.Default().With("component", "rar-processor"),
-		cp:         cp,
-		maxWorkers: maxWorkers,
+		log:         slog.Default().With("component", "rar-processor"),
+		poolManager: poolManager,
+		maxWorkers:  maxWorkers,
 	}
 }
 
@@ -68,9 +68,18 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 // This implementation uses rarlist with UsenetFileSystem to analyze RAR structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
 func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]rarContent, error) {
+	if rh.poolManager == nil {
+		return nil, fmt.Errorf("no pool manager available")
+	}
+
+	cp, err := rh.poolManager.GetPool()
+	if err != nil {
+		return nil, fmt.Errorf("no connection pool available: %w", err)
+	}
+
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, rh.cp, rarFiles, rh.maxWorkers)
+	ufs := NewUsenetFileSystem(ctx, cp, rarFiles, rh.maxWorkers)
 
 	// Get sorted RAR files for proper multi-part reading
 	rarFileNames := ufs.GetRarFiles()

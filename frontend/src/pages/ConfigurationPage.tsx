@@ -2,6 +2,7 @@ import {
 	AlertTriangle,
 	Check,
 	Cog,
+	Download,
 	Folder,
 	Globe,
 	HardDrive,
@@ -13,13 +14,23 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
+import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
+import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
 import { WorkersConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
-import { useConfig, useReloadConfig } from "../hooks/useConfig";
-import type { ConfigSection } from "../types/config";
+import {
+	useConfig,
+	useReloadConfig,
+	useUpdateConfigSection,
+} from "../hooks/useConfig";
+import type {
+	ConfigSection,
+	StreamingConfig,
+	WebDAVConfig,
+} from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
 // Helper function to get icon component
@@ -27,6 +38,7 @@ const getIconComponent = (iconName: string) => {
 	const iconMap = {
 		Globe,
 		Folder,
+		Download,
 		Shield,
 		Cog,
 		Radio,
@@ -38,10 +50,29 @@ const getIconComponent = (iconName: string) => {
 export function ConfigurationPage() {
 	const { data: config, isLoading, error, refetch } = useConfig();
 	const reloadConfig = useReloadConfig();
+	const updateConfigSection = useUpdateConfigSection();
 	const [activeSection, setActiveSection] = useState<ConfigSection | "system">(
 		"webdav",
 	);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+	// Handle configuration updates with save button
+	const handleConfigUpdate = async (
+		section: string,
+		data: WebDAVConfig | StreamingConfig,
+	) => {
+		if (section === "webdav") {
+			await updateConfigSection.mutateAsync({
+				section: "webdav",
+				config: { webdav: data as WebDAVConfig },
+			});
+		} else if (section === "streaming") {
+			await updateConfigSection.mutateAsync({
+				section: "streaming",
+				config: { streaming: data as StreamingConfig },
+			});
+		}
+	};
 
 	const handleReloadConfig = async () => {
 		try {
@@ -161,9 +192,7 @@ export function ConfigurationPage() {
 										<li key={key}>
 											<button
 												type="button"
-												className={
-													activeSection === key ? "active" : ""
-												}
+												className={activeSection === key ? "active" : ""}
 												onClick={() => setActiveSection(key)}
 											>
 												<IconComponent className="h-5 w-5" />
@@ -200,7 +229,9 @@ export function ConfigurationPage() {
 							<div className="mb-6">
 								<div className="flex items-center space-x-3 mb-2">
 									{(() => {
-										const IconComponent = getIconComponent(CONFIG_SECTIONS[activeSection].icon);
+										const IconComponent = getIconComponent(
+											CONFIG_SECTIONS[activeSection].icon,
+										);
 										return <IconComponent className="h-8 w-8 text-primary" />;
 									})()}
 									<div>
@@ -215,18 +246,6 @@ export function ConfigurationPage() {
 
 								{/* Section Status */}
 								<div className="flex items-center space-x-2">
-									{CONFIG_SECTIONS[activeSection].canEdit ? (
-										<div className="badge badge-success">
-											<Check className="h-3 w-3 mr-1" />
-											Editable
-										</div>
-									) : (
-										<div className="badge badge-ghost">
-											<X className="h-3 w-3 mr-1" />
-											Read Only
-										</div>
-									)}
-
 									{CONFIG_SECTIONS[activeSection].requiresRestart && (
 										<div className="badge badge-warning">
 											<AlertTriangle className="h-3 w-3 mr-1" />
@@ -239,23 +258,45 @@ export function ConfigurationPage() {
 							{/* Configuration Form Content */}
 							<div className="space-y-6">
 								{activeSection === "webdav" && (
-									<WebDAVConfigSection config={config} />
+									<WebDAVConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
 								)}
 
 								{activeSection === "workers" && (
 									<WorkersConfigSection config={config} />
 								)}
 
+								{activeSection === "streaming" && (
+									<StreamingConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{activeSection === "system" && (
 									<SystemConfigSection config={config} />
 								)}
 
+								{activeSection === "providers" && (
+									<ProvidersConfigSection config={config} />
+								)}
+
 								{/* Placeholder for other sections */}
-								{!["webdav", "database", "workers", "system"].includes(
-									activeSection,
-								) && (
-									<ComingSoonSection 
-										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection} 
+								{![
+									"webdav",
+									"workers",
+									"streaming",
+									"system",
+									"providers",
+								].includes(activeSection) && (
+									<ComingSoonSection
+										sectionName={
+											CONFIG_SECTIONS[activeSection]?.title || activeSection
+										}
 									/>
 								)}
 							</div>

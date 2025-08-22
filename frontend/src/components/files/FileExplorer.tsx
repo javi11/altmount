@@ -1,5 +1,6 @@
 import { AlertTriangle, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useState } from "react";
+import { useFilePreview } from "../../hooks/useFilePreview";
 import {
 	useWebDAVDirectory,
 	useWebDAVFileOperations,
@@ -8,6 +9,7 @@ import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { FileList } from "./FileList";
+import { FilePreview } from "./FilePreview";
 
 interface FileExplorerProps {
 	isConnected: boolean;
@@ -42,6 +44,8 @@ export function FileExplorer({
 		downloadError,
 		deleteError,
 	} = useWebDAVFileOperations();
+
+	const preview = useFilePreview();
 
 	const handleNavigate = (path: string) => {
 		setCurrentPath(path);
@@ -205,12 +209,27 @@ export function FileExplorer({
 							onDownload={handleDownload}
 							onDelete={handleDelete}
 							onInfo={handleFileInfo}
+							onPreview={preview.openPreview}
 							isDownloading={isDownloading}
 							isDeleting={isDeleting}
 						/>
 					) : null}
 				</div>
 			</div>
+
+			{/* File Preview Modal */}
+			<FilePreview
+				isOpen={preview.isOpen}
+				file={preview.file}
+				content={preview.content}
+				blobUrl={preview.blobUrl}
+				streamUrl={preview.streamUrl}
+				isLoading={preview.isLoading}
+				error={preview.error}
+				onClose={preview.closePreview}
+				onRetry={preview.retryPreview}
+				onDownload={handleDownload}
+			/>
 		</div>
 	);
 }

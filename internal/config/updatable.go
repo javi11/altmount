@@ -172,27 +172,27 @@ func (r *ComponentRegistry) ApplyUpdates(oldConfig, newConfig *Config) {
 		}
 	}
 
-	// Update metadata settings
-	if oldConfig.Metadata.MaxRangeSize != newConfig.Metadata.MaxRangeSize {
+	// Update streaming settings
+	if oldConfig.Streaming.MaxRangeSize != newConfig.Streaming.MaxRangeSize {
 		if r.Metadata != nil {
-			if err := r.Metadata.UpdateMaxRangeSize(newConfig.Metadata.MaxRangeSize); err != nil {
+			if err := r.Metadata.UpdateMaxRangeSize(newConfig.Streaming.MaxRangeSize); err != nil {
 				r.logger.Error("Failed to update max range size", "err", err)
 			} else {
 				r.logger.Info("Max range size updated successfully",
-					"old", oldConfig.Metadata.MaxRangeSize,
-					"new", newConfig.Metadata.MaxRangeSize)
+					"old", oldConfig.Streaming.MaxRangeSize,
+					"new", newConfig.Streaming.MaxRangeSize)
 			}
 		}
 	}
 
-	if oldConfig.Metadata.StreamingChunkSize != newConfig.Metadata.StreamingChunkSize {
+	if oldConfig.Streaming.StreamingChunkSize != newConfig.Streaming.StreamingChunkSize {
 		if r.Metadata != nil {
-			if err := r.Metadata.UpdateStreamingChunkSize(newConfig.Metadata.StreamingChunkSize); err != nil {
+			if err := r.Metadata.UpdateStreamingChunkSize(newConfig.Streaming.StreamingChunkSize); err != nil {
 				r.logger.Error("Failed to update streaming chunk size", "err", err)
 			} else {
 				r.logger.Info("Streaming chunk size updated successfully",
-					"old", oldConfig.Metadata.StreamingChunkSize,
-					"new", newConfig.Metadata.StreamingChunkSize)
+					"old", oldConfig.Streaming.StreamingChunkSize,
+					"new", newConfig.Streaming.StreamingChunkSize)
 			}
 		}
 	}

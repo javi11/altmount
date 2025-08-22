@@ -14,7 +14,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/nzbparser"
 )
 
@@ -61,15 +61,15 @@ var (
 
 // Parser handles NZB file parsing
 type Parser struct {
-	cp  nntppool.UsenetConnectionPool // Connection pool for yenc header fetching
-	log *slog.Logger                  // Logger for debug/error messages
+	poolManager pool.Manager // Pool manager for dynamic pool access
+	log         *slog.Logger // Logger for debug/error messages
 }
 
 // NewParser creates a new NZB parser
-func NewParser(cp nntppool.UsenetConnectionPool) *Parser {
+func NewParser(poolManager pool.Manager) *Parser {
 	return &Parser{
-		cp:  cp,
-		log: slog.Default().With("component", "nzb-parser"),
+		poolManager: poolManager,
+		log:         slog.Default().With("component", "nzb-parser"),
 	}
 }
 
@@ -134,7 +134,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 
 	// Normalize segment sizes using yEnc PartSize headers if needed
 	// This handles cases where NZB segment sizes include yEnc encoding overhead
-	if p.cp != nil && len(file.Segments) >= 2 {
+	if p.poolManager != nil && p.poolManager.HasPool() && len(file.Segments) >= 2 {
 		err := p.normalizeSegmentSizesWithYenc(file.Segments)
 		if err != nil {
 			// Log the error but continue with original segment sizes
@@ -239,7 +239,7 @@ func (p *Parser) calculateFileSize(file nzbparser.NzbFile) (int64, error) {
 	}
 
 	// Priority 3: Different segment sizes - fetch yenc header to get actual file size
-	if p.cp != nil {
+	if p.poolManager != nil && p.poolManager.HasPool() {
 		if actualSize, err := p.fetchActualFileSizeFromYencHeader(file); err == nil {
 			return actualSize, nil
 		}
@@ -260,7 +260,12 @@ func (p *Parser) calculateSegmentSum(file nzbparser.NzbFile) int64 {
 
 // fetchActualFileSizeFromYencHeader fetches the yenc header to get the actual file size
 func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int64, error) {
-	if p.cp == nil {
+	if p.poolManager == nil {
+		return 0, fmt.Errorf("no pool manager available")
+	}
+
+	cp, err := p.poolManager.GetPool()
+	if err != nil {
 		return 0, fmt.Errorf("no connection pool available")
 	}
 
@@ -276,7 +281,7 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 	defer cancel()
 
 	// Get a connection from the pool
-	r, err := p.cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+	r, err := cp.BodyReader(ctx, firstSegment.ID, file.Groups)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get body reader: %w", err)
 	}
@@ -297,7 +302,12 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 
 // fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment
 func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string) (int64, error) {
-	if p.cp == nil {
+	if p.poolManager == nil {
+		return 0, fmt.Errorf("no pool manager available")
+	}
+
+	cp, err := p.poolManager.GetPool()
+	if err != nil {
 		return 0, fmt.Errorf("no connection pool available")
 	}
 
@@ -306,7 +316,7 @@ func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string
 	defer cancel()
 
 	// Get a connection from the pool
-	r, err := p.cp.BodyReader(ctx, segment.ID, groups)
+	r, err := cp.BodyReader(ctx, segment.ID, groups)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get body reader: %w", err)
 	}

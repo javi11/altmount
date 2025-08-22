@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ type Config struct {
 	API       APIConfig        `yaml:"api" mapstructure:"api"`
 	Database  DatabaseConfig   `yaml:"database" mapstructure:"database"`
 	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
+	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming"`
 	WatchPath string           `yaml:"watch_path" mapstructure:"watch_path"`
 	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
 	Workers   WorkersConfig    `yaml:"workers" mapstructure:"workers"`
@@ -44,9 +46,13 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath           string `yaml:"root_path" mapstructure:"root_path"`
-	MaxRangeSize       int64  `yaml:"max_range_size" mapstructure:"max_range_size"`
-	StreamingChunkSize int64  `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size"`
+	RootPath string `yaml:"root_path" mapstructure:"root_path"`
+}
+
+// StreamingConfig represents streaming and chunking configuration
+type StreamingConfig struct {
+	MaxRangeSize       int64 `yaml:"max_range_size" mapstructure:"max_range_size"`
+	StreamingChunkSize int64 `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -61,9 +67,16 @@ type WorkersConfig struct {
 	Processor int `yaml:"processor" mapstructure:"processor"`
 }
 
+// GenerateProviderID creates a unique ID based on host, port, and username
+func GenerateProviderID(host string, port int, username string) string {
+	input := fmt.Sprintf("%s:%d@%s", host, port, username)
+	hash := sha256.Sum256([]byte(input))
+	return fmt.Sprintf("%x", hash)[:8] // First 8 characters for readability
+}
+
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	Name           string `yaml:"name" mapstructure:"name"`
+	ID             string `yaml:"id" mapstructure:"id"`
 	Host           string `yaml:"host" mapstructure:"host"`
 	Port           int    `yaml:"port" mapstructure:"port"`
 	Username       string `yaml:"username" mapstructure:"username"`
@@ -71,6 +84,7 @@ type ProviderConfig struct {
 	MaxConnections int    `yaml:"max_connections" mapstructure:"max_connections"`
 	TLS            bool   `yaml:"tls" mapstructure:"tls"`
 	InsecureTLS    bool   `yaml:"insecure_tls" mapstructure:"insecure_tls"`
+	Enabled        bool   `yaml:"enabled" mapstructure:"enabled"`
 }
 
 // Validate validates the configuration
@@ -92,12 +106,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("metadata root_path cannot be empty")
 	}
 
-	if c.Metadata.MaxRangeSize < 0 {
-		return fmt.Errorf("metadata max_range_size must be non-negative")
+	// Validate streaming configuration
+	if c.Streaming.MaxRangeSize < 0 {
+		return fmt.Errorf("streaming max_range_size must be non-negative")
 	}
 
-	if c.Metadata.StreamingChunkSize < 0 {
-		return fmt.Errorf("metadata streaming_chunk_size must be non-negative")
+	if c.Streaming.StreamingChunkSize < 0 {
+		return fmt.Errorf("streaming streaming_chunk_size must be non-negative")
 	}
 
 	// Validate each provider
@@ -116,20 +131,23 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// ToNNTPProviders converts ProviderConfig slice to nntppool.UsenetProviderConfig slice
+// ToNNTPProviders converts ProviderConfig slice to nntppool.UsenetProviderConfig slice (enabled only)
 func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
-	providers := make([]nntppool.UsenetProviderConfig, len(c.Providers))
-	for i, p := range c.Providers {
-		providers[i] = nntppool.UsenetProviderConfig{
-			Host:                           p.Host,
-			Port:                           p.Port,
-			Username:                       p.Username,
-			Password:                       p.Password,
-			MaxConnections:                 p.MaxConnections,
-			MaxConnectionIdleTimeInSeconds: 300, // Default idle timeout
-			TLS:                            p.TLS,
-			InsecureSSL:                    p.InsecureTLS,
-			MaxConnectionTTLInSeconds:      3600, // Default connection TTL
+	var providers []nntppool.UsenetProviderConfig
+	for _, p := range c.Providers {
+		// Only include enabled providers
+		if p.Enabled {
+			providers = append(providers, nntppool.UsenetProviderConfig{
+				Host:                           p.Host,
+				Port:                           p.Port,
+				Username:                       p.Username,
+				Password:                       p.Password,
+				MaxConnections:                 p.MaxConnections,
+				MaxConnectionIdleTimeInSeconds: 300, // Default idle timeout
+				TLS:                            p.TLS,
+				InsecureSSL:                    p.InsecureTLS,
+				MaxConnectionTTLInSeconds:      3600, // Default connection TTL
+			})
 		}
 	}
 	return providers
@@ -274,7 +292,9 @@ func DefaultConfig() *Config {
 			Path: "altmount.db",
 		},
 		Metadata: MetadataConfig{
-			RootPath:           "./metadata",
+			RootPath: "./metadata",
+		},
+		Streaming: StreamingConfig{
 			MaxRangeSize:       33554432, // 32MB - Maximum range size for a single request
 			StreamingChunkSize: 8388608,  // 8MB - Chunk size for streaming when end=-1
 		},

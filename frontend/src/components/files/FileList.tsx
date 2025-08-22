@@ -18,6 +18,7 @@ interface FileListProps {
 	onDownload: (path: string, filename: string) => void;
 	onDelete: (path: string) => void;
 	onInfo: (path: string) => void;
+	onPreview?: (file: WebDAVFile, currentPath: string) => void;
 	isDownloading?: boolean;
 	isDeleting?: boolean;
 }
@@ -29,6 +30,7 @@ export function FileList({
 	onDownload,
 	onDelete,
 	onInfo,
+	onPreview,
 	isDownloading = false,
 	isDeleting = false,
 }: FileListProps) {
@@ -116,6 +118,7 @@ export function FileList({
 								onDownload={onDownload}
 								onDelete={onDelete}
 								onInfo={onInfo}
+								onPreview={onPreview}
 								isDownloading={isDownloading}
 								isDeleting={isDeleting}
 							/>
