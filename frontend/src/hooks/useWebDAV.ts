@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { apiClient } from "../api/client";
 import { webdavClient } from "../services/webdavClient";
 import type { WebDAVDirectory } from "../types/webdav";
 
@@ -124,19 +125,32 @@ export function useWebDAVFileOperations() {
 		},
 	});
 
-	const getFileInfo = useMutation({
+	const getFileMetadata = useMutation({
 		mutationFn: async (path: string) => {
-			return webdavClient.getFileInfo(path);
+			try {
+				// Try to get detailed metadata first
+				return await apiClient.getFileMetadata(path);
+			} catch (error) {
+				// If metadata fails, fall back to basic WebDAV info
+				console.warn(
+					"Failed to get file metadata, falling back to basic info:",
+					error,
+				);
+				throw error;
+			}
 		},
 	});
 
 	return {
 		downloadFile: downloadFile.mutate,
 		deleteFile: deleteFile.mutate,
-		getFileInfo: getFileInfo.mutate,
+		getFileMetadata: getFileMetadata.mutate,
 		isDownloading: downloadFile.isPending,
 		isDeleting: deleteFile.isPending,
+		isGettingMetadata: getFileMetadata.isPending,
 		downloadError: downloadFile.error,
 		deleteError: deleteFile.error,
+		metadataError: getFileMetadata.error,
+		metadataData: getFileMetadata.data,
 	};
 }

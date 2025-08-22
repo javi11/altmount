@@ -111,6 +111,28 @@ export interface SystemCleanupRequest {
 	health_status?: HealthStatus;
 }
 
+// File metadata types
+export interface SegmentInfo {
+	message_id: string;
+	segment_size: number;
+	start_offset: number;
+	end_offset: number;
+	available: boolean;
+}
+
+export interface FileMetadata {
+	file_size: number;
+	source_nzb_path: string;
+	status: "healthy" | "partial" | "corrupted" | "unspecified";
+	segment_count: number;
+	available_segments: number;
+	encryption: "none" | "rclone" | "headers";
+	created_at: string;
+	modified_at: string;
+	password_protected: boolean;
+	segments: SegmentInfo[];
+}
+
 // Filter and pagination types
 export interface PaginationParams {
 	limit?: number;

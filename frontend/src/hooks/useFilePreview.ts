@@ -5,9 +5,9 @@ import type { WebDAVFile } from "../types/webdav";
 import {
 	createBlobUrl,
 	getFileTypeInfo,
+	isAudioFile,
 	isTextFile,
 	isVideoFile,
-	isAudioFile,
 	revokeBlobUrl,
 } from "../utils/fileUtils";
 
@@ -52,7 +52,10 @@ export function useFilePreview() {
 			}
 
 			// For video and audio files, use direct streaming URL
-			if (isVideoFile(file.basename, file.mime) || isAudioFile(file.basename, file.mime)) {
+			if (
+				isVideoFile(file.basename, file.mime) ||
+				isAudioFile(file.basename, file.mime)
+			) {
 				const streamUrl = `/webdav${path}`;
 				return { content: null, shouldGetAsText: false, fileInfo, streamUrl };
 			}

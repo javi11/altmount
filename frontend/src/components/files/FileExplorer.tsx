@@ -5,9 +5,11 @@ import {
 	useWebDAVDirectory,
 	useWebDAVFileOperations,
 } from "../../hooks/useWebDAV";
+import type { WebDAVFile } from "../../types/webdav";
 import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { BreadcrumbNav } from "./BreadcrumbNav";
+import { FileInfoModal } from "./FileInfoModal";
 import { FileList } from "./FileList";
 import { FilePreview } from "./FilePreview";
 
@@ -38,14 +40,26 @@ export function FileExplorer({
 	const {
 		downloadFile,
 		deleteFile,
-		getFileInfo,
+		getFileMetadata,
 		isDownloading,
 		isDeleting,
+		isGettingMetadata,
 		downloadError,
 		deleteError,
+		metadataError,
+		metadataData,
 	} = useWebDAVFileOperations();
 
 	const preview = useFilePreview();
+
+	// File info modal state
+	const [fileInfoModal, setFileInfoModal] = useState<{
+		isOpen: boolean;
+		file: WebDAVFile | null;
+	}>({
+		isOpen: false,
+		file: null,
+	});
 
 	const handleNavigate = (path: string) => {
 		setCurrentPath(path);
@@ -60,9 +74,37 @@ export function FileExplorer({
 	};
 
 	const handleFileInfo = (path: string) => {
-		getFileInfo(path);
-		// TODO: Show file info in a modal
-		console.log("File info for:", path);
+		// Find the file object from the current directory
+		const file = directory?.files.find((f) => {
+			const filePath = `${currentPath}/${f.basename}`.replace(/\/+/g, "/");
+			return filePath === path;
+		});
+
+		if (file) {
+			setFileInfoModal({
+				isOpen: true,
+				file,
+			});
+			// Fetch metadata for the file
+			getFileMetadata(path);
+		}
+	};
+
+	const handleCloseFileInfo = () => {
+		setFileInfoModal({
+			isOpen: false,
+			file: null,
+		});
+	};
+
+	const handleRetryFileInfo = () => {
+		if (fileInfoModal.file) {
+			const filePath = `${currentPath}/${fileInfoModal.file.basename}`.replace(
+				/\/+/g,
+				"/",
+			);
+			getFileMetadata(filePath);
+		}
 	};
 
 	// Show connecting state
@@ -229,6 +271,17 @@ export function FileExplorer({
 				onClose={preview.closePreview}
 				onRetry={preview.retryPreview}
 				onDownload={handleDownload}
+			/>
+
+			{/* File Info Modal */}
+			<FileInfoModal
+				isOpen={fileInfoModal.isOpen}
+				file={fileInfoModal.file}
+				metadata={metadataData || null}
+				isLoading={isGettingMetadata}
+				error={metadataError}
+				onClose={handleCloseFileInfo}
+				onRetry={handleRetryFileInfo}
 			/>
 		</div>
 	);

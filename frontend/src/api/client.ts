@@ -2,6 +2,7 @@ import type {
 	APIResponse,
 	AuthResponse,
 	FileHealth,
+	FileMetadata,
 	HealthStats,
 	QueueItem,
 	QueueStats,
@@ -184,6 +185,13 @@ export class APIClient {
 			method: "DELETE",
 			body: JSON.stringify(params),
 		});
+	}
+
+	// File metadata endpoints
+	async getFileMetadata(path: string) {
+		return this.request<FileMetadata>(
+			`/files/info?path=${encodeURIComponent(path)}`,
+		);
 	}
 
 	// Authentication endpoints

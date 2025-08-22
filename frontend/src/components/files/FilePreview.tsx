@@ -318,15 +318,12 @@ export function FilePreview({
 			</div>
 
 			{/* Backdrop */}
-			<div 
-				className="modal-backdrop" 
+			<button
+				type="button"
+				className="modal-backdrop"
 				onClick={onClose}
-				onKeyDown={(e) => e.key === 'Enter' && onClose()}
-				role="button"
-				tabIndex={-1}
-			>
-				<button type="button">Close</button>
-			</div>
+				aria-label="Close modal"
+			></button>
 		</dialog>
 	);
 }

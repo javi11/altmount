@@ -8,6 +8,7 @@ import (
 
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/metadata"
 )
 
 // Config represents API server configuration
@@ -30,25 +31,27 @@ type Server struct {
 	authService     *auth.Service
 	userRepo        *database.UserRepository
 	configManager   ConfigManager
+	metadataReader  *metadata.MetadataReader
 	startTime       time.Time
 	mux             *http.ServeMux
 }
 
 // NewServer creates a new API server that registers routes on the provided mux
-func NewServer(config *Config, queueRepo *database.Repository, healthRepo *database.HealthRepository, authService *auth.Service, userRepo *database.UserRepository, configManager ConfigManager, mux *http.ServeMux) *Server {
+func NewServer(config *Config, queueRepo *database.Repository, healthRepo *database.HealthRepository, authService *auth.Service, userRepo *database.UserRepository, configManager ConfigManager, metadataReader *metadata.MetadataReader, mux *http.ServeMux) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
 	server := &Server{
-		config:        config,
-		queueRepo:     queueRepo,
-		healthRepo:    healthRepo,
-		authService:   authService,
-		userRepo:      userRepo,
-		configManager: configManager,
-		startTime:     time.Now(),
-		mux:           mux,
+		config:         config,
+		queueRepo:      queueRepo,
+		healthRepo:     healthRepo,
+		authService:    authService,
+		userRepo:       userRepo,
+		configManager:  configManager,
+		metadataReader: metadataReader,
+		startTime:      time.Now(),
+		mux:            mux,
 	}
 
 	server.setupRoutes()
@@ -88,6 +91,11 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	apiMux.HandleFunc("GET /health/corrupted", s.handleListCorrupted)
 	apiMux.HandleFunc("GET /health/stats", s.handleGetHealthStats)
 	apiMux.HandleFunc("DELETE /health/cleanup", s.handleCleanupHealth)
+
+	// File endpoints (if metadata reader is available)
+	if s.metadataReader != nil {
+		apiMux.HandleFunc("GET /files/info", s.handleGetFileMetadata)
+	}
 
 	// System endpoints
 	apiMux.HandleFunc("GET /system/stats", s.handleGetSystemStats)
