@@ -125,7 +125,7 @@ export interface FileMetadata {
 	source_nzb_path: string;
 	status: "healthy" | "partial" | "corrupted" | "unspecified";
 	segment_count: number;
-	available_segments: number;
+	available_segments?: number;
 	encryption: "none" | "rclone" | "headers";
 	created_at: string;
 	modified_at: string;

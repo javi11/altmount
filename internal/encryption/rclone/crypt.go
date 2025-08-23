@@ -105,7 +105,7 @@ func (o *rcloneCrypt) Open(
 			if end == -1 {
 				actualEnd = encryptedFileSize - 1
 			}
-			
+
 			reader, err := getReader(ctx, underlyingOffset, actualEnd)
 			if err != nil {
 				return nil, err
@@ -160,6 +160,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 
 	if err != nil {
 		return 0, err
+	}
+
+	if r.rd == nil {
+		return 0, errors.New("rclone crypt reader not initialized")
 	}
 
 	return r.rd.Read(p)

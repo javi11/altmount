@@ -89,3 +89,7 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 		timeout = setTimeout(() => func(...args), wait);
 	};
 }
+
+export function isNil(value: unknown): value is null | undefined {
+	return value === null || value === undefined;
+}

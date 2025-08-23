@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"net/url"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -17,15 +16,8 @@ func (s *Server) handleGetFileMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode the path in case it's URL encoded
-	decodedPath, err := url.QueryUnescape(path)
-	if err != nil {
-		WriteBadRequest(w, "Invalid path encoding", err.Error())
-		return
-	}
-
 	// Get metadata from the reader
-	metadata, err := s.metadataReader.GetFileMetadata(decodedPath)
+	metadata, err := s.metadataReader.GetFileMetadata(path)
 	if err != nil {
 		WriteInternalError(w, "Failed to read metadata", err.Error())
 		return
@@ -45,10 +37,10 @@ func (s *Server) handleGetFileMetadata(w http.ResponseWriter, r *http.Request) {
 func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *FileMetadataResponse {
 	// Convert status enum to string
 	statusStr := s.convertFileStatusToString(metadata.Status)
-	
+
 	// Convert encryption enum to string
 	encryptionStr := s.convertEncryptionToString(metadata.Encryption)
-	
+
 	// Convert segments
 	segments := make([]SegmentInfoResponse, len(metadata.SegmentData))
 	for i, segment := range metadata.SegmentData {
@@ -70,7 +62,7 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 		SourceNzbPath:     metadata.SourceNzbPath,
 		Status:            statusStr,
 		SegmentCount:      len(metadata.SegmentData),
-		AvailableSegments: len(metadata.SegmentData), // TODO: Implement actual available segment count
+		AvailableSegments: nil, // TODO: Implement actual available segment count
 		Encryption:        encryptionStr,
 		CreatedAt:         createdAt,
 		ModifiedAt:        modifiedAt,

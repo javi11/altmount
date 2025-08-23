@@ -14,6 +14,7 @@ import type { FileMetadata, SegmentInfo } from "../../types/api";
 import type { WebDAVFile } from "../../types/webdav";
 import { formatFileSize } from "../../utils/fileUtils";
 import { HealthBadge } from "../ui/StatusBadge";
+import { isNil } from "../../lib/utils";
 
 interface FileInfoModalProps {
 	isOpen: boolean;
@@ -170,9 +171,9 @@ export function FileInfoModal({
 			);
 		}
 
-		const segmentPercentage = Math.round(
+		const segmentPercentage = !isNil(metadata.available_segments) ? Math.round(
 			(metadata.available_segments / metadata.segment_count) * 100,
-		);
+		) : 0;
 
 		return (
 			<div className="space-y-6">
@@ -195,13 +196,15 @@ export function FileInfoModal({
 									<div className="font-medium capitalize">
 										{metadata.status}
 									</div>
-									<div className="text-sm text-base-content/70">
-										{metadata.available_segments} of {metadata.segment_count}{" "}
-										segments available ({segmentPercentage}%)
-									</div>
+									{!isNil(metadata.available_segments) && (
+										<div className="text-sm text-base-content/70">
+											{metadata.available_segments} of {metadata.segment_count}{" "}
+											segments available ({segmentPercentage}%)
+										</div>
+									)}
 								</div>
 							</div>
-							{metadata.segment_count > 0 && (
+							{metadata.segment_count > 0 && !isNil(metadata.available_segments) && (
 								<div className="mt-3">
 									<div className="flex items-center justify-between text-sm mb-1">
 										<span>Segment Availability</span>
@@ -357,12 +360,14 @@ export function FileInfoModal({
 							{metadata.available_segments}
 						</div>
 					</div>
-					<div className="stat">
-						<div className="stat-title">Missing</div>
-						<div className="stat-value text-error">
+					{!isNil(metadata.available_segments) && (
+						<div className="stat">
+							<div className="stat-title">Missing</div>
+							<div className="stat-value text-success">
 							{metadata.segment_count - metadata.available_segments}
+							</div>
 						</div>
-					</div>
+					)}
 				</div>
 
 				{/* Segments List */}
@@ -485,12 +490,13 @@ export function FileInfoModal({
 							</div>
 						</div>
 					</div>
-					<div>
-						<h5 className="font-semibold mb-2">File Integrity</h5>
-						<div className="space-y-1">
-							<div className="flex justify-between">
-								<span className="text-base-content/70">Completeness:</span>
-								<span>
+					{!isNil(metadata.available_segments) && (
+						<div>
+							<h5 className="font-semibold mb-2">File Integrity</h5>
+							<div className="space-y-1">
+								<div className="flex justify-between">
+									<span className="text-base-content/70">Completeness:</span>
+									<span>
 									{Math.round(
 										(metadata.available_segments / metadata.segment_count) *
 											100,
@@ -505,7 +511,7 @@ export function FileInfoModal({
 								</span>
 							</div>
 						</div>
-					</div>
+					</div>)}
 				</div>
 			</div>
 		);

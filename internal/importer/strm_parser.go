@@ -126,20 +126,16 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 	salt := params.Get("salt")
 
 	// Decode NXG header using the nxg library to validate it
-	_, err = nxg.DecodeNXGHeader(h)
+	ngxh, err := nxg.DecodeNXGHeader(h)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode NXG header: %w", err)
 	}
 
 	// Create header from the h parameter (h is the base64 encoded header string)
-	var header nxg.Header
-	if len(h) > len(header) {
-		return nil, fmt.Errorf("NXG header too long: %d bytes, expected max %d", len(h), len(header))
-	}
-	copy(header[:], []byte(h))
+	header := nxg.Header([]byte(h))
 
 	// Calculate number of segments needed
-	numSegments := (fileSize + chunkSize - 1) / chunkSize // Ceiling division
+	numSegments := ngxh.TotalDataParts
 
 	// Generate segment IDs using the NXG library
 	segmentIDs := make([]string, numSegments)
@@ -148,27 +144,22 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate segment ID for part %d: %w", i+1, err)
 		}
+
 		segmentIDs[i] = segmentID
 	}
 
 	// Convert segment IDs to metadata segments
 	segments := make([]*metapb.SegmentData, len(segmentIDs))
-	var currentOffset int64
 
 	for i, segmentID := range segmentIDs {
 		segmentSize := chunkSize
-		// Last segment might be smaller
-		if currentOffset+chunkSize > fileSize {
-			segmentSize = fileSize - currentOffset
-		}
 
 		segments[i] = &metapb.SegmentData{
 			Id:          segmentID,
-			StartOffset: currentOffset,
-			EndOffset:   currentOffset + segmentSize - 1,
+			StartOffset: 0,
+			EndOffset:   segmentSize - 1,
 			SegmentSize: segmentSize,
 		}
-		currentOffset += segmentSize
 	}
 
 	// Determine encryption type

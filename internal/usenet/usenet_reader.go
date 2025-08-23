@@ -215,7 +215,7 @@ func (b *usenetReader) downloadManager(
 					s = nil
 
 					if err != nil && !errors.Is(err, context.Canceled) {
-						b.log.ErrorContext(ctx, "Error downloading segment:", "error", err)
+						b.log.DebugContext(ctx, "Error downloading segment:", "error", err)
 						return err
 					}
 
@@ -235,7 +235,7 @@ func (b *usenetReader) downloadManager(
 		}
 
 		if err := pool.Wait(); err != nil {
-			b.log.ErrorContext(ctx, "Error downloading segments:", "error", err)
+			b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
 
 			return
 		}

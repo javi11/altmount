@@ -15,13 +15,13 @@ func CORSMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
-		
+
 		// Handle preflight requests
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -30,19 +30,19 @@ func CORSMiddleware(next http.Handler) http.Handler {
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Create a custom response writer to capture status code
 		lw := &loggingResponseWriter{
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
 		}
-		
+
 		// Process the request
 		next.ServeHTTP(lw, r)
-		
+
 		// Log the request
 		duration := time.Since(start)
-		slog.Info("API request",
+		slog.Debug("API request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"query", r.URL.RawQuery,
@@ -83,7 +83,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 				WriteInternalError(w, "An unexpected error occurred", "")
 			}
 		}()
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -97,7 +97,7 @@ func BasicAuthMiddleware(username, password string) func(http.Handler) http.Hand
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Check basic auth
 			user, pass, ok := r.BasicAuth()
 			if !ok || user != username || pass != password {
@@ -105,7 +105,7 @@ func BasicAuthMiddleware(username, password string) func(http.Handler) http.Hand
 				WriteUnauthorized(w, "Authentication required", "Please provide valid credentials")
 				return
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -114,19 +114,19 @@ func BasicAuthMiddleware(username, password string) func(http.Handler) http.Hand
 // ParsePagination extracts pagination parameters from query string
 func ParsePagination(r *http.Request) Pagination {
 	pagination := DefaultPagination()
-	
+
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 1000 {
 			pagination.Limit = limit
 		}
 	}
-	
+
 	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
 		if offset, err := strconv.Atoi(offsetStr); err == nil && offset >= 0 {
 			pagination.Offset = offset
 		}
 	}
-	
+
 	return pagination
 }
 
@@ -136,7 +136,7 @@ func ParseTimeParam(r *http.Request, param string) (*time.Time, error) {
 	if value == "" {
 		return nil, nil
 	}
-	
+
 	// Try different time formats
 	formats := []string{
 		time.RFC3339,
@@ -144,13 +144,13 @@ func ParseTimeParam(r *http.Request, param string) (*time.Time, error) {
 		"2006-01-02 15:04:05",
 		"2006-01-02",
 	}
-	
+
 	for _, format := range formats {
 		if t, err := time.Parse(format, value); err == nil {
 			return &t, nil
 		}
 	}
-	
+
 	return nil, &ValidationError{Message: "Invalid time format for parameter: " + param}
 }
 

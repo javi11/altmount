@@ -407,25 +407,25 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 
 // FileMetadataResponse represents file metadata information in API responses
 type FileMetadataResponse struct {
-	FileSize         int64                   `json:"file_size"`
-	SourceNzbPath    string                  `json:"source_nzb_path"`
-	Status           string                  `json:"status"`
-	SegmentCount     int                     `json:"segment_count"`
-	AvailableSegments int                     `json:"available_segments"`
-	Encryption       string                  `json:"encryption"`
-	CreatedAt        string                  `json:"created_at"`
-	ModifiedAt       string                  `json:"modified_at"`
-	PasswordProtected bool                   `json:"password_protected"`
-	Segments         []SegmentInfoResponse   `json:"segments"`
+	FileSize          int64                 `json:"file_size"`
+	SourceNzbPath     string                `json:"source_nzb_path"`
+	Status            string                `json:"status"`
+	SegmentCount      int                   `json:"segment_count"`
+	AvailableSegments *int                  `json:"available_segments"`
+	Encryption        string                `json:"encryption"`
+	CreatedAt         string                `json:"created_at"`
+	ModifiedAt        string                `json:"modified_at"`
+	PasswordProtected bool                  `json:"password_protected"`
+	Segments          []SegmentInfoResponse `json:"segments"`
 }
 
 // SegmentInfoResponse represents segment information in API responses
 type SegmentInfoResponse struct {
-	SegmentSize  int64  `json:"segment_size"`
-	StartOffset  int64  `json:"start_offset"`
-	EndOffset    int64  `json:"end_offset"`
-	MessageID    string `json:"message_id"`
-	Available    bool   `json:"available"`
+	SegmentSize int64  `json:"segment_size"`
+	StartOffset int64  `json:"start_offset"`
+	EndOffset   int64  `json:"end_offset"`
+	MessageID   string `json:"message_id"`
+	Available   bool   `json:"available"`
 }
 
 // Provider Management API Types
