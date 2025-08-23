@@ -10,7 +10,7 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/altmount/internal/pool"
 )
 
 // EventType represents the type of health event
@@ -51,7 +51,7 @@ type HealthCheckerConfig struct {
 type HealthChecker struct {
 	healthRepo      *database.HealthRepository
 	metadataService *metadata.MetadataService
-	usenetPool      nntppool.UsenetConnectionPool
+	poolManager     pool.Manager
 	config          HealthCheckerConfig
 	
 	running         bool
@@ -64,7 +64,7 @@ type HealthChecker struct {
 func NewHealthChecker(
 	healthRepo *database.HealthRepository,
 	metadataService *metadata.MetadataService,
-	usenetPool nntppool.UsenetConnectionPool,
+	poolManager pool.Manager,
 	config HealthCheckerConfig,
 ) *HealthChecker {
 	// Set defaults if not provided
@@ -88,7 +88,7 @@ func NewHealthChecker(
 	return &HealthChecker{
 		healthRepo:      healthRepo,
 		metadataService: metadataService,
-		usenetPool:      usenetPool,
+		poolManager:     poolManager,
 		config:          config,
 		stopChan:        make(chan struct{}),
 	}
@@ -356,7 +356,13 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 
 // checkSingleSegment checks if a single segment exists
 func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID string) (bool, error) {
-	responseCode, err := hc.usenetPool.Stat(ctx, segmentID, []string{})
+	// Get current pool from manager
+	usenetPool, err := hc.poolManager.GetPool()
+	if err != nil {
+		return false, fmt.Errorf("failed to get usenet pool: %w", err)
+	}
+
+	responseCode, err := usenetPool.Stat(ctx, segmentID, []string{})
 	if err != nil {
 		return false, fmt.Errorf("failed to check article %s: %w", segmentID, err)
 	}

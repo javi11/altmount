@@ -114,6 +114,7 @@ type HealthListRequest struct {
 
 // HealthStatsResponse represents health statistics in API responses
 type HealthStatsResponse struct {
+	Pending   int `json:"pending"`
 	Healthy   int `json:"healthy"`
 	Partial   int `json:"partial"`
 	Corrupted int `json:"corrupted"`
@@ -129,6 +130,30 @@ type HealthRetryRequest struct {
 type HealthCleanupRequest struct {
 	OlderThan *time.Time             `json:"older_than"`
 	Status    *database.HealthStatus `json:"status"`
+}
+
+// HealthCheckRequest represents request to add file for manual health checking
+type HealthCheckRequest struct {
+	FilePath   string  `json:"file_path"`
+	MaxRetries *int    `json:"max_retries,omitempty"`
+	SourceNzb  *string `json:"source_nzb_path,omitempty"`
+	Priority   bool    `json:"priority,omitempty"`
+}
+
+// HealthWorkerStatusResponse represents the current status of the health worker
+type HealthWorkerStatusResponse struct {
+	Status                 string     `json:"status"`
+	LastRunTime            *time.Time `json:"last_run_time,omitempty"`
+	NextRunTime            *time.Time `json:"next_run_time,omitempty"`
+	TotalRunsCompleted     int64      `json:"total_runs_completed"`
+	TotalFilesChecked      int64      `json:"total_files_checked"`
+	TotalFilesRecovered    int64      `json:"total_files_recovered"`
+	TotalFilesCorrupted    int64      `json:"total_files_corrupted"`
+	CurrentRunStartTime    *time.Time `json:"current_run_start_time,omitempty"`
+	CurrentRunFilesChecked int        `json:"current_run_files_checked"`
+	PendingManualChecks    int        `json:"pending_manual_checks"`
+	LastError              *string    `json:"last_error,omitempty"`
+	ErrorCount             int64      `json:"error_count"`
 }
 
 // System API Types

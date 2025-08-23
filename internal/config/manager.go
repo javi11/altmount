@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/javi11/nntppool"
 	"github.com/spf13/viper"
@@ -19,6 +20,7 @@ type Config struct {
 	Database  DatabaseConfig   `yaml:"database" mapstructure:"database"`
 	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
 	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming"`
+	Health    HealthConfig     `yaml:"health" mapstructure:"health"`
 	WatchPath string           `yaml:"watch_path" mapstructure:"watch_path"`
 	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
 	Workers   WorkersConfig    `yaml:"workers" mapstructure:"workers"`
@@ -67,6 +69,17 @@ type WorkersConfig struct {
 	Processor int `yaml:"processor" mapstructure:"processor"`
 }
 
+// HealthConfig represents health checker configuration
+type HealthConfig struct {
+	Enabled               bool          `yaml:"enabled" mapstructure:"enabled"`
+	CheckInterval         time.Duration `yaml:"check_interval" mapstructure:"check_interval"`
+	MaxConcurrentJobs     int           `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs"`
+	BatchSize             int           `yaml:"batch_size" mapstructure:"batch_size"`
+	MaxRetries            int           `yaml:"max_retries" mapstructure:"max_retries"`
+	MaxSegmentConnections int           `yaml:"max_segment_connections" mapstructure:"max_segment_connections"`
+	CheckAllSegments      bool          `yaml:"check_all_segments" mapstructure:"check_all_segments"`
+}
+
 // GenerateProviderID creates a unique ID based on host, port, and username
 func GenerateProviderID(host string, port int, username string) string {
 	input := fmt.Sprintf("%s:%d@%s", host, port, username)
@@ -113,6 +126,25 @@ func (c *Config) Validate() error {
 
 	if c.Streaming.StreamingChunkSize < 0 {
 		return fmt.Errorf("streaming streaming_chunk_size must be non-negative")
+	}
+
+	// Validate health configuration
+	if c.Health.Enabled {
+		if c.Health.CheckInterval <= 0 {
+			return fmt.Errorf("health check_interval must be greater than 0")
+		}
+		if c.Health.MaxConcurrentJobs <= 0 {
+			return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
+		}
+		if c.Health.BatchSize <= 0 {
+			return fmt.Errorf("health batch_size must be greater than 0")
+		}
+		if c.Health.MaxRetries < 0 {
+			return fmt.Errorf("health max_retries must be non-negative")
+		}
+		if c.Health.MaxSegmentConnections <= 0 {
+			return fmt.Errorf("health max_segment_connections must be greater than 0")
+		}
 	}
 
 	// Validate each provider
@@ -305,6 +337,15 @@ func DefaultConfig() *Config {
 		Workers: WorkersConfig{
 			Download:  15,
 			Processor: 2,
+		},
+		Health: HealthConfig{
+			Enabled:               true,
+			CheckInterval:         30 * time.Minute,
+			MaxConcurrentJobs:     3,
+			BatchSize:             10,
+			MaxRetries:            5,
+			MaxSegmentConnections: 5,
+			CheckAllSegments:      false,
 		},
 		Providers: []ProviderConfig{},
 		Debug:     false,

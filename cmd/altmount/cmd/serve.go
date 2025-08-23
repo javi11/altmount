@@ -14,7 +14,9 @@ import (
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/integration"
+	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/spf13/cobra"
 )
@@ -224,6 +226,43 @@ func runServe(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Create health worker if enabled
+	var healthWorker *health.HealthWorker
+	if cfg.Health.Enabled {
+		healthWorkerConfig := health.HealthWorkerConfig{
+			CheckInterval:         cfg.Health.CheckInterval,
+			MaxConcurrentJobs:     cfg.Health.MaxConcurrentJobs,
+			BatchSize:             cfg.Health.BatchSize,
+			MaxRetries:            cfg.Health.MaxRetries,
+			MaxSegmentConnections: cfg.Health.MaxSegmentConnections,
+			CheckAllSegments:      cfg.Health.CheckAllSegments,
+			Enabled:               cfg.Health.Enabled,
+		}
+
+		// Create metadata service for health worker
+		metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
+
+		healthWorker = health.NewHealthWorker(
+			healthRepo,
+			metadataService,
+			poolManager,
+			healthWorkerConfig,
+			logger,
+		)
+
+		// Set health worker reference in API server
+		apiServer.SetHealthWorker(healthWorker)
+
+		// Start health worker with the main context
+		if err := healthWorker.Start(ctx); err != nil {
+			logger.Error("Failed to start health worker", "error", err)
+		} else {
+			logger.Info("Health worker started", "enabled", cfg.Health.Enabled)
+		}
+	} else {
+		logger.Info("Health worker is disabled in configuration")
+	}
+
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -237,6 +276,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Wait for shutdown signal or server error
 	signalHandler(ctx)
+
+	// Stop health worker if running
+	if healthWorker != nil {
+		if err := healthWorker.Stop(); err != nil {
+			logger.Error("Failed to stop health worker", "error", err)
+		} else {
+			logger.Info("Health worker stopped")
+		}
+	}
 
 	server.Stop()
 

@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"time"
 
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/metadata"
 )
 
@@ -32,6 +34,8 @@ type Server struct {
 	userRepo        *database.UserRepository
 	configManager   ConfigManager
 	metadataReader  *metadata.MetadataReader
+	healthWorker    *health.HealthWorker
+	logger          *slog.Logger
 	startTime       time.Time
 	mux             *http.ServeMux
 }
@@ -50,12 +54,18 @@ func NewServer(config *Config, queueRepo *database.Repository, healthRepo *datab
 		userRepo:       userRepo,
 		configManager:  configManager,
 		metadataReader: metadataReader,
+		logger:         slog.Default(),
 		startTime:      time.Now(),
 		mux:            mux,
 	}
 
 	server.setupRoutes()
 	return server
+}
+
+// SetHealthWorker sets the health worker reference for the server
+func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
+	s.healthWorker = healthWorker
 }
 
 // ServeHTTP implements http.Handler interface (for backwards compatibility)
@@ -91,6 +101,9 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	apiMux.HandleFunc("GET /health/corrupted", s.handleListCorrupted)
 	apiMux.HandleFunc("GET /health/stats", s.handleGetHealthStats)
 	apiMux.HandleFunc("DELETE /health/cleanup", s.handleCleanupHealth)
+	apiMux.HandleFunc("POST /health/check", s.handleAddHealthCheck)
+	apiMux.HandleFunc("GET /health/worker/status", s.handleGetHealthWorkerStatus)
+	apiMux.HandleFunc("POST /health/{id}/check", s.handleManualHealthCheck)
 
 	// File endpoints (if metadata reader is available)
 	if s.metadataReader != nil {

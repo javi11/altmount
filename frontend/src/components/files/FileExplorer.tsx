@@ -277,6 +277,7 @@ export function FileExplorer({
 			<FileInfoModal
 				isOpen={fileInfoModal.isOpen}
 				file={fileInfoModal.file}
+				currentPath={currentPath}
 				metadata={metadataData || null}
 				isLoading={isGettingMetadata}
 				error={metadataError}

@@ -14,7 +14,7 @@ import (
 func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination
 	pagination := ParsePagination(r)
-	
+
 	// Parse status filter
 	var statusFilter *database.HealthStatus
 	if statusStr := r.URL.Query().Get("status"); statusStr != "" {
@@ -62,18 +62,8 @@ func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // listHealthItems is a helper method to list health items with filters
-// This would ideally be implemented in the HealthRepository
 func (s *Server) listHealthItems(statusFilter *database.HealthStatus, pagination Pagination, sinceFilter *time.Time) ([]*database.FileHealth, error) {
-	// Since we don't have a ListHealthItems method in the repository yet,
-	// we'll implement a basic version here and suggest adding it to the repository later
-	
-	// For corrupted files, we can use GetUnhealthyFiles
-	if statusFilter != nil && *statusFilter == database.HealthStatusCorrupted {
-		return s.healthRepo.GetUnhealthyFiles(pagination.Limit)
-	}
-
-	// For now, return empty slice for other cases - this should be implemented in the repository
-	return []*database.FileHealth{}, nil
+	return s.healthRepo.ListHealthItems(statusFilter, pagination.Limit, pagination.Offset, sinceFilter)
 }
 
 // handleGetHealth handles GET /api/health/{id}
@@ -310,7 +300,129 @@ func (s *Server) handleCleanupHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *database.HealthStatus) (int, error) {
 	// The current repository only supports CleanupHealthRecords with a list of existing files
 	// For now, we'll return 0 and suggest implementing selective cleanup in the repository
-	
+
 	// This should be implemented in the health repository with proper filtering
 	return 0, fmt.Errorf("selective health record cleanup not yet implemented")
+}
+
+// handleAddHealthCheck handles POST /api/health/check
+func (s *Server) handleAddHealthCheck(w http.ResponseWriter, r *http.Request) {
+	// Parse request body
+	var req HealthCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteBadRequest(w, "Invalid request body", err.Error())
+		return
+	}
+
+	// Validate required fields
+	if req.FilePath == "" {
+		WriteValidationError(w, "file_path is required", "")
+		return
+	}
+
+	// Set default max retries if not specified
+	maxRetries := 5 // Default from config
+	if req.MaxRetries != nil {
+		if *req.MaxRetries < 0 {
+			WriteValidationError(w, "max_retries must be non-negative", "")
+			return
+		}
+		maxRetries = *req.MaxRetries
+	}
+
+	// Add file to health database
+	err := s.healthRepo.AddFileToHealthCheck(req.FilePath, maxRetries, req.SourceNzb)
+	if err != nil {
+		WriteInternalError(w, "Failed to add file for health check", err.Error())
+		return
+	}
+
+	// Return the health record
+	item, err := s.healthRepo.GetFileHealth(req.FilePath)
+	if err != nil {
+		WriteInternalError(w, "Failed to retrieve added health record", err.Error())
+		return
+	}
+
+	response := ToHealthItemResponse(item)
+	WriteSuccess(w, response, nil)
+}
+
+// handleGetHealthWorkerStatus handles GET /api/health/worker/status
+func (s *Server) handleGetHealthWorkerStatus(w http.ResponseWriter, r *http.Request) {
+	if s.healthWorker == nil {
+		WriteNotFound(w, "Health worker not available", "Health worker is not configured or not running")
+		return
+	}
+
+	stats := s.healthWorker.GetStats()
+	response := HealthWorkerStatusResponse{
+		Status:                 string(stats.Status),
+		LastRunTime:            stats.LastRunTime,
+		NextRunTime:            stats.NextRunTime,
+		TotalRunsCompleted:     stats.TotalRunsCompleted,
+		TotalFilesChecked:      stats.TotalFilesChecked,
+		TotalFilesRecovered:    stats.TotalFilesRecovered,
+		TotalFilesCorrupted:    stats.TotalFilesCorrupted,
+		CurrentRunStartTime:    stats.CurrentRunStartTime,
+		CurrentRunFilesChecked: stats.CurrentRunFilesChecked,
+		PendingManualChecks:    stats.PendingManualChecks,
+		LastError:              stats.LastError,
+		ErrorCount:             stats.ErrorCount,
+	}
+
+	WriteSuccess(w, response, nil)
+}
+
+// handleManualHealthCheck handles POST /api/health/{id}/check
+func (s *Server) handleManualHealthCheck(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from path parameter
+	filePath := r.PathValue("id")
+	if filePath == "" {
+		WriteBadRequest(w, "Health record identifier is required", "")
+		return
+	}
+
+	// Check if health worker is available
+	if s.healthWorker == nil {
+		WriteNotFound(w, "Health worker not available", "Health worker is not configured or not running")
+		return
+	}
+
+	// Parse request body for priority flag
+	var req struct {
+		Priority bool `json:"priority"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			WriteBadRequest(w, "Invalid request body", err.Error())
+			return
+		}
+	}
+
+	// Check if item exists
+	item, err := s.healthRepo.GetFileHealth(filePath)
+	if err != nil {
+		WriteInternalError(w, "Failed to check health record", err.Error())
+		return
+	}
+
+	if item == nil {
+		WriteNotFound(w, "Health record not found", "")
+		return
+	}
+
+	// Add manual check to health worker queue
+	err = s.healthWorker.AddManualCheck(filePath, nil, item.SourceNzbPath, req.Priority)
+	if err != nil {
+		WriteInternalError(w, "Failed to queue manual health check", err.Error())
+		return
+	}
+
+	response := map[string]interface{}{
+		"message":  "Manual health check queued successfully",
+		"priority": req.Priority,
+	}
+
+	WriteSuccess(w, response, nil)
 }

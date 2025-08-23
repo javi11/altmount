@@ -50,6 +50,7 @@ export interface QueueRetryRequest {
 
 // Health types
 export const HealthStatus = {
+	PENDING: "pending",
 	HEALTHY: "healthy",
 	PARTIAL: "partial",
 	CORRUPTED: "corrupted",
@@ -62,7 +63,7 @@ export interface FileHealth {
 	file_path: string;
 	status: HealthStatus;
 	retry_count: number;
-	source_nzb_path: string;
+	source_nzb_path?: string;
 	error_message?: string;
 	last_check?: string;
 	created_at: string;
@@ -71,6 +72,7 @@ export interface FileHealth {
 
 export interface HealthStats {
 	total: number;
+	pending: number;
 	healthy: number;
 	partial: number;
 	corrupted: number;
@@ -172,4 +174,22 @@ export interface LoginRequest {
 
 export interface UserAdminUpdateRequest {
 	is_admin: boolean;
+}
+
+// Health Worker types
+export interface HealthCheckRequest {
+	file_path: string;
+	source_nzb_path: string;
+	priority?: boolean;
+}
+
+export interface HealthWorkerStatus {
+	is_running: boolean;
+	is_processing: boolean;
+	queue_size: number;
+	priority_queue_size: number;
+	total_processed: number;
+	total_failed: number;
+	current_file?: string;
+	last_activity?: string;
 }

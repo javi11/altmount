@@ -3,7 +3,9 @@ import type {
 	AuthResponse,
 	FileHealth,
 	FileMetadata,
+	HealthCheckRequest,
 	HealthStats,
+	HealthWorkerStatus,
 	QueueItem,
 	QueueStats,
 	User,
@@ -185,6 +187,27 @@ export class APIClient {
 			method: "DELETE",
 			body: JSON.stringify(params),
 		});
+	}
+
+	async addHealthCheck(data: HealthCheckRequest) {
+		return this.request<{ message: string }>("/health/check", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async getHealthWorkerStatus() {
+		return this.request<HealthWorkerStatus>("/health/worker/status");
+	}
+
+	async triggerManualHealthCheck(filePath: string, priority?: boolean) {
+		return this.request<{ message: string; priority: boolean }>(
+			`/health/${encodeURIComponent(filePath)}/check`,
+			{
+				method: "POST",
+				body: JSON.stringify({ priority: priority || false }),
+			}
+		);
 	}
 
 	// File metadata endpoints

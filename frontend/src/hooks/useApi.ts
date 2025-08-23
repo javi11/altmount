@@ -143,3 +143,36 @@ export const useCleanupHealth = () => {
 		},
 	});
 };
+
+export const useAddHealthCheck = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (data: { file_path: string; source_nzb_path: string; priority?: boolean }) =>
+			apiClient.addHealthCheck(data),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
+export const useHealthWorkerStatus = () => {
+	return useQuery({
+		queryKey: ["health", "worker", "status"],
+		queryFn: () => apiClient.getHealthWorkerStatus(),
+		refetchInterval: 5000,
+	});
+};
+
+export const useTriggerManualHealthCheck = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ filePath, priority }: { filePath: string; priority?: boolean }) =>
+			apiClient.triggerManualHealthCheck(filePath, priority),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+			queryClient.invalidateQueries({ queryKey: ["health", "worker", "status"] });
+		},
+	});
+};

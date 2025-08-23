@@ -15,10 +15,12 @@ import type { WebDAVFile } from "../../types/webdav";
 import { formatFileSize } from "../../utils/fileUtils";
 import { HealthBadge } from "../ui/StatusBadge";
 import { isNil } from "../../lib/utils";
+import { useAddHealthCheck } from "../../hooks/useApi";
 
 interface FileInfoModalProps {
 	isOpen: boolean;
 	file: WebDAVFile | null;
+	currentPath: string;
 	metadata: FileMetadata | null;
 	isLoading: boolean;
 	error: Error | null;
@@ -31,6 +33,7 @@ type TabType = "overview" | "segments" | "source";
 export function FileInfoModal({
 	isOpen,
 	file,
+	currentPath,
 	metadata,
 	isLoading,
 	error,
@@ -39,6 +42,7 @@ export function FileInfoModal({
 }: FileInfoModalProps) {
 	const modalRef = useRef<HTMLDialogElement>(null);
 	const [activeTab, setActiveTab] = useState<TabType>("overview");
+	const addHealthCheck = useAddHealthCheck();
 
 	useEffect(() => {
 		const modal = modalRef.current;
@@ -457,13 +461,30 @@ export function FileInfoModal({
 								<div className="flex gap-2">
 									<button
 										type="button"
-										className="btn btn-sm btn-outline"
-										onClick={() => {
-											// TODO: Implement retry health check
-											console.log("Retry health check");
+										className="btn btn-sm btn-primary"
+										onClick={async () => {
+											if (file?.basename && metadata.source_nzb_path) {
+												const filePath = `${currentPath}/${file.basename}`.replace(/\/+/g, "/");
+												try {
+													await addHealthCheck.mutateAsync({
+														file_path: filePath,
+														source_nzb_path: metadata.source_nzb_path,
+													});
+												} catch (err) {
+													console.error("Failed to add health check:", err);
+												}
+											}
 										}}
+										disabled={addHealthCheck.isPending}
 									>
-										Retry Health Check
+										{addHealthCheck.isPending ? (
+											<>
+												<span className="loading loading-spinner loading-xs" />
+												Adding...
+											</>
+										) : (
+											"Add to Health Check Queue"
+										)}
 									</button>
 								</div>
 							)}

@@ -57,9 +57,10 @@ type QueueStats struct {
 type HealthStatus string
 
 const (
-	HealthStatusHealthy   HealthStatus = "healthy"
-	HealthStatusPartial   HealthStatus = "partial"
-	HealthStatusCorrupted HealthStatus = "corrupted"
+	HealthStatusPending   HealthStatus = "pending"   // File has not been checked yet
+	HealthStatusHealthy   HealthStatus = "healthy"   // File is fully available and healthy
+	HealthStatusPartial   HealthStatus = "partial"   // File has some missing segments but is recoverable
+	HealthStatusCorrupted HealthStatus = "corrupted" // File is corrupted or permanently unavailable
 )
 
 // FileHealth represents the health tracking of files in the filesystem

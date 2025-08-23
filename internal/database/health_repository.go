@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // HealthRepository handles file health database operations
@@ -73,16 +74,18 @@ func (r *HealthRepository) GetFileHealth(filePath string) (*FileHealth, error) {
 	return &health, nil
 }
 
-// GetUnhealthyFiles returns files that need retry checks
+// GetUnhealthyFiles returns files that need retry checks (including pending files)
 func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       next_retry_at, source_nzb_path, error_details, created_at, updated_at
 		FROM file_health
-		WHERE status != 'healthy'
+		WHERE status IN ('pending', 'partial', 'corrupted')
 		  AND retry_count < max_retries
 		  AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
-		ORDER BY last_checked ASC
+		ORDER BY 
+		  CASE WHEN status = 'pending' THEN 0 ELSE 1 END,  -- Prioritize pending files
+		  last_checked ASC
 		LIMIT ?
 	`
 
@@ -249,4 +252,107 @@ func (r *HealthRepository) CleanupHealthRecords(existingFiles []string) error {
 	}
 
 	return nil
+}
+
+// AddFileToHealthCheck adds a file to the health database for checking
+func (r *HealthRepository) AddFileToHealthCheck(filePath string, maxRetries int, sourceNzbPath *string) error {
+	query := `
+		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, source_nzb_path, created_at, updated_at)
+		VALUES (?, ?, datetime('now'), 0, ?, ?, datetime('now'), datetime('now'))
+		ON CONFLICT(file_path) DO UPDATE SET
+		max_retries = excluded.max_retries,
+		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
+		updated_at = datetime('now')
+	`
+
+	_, err := r.db.Exec(query, filePath, HealthStatusPending, maxRetries, sourceNzbPath)
+	if err != nil {
+		return fmt.Errorf("failed to add file to health check: %w", err)
+	}
+
+	return nil
+}
+
+// ResetFileForRetry resets a file's retry count and status to allow re-checking
+func (r *HealthRepository) ResetFileForRetry(filePath string, newMaxRetries *int) error {
+	query := `
+		UPDATE file_health 
+		SET retry_count = 0,
+		    status = ?,
+		    next_retry_at = NULL,
+		    last_error = NULL,
+		    updated_at = datetime('now')
+	`
+	args := []interface{}{HealthStatusPending, filePath}
+	
+	if newMaxRetries != nil {
+		query += ", max_retries = ?"
+		args = append([]interface{}{HealthStatusPending, *newMaxRetries}, args[1:]...)
+	}
+	
+	query += " WHERE file_path = ?"
+	
+	_, err := r.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to reset file for retry: %w", err)
+	}
+
+	return nil
+}
+
+// ListHealthItems returns all health records with optional filtering and pagination
+func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time) ([]*FileHealth, error) {
+	query := `
+		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
+		       next_retry_at, source_nzb_path, error_details, created_at, updated_at
+		FROM file_health
+		WHERE (? IS NULL OR status = ?)
+		  AND (? IS NULL OR created_at >= ?)
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`
+
+	// Prepare arguments for the query
+	var statusParam interface{} = nil
+	if statusFilter != nil {
+		statusParam = string(*statusFilter)
+	}
+
+	var sinceParam interface{} = nil
+	if sinceFilter != nil {
+		sinceParam = sinceFilter.Format("2006-01-02 15:04:05")
+	}
+
+	args := []interface{}{
+		statusParam, statusParam, // status filter (checked twice in WHERE clause)
+		sinceParam, sinceParam,   // since filter (checked twice in WHERE clause)
+		limit, offset,
+	}
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query health items: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*FileHealth
+	for rows.Next() {
+		var health FileHealth
+		err := rows.Scan(
+			&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
+			&health.LastError, &health.RetryCount, &health.MaxRetries,
+			&health.NextRetryAt, &health.SourceNzbPath, &health.ErrorDetails,
+			&health.CreatedAt, &health.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan health item: %w", err)
+		}
+		files = append(files, &health)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate health items: %w", err)
+	}
+
+	return files, nil
 }
