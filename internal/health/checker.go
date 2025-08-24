@@ -3,7 +3,6 @@ package health
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -36,46 +35,38 @@ type HealthEvent struct {
 // EventHandler handles health events
 type EventHandler func(event HealthEvent)
 
-// HealthCheckerConfig holds configuration for the health checker
-type HealthCheckerConfig struct {
-	CheckInterval         time.Duration // How often to run health checks
-	MaxConcurrentJobs     int           // Maximum concurrent file checks
-	BatchSize             int           // How many files to check in each batch
-	MaxRetries            int           // Maximum retries before marking as permanently corrupted
-	MaxSegmentConnections int           // Maximum concurrent connections for segment checking
-	CheckAllSegments      bool          // Whether to check all segments or just first one
-	EventHandler          EventHandler  // Optional event handler for notifications
+// HealthConfig holds unified configuration for health checking
+type HealthConfig struct {
+	// Worker settings
+	Enabled           bool          // Whether health worker is enabled
+	CheckInterval     time.Duration // How often to run health checks
+	MaxConcurrentJobs int           // How many files to check in each batch
+
+	// Health check settings
+	MaxRetries            int          // Maximum retries before marking as permanently corrupted
+	MaxSegmentConnections int          // Maximum concurrent connections for segment checking
+	CheckAllSegments      bool         // Whether to check all segments or just first one
+	EventHandler          EventHandler // Optional event handler for notifications
 }
 
-// HealthChecker manages file health monitoring and recovery
+// HealthChecker manages file health checking logic
 type HealthChecker struct {
 	healthRepo      *database.HealthRepository
 	metadataService *metadata.MetadataService
 	poolManager     pool.Manager
-	config          HealthCheckerConfig
-
-	running  bool
-	stopChan chan struct{}
-	wg       sync.WaitGroup
-	mu       sync.RWMutex
+	config          HealthConfig
 }
 
-// NewHealthChecker creates a new health checker service
+// NewHealthChecker creates a new health checker
 func NewHealthChecker(
 	healthRepo *database.HealthRepository,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
-	config HealthCheckerConfig,
+	config HealthConfig,
 ) *HealthChecker {
 	// Set defaults if not provided
-	if config.CheckInterval == 0 {
-		config.CheckInterval = 30 * time.Minute
-	}
 	if config.MaxConcurrentJobs == 0 {
-		config.MaxConcurrentJobs = 3
-	}
-	if config.BatchSize == 0 {
-		config.BatchSize = 10
+		config.MaxConcurrentJobs = 1
 	}
 	if config.MaxRetries == 0 {
 		config.MaxRetries = 5
@@ -90,158 +81,34 @@ func NewHealthChecker(
 		metadataService: metadataService,
 		poolManager:     poolManager,
 		config:          config,
-		stopChan:        make(chan struct{}),
 	}
 }
 
-// Start begins the health checking service
-func (hc *HealthChecker) Start(ctx context.Context) error {
-	hc.mu.Lock()
-	if hc.running {
-		hc.mu.Unlock()
-		return fmt.Errorf("health checker already running")
-	}
-	hc.running = true
-	hc.mu.Unlock()
-
-	slog.Info("Starting health checker", "interval", hc.config.CheckInterval)
-
-	hc.wg.Add(1)
-	go func() {
-		defer hc.wg.Done()
-		hc.run(ctx)
-	}()
-
-	return nil
-}
-
-// Stop gracefully stops the health checking service
-func (hc *HealthChecker) Stop() error {
-	hc.mu.Lock()
-	defer hc.mu.Unlock()
-
-	if !hc.running {
-		return fmt.Errorf("health checker not running")
-	}
-
-	slog.Info("Stopping health checker...")
-	close(hc.stopChan)
-	hc.running = false
-
-	// Wait for all goroutines to finish
-	hc.wg.Wait()
-
-	slog.Info("Health checker stopped")
-	return nil
-}
-
-// IsRunning returns whether the health checker is currently running
-func (hc *HealthChecker) IsRunning() bool {
-	hc.mu.RLock()
-	defer hc.mu.RUnlock()
-	return hc.running
-}
-
-// CheckFileHealth manually checks the health of a specific file
-func (hc *HealthChecker) CheckFileHealth(ctx context.Context, filePath string) (*HealthEvent, error) {
+// CheckFile checks the health of a specific file
+func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string) HealthEvent {
 	// Get file metadata
 	fileMeta, err := hc.metadataService.ReadFileMetadata(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file metadata: %w", err)
-	}
-	if fileMeta == nil {
-		return nil, fmt.Errorf("file not found: %s", filePath)
-	}
-
-	// Perform the health check
-	event := hc.checkSingleFile(ctx, filePath, fileMeta)
-	return &event, nil
-}
-
-// run is the main health checking loop
-func (hc *HealthChecker) run(ctx context.Context) {
-	ticker := time.NewTicker(hc.config.CheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Info("Health checker stopped by context")
-			return
-		case <-hc.stopChan:
-			slog.Info("Health checker stopped by stop signal")
-			return
-		case <-ticker.C:
-			if err := hc.runHealthCheckCycle(ctx); err != nil {
-				slog.Error("Health check cycle failed", "error", err)
-			}
+		return HealthEvent{
+			Type:      EventTypeCheckFailed,
+			FilePath:  filePath,
+			Status:    database.HealthStatusCorrupted,
+			Error:     fmt.Errorf("failed to read file metadata: %w", err),
+			Timestamp: time.Now(),
 		}
 	}
-}
-
-// runHealthCheckCycle runs a single cycle of health checks
-func (hc *HealthChecker) runHealthCheckCycle(ctx context.Context) error {
-	// Get unhealthy files that need checking
-	unhealthyFiles, err := hc.healthRepo.GetUnhealthyFiles(hc.config.BatchSize)
-	if err != nil {
-		return fmt.Errorf("failed to get unhealthy files: %w", err)
-	}
-
-	if len(unhealthyFiles) == 0 {
-		slog.Info("No unhealthy files found, skipping health check cycle")
-		return nil
-	}
-
-	slog.Info("Found unhealthy files to check", "count", len(unhealthyFiles))
-
-	for _, fileHealth := range unhealthyFiles {
-		err = hc.healthRepo.SetFileChecking(fileHealth.FilePath)
-		if err != nil {
-			return err
+	if fileMeta == nil {
+		return HealthEvent{
+			Type:      EventTypeCheckFailed,
+			FilePath:  filePath,
+			Status:    database.HealthStatusCorrupted,
+			Error:     fmt.Errorf("file not found: %s", filePath),
+			Timestamp: time.Now(),
 		}
 	}
 
-	// Create a semaphore to limit concurrent checks
-	semaphore := make(chan struct{}, hc.config.MaxConcurrentJobs)
-	var wg sync.WaitGroup
-
-	for _, fileHealth := range unhealthyFiles {
-		wg.Add(1)
-		go func(fh *database.FileHealth) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			// Check the file
-			hc.checkFileFromHealth(ctx, fh)
-		}(fileHealth)
-	}
-
-	wg.Wait()
-	return nil
-}
-
-// checkFileFromHealth checks a file based on its health record
-func (hc *HealthChecker) checkFileFromHealth(ctx context.Context, fileHealth *database.FileHealth) {
-	// Get current metadata
-	fileMeta, err := hc.metadataService.ReadFileMetadata(fileHealth.FilePath)
-	if err != nil {
-		slog.Error("Failed to read metadata", "file_path", fileHealth.FilePath, "error", err)
-		return
-	}
-	if fileMeta == nil {
-		slog.Info("File metadata not found, cleaning up health record", "file_path", fileHealth.FilePath)
-		// TODO: Clean up orphaned health record
-		return
-	}
-
 	// Perform the health check
-	event := hc.checkSingleFile(ctx, fileHealth.FilePath, fileMeta)
-
-	// Handle the result
-	hc.handleHealthCheckResult(event, fileHealth)
+	return hc.checkSingleFile(ctx, filePath, fileMeta)
 }
 
 // checkSingleFile performs a health check on a single file
@@ -376,61 +243,6 @@ func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID strin
 
 	// NNTP response codes: 223 = article exists, other codes indicate issues
 	return responseCode == 223, nil
-}
-
-// handleHealthCheckResult handles the result of a health check
-func (hc *HealthChecker) handleHealthCheckResult(event HealthEvent, fileHealth *database.FileHealth) {
-	switch event.Type {
-	case EventTypeFileRecovered:
-		// File is now healthy - update metadata and delete from health database
-		slog.Info("File recovered", "file_path", event.FilePath)
-
-		// Update metadata status
-		if err := hc.metadataService.UpdateFileStatus(event.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY); err != nil {
-			slog.Error("Failed to update metadata status", "file_path", event.FilePath, "error", err)
-		}
-
-		// Delete health record since file is now healthy
-		if err := hc.healthRepo.DeleteHealthRecord(event.FilePath); err != nil {
-			slog.Error("Failed to delete health record for recovered file", "file_path", event.FilePath, "error", err)
-		} else {
-			slog.Info("Removed health record for recovered file", "file_path", event.FilePath)
-		}
-
-	case EventTypeFileCorrupted:
-		// File is still corrupted - increment retry count or mark as permanently corrupted
-		slog.Warn("File still corrupted", "file_path", event.FilePath, "retry_count", fileHealth.RetryCount, "max_retries", fileHealth.MaxRetries)
-
-		errorMsg := event.Error.Error()
-
-		if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
-			// Max retries reached - mark as permanently corrupted
-			if err := hc.healthRepo.MarkAsCorrupted(event.FilePath, &errorMsg); err != nil {
-				slog.Error("Failed to mark file as corrupted", "error", err)
-			}
-			slog.Error("File permanently marked as corrupted", "file_path", event.FilePath)
-		} else {
-			// Increment retry count
-			if err := hc.healthRepo.IncrementRetryCount(event.FilePath, &errorMsg); err != nil {
-				slog.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
-			}
-		}
-
-	case EventTypeCheckFailed:
-		// Health check failed - increment retry count
-		slog.Error("Health check failed", "file_path", event.FilePath, "error", event.Error)
-
-		errorMsg := event.Error.Error()
-		if err := hc.healthRepo.IncrementRetryCount(event.FilePath, &errorMsg); err != nil {
-			slog.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
-		}
-	}
-
-	// Emit event if handler is configured
-	if hc.config.EventHandler != nil {
-		event.RetryCount = fileHealth.RetryCount
-		hc.config.EventHandler(event)
-	}
 }
 
 // GetHealthStats returns current health statistics

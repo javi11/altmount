@@ -1,0 +1,73 @@
+# Git
+.git
+.gitignore
+.github
+
+# Build artifacts
+build/
+dist/
+**/*.exe
+**/*.app
+**/*.zip
+**/*.tar.gz
+
+# Documentation
+*.md
+docs/
+CLAUDE.md
+CONTRIBUTING.md
+
+# Configuration examples and development files
+config-example.yaml
+docker-compose.yml
+Makefile
+.goreleaser*
+
+# Frontend development files (keep what's needed for build)
+frontend/node_modules/
+frontend/static/
+frontend/vite.config.ts
+frontend/tsconfig.json
+frontend/README.md
+frontend/package.json.md5
+frontend/index.html
+
+# Keep essential frontend files for Docker build
+!frontend/src/
+!frontend/build/
+!frontend/embed.go
+!frontend/package.json
+!frontend/bun.lock*
+
+# Go tests and fixtures
+**/*_test.go
+testdata/
+
+# Example and development directories
+example/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+.cache/
+.buildx-cache/
+
+# Databases and runtime
+altmount.db*
+
+# Docker
+**/docker-compose*.yml

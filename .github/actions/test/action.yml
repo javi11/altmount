@@ -1,0 +1,37 @@
+name: test
+description: Run tests
+inputs:
+  os:
+    description: 'OS to run the tests on'
+    required: true
+    default: 'ubuntu-latest'
+  coverage:
+    description: 'Generate coverage report'
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.0' # Pinned version
+    - name: Go info
+      shell: bash
+      run: |
+        go version
+        go env
+      # test
+
+    # Install Bun
+    - name: Install Bun
+      shell: bash
+      run: npm install -g bun
+
+    - name: Tests
+      shell: bash
+      run: |
+        if [ "${{ inputs.coverage }}" = "true" ]; then
+          make coverage
+        else
+          make test
+        fi

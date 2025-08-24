@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/go-pkgz/auth/v2/token"
+	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/adapters/webdav"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/auth"
@@ -20,6 +21,10 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/spf13/cobra"
 )
+
+// For development, serve static files from disk
+// In production, these would be embedded
+var frontendBuildPath = "../../frontend/build"
 
 func init() {
 	serveCmd := &cobra.Command{
@@ -229,24 +234,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create health worker if enabled
 	var healthWorker *health.HealthWorker
 	if cfg.Health.Enabled {
-		healthWorkerConfig := health.HealthWorkerConfig{
+		healthConfig := health.HealthConfig{
+			Enabled:               cfg.Health.Enabled,
 			CheckInterval:         cfg.Health.CheckInterval,
 			MaxConcurrentJobs:     cfg.Health.MaxConcurrentJobs,
-			BatchSize:             cfg.Health.BatchSize,
 			MaxRetries:            cfg.Health.MaxRetries,
 			MaxSegmentConnections: cfg.Health.MaxSegmentConnections,
 			CheckAllSegments:      cfg.Health.CheckAllSegments,
-			Enabled:               cfg.Health.Enabled,
 		}
 
 		// Create metadata service for health worker
 		metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
 
-		healthWorker = health.NewHealthWorker(
+		// Create health checker
+		healthChecker := health.NewHealthChecker(
 			healthRepo,
 			metadataService,
 			poolManager,
-			healthWorkerConfig,
+			healthConfig,
+		)
+
+		healthWorker = health.NewHealthWorker(
+			healthChecker,
+			healthRepo,
+			metadataService,
+			healthConfig,
 			logger,
 		)
 
@@ -262,6 +274,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	} else {
 		logger.Info("Health worker is disabled in configuration")
 	}
+
+	mux.Handle("/", getStaticFileHandler())
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -303,4 +317,22 @@ func signalHandler(ctx context.Context) {
 	case <-ctx.Done():
 	case <-c:
 	}
+}
+
+func getStaticFileHandler() http.Handler {
+	// Check if we should use embedded filesystem or development path
+	if _, err := os.Stat(frontendBuildPath); err == nil {
+		// Development mode - serve from disk
+		return http.StripPrefix("/", http.FileServer(http.Dir(frontendBuildPath)))
+	}
+
+	// Production mode - serve from embedded filesystem
+	buildFS, err := frontend.GetBuildFS()
+	if err != nil {
+		slog.Info("Failed to get embedded filesystem", "error", err)
+		// Fallback to disk if embedded fails
+		return http.StripPrefix("/", http.FileServer(http.Dir(frontendBuildPath)))
+	}
+
+	return http.StripPrefix("/", http.FileServer(http.FS(buildFS)))
 }

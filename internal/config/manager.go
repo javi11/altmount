@@ -74,7 +74,6 @@ type HealthConfig struct {
 	Enabled               bool          `yaml:"enabled" mapstructure:"enabled"`
 	CheckInterval         time.Duration `yaml:"check_interval" mapstructure:"check_interval"`
 	MaxConcurrentJobs     int           `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs"`
-	BatchSize             int           `yaml:"batch_size" mapstructure:"batch_size"`
 	MaxRetries            int           `yaml:"max_retries" mapstructure:"max_retries"`
 	MaxSegmentConnections int           `yaml:"max_segment_connections" mapstructure:"max_segment_connections"`
 	CheckAllSegments      bool          `yaml:"check_all_segments" mapstructure:"check_all_segments"`
@@ -135,9 +134,6 @@ func (c *Config) Validate() error {
 		}
 		if c.Health.MaxConcurrentJobs <= 0 {
 			return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
-		}
-		if c.Health.BatchSize <= 0 {
-			return fmt.Errorf("health batch_size must be greater than 0")
 		}
 		if c.Health.MaxRetries < 0 {
 			return fmt.Errorf("health max_retries must be non-negative")
@@ -341,8 +337,7 @@ func DefaultConfig() *Config {
 		Health: HealthConfig{
 			Enabled:               true,
 			CheckInterval:         30 * time.Minute,
-			MaxConcurrentJobs:     3,
-			BatchSize:             10,
+			MaxConcurrentJobs:     1,
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,
 			CheckAllSegments:      true,

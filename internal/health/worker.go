@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -9,7 +10,8 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
-	"github.com/javi11/altmount/internal/pool"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/sourcegraph/conc"
 )
 
 // WorkerStatus represents the current status of the health worker
@@ -24,103 +26,66 @@ const (
 
 // WorkerStats represents statistics about the health worker
 type WorkerStats struct {
-	Status                 WorkerStatus  `json:"status"`
-	LastRunTime            *time.Time    `json:"last_run_time,omitempty"`
-	NextRunTime            *time.Time    `json:"next_run_time,omitempty"`
-	TotalRunsCompleted     int64         `json:"total_runs_completed"`
-	TotalFilesChecked      int64         `json:"total_files_checked"`
-	TotalFilesRecovered    int64         `json:"total_files_recovered"`
-	TotalFilesCorrupted    int64         `json:"total_files_corrupted"`
-	CurrentRunStartTime    *time.Time    `json:"current_run_start_time,omitempty"`
-	CurrentRunFilesChecked int           `json:"current_run_files_checked"`
-	PendingManualChecks    int           `json:"pending_manual_checks"`
-	LastError              *string       `json:"last_error,omitempty"`
-	ErrorCount             int64         `json:"error_count"`
-}
-
-// ManualCheckRequest represents a request to manually check a file
-type ManualCheckRequest struct {
-	FilePath    string
-	MaxRetries  *int    // Optional override for max retries
-	SourceNzb   *string // Optional source NZB path
-	Priority    bool    // If true, check immediately instead of queuing
-	ResponseCh  chan error // Channel to send response back
-}
-
-// HealthWorkerConfig holds configuration for the health worker
-type HealthWorkerConfig struct {
-	CheckInterval         time.Duration
-	MaxConcurrentJobs     int
-	BatchSize             int
-	MaxRetries            int
-	MaxSegmentConnections int
-	CheckAllSegments      bool
-	Enabled               bool
+	Status                 WorkerStatus `json:"status"`
+	LastRunTime            *time.Time   `json:"last_run_time,omitempty"`
+	NextRunTime            *time.Time   `json:"next_run_time,omitempty"`
+	TotalRunsCompleted     int64        `json:"total_runs_completed"`
+	TotalFilesChecked      int64        `json:"total_files_checked"`
+	TotalFilesRecovered    int64        `json:"total_files_recovered"`
+	TotalFilesCorrupted    int64        `json:"total_files_corrupted"`
+	CurrentRunStartTime    *time.Time   `json:"current_run_start_time,omitempty"`
+	CurrentRunFilesChecked int          `json:"current_run_files_checked"`
+	PendingManualChecks    int          `json:"pending_manual_checks"`
+	LastError              *string      `json:"last_error,omitempty"`
+	ErrorCount             int64        `json:"error_count"`
 }
 
 // HealthWorker manages continuous health monitoring and manual check requests
 type HealthWorker struct {
+	healthChecker   *HealthChecker
 	healthRepo      *database.HealthRepository
 	metadataService *metadata.MetadataService
-	poolManager     pool.Manager
-	config          HealthWorkerConfig
+	config          HealthConfig
 	logger          *slog.Logger
-	
+
 	// Worker state
-	status          WorkerStatus
-	running         bool
-	stopChan        chan struct{}
-	wg              sync.WaitGroup
-	mu              sync.RWMutex
-	
-	// Manual check queue
-	manualCheckChan chan ManualCheckRequest
-	manualQueue     []ManualCheckRequest
-	manualMu        sync.Mutex
-	
+	status       WorkerStatus
+	running      bool
+	cycleRunning bool // Flag to prevent overlapping cycles
+	stopChan     chan struct{}
+	wg           sync.WaitGroup
+	mu           sync.RWMutex
+
 	// Active checks tracking for cancellation
-	activeChecks map[string]context.CancelFunc // filePath -> cancel function
+	activeChecks   map[string]context.CancelFunc // filePath -> cancel function
 	activeChecksMu sync.RWMutex
-	
+
 	// Statistics
-	stats WorkerStats
+	stats   WorkerStats
 	statsMu sync.RWMutex
 }
 
 // NewHealthWorker creates a new health worker
 func NewHealthWorker(
+	healthChecker *HealthChecker,
 	healthRepo *database.HealthRepository,
 	metadataService *metadata.MetadataService,
-	poolManager pool.Manager,
-	config HealthWorkerConfig,
+	config HealthConfig,
 	logger *slog.Logger,
 ) *HealthWorker {
 	// Set defaults if not provided
 	if config.CheckInterval == 0 {
 		config.CheckInterval = 30 * time.Minute
 	}
-	if config.MaxConcurrentJobs == 0 {
-		config.MaxConcurrentJobs = 3
-	}
-	if config.BatchSize == 0 {
-		config.BatchSize = 10
-	}
-	if config.MaxRetries == 0 {
-		config.MaxRetries = 5
-	}
-	if config.MaxSegmentConnections == 0 {
-		config.MaxSegmentConnections = 5
-	}
 
 	return &HealthWorker{
+		healthChecker:   healthChecker,
 		healthRepo:      healthRepo,
 		metadataService: metadataService,
-		poolManager:     poolManager,
 		config:          config,
 		logger:          logger,
 		status:          WorkerStatusStopped,
 		stopChan:        make(chan struct{}),
-		manualCheckChan: make(chan ManualCheckRequest, 100), // Buffer for manual requests
 		activeChecks:    make(map[string]context.CancelFunc),
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
@@ -149,24 +114,15 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		s.LastError = nil
 	})
 
-	hw.logger.Info("Starting health worker", 
+	hw.logger.Info("Starting health worker",
 		"check_interval", hw.config.CheckInterval,
-		"batch_size", hw.config.BatchSize,
-		"max_concurrent_jobs", hw.config.MaxConcurrentJobs,
-		"max_retries", hw.config.MaxRetries)
+		"max_concurrent_jobs", hw.config.MaxConcurrentJobs)
 
 	// Start the main worker goroutine
 	hw.wg.Add(1)
 	go func() {
 		defer hw.wg.Done()
 		hw.run(ctx)
-	}()
-
-	// Start the manual check processor
-	hw.wg.Add(1)
-	go func() {
-		defer hw.wg.Done()
-		hw.processManualChecks(ctx)
 	}()
 
 	hw.status = WorkerStatusRunning
@@ -195,10 +151,10 @@ func (hw *HealthWorker) Stop() error {
 	hw.logger.Info("Stopping health worker...")
 	close(hw.stopChan)
 	hw.running = false
-	
+
 	// Wait for all goroutines to finish
 	hw.wg.Wait()
-	
+
 	hw.status = WorkerStatusStopped
 	hw.updateStats(func(s *WorkerStats) {
 		s.Status = WorkerStatusStopped
@@ -228,15 +184,10 @@ func (hw *HealthWorker) GetStatus() WorkerStatus {
 func (hw *HealthWorker) GetStats() WorkerStats {
 	hw.statsMu.RLock()
 	defer hw.statsMu.RUnlock()
-	
-	// Add pending manual checks count
-	hw.manualMu.Lock()
-	pending := len(hw.manualQueue) + len(hw.manualCheckChan)
-	hw.manualMu.Unlock()
-	
+
 	stats := hw.stats
-	stats.PendingManualChecks = pending
-	
+	stats.PendingManualChecks = 0 // No manual queue anymore
+
 	return stats
 }
 
@@ -244,25 +195,25 @@ func (hw *HealthWorker) GetStats() WorkerStats {
 func (hw *HealthWorker) CancelHealthCheck(filePath string) error {
 	hw.activeChecksMu.Lock()
 	defer hw.activeChecksMu.Unlock()
-	
+
 	cancelFunc, exists := hw.activeChecks[filePath]
 	if !exists {
 		return fmt.Errorf("no active health check found for file: %s", filePath)
 	}
-	
+
 	// Cancel the context
 	cancelFunc()
-	
+
 	// Remove from active checks
 	delete(hw.activeChecks, filePath)
-	
+
 	// Update file status to pending to allow retry
 	err := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, nil, nil, nil)
 	if err != nil {
 		hw.logger.Error("Failed to update file status after cancellation", "file_path", filePath, "error", err)
 		return fmt.Errorf("failed to update file status after cancellation: %w", err)
 	}
-	
+
 	hw.logger.Info("Health check cancelled", "file_path", filePath)
 	return nil
 }
@@ -271,39 +222,16 @@ func (hw *HealthWorker) CancelHealthCheck(filePath string) error {
 func (hw *HealthWorker) IsCheckActive(filePath string) bool {
 	hw.activeChecksMu.RLock()
 	defer hw.activeChecksMu.RUnlock()
-	
+
 	_, exists := hw.activeChecks[filePath]
 	return exists
 }
 
-// AddManualCheck adds a file for manual health checking
-func (hw *HealthWorker) AddManualCheck(filePath string, maxRetries *int, sourceNzb *string, priority bool) error {
-	if !hw.IsRunning() {
-		return fmt.Errorf("health worker is not running")
-	}
-
-	responseCh := make(chan error, 1)
-	request := ManualCheckRequest{
-		FilePath:   filePath,
-		MaxRetries: maxRetries,
-		SourceNzb:  sourceNzb,
-		Priority:   priority,
-		ResponseCh: responseCh,
-	}
-
-	// Try to send the request
-	select {
-	case hw.manualCheckChan <- request:
-		// Wait for response
-		select {
-		case err := <-responseCh:
-			return err
-		case <-time.After(30 * time.Second):
-			return fmt.Errorf("timeout waiting for manual check response")
-		}
-	default:
-		return fmt.Errorf("manual check queue is full")
-	}
+// IsCycleRunning returns whether a health check cycle is currently running
+func (hw *HealthWorker) IsCycleRunning() bool {
+	hw.mu.RLock()
+	defer hw.mu.RUnlock()
+	return hw.cycleRunning
 }
 
 // run is the main worker loop
@@ -320,6 +248,16 @@ func (hw *HealthWorker) run(ctx context.Context) {
 			hw.logger.Info("Health worker stopped by stop signal")
 			return
 		case <-ticker.C:
+			// Check if a cycle is already running
+			hw.mu.RLock()
+			isCycleRunning := hw.cycleRunning
+			hw.mu.RUnlock()
+
+			if isCycleRunning {
+				hw.logger.Debug("Skipping health check cycle - previous cycle still running")
+				continue
+			}
+
 			if err := hw.runHealthCheckCycle(ctx); err != nil {
 				hw.logger.Error("Health check cycle failed", "error", err)
 				hw.updateStats(func(s *WorkerStats) {
@@ -332,155 +270,125 @@ func (hw *HealthWorker) run(ctx context.Context) {
 	}
 }
 
-// processManualChecks processes manual check requests
-func (hw *HealthWorker) processManualChecks(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-hw.stopChan:
-			return
-		case request := <-hw.manualCheckChan:
-			hw.processManualCheckRequest(ctx, request)
-		}
-	}
-}
-
-// processManualCheckRequest processes a single manual check request
-func (hw *HealthWorker) processManualCheckRequest(ctx context.Context, request ManualCheckRequest) {
-	defer close(request.ResponseCh)
-	
+// AddToHealthCheck adds a file to the health check list with pending status
+func (hw *HealthWorker) AddToHealthCheck(filePath string, sourceNzb *string) error {
 	// Check if file already exists in health database
-	existingHealth, err := hw.healthRepo.GetFileHealth(request.FilePath)
+	existingHealth, err := hw.healthRepo.GetFileHealth(filePath)
 	if err != nil {
-		request.ResponseCh <- fmt.Errorf("failed to check existing health record: %w", err)
-		return
+		return fmt.Errorf("failed to check existing health record: %w", err)
 	}
 
 	// If file doesn't exist in health database, add it
 	if existingHealth == nil {
 		err = hw.healthRepo.UpdateFileHealth(
-			request.FilePath,
-			database.HealthStatusPending, // Start as pending since it's never been checked
+			filePath,
+			database.HealthStatusPending, // Start as pending - will be checked in next cycle
 			nil,
-			request.SourceNzb,
+			sourceNzb,
 			nil,
 		)
 		if err != nil {
-			request.ResponseCh <- fmt.Errorf("failed to add file to health database: %w", err)
-			return
+			return fmt.Errorf("failed to add file to health database: %w", err)
 		}
-		
-		hw.logger.Info("Added file to health database for manual check", "file_path", request.FilePath)
+
+		hw.logger.Info("Added file to health check list", "file_path", filePath)
+	} else {
+		// File already exists, just reset to pending status if not already pending
+		if existingHealth.Status != database.HealthStatusPending {
+			err = hw.healthRepo.UpdateFileHealth(
+				filePath,
+				database.HealthStatusPending,
+				nil,
+				sourceNzb,
+				nil,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to update file status to pending: %w", err)
+			}
+			hw.logger.Info("Reset file status to pending for health check", "file_path", filePath)
+		}
 	}
 
-	// If priority check, process immediately
-	if request.Priority {
-		if err := hw.performSingleFileCheck(ctx, request.FilePath); err != nil {
-			hw.logger.Error("Failed to perform priority health check", "file_path", request.FilePath, "error", err)
-			request.ResponseCh <- fmt.Errorf("failed to perform priority health check: %w", err)
-			return
-		}
+	return nil
+}
+
+// PerformBackgroundCheck starts a health check in background and returns immediately
+func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath string) error {
+	if !hw.IsRunning() {
+		return fmt.Errorf("health worker is not running")
 	}
 
-	request.ResponseCh <- nil
+	// Start health check in background
+	go func() {
+		ctx := context.Background() // Use background context for async operation
+		checkErr := hw.performDirectCheck(ctx, filePath)
+		if checkErr != nil {
+			if errors.Is(checkErr, context.Canceled) {
+				hw.logger.Info("Background health check canceled", "file_path", filePath)
+			} else {
+				hw.logger.Error("Background health check failed", "file_path", filePath, "error", checkErr)
+			}
+
+			// Get current health record to preserve source NZB path
+			fileHealth, getErr := hw.healthRepo.GetFileHealth(filePath)
+			var sourceNzb *string
+			if getErr == nil && fileHealth != nil {
+				sourceNzb = fileHealth.SourceNzbPath
+			}
+
+			// Set status back to pending if the check failed
+			errorMsg := checkErr.Error()
+			updateErr := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil)
+			if updateErr != nil {
+				hw.logger.Error("Failed to update status after failed check", "file_path", filePath, "error", updateErr)
+			}
+		}
+	}()
+
+	return nil
 }
 
-// PerformDirectCheck performs an immediate health check on a single file (public method)
-func (hw *HealthWorker) PerformDirectCheck(ctx context.Context, filePath string) error {
-	return hw.performSingleFileCheck(ctx, filePath)
-}
-
-// performSingleFileCheck performs a health check on a single file
-func (hw *HealthWorker) performSingleFileCheck(ctx context.Context, filePath string) error {
+// performDirectCheck performs a health check on a single file using the HealthChecker
+func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string) error {
 	// Create cancellable context for this check
 	checkCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	
+
 	// Track active check
 	hw.activeChecksMu.Lock()
 	hw.activeChecks[filePath] = cancel
 	hw.activeChecksMu.Unlock()
-	
+
 	// Ensure cleanup on exit
 	defer func() {
 		hw.activeChecksMu.Lock()
 		delete(hw.activeChecks, filePath)
 		hw.activeChecksMu.Unlock()
 	}()
-	
+
 	// Check if already cancelled
 	select {
 	case <-checkCtx.Done():
 		return checkCtx.Err()
 	default:
 	}
-	
-	// Get file metadata
-	fileMeta, err := hw.metadataService.ReadFileMetadata(filePath)
-	if err != nil {
-		hw.logger.Error("Failed to read file metadata for manual check", "file_path", filePath, "error", err)
-		return fmt.Errorf("failed to read file metadata: %w", err)
-	}
-	if fileMeta == nil {
-		hw.logger.Warn("File metadata not found for manual check", "file_path", filePath)
-		return fmt.Errorf("file metadata not found for file: %s", filePath)
-	}
 
-	// Check if cancelled before proceeding
-	select {
-	case <-checkCtx.Done():
-		return checkCtx.Err()
-	default:
-	}
+	// Delegate to HealthChecker
+	event := hw.healthChecker.CheckFile(checkCtx, filePath)
 
-	// Create a health checker for this single check
-	checkerConfig := HealthCheckerConfig{
-		MaxConcurrentJobs:     1,
-		BatchSize:             1,
-		MaxRetries:            hw.config.MaxRetries,
-		MaxSegmentConnections: hw.config.MaxSegmentConnections,
-		CheckAllSegments:      hw.config.CheckAllSegments,
-	}
-
-	checker := NewHealthChecker(hw.healthRepo, hw.metadataService, hw.poolManager, checkerConfig)
-	
-	// Perform the check with cancellable context
-	event := checker.checkSingleFile(checkCtx, filePath, fileMeta)
-	
 	// Check if cancelled during check
 	select {
 	case <-checkCtx.Done():
 		return checkCtx.Err()
 	default:
 	}
-	
-	// Get current health record
-	fileHealth, err := hw.healthRepo.GetFileHealth(filePath)
-	if err != nil {
-		hw.logger.Error("Failed to get file health record", "file_path", filePath, "error", err)
-		return fmt.Errorf("failed to get file health record: %w", err)
-	}
-	if fileHealth == nil {
-		hw.logger.Warn("File health record not found", "file_path", filePath)
-		return fmt.Errorf("file health record not found for file: %s", filePath)
+
+	// Handle the result
+	if err := hw.handleHealthCheckResult(event); err != nil {
+		hw.logger.Error("Failed to handle health check result", "file_path", filePath, "error", err)
+		return fmt.Errorf("failed to handle health check result: %w", err)
 	}
 
-	// For direct manual checks, we want to update the health record immediately
-	// rather than using the normal health check result handling which may delete records
-	var errorMsg *string
-	if event.Error != nil {
-		errorText := event.Error.Error()
-		errorMsg = &errorText
-	}
-	
-	// Update the health record with the new status
-	err = hw.healthRepo.UpdateFileHealth(filePath, event.Status, errorMsg, fileHealth.SourceNzbPath, nil)
-	if err != nil {
-		hw.logger.Error("Failed to update health record after direct check", "file_path", filePath, "error", err)
-		return fmt.Errorf("failed to update health record: %w", err)
-	}
-	
 	// Update stats
 	hw.updateStats(func(s *WorkerStats) {
 		s.TotalFilesChecked++
@@ -491,14 +399,89 @@ func (hw *HealthWorker) performSingleFileCheck(ctx context.Context, filePath str
 			s.TotalFilesCorrupted++
 		}
 	})
-	
+
 	hw.logger.Info("Direct health check completed", "file_path", filePath, "status", event.Status, "type", event.Type)
-	
+
+	return nil
+}
+
+// handleHealthCheckResult handles the result of a health check
+func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
+	switch event.Type {
+	case EventTypeFileRecovered:
+		// File is now healthy - update metadata and delete from health database
+		hw.logger.Info("File recovered", "file_path", event.FilePath)
+
+		// Update metadata status
+		if err := hw.metadataService.UpdateFileStatus(event.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY); err != nil {
+			hw.logger.Error("Failed to update metadata status", "file_path", event.FilePath, "error", err)
+			return fmt.Errorf("failed to update metadata status: %w", err)
+		}
+
+		// Delete health record since file is now healthy
+		if err := hw.healthRepo.DeleteHealthRecord(event.FilePath); err != nil {
+			hw.logger.Error("Failed to delete health record for recovered file", "file_path", event.FilePath, "error", err)
+			return fmt.Errorf("failed to delete health record: %w", err)
+		}
+		hw.logger.Info("Removed health record for recovered file", "file_path", event.FilePath)
+
+	case EventTypeFileCorrupted, EventTypeCheckFailed:
+		// Get current health record to check retry count
+		fileHealth, err := hw.healthRepo.GetFileHealth(event.FilePath)
+		if err != nil {
+			hw.logger.Error("Failed to get file health record", "file_path", event.FilePath, "error", err)
+			return fmt.Errorf("failed to get file health record: %w", err)
+		}
+		if fileHealth == nil {
+			hw.logger.Warn("File health record not found", "file_path", event.FilePath)
+			return fmt.Errorf("file health record not found for file: %s", event.FilePath)
+		}
+
+		var errorMsg *string
+		if event.Error != nil {
+			errorText := event.Error.Error()
+			errorMsg = &errorText
+		}
+
+		if event.Type == EventTypeFileCorrupted {
+			hw.logger.Warn("File still corrupted", "file_path", event.FilePath, "retry_count", fileHealth.RetryCount, "max_retries", fileHealth.MaxRetries)
+		} else {
+			hw.logger.Error("Health check failed", "file_path", event.FilePath, "error", event.Error)
+		}
+
+		if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
+			// Max retries reached - mark as permanently corrupted
+			if err := hw.healthRepo.MarkAsCorrupted(event.FilePath, errorMsg); err != nil {
+				hw.logger.Error("Failed to mark file as corrupted", "error", err)
+				return fmt.Errorf("failed to mark file as corrupted: %w", err)
+			}
+			hw.logger.Error("File permanently marked as corrupted", "file_path", event.FilePath)
+		} else {
+			// Increment retry count
+			if err := hw.healthRepo.IncrementRetryCount(event.FilePath, errorMsg); err != nil {
+				hw.logger.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
+				return fmt.Errorf("failed to increment retry count: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
 
 // runHealthCheckCycle runs a single cycle of health checks
 func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
+	// Set the cycle running flag
+	hw.mu.Lock()
+	hw.cycleRunning = true
+	hw.mu.Unlock()
+
+	// Ensure we clear the flag when done
+	defer func() {
+		hw.mu.Lock()
+		hw.cycleRunning = false
+		hw.mu.Unlock()
+	}()
+
 	now := time.Now()
 	hw.updateStats(func(s *WorkerStats) {
 		s.CurrentRunStartTime = &now
@@ -506,7 +489,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	})
 
 	// Get unhealthy files that need checking
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(hw.config.BatchSize)
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(hw.config.MaxConcurrentJobs)
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
@@ -524,43 +507,37 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		return nil
 	}
 
-	hw.logger.Info("Found unhealthy files to check", "count", len(unhealthyFiles))
+	hw.logger.Info("Found unhealthy files to check - processing in parallel", "count", len(unhealthyFiles), "max_concurrent_jobs", hw.config.MaxConcurrentJobs)
 
-	// Create a health checker for this batch
-	checkerConfig := HealthCheckerConfig{
-		MaxConcurrentJobs:     hw.config.MaxConcurrentJobs,
-		BatchSize:             hw.config.BatchSize,
-		MaxRetries:            hw.config.MaxRetries,
-		MaxSegmentConnections: hw.config.MaxSegmentConnections,
-		CheckAllSegments:      hw.config.CheckAllSegments,
-	}
+	// Process files in parallel using conc
+	wg := conc.NewWaitGroup()
 
-	checker := NewHealthChecker(hw.healthRepo, hw.metadataService, hw.poolManager, checkerConfig)
-	
-	// Process files with progress tracking
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, hw.config.MaxConcurrentJobs)
-	
 	for _, fileHealth := range unhealthyFiles {
-		wg.Add(1)
-		go func(fh *database.FileHealth) {
-			defer wg.Done()
+		wg.Go(func() {
+			hw.logger.Info("Checking unhealthy file", "file_path", fileHealth.FilePath)
 
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			// Set checking status
+			err := hw.healthRepo.SetFileChecking(fileHealth.FilePath)
+			if err != nil {
+				hw.logger.Error("Failed to set file checking status", "file_path", fileHealth.FilePath, "error", err)
+				return
+			}
 
-			// Check the file
-			checker.checkFileFromHealth(ctx, fh)
-			
-			// Update progress
+			// Use performDirectCheck which provides cancellation infrastructure
+			err = hw.performDirectCheck(ctx, fileHealth.FilePath)
+			if err != nil {
+				hw.logger.Error("Health check failed", "file_path", fileHealth.FilePath, "error", err)
+				// performDirectCheck already handled the result and stats
+			}
+
+			// Update cycle progress stats (performDirectCheck updates individual file stats)
 			hw.updateStats(func(s *WorkerStats) {
 				s.CurrentRunFilesChecked++
-				s.TotalFilesChecked++
 			})
-		}(fileHealth)
+		})
 	}
 
+	// Wait for all files to complete processing
 	wg.Wait()
 
 	// Update final stats
@@ -573,7 +550,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		s.NextRunTime = &nextRun
 	})
 
-	hw.logger.Info("Health check cycle completed", 
+	hw.logger.Info("Health check cycle completed",
 		"files_checked", len(unhealthyFiles),
 		"duration", time.Since(now))
 
@@ -588,7 +565,7 @@ func (hw *HealthWorker) updateStats(updateFunc func(*WorkerStats)) {
 }
 
 // UpdateConfig updates the worker configuration
-func (hw *HealthWorker) UpdateConfig(config HealthWorkerConfig) error {
+func (hw *HealthWorker) UpdateConfig(config HealthConfig) error {
 	hw.mu.Lock()
 	defer hw.mu.Unlock()
 
@@ -605,8 +582,7 @@ func (hw *HealthWorker) UpdateConfig(config HealthWorkerConfig) error {
 	hw.logger.Info("Health worker configuration updated",
 		"enabled", config.Enabled,
 		"check_interval", config.CheckInterval,
-		"batch_size", config.BatchSize,
-		"max_retries", config.MaxRetries)
+		"max_concurrent_jobs", config.MaxConcurrentJobs)
 
 	return nil
 }

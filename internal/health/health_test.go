@@ -20,7 +20,7 @@ func TestHealthChecker(t *testing.T) {
 	// Create a temporary metadata service for testing
 	metadataService := metadata.NewMetadataService("./test-metadata")
 	
-	checker := NewHealthChecker(repo, metadataService, nil, HealthCheckerConfig{
+	checker := NewHealthChecker(repo, metadataService, nil, HealthConfig{
 		MaxRetries: 2,
 	})
 

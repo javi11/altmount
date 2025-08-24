@@ -631,7 +631,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	hostChanged := false
 	portChanged := false
 	usernameChanged := false
-	
+
 	if updateReq.Host != nil {
 		updatedProvider.Host = *updateReq.Host
 		hostChanged = true

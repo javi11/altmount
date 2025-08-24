@@ -1,0 +1,63 @@
+# https://goreleaser.com
+version: 2
+project_name: altmount-cli
+
+builds:
+  - id: cli
+    binary: altmount-cli
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/altmount/main.go
+    ldflags:
+      - -s -w
+      - -X "main.Version={{ .Version }}"
+      - -X "main.GitCommit={{ .ShortCommit }}"
+      - -X "main.Timestamp={{ .Timestamp }}"
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=1
+      - >-
+        {{- if eq .Os "linux" }}
+          {{- if eq .Arch "amd64" }}CC=zig cc -target x86_64-linux-musl{{- end }}
+          {{- if eq .Arch "arm64"}}CC=zig cc -target aarch64-linux-musl{{- end }}
+        {{- end }}
+      - >-
+        {{- if eq .Os "windows" }}
+          {{- if eq .Arch "amd64" }}CC=zig cc -target x86_64-windows-gnu{{- end }}
+        {{- end }}
+
+universal_binaries:
+  - id: cli
+    ids:
+      - cli
+    replace: true
+
+archives:
+  - id: cli
+    ids:
+      - cli
+    formats: tar.gz
+    name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    format_overrides:
+      - goos: windows
+        formats: zip
+
+checksum:
+  name_template: 'checksums-cli.txt'
+  algorithm: sha512
+
+changelog:
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^Merge branch' 

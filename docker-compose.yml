@@ -1,0 +1,33 @@
+services:
+  altmount:
+    container_name: altmount
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: altmount:latest
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./example/config:/config
+      - ./example/watch:/watch
+      - ./example/metadata:/metadata
+    environment:
+      - PORT=8081
+      - HOST=0.0.0.0
+      - PUID=1000
+      - PGID=1000
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8081/api/system/stats",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

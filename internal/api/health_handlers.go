@@ -3,14 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/health"
 )
 
 // handleListHealth handles GET /api/health
@@ -417,25 +415,12 @@ func (s *Server) handleDirectHealthCheck(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Start health check in background
-	go func() {
-		ctx := context.Background() // Use background context for async operation
-		checkErr := s.healthWorker.PerformDirectCheck(ctx, filePath)
-		if checkErr != nil {
-			if errors.Is(checkErr, context.Canceled) {
-				s.logger.Info("Background health check canceled", "file_path", filePath)
-			} else {
-				s.logger.Error("Background health check failed", "file_path", filePath, "error", checkErr)
-			}
-
-			// Set status back to pending if the check failed
-			errorMsg := checkErr.Error()
-			updateErr := s.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, &errorMsg, item.SourceNzbPath, nil)
-			if updateErr != nil {
-				s.logger.Error("Failed to update status after failed check", "file_path", filePath, "error", updateErr)
-			}
-		}
-	}()
+	// Start health check in background using worker
+	err = s.healthWorker.PerformBackgroundCheck(context.Background(), filePath)
+	if err != nil {
+		WriteInternalError(w, "Failed to start background health check", err.Error())
+		return
+	}
 
 	// Get the updated health record with 'checking' status
 	updatedItem, err := s.healthRepo.GetFileHealth(filePath)
@@ -479,157 +464,6 @@ type SegmentsInfo struct {
 	TotalSegments   int  `json:"total_segments"`
 	MissingSegments int  `json:"missing_segments"`
 	CheckedAll      bool `json:"checked_all"`
-}
-
-// handleUploadAndCheck handles POST /api/health/upload
-// Performs immediate health check on a file specified by metadata path
-func (s *Server) handleUploadAndCheck(w http.ResponseWriter, r *http.Request) {
-	// Parse request body
-	var req UploadAndCheckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteBadRequest(w, "Invalid request body", err.Error())
-		return
-	}
-
-	// Validate required fields
-	if req.FilePath == "" {
-		WriteValidationError(w, "file_path is required", "")
-		return
-	}
-
-	// Check if health worker is available (we need its dependencies)
-	if s.healthWorker == nil {
-		WriteNotFound(w, "Health worker not available", "Health worker is not configured or not running")
-		return
-	}
-
-	// Create a temporary health checker for immediate checking
-	checkerConfig := health.HealthCheckerConfig{
-		MaxConcurrentJobs:     1, // Single file check
-		BatchSize:             1,
-		MaxRetries:            2, // Default
-		MaxSegmentConnections: 5, // Default
-		CheckAllSegments:      req.CheckAllSegments,
-	}
-
-	// Override max retries if provided
-	if req.MaxRetries != nil {
-		if *req.MaxRetries < 0 {
-			WriteValidationError(w, "max_retries must be non-negative", "")
-			return
-		}
-		checkerConfig.MaxRetries = *req.MaxRetries
-	}
-
-	// Perform immediate health check using the health worker
-	// The health worker will create a temporary health checker and perform the check
-	result, err := s.performImmediateHealthCheck(req.FilePath, checkerConfig, req.SourceNzb)
-	if err != nil {
-		WriteInternalError(w, "Failed to perform health check", err.Error())
-		return
-	}
-
-	WriteSuccess(w, result, nil)
-}
-
-// performImmediateHealthCheck performs an immediate health check using the health worker's dependencies
-func (s *Server) performImmediateHealthCheck(filePath string, config health.HealthCheckerConfig, sourceNzb *string) (*UploadAndCheckResponse, error) {
-	// First, add the file to health database if not exists (for tracking purposes)
-	maxRetries := config.MaxRetries
-	err := s.healthRepo.AddFileToHealthCheck(filePath, maxRetries, sourceNzb)
-	if err != nil {
-		// If file already exists, that's okay, we'll continue with the check
-		s.logger.Info("File may already exist in health database", "file_path", filePath, "error", err)
-	}
-
-	// Use the health worker to perform an immediate priority check
-	err = s.healthWorker.AddManualCheck(filePath, &maxRetries, sourceNzb, true) // priority=true for immediate execution
-	if err != nil {
-		return nil, fmt.Errorf("failed to queue immediate health check: %w", err)
-	}
-
-	// Wait for the check to complete with timeout
-	timeout := 30 * time.Second
-	checkInterval := 500 * time.Millisecond
-	maxWait := time.Now().Add(timeout)
-
-	for time.Now().Before(maxWait) {
-		// Check if the health record has been updated
-		healthRecord, err := s.healthRepo.GetFileHealth(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve health check results: %w", err)
-		}
-
-		if healthRecord != nil && healthRecord.Status != database.HealthStatusPending {
-			// Health check completed, build response
-			return s.buildHealthCheckResponse(filePath, healthRecord, config.CheckAllSegments), nil
-		}
-
-		// Wait before checking again
-		time.Sleep(checkInterval)
-	}
-
-	// Timeout reached
-	return nil, fmt.Errorf("health check timed out after %v", timeout)
-}
-
-// buildHealthCheckResponse creates the response object from health record
-func (s *Server) buildHealthCheckResponse(filePath string, healthRecord *database.FileHealth, checkedAll bool) *UploadAndCheckResponse {
-	response := &UploadAndCheckResponse{
-		FilePath:     filePath,
-		HealthStatus: healthRecord.Status,
-		CheckedAt:    time.Now(),
-	}
-
-	// Set check result message
-	switch healthRecord.Status {
-	case database.HealthStatusHealthy:
-		response.CheckResult = "File is healthy - all segments are available"
-	case database.HealthStatusPartial:
-		response.CheckResult = "File is partially available - some segments are missing"
-		if healthRecord.LastError != nil {
-			response.ErrorMessage = healthRecord.LastError
-		}
-	case database.HealthStatusCorrupted:
-		response.CheckResult = "File is corrupted - most or all segments are missing"
-		if healthRecord.LastError != nil {
-			response.ErrorMessage = healthRecord.LastError
-		}
-	case database.HealthStatusPending:
-		response.CheckResult = "Health check is pending"
-	default:
-		response.CheckResult = "Unknown health status"
-	}
-
-	// If we have metadata reader available, we can get segment information
-	if s.metadataReader != nil {
-		metadata, err := s.metadataReader.GetFileMetadata(filePath)
-		if err == nil && metadata != nil {
-			response.SegmentsInfo = &SegmentsInfo{
-				TotalSegments: len(metadata.SegmentData),
-				CheckedAll:    checkedAll,
-			}
-
-			// Try to parse missing segments from error message
-			if healthRecord.LastError != nil {
-				response.SegmentsInfo.MissingSegments = s.parseMissingSegmentsFromError(*healthRecord.LastError)
-			}
-		}
-	}
-
-	return response
-}
-
-// parseMissingSegmentsFromError attempts to extract missing segments count from error message
-func (s *Server) parseMissingSegmentsFromError(errorMsg string) int {
-	// Simple parsing of error messages like "partial file: 2/10 segments missing"
-	// This is a basic implementation - could be improved with regex
-	if len(errorMsg) > 0 {
-		// For now, return 0 if we can't parse
-		// In a real implementation, you'd use regex to extract the numbers
-		return 0
-	}
-	return 0
 }
 
 // handleCancelHealthCheck handles POST /api/health/{id}/cancel
