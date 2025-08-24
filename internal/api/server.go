@@ -27,17 +27,17 @@ func DefaultConfig() *Config {
 
 // Server represents the API server
 type Server struct {
-	config          *Config
-	queueRepo       *database.Repository
-	healthRepo      *database.HealthRepository
-	authService     *auth.Service
-	userRepo        *database.UserRepository
-	configManager   ConfigManager
-	metadataReader  *metadata.MetadataReader
-	healthWorker    *health.HealthWorker
-	logger          *slog.Logger
-	startTime       time.Time
-	mux             *http.ServeMux
+	config         *Config
+	queueRepo      *database.Repository
+	healthRepo     *database.HealthRepository
+	authService    *auth.Service
+	userRepo       *database.UserRepository
+	configManager  ConfigManager
+	metadataReader *metadata.MetadataReader
+	healthWorker   *health.HealthWorker
+	logger         *slog.Logger
+	startTime      time.Time
+	mux            *http.ServeMux
 }
 
 // NewServer creates a new API server that registers routes on the provided mux
@@ -80,11 +80,11 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle(s.config.Prefix+"/", http.StripPrefix(s.config.Prefix, apiHandler))
 }
 
-// handleAPI routes API requests to appropriate handlers  
+// handleAPI routes API requests to appropriate handlers
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	// Create internal mux for API routing
 	apiMux := http.NewServeMux()
-	
+
 	// Queue endpoints
 	apiMux.HandleFunc("GET /queue", s.handleListQueue)
 	apiMux.HandleFunc("GET /queue/{id}", s.handleGetQueue)
@@ -102,8 +102,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	apiMux.HandleFunc("GET /health/stats", s.handleGetHealthStats)
 	apiMux.HandleFunc("DELETE /health/cleanup", s.handleCleanupHealth)
 	apiMux.HandleFunc("POST /health/check", s.handleAddHealthCheck)
+	apiMux.HandleFunc("POST /health/upload", s.handleUploadAndCheck)
 	apiMux.HandleFunc("GET /health/worker/status", s.handleGetHealthWorkerStatus)
-	apiMux.HandleFunc("POST /health/{id}/check", s.handleManualHealthCheck)
+	apiMux.HandleFunc("POST /health/{id}/check-now", s.handleDirectHealthCheck)
+	apiMux.HandleFunc("POST /health/{id}/cancel", s.handleCancelHealthCheck)
 
 	// File endpoints (if metadata reader is available)
 	if s.metadataReader != nil {
@@ -123,7 +125,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("PATCH /config/{section}", s.handlePatchConfigSection)
 		apiMux.HandleFunc("POST /config/reload", s.handleReloadConfig)
 		apiMux.HandleFunc("POST /config/validate", s.handleValidateConfig)
-		
+
 		// Provider management endpoints
 		apiMux.HandleFunc("POST /providers/test", s.handleTestProvider)
 		apiMux.HandleFunc("POST /providers", s.handleCreateProvider)
@@ -131,14 +133,14 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("DELETE /providers/{id}", s.handleDeleteProvider)
 		apiMux.HandleFunc("PUT /providers/reorder", s.handleReorderProviders)
 	}
-	
+
 	// Authentication endpoints (if auth service is available)
 	if s.authService != nil {
 		// Direct authentication endpoints
 		apiMux.HandleFunc("POST /auth/login", s.handleDirectLogin)
 		apiMux.HandleFunc("POST /auth/register", s.handleRegister)
 		apiMux.HandleFunc("GET /auth/registration-status", s.handleCheckRegistration)
-		
+
 		// Protected API endpoints for user management (require authentication)
 		tokenService := s.authService.TokenService()
 		if tokenService != nil {
@@ -146,14 +148,14 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			apiMux.Handle("GET /user", authMiddleware(http.HandlerFunc(s.handleAuthUser)))
 			apiMux.Handle("POST /user/refresh", authMiddleware(http.HandlerFunc(s.handleAuthRefresh)))
 			apiMux.Handle("POST /user/logout", authMiddleware(http.HandlerFunc(s.handleAuthLogout)))
-			
+
 			// Admin endpoints (require admin privileges)
 			adminMiddleware := auth.RequireAdmin(tokenService, s.userRepo)
 			apiMux.Handle("GET /users", adminMiddleware(http.HandlerFunc(s.handleListUsers)))
 			apiMux.Handle("PUT /users/{user_id}/admin", adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdmin)))
 		}
 	}
-	
+
 	apiMux.ServeHTTP(w, r)
 }
 
@@ -164,7 +166,7 @@ func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
 	handler = LoggingMiddleware(handler)
 	handler = ContentTypeMiddleware(handler)
 	handler = CORSMiddleware(handler)
-	
+
 	// Apply JWT authentication middleware for user context (optional)
 	if s.authService != nil && s.userRepo != nil {
 		tokenService := s.authService.TokenService()
@@ -172,9 +174,9 @@ func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
 			handler = auth.JWTMiddleware(tokenService, s.userRepo)(handler)
 		}
 	}
-	
+
 	// Basic authentication is now handled by OAuth flow only
-	
+
 	return handler
 }
 

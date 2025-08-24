@@ -58,6 +58,7 @@ export function getStatusColor(status: string): string {
 			return "success";
 		case "processing":
 		case "retrying":
+		case "checking":
 			return "info";
 		case "pending":
 			return "warning";

@@ -200,12 +200,34 @@ export class APIClient {
 		return this.request<HealthWorkerStatus>("/health/worker/status");
 	}
 
-	async triggerManualHealthCheck(filePath: string, priority?: boolean) {
-		return this.request<{ message: string; priority: boolean }>(
-			`/health/${encodeURIComponent(filePath)}/check`,
+	async directHealthCheck(filePath: string) {
+		return this.request<{
+			message: string;
+			file_path: string;
+			old_status: string;
+			new_status: string;
+			checked_at: string;
+			health_data: FileHealth;
+		}>(
+			`/health/${encodeURIComponent(filePath)}/check-now`,
 			{
 				method: "POST",
-				body: JSON.stringify({ priority: priority || false }),
+			}
+		);
+	}
+
+	async cancelHealthCheck(filePath: string) {
+		return this.request<{
+			message: string;
+			file_path: string;
+			old_status: string;
+			new_status: string;
+			cancelled_at: string;
+			health_data: FileHealth;
+		}>(
+			`/health/${encodeURIComponent(filePath)}/cancel`,
+			{
+				method: "POST",
 			}
 		);
 	}

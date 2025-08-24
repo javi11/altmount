@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -90,6 +91,11 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 
 	// Create health repository for file health tracking
 	healthRepo := database.NewHealthRepository(db.Connection())
+
+	// Reset all in-progress file health checks on start up
+	if err := healthRepo.ResetFileAllChecking(); err != nil {
+		slog.Error("failed to reset in progress file health", "err", err)
+	}
 
 	// Create metadata-based remote file handler
 	metadataRemoteFile := nzbfilesystem.NewMetadataRemoteFile(

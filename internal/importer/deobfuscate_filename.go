@@ -29,11 +29,8 @@ import (
 // 3. Otherwise: obfuscated.
 // IsProbablyObfuscated returns true if the provided filename/path appears obfuscated.
 // See detailed heuristic description above.
-func (p *Processor) IsProbablyObfuscated(input string) bool {
+func IsProbablyObfuscated(input string) bool {
 	logger := slog.Default()
-	if p != nil && p.log != nil {
-		logger = p.log
-	}
 
 	// Extract filename then its basename without extension
 	filename := filepath.Base(input)

@@ -6,6 +6,7 @@ import {
 	RefreshCw,
 	Shield,
 	Trash2,
+	X,
 } from "lucide-react";
 import { useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -18,11 +19,11 @@ import {
 	useDeleteHealthItem,
 	useHealthStats,
 	useHealthWorkerStatus,
-	useRetryHealthItem,
-	useTriggerManualHealthCheck,
+	useDirectHealthCheck,
+	useCancelHealthCheck,
 } from "../hooks/useApi";
 import { formatRelativeTime, truncateText } from "../lib/utils";
-import { type FileHealth, HealthStatus } from "../types/api";
+import { type FileHealth } from "../types/api";
 
 export function HealthPage() {
 	const [page, setPage] = useState(0);
@@ -43,10 +44,10 @@ export function HealthPage() {
 	const { data: stats } = useHealthStats();
 	const { data: workerStatus } = useHealthWorkerStatus();
 	const deleteItem = useDeleteHealthItem();
-	const retryItem = useRetryHealthItem();
 	const cleanupHealth = useCleanupHealth();
 	const addHealthCheck = useAddHealthCheck();
-	const triggerManualCheck = useTriggerManualHealthCheck();
+	const directHealthCheck = useDirectHealthCheck();
+	const cancelHealthCheck = useCancelHealthCheck();
 
 	const handleDelete = async (filePath: string) => {
 		if (confirm("Are you sure you want to delete this health record?")) {
@@ -54,9 +55,6 @@ export function HealthPage() {
 		}
 	};
 
-	const handleRetry = async (filePath: string, resetStatus = false) => {
-		await retryItem.mutateAsync({ id: filePath, resetStatus });
-	};
 
 	const handleCleanup = async () => {
 		if (confirm("Are you sure you want to cleanup old health records?")) {
@@ -87,11 +85,21 @@ export function HealthPage() {
 		}
 	};
 
-	const handleManualCheck = async (filePath: string, priority = false) => {
+	const handleManualCheck = async (filePath: string) => {
 		try {
-			await triggerManualCheck.mutateAsync({ filePath, priority });
+			await directHealthCheck.mutateAsync(filePath);
 		} catch (err) {
-			console.error("Failed to trigger manual health check:", err);
+			console.error("Failed to perform direct health check:", err);
+		}
+	};
+
+	const handleCancelCheck = async (filePath: string) => {
+		if (confirm("Are you sure you want to cancel this health check?")) {
+			try {
+				await cancelHealthCheck.mutateAsync(filePath);
+			} catch (err) {
+				console.error("Failed to cancel health check:", err);
+			}
 		}
 	};
 
@@ -177,50 +185,39 @@ export function HealthPage() {
 					<div className="card-body">
 						<div className="flex items-center justify-between">
 							<h2 className="card-title">Health Worker Status</h2>
-							<div className={`badge ${workerStatus.is_running ? 'badge-success' : 'badge-error'}`}>
-								{workerStatus.is_running ? 'Running' : 'Stopped'}
+							<div className={`badge ${workerStatus.status === 'running' ? 'badge-success' : 'badge-error'}`}>
+								{workerStatus.status === 'running' ? 'Running' : 'Stopped'}
 							</div>
 						</div>
 						
 						<div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
 							<div className="stat">
-								<div className="stat-title">Queue Size</div>
-								<div className="stat-value text-info">{workerStatus.queue_size}</div>
-								<div className="stat-desc">
-									{workerStatus.priority_queue_size > 0 && 
-										`${workerStatus.priority_queue_size} priority`
-									}
-								</div>
+								<div className="stat-title">Manual Checks</div>
+								<div className="stat-value text-info">{workerStatus.pending_manual_checks}</div>
+								<div className="stat-desc">Pending checks</div>
 							</div>
 							<div className="stat">
-								<div className="stat-title">Processed</div>
-								<div className="stat-value text-success">{workerStatus.total_processed}</div>
-								<div className="stat-desc">Total completed</div>
+								<div className="stat-title">Files Checked</div>
+								<div className="stat-value text-success">{workerStatus.total_files_checked}</div>
+								<div className="stat-desc">Total checked</div>
 							</div>
 							<div className="stat">
-								<div className="stat-title">Failed</div>
-								<div className="stat-value text-error">{workerStatus.total_failed}</div>
-								<div className="stat-desc">Total failed</div>
+								<div className="stat-title">Corrupted</div>
+								<div className="stat-value text-error">{workerStatus.total_files_corrupted}</div>
+								<div className="stat-desc">Files corrupted</div>
 							</div>
 							<div className="stat">
-								<div className="stat-title">Status</div>
+								<div className="stat-title">Runs</div>
 								<div className="stat-value text-sm">
-									{workerStatus.is_processing ? 
-										<span className="loading loading-spinner loading-sm text-primary" /> : 
-										'Idle'
-									}
+									{workerStatus.total_runs_completed}
 								</div>
-								<div className="stat-desc">
-									{workerStatus.current_file && 
-										`Checking: ${truncateText(workerStatus.current_file.split('/').pop() || '', 20)}`
-									}
-								</div>
+								<div className="stat-desc">Cycles completed</div>
 							</div>
 						</div>
 						
-						{workerStatus.last_activity && (
+						{workerStatus.last_run_time && (
 							<div className="text-sm text-base-content/70 mt-2">
-								Last activity: {formatRelativeTime(workerStatus.last_activity)}
+								Last run: {formatRelativeTime(workerStatus.last_run_time)}
 							</div>
 						)}
 					</div>
@@ -308,8 +305,8 @@ export function HealthPage() {
 											</td>
 											<td>
 												<span className="text-sm text-base-content/70">
-													{item.last_check
-														? formatRelativeTime(item.last_check)
+													{item.last_checked
+														? formatRelativeTime(item.last_checked)
 														: "Never"}
 												</span>
 											</td>
@@ -323,45 +320,29 @@ export function HealthPage() {
 														<MoreHorizontal className="h-4 w-4" />
 													</button>
 													<ul className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48">
-														<li>
-															<button
-																type="button"
-																onClick={() => handleManualCheck(item.file_path)}
-																disabled={triggerManualCheck.isPending}
-															>
-																<PlayCircle className="h-4 w-4" />
-																Manual Check
-															</button>
-														</li>
-														{(item.status === HealthStatus.CORRUPTED ||
-															item.status === HealthStatus.PARTIAL) && (
-															<>
-																<li>
-																	<hr />
-																</li>
-																<li>
-																	<button
-																		type="button"
-																		onClick={() => handleRetry(item.file_path)}
-																		disabled={retryItem.isPending}
-																	>
-																		<RefreshCw className="h-4 w-4" />
-																		Retry Check
-																	</button>
-																</li>
-																<li>
-																	<button
-																		type="button"
-																		onClick={() =>
-																			handleRetry(item.file_path, true)
-																		}
-																		disabled={retryItem.isPending}
-																	>
-																		<RefreshCw className="h-4 w-4" />
-																		Reset & Check
-																	</button>
-																</li>
-															</>
+														{item.status === "checking" ? (
+															<li>
+																<button
+																	type="button"
+																	onClick={() => handleCancelCheck(item.file_path)}
+																	disabled={cancelHealthCheck.isPending}
+																	className="text-warning"
+																>
+																	<X className="h-4 w-4" />
+																	Cancel Check
+																</button>
+															</li>
+														) : (
+															<li>
+																<button
+																	type="button"
+																	onClick={() => handleManualCheck(item.file_path)}
+																	disabled={directHealthCheck.isPending}
+																>
+																	<PlayCircle className="h-4 w-4" />
+																	Retry Check
+																</button>
+															</li>
 														)}
 														<li>
 															<hr />

@@ -51,6 +51,7 @@ export interface QueueRetryRequest {
 // Health types
 export const HealthStatus = {
 	PENDING: "pending",
+	CHECKING: "checking",
 	HEALTHY: "healthy",
 	PARTIAL: "partial",
 	CORRUPTED: "corrupted",
@@ -65,7 +66,7 @@ export interface FileHealth {
 	retry_count: number;
 	source_nzb_path?: string;
 	error_message?: string;
-	last_check?: string;
+	last_checked?: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -76,7 +77,6 @@ export interface HealthStats {
 	healthy: number;
 	partial: number;
 	corrupted: number;
-	last_check?: string;
 }
 
 export interface HealthRetryRequest {
@@ -184,12 +184,16 @@ export interface HealthCheckRequest {
 }
 
 export interface HealthWorkerStatus {
-	is_running: boolean;
-	is_processing: boolean;
-	queue_size: number;
-	priority_queue_size: number;
-	total_processed: number;
-	total_failed: number;
-	current_file?: string;
-	last_activity?: string;
+	status: string;
+	total_runs_completed: number;
+	total_files_checked: number;
+	total_files_recovered: number;
+	total_files_corrupted: number;
+	current_run_files_checked: number;
+	pending_manual_checks: number;
+	error_count: number;
+	current_run_start_time?: string;
+	last_run_time?: string;
+	next_run_time?: string;
+	last_error?: string;
 }

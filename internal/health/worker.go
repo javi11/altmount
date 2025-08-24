@@ -78,6 +78,10 @@ type HealthWorker struct {
 	manualQueue     []ManualCheckRequest
 	manualMu        sync.Mutex
 	
+	// Active checks tracking for cancellation
+	activeChecks map[string]context.CancelFunc // filePath -> cancel function
+	activeChecksMu sync.RWMutex
+	
 	// Statistics
 	stats WorkerStats
 	statsMu sync.RWMutex
@@ -117,6 +121,7 @@ func NewHealthWorker(
 		status:          WorkerStatusStopped,
 		stopChan:        make(chan struct{}),
 		manualCheckChan: make(chan ManualCheckRequest, 100), // Buffer for manual requests
+		activeChecks:    make(map[string]context.CancelFunc),
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -235,6 +240,42 @@ func (hw *HealthWorker) GetStats() WorkerStats {
 	return stats
 }
 
+// CancelHealthCheck cancels an active health check for the specified file
+func (hw *HealthWorker) CancelHealthCheck(filePath string) error {
+	hw.activeChecksMu.Lock()
+	defer hw.activeChecksMu.Unlock()
+	
+	cancelFunc, exists := hw.activeChecks[filePath]
+	if !exists {
+		return fmt.Errorf("no active health check found for file: %s", filePath)
+	}
+	
+	// Cancel the context
+	cancelFunc()
+	
+	// Remove from active checks
+	delete(hw.activeChecks, filePath)
+	
+	// Update file status to pending to allow retry
+	err := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, nil, nil, nil)
+	if err != nil {
+		hw.logger.Error("Failed to update file status after cancellation", "file_path", filePath, "error", err)
+		return fmt.Errorf("failed to update file status after cancellation: %w", err)
+	}
+	
+	hw.logger.Info("Health check cancelled", "file_path", filePath)
+	return nil
+}
+
+// IsCheckActive returns whether a health check is currently active for the specified file
+func (hw *HealthWorker) IsCheckActive(filePath string) bool {
+	hw.activeChecksMu.RLock()
+	defer hw.activeChecksMu.RUnlock()
+	
+	_, exists := hw.activeChecks[filePath]
+	return exists
+}
+
 // AddManualCheck adds a file for manual health checking
 func (hw *HealthWorker) AddManualCheck(filePath string, maxRetries *int, sourceNzb *string, priority bool) error {
 	if !hw.IsRunning() {
@@ -335,23 +376,62 @@ func (hw *HealthWorker) processManualCheckRequest(ctx context.Context, request M
 
 	// If priority check, process immediately
 	if request.Priority {
-		hw.performSingleFileCheck(ctx, request.FilePath)
+		if err := hw.performSingleFileCheck(ctx, request.FilePath); err != nil {
+			hw.logger.Error("Failed to perform priority health check", "file_path", request.FilePath, "error", err)
+			request.ResponseCh <- fmt.Errorf("failed to perform priority health check: %w", err)
+			return
+		}
 	}
 
 	request.ResponseCh <- nil
 }
 
+// PerformDirectCheck performs an immediate health check on a single file (public method)
+func (hw *HealthWorker) PerformDirectCheck(ctx context.Context, filePath string) error {
+	return hw.performSingleFileCheck(ctx, filePath)
+}
+
 // performSingleFileCheck performs a health check on a single file
-func (hw *HealthWorker) performSingleFileCheck(ctx context.Context, filePath string) {
+func (hw *HealthWorker) performSingleFileCheck(ctx context.Context, filePath string) error {
+	// Create cancellable context for this check
+	checkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	
+	// Track active check
+	hw.activeChecksMu.Lock()
+	hw.activeChecks[filePath] = cancel
+	hw.activeChecksMu.Unlock()
+	
+	// Ensure cleanup on exit
+	defer func() {
+		hw.activeChecksMu.Lock()
+		delete(hw.activeChecks, filePath)
+		hw.activeChecksMu.Unlock()
+	}()
+	
+	// Check if already cancelled
+	select {
+	case <-checkCtx.Done():
+		return checkCtx.Err()
+	default:
+	}
+	
 	// Get file metadata
 	fileMeta, err := hw.metadataService.ReadFileMetadata(filePath)
 	if err != nil {
 		hw.logger.Error("Failed to read file metadata for manual check", "file_path", filePath, "error", err)
-		return
+		return fmt.Errorf("failed to read file metadata: %w", err)
 	}
 	if fileMeta == nil {
 		hw.logger.Warn("File metadata not found for manual check", "file_path", filePath)
-		return
+		return fmt.Errorf("file metadata not found for file: %s", filePath)
+	}
+
+	// Check if cancelled before proceeding
+	select {
+	case <-checkCtx.Done():
+		return checkCtx.Err()
+	default:
 	}
 
 	// Create a health checker for this single check
@@ -365,22 +445,41 @@ func (hw *HealthWorker) performSingleFileCheck(ctx context.Context, filePath str
 
 	checker := NewHealthChecker(hw.healthRepo, hw.metadataService, hw.poolManager, checkerConfig)
 	
-	// Perform the check
-	event := checker.checkSingleFile(ctx, filePath, fileMeta)
+	// Perform the check with cancellable context
+	event := checker.checkSingleFile(checkCtx, filePath, fileMeta)
+	
+	// Check if cancelled during check
+	select {
+	case <-checkCtx.Done():
+		return checkCtx.Err()
+	default:
+	}
 	
 	// Get current health record
 	fileHealth, err := hw.healthRepo.GetFileHealth(filePath)
 	if err != nil {
 		hw.logger.Error("Failed to get file health record", "file_path", filePath, "error", err)
-		return
+		return fmt.Errorf("failed to get file health record: %w", err)
 	}
 	if fileHealth == nil {
 		hw.logger.Warn("File health record not found", "file_path", filePath)
-		return
+		return fmt.Errorf("file health record not found for file: %s", filePath)
 	}
 
-	// Handle the result
-	checker.handleHealthCheckResult(event, fileHealth)
+	// For direct manual checks, we want to update the health record immediately
+	// rather than using the normal health check result handling which may delete records
+	var errorMsg *string
+	if event.Error != nil {
+		errorText := event.Error.Error()
+		errorMsg = &errorText
+	}
+	
+	// Update the health record with the new status
+	err = hw.healthRepo.UpdateFileHealth(filePath, event.Status, errorMsg, fileHealth.SourceNzbPath, nil)
+	if err != nil {
+		hw.logger.Error("Failed to update health record after direct check", "file_path", filePath, "error", err)
+		return fmt.Errorf("failed to update health record: %w", err)
+	}
 	
 	// Update stats
 	hw.updateStats(func(s *WorkerStats) {
@@ -392,6 +491,10 @@ func (hw *HealthWorker) performSingleFileCheck(ctx context.Context, filePath str
 			s.TotalFilesCorrupted++
 		}
 	})
+	
+	hw.logger.Info("Direct health check completed", "file_path", filePath, "status", event.Status, "type", event.Type)
+	
+	return nil
 }
 
 // runHealthCheckCycle runs a single cycle of health checks

@@ -58,6 +58,7 @@ type HealthStatus string
 
 const (
 	HealthStatusPending   HealthStatus = "pending"   // File has not been checked yet
+	HealthStatusChecking  HealthStatus = "checking"  // File is currently being checked
 	HealthStatusHealthy   HealthStatus = "healthy"   // File is fully available and healthy
 	HealthStatusPartial   HealthStatus = "partial"   // File has some missing segments but is recoverable
 	HealthStatusCorrupted HealthStatus = "corrupted" // File is corrupted or permanently unavailable

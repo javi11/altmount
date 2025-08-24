@@ -206,7 +206,7 @@ func (r *HealthRepository) GetHealthStats() (map[HealthStatus]int, error) {
 // DeleteHealthRecord removes a specific health record from the database
 func (r *HealthRepository) DeleteHealthRecord(filePath string) error {
 	query := `DELETE FROM file_health WHERE file_path = ?`
-	
+
 	result, err := r.db.Exec(query, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to delete health record: %w", err)
@@ -273,33 +273,6 @@ func (r *HealthRepository) AddFileToHealthCheck(filePath string, maxRetries int,
 	return nil
 }
 
-// ResetFileForRetry resets a file's retry count and status to allow re-checking
-func (r *HealthRepository) ResetFileForRetry(filePath string, newMaxRetries *int) error {
-	query := `
-		UPDATE file_health 
-		SET retry_count = 0,
-		    status = ?,
-		    next_retry_at = NULL,
-		    last_error = NULL,
-		    updated_at = datetime('now')
-	`
-	args := []interface{}{HealthStatusPending, filePath}
-	
-	if newMaxRetries != nil {
-		query += ", max_retries = ?"
-		args = append([]interface{}{HealthStatusPending, *newMaxRetries}, args[1:]...)
-	}
-	
-	query += " WHERE file_path = ?"
-	
-	_, err := r.db.Exec(query, args...)
-	if err != nil {
-		return fmt.Errorf("failed to reset file for retry: %w", err)
-	}
-
-	return nil
-}
-
 // ListHealthItems returns all health records with optional filtering and pagination
 func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time) ([]*FileHealth, error) {
 	query := `
@@ -325,7 +298,7 @@ func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, of
 
 	args := []interface{}{
 		statusParam, statusParam, // status filter (checked twice in WHERE clause)
-		sinceParam, sinceParam,   // since filter (checked twice in WHERE clause)
+		sinceParam, sinceParam, // since filter (checked twice in WHERE clause)
 		limit, offset,
 	}
 
@@ -355,4 +328,37 @@ func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, of
 	}
 
 	return files, nil
+}
+
+// SetFileChecking sets a file's status to 'checking'
+func (r *HealthRepository) SetFileChecking(filePath string) error {
+	query := `
+		UPDATE file_health 
+		SET status = ?,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	_, err := r.db.Exec(query, HealthStatusChecking, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to set file status to checking: %w", err)
+	}
+
+	return nil
+}
+
+func (r *HealthRepository) ResetFileAllChecking() error {
+	query := `
+		UPDATE file_health
+		SET status = ?,
+		    updated_at = datetime('now')
+		WHERE status = ?
+	`
+
+	_, err := r.db.Exec(query, HealthStatusPending, HealthStatusChecking)
+	if err != nil {
+		return fmt.Errorf("failed to reset all file statuses: %w", err)
+	}
+
+	return nil
 }

@@ -80,6 +80,12 @@ export const useHealth = (params?: {
 	return useQuery({
 		queryKey: ["health", params],
 		queryFn: () => apiClient.getHealth(params),
+		refetchInterval: (query) => {
+			// Poll every 5 seconds if any items are in "checking" status
+			const data = query.state.data;
+			const hasCheckingItems = data?.some(item => item.status === 'checking');
+			return hasCheckingItems ? 5000 : false;
+		},
 	});
 };
 
@@ -164,13 +170,28 @@ export const useHealthWorkerStatus = () => {
 	});
 };
 
-export const useTriggerManualHealthCheck = () => {
+export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ filePath, priority }: { filePath: string; priority?: boolean }) =>
-			apiClient.triggerManualHealthCheck(filePath, priority),
+		mutationFn: (filePath: string) =>
+			apiClient.directHealthCheck(filePath),
 		onSuccess: () => {
+			// Immediately refresh health data to show "checking" status
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+			queryClient.invalidateQueries({ queryKey: ["health", "worker", "status"] });
+		},
+	});
+};
+
+export const useCancelHealthCheck = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (filePath: string) =>
+			apiClient.cancelHealthCheck(filePath),
+		onSuccess: () => {
+			// Immediately refresh health data to show cancelled status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 			queryClient.invalidateQueries({ queryKey: ["health", "worker", "status"] });
 		},

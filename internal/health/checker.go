@@ -3,7 +3,7 @@ package health
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -24,13 +24,13 @@ const (
 
 // HealthEvent represents a health check event
 type HealthEvent struct {
-	Type        EventType
-	FilePath    string
-	Status      database.HealthStatus
-	Error       error
-	Timestamp   time.Time
-	RetryCount  int
-	SourceNzb   *string
+	Type       EventType
+	FilePath   string
+	Status     database.HealthStatus
+	Error      error
+	Timestamp  time.Time
+	RetryCount int
+	SourceNzb  *string
 }
 
 // EventHandler handles health events
@@ -53,11 +53,11 @@ type HealthChecker struct {
 	metadataService *metadata.MetadataService
 	poolManager     pool.Manager
 	config          HealthCheckerConfig
-	
-	running         bool
-	stopChan        chan struct{}
-	wg              sync.WaitGroup
-	mu              sync.RWMutex
+
+	running  bool
+	stopChan chan struct{}
+	wg       sync.WaitGroup
+	mu       sync.RWMutex
 }
 
 // NewHealthChecker creates a new health checker service
@@ -104,7 +104,7 @@ func (hc *HealthChecker) Start(ctx context.Context) error {
 	hc.running = true
 	hc.mu.Unlock()
 
-	log.Printf("Starting health checker with interval: %v", hc.config.CheckInterval)
+	slog.Info("Starting health checker", "interval", hc.config.CheckInterval)
 
 	hc.wg.Add(1)
 	go func() {
@@ -124,14 +124,14 @@ func (hc *HealthChecker) Stop() error {
 		return fmt.Errorf("health checker not running")
 	}
 
-	log.Printf("Stopping health checker...")
+	slog.Info("Stopping health checker...")
 	close(hc.stopChan)
 	hc.running = false
-	
+
 	// Wait for all goroutines to finish
 	hc.wg.Wait()
-	
-	log.Printf("Health checker stopped")
+
+	slog.Info("Health checker stopped")
 	return nil
 }
 
@@ -166,14 +166,14 @@ func (hc *HealthChecker) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Health checker stopped by context")
+			slog.Info("Health checker stopped by context")
 			return
 		case <-hc.stopChan:
-			log.Printf("Health checker stopped by stop signal")
+			slog.Info("Health checker stopped by stop signal")
 			return
 		case <-ticker.C:
 			if err := hc.runHealthCheckCycle(ctx); err != nil {
-				log.Printf("Health check cycle failed: %v", err)
+				slog.Error("Health check cycle failed", "error", err)
 			}
 		}
 	}
@@ -188,11 +188,18 @@ func (hc *HealthChecker) runHealthCheckCycle(ctx context.Context) error {
 	}
 
 	if len(unhealthyFiles) == 0 {
-		log.Printf("No unhealthy files found, skipping health check cycle")
+		slog.Info("No unhealthy files found, skipping health check cycle")
 		return nil
 	}
 
-	log.Printf("Found %d unhealthy files to check", len(unhealthyFiles))
+	slog.Info("Found unhealthy files to check", "count", len(unhealthyFiles))
+
+	for _, fileHealth := range unhealthyFiles {
+		err = hc.healthRepo.SetFileChecking(fileHealth.FilePath)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Create a semaphore to limit concurrent checks
 	semaphore := make(chan struct{}, hc.config.MaxConcurrentJobs)
@@ -221,18 +228,18 @@ func (hc *HealthChecker) checkFileFromHealth(ctx context.Context, fileHealth *da
 	// Get current metadata
 	fileMeta, err := hc.metadataService.ReadFileMetadata(fileHealth.FilePath)
 	if err != nil {
-		log.Printf("Failed to read metadata for %s: %v", fileHealth.FilePath, err)
+		slog.Error("Failed to read metadata", "file_path", fileHealth.FilePath, "error", err)
 		return
 	}
 	if fileMeta == nil {
-		log.Printf("File metadata not found for %s, cleaning up health record", fileHealth.FilePath)
+		slog.Info("File metadata not found, cleaning up health record", "file_path", fileHealth.FilePath)
 		// TODO: Clean up orphaned health record
 		return
 	}
 
 	// Perform the health check
 	event := hc.checkSingleFile(ctx, fileHealth.FilePath, fileMeta)
-	
+
 	// Handle the result
 	hc.handleHealthCheckResult(event, fileHealth)
 }
@@ -263,7 +270,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 
 	// Check segments with configurable concurrency
 	missingSegments, totalSegments, checkErr := hc.checkSegments(ctx, segmentsToCheck)
-	
+
 	if checkErr != nil {
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
@@ -274,7 +281,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	// Determine file health based on missing segments
 	if missingSegments == 0 {
 		// All checked segments are available
-		event.Type = EventTypeFileRecovered  
+		event.Type = EventTypeFileRecovered
 		event.Status = database.HealthStatusHealthy
 	} else if missingSegments < totalSegments {
 		// Some segments missing
@@ -302,7 +309,7 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 	semaphore := make(chan struct{}, hc.config.MaxSegmentConnections)
 	results := make(chan bool, totalCount)
 	errors := make(chan error, totalCount)
-	
+
 	var wg sync.WaitGroup
 
 	// Check all segments concurrently
@@ -310,7 +317,7 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 		wg.Add(1)
 		go func(seg *metapb.SegmentData) {
 			defer wg.Done()
-			
+
 			// Acquire semaphore
 			select {
 			case semaphore <- struct{}{}:
@@ -326,7 +333,7 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 				errors <- checkErr
 				return
 			}
-			
+
 			results <- available
 		}(segment)
 	}
@@ -376,46 +383,46 @@ func (hc *HealthChecker) handleHealthCheckResult(event HealthEvent, fileHealth *
 	switch event.Type {
 	case EventTypeFileRecovered:
 		// File is now healthy - update metadata and delete from health database
-		log.Printf("File recovered: %s", event.FilePath)
-		
+		slog.Info("File recovered", "file_path", event.FilePath)
+
 		// Update metadata status
 		if err := hc.metadataService.UpdateFileStatus(event.FilePath, metapb.FileStatus_FILE_STATUS_HEALTHY); err != nil {
-			log.Printf("Failed to update metadata status for %s: %v", event.FilePath, err)
+			slog.Error("Failed to update metadata status", "file_path", event.FilePath, "error", err)
 		}
-		
+
 		// Delete health record since file is now healthy
 		if err := hc.healthRepo.DeleteHealthRecord(event.FilePath); err != nil {
-			log.Printf("Failed to delete health record for recovered file %s: %v", event.FilePath, err)
+			slog.Error("Failed to delete health record for recovered file", "file_path", event.FilePath, "error", err)
 		} else {
-			log.Printf("Removed health record for recovered file: %s", event.FilePath)
+			slog.Info("Removed health record for recovered file", "file_path", event.FilePath)
 		}
 
 	case EventTypeFileCorrupted:
 		// File is still corrupted - increment retry count or mark as permanently corrupted
-		log.Printf("File still corrupted: %s (retry %d/%d)", event.FilePath, fileHealth.RetryCount, fileHealth.MaxRetries)
-		
+		slog.Warn("File still corrupted", "file_path", event.FilePath, "retry_count", fileHealth.RetryCount, "max_retries", fileHealth.MaxRetries)
+
 		errorMsg := event.Error.Error()
-		
+
 		if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
 			// Max retries reached - mark as permanently corrupted
 			if err := hc.healthRepo.MarkAsCorrupted(event.FilePath, &errorMsg); err != nil {
-				log.Printf("Failed to mark file as corrupted: %v", err)
+				slog.Error("Failed to mark file as corrupted", "error", err)
 			}
-			log.Printf("File permanently marked as corrupted: %s", event.FilePath)
+			slog.Error("File permanently marked as corrupted", "file_path", event.FilePath)
 		} else {
 			// Increment retry count
 			if err := hc.healthRepo.IncrementRetryCount(event.FilePath, &errorMsg); err != nil {
-				log.Printf("Failed to increment retry count for %s: %v", event.FilePath, err)
+				slog.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
 			}
 		}
 
 	case EventTypeCheckFailed:
 		// Health check failed - increment retry count
-		log.Printf("Health check failed for %s: %v", event.FilePath, event.Error)
-		
+		slog.Error("Health check failed", "file_path", event.FilePath, "error", event.Error)
+
 		errorMsg := event.Error.Error()
 		if err := hc.healthRepo.IncrementRetryCount(event.FilePath, &errorMsg); err != nil {
-			log.Printf("Failed to increment retry count for %s: %v", event.FilePath, err)
+			slog.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
 		}
 	}
 

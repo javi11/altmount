@@ -20,6 +20,7 @@ export function HealthBadge({ status, className }: StatusBadgeProps) {
 		corrupted: "✗",
 		degraded: "⚠",
 		unhealthy: "✗",
+		checking: "🔄",
 	};
 
 	const icon = icons[status.toLowerCase() as keyof typeof icons] || "?";
@@ -27,7 +28,11 @@ export function HealthBadge({ status, className }: StatusBadgeProps) {
 
 	return (
 		<div className={cn(`badge badge-${colorClass}`, className)}>
-			<span className="mr-1">{icon}</span>
+			{status.toLowerCase() === "checking" ? (
+				<span className="loading loading-spinner loading-xs mr-1" />
+			) : (
+				<span className="mr-1">{icon}</span>
+			)}
 			{status}
 		</div>
 	);

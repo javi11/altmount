@@ -204,6 +204,11 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 			}
 		}
 	}
+
+	if IsProbablyObfuscated(filename) {
+		p.log.Warn("File appears obfuscated", "filename", filename, "subject", file.Subject)
+	}
+
 	// Check if this is a RAR file
 	isRarArchive := rarPattern.MatchString(filename)
 
