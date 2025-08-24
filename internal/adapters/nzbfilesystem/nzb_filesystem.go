@@ -138,3 +138,8 @@ func (nfs *NzbFilesystem) Chown(name string, uid, gid int) error {
 func (nfs *NzbFilesystem) Chtimes(name string, atime, mtime time.Time) error {
 	return os.ErrPermission
 }
+
+// GetRemoteFile returns the underlying MetadataRemoteFile for configuration updates
+func (nfs *NzbFilesystem) GetRemoteFile() *MetadataRemoteFile {
+	return nfs.remoteFile
+}

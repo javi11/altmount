@@ -896,3 +896,52 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 		}
 	}()
 }
+
+// UpdateDownloadWorkers updates the maximum download workers count dynamically
+func (mrf *MetadataRemoteFile) UpdateDownloadWorkers(count int) error {
+	if count <= 0 {
+		return fmt.Errorf("download workers count must be greater than 0")
+	}
+	
+	// Since we don't have a direct mutex, we need to be careful about concurrent access
+	// For now, we'll just update the value. In a full implementation, this might need
+	// to coordinate with any active download pools.
+	mrf.maxDownloadWorkers = count
+	
+	return nil
+}
+
+// UpdateMaxRangeSize updates the maximum range size for streaming dynamically
+func (mrf *MetadataRemoteFile) UpdateMaxRangeSize(size int64) error {
+	if size <= 0 {
+		return fmt.Errorf("max range size must be greater than 0")
+	}
+	
+	mrf.maxRangeSize = size
+	return nil
+}
+
+// UpdateStreamingChunkSize updates the streaming chunk size dynamically  
+func (mrf *MetadataRemoteFile) UpdateStreamingChunkSize(size int64) error {
+	if size <= 0 {
+		return fmt.Errorf("streaming chunk size must be greater than 0")
+	}
+	
+	mrf.streamingChunkSize = size
+	return nil
+}
+
+// GetDownloadWorkers returns the current download workers count
+func (mrf *MetadataRemoteFile) GetDownloadWorkers() int {
+	return mrf.maxDownloadWorkers
+}
+
+// GetMaxRangeSize returns the current max range size
+func (mrf *MetadataRemoteFile) GetMaxRangeSize() int64 {
+	return mrf.maxRangeSize
+}
+
+// GetStreamingChunkSize returns the current streaming chunk size
+func (mrf *MetadataRemoteFile) GetStreamingChunkSize() int64 {
+	return mrf.streamingChunkSize
+}

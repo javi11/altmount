@@ -420,3 +420,30 @@ func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
 
 	return stats, nil
 }
+
+// UpdateWorkerCount - removed dynamic worker scaling capability
+// Processor worker count changes require server restart to take effect
+func (s *Service) UpdateWorkerCount(count int) error {
+	if count <= 0 {
+		return fmt.Errorf("worker count must be greater than 0")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.log.Info("Processor worker count update requested - restart required to take effect",
+		"current_count", s.config.Workers,
+		"requested_count", count,
+		"running", s.running)
+
+	// Configuration update is handled at the config manager level
+	// Changes only take effect on service restart
+	return nil
+}
+
+// GetWorkerCount returns the current configured worker count
+func (s *Service) GetWorkerCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config.Workers
+}

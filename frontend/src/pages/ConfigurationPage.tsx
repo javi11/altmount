@@ -30,6 +30,7 @@ import type {
 	ConfigSection,
 	StreamingConfig,
 	WebDAVConfig,
+	ImportConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -59,7 +60,7 @@ export function ConfigurationPage() {
 	// Handle configuration updates with save button
 	const handleConfigUpdate = async (
 		section: string,
-		data: WebDAVConfig | StreamingConfig,
+		data: WebDAVConfig | StreamingConfig | ImportConfig,
 	) => {
 		if (section === "webdav") {
 			await updateConfigSection.mutateAsync({
@@ -70,6 +71,11 @@ export function ConfigurationPage() {
 			await updateConfigSection.mutateAsync({
 				section: "streaming",
 				config: { streaming: data as StreamingConfig },
+			});
+		} else if (section === "import") {
+			await updateConfigSection.mutateAsync({
+				section: "import",
+				config: { import: data as ImportConfig },
 			});
 		}
 	};
@@ -266,7 +272,11 @@ export function ConfigurationPage() {
 								)}
 
 								{activeSection === "import" && (
-									<ImportConfigSection config={config} />
+									<ImportConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
 								)}
 
 								{activeSection === "streaming" && (

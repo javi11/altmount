@@ -147,8 +147,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer nsys.Close()
 
-	// Register NZB system as worker pool updater and metadata updater
-	componentRegistry.RegisterWorkerPool(nsys)
 	componentRegistry.RegisterMetadata(nsys)
 
 	// Create shared HTTP mux

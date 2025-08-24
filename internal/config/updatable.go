@@ -10,7 +10,7 @@ type ComponentUpdater interface {
 // WorkerPoolUpdater defines interface for components that can resize worker pools
 type WorkerPoolUpdater interface {
 	UpdateDownloadWorkers(count int) error
-	UpdateImportWorkers(count int) error
+	// UpdateImportWorkers removed - requires server restart
 }
 
 // AuthUpdater defines interface for components that can update authentication
@@ -42,14 +42,13 @@ type MetadataUpdater interface {
 
 // ComponentRegistry holds references to updatable components
 type ComponentRegistry struct {
-	WorkerPool WorkerPoolUpdater
-	WebDAV     AuthUpdater
-	API        AuthUpdater
-	Logging    LoggingUpdater
-	Directory  DirectoryUpdater
-	RClone     RCloneUpdater
-	Metadata   MetadataUpdater
-	logger     *slog.Logger
+	WebDAV    AuthUpdater
+	API       AuthUpdater
+	Logging   LoggingUpdater
+	Directory DirectoryUpdater
+	RClone    RCloneUpdater
+	Metadata  MetadataUpdater
+	logger    *slog.Logger
 }
 
 // NewComponentRegistry creates a new component registry
@@ -61,11 +60,6 @@ func NewComponentRegistry(logger *slog.Logger) *ComponentRegistry {
 	return &ComponentRegistry{
 		logger: logger,
 	}
-}
-
-// RegisterWorkerPool registers a worker pool updater
-func (r *ComponentRegistry) RegisterWorkerPool(updater WorkerPoolUpdater) {
-	r.WorkerPool = updater
 }
 
 // RegisterWebDAV registers a WebDAV auth updater
@@ -124,17 +118,11 @@ func (r *ComponentRegistry) ApplyUpdates(oldConfig, newConfig *Config) {
 		}
 	}
 
-	// Update import processor workers
+	// Import processor workers - restart required (no hot-reload)
 	if oldConfig.Import.MaxProcessorWorkers != newConfig.Import.MaxProcessorWorkers {
-		if r.WorkerPool != nil {
-			if err := r.WorkerPool.UpdateImportWorkers(newConfig.Import.MaxProcessorWorkers); err != nil {
-				r.logger.Error("Failed to update import processor workers", "err", err)
-			} else {
-				r.logger.Info("Import processor workers updated successfully",
-					"old", oldConfig.Import.MaxProcessorWorkers,
-					"new", newConfig.Import.MaxProcessorWorkers)
-			}
-		}
+		r.logger.Info("Import processor worker count changed - server restart required to take effect",
+			"old", oldConfig.Import.MaxProcessorWorkers,
+			"new", newConfig.Import.MaxProcessorWorkers)
 	}
 
 	// Update WebDAV authentication

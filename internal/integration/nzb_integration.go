@@ -208,35 +208,22 @@ func (ns *NzbSystem) UpdateDownloadWorkers(count int) error {
 	}
 
 	oldCount := ns.maxDownloadWorkers
-	ns.maxDownloadWorkers = count
 
-	// Note: For now we store the new count, but actual worker pool resizing
-	// would require recreating the MetadataRemoteFile component with new worker count.
-	// This is a placeholder for future implementation of dynamic worker resizing.
-
-	_ = oldCount // Avoid unused variable warning
-	return nil
-}
-
-// UpdateImportWorkers implements config.WorkerPoolUpdater
-func (ns *NzbSystem) UpdateImportWorkers(count int) error {
-	ns.configMutex.Lock()
-	defer ns.configMutex.Unlock()
-
-	if count <= 0 {
-		return fmt.Errorf("import processor workers count must be greater than 0")
+	// Update MetadataRemoteFile with new worker count
+	if nzbFs, ok := ns.fs.(*nzbfilesystem.NzbFilesystem); ok {
+		if err := nzbFs.GetRemoteFile().UpdateDownloadWorkers(count); err != nil {
+			return fmt.Errorf("failed to update download workers in MetadataRemoteFile: %w", err)
+		}
 	}
 
-	oldCount := ns.maxProcessorWorkers
-	ns.maxProcessorWorkers = count
+	ns.maxDownloadWorkers = count
 
-	// Note: For now we store the new count, but actual worker pool resizing
-	// in the importer service would require stopping and restarting workers.
-	// This is a placeholder for future implementation of dynamic worker resizing.
-
-	_ = oldCount // Avoid unused variable warning
+	fmt.Printf("Download workers updated from %d to %d\n", oldCount, count)
 	return nil
 }
+
+// UpdateImportWorkers - removed: processor worker changes require server restart
+// The maxProcessorWorkers field is maintained for reference but changes only take effect on restart
 
 // GetDownloadWorkers returns the current download worker count
 func (ns *NzbSystem) GetDownloadWorkers() int {
@@ -254,36 +241,30 @@ func (ns *NzbSystem) GetImportWorkers() int {
 
 // UpdateMaxRangeSize implements config.MetadataUpdater
 func (ns *NzbSystem) UpdateMaxRangeSize(size int64) error {
-	// Note: For now this is a placeholder. In a full implementation,
-	// this would update the MetadataRemoteFile component with the new max range size.
-	// This would require recreating or updating the component configuration.
+	// Update MetadataRemoteFile with new max range size
+	if nzbFs, ok := ns.fs.(*nzbfilesystem.NzbFilesystem); ok {
+		if err := nzbFs.GetRemoteFile().UpdateMaxRangeSize(size); err != nil {
+			return fmt.Errorf("failed to update max range size in MetadataRemoteFile: %w", err)
+		}
+		fmt.Printf("Max range size updated to %d bytes\n", size)
+	}
 	return nil
 }
 
 // UpdateStreamingChunkSize implements config.MetadataUpdater
 func (ns *NzbSystem) UpdateStreamingChunkSize(size int64) error {
-	// Note: For now this is a placeholder. In a full implementation,
-	// this would update the MetadataRemoteFile component with the new streaming chunk size.
-	// This would require recreating or updating the component configuration.
+	// Update MetadataRemoteFile with new streaming chunk size
+	if nzbFs, ok := ns.fs.(*nzbfilesystem.NzbFilesystem); ok {
+		if err := nzbFs.GetRemoteFile().UpdateStreamingChunkSize(size); err != nil {
+			return fmt.Errorf("failed to update streaming chunk size in MetadataRemoteFile: %w", err)
+		}
+		fmt.Printf("Streaming chunk size updated to %d bytes\n", size)
+	}
 	return nil
 }
 
 // UpdateMaxDownloadWorkers implements config.MetadataUpdater
 func (ns *NzbSystem) UpdateMaxDownloadWorkers(count int) error {
-	ns.configMutex.Lock()
-	defer ns.configMutex.Unlock()
-
-	if count <= 0 {
-		return fmt.Errorf("download workers count must be greater than 0")
-	}
-
-	oldCount := ns.maxDownloadWorkers
-	ns.maxDownloadWorkers = count
-
-	// Note: For now we store the new count, but actual worker pool resizing
-	// would require recreating the MetadataRemoteFile component with new worker count.
-	// This is a placeholder for future implementation of dynamic worker resizing.
-
-	_ = oldCount // Avoid unused variable warning
-	return nil
+	// Delegate to the WorkerPoolUpdater method to avoid duplication
+	return ns.UpdateDownloadWorkers(count)
 }

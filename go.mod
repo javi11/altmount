@@ -14,7 +14,7 @@ require (
 	github.com/acomagu/bufpipe v1.0.4
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
-	github.com/javi11/nntppool v1.5.2
+	github.com/javi11/nntppool v1.5.3
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.0
 	github.com/javi11/rarlist v1.0.2-0.20250818144055-979aecfdff9e
