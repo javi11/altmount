@@ -22,8 +22,8 @@ import (
 )
 
 type webdavServer struct {
-	srv         *http.Server
-	authCreds   *AuthCredentials
+	srv       *http.Server
+	authCreds *AuthCredentials
 }
 
 func NewServer(
@@ -57,7 +57,8 @@ func NewServer(
 		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
 		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
 	}
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+
+	var h http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
 		// Fallback to basic authentication if JWT failed
 		username, password, hasBasicAuth := r.BasicAuth()
 
@@ -137,7 +138,36 @@ func NewServer(
 		}
 
 		handler.ServeHTTP(w, r)
-	})
+	}
+
+	// Default to root if not set
+	prefix := strings.TrimSpace(config.Prefix)
+	if prefix == "" {
+		prefix = "/"
+	}
+
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+
+	// Normalize: "/webdav"
+	base := strings.TrimRight(prefix, "/")
+	if base == "" {
+		base = "/"
+	}
+
+	if base == "/" {
+		// Mount at root
+		mux.Handle("/", h)
+	} else {
+		// Redirect /webdav -> /webdav/
+		mux.Handle(base, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, base+"/", http.StatusMovedPermanently)
+		}))
+		// Mount handler at /webdav/
+		mux.Handle(base+"/", http.StripPrefix(base, h))
+	}
+
 	addr := fmt.Sprintf(":%v", config.Port)
 
 	srv := &http.Server{

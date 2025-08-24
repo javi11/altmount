@@ -9,4 +9,6 @@ type Config struct {
 	Pass string `yaml:"password" default:"usenet" json:"-" mapstructure:"password"`
 	// Debug enables debug mode and exposes profiler endpoints
 	Debug bool `yaml:"debug" default:"false" mapstructure:"debug"`
+	// Prefix is the URL path prefix for the WebDAV server
+	Prefix string `yaml:"prefix" default:"/webdav" mapstructure:"prefix"`
 }

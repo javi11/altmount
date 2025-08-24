@@ -18,7 +18,7 @@ import { ProvidersConfigSection } from "../components/config/ProvidersConfigSect
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
-import { WorkersConfigSection } from "../components/config/WorkersConfigSection";
+import { ImportConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import {
@@ -265,8 +265,8 @@ export function ConfigurationPage() {
 									/>
 								)}
 
-								{activeSection === "workers" && (
-									<WorkersConfigSection config={config} />
+								{activeSection === "import" && (
+									<ImportConfigSection config={config} />
 								)}
 
 								{activeSection === "streaming" && (
@@ -288,7 +288,7 @@ export function ConfigurationPage() {
 								{/* Placeholder for other sections */}
 								{![
 									"webdav",
-									"workers",
+									"import",
 									"streaming",
 									"system",
 									"providers",

@@ -131,15 +131,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create NZB system with metadata + queue
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
-		QueueDatabasePath:  cfg.Database.Path,
-		MetadataRootPath:   cfg.Metadata.RootPath,
-		MaxRangeSize:       cfg.Streaming.MaxRangeSize,
-		StreamingChunkSize: cfg.Streaming.StreamingChunkSize,
-		WatchPath:          cfg.WatchPath,
-		Password:           cfg.RClone.Password,
-		Salt:               cfg.RClone.Salt,
-		DownloadWorkers:    cfg.Workers.Download,
-		ProcessorWorkers:   cfg.Workers.Processor,
+		QueueDatabasePath:   cfg.Database.Path,
+		MetadataRootPath:    cfg.Metadata.RootPath,
+		MaxRangeSize:        cfg.Streaming.MaxRangeSize,
+		StreamingChunkSize:  cfg.Streaming.StreamingChunkSize,
+		WatchPath:           cfg.WatchPath,
+		Password:            cfg.RClone.Password,
+		Salt:                cfg.RClone.Salt,
+		MaxDownloadWorkers:  cfg.Streaming.MaxDownloadWorkers,
+		MaxProcessorWorkers: cfg.Import.MaxProcessorWorkers,
 	}, poolManager)
 	if err != nil {
 		logger.Error("failed to init NZB system", "err", err)
@@ -147,8 +147,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer nsys.Close()
 
-	// Register NZB system as worker pool updater
+	// Register NZB system as worker pool updater and metadata updater
 	componentRegistry.RegisterWorkerPool(nsys)
+	componentRegistry.RegisterMetadata(nsys)
 
 	// Create shared HTTP mux
 	mux := http.NewServeMux()
@@ -206,10 +207,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	server, err := webdav.NewServer(&webdav.Config{
-		Port:  cfg.WebDAV.Port,
-		User:  cfg.WebDAV.User,
-		Pass:  cfg.WebDAV.Password,
-		Debug: cfg.WebDAV.Debug || cfg.Debug,
+		Port:   cfg.WebDAV.Port,
+		User:   cfg.WebDAV.User,
+		Pass:   cfg.WebDAV.Password,
+		Debug:  cfg.WebDAV.Debug || cfg.Debug,
+		Prefix: "/webdav",
 	}, nsys.FileSystem(), mux, tokenService, webdavUserRepo)
 	if err != nil {
 		logger.Error("failed to start webdav", "err", err)
@@ -224,8 +226,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	logger.Info("Starting AltMount server",
 		"webdav_port", cfg.WebDAV.Port,
 		"providers", len(cfg.Providers),
-		"download_workers", cfg.Workers.Download,
-		"processor_workers", cfg.Workers.Processor)
+		"download_workers", cfg.Streaming.MaxDownloadWorkers,
+		"processor_workers", cfg.Import.MaxProcessorWorkers)
 
 	// Create context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

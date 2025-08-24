@@ -39,8 +39,8 @@ export function StreamingConfigSection({
 	};
 	return (
 		<div className="space-y-4">
-			<h3 className="text-lg font-semibold">Streaming Configuration</h3>
-			<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+			<h3 className="text-lg font-semibold">Streaming & Download Configuration</h3>
+			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Max Range Size</legend>
 					<input
@@ -81,6 +81,26 @@ export function StreamingConfigSection({
 					</p>
 					<BytesDisplay bytes={formData.streaming_chunk_size} mode="badge" />
 				</fieldset>
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Download Workers</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.max_download_workers}
+						readOnly={isReadOnly}
+						min={1}
+						max={50}
+						onChange={(e) =>
+							handleInputChange(
+								"max_download_workers",
+								parseInt(e.target.value) || 1,
+							)
+						}
+					/>
+					<p className="label">
+						Number of concurrent download threads
+					</p>
+				</fieldset>
 			</div>
 			<div className="alert alert-info">
 				<div>
@@ -88,6 +108,7 @@ export function StreamingConfigSection({
 					<div className="text-sm">
 						These settings control how files are streamed and chunked during
 						download. Higher values may improve performance but use more memory.
+						Download workers control the number of concurrent downloads from NNTP servers.
 						If you don't understand these settings, it's recommended to keep the
 						default values.
 					</div>

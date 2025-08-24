@@ -14,7 +14,7 @@ export default defineConfig({
 				changeOrigin: true,
 			},
 			"/webdav": {
-				target: "http://localhost:8080",
+				target: "http://localhost:8080/webdav",
 				changeOrigin: true,
 			},
 		},

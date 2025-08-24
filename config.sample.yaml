@@ -10,10 +10,7 @@ webdav:
 
 # REST API configuration  
 api:
-  enabled: true                    # Enable/disable REST API
   prefix: "/api"                   # API endpoint prefix
-  username: ""                     # Optional: API authentication username (leave empty for no auth)
-  password: ""                     # Optional: API authentication password (leave empty for no auth)
 
 # Database configuration
 database:
@@ -22,7 +19,12 @@ database:
 # Metadata filesystem configuration
 metadata:
   root_path: "./metadata"   # Directory to store metadata files (required)
-  cache_size: 1000          # Number of metadata entries to cache in memory
+
+# Streaming and download configuration
+streaming:
+  max_range_size: 33554432        # 32MB - Maximum range size for a single request
+  streaming_chunk_size: 8388608    # 8MB - Chunk size for streaming when end=-1
+  max_download_workers: 15         # Number of download workers
 
 # Directory containing NZB files to process
 watch_path: "./nzbs"
@@ -32,10 +34,9 @@ rclone:
   password: ""
   salt: ""
 
-# Worker configuration
-workers:
-  download: 15      # Number of download workers
-  processor: 2      # Number of queue processor workers
+# Import processing configuration
+import:
+  max_processor_workers: 2      # Number of NZB processor workers
 
 # Global debug mode
 debug: false
@@ -98,11 +99,16 @@ providers:
 #    - Typical range: 10-50 connections per provider
 #
 # 5. Workers:
-#    - Download workers: Number of concurrent download threads
-#    - Processor workers: Number of NZB processing threads
+#    - Download workers: Number of concurrent download threads (now in streaming section)
+#    - Import processor workers: Number of NZB processing threads
 #    - Adjust based on your system resources and provider limits
 #
-# 6. Paths:
+# 6. Streaming Configuration:
+#    - Max Range Size: Maximum size for a single HTTP range request
+#    - Streaming Chunk Size: Size of chunks when streaming files
+#    - Max Download Workers: Number of concurrent download workers
+#
+# 7. Paths:
 #    - Use absolute paths for production deployments
 #    - Relative paths are relative to the working directory
 #    - Ensure the application has read/write access to all paths

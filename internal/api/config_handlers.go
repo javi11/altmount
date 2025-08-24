@@ -243,15 +243,15 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 		Streaming: StreamingConfigResponse{
 			MaxRangeSize:       config.Streaming.MaxRangeSize,
 			StreamingChunkSize: config.Streaming.StreamingChunkSize,
+			MaxDownloadWorkers: config.Streaming.MaxDownloadWorkers,
 		},
 		WatchPath: config.WatchPath,
 		RClone: RCloneConfigResponse{
 			PasswordSet: config.RClone.Password != "",
 			SaltSet:     config.RClone.Salt != "",
 		},
-		Workers: WorkersConfigResponse{
-			Download:  config.Workers.Download,
-			Processor: config.Workers.Processor,
+		Import: ImportConfigResponse{
+			MaxProcessorWorkers: config.Import.MaxProcessorWorkers,
 		},
 		Providers: providers,
 		Debug:     config.Debug,
@@ -299,6 +299,9 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		if updates.Streaming.StreamingChunkSize != nil {
 			cfg.Streaming.StreamingChunkSize = *updates.Streaming.StreamingChunkSize
 		}
+		if updates.Streaming.MaxDownloadWorkers != nil {
+			cfg.Streaming.MaxDownloadWorkers = *updates.Streaming.MaxDownloadWorkers
+		}
 	}
 
 	if updates.WatchPath != nil {
@@ -314,12 +317,9 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		}
 	}
 
-	if updates.Workers != nil {
-		if updates.Workers.Download != nil {
-			cfg.Workers.Download = *updates.Workers.Download
-		}
-		if updates.Workers.Processor != nil {
-			cfg.Workers.Processor = *updates.Workers.Processor
+	if updates.Import != nil {
+		if updates.Import.MaxProcessorWorkers != nil {
+			cfg.Import.MaxProcessorWorkers = *updates.Import.MaxProcessorWorkers
 		}
 	}
 
@@ -407,6 +407,9 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 			if updates.Streaming.StreamingChunkSize != nil {
 				cfg.Streaming.StreamingChunkSize = *updates.Streaming.StreamingChunkSize
 			}
+			if updates.Streaming.MaxDownloadWorkers != nil {
+				cfg.Streaming.MaxDownloadWorkers = *updates.Streaming.MaxDownloadWorkers
+			}
 		}
 	case "rclone":
 		if updates.RClone != nil {
@@ -417,13 +420,10 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 				cfg.RClone.Salt = *updates.RClone.Salt
 			}
 		}
-	case "workers":
-		if updates.Workers != nil {
-			if updates.Workers.Download != nil {
-				cfg.Workers.Download = *updates.Workers.Download
-			}
-			if updates.Workers.Processor != nil {
-				cfg.Workers.Processor = *updates.Workers.Processor
+	case "import":
+		if updates.Import != nil {
+			if updates.Import.MaxProcessorWorkers != nil {
+				cfg.Import.MaxProcessorWorkers = *updates.Import.MaxProcessorWorkers
 			}
 		}
 	case "providers":

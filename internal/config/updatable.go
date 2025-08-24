@@ -10,7 +10,7 @@ type ComponentUpdater interface {
 // WorkerPoolUpdater defines interface for components that can resize worker pools
 type WorkerPoolUpdater interface {
 	UpdateDownloadWorkers(count int) error
-	UpdateProcessorWorkers(count int) error
+	UpdateImportWorkers(count int) error
 }
 
 // AuthUpdater defines interface for components that can update authentication
@@ -37,6 +37,7 @@ type RCloneUpdater interface {
 type MetadataUpdater interface {
 	UpdateMaxRangeSize(size int64) error
 	UpdateStreamingChunkSize(size int64) error
+	UpdateMaxDownloadWorkers(count int) error
 }
 
 // ComponentRegistry holds references to updatable components
@@ -110,27 +111,28 @@ func (r *ComponentRegistry) ApplyUpdates(oldConfig, newConfig *Config) {
 		}
 	}
 
-	// Update worker pools
-	if oldConfig.Workers.Download != newConfig.Workers.Download {
-		if r.WorkerPool != nil {
-			if err := r.WorkerPool.UpdateDownloadWorkers(newConfig.Workers.Download); err != nil {
+	// Update download workers (now in streaming config)
+	if oldConfig.Streaming.MaxDownloadWorkers != newConfig.Streaming.MaxDownloadWorkers {
+		if r.Metadata != nil {
+			if err := r.Metadata.UpdateMaxDownloadWorkers(newConfig.Streaming.MaxDownloadWorkers); err != nil {
 				r.logger.Error("Failed to update download workers", "err", err)
 			} else {
 				r.logger.Info("Download workers updated successfully",
-					"old", oldConfig.Workers.Download,
-					"new", newConfig.Workers.Download)
+					"old", oldConfig.Streaming.MaxDownloadWorkers,
+					"new", newConfig.Streaming.MaxDownloadWorkers)
 			}
 		}
 	}
 
-	if oldConfig.Workers.Processor != newConfig.Workers.Processor {
+	// Update import processor workers
+	if oldConfig.Import.MaxProcessorWorkers != newConfig.Import.MaxProcessorWorkers {
 		if r.WorkerPool != nil {
-			if err := r.WorkerPool.UpdateProcessorWorkers(newConfig.Workers.Processor); err != nil {
-				r.logger.Error("Failed to update processor workers", "err", err)
+			if err := r.WorkerPool.UpdateImportWorkers(newConfig.Import.MaxProcessorWorkers); err != nil {
+				r.logger.Error("Failed to update import processor workers", "err", err)
 			} else {
-				r.logger.Info("Processor workers updated successfully",
-					"old", oldConfig.Workers.Processor,
-					"new", newConfig.Workers.Processor)
+				r.logger.Info("Import processor workers updated successfully",
+					"old", oldConfig.Import.MaxProcessorWorkers,
+					"new", newConfig.Import.MaxProcessorWorkers)
 			}
 		}
 	}

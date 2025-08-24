@@ -212,7 +212,7 @@ type ConfigResponse struct {
 	Streaming StreamingConfigResponse  `json:"streaming"`
 	WatchPath string                   `json:"watch_path"`
 	RClone    RCloneConfigResponse     `json:"rclone"`
-	Workers   WorkersConfigResponse    `json:"workers"`
+	Import    ImportConfigResponse     `json:"import"`
 	Providers []ProviderConfigResponse `json:"providers"`
 	Debug     bool                     `json:"debug"`
 }
@@ -244,6 +244,7 @@ type MetadataConfigResponse struct {
 type StreamingConfigResponse struct {
 	MaxRangeSize       int64 `json:"max_range_size"`
 	StreamingChunkSize int64 `json:"streaming_chunk_size"`
+	MaxDownloadWorkers int   `json:"max_download_workers"`
 }
 
 // RCloneConfigResponse represents rclone configuration in API responses (sanitized)
@@ -252,10 +253,9 @@ type RCloneConfigResponse struct {
 	SaltSet     bool `json:"salt_set"`
 }
 
-// WorkersConfigResponse represents worker configuration in API responses
-type WorkersConfigResponse struct {
-	Download  int `json:"download"`
-	Processor int `json:"processor"`
+// ImportConfigResponse represents import configuration in API responses
+type ImportConfigResponse struct {
+	MaxProcessorWorkers int `json:"max_processor_workers"`
 }
 
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
@@ -280,7 +280,7 @@ type ConfigUpdateRequest struct {
 	Streaming *StreamingConfigRequest  `json:"streaming,omitempty"`
 	WatchPath *string                  `json:"watch_path,omitempty"`
 	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
-	Workers   *WorkersConfigRequest    `json:"workers,omitempty"`
+	Import    *ImportConfigRequest     `json:"import,omitempty"`
 	Providers *[]ProviderConfigRequest `json:"providers,omitempty"`
 	Debug     *bool                    `json:"debug,omitempty"`
 }
@@ -312,6 +312,7 @@ type MetadataConfigRequest struct {
 type StreamingConfigRequest struct {
 	MaxRangeSize       *int64 `json:"max_range_size,omitempty"`
 	StreamingChunkSize *int64 `json:"streaming_chunk_size,omitempty"`
+	MaxDownloadWorkers *int   `json:"max_download_workers,omitempty"`
 }
 
 // RCloneConfigRequest represents rclone configuration in update requests
@@ -320,10 +321,9 @@ type RCloneConfigRequest struct {
 	Salt     *string `json:"salt,omitempty"`
 }
 
-// WorkersConfigRequest represents worker configuration in update requests
-type WorkersConfigRequest struct {
-	Download  *int `json:"download,omitempty"`
-	Processor *int `json:"processor,omitempty"`
+// ImportConfigRequest represents import configuration in update requests
+type ImportConfigRequest struct {
+	MaxProcessorWorkers *int `json:"max_processor_workers,omitempty"`
 }
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests

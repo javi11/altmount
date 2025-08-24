@@ -24,8 +24,8 @@ type NzbConfig struct {
 	WatchPath          string        // Directory containing NZB files
 	Password           string        // Global password for .bin files
 	Salt               string        // Global salt for .bin files
-	ProcessorWorkers   int           // Number of queue workers (default: 2)
-	DownloadWorkers    int           // Number of download workers (default: 15)
+	MaxProcessorWorkers int           // Number of queue workers (default: 2)
+	MaxDownloadWorkers  int           // Number of download workers (default: 15)
 	ScanInterval       time.Duration // Directory scan interval (default: 30s)
 }
 
@@ -38,8 +38,8 @@ type NzbSystem struct {
 	poolManager    pool.Manager
 
 	// Configuration tracking for dynamic updates
-	downloadWorkers  int
-	processorWorkers int
+	maxDownloadWorkers  int
+	maxProcessorWorkers int
 	configMutex      sync.RWMutex
 }
 
@@ -60,14 +60,14 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 	}
 
 	// Set defaults for workers and scan interval if not configured
-	processorWorkers := config.ProcessorWorkers
-	if processorWorkers <= 0 {
-		processorWorkers = 2 // Default: 2 parallel workers
+	maxProcessorWorkers := config.MaxProcessorWorkers
+	if maxProcessorWorkers <= 0 {
+		maxProcessorWorkers = 2 // Default: 2 parallel workers
 	}
 
-	downloadWorkers := config.DownloadWorkers
-	if downloadWorkers <= 0 {
-		downloadWorkers = 15 // Default: 15 download workers
+	maxDownloadWorkers := config.MaxDownloadWorkers
+	if maxDownloadWorkers <= 0 {
+		maxDownloadWorkers = 15 // Default: 15 download workers
 	}
 
 	scanInterval := config.ScanInterval
@@ -79,7 +79,7 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 	serviceConfig := importer.ServiceConfig{
 		WatchDir:     config.WatchPath,
 		ScanInterval: scanInterval,
-		Workers:      processorWorkers,
+		Workers:      maxProcessorWorkers,
 	}
 
 	// Create service with poolManager for dynamic pool access
@@ -102,7 +102,7 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 		metadataService,
 		healthRepo,
 		poolManager,
-		downloadWorkers,
+		maxDownloadWorkers,
 		nzbfilesystem.MetadataRemoteFileConfig{
 			GlobalPassword:     config.Password,
 			GlobalSalt:         config.Salt,
@@ -126,8 +126,8 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 		service:          service,
 		fs:               fs,
 		poolManager:      poolManager,
-		downloadWorkers:  downloadWorkers,
-		processorWorkers: processorWorkers,
+		maxDownloadWorkers:  maxDownloadWorkers,
+		maxProcessorWorkers: maxProcessorWorkers,
 	}, nil
 }
 
@@ -207,8 +207,8 @@ func (ns *NzbSystem) UpdateDownloadWorkers(count int) error {
 		return fmt.Errorf("download workers count must be greater than 0")
 	}
 
-	oldCount := ns.downloadWorkers
-	ns.downloadWorkers = count
+	oldCount := ns.maxDownloadWorkers
+	ns.maxDownloadWorkers = count
 
 	// Note: For now we store the new count, but actual worker pool resizing
 	// would require recreating the MetadataRemoteFile component with new worker count.
@@ -218,17 +218,17 @@ func (ns *NzbSystem) UpdateDownloadWorkers(count int) error {
 	return nil
 }
 
-// UpdateProcessorWorkers implements config.WorkerPoolUpdater
-func (ns *NzbSystem) UpdateProcessorWorkers(count int) error {
+// UpdateImportWorkers implements config.WorkerPoolUpdater
+func (ns *NzbSystem) UpdateImportWorkers(count int) error {
 	ns.configMutex.Lock()
 	defer ns.configMutex.Unlock()
 
 	if count <= 0 {
-		return fmt.Errorf("processor workers count must be greater than 0")
+		return fmt.Errorf("import processor workers count must be greater than 0")
 	}
 
-	oldCount := ns.processorWorkers
-	ns.processorWorkers = count
+	oldCount := ns.maxProcessorWorkers
+	ns.maxProcessorWorkers = count
 
 	// Note: For now we store the new count, but actual worker pool resizing
 	// in the importer service would require stopping and restarting workers.
@@ -242,12 +242,48 @@ func (ns *NzbSystem) UpdateProcessorWorkers(count int) error {
 func (ns *NzbSystem) GetDownloadWorkers() int {
 	ns.configMutex.RLock()
 	defer ns.configMutex.RUnlock()
-	return ns.downloadWorkers
+	return ns.maxDownloadWorkers
 }
 
-// GetProcessorWorkers returns the current processor worker count
-func (ns *NzbSystem) GetProcessorWorkers() int {
+// GetImportWorkers returns the current import processor worker count
+func (ns *NzbSystem) GetImportWorkers() int {
 	ns.configMutex.RLock()
 	defer ns.configMutex.RUnlock()
-	return ns.processorWorkers
+	return ns.maxProcessorWorkers
+}
+
+// UpdateMaxRangeSize implements config.MetadataUpdater
+func (ns *NzbSystem) UpdateMaxRangeSize(size int64) error {
+	// Note: For now this is a placeholder. In a full implementation,
+	// this would update the MetadataRemoteFile component with the new max range size.
+	// This would require recreating or updating the component configuration.
+	return nil
+}
+
+// UpdateStreamingChunkSize implements config.MetadataUpdater
+func (ns *NzbSystem) UpdateStreamingChunkSize(size int64) error {
+	// Note: For now this is a placeholder. In a full implementation,
+	// this would update the MetadataRemoteFile component with the new streaming chunk size.
+	// This would require recreating or updating the component configuration.
+	return nil
+}
+
+// UpdateMaxDownloadWorkers implements config.MetadataUpdater
+func (ns *NzbSystem) UpdateMaxDownloadWorkers(count int) error {
+	ns.configMutex.Lock()
+	defer ns.configMutex.Unlock()
+
+	if count <= 0 {
+		return fmt.Errorf("download workers count must be greater than 0")
+	}
+
+	oldCount := ns.maxDownloadWorkers
+	ns.maxDownloadWorkers = count
+
+	// Note: For now we store the new count, but actual worker pool resizing
+	// would require recreating the MetadataRemoteFile component with new worker count.
+	// This is a placeholder for future implementation of dynamic worker resizing.
+
+	_ = oldCount // Avoid unused variable warning
+	return nil
 }

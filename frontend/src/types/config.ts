@@ -9,7 +9,7 @@ export interface ConfigResponse {
 	streaming: StreamingConfig;
 	watch_path: string;
 	rclone: RCloneConfig;
-	workers: WorkersConfig;
+	import: ImportConfig;
 	providers: ProviderConfig[];
 	debug: boolean;
 }
@@ -41,6 +41,7 @@ export interface MetadataConfig {
 export interface StreamingConfig {
 	max_range_size: number;
 	streaming_chunk_size: number;
+	max_download_workers: number;
 }
 
 // RClone configuration (sanitized)
@@ -49,10 +50,9 @@ export interface RCloneConfig {
 	salt_set: boolean;
 }
 
-// Workers configuration
-export interface WorkersConfig {
-	download: number;
-	processor: number;
+// Import configuration
+export interface ImportConfig {
+	max_processor_workers: number;
 }
 
 // NNTP Provider configuration (sanitized)
@@ -77,7 +77,7 @@ export interface ConfigUpdateRequest {
 	streaming?: StreamingUpdateRequest;
 	watch_path?: string;
 	rclone?: RCloneUpdateRequest;
-	workers?: WorkersUpdateRequest;
+	import?: ImportUpdateRequest;
 	providers?: ProviderUpdateRequest[];
 	debug?: boolean;
 }
@@ -109,6 +109,7 @@ export interface MetadataUpdateRequest {
 export interface StreamingUpdateRequest {
 	max_range_size?: number;
 	streaming_chunk_size?: number;
+	max_download_workers?: number;
 }
 
 // RClone update request
@@ -117,10 +118,9 @@ export interface RCloneUpdateRequest {
 	salt?: string;
 }
 
-// Workers update request
-export interface WorkersUpdateRequest {
-	download?: number;
-	processor?: number;
+// Import update request
+export interface ImportUpdateRequest {
+	max_processor_workers?: number;
 }
 
 // Provider update request
@@ -159,7 +159,7 @@ export type ConfigSection =
 	| "metadata"
 	| "streaming"
 	| "rclone"
-	| "workers"
+	| "import"
 	| "providers";
 
 // Form data interfaces for UI components
@@ -174,9 +174,8 @@ export interface APIFormData {
 	prefix: string;
 }
 
-export interface WorkersFormData {
-	download: number;
-	processor: number;
+export interface ImportFormData {
+	max_processor_workers: number;
 }
 
 export interface MetadataFormData {
@@ -186,6 +185,7 @@ export interface MetadataFormData {
 export interface StreamingFormData {
 	max_range_size: number;
 	streaming_chunk_size: number;
+	max_download_workers: number;
 }
 
 export interface RCloneFormData {
@@ -268,8 +268,8 @@ export const CONFIG_SECTIONS: Record<
 		canEdit: true,
 	},
 	streaming: {
-		title: "Streaming",
-		description: "File streaming and chunking configuration",
+		title: "Streaming & Downloads",
+		description: "File streaming, chunking and download worker configuration",
 		icon: "Download",
 		canEdit: true,
 	},
@@ -279,9 +279,9 @@ export const CONFIG_SECTIONS: Record<
 		icon: "Shield",
 		canEdit: true,
 	},
-	workers: {
-		title: "Worker Processes",
-		description: "Download and processor worker configuration",
+	import: {
+		title: "Import Processing",
+		description: "NZB import and processing worker configuration",
 		icon: "Cog",
 		canEdit: true,
 	},

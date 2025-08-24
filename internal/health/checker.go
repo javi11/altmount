@@ -3,13 +3,13 @@ package health
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	concpool "github.com/sourcegraph/conc/pool"
 )
 
 // EventType represents the type of health event
@@ -172,54 +172,27 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 		return 0, 0, nil
 	}
 
-	// Create semaphore to limit concurrent connections
-	semaphore := make(chan struct{}, hc.config.MaxSegmentConnections)
-	results := make(chan bool, totalCount)
-	errors := make(chan error, totalCount)
+	// Create pool with concurrency limit and context cancellation
+	p := concpool.NewWithResults[bool]().
+		WithMaxGoroutines(hc.config.MaxSegmentConnections).
+		WithContext(ctx)
 
-	var wg sync.WaitGroup
-
-	// Check all segments concurrently
+	// Check all segments concurrently using pool
 	for _, segment := range segments {
-		wg.Add(1)
-		go func(seg *metapb.SegmentData) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			select {
-			case semaphore <- struct{}{}:
-				defer func() { <-semaphore }()
-			case <-ctx.Done():
-				errors <- ctx.Err()
-				return
-			}
-
-			// Check if segment exists
-			available, checkErr := hc.checkSingleSegment(ctx, seg.Id)
-			if checkErr != nil {
-				errors <- checkErr
-				return
-			}
-
-			results <- available
-		}(segment)
+		p.Go(func(ctx context.Context) (bool, error) {
+			return hc.checkSingleSegment(ctx, segment.Id)
+		})
 	}
 
-	// Wait for all checks to complete
-	wg.Wait()
-	close(results)
-	close(errors)
-
-	// Check for errors first
-	select {
-	case err := <-errors:
+	// Wait for all checks to complete and collect results
+	results, err := p.Wait()
+	if err != nil {
 		return 0, totalCount, err
-	default:
 	}
 
 	// Count missing segments
 	missingCount = 0
-	for available := range results {
+	for _, available := range results {
 		if !available {
 			missingCount++
 		}

@@ -23,7 +23,7 @@ type Config struct {
 	Health    HealthConfig     `yaml:"health" mapstructure:"health"`
 	WatchPath string           `yaml:"watch_path" mapstructure:"watch_path"`
 	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
-	Workers   WorkersConfig    `yaml:"workers" mapstructure:"workers"`
+	Import    ImportConfig     `yaml:"import" mapstructure:"import"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
 	Debug     bool             `yaml:"debug" mapstructure:"debug"`
 }
@@ -55,6 +55,7 @@ type MetadataConfig struct {
 type StreamingConfig struct {
 	MaxRangeSize       int64 `yaml:"max_range_size" mapstructure:"max_range_size"`
 	StreamingChunkSize int64 `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size"`
+	MaxDownloadWorkers int   `yaml:"max_download_workers" mapstructure:"max_download_workers"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -63,10 +64,9 @@ type RCloneConfig struct {
 	Salt     string `yaml:"salt" mapstructure:"salt"`
 }
 
-// WorkersConfig represents worker configuration
-type WorkersConfig struct {
-	Download  int `yaml:"download" mapstructure:"download"`
-	Processor int `yaml:"processor" mapstructure:"processor"`
+// ImportConfig represents import processing configuration
+type ImportConfig struct {
+	MaxProcessorWorkers int `yaml:"max_processor_workers" mapstructure:"max_processor_workers"`
 }
 
 // HealthConfig represents health checker configuration
@@ -105,12 +105,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("webdav port must be between 1 and 65535")
 	}
 
-	if c.Workers.Download <= 0 {
-		return fmt.Errorf("download workers must be greater than 0")
+	if c.Streaming.MaxDownloadWorkers <= 0 {
+		return fmt.Errorf("streaming max_download_workers must be greater than 0")
 	}
 
-	if c.Workers.Processor <= 0 {
-		return fmt.Errorf("processor workers must be greater than 0")
+	if c.Import.MaxProcessorWorkers <= 0 {
+		return fmt.Errorf("import max_processor_workers must be greater than 0")
 	}
 
 	// Validate metadata configuration (now required)
@@ -325,14 +325,14 @@ func DefaultConfig() *Config {
 		Streaming: StreamingConfig{
 			MaxRangeSize:       33554432, // 32MB - Maximum range size for a single request
 			StreamingChunkSize: 8388608,  // 8MB - Chunk size for streaming when end=-1
+			MaxDownloadWorkers: 15,       // Default: 15 download workers
 		},
 		RClone: RCloneConfig{
 			Password: "",
 			Salt:     "",
 		},
-		Workers: WorkersConfig{
-			Download:  15,
-			Processor: 2,
+		Import: ImportConfig{
+			MaxProcessorWorkers: 2, // Default: 2 processor workers
 		},
 		Health: HealthConfig{
 			Enabled:               true,
