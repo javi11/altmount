@@ -21,6 +21,7 @@ import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
+import { RestartRequiredBanner } from "../components/ui/RestartRequiredBanner";
 import {
 	useConfig,
 	useReloadConfig,
@@ -56,36 +57,80 @@ export function ConfigurationPage() {
 		"webdav",
 	);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+	const [restartRequiredConfigs, setRestartRequiredConfigs] = useState<string[]>([]);
+	const [isRestartBannerDismissed, setIsRestartBannerDismissed] = useState(() => {
+		// Initialize from session storage on component mount
+		return sessionStorage.getItem('restartBannerDismissed') === 'true';
+	});
 
-	// Handle configuration updates with save button
-	const handleConfigUpdate = async (
-		section: string,
-		data: WebDAVConfig | StreamingConfig | ImportConfig,
-	) => {
-		if (section === "webdav") {
-			await updateConfigSection.mutateAsync({
-				section: "webdav",
-				config: { webdav: data as WebDAVConfig },
-			});
-		} else if (section === "streaming") {
-			await updateConfigSection.mutateAsync({
-				section: "streaming",
-				config: { streaming: data as StreamingConfig },
-			});
-		} else if (section === "import") {
-			await updateConfigSection.mutateAsync({
-				section: "import",
-				config: { import: data as ImportConfig },
-			});
-		}
+	// Helper functions for restart required state
+	const addRestartRequiredConfig = (configName: string) => {
+		setRestartRequiredConfigs(prev => 
+			prev.includes(configName) ? prev : [...prev, configName]
+		);
+		setIsRestartBannerDismissed(false);
 	};
 
+	const handleDismissRestartBanner = () => {
+		setIsRestartBannerDismissed(true);
+		sessionStorage.setItem('restartBannerDismissed', 'true');
+	};
+
+	// Clear restart state on config reload (indicates server restart)
 	const handleReloadConfig = async () => {
 		try {
 			await reloadConfig.mutateAsync();
 			setHasUnsavedChanges(false);
+			setRestartRequiredConfigs([]);
+			setIsRestartBannerDismissed(false);
+			sessionStorage.removeItem('restartBannerDismissed');
 		} catch (error) {
 			console.error("Failed to reload configuration:", error);
+		}
+	};
+
+	// Handle configuration updates with restart detection
+	const handleConfigUpdate = async (
+		section: string,
+		data: WebDAVConfig | StreamingConfig | ImportConfig,
+	) => {
+		try {
+			if (section === "webdav" && config) {
+				const webdavData = data as WebDAVConfig;
+				const portChanged = webdavData.port !== config.webdav.port;
+				
+				await updateConfigSection.mutateAsync({
+					section: "webdav",
+					config: { webdav: webdavData },
+				});
+				
+				// Only add restart requirement after successful update
+				if (portChanged) {
+					addRestartRequiredConfig("WebDAV Port");
+				}
+			} else if (section === "streaming") {
+				await updateConfigSection.mutateAsync({
+					section: "streaming",
+					config: { streaming: data as StreamingConfig },
+				});
+			} else if (section === "import" && config) {
+				const importData = data as ImportConfig;
+				const workersChanged = importData.max_processor_workers !== config.import.max_processor_workers;
+				
+				await updateConfigSection.mutateAsync({
+					section: "import",
+					config: { import: importData },
+				});
+				
+				// Only add restart requirement after successful update
+				if (workersChanged) {
+					addRestartRequiredConfig("Import Max Processor Workers");
+				}
+			}
+		} catch (error) {
+			// If update fails, don't show restart banner
+			console.error("Failed to update configuration:", error);
+			throw error; // Re-throw to let the component handle the error
 		}
 	};
 
@@ -165,6 +210,13 @@ export function ConfigurationPage() {
 					</button>
 				</div>
 			</div>
+
+			{/* Restart Required Banner */}
+			<RestartRequiredBanner
+				restartRequiredConfigs={restartRequiredConfigs}
+				onDismiss={handleDismissRestartBanner}
+				isDismissed={isRestartBannerDismissed}
+			/>
 
 			{/* Success/Error Messages */}
 			{reloadConfig.isSuccess && (

@@ -1,11 +1,13 @@
 import {
 	Download,
 	MoreHorizontal,
+	Pause,
+	Play,
 	PlayCircle,
 	RefreshCw,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { StatusBadge } from "../components/ui/StatusBadge";
@@ -23,6 +25,11 @@ export function QueuePage() {
 	const [page, setPage] = useState(0);
 	const [statusFilter, setStatusFilter] = useState<string>("");
 	const [searchTerm, setSearchTerm] = useState("");
+	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+	const [refreshInterval, setRefreshInterval] = useState(10000); // 10 seconds default
+	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
+	const [userInteracting, setUserInteracting] = useState(false);
+	const [countdown, setCountdown] = useState(0);
 
 	const pageSize = 20;
 	const {
@@ -34,6 +41,7 @@ export function QueuePage() {
 		limit: pageSize,
 		offset: page * pageSize,
 		status: statusFilter || undefined,
+		refetchInterval: autoRefreshEnabled && !userInteracting ? refreshInterval : undefined,
 	});
 
 	const { data: stats } = useQueueStats();
@@ -56,6 +64,63 @@ export function QueuePage() {
 			await clearCompleted.mutateAsync("");
 		}
 	};
+
+	const toggleAutoRefresh = () => {
+		setAutoRefreshEnabled(!autoRefreshEnabled);
+		setNextRefreshTime(null);
+	};
+
+	const handleRefreshIntervalChange = (interval: number) => {
+		setRefreshInterval(interval);
+		setNextRefreshTime(null);
+	};
+
+	// Update next refresh time when auto-refresh is enabled
+	useEffect(() => {
+		if (autoRefreshEnabled && !userInteracting) {
+			const updateNextRefreshTime = () => {
+				setNextRefreshTime(new Date(Date.now() + refreshInterval));
+			};
+
+			updateNextRefreshTime();
+			const interval = setInterval(updateNextRefreshTime, refreshInterval);
+
+			return () => clearInterval(interval);
+		} else {
+			setNextRefreshTime(null);
+		}
+	}, [autoRefreshEnabled, refreshInterval, userInteracting]);
+
+	// Pause auto-refresh during user interactions
+	const handleUserInteractionStart = () => {
+		setUserInteracting(true);
+	};
+
+	const handleUserInteractionEnd = () => {
+		// Resume auto-refresh after a short delay
+		const timer = setTimeout(() => {
+			setUserInteracting(false);
+		}, 2000); // 2 second delay before resuming auto-refresh
+
+		return () => clearTimeout(timer);
+	};
+
+	// Update countdown timer every second
+	useEffect(() => {
+		if (nextRefreshTime && autoRefreshEnabled && !userInteracting) {
+			const updateCountdown = () => {
+				const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
+				setCountdown(remaining);
+			};
+
+			updateCountdown();
+			const timer = setInterval(updateCountdown, 1000);
+
+			return () => clearInterval(timer);
+		} else {
+			setCountdown(0);
+		}
+	}, [nextRefreshTime, autoRefreshEnabled, userInteracting]);
 
 	const filteredData = queueData?.filter(
 		(item: QueueItem) =>
@@ -81,9 +146,51 @@ export function QueuePage() {
 					<h1 className="text-3xl font-bold">Queue Management</h1>
 					<p className="text-base-content/70">
 						Manage and monitor your download queue
+						{autoRefreshEnabled && !userInteracting && countdown > 0 && (
+							<span className="ml-2 text-sm text-info">
+								• Auto-refresh in {countdown}s
+							</span>
+						)}
+						{userInteracting && autoRefreshEnabled && (
+							<span className="ml-2 text-sm text-warning">
+								• Auto-refresh paused
+							</span>
+						)}
 					</p>
 				</div>
-				<div className="flex gap-2">
+				<div className="flex gap-2 flex-wrap">
+					{/* Auto-refresh controls */}
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							className={`btn btn-sm ${autoRefreshEnabled ? "btn-success" : "btn-outline"}`}
+							onClick={toggleAutoRefresh}
+							title={autoRefreshEnabled ? "Disable auto-refresh" : "Enable auto-refresh"}
+						>
+							{autoRefreshEnabled ? (
+								<Pause className="h-4 w-4" />
+							) : (
+								<Play className="h-4 w-4" />
+							)}
+							Auto
+						</button>
+						
+						{autoRefreshEnabled && (
+							<select
+								className="select select-sm"
+								value={refreshInterval}
+								onChange={(e) => handleRefreshIntervalChange(Number(e.target.value))}
+								onFocus={handleUserInteractionStart}
+								onBlur={handleUserInteractionEnd}
+							>
+								<option value={5000}>5s</option>
+								<option value={10000}>10s</option>
+								<option value={30000}>30s</option>
+								<option value={60000}>60s</option>
+							</select>
+						)}
+					</div>
+					
 					<button
 						type="button"
 						className="btn btn-outline"
@@ -152,6 +259,8 @@ export function QueuePage() {
 								className="input"
 								value={searchTerm}
 								onChange={(e) => setSearchTerm(e.target.value)}
+								onFocus={handleUserInteractionStart}
+								onBlur={handleUserInteractionEnd}
 							/>
 						</fieldset>
 
@@ -162,6 +271,8 @@ export function QueuePage() {
 								className="select"
 								value={statusFilter}
 								onChange={(e) => setStatusFilter(e.target.value)}
+								onFocus={handleUserInteractionStart}
+								onBlur={handleUserInteractionEnd}
 							>
 								<option value="">All Status</option>
 								<option value={QueueStatus.PENDING}>Pending</option>

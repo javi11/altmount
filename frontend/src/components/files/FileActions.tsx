@@ -89,9 +89,6 @@ export function FileActions({
 					</li>
 				)}
 				<li>
-					<hr />
-				</li>
-				<li>
 					<button
 						type="button"
 						onClick={handleDelete}

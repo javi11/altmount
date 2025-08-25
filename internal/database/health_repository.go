@@ -131,6 +131,7 @@ func (r *HealthRepository) IncrementRetryCount(filePath string, errorMessage *st
 		        WHEN retry_count = 3 THEN 8
 		        ELSE 16
 		    END) || ' minutes'),
+			status = 'pending',
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
@@ -151,7 +152,7 @@ func (r *HealthRepository) MarkAsCorrupted(filePath string, finalError *string) 
 		    last_error = ?,
 		    next_retry_at = NULL,
 		    updated_at = datetime('now')
-		WHERE file_path = ? AND retry_count >= max_retries
+		WHERE file_path = ?
 	`
 
 	result, err := r.db.Exec(query, finalError, filePath)

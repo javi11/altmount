@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -76,15 +77,6 @@ func NewHealthChecker(
 	}
 }
 
-// Helper methods to get dynamic health config values
-func (hc *HealthChecker) getMaxRetries() int {
-	retries := hc.configGetter().Health.MaxRetries
-	if retries <= 0 {
-		return 5 // Default
-	}
-	return retries
-}
-
 func (hc *HealthChecker) getMaxSegmentConnections() int {
 	connections := hc.configGetter().Health.MaxSegmentConnections
 	if connections <= 0 {
@@ -95,14 +87,6 @@ func (hc *HealthChecker) getMaxSegmentConnections() int {
 
 func (hc *HealthChecker) getCheckAllSegments() bool {
 	return hc.configGetter().Health.CheckAllSegments
-}
-
-func (hc *HealthChecker) getMaxConcurrentJobs() int {
-	jobs := hc.configGetter().Health.MaxConcurrentJobs
-	if jobs <= 0 {
-		return 1 // Default
-	}
-	return jobs
 }
 
 // CheckFile checks the health of a specific file
@@ -157,46 +141,34 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	}
 
 	// Check segments with configurable concurrency
-	missingSegments, totalSegments, checkErr := hc.checkSegments(ctx, segmentsToCheck)
+	checkErr := hc.checkSegments(ctx, segmentsToCheck)
 
 	if checkErr != nil {
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("failed to check segments: %w", checkErr)
+		event.Error = fmt.Errorf("corrupted file some segments are missing")
 		return event
 	}
 
-	// Determine file health based on missing segments
-	if missingSegments == 0 {
-		// All checked segments are available
-		event.Type = EventTypeFileRecovered
-		event.Status = database.HealthStatusHealthy
-	} else if missingSegments < totalSegments {
-		// Some segments missing
-		event.Type = EventTypeFileCorrupted
-		event.Status = database.HealthStatusPartial
-		event.Error = fmt.Errorf("partial file: %d/%d segments missing", missingSegments, totalSegments)
-	} else {
-		// All segments missing
-		event.Type = EventTypeFileCorrupted
-		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("corrupted file: %d/%d segments missing", missingSegments, totalSegments)
-	}
+	// All checked segments are available
+	event.Type = EventTypeFileRecovered
+	event.Status = database.HealthStatusHealthy
 
 	return event
 }
 
 // checkSegments checks multiple segments concurrently with connection limit
-func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.SegmentData) (missingCount, totalCount int, err error) {
-	totalCount = len(segments)
+func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.SegmentData) (err error) {
+	totalCount := len(segments)
 	if totalCount == 0 {
-		return 0, 0, nil
+		return nil
 	}
 
 	// Create pool with concurrency limit and context cancellation
 	p := concpool.NewWithResults[bool]().
 		WithMaxGoroutines(hc.getMaxSegmentConnections()).
-		WithContext(ctx)
+		WithContext(ctx).
+		WithCancelOnError()
 
 	// Check all segments concurrently using pool
 	for _, segment := range segments {
@@ -206,20 +178,12 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 	}
 
 	// Wait for all checks to complete and collect results
-	results, err := p.Wait()
+	_, err = p.Wait()
 	if err != nil {
-		return 0, totalCount, err
+		return err
 	}
 
-	// Count missing segments
-	missingCount = 0
-	for _, available := range results {
-		if !available {
-			missingCount++
-		}
-	}
-
-	return missingCount, totalCount, nil
+	return nil
 }
 
 // checkSingleSegment checks if a single segment exists
@@ -232,6 +196,10 @@ func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID strin
 
 	responseCode, err := usenetPool.Stat(ctx, segmentID, []string{})
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return false, nil
+		}
+
 		return false, fmt.Errorf("failed to check article %s: %w", segmentID, err)
 	}
 

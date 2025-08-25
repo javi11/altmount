@@ -7,10 +7,12 @@ export const useQueue = (params?: {
 	offset?: number;
 	status?: string;
 	since?: string;
+	refetchInterval?: number;
 }) => {
 	return useQuery({
 		queryKey: ["queue", params],
 		queryFn: () => apiClient.getQueue(params),
+		refetchInterval: params?.refetchInterval,
 	});
 };
 

@@ -1,4 +1,4 @@
-import { Save, AlertTriangle } from "lucide-react";
+import { Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, ImportConfig } from "../../types/config";
 
@@ -17,14 +17,11 @@ export function ImportConfigSection({
 }: ImportConfigSectionProps) {
 	const [formData, setFormData] = useState<ImportConfig>(config.import);
 	const [hasChanges, setHasChanges] = useState(false);
-	const [restartRequired, setRestartRequired] = useState(false);
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		setFormData(config.import);
 		setHasChanges(false);
-		// Reset restart required when config is reloaded (e.g., after server restart)
-		setRestartRequired(false);
 	}, [config.import]);
 
 	const handleInputChange = (field: keyof ImportConfig, value: number) => {
@@ -37,10 +34,6 @@ export function ImportConfigSection({
 		if (onUpdate && hasChanges) {
 			await onUpdate("import", formData);
 			setHasChanges(false);
-			// Set restart required flag when processor worker count changes
-			if (formData.max_processor_workers !== config.import.max_processor_workers) {
-				setRestartRequired(true);
-			}
 		}
 	};
 
@@ -66,33 +59,6 @@ export function ImportConfigSection({
 					</p>
 				</fieldset>
 			</div>
-			
-			<div className="alert alert-warning">
-				<AlertTriangle className="h-5 w-5" />
-				<div>
-					<div className="font-bold">Server Restart Required</div>
-					<div className="text-sm">
-						Changes to processor worker count require a server restart to take effect. 
-						This setting controls how many NZB files can be processed simultaneously 
-						during import operations. Higher values may improve import speed but will 
-						use more system resources.
-					</div>
-				</div>
-			</div>
-
-			{/* Restart Required Notice (shown after saving changes) */}
-			{restartRequired && (
-				<div className="alert alert-error">
-					<AlertTriangle className="h-5 w-5" />
-					<div>
-						<div className="font-bold">Configuration Saved - Restart Server Now</div>
-						<div className="text-sm">
-							Your processor worker count has been updated in the configuration. 
-							Restart the AltMount server for the changes to take effect.
-						</div>
-					</div>
-				</div>
-			)}
 
 			{/* Save Button */}
 			{!isReadOnly && (

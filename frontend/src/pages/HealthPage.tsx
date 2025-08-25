@@ -23,7 +23,7 @@ import {
 	useCancelHealthCheck,
 } from "../hooks/useApi";
 import { formatRelativeTime, truncateText } from "../lib/utils";
-import { type FileHealth } from "../types/api";
+import type { FileHealth } from "../types/api";
 
 export function HealthPage() {
 	const [page, setPage] = useState(0);
@@ -274,14 +274,14 @@ export function HealthPage() {
 																40,
 															)}
 														</div>
-														<div className="text-sm text-base-content/70">
+														<div className="text-sm text-base-content/70 tooltip" data-tip={item.file_path}>
 															{truncateText(item.file_path, 60)}
 														</div>
 													</div>
 												</div>
 											</td>
 											<td>
-												<div className="text-sm">
+												<div className="text-sm tooltip" data-tip={item.source_nzb_path}>
 													{truncateText(
 														item.source_nzb_path?.split("/").pop() || "",
 														40,
@@ -344,9 +344,6 @@ export function HealthPage() {
 																</button>
 															</li>
 														)}
-														<li>
-															<hr />
-														</li>
 														<li>
 															<button
 																type="button"

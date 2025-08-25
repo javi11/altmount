@@ -49,9 +49,12 @@ export function WebDAVConfigSection({
 						type="number"
 						className="input"
 						value={formData.port}
-						readOnly={true} // Port always requires restart
+						readOnly={isReadOnly}
+						onChange={(e) =>
+							handleInputChange("port", parseInt(e.target.value, 10) || 0)
+						}
 					/>
-					<p className="label">Server restart required to change port</p>
+					<p className="label">WebDAV server port for client connections</p>
 				</fieldset>
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Username</legend>
