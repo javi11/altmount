@@ -14,7 +14,7 @@ require (
 	github.com/acomagu/bufpipe v1.0.4
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
-	github.com/javi11/nntppool v1.5.3
+	github.com/javi11/nntppool v1.5.5
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.0
 	github.com/javi11/rarlist v1.0.2-0.20250818144055-979aecfdff9e
@@ -33,6 +33,7 @@ require (
 	golang.org/x/crypto v0.41.0
 	golang.org/x/net v0.43.0
 	google.golang.org/protobuf v1.36.6
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -253,7 +254,6 @@ require (
 	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/tools v0.36.0 // indirect
 	golang.org/x/vuln v1.1.4 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	honnef.co/go/tools v0.6.1 // indirect
 	mvdan.cc/gofumpt v0.8.0 // indirect
 	mvdan.cc/unparam v0.0.0-20250301125049-0df0534333a4 // indirect

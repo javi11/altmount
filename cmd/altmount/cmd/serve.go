@@ -19,12 +19,24 @@ import (
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/spf13/cobra"
 )
 
 // For development, serve static files from disk
 // In production, these would be embedded
 var frontendBuildPath = "../../frontend/build"
+
+// getEffectiveLogLevel returns the effective log level, preferring new config over legacy
+func getEffectiveLogLevel(newLevel, legacyLevel string) string {
+	if newLevel != "" {
+		return newLevel
+	}
+	if legacyLevel != "" {
+		return legacyLevel
+	}
+	return "info"
+}
 
 func init() {
 	serveCmd := &cobra.Command{
@@ -38,14 +50,24 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	logger := slog.Default()
-
-	// Load configuration
+	// Load configuration first (using default logger for config loading errors)
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		logger.Error("failed to load config", "err", err)
+		slog.Default().Error("failed to load config", "err", err)
 		return err
 	}
+
+	// Setup log rotation with the loaded configuration
+	logger := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.LogLevel)
+	slog.SetDefault(logger)
+
+	logger.Info("Starting AltMount server with log rotation configured",
+		"log_file", cfg.Log.File,
+		"log_level", getEffectiveLogLevel(cfg.Log.Level, cfg.LogLevel),
+		"max_size_mb", cfg.Log.MaxSize,
+		"max_age_days", cfg.Log.MaxAge,
+		"max_backups", cfg.Log.MaxBackups,
+		"compress", cfg.Log.Compress)
 
 	// Create config manager for dynamic configuration updates
 	configManager := config.NewManager(cfg, configFile)
@@ -104,31 +126,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 				"old", oldConfig.Metadata.RootPath,
 				"new", newConfig.Metadata.RootPath)
 		}
-
-		// Handle debug/log level changes dynamically
-		if oldConfig.Debug != newConfig.Debug {
-			var level slog.Level
-			if newConfig.Debug {
-				level = slog.LevelDebug
-			} else {
-				level = slog.LevelInfo
-			}
-
-			// Create new structured logger
-			opts := &slog.HandlerOptions{
-				Level: level,
-			}
-
-			handler := slog.NewTextHandler(os.Stdout, opts)
-			newLogger := slog.New(handler)
-
-			// Set as default logger
-			slog.SetDefault(newLogger)
-
-			logger.Info("Log level updated",
-				"debug_mode", newConfig.Debug,
-				"log_level", level.String())
-		}
 	})
 
 	// Initialize pool if providers are configured
@@ -150,7 +147,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		MetadataRootPath:    cfg.Metadata.RootPath,
 		MaxRangeSize:        cfg.Streaming.MaxRangeSize,
 		StreamingChunkSize:  cfg.Streaming.StreamingChunkSize,
-		WatchPath:           cfg.WatchPath,
 		Password:            cfg.RClone.Password,
 		Salt:                cfg.RClone.Salt,
 		MaxDownloadWorkers:  cfg.Streaming.MaxDownloadWorkers,
@@ -228,7 +224,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Port:   cfg.WebDAV.Port,
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
-		Debug:  cfg.WebDAV.Debug || cfg.Debug,
+		Debug:  cfg.LogLevel == "debug",
 		Prefix: "/webdav",
 	}, nsys.FileSystem(), mux, tokenService, webdavUserRepo, configManager.GetConfigGetter())
 	if err != nil {

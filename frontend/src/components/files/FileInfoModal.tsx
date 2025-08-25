@@ -16,6 +16,7 @@ import { formatFileSize } from "../../utils/fileUtils";
 import { HealthBadge } from "../ui/StatusBadge";
 import { isNil } from "../../lib/utils";
 import { useAddHealthCheck } from "../../hooks/useApi";
+import { useToast } from "../../contexts/ToastContext";
 
 interface FileInfoModalProps {
 	isOpen: boolean;
@@ -43,6 +44,7 @@ export function FileInfoModal({
 	const modalRef = useRef<HTMLDialogElement>(null);
 	const [activeTab, setActiveTab] = useState<TabType>("overview");
 	const addHealthCheck = useAddHealthCheck();
+	const { showToast } = useToast();
 
 	useEffect(() => {
 		const modal = modalRef.current;
@@ -221,6 +223,45 @@ export function FileInfoModal({
 									/>
 								</div>
 							)}
+						</div>
+						<div className="flex gap-2">
+							<button
+								type="button"
+								className="btn btn-sm btn-primary"
+								onClick={async () => {
+									if (file?.basename && metadata.source_nzb_path) {
+										const filePath = `${currentPath}/${file.basename}`.replace(/\/+/g, "/");
+										try {
+											await addHealthCheck.mutateAsync({
+												file_path: filePath,
+												source_nzb_path: metadata.source_nzb_path,
+											});
+											showToast({
+												type: 'success',
+												title: 'File Added to Health Check Queue',
+												message: `${file.basename} has been successfully added to the health check queue.`,
+											});
+										} catch (err) {
+											console.error("Failed to add health check:", err);
+											showToast({
+												type: 'error',
+												title: 'Failed to Add File',
+												message: err instanceof Error ? err.message : 'An error occurred while adding the file to the health check queue.',
+											});
+										}
+									}
+								}}
+								disabled={addHealthCheck.isPending}
+							>
+								{addHealthCheck.isPending ? (
+									<>
+										<span className="loading loading-spinner loading-xs" />
+										Adding...
+									</>
+								) : (
+									"Check Now"
+								)}
+							</button>
 						</div>
 					</div>
 				</div>
@@ -457,37 +498,6 @@ export function FileInfoModal({
 									{metadata.source_nzb_path || "Unknown"}
 								</div>
 							</div>
-							{metadata.source_nzb_path && (
-								<div className="flex gap-2">
-									<button
-										type="button"
-										className="btn btn-sm btn-primary"
-										onClick={async () => {
-											if (file?.basename && metadata.source_nzb_path) {
-												const filePath = `${currentPath}/${file.basename}`.replace(/\/+/g, "/");
-												try {
-													await addHealthCheck.mutateAsync({
-														file_path: filePath,
-														source_nzb_path: metadata.source_nzb_path,
-													});
-												} catch (err) {
-													console.error("Failed to add health check:", err);
-												}
-											}
-										}}
-										disabled={addHealthCheck.isPending}
-									>
-										{addHealthCheck.isPending ? (
-											<>
-												<span className="loading loading-spinner loading-xs" />
-												Adding...
-											</>
-										) : (
-											"Add to Health Check Queue"
-										)}
-									</button>
-								</div>
-							)}
 						</div>
 					</div>
 				</div>

@@ -212,11 +212,10 @@ type ConfigResponse struct {
 	Database  DatabaseConfigResponse   `json:"database"`
 	Metadata  MetadataConfigResponse   `json:"metadata"`
 	Streaming StreamingConfigResponse  `json:"streaming"`
-	WatchPath string                   `json:"watch_path"`
 	RClone    RCloneConfigResponse     `json:"rclone"`
 	Import    ImportConfigResponse     `json:"import"`
 	Providers []ProviderConfigResponse `json:"providers"`
-	Debug     bool                     `json:"debug"`
+	LogLevel  string                   `json:"log_level"`
 }
 
 // WebDAVConfigResponse represents WebDAV server configuration in API responses
@@ -280,11 +279,10 @@ type ConfigUpdateRequest struct {
 	Database  *DatabaseConfigRequest   `json:"database,omitempty"`
 	Metadata  *MetadataConfigRequest   `json:"metadata,omitempty"`
 	Streaming *StreamingConfigRequest  `json:"streaming,omitempty"`
-	WatchPath *string                  `json:"watch_path,omitempty"`
 	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
 	Import    *ImportConfigRequest     `json:"import,omitempty"`
 	Providers *[]ProviderConfigRequest `json:"providers,omitempty"`
-	Debug     *bool                    `json:"debug,omitempty"`
+	LogLevel  *string                  `json:"log_level,omitempty"`
 }
 
 // WebDAVConfigRequest represents WebDAV server configuration in update requests
@@ -365,13 +363,13 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 	if item == nil {
 		return nil
 	}
-	
+
 	// Generate target_path by removing .nzb extension
 	targetPath := item.NzbPath
 	if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
 		targetPath = targetPath[:len(targetPath)-4]
 	}
-	
+
 	return &QueueItemResponse{
 		ID:           item.ID,
 		NzbPath:      item.NzbPath,
@@ -518,14 +516,13 @@ type ManualScanRequest struct {
 	Path string `json:"path"`
 }
 
-// ScanStatusResponse represents the current status of a manual scan operation  
+// ScanStatusResponse represents the current status of a manual scan operation
 type ScanStatusResponse struct {
-	Status        string     `json:"status"`
-	Path          string     `json:"path,omitempty"`
-	StartTime     *time.Time `json:"start_time,omitempty"`
-	FilesFound    int        `json:"files_found"`
-	FilesAdded    int        `json:"files_added"`
-	CurrentFile   string     `json:"current_file,omitempty"`
-	LastError     *string    `json:"last_error,omitempty"`
+	Status      string     `json:"status"`
+	Path        string     `json:"path,omitempty"`
+	StartTime   *time.Time `json:"start_time,omitempty"`
+	FilesFound  int        `json:"files_found"`
+	FilesAdded  int        `json:"files_added"`
+	CurrentFile string     `json:"current_file,omitempty"`
+	LastError   *string    `json:"last_error,omitempty"`
 }
-

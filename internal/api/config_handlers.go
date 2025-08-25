@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
@@ -19,6 +21,27 @@ type ConfigManager interface {
 	OnConfigChange(callback config.ChangeCallback)
 	ReloadConfig() error
 	SaveConfig() error
+}
+
+// parseLogLevel converts string log level to slog.Level
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// applyLogLevel applies the log level to the global logger
+func applyLogLevel(level string) {
+	if level != "" {
+		slog.SetLogLoggerLevel(parseLogLevel(level))
+	}
 }
 
 // handleGetConfig returns the current configuration
@@ -245,7 +268,6 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			StreamingChunkSize: config.Streaming.StreamingChunkSize,
 			MaxDownloadWorkers: config.Streaming.MaxDownloadWorkers,
 		},
-		WatchPath: config.WatchPath,
 		RClone: RCloneConfigResponse{
 			PasswordSet: config.RClone.Password != "",
 			SaltSet:     config.RClone.Salt != "",
@@ -254,7 +276,7 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			MaxProcessorWorkers: config.Import.MaxProcessorWorkers,
 		},
 		Providers: providers,
-		Debug:     config.Debug,
+		LogLevel:  config.LogLevel,
 	}
 }
 
@@ -302,10 +324,6 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		if updates.Streaming.MaxDownloadWorkers != nil {
 			cfg.Streaming.MaxDownloadWorkers = *updates.Streaming.MaxDownloadWorkers
 		}
-	}
-
-	if updates.WatchPath != nil {
-		cfg.WatchPath = *updates.WatchPath
 	}
 
 	if updates.RClone != nil {
@@ -359,8 +377,10 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		cfg.Providers = providers
 	}
 
-	if updates.Debug != nil {
-		cfg.Debug = *updates.Debug
+	if updates.LogLevel != nil {
+		cfg.LogLevel = *updates.LogLevel
+		// Apply the log level change immediately
+		applyLogLevel(*updates.LogLevel)
 	}
 }
 
@@ -455,6 +475,12 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 				providers[i] = provider
 			}
 			cfg.Providers = providers
+		}
+	case "system":
+		if updates.LogLevel != nil {
+			cfg.LogLevel = *updates.LogLevel
+			// Apply the log level change immediately
+			applyLogLevel(*updates.LogLevel)
 		}
 	default:
 		return fmt.Errorf("invalid section: %s", section)

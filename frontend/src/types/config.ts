@@ -7,11 +7,11 @@ export interface ConfigResponse {
 	database: DatabaseConfig;
 	metadata: MetadataConfig;
 	streaming: StreamingConfig;
-	watch_path: string;
 	rclone: RCloneConfig;
 	import: ImportConfig;
+	log: LogConfig;
 	providers: ProviderConfig[];
-	debug: boolean;
+	log_level: string;
 }
 
 // WebDAV server configuration
@@ -55,6 +55,16 @@ export interface ImportConfig {
 	max_processor_workers: number;
 }
 
+// Log configuration
+export interface LogConfig {
+	file: string;
+	level: string;
+	max_size: number;
+	max_age: number;
+	max_backups: number;
+	compress: boolean;
+}
+
 // NNTP Provider configuration (sanitized)
 export interface ProviderConfig {
 	id: string;
@@ -75,11 +85,11 @@ export interface ConfigUpdateRequest {
 	database?: DatabaseUpdateRequest;
 	metadata?: MetadataUpdateRequest;
 	streaming?: StreamingUpdateRequest;
-	watch_path?: string;
 	rclone?: RCloneUpdateRequest;
 	import?: ImportUpdateRequest;
+	log?: LogUpdateRequest;
 	providers?: ProviderUpdateRequest[];
-	debug?: boolean;
+	log_level?: string;
 }
 
 // WebDAV update request
@@ -123,6 +133,16 @@ export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 }
 
+// Log update request
+export interface LogUpdateRequest {
+	file?: string;
+	level?: string;
+	max_size?: number;
+	max_age?: number;
+	max_backups?: number;
+	compress?: boolean;
+}
+
 // Provider update request
 export interface ProviderUpdateRequest {
 	name?: string;
@@ -158,9 +178,10 @@ export type ConfigSection =
 	| "webdav"
 	| "metadata"
 	| "streaming"
-	| "rclone"
 	| "import"
-	| "providers";
+	| "log"
+	| "providers"
+	| "system";
 
 // Form data interfaces for UI components
 export interface WebDAVFormData {
@@ -204,9 +225,17 @@ export interface ProviderFormData {
 	enabled: boolean;
 }
 
+export interface LogFormData {
+	file: string;
+	level: string;
+	max_size: number;
+	max_age: number;
+	max_backups: number;
+	compress: boolean;
+}
+
 export interface SystemFormData {
-	watch_path: string;
-	debug: boolean;
+	log_level: string;
 }
 
 // Helper type for configuration sections
@@ -271,16 +300,16 @@ export const CONFIG_SECTIONS: Record<
 		icon: "Download",
 		canEdit: true,
 	},
-	rclone: {
-		title: "RClone Encryption",
-		description: "RClone encryption password and salt configuration",
-		icon: "Shield",
-		canEdit: true,
-	},
 	import: {
 		title: "Import Processing",
 		description: "NZB import and processing worker configuration",
 		icon: "Cog",
+		canEdit: true,
+	},
+	log: {
+		title: "Logging",
+		description: "Log rotation and output configuration",
+		icon: "FileText",
 		canEdit: true,
 	},
 	providers: {
@@ -290,8 +319,8 @@ export const CONFIG_SECTIONS: Record<
 		canEdit: true,
 	},
 	system: {
-		title: "System Paths",
-		description: "Mount paths and system directories",
+		title: "System",
+		description: "System settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},

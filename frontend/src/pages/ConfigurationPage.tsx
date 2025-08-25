@@ -34,6 +34,7 @@ import type {
 	WebDAVConfig,
 	ImportConfig,
 	MetadataConfig,
+	SystemFormData,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -94,7 +95,7 @@ export function ConfigurationPage() {
 	// Handle configuration updates with restart detection
 	const handleConfigUpdate = async (
 		section: string,
-		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig,
+		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig | SystemFormData,
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -141,6 +142,14 @@ export function ConfigurationPage() {
 				if (rootPathChanged) {
 					addRestartRequiredConfig("Metadata Root Path");
 				}
+			} else if (section === "system") {
+				const systemData = data as SystemFormData;
+				await updateConfigSection.mutateAsync({
+					section: "system",
+					config: {
+						log_level: systemData.log_level,
+					},
+				});
 			}
 		} catch (error) {
 			// If update fails, don't show restart banner
@@ -348,7 +357,11 @@ export function ConfigurationPage() {
 								)}
 
 								{activeSection === "system" && (
-									<SystemConfigSection config={config} />
+									<SystemConfigSection 
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
 								)}
 
 								{activeSection === "providers" && (

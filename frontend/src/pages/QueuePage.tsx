@@ -130,7 +130,8 @@ export function QueuePage() {
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting]);
 
 	// Reset to page 1 when search or status filter changes
-	useEffect(() => {
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only want to run this when searchTerm or statusFilter changes
+		useEffect(() => {
 		setPage(0);
 	}, [searchTerm, statusFilter]);
 

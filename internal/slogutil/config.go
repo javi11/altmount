@@ -1,9 +1,13 @@
 package slogutil
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/javi11/altmount/internal/config"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type Format string
@@ -60,4 +64,46 @@ func parseLevel(level string) slog.Leveler {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// SetupLogRotation configures slog with log rotation using lumberjack
+// If logConfig.File is empty, it logs to console only
+// Returns the configured logger
+func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
+	var writer io.Writer = os.Stdout
+
+	// If log file is configured, set up rotation
+	if logConfig.File != "" {
+		writer = &lumberjack.Logger{
+			Filename:   logConfig.File,
+			MaxSize:    logConfig.MaxSize,    // MB
+			MaxBackups: logConfig.MaxBackups, // number of old files
+			MaxAge:     logConfig.MaxAge,     // days
+			Compress:   logConfig.Compress,   // compress old files
+		}
+	}
+
+	// Determine log level (prefer new config.Log.Level over old config.LogLevel)
+	level := logConfig.Level
+	if level == "" {
+		level = "info" // fallback default
+	}
+
+	// Create handler with the writer and level
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
+		Level: parseLevel(level),
+	})
+
+	return slog.New(handler)
+}
+
+// SetupLogRotationWithFallback sets up log rotation with backward compatibility
+// It checks both new log config and legacy log_level setting
+func SetupLogRotationWithFallback(logConfig config.LogConfig, legacyLogLevel string) *slog.Logger {
+	// Use legacy log level if new config level is empty
+	if logConfig.Level == "" && legacyLogLevel != "" {
+		logConfig.Level = legacyLogLevel
+	}
+
+	return SetupLogRotation(logConfig)
 }

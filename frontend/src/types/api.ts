@@ -158,7 +158,7 @@ export interface FileMetadata {
 	status: "healthy" | "partial" | "corrupted" | "unspecified";
 	segment_count: number;
 	available_segments?: number;
-	encryption: "none" | "rclone" | "headers";
+	encryption: "none" | "rclone";
 	created_at: string;
 	modified_at: string;
 	password_protected: boolean;

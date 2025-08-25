@@ -21,11 +21,11 @@ type Config struct {
 	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
 	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming"`
 	Health    HealthConfig     `yaml:"health" mapstructure:"health"`
-	WatchPath string           `yaml:"watch_path" mapstructure:"watch_path"`
 	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
 	Import    ImportConfig     `yaml:"import" mapstructure:"import"`
+	Log       LogConfig        `yaml:"log" mapstructure:"log"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
-	Debug     bool             `yaml:"debug" mapstructure:"debug"`
+	LogLevel  string           `yaml:"log_level" mapstructure:"log_level"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -67,6 +67,16 @@ type RCloneConfig struct {
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
 	MaxProcessorWorkers int `yaml:"max_processor_workers" mapstructure:"max_processor_workers"`
+}
+
+// LogConfig represents logging configuration with rotation support
+type LogConfig struct {
+	File       string `yaml:"file" mapstructure:"file"`               // Log file path (empty = console only)
+	Level      string `yaml:"level" mapstructure:"level"`             // Log level (debug, info, warn, error)
+	MaxSize    int    `yaml:"max_size" mapstructure:"max_size"`       // Max size in MB before rotation
+	MaxAge     int    `yaml:"max_age" mapstructure:"max_age"`         // Max age in days to keep files
+	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups"` // Max number of old files to keep
+	Compress   bool   `yaml:"compress" mapstructure:"compress"`       // Compress old log files
 }
 
 // HealthConfig represents health checker configuration
@@ -111,6 +121,48 @@ func (c *Config) Validate() error {
 
 	if c.Import.MaxProcessorWorkers <= 0 {
 		return fmt.Errorf("import max_processor_workers must be greater than 0")
+	}
+
+	// Validate log level (both old and new config)
+	if c.LogLevel != "" {
+		validLevels := []string{"debug", "info", "warn", "error"}
+		isValid := false
+		for _, level := range validLevels {
+			if c.LogLevel == level {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("log_level must be one of: debug, info, warn, error")
+		}
+	}
+
+	// Validate log configuration
+	if c.Log.Level != "" {
+		validLevels := []string{"debug", "info", "warn", "error"}
+		isValid := false
+		for _, level := range validLevels {
+			if c.Log.Level == level {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("log.level must be one of: debug, info, warn, error")
+		}
+	}
+
+	if c.Log.MaxSize < 0 {
+		return fmt.Errorf("log.max_size must be non-negative")
+	}
+
+	if c.Log.MaxAge < 0 {
+		return fmt.Errorf("log.max_age must be non-negative")
+	}
+
+	if c.Log.MaxBackups < 0 {
+		return fmt.Errorf("log.max_backups must be non-negative")
 	}
 
 	// Validate metadata configuration (now required)
@@ -347,6 +399,14 @@ func DefaultConfig() *Config {
 		Import: ImportConfig{
 			MaxProcessorWorkers: 2, // Default: 2 processor workers
 		},
+		Log: LogConfig{
+			File:       "",     // Empty = console only
+			Level:      "info", // Default log level
+			MaxSize:    100,    // 100MB max size
+			MaxAge:     30,     // Keep for 30 days
+			MaxBackups: 10,     // Keep 10 old files
+			Compress:   true,   // Compress old files
+		},
 		Health: HealthConfig{
 			Enabled:               true,
 			CheckInterval:         30 * time.Minute,
@@ -356,7 +416,7 @@ func DefaultConfig() *Config {
 			CheckAllSegments:      true,
 		},
 		Providers: []ProviderConfig{},
-		Debug:     false,
+		LogLevel:  "info",
 	}
 }
 

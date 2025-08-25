@@ -21,7 +21,6 @@ type NzbConfig struct {
 	MetadataRootPath    string // Path to metadata root directory
 	MaxRangeSize        int64  // Maximum range size for a single request
 	StreamingChunkSize  int64  // Chunk size for streaming when end=-1
-	WatchPath           string // Legacy root path for compatibility (manual scanning available via API)
 	Password            string // Global password for .bin files
 	Salt                string // Global salt for .bin files
 	MaxProcessorWorkers int    // Number of queue workers (default: 2)
@@ -39,7 +38,7 @@ type NzbSystem struct {
 	// Configuration tracking for dynamic updates
 	maxDownloadWorkers  int
 	maxProcessorWorkers int
-	configMutex      sync.RWMutex
+	configMutex         sync.RWMutex
 }
 
 // NewNzbSystem creates a new NZB-backed virtual filesystem with metadata + queue architecture
@@ -68,7 +67,6 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter confi
 	if maxDownloadWorkers <= 0 {
 		maxDownloadWorkers = 15 // Default: 15 download workers
 	}
-
 
 	// Create NZB service using metadata + queue
 	serviceConfig := importer.ServiceConfig{
@@ -108,11 +106,11 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter confi
 	}
 
 	return &NzbSystem{
-		database:         db,
-		metadataReader:   metadataReader,
-		service:          service,
-		fs:               fs,
-		poolManager:      poolManager,
+		database:            db,
+		metadataReader:      metadataReader,
+		service:             service,
+		fs:                  fs,
+		poolManager:         poolManager,
 		maxDownloadWorkers:  maxDownloadWorkers,
 		maxProcessorWorkers: maxProcessorWorkers,
 	}, nil
@@ -190,7 +188,6 @@ type Stats struct {
 	TotalSize         int64
 }
 
-
 // UpdateImportWorkers - removed: processor worker changes require server restart
 // The maxProcessorWorkers field is maintained for reference but changes only take effect on restart
 
@@ -207,6 +204,3 @@ func (ns *NzbSystem) GetImportWorkers() int {
 	defer ns.configMutex.RUnlock()
 	return ns.maxProcessorWorkers
 }
-
-
-
