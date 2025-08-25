@@ -28,11 +28,18 @@ export interface QueueItem {
 	id: number;
 	nzb_path: string;
 	target_path: string;
+	watch_root?: string;
+	priority: number;
 	status: QueueStatus;
-	retry_count: number;
-	error_message?: string;
 	created_at: string;
 	updated_at: string;
+	started_at?: string;
+	completed_at?: string;
+	retry_count: number;
+	max_retries: number;
+	error_message?: string;
+	batch_id?: string;
+	metadata?: string;
 }
 
 export interface QueueStats {
@@ -46,6 +53,29 @@ export interface QueueStats {
 
 export interface QueueRetryRequest {
 	reset_retry_count?: boolean;
+}
+
+// Manual Scan types
+export const ScanStatus = {
+	IDLE: "idle",
+	SCANNING: "scanning", 
+	CANCELING: "canceling",
+} as const;
+
+export type ScanStatus = (typeof ScanStatus)[keyof typeof ScanStatus];
+
+export interface ManualScanRequest {
+	path: string;
+}
+
+export interface ScanStatusResponse {
+	status: ScanStatus;
+	path?: string;
+	start_time?: string;
+	files_found: number;
+	files_added: number;
+	current_file?: string;
+	last_error?: string;
 }
 
 // Health types

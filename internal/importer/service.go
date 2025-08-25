@@ -15,14 +15,32 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 )
 
-// ServiceConfig holds configuration for the simplified NZB service
+// ServiceConfig holds configuration for the NZB import service
 type ServiceConfig struct {
-	WatchDir     string        // Directory to scan for NZB files
-	ScanInterval time.Duration // How often to scan directory (default: 30s)
-	Workers      int           // Number of parallel workers (default: 2)
+	Workers int // Number of parallel queue workers (default: 2)
 }
 
-// Service provides simplified NZB queue-based importing
+// ScanStatus represents the current status of a manual scan
+type ScanStatus string
+
+const (
+	ScanStatusIdle      ScanStatus = "idle"
+	ScanStatusScanning  ScanStatus = "scanning"
+	ScanStatusCanceling ScanStatus = "canceling"
+)
+
+// ScanInfo holds information about the current scan operation
+type ScanInfo struct {
+	Status        ScanStatus `json:"status"`
+	Path          string     `json:"path,omitempty"`
+	StartTime     *time.Time `json:"start_time,omitempty"`
+	FilesFound    int        `json:"files_found"`
+	FilesAdded    int        `json:"files_added"`
+	CurrentFile   string     `json:"current_file,omitempty"`
+	LastError     *string    `json:"last_error,omitempty"`
+}
+
+// Service provides NZB import functionality with manual directory scanning and queue-based processing
 type Service struct {
 	config          ServiceConfig
 	database        *database.DB              // Database for processing queue
@@ -36,14 +54,16 @@ type Service struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
+
+	// Manual scan state
+	scanMu     sync.RWMutex
+	scanInfo   ScanInfo
+	scanCancel context.CancelFunc
 }
 
-// NewService creates a new simplified NZB service with separate main and database
+// NewService creates a new NZB import service with manual scanning and queue processing capabilities
 func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager) (*Service, error) {
 	// Set defaults
-	if config.ScanInterval == 0 {
-		config.ScanInterval = 30 * time.Second
-	}
 	if config.Workers == 0 {
 		config.Workers = 2
 	}
@@ -58,15 +78,16 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		metadataService: metadataService,
 		database:        database,
 		processor:       processor,
-		log:             slog.Default().With("component", "nzb-service"),
+		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
+		scanInfo:        ScanInfo{Status: ScanStatusIdle},
 	}
 
 	return service, nil
 }
 
-// Start starts the simplified NZB service
+// Start starts the NZB import service (queue workers only, manual scanning available via API)
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,16 +96,8 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("service is already started")
 	}
 
-	s.log.InfoContext(ctx, "Starting simplified NZB service",
-		"watch_dir", s.config.WatchDir,
-		"scan_interval", s.config.ScanInterval,
+	s.log.InfoContext(ctx, "Starting NZB import service",
 		"workers", s.config.Workers)
-
-	// Start directory scanner if watch directory is configured
-	if s.config.WatchDir != "" {
-		s.wg.Add(1)
-		go s.scannerLoop()
-	}
 
 	// Start worker pool for processing queue items
 	for i := 0; i < s.config.Workers; i++ {
@@ -93,12 +106,12 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	s.running = true
-	s.log.InfoContext(ctx, "NZB service started successfully")
+	s.log.InfoContext(ctx, "NZB import service started successfully")
 
 	return nil
 }
 
-// Stop stops the NZB service
+// Stop stops the NZB import service and all queue workers
 func (s *Service) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,7 +120,7 @@ func (s *Service) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	s.log.InfoContext(ctx, "Stopping NZB service")
+	s.log.InfoContext(ctx, "Stopping NZB import service")
 
 	// Cancel all goroutines
 	s.cancel()
@@ -119,12 +132,12 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
 	s.running = false
-	s.log.InfoContext(ctx, "NZB service stopped")
+	s.log.InfoContext(ctx, "NZB import service stopped")
 
 	return nil
 }
 
-// Close closes the service and releases resources
+// Close closes the NZB import service and releases all resources
 func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -154,41 +167,109 @@ func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, erro
 	return s.database.Repository.GetQueueStats()
 }
 
-// scannerLoop runs in background and scans directory for new NZB files
-func (s *Service) scannerLoop() {
-	defer s.wg.Done()
+// StartManualScan starts a manual scan of the specified directory
+func (s *Service) StartManualScan(scanPath string) error {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
 
-	ticker := time.NewTicker(s.config.ScanInterval)
-	defer ticker.Stop()
-
-	s.log.Info("Directory scanner started", "watch_dir", s.config.WatchDir)
-
-	// Do initial scan
-	s.scanDirectory()
-
-	// Regular scanning loop
-	for {
-		select {
-		case <-ticker.C:
-			s.scanDirectory()
-		case <-s.ctx.Done():
-			s.log.Info("Directory scanner stopped")
-			return
-		}
+	// Check if already scanning
+	if s.scanInfo.Status != ScanStatusIdle {
+		return fmt.Errorf("scan already in progress, current status: %s", s.scanInfo.Status)
 	}
+
+	// Validate path
+	if scanPath == "" {
+		return fmt.Errorf("scan path cannot be empty")
+	}
+
+	// Check if path exists
+	if _, err := filepath.Abs(scanPath); err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Create scan context
+	scanCtx, scanCancel := context.WithCancel(context.Background())
+	s.scanCancel = scanCancel
+
+	// Initialize scan info
+	now := time.Now()
+	s.scanInfo = ScanInfo{
+		Status:      ScanStatusScanning,
+		Path:        scanPath,
+		StartTime:   &now,
+		FilesFound:  0,
+		FilesAdded:  0,
+		CurrentFile: "",
+		LastError:   nil,
+	}
+
+	// Start scanning in goroutine
+	go s.performManualScan(scanCtx, scanPath)
+
+	s.log.Info("Manual scan started", "path", scanPath)
+	return nil
 }
 
-// scanDirectory scans the watch directory and adds new files to queue
-func (s *Service) scanDirectory() {
-	if s.config.WatchDir == "" {
-		return
+// GetScanStatus returns the current scan status
+func (s *Service) GetScanStatus() ScanInfo {
+	s.scanMu.RLock()
+	defer s.scanMu.RUnlock()
+	return s.scanInfo
+}
+
+// CancelScan cancels the current scan operation
+func (s *Service) CancelScan() error {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+
+	if s.scanInfo.Status == ScanStatusIdle {
+		return fmt.Errorf("no scan is currently running")
 	}
 
-	s.log.Debug("Scanning directory for NZB files", "dir", s.config.WatchDir)
+	if s.scanInfo.Status == ScanStatusCanceling {
+		return fmt.Errorf("scan is already being canceled")
+	}
 
-	err := filepath.WalkDir(s.config.WatchDir, func(path string, d fs.DirEntry, err error) error {
+	// Update status and cancel context
+	s.scanInfo.Status = ScanStatusCanceling
+	if s.scanCancel != nil {
+		s.scanCancel()
+	}
+
+	s.log.Info("Manual scan cancellation requested", "path", s.scanInfo.Path)
+	return nil
+}
+
+// performManualScan performs the actual scanning work in a separate goroutine
+func (s *Service) performManualScan(ctx context.Context, scanPath string) {
+	defer func() {
+		s.scanMu.Lock()
+		s.scanInfo.Status = ScanStatusIdle
+		s.scanInfo.CurrentFile = ""
+		if s.scanCancel != nil {
+			s.scanCancel()
+			s.scanCancel = nil
+		}
+		s.scanMu.Unlock()
+	}()
+
+	s.log.Debug("Scanning directory for NZB files", "dir", scanPath)
+
+	err := filepath.WalkDir(scanPath, func(path string, d fs.DirEntry, err error) error {
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			s.log.Info("Scan cancelled", "path", scanPath)
+			return fmt.Errorf("scan cancelled")
+		default:
+		}
+
 		if err != nil {
 			s.log.Warn("Error accessing path", "path", path, "error", err)
+			s.scanMu.Lock()
+			errMsg := err.Error()
+			s.scanInfo.LastError = &errMsg
+			s.scanMu.Unlock()
 			return nil // Continue walking
 		}
 
@@ -196,6 +277,12 @@ func (s *Service) scanDirectory() {
 		if d.IsDir() {
 			return nil
 		}
+
+		// Update current file being processed
+		s.scanMu.Lock()
+		s.scanInfo.CurrentFile = path
+		s.scanInfo.FilesFound++
+		s.scanMu.Unlock()
 
 		// Check if it's an NZB or STRM file
 		ext := strings.ToLower(path)
@@ -209,13 +296,25 @@ func (s *Service) scanDirectory() {
 		}
 
 		// Add to queue
-		s.addToQueue(path)
+		s.addToQueue(path, &scanPath)
+
+		// Update files added counter
+		s.scanMu.Lock()
+		s.scanInfo.FilesAdded++
+		s.scanMu.Unlock()
+
 		return nil
 	})
 
-	if err != nil {
-		s.log.Error("Failed to scan directory", "dir", s.config.WatchDir, "error", err)
+	if err != nil && !strings.Contains(err.Error(), "scan cancelled") {
+		s.log.Error("Failed to scan directory", "dir", scanPath, "error", err)
+		s.scanMu.Lock()
+		errMsg := err.Error()
+		s.scanInfo.LastError = &errMsg
+		s.scanMu.Unlock()
 	}
+
+	s.log.Info("Manual scan completed", "path", scanPath, "files_found", s.scanInfo.FilesFound, "files_added", s.scanInfo.FilesAdded)
 }
 
 // isFileAlreadyInQueue checks if file is already in queue (simplified scanning)
@@ -231,10 +330,10 @@ func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 }
 
 // addToQueue adds a new NZB file to the import queue
-func (s *Service) addToQueue(filePath string) {
+func (s *Service) addToQueue(filePath string, watchRoot *string) {
 	item := &database.ImportQueueItem{
 		NzbPath:    filePath,
-		WatchRoot:  &s.config.WatchDir,
+		WatchRoot:  watchRoot,
 		Priority:   database.QueuePriorityNormal,
 		Status:     database.QueueStatusPending,
 		RetryCount: 0,
@@ -395,19 +494,17 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 // ServiceStats holds statistics about the service
 type ServiceStats struct {
 	IsRunning    bool                 `json:"is_running"`
-	WatchDir     string               `json:"watch_dir"`
-	ScanInterval time.Duration        `json:"scan_interval"`
 	Workers      int                  `json:"workers"`
 	QueueStats   *database.QueueStats `json:"queue_stats,omitempty"`
+	ScanInfo     ScanInfo             `json:"scan_info"`
 }
 
 // GetStats returns service statistics
 func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
 	stats := &ServiceStats{
-		IsRunning:    s.IsRunning(),
-		WatchDir:     s.config.WatchDir,
-		ScanInterval: s.config.ScanInterval,
-		Workers:      s.config.Workers,
+		IsRunning: s.IsRunning(),
+		Workers:   s.config.Workers,
+		ScanInfo:  s.GetScanStatus(),
 	}
 
 	// Add queue statistics
@@ -421,8 +518,8 @@ func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
 	return stats, nil
 }
 
-// UpdateWorkerCount - removed dynamic worker scaling capability
-// Processor worker count changes require server restart to take effect
+// UpdateWorkerCount updates the worker count configuration (requires service restart to take effect)
+// Dynamic worker scaling is not supported - changes only apply on next service restart
 func (s *Service) UpdateWorkerCount(count int) error {
 	if count <= 0 {
 		return fmt.Errorf("worker count must be greater than 0")
@@ -431,7 +528,7 @@ func (s *Service) UpdateWorkerCount(count int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.log.Info("Processor worker count update requested - restart required to take effect",
+	s.log.Info("Queue worker count update requested - restart required to take effect",
 		"current_count", s.config.Workers,
 		"requested_count", count,
 		"running", s.running)

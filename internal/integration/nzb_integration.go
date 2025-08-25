@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/javi11/altmount/internal/adapters/nzbfilesystem"
 	"github.com/javi11/altmount/internal/config"
@@ -18,16 +17,15 @@ import (
 
 // NzbConfig holds configuration for the NZB system
 type NzbConfig struct {
-	QueueDatabasePath  string
-	MetadataRootPath   string        // Path to metadata root directory
-	MaxRangeSize       int64         // Maximum range size for a single request
-	StreamingChunkSize int64         // Chunk size for streaming when end=-1
-	WatchPath          string        // Directory containing NZB files
-	Password           string        // Global password for .bin files
-	Salt               string        // Global salt for .bin files
-	MaxProcessorWorkers int           // Number of queue workers (default: 2)
-	MaxDownloadWorkers  int           // Number of download workers (default: 15)
-	ScanInterval       time.Duration // Directory scan interval (default: 30s)
+	QueueDatabasePath   string
+	MetadataRootPath    string // Path to metadata root directory
+	MaxRangeSize        int64  // Maximum range size for a single request
+	StreamingChunkSize  int64  // Chunk size for streaming when end=-1
+	WatchPath           string // Legacy root path for compatibility (manual scanning available via API)
+	Password            string // Global password for .bin files
+	Salt                string // Global salt for .bin files
+	MaxProcessorWorkers int    // Number of queue workers (default: 2)
+	MaxDownloadWorkers  int    // Number of download workers (default: 15)
 }
 
 // NzbSystem represents the complete NZB-backed filesystem
@@ -71,16 +69,10 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter confi
 		maxDownloadWorkers = 15 // Default: 15 download workers
 	}
 
-	scanInterval := config.ScanInterval
-	if scanInterval <= 0 {
-		scanInterval = 30 * time.Second // Default: scan every 30 seconds
-	}
 
 	// Create NZB service using metadata + queue
 	serviceConfig := importer.ServiceConfig{
-		WatchDir:     config.WatchPath,
-		ScanInterval: scanInterval,
-		Workers:      maxProcessorWorkers,
+		Workers: maxProcessorWorkers,
 	}
 
 	// Create service with poolManager for dynamic pool access
@@ -149,6 +141,11 @@ func (ns *NzbSystem) MetadataReader() *metadata.MetadataReader {
 // Database returns the database instance (for processing queue)
 func (ns *NzbSystem) Database() *database.DB {
 	return ns.database
+}
+
+// ImporterService returns the importer service instance
+func (ns *NzbSystem) ImporterService() *importer.Service {
+	return ns.service
 }
 
 // StartService starts the NZB service (including background scanning and processing)

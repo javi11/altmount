@@ -16,6 +16,9 @@ func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination
 	pagination := ParsePagination(r)
 
+	// Parse search parameter
+	search := r.URL.Query().Get("search")
+
 	// Parse status filter
 	var statusFilter *database.HealthStatus
 	if statusStr := r.URL.Query().Get("status"); statusStr != "" {
@@ -39,10 +42,17 @@ func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 		sinceFilter = since
 	}
 
-	// Get health items - we'll need to implement a list method in health repository
-	items, err := s.listHealthItems(statusFilter, pagination, sinceFilter)
+	// Get health items with search support
+	items, err := s.listHealthItems(statusFilter, pagination, sinceFilter, search)
 	if err != nil {
 		WriteInternalError(w, "Failed to retrieve health records", err.Error())
+		return
+	}
+
+	// Get total count for pagination
+	totalCount, err := s.countHealthItems(statusFilter, sinceFilter, search)
+	if err != nil {
+		WriteInternalError(w, "Failed to count health records", err.Error())
 		return
 	}
 
@@ -57,14 +67,20 @@ func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 		Count:  len(response),
 		Limit:  pagination.Limit,
 		Offset: pagination.Offset,
+		Total:  totalCount,
 	}
 
 	WriteSuccess(w, response, meta)
 }
 
 // listHealthItems is a helper method to list health items with filters
-func (s *Server) listHealthItems(statusFilter *database.HealthStatus, pagination Pagination, sinceFilter *time.Time) ([]*database.FileHealth, error) {
-	return s.healthRepo.ListHealthItems(statusFilter, pagination.Limit, pagination.Offset, sinceFilter)
+func (s *Server) listHealthItems(statusFilter *database.HealthStatus, pagination Pagination, sinceFilter *time.Time, search string) ([]*database.FileHealth, error) {
+	return s.healthRepo.ListHealthItems(statusFilter, pagination.Limit, pagination.Offset, sinceFilter, search)
+}
+
+// countHealthItems is a helper method to count health items with filters
+func (s *Server) countHealthItems(statusFilter *database.HealthStatus, sinceFilter *time.Time, search string) (int, error) {
+	return s.healthRepo.CountHealthItems(statusFilter, sinceFilter, search)
 }
 
 // handleGetHealth handles GET /api/health/{id}

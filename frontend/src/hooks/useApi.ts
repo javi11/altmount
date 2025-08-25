@@ -7,6 +7,7 @@ export const useQueue = (params?: {
 	offset?: number;
 	status?: string;
 	since?: string;
+	search?: string;
 	refetchInterval?: number;
 }) => {
 	return useQuery({
@@ -78,13 +79,14 @@ export const useHealth = (params?: {
 	offset?: number;
 	status?: string;
 	since?: string;
+	search?: string;
 }) => {
 	return useQuery({
 		queryKey: ["health", params],
 		queryFn: () => apiClient.getHealth(params),
 		refetchInterval: (query) => {
 			// Poll every 5 seconds if any items are in "checking" status
-			const data = query.state.data;
+			const data = query.state.data?.data;
 			const hasCheckingItems = data?.some(item => item.status === 'checking');
 			return hasCheckingItems ? 5000 : false;
 		},
@@ -196,6 +198,41 @@ export const useCancelHealthCheck = () => {
 			// Immediately refresh health data to show cancelled status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 			queryClient.invalidateQueries({ queryKey: ["health", "worker", "status"] });
+		},
+	});
+};
+
+// Manual Scan hooks
+export const useScanStatus = (refetchInterval?: number) => {
+	return useQuery({
+		queryKey: ["scan", "status"],
+		queryFn: () => apiClient.getScanStatus(),
+		refetchInterval: refetchInterval,
+	});
+};
+
+export const useStartManualScan = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (path: string) => apiClient.startManualScan({ path }),
+		onSuccess: () => {
+			// Invalidate scan status to update immediately
+			queryClient.invalidateQueries({ queryKey: ["scan", "status"] });
+			// Invalidate queue to refresh when scan completes
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+		},
+	});
+};
+
+export const useCancelScan = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.cancelScan(),
+		onSuccess: () => {
+			// Invalidate scan status to update immediately
+			queryClient.invalidateQueries({ queryKey: ["scan", "status"] });
 		},
 	});
 };

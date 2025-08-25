@@ -275,13 +275,14 @@ func (r *HealthRepository) AddFileToHealthCheck(filePath string, maxRetries int,
 }
 
 // ListHealthItems returns all health records with optional filtering and pagination
-func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time) ([]*FileHealth, error) {
+func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time, search string) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       next_retry_at, source_nzb_path, error_details, created_at, updated_at
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
+		  AND (? = '' OR file_path LIKE ? OR (source_nzb_path IS NOT NULL AND source_nzb_path LIKE ?))
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
 	`
@@ -297,9 +298,13 @@ func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, of
 		sinceParam = sinceFilter.Format("2006-01-02 15:04:05")
 	}
 
+	// Prepare search parameter with wildcards
+	searchPattern := "%" + search + "%"
+
 	args := []interface{}{
 		statusParam, statusParam, // status filter (checked twice in WHERE clause)
-		sinceParam, sinceParam, // since filter (checked twice in WHERE clause)
+		sinceParam, sinceParam,   // since filter (checked twice in WHERE clause)
+		search, searchPattern, searchPattern, // search filter (file_path and source_nzb_path)
 		limit, offset,
 	}
 
@@ -329,6 +334,45 @@ func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, of
 	}
 
 	return files, nil
+}
+
+// CountHealthItems returns the total count of health records with optional filtering
+func (r *HealthRepository) CountHealthItems(statusFilter *HealthStatus, sinceFilter *time.Time, search string) (int, error) {
+	query := `
+		SELECT COUNT(*) 
+		FROM file_health
+		WHERE (? IS NULL OR status = ?)
+		  AND (? IS NULL OR created_at >= ?)
+		  AND (? = '' OR file_path LIKE ? OR (source_nzb_path IS NOT NULL AND source_nzb_path LIKE ?))
+	`
+
+	// Prepare arguments for the query
+	var statusParam interface{} = nil
+	if statusFilter != nil {
+		statusParam = string(*statusFilter)
+	}
+
+	var sinceParam interface{} = nil
+	if sinceFilter != nil {
+		sinceParam = sinceFilter.Format("2006-01-02 15:04:05")
+	}
+
+	// Prepare search parameter with wildcards
+	searchPattern := "%" + search + "%"
+
+	args := []interface{}{
+		statusParam, statusParam, // status filter (checked twice in WHERE clause)
+		sinceParam, sinceParam,   // since filter (checked twice in WHERE clause)
+		search, searchPattern, searchPattern, // search filter (file_path and source_nzb_path)
+	}
+
+	var count int
+	err := r.db.QueryRow(query, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count health items: %w", err)
+	}
+
+	return count, nil
 }
 
 // SetFileChecking sets a file's status to 'checking'

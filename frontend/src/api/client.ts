@@ -6,8 +6,10 @@ import type {
 	HealthCheckRequest,
 	HealthStats,
 	HealthWorkerStatus,
+	ManualScanRequest,
 	QueueItem,
 	QueueStats,
+	ScanStatusResponse,
 	User,
 	UserAdminUpdateRequest,
 } from "../types/api";
@@ -84,21 +86,65 @@ export class APIClient {
 		}
 	}
 
+	private async requestWithMeta<T>(
+		endpoint: string,
+		options: RequestInit = {},
+	): Promise<APIResponse<T>> {
+		const url = `${this.baseURL}${endpoint}`;
+
+		const config: RequestInit = {
+			headers: {
+				"Content-Type": "application/json",
+				...options.headers,
+			},
+			...options,
+		};
+
+		try {
+			const response = await fetch(url, config);
+
+			if (!response.ok) {
+				throw new APIError(
+					response.status,
+					`HTTP ${response.status}: ${response.statusText}`,
+				);
+			}
+
+			const data: APIResponse<T> = await response.json();
+
+			if (!data.success) {
+				throw new APIError(response.status, data.error || "API request failed");
+			}
+
+			return data;
+		} catch (error) {
+			if (error instanceof APIError) {
+				throw error;
+			}
+			throw new APIError(
+				0,
+				error instanceof Error ? error.message : "Network error",
+			);
+		}
+	}
+
 	// Queue endpoints
 	async getQueue(params?: {
 		limit?: number;
 		offset?: number;
 		status?: string;
 		since?: string;
+		search?: string;
 	}) {
 		const searchParams = new URLSearchParams();
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
 		if (params?.offset) searchParams.set("offset", params.offset.toString());
 		if (params?.status) searchParams.set("status", params.status);
 		if (params?.since) searchParams.set("since", params.since);
+		if (params?.search) searchParams.set("search", params.search);
 
 		const query = searchParams.toString();
-		return this.request<QueueItem[]>(`/queue${query ? `?${query}` : ""}`);
+		return this.requestWithMeta<QueueItem[]>(`/queue${query ? `?${query}` : ""}`);
 	}
 
 	async getQueueItem(id: number) {
@@ -139,15 +185,17 @@ export class APIClient {
 		offset?: number;
 		status?: string;
 		since?: string;
+		search?: string;
 	}) {
 		const searchParams = new URLSearchParams();
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
 		if (params?.offset) searchParams.set("offset", params.offset.toString());
 		if (params?.status) searchParams.set("status", params.status);
 		if (params?.since) searchParams.set("since", params.since);
+		if (params?.search) searchParams.set("search", params.search);
 
 		const query = searchParams.toString();
-		return this.request<FileHealth[]>(`/health${query ? `?${query}` : ""}`);
+		return this.requestWithMeta<FileHealth[]>(`/health${query ? `?${query}` : ""}`);
 	}
 
 	async getHealthItem(id: string) {
@@ -368,6 +416,24 @@ export class APIClient {
 		return this.request<ProviderConfig[]>("/providers/reorder", {
 			method: "PUT",
 			body: JSON.stringify(data),
+		});
+	}
+
+	// Manual Scan endpoints
+	async startManualScan(data: ManualScanRequest) {
+		return this.request<ScanStatusResponse>("/import/scan", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async getScanStatus() {
+		return this.request<ScanStatusResponse>("/import/scan/status");
+	}
+
+	async cancelScan() {
+		return this.request<ScanStatusResponse>("/import/scan", {
+			method: "DELETE",
 		});
 	}
 }

@@ -200,7 +200,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create API server with shared mux
-	apiServer := api.NewServer(apiConfig, mainRepo, healthRepo, authService, userRepo, configManager, nsys.MetadataReader(), mux)
+	apiServer := api.NewServer(
+		apiConfig,
+		mainRepo,
+		healthRepo,
+		authService,
+		userRepo,
+		configManager,
+		nsys.MetadataReader(),
+		mux,
+		nsys.ImporterService())
 	logger.Info("API server enabled", "prefix", "/api")
 
 	// Register API server for auth updates

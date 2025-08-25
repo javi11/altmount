@@ -10,6 +10,7 @@ import (
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/health"
+	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 )
 
@@ -27,36 +28,47 @@ func DefaultConfig() *Config {
 
 // Server represents the API server
 type Server struct {
-	config         *Config
-	queueRepo      *database.Repository
-	healthRepo     *database.HealthRepository
-	authService    *auth.Service
-	userRepo       *database.UserRepository
-	configManager  ConfigManager
-	metadataReader *metadata.MetadataReader
-	healthWorker   *health.HealthWorker
-	logger         *slog.Logger
-	startTime      time.Time
-	mux            *http.ServeMux
+	config          *Config
+	queueRepo       *database.Repository
+	healthRepo      *database.HealthRepository
+	authService     *auth.Service
+	userRepo        *database.UserRepository
+	configManager   ConfigManager
+	metadataReader  *metadata.MetadataReader
+	healthWorker    *health.HealthWorker
+	importerService *importer.Service
+	logger          *slog.Logger
+	startTime       time.Time
+	mux             *http.ServeMux
 }
 
 // NewServer creates a new API server that registers routes on the provided mux
-func NewServer(config *Config, queueRepo *database.Repository, healthRepo *database.HealthRepository, authService *auth.Service, userRepo *database.UserRepository, configManager ConfigManager, metadataReader *metadata.MetadataReader, mux *http.ServeMux) *Server {
+func NewServer(
+	config *Config,
+	queueRepo *database.Repository,
+	healthRepo *database.HealthRepository,
+	authService *auth.Service,
+	userRepo *database.UserRepository,
+	configManager ConfigManager,
+	metadataReader *metadata.MetadataReader,
+	mux *http.ServeMux,
+	importService *importer.Service) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
 	server := &Server{
-		config:         config,
-		queueRepo:      queueRepo,
-		healthRepo:     healthRepo,
-		authService:    authService,
-		userRepo:       userRepo,
-		configManager:  configManager,
-		metadataReader: metadataReader,
-		logger:         slog.Default(),
-		startTime:      time.Now(),
-		mux:            mux,
+		config:          config,
+		queueRepo:       queueRepo,
+		healthRepo:      healthRepo,
+		authService:     authService,
+		userRepo:        userRepo,
+		configManager:   configManager,
+		metadataReader:  metadataReader,
+		importerService: importService, // Will be set later via SetImporterService
+		logger:          slog.Default(),
+		startTime:       time.Now(),
+		mux:             mux,
 	}
 
 	server.setupRoutes()
@@ -109,6 +121,13 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	// File endpoints (if metadata reader is available)
 	if s.metadataReader != nil {
 		apiMux.HandleFunc("GET /files/info", s.handleGetFileMetadata)
+	}
+
+	// Import endpoints (if importer service is available)
+	if s.importerService != nil {
+		apiMux.HandleFunc("POST /import/scan", s.handleStartManualScan)
+		apiMux.HandleFunc("GET /import/scan/status", s.handleGetScanStatus)
+		apiMux.HandleFunc("DELETE /import/scan", s.handleCancelScan)
 	}
 
 	// System endpoints

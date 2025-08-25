@@ -11,6 +11,8 @@ import { useEffect, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { StatusBadge } from "../components/ui/StatusBadge";
+import { Pagination } from "../components/ui/Pagination";
+import { ManualScanSection } from "../components/queue/ManualScanSection";
 import {
 	useClearCompletedQueue,
 	useDeleteQueueItem,
@@ -33,7 +35,7 @@ export function QueuePage() {
 
 	const pageSize = 20;
 	const {
-		data: queueData,
+		data: queueResponse,
 		isLoading,
 		error,
 		refetch,
@@ -41,8 +43,13 @@ export function QueuePage() {
 		limit: pageSize,
 		offset: page * pageSize,
 		status: statusFilter || undefined,
+		search: searchTerm || undefined,
 		refetchInterval: autoRefreshEnabled && !userInteracting ? refreshInterval : undefined,
 	});
+
+	const queueData = queueResponse?.data;
+	const meta = queueResponse?.meta;
+	const totalPages = meta?.total ? Math.ceil(meta.total / pageSize) : 0;
 
 	const { data: stats } = useQueueStats();
 	const deleteItem = useDeleteQueueItem();
@@ -122,12 +129,10 @@ export function QueuePage() {
 		}
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting]);
 
-	const filteredData = queueData?.filter(
-		(item: QueueItem) =>
-			!searchTerm ||
-			item.nzb_path.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			item.target_path.toLowerCase().includes(searchTerm.toLowerCase()),
-	);
+	// Reset to page 1 when search or status filter changes
+	useEffect(() => {
+		setPage(0);
+	}, [searchTerm, statusFilter]);
 
 	if (error) {
 		return (
@@ -216,6 +221,9 @@ export function QueuePage() {
 				</div>
 			</div>
 
+			{/* Manual Scan Section */}
+			<ManualScanSection />
+
 			{/* Stats Cards */}
 			{stats && (
 				<div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -291,7 +299,7 @@ export function QueuePage() {
 				<div className="card-body p-0">
 					{isLoading ? (
 						<LoadingTable columns={6} />
-					) : filteredData && filteredData.length > 0 ? (
+					) : queueData && queueData.length > 0 ? (
 						<div className="overflow-x-auto">
 							<table className="table table-zebra">
 								<thead>
@@ -305,7 +313,7 @@ export function QueuePage() {
 									</tr>
 								</thead>
 								<tbody>
-									{filteredData.map((item: QueueItem) => (
+									{queueData.map((item: QueueItem) => (
 										<tr key={item.id} className="hover">
 											<td>
 												<div className="flex items-center space-x-3">
@@ -407,7 +415,7 @@ export function QueuePage() {
 							</h3>
 							<p className="text-base-content/50">
 								{searchTerm || statusFilter
-									? "Try adjusting your filters"
+									? "No items match your search or filters"
 									: "Your queue is empty"}
 							</p>
 						</div>
@@ -416,29 +424,15 @@ export function QueuePage() {
 			</div>
 
 			{/* Pagination */}
-			{filteredData && filteredData.length === pageSize && (
-				<div className="flex justify-center">
-					<div className="join">
-						<button
-							type="button"
-							className="join-item btn"
-							disabled={page === 0}
-							onClick={() => setPage(page - 1)}
-						>
-							Previous
-						</button>
-						<button type="button" className="join-item btn btn-active">
-							Page {page + 1}
-						</button>
-						<button
-							type="button"
-							className="join-item btn"
-							onClick={() => setPage(page + 1)}
-						>
-							Next
-						</button>
-					</div>
-				</div>
+			{totalPages > 1 && (
+				<Pagination
+					currentPage={page + 1}
+					totalPages={totalPages}
+					onPageChange={(newPage) => setPage(newPage - 1)}
+					totalItems={meta?.total}
+					itemsPerPage={pageSize}
+					showSummary={true}
+				/>
 			)}
 		</div>
 	);

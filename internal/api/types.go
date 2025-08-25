@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
@@ -25,10 +26,10 @@ type APIError struct {
 
 // APIMeta represents metadata for paginated responses
 type APIMeta struct {
-	Total  int `json:"total,omitempty"`
-	Limit  int `json:"limit,omitempty"`
-	Offset int `json:"offset,omitempty"`
-	Count  int `json:"count,omitempty"`
+	Total  int `json:"total"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+	Count  int `json:"count"`
 }
 
 // Pagination represents pagination parameters
@@ -51,6 +52,7 @@ func DefaultPagination() Pagination {
 type QueueItemResponse struct {
 	ID           int64                  `json:"id"`
 	NzbPath      string                 `json:"nzb_path"`
+	TargetPath   string                 `json:"target_path"`
 	WatchRoot    *string                `json:"watch_root"`
 	Priority     database.QueuePriority `json:"priority"`
 	Status       database.QueueStatus   `json:"status"`
@@ -363,9 +365,17 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 	if item == nil {
 		return nil
 	}
+	
+	// Generate target_path by removing .nzb extension
+	targetPath := item.NzbPath
+	if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
+		targetPath = targetPath[:len(targetPath)-4]
+	}
+	
 	return &QueueItemResponse{
 		ID:           item.ID,
 		NzbPath:      item.NzbPath,
+		TargetPath:   targetPath,
 		WatchRoot:    item.WatchRoot,
 		Priority:     item.Priority,
 		Status:       item.Status,
@@ -500,3 +510,22 @@ type ProviderUpdateRequest struct {
 type ProviderReorderRequest struct {
 	ProviderIDs []string `json:"provider_ids"`
 }
+
+// Import API Types
+
+// ManualScanRequest represents a request to start a manual directory scan
+type ManualScanRequest struct {
+	Path string `json:"path"`
+}
+
+// ScanStatusResponse represents the current status of a manual scan operation  
+type ScanStatusResponse struct {
+	Status        string     `json:"status"`
+	Path          string     `json:"path,omitempty"`
+	StartTime     *time.Time `json:"start_time,omitempty"`
+	FilesFound    int        `json:"files_found"`
+	FilesAdded    int        `json:"files_added"`
+	CurrentFile   string     `json:"current_file,omitempty"`
+	LastError     *string    `json:"last_error,omitempty"`
+}
+

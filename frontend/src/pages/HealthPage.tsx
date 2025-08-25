@@ -8,9 +8,10 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
+import { Pagination } from "../components/ui/Pagination";
 import { HealthBadge } from "../components/ui/StatusBadge";
 import {
 	useAddHealthCheck,
@@ -36,9 +37,10 @@ export function HealthPage() {
 	});
 
 	const pageSize = 20;
-	const { data, isLoading, refetch, error } = useHealth({
+	const { data: healthResponse, isLoading, refetch, error } = useHealth({
 		limit: pageSize,
 		offset: page * pageSize,
+		search: searchTerm,
 	});
 
 	const { data: stats } = useHealthStats();
@@ -103,12 +105,15 @@ export function HealthPage() {
 		}
 	};
 
-	const filteredData = data?.filter(
-		(item: FileHealth) =>
-			!searchTerm ||
-			item.file_path.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			item.source_nzb_path?.toLowerCase().includes(searchTerm.toLowerCase()),
-	);
+	const data = healthResponse?.data;
+	const meta = healthResponse?.meta;
+
+	// Reset page when search term changes
+	useEffect(() => {
+		if (searchTerm !== "") {
+			setPage(0);
+		}
+	}, [searchTerm]);
 
 	if (error) {
 		return (
@@ -248,7 +253,7 @@ export function HealthPage() {
 				<div className="card-body p-0">
 					{isLoading ? (
 						<LoadingTable columns={6} />
-					) : filteredData && filteredData.length > 0 ? (
+					) : data && data.length > 0 ? (
 						<div>
 							<table className="table table-zebra">
 								<thead>
@@ -262,7 +267,7 @@ export function HealthPage() {
 									</tr>
 								</thead>
 								<tbody>
-									{filteredData.map((item: FileHealth) => (
+									{data.map((item: FileHealth) => (
 										<tr key={item.id} className="hover">
 											<td>
 												<div className="flex items-center space-x-3">
@@ -380,29 +385,15 @@ export function HealthPage() {
 			</div>
 
 			{/* Pagination */}
-			{filteredData && filteredData.length === pageSize && (
-				<div className="flex justify-center">
-					<div className="join">
-						<button
-							type="button"
-							className="join-item btn"
-							disabled={page === 0}
-							onClick={() => setPage(page - 1)}
-						>
-							Previous
-						</button>
-						<button type="button" className="join-item btn btn-active">
-							Page {page + 1}
-						</button>
-						<button
-							type="button"
-							className="join-item btn"
-							onClick={() => setPage(page + 1)}
-						>
-							Next
-						</button>
-					</div>
-				</div>
+			{meta && meta.total && meta.total > pageSize && (
+				<Pagination
+					currentPage={page + 1}
+					totalPages={Math.ceil(meta.total / pageSize)}
+					onPageChange={(newPage) => setPage(newPage - 1)}
+					totalItems={meta.total}
+					itemsPerPage={pageSize}
+					showSummary={true}
+				/>
 			)}
 
 			{/* Health Status Alert */}

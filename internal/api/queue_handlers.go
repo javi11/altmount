@@ -30,6 +30,9 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Parse search parameter
+	searchFilter := r.URL.Query().Get("search")
+
 	// Parse since filter
 	var sinceFilter *time.Time
 	if since, err := ParseTimeParam(r, "since"); err != nil {
@@ -39,8 +42,15 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 		sinceFilter = since
 	}
 
+	// Get total count for pagination
+	totalCount, err := s.queueRepo.CountQueueItems(statusFilter, searchFilter)
+	if err != nil {
+		WriteInternalError(w, "Failed to count queue items", err.Error())
+		return
+	}
+
 	// Get queue items from repository
-	items, err := s.queueRepo.ListQueueItems(statusFilter, pagination.Limit, pagination.Offset)
+	items, err := s.queueRepo.ListQueueItems(statusFilter, searchFilter, pagination.Limit, pagination.Offset)
 	if err != nil {
 		WriteInternalError(w, "Failed to retrieve queue items", err.Error())
 		return
@@ -65,6 +75,7 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 
 	// Create metadata
 	meta := &APIMeta{
+		Total:  totalCount,
 		Count:  len(response),
 		Limit:  pagination.Limit,
 		Offset: pagination.Offset,

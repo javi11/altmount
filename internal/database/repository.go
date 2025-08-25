@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -492,30 +493,37 @@ func (r *Repository) UpdateQueueStats() error {
 }
 
 // ListQueueItems retrieves queue items with optional filtering
-func (r *Repository) ListQueueItems(status *QueueStatus, limit, offset int) ([]*ImportQueueItem, error) {
+func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, offset int) ([]*ImportQueueItem, error) {
 	var query string
 	var args []interface{}
-
+	
+	baseSelect := `SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at,
+	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+	               FROM import_queue`
+	
+	var conditions []string
+	var conditionArgs []interface{}
+	
 	if status != nil {
-		query = `
-			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at,
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
-			FROM import_queue WHERE status = ?
-			ORDER BY priority ASC, created_at ASC
-			LIMIT ? OFFSET ?
-		`
-		args = []interface{}{*status, limit, offset}
-	} else {
-		query = `
-			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at,
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
-			FROM import_queue 
-			ORDER BY priority ASC, created_at ASC
-			LIMIT ? OFFSET ?
-		`
-		args = []interface{}{limit, offset}
+		conditions = append(conditions, "status = ?")
+		conditionArgs = append(conditionArgs, *status)
 	}
-
+	
+	if search != "" {
+		conditions = append(conditions, "(nzb_path LIKE ? OR watch_root LIKE ?)")
+		searchPattern := "%" + search + "%"
+		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
+	}
+	
+	if len(conditions) > 0 {
+		query = baseSelect + " WHERE " + strings.Join(conditions, " AND ")
+	} else {
+		query = baseSelect
+	}
+	
+	query += " ORDER BY priority ASC, created_at ASC LIMIT ? OFFSET ?"
+	args = append(conditionArgs, limit, offset)
+	
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list queue items: %w", err)
@@ -537,6 +545,44 @@ func (r *Repository) ListQueueItems(status *QueueStatus, limit, offset int) ([]*
 	}
 
 	return items, rows.Err()
+}
+
+// CountQueueItems counts the total number of queue items matching the given filters
+func (r *Repository) CountQueueItems(status *QueueStatus, search string) (int, error) {
+	var query string
+	var args []interface{}
+	
+	baseQuery := `SELECT COUNT(*) FROM import_queue`
+	
+	var conditions []string
+	var conditionArgs []interface{}
+	
+	if status != nil {
+		conditions = append(conditions, "status = ?")
+		conditionArgs = append(conditionArgs, *status)
+	}
+	
+	if search != "" {
+		conditions = append(conditions, "(nzb_path LIKE ? OR watch_root LIKE ?)")
+		searchPattern := "%" + search + "%"
+		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
+	}
+	
+	if len(conditions) > 0 {
+		query = baseQuery + " WHERE " + strings.Join(conditions, " AND ")
+	} else {
+		query = baseQuery
+	}
+	
+	args = conditionArgs
+	
+	var count int
+	err := r.db.QueryRow(query, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count queue items: %w", err)
+	}
+	
+	return count, nil
 }
 
 // ClearCompletedQueueItems removes completed and failed items from the queue
