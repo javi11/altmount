@@ -203,6 +203,17 @@ type SystemCleanupResponse struct {
 	DryRun               bool `json:"dry_run"`
 }
 
+// SystemRestartRequest represents request for system restart
+type SystemRestartRequest struct {
+	Force bool `json:"force,omitempty"` // Force restart even if unsafe
+}
+
+// SystemRestartResponse represents restart operation result
+type SystemRestartResponse struct {
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // Configuration API Types
 
 // ConfigResponse represents the configuration in API responses

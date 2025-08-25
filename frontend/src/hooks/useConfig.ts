@@ -86,3 +86,13 @@ export function useReloadConfig() {
 		},
 	});
 }
+
+// Hook to restart server
+export function useRestartServer() {
+	return useMutation({
+		mutationFn: (force: boolean = false) => apiClient.restartServer(force),
+		onError: (error) => {
+			console.error("Failed to restart server:", error);
+		},
+	});
+}

@@ -26,6 +26,7 @@ import { RestartRequiredBanner } from "../components/ui/RestartRequiredBanner";
 import {
 	useConfig,
 	useReloadConfig,
+	useRestartServer,
 	useUpdateConfigSection,
 } from "../hooks/useConfig";
 import type {
@@ -55,6 +56,7 @@ const getIconComponent = (iconName: string) => {
 export function ConfigurationPage() {
 	const { data: config, isLoading, error, refetch } = useConfig();
 	const reloadConfig = useReloadConfig();
+	const restartServer = useRestartServer();
 	const updateConfigSection = useUpdateConfigSection();
 	const [activeSection, setActiveSection] = useState<ConfigSection | "system">(
 		"webdav",
@@ -89,6 +91,29 @@ export function ConfigurationPage() {
 			sessionStorage.removeItem('restartBannerDismissed');
 		} catch (error) {
 			console.error("Failed to reload configuration:", error);
+		}
+	};
+
+	// Handle server restart
+	const handleRestartServer = async () => {
+		if (!window.confirm("This will restart the entire server. All active connections will be lost. Continue?")) {
+			return;
+		}
+
+		try {
+			await restartServer.mutateAsync(false);
+			// Clear local state since server is restarting
+			setHasUnsavedChanges(false);
+			setRestartRequiredConfigs([]);
+			setIsRestartBannerDismissed(false);
+			sessionStorage.removeItem('restartBannerDismissed');
+			
+			// Wait a bit for the server to restart, then reload the page
+			setTimeout(() => {
+				window.location.reload();
+			}, 3000);
+		} catch (error) {
+			console.error("Failed to restart server:", error);
 		}
 	};
 
@@ -232,6 +257,21 @@ export function ConfigurationPage() {
 						)}
 						Reload
 					</button>
+
+					<button
+						type="button"
+						className="btn btn-outline btn-sm btn-error"
+						onClick={handleRestartServer}
+						disabled={restartServer.isPending}
+						title="Restart the entire server"
+					>
+						{restartServer.isPending ? (
+							<LoadingSpinner size="sm" />
+						) : (
+							<Radio className="h-4 w-4" />
+						)}
+						Restart Server
+					</button>
 				</div>
 			</div>
 
@@ -256,6 +296,23 @@ export function ConfigurationPage() {
 					<div>
 						<div className="font-bold">Failed to reload configuration</div>
 						<div className="text-sm">{reloadConfig.error.message}</div>
+					</div>
+				</div>
+			)}
+
+			{restartServer.isSuccess && (
+				<div className="alert alert-info">
+					<Radio className="h-6 w-6" />
+					<div>Server restart initiated. Page will reload shortly...</div>
+				</div>
+			)}
+
+			{restartServer.error && (
+				<div className="alert alert-error">
+					<X className="h-6 w-6" />
+					<div>
+						<div className="font-bold">Failed to restart server</div>
+						<div className="text-sm">{restartServer.error.message}</div>
 					</div>
 				</div>
 			)}

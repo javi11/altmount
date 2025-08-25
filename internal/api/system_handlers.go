@@ -3,6 +3,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -144,15 +147,66 @@ func (s *Server) handleSystemCleanup(w http.ResponseWriter, r *http.Request) {
 
 // handleSystemRestart handles POST /api/system/restart
 func (s *Server) handleSystemRestart(w http.ResponseWriter, r *http.Request) {
-	// For now, we'll return a message indicating the restart command was received
-	// In a production system, this would trigger a graceful shutdown and restart
-	response := map[string]interface{}{
-		"message": "Restart command received. Please restart the server manually.",
-		"timestamp": time.Now(),
-		"note": "Automatic restart is not implemented for safety. Please use your process manager or restart manually.",
+	// Parse request body if present
+	var req SystemRestartRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			WriteBadRequest(w, "Invalid request body", err.Error())
+			return
+		}
+	}
+
+	s.logger.Info("System restart requested", "force", req.Force, "user_agent", r.UserAgent())
+
+	// Prepare response
+	response := SystemRestartResponse{
+		Message:   "Server restart initiated. The server will restart shortly.",
+		Timestamp: time.Now(),
+	}
+
+	// Send response immediately before restart
+	WriteSuccess(w, response, nil)
+
+	// Start restart process in a goroutine to allow response to be sent
+	go s.performRestart()
+}
+
+// performRestart performs the actual server restart
+func (s *Server) performRestart() {
+	s.logger.Info("Initiating server restart process")
+	
+	// Give a moment for the HTTP response to be sent
+	time.Sleep(100 * time.Millisecond)
+	
+	// Get the current executable path
+	executable, err := os.Executable()
+	if err != nil {
+		s.logger.Error("Failed to get executable path for restart", "error", err)
+		return
 	}
 	
-	WriteSuccess(w, response, nil)
+	s.logger.Info("Restarting server", "executable", executable, "args", os.Args)
+	
+	// Use syscall.Exec to replace the current process
+	// This preserves the process ID and is the cleanest way to restart
+	err = syscall.Exec(executable, os.Args, os.Environ())
+	if err != nil {
+		s.logger.Error("Failed to restart using syscall.Exec, trying exec.Command", "error", err)
+		
+		// Fallback: use exec.Command (this creates a new process)
+		cmd := exec.Command(executable, os.Args[1:]...)
+		cmd.Env = os.Environ()
+		
+		if err := cmd.Start(); err != nil {
+			s.logger.Error("Failed to restart server using exec.Command", "error", err)
+			return
+		}
+		
+		s.logger.Info("Server restart initiated with new process", "pid", cmd.Process.Pid)
+		
+		// Exit the current process
+		os.Exit(0)
+	}
 }
 
 // Additional system management endpoints could be added here, such as:

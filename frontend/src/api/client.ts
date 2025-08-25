@@ -384,6 +384,17 @@ export class APIClient {
 		});
 	}
 
+	// System endpoints
+	async restartServer(force: boolean = false) {
+		return this.request<{ message: string; timestamp: string }>(
+			"/system/restart",
+			{
+				method: "POST",
+				body: JSON.stringify({ force }),
+			}
+		);
+	}
+
 	// Provider endpoints
 	async testProvider(data: ProviderTestRequest) {
 		return this.request<ProviderTestResponse>("/providers/test", {
