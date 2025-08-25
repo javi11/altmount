@@ -19,6 +19,7 @@ import { StreamingConfigSection } from "../components/config/StreamingConfigSect
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
+import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { RestartRequiredBanner } from "../components/ui/RestartRequiredBanner";
@@ -32,6 +33,7 @@ import type {
 	StreamingConfig,
 	WebDAVConfig,
 	ImportConfig,
+	MetadataConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -92,7 +94,7 @@ export function ConfigurationPage() {
 	// Handle configuration updates with restart detection
 	const handleConfigUpdate = async (
 		section: string,
-		data: WebDAVConfig | StreamingConfig | ImportConfig,
+		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig,
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -125,6 +127,19 @@ export function ConfigurationPage() {
 				// Only add restart requirement after successful update
 				if (workersChanged) {
 					addRestartRequiredConfig("Import Max Processor Workers");
+				}
+			} else if (section === "metadata" && config) {
+				const metadataData = data as MetadataConfig;
+				const rootPathChanged = metadataData.root_path !== config.metadata.root_path;
+				
+				await updateConfigSection.mutateAsync({
+					section: "metadata",
+					config: { metadata: metadataData },
+				});
+				
+				// Only add restart requirement after successful update
+				if (rootPathChanged) {
+					addRestartRequiredConfig("Metadata Root Path");
 				}
 			}
 		} catch (error) {
@@ -316,6 +331,14 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "metadata" && (
+									<MetadataConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{activeSection === "streaming" && (
 									<StreamingConfigSection
 										config={config}
@@ -336,6 +359,7 @@ export function ConfigurationPage() {
 								{![
 									"webdav",
 									"import",
+									"metadata",
 									"streaming",
 									"system",
 									"providers",

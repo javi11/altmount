@@ -261,6 +261,11 @@ func (m *Manager) ValidateConfigUpdate(newConfig *Config) error {
 			return fmt.Errorf("database path cannot be changed via API - requires server restart")
 		}
 
+		// Protect metadata root path from API changes
+		if newConfig.Metadata.RootPath != currentConfig.Metadata.RootPath {
+			return fmt.Errorf("metadata root_path cannot be changed via API - requires server restart")
+		}
+
 	}
 
 	return nil

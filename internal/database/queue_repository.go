@@ -55,10 +55,10 @@ func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 	return nil
 }
 
-// IsFileInQueue checks if a file is already in the queue (simplified for scanning)
+// IsFileInQueue checks if a file is already in the queue (pending, retrying, or processing)
 func (r *QueueRepository) IsFileInQueue(filePath string) (bool, error) {
-	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? LIMIT 1`
-	
+	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'retrying', 'processing') LIMIT 1`
+
 	var exists int
 	err := r.db.QueryRow(query, filePath).Scan(&exists)
 	if err != nil {
@@ -67,7 +67,7 @@ func (r *QueueRepository) IsFileInQueue(filePath string) (bool, error) {
 		}
 		return false, fmt.Errorf("failed to check if file in queue: %w", err)
 	}
-	
+
 	return true, nil
 }
 
@@ -75,7 +75,7 @@ func (r *QueueRepository) IsFileInQueue(filePath string) (bool, error) {
 func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 	// Use immediate transaction to atomically claim an item
 	var claimedItem *ImportQueueItem
-	
+
 	err := r.withQueueTransaction(func(txRepo *QueueRepository) error {
 		// First, get the next available item ID within the transaction
 		var itemID int64
@@ -87,7 +87,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			ORDER BY priority ASC, created_at ASC
 			LIMIT 1
 		`
-		
+
 		err := txRepo.db.QueryRow(selectQuery).Scan(&itemID)
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -96,29 +96,29 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			}
 			return fmt.Errorf("failed to select queue item: %w", err)
 		}
-		
+
 		// Now atomically update that specific item and get all its data
 		updateQuery := `
 			UPDATE import_queue 
 			SET status = 'processing', started_at = datetime('now'), updated_at = datetime('now')
 			WHERE id = ? AND status IN ('pending', 'retrying')
 		`
-		
+
 		result, err := txRepo.db.Exec(updateQuery, itemID)
 		if err != nil {
 			return fmt.Errorf("failed to claim queue item %d: %w", itemID, err)
 		}
-		
+
 		rowsAffected, err := result.RowsAffected()
 		if err != nil {
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		}
-		
+
 		if rowsAffected == 0 {
 			// Item was claimed by another worker between SELECT and UPDATE
 			return nil
 		}
-		
+
 		// Get the complete claimed item data
 		getQuery := `
 			SELECT id, nzb_path, watch_root, priority, status, created_at, updated_at, 
@@ -126,7 +126,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			FROM import_queue 
 			WHERE id = ?
 		`
-		
+
 		var item ImportQueueItem
 		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
 			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
@@ -136,15 +136,15 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		if err != nil {
 			return fmt.Errorf("failed to get claimed item: %w", err)
 		}
-		
+
 		claimedItem = &item
 		return nil
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return claimedItem, nil
 }
 
@@ -202,10 +202,10 @@ func (r *QueueRepository) GetQueueStats() (*QueueStats, error) {
 		counts = append(counts, count)
 	}
 
-	stats.TotalQueued = counts[0]      // pending
-	stats.TotalProcessing = counts[1]  // processing
-	stats.TotalCompleted = counts[2]   // completed
-	stats.TotalFailed = counts[3]      // failed
+	stats.TotalQueued = counts[0]     // pending
+	stats.TotalProcessing = counts[1] // processing
+	stats.TotalCompleted = counts[2]  // completed
+	stats.TotalFailed = counts[3]     // failed
 
 	// Calculate average processing time for completed items
 	var avgProcessingTimeFloat sql.NullFloat64
@@ -218,7 +218,7 @@ func (r *QueueRepository) GetQueueStats() (*QueueStats, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate average processing time: %w", err)
 	}
-	
+
 	// Convert float to int64 for storage
 	if avgProcessingTimeFloat.Valid {
 		avgTime := int(avgProcessingTimeFloat.Float64)
