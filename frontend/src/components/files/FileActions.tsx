@@ -1,6 +1,7 @@
 import { Download, Eye, Info, MoreHorizontal, Trash2 } from "lucide-react";
 import type { WebDAVFile } from "../../types/webdav";
 import { getFileTypeInfo } from "../../utils/fileUtils";
+import { useConfirm } from "../../contexts/ModalContext";
 
 interface FileActionsProps {
 	file: WebDAVFile;
@@ -24,6 +25,7 @@ export function FileActions({
 	isDeleting = false,
 }: FileActionsProps) {
 	const filePath = `${currentPath}/${file.basename}`.replace(/\/+/g, "/");
+	const { confirmDelete } = useConfirm();
 
 	const handleDownload = () => {
 		if (file.type === "file") {
@@ -31,8 +33,9 @@ export function FileActions({
 		}
 	};
 
-	const handleDelete = () => {
-		if (confirm(`Are you sure you want to delete "${file.basename}"?`)) {
+	const handleDelete = async () => {
+		const confirmed = await confirmDelete(file.basename);
+		if (confirmed) {
 			onDelete(filePath);
 		}
 	};

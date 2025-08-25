@@ -13,6 +13,7 @@ import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { Pagination } from "../components/ui/Pagination";
 import { ManualScanSection } from "../components/queue/ManualScanSection";
+import { useConfirm } from "../contexts/ModalContext";
 import {
 	useClearCompletedQueue,
 	useDeleteQueueItem,
@@ -55,9 +56,11 @@ export function QueuePage() {
 	const deleteItem = useDeleteQueueItem();
 	const retryItem = useRetryQueueItem();
 	const clearCompleted = useClearCompletedQueue();
+	const { confirmDelete, confirmAction } = useConfirm();
 
 	const handleDelete = async (id: number) => {
-		if (confirm("Are you sure you want to delete this queue item?")) {
+		const confirmed = await confirmDelete("queue item");
+		if (confirmed) {
 			await deleteItem.mutateAsync(id);
 		}
 	};
@@ -67,7 +70,16 @@ export function QueuePage() {
 	};
 
 	const handleClearCompleted = async () => {
-		if (confirm("Are you sure you want to clear all completed items?")) {
+		const confirmed = await confirmAction(
+			"Clear Completed Items",
+			"Are you sure you want to clear all completed items? This action cannot be undone.",
+			{
+				type: "warning",
+				confirmText: "Clear All",
+				confirmButtonClass: "btn-warning"
+			}
+		);
+		if (confirmed) {
 			await clearCompleted.mutateAsync("");
 		}
 	};

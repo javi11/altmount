@@ -5,6 +5,7 @@ import { ProtectedRoute, UserManagement } from "./components/auth";
 import { Layout } from "./components/layout/Layout";
 import { ToastContainer } from "./components/ui/ToastContainer";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ModalProvider } from "./contexts/ModalContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import { queryClient } from "./lib/queryClient";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
@@ -17,8 +18,9 @@ function App() {
 	return (
 		<QueryClientProvider client={queryClient}>
 			<ToastProvider>
-				<AuthProvider>
-					<BrowserRouter>
+				<ModalProvider>
+					<AuthProvider>
+						<BrowserRouter>
 						<div className="min-h-screen bg-base-100" data-theme="light">
 							<Routes>
 								{/* Protected routes */}
@@ -56,8 +58,9 @@ function App() {
 							</Routes>
 						</div>
 						<ToastContainer />
-					</BrowserRouter>
-				</AuthProvider>
+						</BrowserRouter>
+					</AuthProvider>
+				</ModalProvider>
 			</ToastProvider>
 			<ReactQueryDevtools initialIsOpen={false} />
 		</QueryClientProvider>

@@ -13,6 +13,8 @@ import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
 import { HealthBadge } from "../components/ui/StatusBadge";
+import { useConfirm } from "../contexts/ModalContext";
+import { useToast } from "../contexts/ToastContext";
 import {
 	useAddHealthCheck,
 	useCleanupHealth,
@@ -50,16 +52,28 @@ export function HealthPage() {
 	const addHealthCheck = useAddHealthCheck();
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
+	const { confirmDelete, confirmAction } = useConfirm();
+	const { showToast } = useToast();
 
 	const handleDelete = async (filePath: string) => {
-		if (confirm("Are you sure you want to delete this health record?")) {
+		const confirmed = await confirmDelete("health record");
+		if (confirmed) {
 			await deleteItem.mutateAsync(filePath);
 		}
 	};
 
 
 	const handleCleanup = async () => {
-		if (confirm("Are you sure you want to cleanup old health records?")) {
+		const confirmed = await confirmAction(
+			"Cleanup Old Health Records",
+			"Are you sure you want to cleanup old health records? This will remove records older than 7 days.",
+			{
+				type: "warning",
+				confirmText: "Cleanup",
+				confirmButtonClass: "btn-warning"
+			}
+		);
+		if (confirmed) {
 			await cleanupHealth.mutateAsync({
 				older_than: new Date(
 					Date.now() - 7 * 24 * 60 * 60 * 1000,
@@ -70,7 +84,11 @@ export function HealthPage() {
 
 	const handleAddHealthCheck = async () => {
 		if (!healthCheckForm.file_path.trim() || !healthCheckForm.source_nzb_path?.trim()) {
-			alert("Please fill in both file path and source NZB path");
+			showToast({
+				type: 'warning',
+				title: 'Missing Required Fields',
+				message: 'Please fill in both file path and source NZB path',
+			});
 			return;
 		}
 
@@ -96,7 +114,16 @@ export function HealthPage() {
 	};
 
 	const handleCancelCheck = async (filePath: string) => {
-		if (confirm("Are you sure you want to cancel this health check?")) {
+		const confirmed = await confirmAction(
+			"Cancel Health Check",
+			"Are you sure you want to cancel this health check?",
+			{
+				type: "warning",
+				confirmText: "Cancel Check",
+				confirmButtonClass: "btn-warning"
+			}
+		);
+		if (confirmed) {
 			try {
 				await cancelHealthCheck.mutateAsync(filePath);
 			} catch (err) {

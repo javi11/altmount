@@ -12,6 +12,8 @@ import { useState } from "react";
 import { useProviders } from "../../hooks/useProviders";
 import type { ConfigResponse, ProviderConfig } from "../../types/config";
 import { ProviderModal } from "./ProviderModal";
+import { useConfirm } from "../../contexts/ModalContext";
+import { useToast } from "../../contexts/ToastContext";
 
 interface ProvidersConfigSectionProps {
 	config: ConfigResponse;
@@ -29,6 +31,8 @@ export function ProvidersConfigSection({
 	const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
 
 	const { deleteProvider, updateProvider, reorderProviders } = useProviders();
+	const { confirmDelete } = useConfirm();
+	const { showToast } = useToast();
 
 	const handleCreate = () => {
 		setEditingProvider(null);
@@ -43,12 +47,17 @@ export function ProvidersConfigSection({
 	};
 
 	const handleDelete = async (providerId: string) => {
-		if (confirm("Are you sure you want to delete this provider?")) {
+		const confirmed = await confirmDelete("provider");
+		if (confirmed) {
 			try {
 				await deleteProvider.mutateAsync(providerId);
 			} catch (error) {
 				console.error("Failed to delete provider:", error);
-				alert("Failed to delete provider. Please try again.");
+				showToast({
+					type: 'error',
+					title: 'Delete Failed',
+					message: 'Failed to delete provider. Please try again.',
+				});
 			}
 		}
 	};
@@ -61,7 +70,11 @@ export function ProvidersConfigSection({
 			});
 		} catch (error) {
 			console.error("Failed to toggle provider:", error);
-			alert("Failed to update provider. Please try again.");
+			showToast({
+				type: 'error',
+				title: 'Update Failed',
+				message: 'Failed to update provider. Please try again.',
+			});
 		}
 	};
 
@@ -128,7 +141,11 @@ export function ProvidersConfigSection({
 			});
 		} catch (error) {
 			console.error("Failed to reorder providers:", error);
-			alert("Failed to reorder providers. Please try again.");
+			showToast({
+				type: 'error',
+				title: 'Reorder Failed',
+				message: 'Failed to reorder providers. Please try again.',
+			});
 		}
 	};
 

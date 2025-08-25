@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Loader, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useProviders } from "../../hooks/useProviders";
 import type { ProviderConfig, ProviderFormData } from "../../types/config";
+import { useToast } from "../../contexts/ToastContext";
 
 interface ProviderModalProps {
 	mode: "create" | "edit";
@@ -37,6 +38,7 @@ export function ProviderModal({
 	const [canSave, setCanSave] = useState(false);
 
 	const { testProvider, createProvider, updateProvider } = useProviders();
+	const { showToast } = useToast();
 
 	// Initialize form data when provider changes
 	useEffect(() => {
@@ -79,7 +81,11 @@ export function ProviderModal({
 
 	const handleTestConnection = async () => {
 		if (!formData.host || !formData.username || !formData.password) {
-			alert("Please fill in all required fields before testing connection");
+			showToast({
+				type: 'warning',
+				title: 'Missing Required Fields',
+				message: 'Please fill in all required fields before testing connection',
+			});
 			return;
 		}
 
@@ -117,7 +123,11 @@ export function ProviderModal({
 
 	const handleSave = async () => {
 		if (!canSave) {
-			alert("Please test the connection successfully before saving");
+			showToast({
+				type: 'warning',
+				title: 'Connection Test Required',
+				message: 'Please test the connection successfully before saving',
+			});
 			return;
 		}
 
@@ -150,7 +160,11 @@ export function ProviderModal({
 			onSuccess();
 		} catch (error) {
 			console.error("Failed to save provider:", error);
-			alert("Failed to save provider. Please try again.");
+			showToast({
+				type: 'error',
+				title: 'Save Failed',
+				message: 'Failed to save provider. Please try again.',
+			});
 		}
 	};
 

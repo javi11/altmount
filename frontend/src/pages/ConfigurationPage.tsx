@@ -23,6 +23,7 @@ import { MetadataConfigSection } from "../components/config/MetadataConfigSectio
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { RestartRequiredBanner } from "../components/ui/RestartRequiredBanner";
+import { useConfirm } from "../contexts/ModalContext";
 import {
 	useConfig,
 	useReloadConfig,
@@ -58,6 +59,7 @@ export function ConfigurationPage() {
 	const reloadConfig = useReloadConfig();
 	const restartServer = useRestartServer();
 	const updateConfigSection = useUpdateConfigSection();
+	const { confirmAction } = useConfirm();
 	const [activeSection, setActiveSection] = useState<ConfigSection | "system">(
 		"webdav",
 	);
@@ -96,7 +98,16 @@ export function ConfigurationPage() {
 
 	// Handle server restart
 	const handleRestartServer = async () => {
-		if (!window.confirm("This will restart the entire server. All active connections will be lost. Continue?")) {
+		const confirmed = await confirmAction(
+			"Restart Server",
+			"This will restart the entire server. All active connections will be lost. Continue?",
+			{
+				type: "error",
+				confirmText: "Restart Server",
+				confirmButtonClass: "btn-error"
+			}
+		);
+		if (!confirmed) {
 			return;
 		}
 
