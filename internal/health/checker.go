@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -54,7 +55,8 @@ type HealthChecker struct {
 	healthRepo      *database.HealthRepository
 	metadataService *metadata.MetadataService
 	poolManager     pool.Manager
-	config          HealthConfig
+	configGetter    config.ConfigGetter
+	eventHandler    EventHandler // Optional event handler for notifications
 }
 
 // NewHealthChecker creates a new health checker
@@ -62,26 +64,45 @@ func NewHealthChecker(
 	healthRepo *database.HealthRepository,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
-	config HealthConfig,
+	configGetter config.ConfigGetter,
+	eventHandler EventHandler,
 ) *HealthChecker {
-	// Set defaults if not provided
-	if config.MaxConcurrentJobs == 0 {
-		config.MaxConcurrentJobs = 1
-	}
-	if config.MaxRetries == 0 {
-		config.MaxRetries = 5
-	}
-	if config.MaxSegmentConnections == 0 {
-		config.MaxSegmentConnections = 5
-	}
-	// CheckAllSegments defaults to false (check only first segment)
-
 	return &HealthChecker{
 		healthRepo:      healthRepo,
 		metadataService: metadataService,
 		poolManager:     poolManager,
-		config:          config,
+		configGetter:    configGetter,
+		eventHandler:    eventHandler,
 	}
+}
+
+// Helper methods to get dynamic health config values
+func (hc *HealthChecker) getMaxRetries() int {
+	retries := hc.configGetter().Health.MaxRetries
+	if retries <= 0 {
+		return 5 // Default
+	}
+	return retries
+}
+
+func (hc *HealthChecker) getMaxSegmentConnections() int {
+	connections := hc.configGetter().Health.MaxSegmentConnections
+	if connections <= 0 {
+		return 5 // Default
+	}
+	return connections
+}
+
+func (hc *HealthChecker) getCheckAllSegments() bool {
+	return hc.configGetter().Health.CheckAllSegments
+}
+
+func (hc *HealthChecker) getMaxConcurrentJobs() int {
+	jobs := hc.configGetter().Health.MaxConcurrentJobs
+	if jobs <= 0 {
+		return 1 // Default
+	}
+	return jobs
 }
 
 // CheckFile checks the health of a specific file
@@ -127,7 +148,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	}
 
 	var segmentsToCheck []*metapb.SegmentData
-	if hc.config.CheckAllSegments {
+	if hc.getCheckAllSegments() {
 		// Check all segments
 		segmentsToCheck = fileMeta.SegmentData
 	} else {
@@ -174,7 +195,7 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 
 	// Create pool with concurrency limit and context cancellation
 	p := concpool.NewWithResults[bool]().
-		WithMaxGoroutines(hc.config.MaxSegmentConnections).
+		WithMaxGoroutines(hc.getMaxSegmentConnections()).
 		WithContext(ctx)
 
 	// Check all segments concurrently using pool

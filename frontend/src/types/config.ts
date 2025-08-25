@@ -215,7 +215,6 @@ export interface ConfigSectionInfo {
 	description: string;
 	icon: string;
 	canEdit: boolean;
-	requiresRestart?: boolean;
 }
 
 // Configuration sections metadata
@@ -259,7 +258,6 @@ export const CONFIG_SECTIONS: Record<
 		description: "WebDAV server settings for file access",
 		icon: "Globe",
 		canEdit: true,
-		requiresRestart: true, // Port changes require restart
 	},
 	metadata: {
 		title: "Metadata",

@@ -213,11 +213,6 @@ export function ConfigurationPage() {
 														Read Only
 													</span>
 												)}
-												{section.requiresRestart && (
-													<span className="badge badge-warning badge-xs">
-														Restart
-													</span>
-												)}
 											</button>
 										</li>
 									);
@@ -248,16 +243,6 @@ export function ConfigurationPage() {
 											{CONFIG_SECTIONS[activeSection].description}
 										</p>
 									</div>
-								</div>
-
-								{/* Section Status */}
-								<div className="flex items-center space-x-2">
-									{CONFIG_SECTIONS[activeSection].requiresRestart && (
-										<div className="badge badge-warning">
-											<AlertTriangle className="h-3 w-3 mr-1" />
-											Requires Restart
-										</div>
-									)}
 								</div>
 							</div>
 

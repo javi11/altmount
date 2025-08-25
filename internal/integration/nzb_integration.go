@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/adapters/nzbfilesystem"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
@@ -44,7 +45,7 @@ type NzbSystem struct {
 }
 
 // NewNzbSystem creates a new NZB-backed virtual filesystem with metadata + queue architecture
-func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error) {
+func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter config.ConfigGetter) (*NzbSystem, error) {
 	// Initialize metadata service for serving files
 	metadataService := metadata.NewMetadataService(config.MetadataRootPath)
 	metadataReader := metadata.NewMetadataReader(metadataService)
@@ -102,13 +103,7 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager) (*NzbSystem, error
 		metadataService,
 		healthRepo,
 		poolManager,
-		maxDownloadWorkers,
-		nzbfilesystem.MetadataRemoteFileConfig{
-			GlobalPassword:     config.Password,
-			GlobalSalt:         config.Salt,
-			MaxRangeSize:       config.MaxRangeSize,
-			StreamingChunkSize: config.StreamingChunkSize,
-		},
+		configGetter,
 	)
 
 	// Create filesystem backed by metadata
@@ -198,29 +193,6 @@ type Stats struct {
 	TotalSize         int64
 }
 
-// UpdateDownloadWorkers implements config.WorkerPoolUpdater
-func (ns *NzbSystem) UpdateDownloadWorkers(count int) error {
-	ns.configMutex.Lock()
-	defer ns.configMutex.Unlock()
-
-	if count <= 0 {
-		return fmt.Errorf("download workers count must be greater than 0")
-	}
-
-	oldCount := ns.maxDownloadWorkers
-
-	// Update MetadataRemoteFile with new worker count
-	if nzbFs, ok := ns.fs.(*nzbfilesystem.NzbFilesystem); ok {
-		if err := nzbFs.GetRemoteFile().UpdateDownloadWorkers(count); err != nil {
-			return fmt.Errorf("failed to update download workers in MetadataRemoteFile: %w", err)
-		}
-	}
-
-	ns.maxDownloadWorkers = count
-
-	fmt.Printf("Download workers updated from %d to %d\n", oldCount, count)
-	return nil
-}
 
 // UpdateImportWorkers - removed: processor worker changes require server restart
 // The maxProcessorWorkers field is maintained for reference but changes only take effect on restart
@@ -239,32 +211,5 @@ func (ns *NzbSystem) GetImportWorkers() int {
 	return ns.maxProcessorWorkers
 }
 
-// UpdateMaxRangeSize implements config.MetadataUpdater
-func (ns *NzbSystem) UpdateMaxRangeSize(size int64) error {
-	// Update MetadataRemoteFile with new max range size
-	if nzbFs, ok := ns.fs.(*nzbfilesystem.NzbFilesystem); ok {
-		if err := nzbFs.GetRemoteFile().UpdateMaxRangeSize(size); err != nil {
-			return fmt.Errorf("failed to update max range size in MetadataRemoteFile: %w", err)
-		}
-		fmt.Printf("Max range size updated to %d bytes\n", size)
-	}
-	return nil
-}
 
-// UpdateStreamingChunkSize implements config.MetadataUpdater
-func (ns *NzbSystem) UpdateStreamingChunkSize(size int64) error {
-	// Update MetadataRemoteFile with new streaming chunk size
-	if nzbFs, ok := ns.fs.(*nzbfilesystem.NzbFilesystem); ok {
-		if err := nzbFs.GetRemoteFile().UpdateStreamingChunkSize(size); err != nil {
-			return fmt.Errorf("failed to update streaming chunk size in MetadataRemoteFile: %w", err)
-		}
-		fmt.Printf("Streaming chunk size updated to %d bytes\n", size)
-	}
-	return nil
-}
 
-// UpdateMaxDownloadWorkers implements config.MetadataUpdater
-func (ns *NzbSystem) UpdateMaxDownloadWorkers(count int) error {
-	// Delegate to the WorkerPoolUpdater method to avoid duplication
-	return ns.UpdateDownloadWorkers(count)
-}

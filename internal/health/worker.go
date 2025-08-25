@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -45,7 +46,7 @@ type HealthWorker struct {
 	healthChecker   *HealthChecker
 	healthRepo      *database.HealthRepository
 	metadataService *metadata.MetadataService
-	config          HealthConfig
+	configGetter    config.ConfigGetter
 	logger          *slog.Logger
 
 	// Worker state
@@ -70,19 +71,14 @@ func NewHealthWorker(
 	healthChecker *HealthChecker,
 	healthRepo *database.HealthRepository,
 	metadataService *metadata.MetadataService,
-	config HealthConfig,
+	configGetter config.ConfigGetter,
 	logger *slog.Logger,
 ) *HealthWorker {
-	// Set defaults if not provided
-	if config.CheckInterval == 0 {
-		config.CheckInterval = 30 * time.Minute
-	}
-
 	return &HealthWorker{
 		healthChecker:   healthChecker,
 		healthRepo:      healthRepo,
 		metadataService: metadataService,
-		config:          config,
+		configGetter:    configGetter,
 		logger:          logger,
 		status:          WorkerStatusStopped,
 		stopChan:        make(chan struct{}),
@@ -102,7 +98,7 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		return fmt.Errorf("health worker already running")
 	}
 
-	if !hw.config.Enabled {
+	if !hw.getEnabled() {
 		hw.logger.Info("Health worker is disabled in configuration")
 		return nil
 	}
@@ -115,8 +111,8 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 	})
 
 	hw.logger.Info("Starting health worker",
-		"check_interval", hw.config.CheckInterval,
-		"max_concurrent_jobs", hw.config.MaxConcurrentJobs)
+		"check_interval", hw.getCheckInterval(),
+		"max_concurrent_jobs", hw.getMaxConcurrentJobs())
 
 	// Start the main worker goroutine
 	hw.wg.Add(1)
@@ -236,7 +232,7 @@ func (hw *HealthWorker) IsCycleRunning() bool {
 
 // run is the main worker loop
 func (hw *HealthWorker) run(ctx context.Context) {
-	ticker := time.NewTicker(hw.config.CheckInterval)
+	ticker := time.NewTicker(hw.getCheckInterval())
 	defer ticker.Stop()
 
 	for {
@@ -489,7 +485,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	})
 
 	// Get unhealthy files that need checking
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(hw.config.MaxConcurrentJobs)
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(hw.getMaxConcurrentJobs())
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
@@ -501,13 +497,13 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			s.CurrentRunFilesChecked = 0
 			s.TotalRunsCompleted++
 			s.LastRunTime = &now
-			nextRun := now.Add(hw.config.CheckInterval)
+			nextRun := now.Add(hw.getCheckInterval())
 			s.NextRunTime = &nextRun
 		})
 		return nil
 	}
 
-	hw.logger.Info("Found unhealthy files to check - processing in parallel", "count", len(unhealthyFiles), "max_concurrent_jobs", hw.config.MaxConcurrentJobs)
+	hw.logger.Info("Found unhealthy files to check - processing in parallel", "count", len(unhealthyFiles), "max_concurrent_jobs", hw.getMaxConcurrentJobs())
 
 	// Process files in parallel using conc
 	wg := conc.NewWaitGroup()
@@ -546,7 +542,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		s.CurrentRunFilesChecked = 0
 		s.TotalRunsCompleted++
 		s.LastRunTime = &now
-		nextRun := now.Add(hw.config.CheckInterval)
+		nextRun := now.Add(hw.getCheckInterval())
 		s.NextRunTime = &nextRun
 	})
 
@@ -564,25 +560,23 @@ func (hw *HealthWorker) updateStats(updateFunc func(*WorkerStats)) {
 	updateFunc(&hw.stats)
 }
 
-// UpdateConfig updates the worker configuration
-func (hw *HealthWorker) UpdateConfig(config HealthConfig) error {
-	hw.mu.Lock()
-	defer hw.mu.Unlock()
+// Helper methods to get dynamic health config values
+func (hw *HealthWorker) getEnabled() bool {
+	return hw.configGetter().Health.Enabled
+}
 
-	oldEnabled := hw.config.Enabled
-	hw.config = config
-
-	// If enabled status changed, we need to restart
-	if oldEnabled != config.Enabled {
-		if hw.running {
-			hw.logger.Info("Health worker enabled status changed, restart required")
-		}
+func (hw *HealthWorker) getCheckInterval() time.Duration {
+	interval := hw.configGetter().Health.CheckInterval
+	if interval <= 0 {
+		return 30 * time.Minute // Default
 	}
+	return interval
+}
 
-	hw.logger.Info("Health worker configuration updated",
-		"enabled", config.Enabled,
-		"check_interval", config.CheckInterval,
-		"max_concurrent_jobs", config.MaxConcurrentJobs)
-
-	return nil
+func (hw *HealthWorker) getMaxConcurrentJobs() int {
+	jobs := hw.configGetter().Health.MaxConcurrentJobs
+	if jobs <= 0 {
+		return 1 // Default
+	}
+	return jobs
 }

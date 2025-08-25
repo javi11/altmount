@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
@@ -25,63 +26,68 @@ import (
 
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
-	metadataService    *metadata.MetadataService
-	healthRepository   *database.HealthRepository
-	poolManager        pool.Manager      // Pool manager for dynamic pool access
-	maxDownloadWorkers int
-	rcloneCipher       encryption.Cipher // For rclone encryption/decryption
-	globalPassword     string            // Global password fallback
-	globalSalt         string            // Global salt fallback
-	maxRangeSize       int64             // Configurable maximum range size
-	streamingChunkSize int64             // Configurable streaming chunk size
+	metadataService  *metadata.MetadataService
+	healthRepository *database.HealthRepository
+	poolManager      pool.Manager         // Pool manager for dynamic pool access
+	configGetter     config.ConfigGetter  // Dynamic config access
+	rcloneCipher     encryption.Cipher    // For rclone encryption/decryption
 }
 
-// MetadataRemoteFileConfig holds configuration for MetadataRemoteFile
-type MetadataRemoteFileConfig struct {
-	GlobalPassword         string
-	GlobalSalt             string
-	MaxRangeSize          int64 // Maximum range size for a single request (0 = use default)
-	StreamingChunkSize    int64 // Chunk size for streaming when end=-1 (0 = use default)
-}
+// Configuration is now accessed dynamically through config.ConfigGetter
+// No longer need a separate config struct
 
 // NewMetadataRemoteFile creates a new metadata-based remote file handler
 func NewMetadataRemoteFile(
 	metadataService *metadata.MetadataService,
 	healthRepository *database.HealthRepository,
 	poolManager pool.Manager,
-	maxDownloadWorkers int,
-	config MetadataRemoteFileConfig,
+	configGetter config.ConfigGetter,
 ) *MetadataRemoteFile {
 	// Initialize rclone cipher with global credentials for encrypted files
+	cfg := configGetter()
 	rcloneConfig := &encryption.Config{
-		RclonePassword: config.GlobalPassword, // Global password fallback
-		RcloneSalt:     config.GlobalSalt,     // Global salt fallback
+		RclonePassword: cfg.RClone.Password, // Global password fallback
+		RcloneSalt:     cfg.RClone.Salt,     // Global salt fallback
 	}
 
 	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
 
-	// Use configurable range sizes from config with fallback to defaults
-	maxRangeSize := config.MaxRangeSize
-	if maxRangeSize <= 0 {
-		maxRangeSize = 33554432 // Default 32MB
-	}
-
-	streamingChunkSize := config.StreamingChunkSize
-	if streamingChunkSize <= 0 {
-		streamingChunkSize = 8388608 // Default 8MB
-	}
-
 	return &MetadataRemoteFile{
-		metadataService:    metadataService,
-		healthRepository:   healthRepository,
-		poolManager:        poolManager,
-		maxDownloadWorkers: maxDownloadWorkers,
-		rcloneCipher:       rcloneCipher,
-		globalPassword:     config.GlobalPassword,
-		globalSalt:         config.GlobalSalt,
-		maxRangeSize:       maxRangeSize,
-		streamingChunkSize: streamingChunkSize,
+		metadataService:  metadataService,
+		healthRepository: healthRepository,
+		poolManager:      poolManager,
+		configGetter:     configGetter,
+		rcloneCipher:     rcloneCipher,
 	}
+}
+
+// Helper methods to get dynamic config values
+func (mrf *MetadataRemoteFile) getMaxDownloadWorkers() int {
+	return mrf.configGetter().Streaming.MaxDownloadWorkers
+}
+
+func (mrf *MetadataRemoteFile) getGlobalPassword() string {
+	return mrf.configGetter().RClone.Password
+}
+
+func (mrf *MetadataRemoteFile) getGlobalSalt() string {
+	return mrf.configGetter().RClone.Salt
+}
+
+func (mrf *MetadataRemoteFile) getMaxRangeSize() int64 {
+	size := mrf.configGetter().Streaming.MaxRangeSize
+	if size <= 0 {
+		return 33554432 // Default 32MB
+	}
+	return size
+}
+
+func (mrf *MetadataRemoteFile) getStreamingChunkSize() int64 {
+	size := mrf.configGetter().Streaming.StreamingChunkSize
+	if size <= 0 {
+		return 8388608 // Default 8MB
+	}
+	return size
 }
 
 // OpenFile opens a virtual file backed by metadata
@@ -126,12 +132,12 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		args:               r,
 		poolManager:        mrf.poolManager,
 		ctx:                ctx,
-		maxWorkers:         mrf.maxDownloadWorkers,
+		maxWorkers:         mrf.getMaxDownloadWorkers(),
 		rcloneCipher:       mrf.rcloneCipher,
-		globalPassword:     mrf.globalPassword,
-		globalSalt:         mrf.globalSalt,
-		maxRangeSize:       mrf.maxRangeSize,
-		streamingChunkSize: mrf.streamingChunkSize,
+		globalPassword:     mrf.getGlobalPassword(),
+		globalSalt:         mrf.getGlobalSalt(),
+		maxRangeSize:       mrf.getMaxRangeSize(),
+		streamingChunkSize: mrf.getStreamingChunkSize(),
 	}
 
 	return true, virtualFile, nil
@@ -897,51 +903,5 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 	}()
 }
 
-// UpdateDownloadWorkers updates the maximum download workers count dynamically
-func (mrf *MetadataRemoteFile) UpdateDownloadWorkers(count int) error {
-	if count <= 0 {
-		return fmt.Errorf("download workers count must be greater than 0")
-	}
-	
-	// Since we don't have a direct mutex, we need to be careful about concurrent access
-	// For now, we'll just update the value. In a full implementation, this might need
-	// to coordinate with any active download pools.
-	mrf.maxDownloadWorkers = count
-	
-	return nil
-}
-
-// UpdateMaxRangeSize updates the maximum range size for streaming dynamically
-func (mrf *MetadataRemoteFile) UpdateMaxRangeSize(size int64) error {
-	if size <= 0 {
-		return fmt.Errorf("max range size must be greater than 0")
-	}
-	
-	mrf.maxRangeSize = size
-	return nil
-}
-
-// UpdateStreamingChunkSize updates the streaming chunk size dynamically  
-func (mrf *MetadataRemoteFile) UpdateStreamingChunkSize(size int64) error {
-	if size <= 0 {
-		return fmt.Errorf("streaming chunk size must be greater than 0")
-	}
-	
-	mrf.streamingChunkSize = size
-	return nil
-}
-
-// GetDownloadWorkers returns the current download workers count
-func (mrf *MetadataRemoteFile) GetDownloadWorkers() int {
-	return mrf.maxDownloadWorkers
-}
-
-// GetMaxRangeSize returns the current max range size
-func (mrf *MetadataRemoteFile) GetMaxRangeSize() int64 {
-	return mrf.maxRangeSize
-}
-
-// GetStreamingChunkSize returns the current streaming chunk size
-func (mrf *MetadataRemoteFile) GetStreamingChunkSize() int64 {
-	return mrf.streamingChunkSize
-}
+// Dynamic configuration is now handled through config getters
+// No longer need update methods - values are accessed directly from current config

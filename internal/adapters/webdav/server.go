@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/internal/adapters/webdav/propfind"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
@@ -22,8 +23,9 @@ import (
 )
 
 type webdavServer struct {
-	srv       *http.Server
-	authCreds *AuthCredentials
+	srv          *http.Server
+	authCreds    *AuthCredentials
+	configGetter config.ConfigGetter
 }
 
 func NewServer(
@@ -32,8 +34,9 @@ func NewServer(
 	mux *http.ServeMux, // Use shared mux instead
 	tokenService *token.Service, // Optional token service for JWT auth
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
+	configGetter config.ConfigGetter, // Dynamic config access
 ) (*webdavServer, error) {
-	// Create dynamic auth credentials
+	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
@@ -179,8 +182,9 @@ func NewServer(
 	}
 
 	return &webdavServer{
-		srv:       srv,
-		authCreds: authCreds,
+		srv:          srv,
+		authCreds:    authCreds,
+		configGetter: configGetter,
 	}, nil
 }
 
@@ -236,4 +240,13 @@ func (s *webdavServer) Stop() {
 // GetAuthCredentials returns the auth credentials for dynamic updates
 func (s *webdavServer) GetAuthCredentials() *AuthCredentials {
 	return s.authCreds
+}
+
+// SyncAuthCredentials updates auth credentials from current config
+func (s *webdavServer) SyncAuthCredentials() {
+	if s.configGetter != nil {
+		currentConfig := s.configGetter()
+		s.authCreds.UpdateCredentials(currentConfig.WebDAV.User, currentConfig.WebDAV.Password)
+		slog.Debug("WebDAV auth credentials synced from config")
+	}
 }

@@ -53,16 +53,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create pool manager for dynamic NNTP connection management
 	poolManager := pool.NewManager(logger)
 
-	// Create component registry for dynamic configuration updates
-	componentRegistry := config.NewComponentRegistry(logger)
-
-	// Create logging updater
-	loggingUpdater := config.NewLoggingUpdater(cfg.Debug)
-	componentRegistry.RegisterLogging(loggingUpdater)
-
 	// Register configuration change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
-		logger.Info("Configuration updated")
+		logger.Info("Configuration updated", "new_config", newConfig)
 
 		// Handle provider changes dynamically
 		providersChanged := len(oldConfig.Providers) != len(newConfig.Providers)
@@ -112,8 +105,30 @@ func runServe(cmd *cobra.Command, args []string) error {
 				"new", newConfig.Metadata.RootPath)
 		}
 
-		// Apply dynamic configuration updates via component registry
-		componentRegistry.ApplyUpdates(oldConfig, newConfig)
+		// Handle debug/log level changes dynamically
+		if oldConfig.Debug != newConfig.Debug {
+			var level slog.Level
+			if newConfig.Debug {
+				level = slog.LevelDebug
+			} else {
+				level = slog.LevelInfo
+			}
+
+			// Create new structured logger
+			opts := &slog.HandlerOptions{
+				Level: level,
+			}
+
+			handler := slog.NewTextHandler(os.Stdout, opts)
+			newLogger := slog.New(handler)
+
+			// Set as default logger
+			slog.SetDefault(newLogger)
+
+			logger.Info("Log level updated",
+				"debug_mode", newConfig.Debug,
+				"log_level", level.String())
+		}
 	})
 
 	// Initialize pool if providers are configured
@@ -140,14 +155,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Salt:                cfg.RClone.Salt,
 		MaxDownloadWorkers:  cfg.Streaming.MaxDownloadWorkers,
 		MaxProcessorWorkers: cfg.Import.MaxProcessorWorkers,
-	}, poolManager)
+	}, poolManager, configManager.GetConfigGetter())
 	if err != nil {
 		logger.Error("failed to init NZB system", "err", err)
 		return err
 	}
 	defer nsys.Close()
-
-	componentRegistry.RegisterMetadata(nsys)
 
 	// Create shared HTTP mux
 	mux := http.NewServeMux()
@@ -191,8 +204,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	logger.Info("API server enabled", "prefix", "/api")
 
 	// Register API server for auth updates
-	apiAuthUpdater := api.NewAuthUpdater(apiServer)
-	componentRegistry.RegisterAPI(apiAuthUpdater)
 
 	// Create WebDAV server with shared mux
 	var tokenService *token.Service
@@ -210,7 +221,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Pass:   cfg.WebDAV.Password,
 		Debug:  cfg.WebDAV.Debug || cfg.Debug,
 		Prefix: "/webdav",
-	}, nsys.FileSystem(), mux, tokenService, webdavUserRepo)
+	}, nsys.FileSystem(), mux, tokenService, webdavUserRepo, configManager.GetConfigGetter())
 	if err != nil {
 		logger.Error("failed to start webdav", "err", err)
 		return err
@@ -219,7 +230,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Register WebDAV auth updater with dynamic credentials
 	webdavAuthUpdater := webdav.NewAuthUpdater()
 	webdavAuthUpdater.SetAuthCredentials(server.GetAuthCredentials())
-	componentRegistry.RegisterWebDAV(webdavAuthUpdater)
+
+	// Add WebDAV-specific config change handler
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		// Sync WebDAV auth credentials if they changed
+		if oldConfig.WebDAV.User != newConfig.WebDAV.User || oldConfig.WebDAV.Password != newConfig.WebDAV.Password {
+			server.SyncAuthCredentials()
+			logger.Info("WebDAV auth credentials updated",
+				"old_user", oldConfig.WebDAV.User,
+				"new_user", newConfig.WebDAV.User)
+		}
+	})
 
 	logger.Info("Starting AltMount server",
 		"webdav_port", cfg.WebDAV.Port,
@@ -234,15 +255,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create health worker if enabled
 	var healthWorker *health.HealthWorker
 	if cfg.Health.Enabled {
-		healthConfig := health.HealthConfig{
-			Enabled:               cfg.Health.Enabled,
-			CheckInterval:         cfg.Health.CheckInterval,
-			MaxConcurrentJobs:     cfg.Health.MaxConcurrentJobs,
-			MaxRetries:            cfg.Health.MaxRetries,
-			MaxSegmentConnections: cfg.Health.MaxSegmentConnections,
-			CheckAllSegments:      cfg.Health.CheckAllSegments,
-		}
-
 		// Create metadata service for health worker
 		metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
 
@@ -251,14 +263,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 			healthRepo,
 			metadataService,
 			poolManager,
-			healthConfig,
+			configManager.GetConfigGetter(),
+			nil, // No event handler for now
 		)
 
 		healthWorker = health.NewHealthWorker(
 			healthChecker,
 			healthRepo,
 			metadataService,
-			healthConfig,
+			configManager.GetConfigGetter(),
 			logger,
 		)
 

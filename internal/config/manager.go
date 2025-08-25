@@ -184,6 +184,9 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 // ChangeCallback represents a function called when configuration changes
 type ChangeCallback func(oldConfig, newConfig *Config)
 
+// ConfigGetter represents a function that returns the current configuration
+type ConfigGetter func() *Config
+
 // Manager manages configuration state and persistence
 type Manager struct {
 	current    *Config
@@ -205,6 +208,11 @@ func (m *Manager) GetConfig() *Config {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.current
+}
+
+// GetConfigGetter returns a function that provides the current configuration
+func (m *Manager) GetConfigGetter() ConfigGetter {
+	return m.GetConfig
 }
 
 // UpdateConfig updates the current configuration (thread-safe)
