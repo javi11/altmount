@@ -3,7 +3,7 @@
 CREATE TABLE import_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nzb_path TEXT NOT NULL,
-    watch_root TEXT DEFAULT NULL,
+    relative_path TEXT DEFAULT NULL,
     priority INTEGER NOT NULL DEFAULT 1, -- 1=high, 2=normal, 3=low
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'retrying')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

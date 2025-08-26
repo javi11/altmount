@@ -39,11 +39,11 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 
 // ProcessNzbFile processes an NZB file and stores it in the database
 func (proc *Processor) ProcessNzbFile(nzbPath string) error {
-	return proc.ProcessNzbFileWithRoot(nzbPath, "")
+	return proc.ProcessNzbFileWithRelativePath(nzbPath, "")
 }
 
-// ProcessNzbFileWithRoot processes an NZB or STRM file maintaining the folder structure relative to watchRoot
-func (proc *Processor) ProcessNzbFileWithRoot(filePath, watchRoot string) error {
+// ProcessNzbFileWithelativePath processes an NZB or STRM file maintaining the folder structure relative to relative path
+func (proc *Processor) ProcessNzbFileWithRelativePath(filePath, relativePath string) error {
 	// Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -77,7 +77,7 @@ func (proc *Processor) ProcessNzbFileWithRoot(filePath, watchRoot string) error 
 	}
 
 	// Calculate the relative virtual directory path for this file
-	virtualDir := proc.calculateVirtualDirectory(filePath, watchRoot)
+	virtualDir := proc.calculateVirtualDirectory(filePath, relativePath)
 
 	proc.log.Info("Processing file",
 		"file_path", filePath,
@@ -419,18 +419,18 @@ func (proc *Processor) analyzeDirectoryStructureWithBase(files []ParsedFile, bas
 }
 
 // calculateVirtualDirectory determines the virtual directory path based on NZB file location relative to watch root
-func (proc *Processor) calculateVirtualDirectory(nzbPath, watchRoot string) string {
-	if watchRoot == "" {
+func (proc *Processor) calculateVirtualDirectory(nzbPath, relativePath string) string {
+	if relativePath == "" {
 		// No watch root specified, place in root directory
 		return "/"
 	}
 
 	// Clean paths for consistent comparison
 	nzbPath = filepath.Clean(nzbPath)
-	watchRoot = filepath.Clean(watchRoot)
+	relativePath = filepath.Clean(relativePath)
 
 	// Get relative path from watch root to NZB file
-	relPath, err := filepath.Rel(watchRoot, nzbPath)
+	relPath, err := filepath.Rel(relativePath, nzbPath)
 	if err != nil {
 		// If we can't get relative path, default to root
 		return "/"

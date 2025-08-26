@@ -29,7 +29,7 @@ export interface QueueItem {
 	nzb_path: string;
 	target_path: string;
 	category?: string;
-	watch_root?: string;
+	relative_path?: string;
 	priority: number;
 	status: QueueStatus;
 	created_at: string;

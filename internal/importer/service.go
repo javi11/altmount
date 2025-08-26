@@ -32,13 +32,13 @@ const (
 
 // ScanInfo holds information about the current scan operation
 type ScanInfo struct {
-	Status        ScanStatus `json:"status"`
-	Path          string     `json:"path,omitempty"`
-	StartTime     *time.Time `json:"start_time,omitempty"`
-	FilesFound    int        `json:"files_found"`
-	FilesAdded    int        `json:"files_added"`
-	CurrentFile   string     `json:"current_file,omitempty"`
-	LastError     *string    `json:"last_error,omitempty"`
+	Status      ScanStatus `json:"status"`
+	Path        string     `json:"path,omitempty"`
+	StartTime   *time.Time `json:"start_time,omitempty"`
+	FilesFound  int        `json:"files_found"`
+	FilesAdded  int        `json:"files_added"`
+	CurrentFile string     `json:"current_file,omitempty"`
+	LastError   *string    `json:"last_error,omitempty"`
 }
 
 // Service provides NZB import functionality with manual directory scanning and queue-based processing
@@ -333,15 +333,15 @@ func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 }
 
 // addToQueue adds a new NZB file to the import queue
-func (s *Service) addToQueue(filePath string, watchRoot *string) {
+func (s *Service) addToQueue(filePath string, relativePath *string) {
 	item := &database.ImportQueueItem{
-		NzbPath:    filePath,
-		WatchRoot:  watchRoot,
-		Priority:   database.QueuePriorityNormal,
-		Status:     database.QueueStatusPending,
-		RetryCount: 0,
-		MaxRetries: 3,
-		CreatedAt:  time.Now(),
+		NzbPath:      filePath,
+		RelativePath: relativePath,
+		Priority:     database.QueuePriorityNormal,
+		Status:       database.QueueStatusPending,
+		RetryCount:   0,
+		MaxRetries:   3,
+		CreatedAt:    time.Now(),
 	}
 
 	if err := s.database.Repository.AddToQueue(item); err != nil {
@@ -442,8 +442,8 @@ func (s *Service) processQueueItems(workerID int) {
 
 	// Step 3: Process the NZB file and write to main database
 	var processingErr error
-	if item.WatchRoot != nil {
-		processingErr = s.processor.ProcessNzbFileWithRoot(item.NzbPath, *item.WatchRoot)
+	if item.RelativePath != nil {
+		processingErr = s.processor.ProcessNzbFileWithRelativePath(item.NzbPath, *item.RelativePath)
 	} else {
 		processingErr = s.processor.ProcessNzbFile(item.NzbPath)
 	}
@@ -458,7 +458,7 @@ func (s *Service) processQueueItems(workerID int) {
 			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
 		} else {
 			log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
-			
+
 			// Notify rclone VFS about the new import (async, don't fail on error)
 			s.notifyRcloneVFS(item, log)
 		}
@@ -499,10 +499,10 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 
 // ServiceStats holds statistics about the service
 type ServiceStats struct {
-	IsRunning    bool                 `json:"is_running"`
-	Workers      int                  `json:"workers"`
-	QueueStats   *database.QueueStats `json:"queue_stats,omitempty"`
-	ScanInfo     ScanInfo             `json:"scan_info"`
+	IsRunning  bool                 `json:"is_running"`
+	Workers    int                  `json:"workers"`
+	QueueStats *database.QueueStats `json:"queue_stats,omitempty"`
+	ScanInfo   ScanInfo             `json:"scan_info"`
 }
 
 // GetStats returns service statistics
@@ -559,9 +559,9 @@ func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logg
 
 	// Calculate the virtual directory path for VFS notification
 	var virtualDir string
-	if item.WatchRoot != nil {
+	if item.RelativePath != nil {
 		// Calculate virtual directory based on NZB file location relative to watch root
-		virtualDir = s.calculateVirtualDirectory(item.NzbPath, *item.WatchRoot)
+		virtualDir = s.calculateVirtualDirectory(item.NzbPath, *item.RelativePath)
 	} else {
 		// Default to root if no watch root specified
 		virtualDir = "/"
@@ -574,31 +574,31 @@ func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logg
 
 		err := s.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
 		if err != nil {
-			log.Warn("Failed to notify rclone VFS about new import", 
-				"queue_id", item.ID, 
-				"file", item.NzbPath, 
-				"virtual_dir", virtualDir, 
+			log.Warn("Failed to notify rclone VFS about new import",
+				"queue_id", item.ID,
+				"file", item.NzbPath,
+				"virtual_dir", virtualDir,
 				"error", err)
 		} else {
-			log.Debug("Successfully notified rclone VFS about new import", 
-				"queue_id", item.ID, 
+			log.Debug("Successfully notified rclone VFS about new import",
+				"queue_id", item.ID,
 				"virtual_dir", virtualDir)
 		}
 	}()
 }
 
 // calculateVirtualDirectory calculates the virtual directory for VFS notification
-func (s *Service) calculateVirtualDirectory(nzbPath, watchRoot string) string {
-	if watchRoot == "" {
+func (s *Service) calculateVirtualDirectory(nzbPath, relativePath string) string {
+	if relativePath == "" {
 		return "/"
 	}
 
 	// Clean paths for consistent comparison
 	nzbPath = filepath.Clean(nzbPath)
-	watchRoot = filepath.Clean(watchRoot)
+	relativePath = filepath.Clean(relativePath)
 
 	// Get relative path from watch root to NZB file
-	relPath, err := filepath.Rel(watchRoot, nzbPath)
+	relPath, err := filepath.Rel(relativePath, nzbPath)
 	if err != nil {
 		// If we can't get relative path, default to root
 		return "/"

@@ -104,7 +104,7 @@ func (r *Repository) withTransactionMode(mode string, fn func(*Repository) error
 func (r *Repository) AddToQueue(item *ImportQueueItem) error {
 	// Use UPSERT with immediate lock to prevent conflicts during concurrent inserts
 	query := `
-		INSERT INTO import_queue (nzb_path, watch_root, category, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
+		INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(nzb_path) DO UPDATE SET
 		priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
@@ -116,7 +116,7 @@ func (r *Repository) AddToQueue(item *ImportQueueItem) error {
 	`
 
 	result, err := r.db.Exec(query,
-		item.NzbPath, item.WatchRoot, item.Category, item.Priority, item.Status,
+		item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
 		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to add to queue: %w", err)
@@ -139,7 +139,7 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 	// Use a CTE to select items and immediately mark them as claimed to avoid race conditions
 	query := `
 		WITH selected_items AS (
-			SELECT id, nzb_path, watch_root, category, priority, status, created_at, updated_at, 
+			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
 			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
 			FROM import_queue 
 			WHERE status IN ('pending', 'retrying') 
@@ -161,7 +161,7 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 	for rows.Next() {
 		var item ImportQueueItem
 		err := rows.Scan(
-			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Category, &item.Priority, &item.Status,
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
 		)
@@ -225,7 +225,7 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 
 		// Get the complete claimed item data
 		getQuery := `
-			SELECT id, nzb_path, watch_root, category, priority, status, created_at, updated_at, 
+			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
 			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
 			FROM import_queue 
 			WHERE id = ?
@@ -233,7 +233,7 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 
 		var item ImportQueueItem
 		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
-			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Category, &item.Priority, &item.Status,
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
 		)
@@ -262,7 +262,7 @@ func (r *Repository) AddBatchToQueue(items []*ImportQueueItem) error {
 	return r.WithImmediateTransaction(func(txRepo *Repository) error {
 		// Prepare batch insert statement
 		query := `
-			INSERT INTO import_queue (nzb_path, watch_root, category, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
+			INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 			ON CONFLICT(nzb_path) DO UPDATE SET
 			priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
@@ -276,7 +276,7 @@ func (r *Repository) AddBatchToQueue(items []*ImportQueueItem) error {
 		now := time.Now()
 		for _, item := range items {
 			result, err := txRepo.db.Exec(query,
-				item.NzbPath, item.WatchRoot, item.Category, item.Priority, item.Status,
+				item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
 				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata)
 			if err != nil {
 				return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
@@ -326,14 +326,14 @@ func (r *Repository) UpdateQueueItemStatus(id int64, status QueueStatus, errorMe
 // GetQueueItem retrieves a specific queue item by ID
 func (r *Repository) GetQueueItem(id int64) (*ImportQueueItem, error) {
 	query := `
-		SELECT id, nzb_path, watch_root, category, priority, status, created_at, updated_at,
+		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
 		FROM import_queue WHERE id = ?
 	`
 
 	var item ImportQueueItem
 	err := r.db.QueryRow(query, id).Scan(
-		&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
+		&item.ID, &item.NzbPath, &item.RelativePath, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
 	)
@@ -351,14 +351,14 @@ func (r *Repository) GetQueueItem(id int64) (*ImportQueueItem, error) {
 // GetQueueItemByPath retrieves a queue item by NZB path
 func (r *Repository) GetQueueItemByPath(nzbPath string) (*ImportQueueItem, error) {
 	query := `
-		SELECT id, nzb_path, watch_root, category, priority, status, created_at, updated_at,
+		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
 		FROM import_queue WHERE nzb_path = ?
 	`
 
 	var item ImportQueueItem
 	err := r.db.QueryRow(query, nzbPath).Scan(
-		&item.ID, &item.NzbPath, &item.WatchRoot, &item.Priority, &item.Status,
+		&item.ID, &item.NzbPath, &item.RelativePath, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
 	)
@@ -499,7 +499,7 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 	var query string
 	var args []interface{}
 
-	baseSelect := `SELECT id, nzb_path, watch_root, category, priority, status, created_at, updated_at,
+	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
 	               FROM import_queue`
 
@@ -512,7 +512,7 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 	}
 
 	if search != "" {
-		conditions = append(conditions, "(nzb_path LIKE ? OR watch_root LIKE ?)")
+		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
 		searchPattern := "%" + search + "%"
 		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
 	}
@@ -536,7 +536,7 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 	for rows.Next() {
 		var item ImportQueueItem
 		err := rows.Scan(
-			&item.ID, &item.NzbPath, &item.WatchRoot, &item.Category, &item.Priority, &item.Status,
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
 		)
@@ -565,7 +565,7 @@ func (r *Repository) CountQueueItems(status *QueueStatus, search string) (int, e
 	}
 
 	if search != "" {
-		conditions = append(conditions, "(nzb_path LIKE ? OR watch_root LIKE ?)")
+		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
 		searchPattern := "%" + search + "%"
 		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
 	}

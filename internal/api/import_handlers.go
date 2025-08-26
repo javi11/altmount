@@ -87,6 +87,14 @@ func (s *Server) handleManualImportFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	var relativePath *string
+
+	// Path that will be stripped from the file destination
+	rp := r.URL.Query().Get("relative_path")
+	if rp != "" {
+		relativePath = &rp
+	}
+
 	// Validate API key using the refactored validation function
 	if !s.validateAPIKey(r, apiKey) {
 		WriteUnauthorized(w, "Invalid API key", "The provided API key is not valid")
@@ -143,12 +151,13 @@ func (s *Server) handleManualImportFile(w http.ResponseWriter, r *http.Request) 
 
 	// Add the file to the processing queue
 	item := &database.ImportQueueItem{
-		NzbPath:    req.FilePath,
-		Priority:   database.QueuePriorityNormal,
-		Status:     database.QueueStatusPending,
-		RetryCount: 0,
-		MaxRetries: 3,
-		CreatedAt:  time.Now(),
+		NzbPath:      req.FilePath,
+		Priority:     database.QueuePriorityNormal,
+		Status:       database.QueueStatusPending,
+		RetryCount:   0,
+		MaxRetries:   3,
+		CreatedAt:    time.Now(),
+		RelativePath: relativePath,
 	}
 
 	err = s.queueRepo.AddToQueue(item)

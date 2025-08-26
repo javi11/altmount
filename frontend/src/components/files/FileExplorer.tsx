@@ -1,5 +1,5 @@
-import { AlertTriangle, RefreshCw, Wifi, WifiOff } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, RefreshCw, Search, Wifi, WifiOff, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useFilePreview } from "../../hooks/useFilePreview";
 import { useWebDAVDirectory, useWebDAVFileOperations } from "../../hooks/useWebDAV";
 import type { WebDAVFile } from "../../types/webdav";
@@ -26,6 +26,7 @@ export function FileExplorer({
 	onRetryConnection,
 }: FileExplorerProps) {
 	const [currentPath, setCurrentPath] = useState("/");
+	const [searchTerm, setSearchTerm] = useState("");
 
 	const {
 		data: directory,
@@ -49,6 +50,17 @@ export function FileExplorer({
 
 	const preview = useFilePreview();
 
+	// Filter files based on search term
+	const filteredFiles = useMemo(() => {
+		if (!directory?.files || !searchTerm.trim()) {
+			return directory?.files || [];
+		}
+		
+		return directory.files.filter((file) =>
+			file.basename.toLowerCase().includes(searchTerm.toLowerCase())
+		);
+	}, [directory?.files, searchTerm]);
+
 	// File info modal state
 	const [fileInfoModal, setFileInfoModal] = useState<{
 		isOpen: boolean;
@@ -60,6 +72,11 @@ export function FileExplorer({
 
 	const handleNavigate = (path: string) => {
 		setCurrentPath(path);
+		setSearchTerm(""); // Clear search when navigating
+	};
+
+	const handleClearSearch = () => {
+		setSearchTerm("");
 	};
 
 	const handleDownload = (path: string, filename: string) => {
@@ -71,8 +88,8 @@ export function FileExplorer({
 	};
 
 	const handleFileInfo = (path: string) => {
-		// Find the file object from the current directory
-		const file = directory?.files.find((f) => {
+		// Find the file object from the filtered files
+		const file = filteredFiles.find((f) => {
 			const filePath = `${currentPath}/${f.basename}`.replace(/\/+/g, "/");
 			return filePath === path;
 		});
@@ -186,6 +203,34 @@ export function FileExplorer({
 				</div>
 			</div>
 
+			{/* Search Bar */}
+			<div className="card bg-base-100 shadow-md">
+				<div className="card-body p-4">
+					<div className="relative">
+						<div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+							<Search className="h-4 w-4 text-base-content/50" />
+						</div>
+						<input
+							type="text"
+							placeholder="Search in current directory..."
+							className="input input-bordered w-full pr-10 pl-10"
+							value={searchTerm}
+							onChange={(e) => setSearchTerm(e.target.value)}
+						/>
+						{searchTerm && (
+							<button
+								type="button"
+								className="absolute inset-y-0 right-0 flex items-center pr-3 hover:text-base-content/70"
+								onClick={handleClearSearch}
+								aria-label="Clear search"
+							>
+								<X className="h-4 w-4 text-base-content/50" />
+							</button>
+						)}
+					</div>
+				</div>
+			</div>
+
 			{/* Breadcrumb Navigation */}
 			<div className="card bg-base-100 shadow-md">
 				<div className="card-body p-4">
@@ -207,11 +252,16 @@ export function FileExplorer({
 			{/* File List */}
 			<div className="card bg-base-100 shadow-md">
 				<div className="card-body p-6">
+					{searchTerm && directory && (
+						<div className="mb-4 text-base-content/70 text-sm">
+							{filteredFiles.length} of {directory.files.length} items match "{searchTerm}"
+						</div>
+					)}
 					{isLoading && isConnected ? (
 						<LoadingSpinner />
 					) : directory ? (
 						<FileList
-							files={directory.files}
+							files={filteredFiles}
 							currentPath={currentPath}
 							onNavigate={handleNavigate}
 							onDownload={handleDownload}

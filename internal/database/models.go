@@ -28,7 +28,7 @@ const (
 type ImportQueueItem struct {
 	ID           int64         `db:"id"`
 	NzbPath      string        `db:"nzb_path"`
-	WatchRoot    *string       `db:"watch_root"`
+	RelativePath *string       `db:"relative_path"`
 	Category     *string       `db:"category"` // SABnzbd-compatible category
 	Priority     QueuePriority `db:"priority"`
 	Status       QueueStatus   `db:"status"`
