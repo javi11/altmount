@@ -114,9 +114,35 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create temporary file
+	// Get and validate category from form first
+	category := r.FormValue("cat")
+	validatedCategory, err := s.validateSABnzbdCategory(category)
+	if err != nil {
+		s.writeSABnzbdError(w, err.Error())
+		return
+	}
+
+	// Build category path and create temporary file with category subdirectory
 	tempDir := os.TempDir()
-	tempFile := filepath.Join(tempDir, completeDir, header.Filename)
+	categoryPath := s.buildCategoryPath(validatedCategory)
+	var tempFile string
+	if categoryPath != "" {
+		tempFile = filepath.Join(tempDir, completeDir, categoryPath, header.Filename)
+		// Ensure category directory exists
+		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
+		if err := os.MkdirAll(categoryDir, 0755); err != nil {
+			s.writeSABnzbdError(w, "Failed to create category directory")
+			return
+		}
+	} else {
+		tempFile = filepath.Join(tempDir, completeDir, header.Filename)
+		// Ensure base directory exists
+		baseDir := filepath.Join(tempDir, completeDir)
+		if err := os.MkdirAll(baseDir, 0755); err != nil {
+			s.writeSABnzbdError(w, "Failed to create base directory")
+			return
+		}
+	}
 
 	outFile, err := os.Create(tempFile)
 	if err != nil {
@@ -138,13 +164,7 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get and validate category from form
-	category := r.FormValue("cat")
-	validatedCategory, err := s.validateSABnzbdCategory(category)
-	if err != nil {
-		s.writeSABnzbdError(w, err.Error())
-		return
-	}
+	// Category validation was moved above file creation
 
 	// Add the file to the processing queue
 	item := &database.ImportQueueItem{
@@ -195,7 +215,15 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create temporary file
+	// Get and validate category from query parameters first
+	category := query.Get("cat")
+	validatedCategory, err := s.validateSABnzbdCategory(category)
+	if err != nil {
+		s.writeSABnzbdError(w, err.Error())
+		return
+	}
+
+	// Create temporary file with category path
 	tempDir := os.TempDir()
 
 	// Extract filename from URL or use default
@@ -211,7 +239,26 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		filename += ".nzb"
 	}
 
-	tempFile := filepath.Join(tempDir, completeDir, filename)
+	// Build category path and create temporary file with category subdirectory
+	categoryPath := s.buildCategoryPath(validatedCategory)
+	var tempFile string
+	if categoryPath != "" {
+		tempFile = filepath.Join(tempDir, completeDir, categoryPath, filename)
+		// Ensure category directory exists
+		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
+		if err := os.MkdirAll(categoryDir, 0755); err != nil {
+			s.writeSABnzbdError(w, "Failed to create category directory")
+			return
+		}
+	} else {
+		tempFile = filepath.Join(tempDir, completeDir, filename)
+		// Ensure base directory exists
+		baseDir := filepath.Join(tempDir, completeDir)
+		if err := os.MkdirAll(baseDir, 0755); err != nil {
+			s.writeSABnzbdError(w, "Failed to create base directory")
+			return
+		}
+	}
 
 	outFile, err := os.Create(tempFile)
 	if err != nil {
@@ -233,13 +280,7 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get and validate category from query parameters
-	category := query.Get("cat")
-	validatedCategory, err := s.validateSABnzbdCategory(category)
-	if err != nil {
-		s.writeSABnzbdError(w, err.Error())
-		return
-	}
+	// Category validation was moved above file creation
 
 	item := &database.ImportQueueItem{
 		NzbPath:    tempFile,
@@ -513,7 +554,7 @@ func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) 
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 
-		completeDir := path.Join(cfg.SABnzbd.MountDir, completeDir)
+		completeDirPath := path.Join(cfg.SABnzbd.MountDir, completeDir)
 		// Build categories from configuration
 		categories := make(map[string]interface{})
 
@@ -544,7 +585,7 @@ func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) 
 		}
 
 		config = map[string]interface{}{
-			"complete_dir": completeDir,
+			"complete_dir": completeDirPath,
 			"categories":   categories,
 		}
 	} else {
@@ -594,6 +635,40 @@ func (s *Server) parseSABnzbdPriority(priority string) database.QueuePriority {
 	default:
 		return database.QueuePriorityNormal
 	}
+}
+
+// buildCategoryPath builds the directory path for a category
+func (s *Server) buildCategoryPath(category string) string {
+	// Return empty for default category (no subdirectory)
+	if category == "default" || category == "" {
+		return ""
+	}
+
+	if s.configManager == nil {
+		// No config manager, use category name as directory
+		return category
+	}
+
+	config := s.configManager.GetConfig()
+	
+	// If no categories are configured, use category name as directory
+	if len(config.SABnzbd.Categories) == 0 {
+		return category
+	}
+
+	// Look for the category in configuration
+	for _, configCategory := range config.SABnzbd.Categories {
+		if configCategory.Name == category {
+			// Use configured Dir if available, otherwise use category name
+			if configCategory.Dir != "" {
+				return configCategory.Dir
+			}
+			return category
+		}
+	}
+
+	// Category not found in configuration, use category name as directory
+	return category
 }
 
 // validateSABnzbdCategory validates and returns the category, or error if invalid
