@@ -23,14 +23,13 @@ import (
 	"github.com/spf13/afero"
 )
 
-
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
-	poolManager      pool.Manager         // Pool manager for dynamic pool access
-	configGetter     config.ConfigGetter  // Dynamic config access
-	rcloneCipher     encryption.Cipher    // For rclone encryption/decryption
+	poolManager      pool.Manager        // Pool manager for dynamic pool access
+	configGetter     config.ConfigGetter // Dynamic config access
+	rcloneCipher     encryption.Cipher   // For rclone encryption/decryption
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -121,6 +120,10 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 
 	if fileMeta == nil {
 		return false, nil, nil
+	}
+
+	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
+		return false, nil, ErrFileIsCorrupted
 	}
 
 	// Create a metadata-based virtual file handle
@@ -451,14 +454,14 @@ type MetadataVirtualFile struct {
 	readerInitialized bool
 	position          int64
 	currentRangeStart int64 // Start of current reader's range
-	currentRangeEnd   int64 // End of current reader's range  
+	currentRangeEnd   int64 // End of current reader's range
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
-	
+
 	// Configurable range settings
 	maxRangeSize       int64 // Maximum range size for a single request
 	streamingChunkSize int64 // Chunk size for streaming when end=-1
-	
-	mu                sync.Mutex
+
+	mu sync.Mutex
 }
 
 // Read implements afero.File.Read
@@ -480,14 +483,14 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		if errors.Is(err, io.EOF) && mvf.hasMoreDataToRead() {
 			// Close current reader and create a new one for the next range
 			mvf.closeCurrentReader()
-			
+
 			// Try to create a new reader for the remaining data
 			if newReaderErr := mvf.ensureReader(); newReaderErr != nil {
 				// If we can't create a new reader, return what we have
 				mvf.position += int64(totalRead)
 				return totalRead, err
 			}
-			
+
 			// Try to read more data with the new reader
 			if totalRead < len(p) {
 				additionalRead, newErr := mvf.reader.Read(p[totalRead:])
@@ -499,13 +502,13 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				}
 			}
 		}
-		
+
 		var articleErr *usenet.ArticleNotFoundError
 		// Handle UsenetReader errors the same way as VirtualFile
 		if errors.As(err, &articleErr) {
 			// Update file health status and database tracking
 			mvf.updateFileHealthOnError(articleErr, articleErr.BytesRead > 0 || totalRead > 0)
-			
+
 			if articleErr.BytesRead > 0 || totalRead > 0 {
 				// Some content was read - return partial content error
 				return totalRead, &PartialContentError{
@@ -521,7 +524,7 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				}
 			}
 		}
-		
+
 		// Update position even on error if we read some data
 		mvf.position += int64(totalRead)
 		return totalRead, err
@@ -744,12 +747,12 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 // Only applies limiting when end=-1 or when the requested range exceeds safe memory limits
 func (mvf *MetadataVirtualFile) calculateIntelligentRange(start, end int64) (int64, int64) {
 	fileSize := mvf.fileMeta.FileSize
-	
+
 	// Handle empty files - return invalid range that will result in no segments
 	if fileSize == 0 {
 		return 0, -1 // Invalid range for empty file
 	}
-	
+
 	// Ensure start is within bounds
 	if start < 0 {
 		start = 0
@@ -762,7 +765,7 @@ func (mvf *MetadataVirtualFile) calculateIntelligentRange(start, end int64) (int
 	if end == -1 {
 		// Calculate a reasonable chunk size based on remaining file size
 		remaining := fileSize - start
-		
+
 		// If remaining size is smaller than configured streaming chunk size, use all remaining
 		if remaining <= mvf.streamingChunkSize {
 			end = fileSize - 1
@@ -775,7 +778,7 @@ func (mvf *MetadataVirtualFile) calculateIntelligentRange(start, end int64) (int
 		if end >= fileSize {
 			end = fileSize - 1
 		}
-		
+
 		// Only apply maximum range size limit if the requested range is excessively large
 		// This preserves the original range request for reasonable sizes
 		rangeSize := end - start + 1
@@ -862,7 +865,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 	// Determine the appropriate status
 	var metadataStatus metapb.FileStatus
 	var dbStatus database.HealthStatus
-	
+
 	if hasPartialContent {
 		metadataStatus = metapb.FileStatus_FILE_STATUS_PARTIAL
 		dbStatus = database.HealthStatusPartial
@@ -870,7 +873,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 		metadataStatus = metapb.FileStatus_FILE_STATUS_CORRUPTED
 		dbStatus = database.HealthStatusCorrupted
 	}
-	
+
 	// Update metadata status (non-blocking)
 	go func() {
 		if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
@@ -878,7 +881,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 			fmt.Printf("Warning: failed to update metadata status for %s: %v\n", mvf.name, err)
 		}
 	}()
-	
+
 	// Update database health tracking (non-blocking)
 	go func() {
 		errorMsg := articleErr.Error()
@@ -886,16 +889,16 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 		if *sourceNzbPath == "" {
 			sourceNzbPath = nil
 		}
-		
+
 		// Create error details JSON
-		errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`, 
+		errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
 			1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
-		
+
 		if err := mvf.healthRepository.UpdateFileHealth(
-			mvf.name, 
-			dbStatus, 
-			&errorMsg, 
-			sourceNzbPath, 
+			mvf.name,
+			dbStatus,
+			&errorMsg,
+			sourceNzbPath,
 			&errorDetails,
 		); err != nil {
 			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)

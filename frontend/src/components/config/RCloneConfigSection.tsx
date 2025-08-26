@@ -1,4 +1,4 @@
-import { Save, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, RCloneVFSFormData } from "../../types/config";
 
@@ -34,16 +34,12 @@ export function RCloneConfigSection({
 		};
 		setFormData(newFormData);
 		setHasChanges(false);
-	}, [
-		config.rclone.vfs_enabled,
-		config.rclone.vfs_url,
-		config.rclone.vfs_user,
-	]);
+	}, [config.rclone.vfs_enabled, config.rclone.vfs_url, config.rclone.vfs_user]);
 
 	const handleInputChange = (field: keyof RCloneVFSFormData, value: string | boolean) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
-		
+
 		// Check for changes by comparing against original config
 		const configData = {
 			vfs_enabled: config.rclone.vfs_enabled,
@@ -51,14 +47,14 @@ export function RCloneConfigSection({
 			vfs_user: config.rclone.vfs_user,
 			vfs_pass: "",
 		};
-		
+
 		// Always consider changes if VFS password is entered
 		const vfsPasswordChanged = newData.vfs_pass !== "";
-		const otherFieldsChanged = 
+		const otherFieldsChanged =
 			newData.vfs_enabled !== configData.vfs_enabled ||
 			newData.vfs_url !== configData.vfs_url ||
 			newData.vfs_user !== configData.vfs_user;
-		
+
 		setHasChanges(vfsPasswordChanged || otherFieldsChanged);
 	};
 
@@ -70,11 +66,11 @@ export function RCloneConfigSection({
 				vfs_url: formData.vfs_url,
 				vfs_user: formData.vfs_user,
 			};
-			
+
 			if (formData.vfs_pass.trim() !== "") {
 				updateData.vfs_pass = formData.vfs_pass;
 			}
-			
+
 			await onUpdate("rclone", updateData);
 			setHasChanges(false);
 		}
@@ -83,11 +79,11 @@ export function RCloneConfigSection({
 	return (
 		<div className="space-y-4">
 			<h3 className="font-semibold text-lg">RClone VFS Configuration</h3>
-			
+
 			{/* VFS Settings */}
 			<div className="space-y-4">
 				<h4 className="font-medium text-base">VFS Notification Settings</h4>
-				
+
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Enable VFS Notifications</legend>
 					<label className="label cursor-pointer">
@@ -117,9 +113,7 @@ export function RCloneConfigSection({
 								onChange={(e) => handleInputChange("vfs_url", e.target.value)}
 								placeholder="http://localhost:5572"
 							/>
-							<p className="label">
-								RClone RC API URL (e.g., http://localhost:5572)
-							</p>
+							<p className="label">RClone RC API URL (e.g., http://localhost:5572)</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
@@ -132,9 +126,7 @@ export function RCloneConfigSection({
 								onChange={(e) => handleInputChange("vfs_user", e.target.value)}
 								placeholder="Enter VFS username (optional)"
 							/>
-							<p className="label">
-								Username for RClone RC API authentication (optional)
-							</p>
+							<p className="label">Username for RClone RC API authentication (optional)</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
@@ -146,7 +138,11 @@ export function RCloneConfigSection({
 									value={formData.vfs_pass}
 									disabled={isReadOnly}
 									onChange={(e) => handleInputChange("vfs_pass", e.target.value)}
-									placeholder={config.rclone.vfs_pass_set ? "VFS password is set (enter new to change)" : "Enter VFS password (optional)"}
+									placeholder={
+										config.rclone.vfs_pass_set
+											? "VFS password is set (enter new to change)"
+											: "Enter VFS password (optional)"
+									}
 								/>
 								<button
 									type="button"

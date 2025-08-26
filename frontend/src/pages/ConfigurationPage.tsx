@@ -131,7 +131,14 @@ export function ConfigurationPage() {
 	// Handle configuration updates with restart detection
 	const handleConfigUpdate = async (
 		section: string,
-		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig | RCloneVFSFormData | SystemFormData | SABnzbdConfig,
+		data:
+			| WebDAVConfig
+			| StreamingConfig
+			| ImportConfig
+			| MetadataConfig
+			| RCloneVFSFormData
+			| SystemFormData
+			| SABnzbdConfig,
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -448,9 +455,16 @@ export function ConfigurationPage() {
 								)}
 
 								{/* Placeholder for other sections */}
-								{!["webdav", "import", "metadata", "streaming", "system", "providers", "rclone", "sabnzbd"].includes(
-									activeSection,
-								) && (
+								{![
+									"webdav",
+									"import",
+									"metadata",
+									"streaming",
+									"system",
+									"providers",
+									"rclone",
+									"sabnzbd",
+								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
 									/>

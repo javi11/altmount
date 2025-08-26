@@ -131,7 +131,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			VFSUser:    cfg.RClone.VFSUser,
 			VFSPass:    cfg.RClone.VFSPass,
 		}
-		
+
 		httpClient := &http.Client{}
 		rcloneClient = rclonecli.NewRcloneRcClient(rcloneConfig, httpClient)
 		logger.Info("RClone VFS client initialized", "vfs_url", cfg.RClone.VFSUrl)

@@ -1,6 +1,6 @@
-import { Save, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { AlertTriangle, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ConfigResponse, SABnzbdConfig, SABnzbdCategory } from "../../types/config";
+import type { ConfigResponse, SABnzbdCategory, SABnzbdConfig } from "../../types/config";
 
 interface SABnzbdConfigSectionProps {
 	config: ConfigResponse;
@@ -54,14 +54,16 @@ export function SABnzbdConfigSection({
 			}
 
 			// Validate category names are unique
-			const categoryNames = data.categories.map(cat => cat.name);
-			const duplicates = categoryNames.filter((name, index) => categoryNames.indexOf(name) !== index);
+			const categoryNames = data.categories.map((cat) => cat.name);
+			const duplicates = categoryNames.filter(
+				(name, index) => categoryNames.indexOf(name) !== index,
+			);
 			if (duplicates.length > 0) {
 				errors.push(`Duplicate category names found: ${[...new Set(duplicates)].join(", ")}`);
 			}
 
 			// Validate category names are not empty
-			const emptyNames = data.categories.filter(cat => !cat.name.trim());
+			const emptyNames = data.categories.filter((cat) => !cat.name.trim());
 			if (emptyNames.length > 0) {
 				errors.push("Category names cannot be empty");
 			}
@@ -180,8 +182,8 @@ export function SABnzbdConfigSection({
 							onChange={(e) => handleMountDirChange(e.target.value)}
 						/>
 						<p className="label">
-							Absolute path to the directory where you will mount the WebDAV server.
-							This path will be reported to download clients.
+							Absolute path to the directory where you will mount the WebDAV server. This path will
+							be reported to download clients.
 						</p>
 					</fieldset>
 
@@ -191,8 +193,8 @@ export function SABnzbdConfigSection({
 							<div>
 								<h4 className="font-medium">Categories</h4>
 								<p className="text-base-content/70 text-sm">
-									Configure download categories for organization. If no categories are configured,
-									a default category will be used.
+									Configure download categories for organization. If no categories are configured, a
+									default category will be used.
 								</p>
 							</div>
 							{!isReadOnly && (
@@ -267,9 +269,7 @@ export function SABnzbdConfigSection({
 															value={category.dir}
 															readOnly={isReadOnly}
 															placeholder="Optional subdirectory"
-															onChange={(e) =>
-																handleCategoryUpdate(index, { dir: e.target.value })
-															}
+															onChange={(e) => handleCategoryUpdate(index, { dir: e.target.value })}
 														/>
 													</fieldset>
 												</div>
@@ -304,9 +304,7 @@ export function SABnzbdConfigSection({
 												className="input input-sm"
 												value={newCategory.name}
 												placeholder="movies"
-												onChange={(e) =>
-													setNewCategory({ ...newCategory, name: e.target.value })
-												}
+												onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
 											/>
 										</fieldset>
 										<fieldset className="fieldset">
@@ -347,9 +345,7 @@ export function SABnzbdConfigSection({
 												className="input input-sm"
 												value={newCategory.dir}
 												placeholder="movies"
-												onChange={(e) =>
-													setNewCategory({ ...newCategory, dir: e.target.value })
-												}
+												onChange={(e) => setNewCategory({ ...newCategory, dir: e.target.value })}
 											/>
 										</fieldset>
 									</div>

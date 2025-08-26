@@ -1,5 +1,15 @@
-import { Download, MoreHorizontal, Pause, Play, PlayCircle, RefreshCw, Trash2 } from "lucide-react";
+import {
+	AlertCircle,
+	Download,
+	MoreHorizontal,
+	Pause,
+	Play,
+	PlayCircle,
+	RefreshCw,
+	Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import { DragDropUpload } from "../components/queue/DragDropUpload";
 import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
@@ -132,10 +142,9 @@ export function QueuePage() {
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting]);
 
 	// Reset to page 1 when search or status filter changes
-	// biome-ignore lint/correctness/useExhaustiveDependencies: only want to run this when searchTerm or statusFilter changes
 	useEffect(() => {
 		setPage(0);
-	}, [searchTerm, statusFilter]);
+	}, []);
 
 	if (error) {
 		return (
@@ -217,6 +226,9 @@ export function QueuePage() {
 			{/* Manual Scan Section */}
 			<ManualScanSection />
 
+			{/* Drag & Drop Upload Section */}
+			<DragDropUpload />
+
 			{/* Stats Cards */}
 			{stats && (
 				<div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
@@ -287,7 +299,7 @@ export function QueuePage() {
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body p-0">
 					{isLoading ? (
-						<LoadingTable columns={6} />
+						<LoadingTable columns={7} />
 					) : queueData && queueData.length > 0 ? (
 						<div className="overflow-x-auto">
 							<table className="table-zebra table">
@@ -295,6 +307,7 @@ export function QueuePage() {
 									<tr>
 										<th>NZB File</th>
 										<th>Target Path</th>
+										<th>Category</th>
 										<th>Status</th>
 										<th>Retry Count</th>
 										<th>Updated</th>
@@ -319,7 +332,28 @@ export function QueuePage() {
 												<div className="text-sm">{truncateText(item.target_path, 50)}</div>
 											</td>
 											<td>
-												<StatusBadge status={item.status} />
+												{item.category ? (
+													<span className="badge badge-outline badge-sm">{item.category}</span>
+												) : (
+													<span className="text-base-content/50 text-sm">—</span>
+												)}
+											</td>
+											<td>
+												{(item.status === QueueStatus.FAILED ||
+													item.status === QueueStatus.RETRYING) &&
+												item.error_message ? (
+													<div
+														className="tooltip tooltip-top"
+														data-tip={truncateText(item.error_message, 200)}
+													>
+														<div className="flex items-center gap-1">
+															<StatusBadge status={item.status} />
+															<AlertCircle className="h-3 w-3 text-error" />
+														</div>
+													</div>
+												) : (
+													<StatusBadge status={item.status} />
+												)}
 											</td>
 											<td>
 												<span

@@ -523,7 +523,7 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 		query = baseSelect
 	}
 
-	query += " ORDER BY priority ASC, created_at ASC LIMIT ? OFFSET ?"
+	query += " ORDER BY status DESC, created_at DESC LIMIT ? OFFSET ?"
 	args = append(conditionArgs, limit, offset)
 
 	rows, err := r.db.Query(query, args...)

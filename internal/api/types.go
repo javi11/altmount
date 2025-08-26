@@ -53,6 +53,7 @@ type QueueItemResponse struct {
 	ID           int64                  `json:"id"`
 	NzbPath      string                 `json:"nzb_path"`
 	TargetPath   string                 `json:"target_path"`
+	Category     *string                `json:"category"`
 	Priority     database.QueuePriority `json:"priority"`
 	Status       database.QueueStatus   `json:"status"`
 	CreatedAt    time.Time              `json:"created_at"`
@@ -415,6 +416,7 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		ID:           item.ID,
 		NzbPath:      item.NzbPath,
 		TargetPath:   targetPath,
+		Category:     item.Category,
 		Priority:     item.Priority,
 		Status:       item.Status,
 		CreatedAt:    item.CreatedAt,

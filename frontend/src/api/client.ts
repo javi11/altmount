@@ -10,6 +10,7 @@ import type {
 	PoolMetrics,
 	QueueItem,
 	QueueStats,
+	SABnzbdAddResponse,
 	ScanStatusResponse,
 	User,
 	UserAdminUpdateRequest,
@@ -419,6 +420,30 @@ export class APIClient {
 		return this.request<ScanStatusResponse>("/import/scan", {
 			method: "DELETE",
 		});
+	}
+
+	// SABnzbd file upload endpoint
+	async uploadNzbFile(file: File, apiKey: string): Promise<SABnzbdAddResponse> {
+		const formData = new FormData();
+		formData.append("nzbfile", file);
+
+		const url = `/api/sabnzbd?mode=addfile&apikey=${encodeURIComponent(apiKey)}`;
+
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+		});
+
+		if (!response.ok) {
+			throw new APIError(response.status, `Upload failed: ${response.statusText}`);
+		}
+
+		const data = await response.json();
+		if (!data.status) {
+			throw new APIError(response.status, data.error || "Upload failed");
+		}
+
+		return data;
 	}
 }
 

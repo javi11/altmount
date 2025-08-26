@@ -46,6 +46,7 @@ func NewServer(
 	handler := &webdav.Handler{
 		FileSystem: errorHandler,
 		LockSystem: webdav.NewMemLS(),
+		Prefix:     config.Prefix,
 		Logger: func(r *http.Request, err error) {
 			if err != nil && !errors.Is(err, context.Canceled) {
 				slog.DebugContext(r.Context(), "WebDav error", "err", err)
@@ -103,8 +104,6 @@ func NewServer(
 			return
 		}
 
-		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/webdav")
-
 		// This will prevent webdav internal seeks which is not supported by usenet reader
 		ext := filepath.Ext(r.URL.Path)
 		if ext != "" {
@@ -123,7 +122,7 @@ func NewServer(
 		r = r.WithContext(context.WithValue(r.Context(), utils.Origin, r.RequestURI))
 
 		if r.Method == "PROPFIND" {
-			status, err := propfind.HandlePropfind(handler.FileSystem, handler.LockSystem, w, r)
+			status, err := propfind.HandlePropfind(handler.FileSystem, handler.LockSystem, w, r, config.Prefix)
 			if status != 0 {
 				w.WriteHeader(status)
 				if status != http.StatusNoContent {
@@ -168,7 +167,7 @@ func NewServer(
 			http.Redirect(w, r, base+"/", http.StatusMovedPermanently)
 		}))
 		// Mount handler at /webdav/
-		mux.Handle(base+"/", http.StripPrefix(base, h))
+		mux.Handle(base+"/", h)
 	}
 
 	addr := fmt.Sprintf(":%v", config.Port)

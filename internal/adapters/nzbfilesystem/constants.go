@@ -68,6 +68,7 @@ var (
 	ErrTruncateNotSupported = errors.New("truncate not supported for virtual files")
 	ErrWriteNotSupported    = errors.New("write not supported for virtual files")
 	ErrFailedListDirectory  = errors.New("failed to list directory contents")
+	ErrFileIsCorrupted      = errors.New("file is corrupted, there are some missing segments")
 )
 
 // Database operation error message templates

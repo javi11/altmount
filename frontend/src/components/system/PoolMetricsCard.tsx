@@ -42,7 +42,9 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 			<div className="card-body">
 				<div className="flex items-center justify-between">
 					<div>
-						<h2 className="card-title font-medium text-base-content/70 text-sm">Active Connections</h2>
+						<h2 className="card-title font-medium text-base-content/70 text-sm">
+							Active Connections
+						</h2>
 						{isLoading ? (
 							<LoadingSpinner size="sm" />
 						) : poolMetrics ? (

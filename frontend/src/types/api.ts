@@ -28,6 +28,7 @@ export interface QueueItem {
 	id: number;
 	nzb_path: string;
 	target_path: string;
+	category?: string;
 	watch_root?: string;
 	priority: number;
 	status: QueueStatus;
@@ -240,4 +241,15 @@ export interface PoolMetrics {
 	command_success_rate_percent: number;
 	acquire_wait_time_ms: number;
 	last_updated: string;
+}
+
+// SABnzbd API response types
+export interface SABnzbdAddResponse {
+	status: boolean;
+	nzo_ids: string[];
+}
+
+export interface SABnzbdResponse {
+	status: boolean;
+	error?: string;
 }

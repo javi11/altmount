@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/net/webdav"
 )
@@ -24,10 +25,15 @@ var (
 	errInvalidDepth    = errors.New("webdav: invalid depth")
 	errInvalidPropfind = errors.New("webdav: invalid propfind")
 	errInvalidResponse = errors.New("webdav: invalid response")
+	errPrefixMismatch  = errors.New("webdav: prefix mismatch")
 )
 
-func HandlePropfind(fs webdav.FileSystem, ls webdav.LockSystem, w http.ResponseWriter, r *http.Request) (status int, err error) {
-	reqPath := r.URL.Path
+func HandlePropfind(fs webdav.FileSystem, ls webdav.LockSystem, w http.ResponseWriter, r *http.Request, prefix string) (status int, err error) {
+	reqPath, status, err := stripPrefix(r.URL.Path, prefix)
+	if err != nil {
+		return status, err
+	}
+
 	ctx := r.Context()
 	fi, err := fs.Stat(ctx, reqPath)
 	if err != nil {
@@ -74,10 +80,11 @@ func HandlePropfind(fs webdav.FileSystem, ls webdav.LockSystem, w http.ResponseW
 		if err != nil {
 			return handlePropfindError(err, info)
 		}
-		href := reqPath
+		href := path.Join(prefix, reqPath)
 		if href != "/" && info.IsDir() {
 			href += "/"
 		}
+
 		return mw.write(makePropstatResponse(href, pstats))
 	}
 
@@ -207,4 +214,14 @@ func walkFS(ctx context.Context, fs webdav.FileSystem, depth int, name string, i
 		}
 	}
 	return nil
+}
+
+func stripPrefix(p, prefix string) (string, int, error) {
+	if prefix == "" {
+		return p, http.StatusOK, nil
+	}
+	if r := strings.TrimPrefix(p, prefix); len(r) < len(p) {
+		return r, http.StatusOK, nil
+	}
+	return p, http.StatusNotFound, errPrefixMismatch
 }

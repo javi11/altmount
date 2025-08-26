@@ -69,10 +69,10 @@ func (c *customErrorHandler) mapError(err error) error {
 		}
 	}
 
-	if errors.As(err, &corruptedErr) {
-		// Corrupted file - return 503 Service Unavailable
+	if errors.As(err, &corruptedErr) || errors.Is(err, nzbfilesystem.ErrFileIsCorrupted) {
+		// Corrupted file - return 404 Not Found
 		return &HTTPError{
-			StatusCode: http.StatusServiceUnavailable,
+			StatusCode: http.StatusNotFound,
 			Message:    "File unavailable due to missing articles",
 			Err:        err,
 		}

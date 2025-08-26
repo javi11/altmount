@@ -233,3 +233,18 @@ export const useCancelScan = () => {
 		},
 	});
 };
+
+// NZB file upload hook
+export const useUploadNzb = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ file, apiKey }: { file: File; apiKey: string }) =>
+			apiClient.uploadNzbFile(file, apiKey),
+		onSuccess: () => {
+			// Invalidate queue data to show newly uploaded files
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};

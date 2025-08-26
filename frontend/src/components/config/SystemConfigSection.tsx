@@ -1,8 +1,8 @@
-import { Copy, Save, RefreshCw } from "lucide-react";
+import { Copy, RefreshCw, Save } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useAuth, useRegenerateAPIKey } from "../../hooks/useAuth";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
+import { useAuth, useRegenerateAPIKey } from "../../hooks/useAuth";
 import type { ConfigResponse, SystemFormData } from "../../types/config";
 
 interface SystemConfigSectionProps {
@@ -22,7 +22,7 @@ export function SystemConfigSection({
 		log_level: config.log_level,
 	});
 	const [hasChanges, setHasChanges] = useState(false);
-	
+
 	// API Key functionality
 	const { user, refreshToken } = useAuth();
 	const regenerateAPIKey = useRegenerateAPIKey();
@@ -81,7 +81,7 @@ export function SystemConfigSection({
 				type: "warning",
 				confirmText: "Regenerate API Key",
 				confirmButtonClass: "btn-warning",
-			}
+			},
 		);
 
 		if (confirmed) {
@@ -130,7 +130,11 @@ export function SystemConfigSection({
 						<input
 							type="text"
 							className="input flex-1"
-							value={user?.api_key ? `${user.api_key.substring(0, 8)}...${user.api_key.slice(-4)}` : 'No API key generated'}
+							value={
+								user?.api_key
+									? `${user.api_key.substring(0, 8)}...${user.api_key.slice(-4)}`
+									: "No API key generated"
+							}
 							readOnly
 							disabled
 						/>

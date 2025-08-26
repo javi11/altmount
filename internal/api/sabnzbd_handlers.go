@@ -14,8 +14,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
+
+var defaultCategory = config.SABnzbdCategory{
+	Name:     "default",
+	Order:    0,
+	Priority: -100,
+	Dir:      "",
+}
 
 const completeDir = "/sabnzbd"
 
@@ -67,7 +75,6 @@ func (s *Server) handleSABnzbd(w http.ResponseWriter, r *http.Request) {
 		s.writeSABnzbdError(w, fmt.Sprintf("Unknown mode: %s", mode))
 	}
 }
-
 
 // handleSABnzbdAddFile handles file upload for NZB files
 func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
@@ -637,7 +644,7 @@ func (s *Server) buildCategoryPath(category string) string {
 	}
 
 	config := s.configManager.GetConfig()
-	
+
 	// If no categories are configured, use category name as directory
 	if len(config.SABnzbd.Categories) == 0 {
 		return category
@@ -660,12 +667,8 @@ func (s *Server) buildCategoryPath(category string) string {
 
 // validateSABnzbdCategory validates and returns the category, or error if invalid
 func (s *Server) validateSABnzbdCategory(category string) (string, error) {
-	if s.configManager == nil {
-		// No config manager, allow any category and default to "default"
-		if category == "" {
-			return "default", nil
-		}
-		return category, nil
+	if category == "" {
+		return defaultCategory.Name, nil
 	}
 
 	config := s.configManager.GetConfig()
@@ -673,14 +676,14 @@ func (s *Server) validateSABnzbdCategory(category string) (string, error) {
 	// If no categories are configured, allow any category and default to "default"
 	if len(config.SABnzbd.Categories) == 0 {
 		if category == "" {
-			return "default", nil
+			return defaultCategory.Name, nil
 		}
 		return category, nil
 	}
 
 	// If categories are configured, validate against the list
 	if category == "" {
-		category = "default"
+		category = defaultCategory.Name
 	}
 
 	// Check if category exists in configuration

@@ -10,5 +10,5 @@ type Config struct {
 	// Debug enables debug mode and exposes profiler endpoints
 	Debug bool `yaml:"debug" default:"false" mapstructure:"debug"`
 	// Prefix is the URL path prefix for the WebDAV server
-	Prefix string `yaml:"prefix" default:"/webdav" mapstructure:"prefix"`
+	Prefix string `yaml:"prefix" default:"/webdav/" mapstructure:"prefix"`
 }
