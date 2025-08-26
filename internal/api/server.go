@@ -180,6 +180,9 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// SABnzbd-compatible API endpoints (protected by API key authentication)
+	apiMux.HandleFunc("/sabnzbd", s.handleSABnzbd)
+
 	apiMux.ServeHTTP(w, r)
 }
 

@@ -368,3 +368,28 @@ func (r *UserRepository) RegenerateAPIKey(userID string) (string, error) {
 	
 	return apiKey, nil
 }
+
+// GetUserByAPIKey retrieves a user by their API key
+func (r *UserRepository) GetUserByAPIKey(apiKey string) (*User, error) {
+	query := `
+		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
+		FROM users 
+		WHERE api_key = ?
+	`
+
+	var user User
+	err := r.db.QueryRow(query, apiKey).Scan(
+		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
+		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
+		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get user by API key: %w", err)
+	}
+
+	return &user, nil
+}

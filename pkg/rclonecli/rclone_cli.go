@@ -31,6 +31,16 @@ func NewRcloneRcClient(
 }
 
 func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, recursive bool) error {
+	// Check if VFS notifications are enabled
+	if !c.config.VFSEnabled {
+		return nil // Silently skip if VFS is not enabled
+	}
+
+	// Check if VFS URL is configured
+	if c.config.VFSUrl == "" {
+		return fmt.Errorf("VFS URL is not configured")
+	}
+
 	data := map[string]string{
 		"_async":    fmt.Sprintf("%t", async),
 		"recursive": fmt.Sprintf("%t", recursive),

@@ -16,6 +16,7 @@ import { useState } from "react";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
+import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
@@ -34,6 +35,7 @@ import type {
 	ConfigSection,
 	ImportConfig,
 	MetadataConfig,
+	RCloneVFSFormData,
 	StreamingConfig,
 	SystemFormData,
 	WebDAVConfig,
@@ -127,7 +129,7 @@ export function ConfigurationPage() {
 	// Handle configuration updates with restart detection
 	const handleConfigUpdate = async (
 		section: string,
-		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig | SystemFormData,
+		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig | RCloneVFSFormData | SystemFormData,
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -175,6 +177,11 @@ export function ConfigurationPage() {
 				if (rootPathChanged) {
 					addRestartRequiredConfig("Metadata Root Path");
 				}
+			} else if (section === "rclone") {
+				await updateConfigSection.mutateAsync({
+					section: "rclone",
+					config: { rclone: data as RCloneVFSFormData },
+				});
 			} else if (section === "system") {
 				const systemData = data as SystemFormData;
 				await updateConfigSection.mutateAsync({
@@ -417,8 +424,16 @@ export function ConfigurationPage() {
 
 								{activeSection === "providers" && <ProvidersConfigSection config={config} />}
 
+								{activeSection === "rclone" && (
+									<RCloneConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{/* Placeholder for other sections */}
-								{!["webdav", "import", "metadata", "streaming", "system", "providers"].includes(
+								{!["webdav", "import", "metadata", "streaming", "system", "providers", "rclone"].includes(
 									activeSection,
 								) && (
 									<ComingSoonSection

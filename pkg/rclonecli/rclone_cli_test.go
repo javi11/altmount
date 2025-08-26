@@ -24,7 +24,8 @@ func TestRefreshCache(t *testing.T) {
 		EndStandalone()()
 
 	client := NewRcloneRcClient(&Config{
-		VFSUrl: host,
+		VFSEnabled: true,
+		VFSUrl:     host,
 	}, hc)
 
 	err := client.RefreshCache(context.Background(), "", true, false)
@@ -46,7 +47,8 @@ func TestRefreshCacheWithDir(t *testing.T) {
 		EndStandalone()()
 
 	client := NewRcloneRcClient(&Config{
-		VFSUrl: host,
+		VFSEnabled: true,
+		VFSUrl:     host,
 	}, hc)
 
 	err := client.RefreshCache(context.Background(), "/foo", true, false)
@@ -68,7 +70,8 @@ func TestRefreshCacheWithDirAndRecursive(t *testing.T) {
 		EndStandalone()()
 
 	client := NewRcloneRcClient(&Config{
-		VFSUrl: host,
+		VFSEnabled: true,
+		VFSUrl:     host,
 	}, hc)
 
 	err := client.RefreshCache(context.Background(), "/foo", true, true)
@@ -90,7 +93,8 @@ func TestRefreshCacheWithDirAndRecursiveAndNotAsync(t *testing.T) {
 		EndStandalone()()
 
 	client := NewRcloneRcClient(&Config{
-		VFSUrl: host,
+		VFSEnabled: true,
+		VFSUrl:     host,
 	}, hc)
 
 	err := client.RefreshCache(context.Background(), "/foo", false, true)
@@ -112,9 +116,37 @@ func TestRefreshCacheWithError(t *testing.T) {
 		EndStandalone()()
 
 	client := NewRcloneRcClient(&Config{
-		VFSUrl: host,
+		VFSEnabled: true,
+		VFSUrl:     host,
 	}, hc)
 
 	err := client.RefreshCache(context.Background(), "/foo", false, true)
 	assert.Error(t, err)
+}
+
+func TestRefreshCacheDisabled(t *testing.T) {
+	host := "http://localhost:5572"
+	hc := &http.Client{}
+
+	// No mock setup since no HTTP call should be made when VFS is disabled
+	client := NewRcloneRcClient(&Config{
+		VFSEnabled: false,
+		VFSUrl:     host,
+	}, hc)
+
+	err := client.RefreshCache(context.Background(), "/foo", true, false)
+	assert.NoError(t, err) // Should return nil without making HTTP call
+}
+
+func TestRefreshCacheNoURL(t *testing.T) {
+	hc := &http.Client{}
+
+	client := NewRcloneRcClient(&Config{
+		VFSEnabled: true,
+		VFSUrl:     "", // Empty URL
+	}, hc)
+
+	err := client.RefreshCache(context.Background(), "/foo", true, false)
+	assert.Error(t, err) // Should error because URL is not configured
+	assert.Contains(t, err.Error(), "VFS URL is not configured")
 }

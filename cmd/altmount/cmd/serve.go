@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/spf13/cobra"
 )
 
@@ -121,6 +122,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer poolManager.ClearPool()
 
+	// Create rclone client for VFS notifications (if configured)
+	var rcloneClient rclonecli.RcloneRcClient
+	if cfg.RClone.VFSEnabled != nil && *cfg.RClone.VFSEnabled && cfg.RClone.VFSUrl != "" {
+		rcloneConfig := &rclonecli.Config{
+			VFSEnabled: *cfg.RClone.VFSEnabled,
+			VFSUrl:     cfg.RClone.VFSUrl,
+			VFSUser:    cfg.RClone.VFSUser,
+			VFSPass:    cfg.RClone.VFSPass,
+		}
+		
+		httpClient := &http.Client{}
+		rcloneClient = rclonecli.NewRcloneRcClient(rcloneConfig, httpClient)
+		logger.Info("RClone VFS client initialized", "vfs_url", cfg.RClone.VFSUrl)
+	} else {
+		logger.Info("RClone VFS notifications disabled")
+	}
+
 	// Create NZB system with metadata + queue
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
 		QueueDatabasePath:   cfg.Database.Path,
@@ -131,7 +149,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Salt:                cfg.RClone.Salt,
 		MaxDownloadWorkers:  cfg.Streaming.MaxDownloadWorkers,
 		MaxProcessorWorkers: cfg.Import.MaxProcessorWorkers,
-	}, poolManager, configManager.GetConfigGetter())
+	}, poolManager, configManager.GetConfigGetter(), rcloneClient)
 	if err != nil {
 		logger.Error("failed to init NZB system", "err", err)
 		return err

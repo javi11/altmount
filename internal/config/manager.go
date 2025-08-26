@@ -59,8 +59,12 @@ type StreamingConfig struct {
 
 // RCloneConfig represents rclone configuration
 type RCloneConfig struct {
-	Password string `yaml:"password" mapstructure:"password"`
-	Salt     string `yaml:"salt" mapstructure:"salt"`
+	Password   string `yaml:"password" mapstructure:"password"`
+	Salt       string `yaml:"salt" mapstructure:"salt"`
+	VFSEnabled *bool  `yaml:"vfs_enabled" mapstructure:"vfs_enabled"`
+	VFSUrl     string `yaml:"vfs_url" mapstructure:"vfs_url"`
+	VFSUser    string `yaml:"vfs_user" mapstructure:"vfs_user"`
+	VFSPass    string `yaml:"vfs_pass" mapstructure:"vfs_pass"`
 }
 
 // ImportConfig represents import processing configuration
@@ -123,6 +127,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.Enabled = &v
 	} else {
 		copyCfg.Health.Enabled = nil
+	}
+
+	// Deep copy RClone.VFSEnabled pointer
+	if c.RClone.VFSEnabled != nil {
+		v := *c.RClone.VFSEnabled
+		copyCfg.RClone.VFSEnabled = &v
+	} else {
+		copyCfg.RClone.VFSEnabled = nil
 	}
 
 	// Deep copy Providers slice and their Enabled pointers
@@ -228,6 +240,13 @@ func (c *Config) Validate() error {
 		}
 		if c.Health.MaxSegmentConnections <= 0 {
 			return fmt.Errorf("health max_segment_connections must be greater than 0")
+		}
+	}
+
+	// Validate RClone VFS configuration
+	if c.RClone.VFSEnabled != nil && *c.RClone.VFSEnabled {
+		if c.RClone.VFSUrl == "" {
+			return fmt.Errorf("rclone vfs_url cannot be empty when VFS is enabled")
 		}
 	}
 
@@ -461,6 +480,7 @@ func (m *Manager) SaveConfig() error {
 // DefaultConfig returns a config with default values
 func DefaultConfig() *Config {
 	healthCheckEnabled := true
+	vfsEnabled := false
 
 	return &Config{
 		WebDAV: WebDAVConfig{
@@ -483,8 +503,12 @@ func DefaultConfig() *Config {
 			MaxDownloadWorkers: 15,       // Default: 15 download workers
 		},
 		RClone: RCloneConfig{
-			Password: "",
-			Salt:     "",
+			Password:   "",
+			Salt:       "",
+			VFSEnabled: &vfsEnabled,
+			VFSUrl:     "",
+			VFSUser:    "",
+			VFSPass:    "",
 		},
 		Import: ImportConfig{
 			MaxProcessorWorkers: 2, // Default: 2 processor workers

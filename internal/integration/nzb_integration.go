@@ -12,6 +12,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/spf13/afero"
 )
 
@@ -42,7 +43,7 @@ type NzbSystem struct {
 }
 
 // NewNzbSystem creates a new NZB-backed virtual filesystem with metadata + queue architecture
-func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter config.ConfigGetter) (*NzbSystem, error) {
+func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter config.ConfigGetter, rcloneClient rclonecli.RcloneRcClient) (*NzbSystem, error) {
 	// Initialize metadata service for serving files
 	metadataService := metadata.NewMetadataService(config.MetadataRootPath)
 	metadataReader := metadata.NewMetadataReader(metadataService)
@@ -74,7 +75,7 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter confi
 	}
 
 	// Create service with poolManager for dynamic pool access
-	service, err := importer.NewService(serviceConfig, metadataService, db, poolManager)
+	service, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)

@@ -47,6 +47,10 @@ export interface StreamingConfig {
 export interface RCloneConfig {
 	password_set: boolean;
 	salt_set: boolean;
+	vfs_enabled: boolean;
+	vfs_url: string;
+	vfs_user: string;
+	vfs_pass_set: boolean;
 }
 
 // Import configuration
@@ -125,6 +129,10 @@ export interface StreamingUpdateRequest {
 export interface RCloneUpdateRequest {
 	password?: string;
 	salt?: string;
+	vfs_enabled?: boolean;
+	vfs_url?: string;
+	vfs_user?: string;
+	vfs_pass?: string;
 }
 
 // Import update request
@@ -179,6 +187,7 @@ export type ConfigSection =
 	| "streaming"
 	| "import"
 	| "providers"
+	| "rclone"
 	| "system";
 
 // Form data interfaces for UI components
@@ -209,6 +218,17 @@ export interface StreamingFormData {
 export interface RCloneFormData {
 	password: string;
 	salt: string;
+	vfs_enabled: boolean;
+	vfs_url: string;
+	vfs_user: string;
+	vfs_pass: string;
+}
+
+export interface RCloneVFSFormData {
+	vfs_enabled: boolean;
+	vfs_url: string;
+	vfs_user: string;
+	vfs_pass: string;
 }
 
 export interface ProviderFormData {
@@ -304,6 +324,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "NNTP Providers",
 		description: "Usenet provider configuration for downloads",
 		icon: "Radio",
+		canEdit: true,
+	},
+	rclone: {
+		title: "RClone VFS",
+		description: "RClone VFS notification settings for external mounts",
+		icon: "HardDrive",
 		canEdit: true,
 	},
 	system: {

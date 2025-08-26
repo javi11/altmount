@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
 // ServiceConfig holds configuration for the NZB import service
@@ -46,6 +47,7 @@ type Service struct {
 	database        *database.DB              // Database for processing queue
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
+	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
 	log             *slog.Logger
 
 	// Runtime state
@@ -62,7 +64,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -78,6 +80,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		metadataService: metadataService,
 		database:        database,
 		processor:       processor,
+		rcloneClient:    rcloneClient,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -455,6 +458,9 @@ func (s *Service) processQueueItems(workerID int) {
 			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
 		} else {
 			log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
+			
+			// Notify rclone VFS about the new import (async, don't fail on error)
+			s.notifyRcloneVFS(item, log)
 		}
 	}
 }
@@ -543,4 +549,71 @@ func (s *Service) GetWorkerCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.config.Workers
+}
+
+// notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
+func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logger) {
+	if s.rcloneClient == nil {
+		return // No rclone client configured
+	}
+
+	// Calculate the virtual directory path for VFS notification
+	var virtualDir string
+	if item.WatchRoot != nil {
+		// Calculate virtual directory based on NZB file location relative to watch root
+		virtualDir = s.calculateVirtualDirectory(item.NzbPath, *item.WatchRoot)
+	} else {
+		// Default to root if no watch root specified
+		virtualDir = "/"
+	}
+
+	// Run VFS notification in background (async)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
+		defer cancel()
+
+		err := s.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
+		if err != nil {
+			log.Warn("Failed to notify rclone VFS about new import", 
+				"queue_id", item.ID, 
+				"file", item.NzbPath, 
+				"virtual_dir", virtualDir, 
+				"error", err)
+		} else {
+			log.Debug("Successfully notified rclone VFS about new import", 
+				"queue_id", item.ID, 
+				"virtual_dir", virtualDir)
+		}
+	}()
+}
+
+// calculateVirtualDirectory calculates the virtual directory for VFS notification
+func (s *Service) calculateVirtualDirectory(nzbPath, watchRoot string) string {
+	if watchRoot == "" {
+		return "/"
+	}
+
+	// Clean paths for consistent comparison
+	nzbPath = filepath.Clean(nzbPath)
+	watchRoot = filepath.Clean(watchRoot)
+
+	// Get relative path from watch root to NZB file
+	relPath, err := filepath.Rel(watchRoot, nzbPath)
+	if err != nil {
+		// If we can't get relative path, default to root
+		return "/"
+	}
+
+	// Get directory of NZB file (without filename)
+	relDir := filepath.Dir(relPath)
+
+	// Convert to virtual path
+	if relDir == "." || relDir == "" {
+		// NZB is directly in watch root
+		return "/"
+	}
+
+	// Ensure virtual path starts with / and uses forward slashes
+	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
+	return filepath.Clean(virtualPath)
 }
