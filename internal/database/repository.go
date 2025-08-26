@@ -498,34 +498,34 @@ func (r *Repository) UpdateQueueStats() error {
 func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, offset int) ([]*ImportQueueItem, error) {
 	var query string
 	var args []interface{}
-	
+
 	baseSelect := `SELECT id, nzb_path, watch_root, category, priority, status, created_at, updated_at,
 	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
 	               FROM import_queue`
-	
+
 	var conditions []string
 	var conditionArgs []interface{}
-	
+
 	if status != nil {
 		conditions = append(conditions, "status = ?")
 		conditionArgs = append(conditionArgs, *status)
 	}
-	
+
 	if search != "" {
 		conditions = append(conditions, "(nzb_path LIKE ? OR watch_root LIKE ?)")
 		searchPattern := "%" + search + "%"
 		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
 	}
-	
+
 	if len(conditions) > 0 {
 		query = baseSelect + " WHERE " + strings.Join(conditions, " AND ")
 	} else {
 		query = baseSelect
 	}
-	
+
 	query += " ORDER BY priority ASC, created_at ASC LIMIT ? OFFSET ?"
 	args = append(conditionArgs, limit, offset)
-	
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list queue items: %w", err)
@@ -553,37 +553,37 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 func (r *Repository) CountQueueItems(status *QueueStatus, search string) (int, error) {
 	var query string
 	var args []interface{}
-	
+
 	baseQuery := `SELECT COUNT(*) FROM import_queue`
-	
+
 	var conditions []string
 	var conditionArgs []interface{}
-	
+
 	if status != nil {
 		conditions = append(conditions, "status = ?")
 		conditionArgs = append(conditionArgs, *status)
 	}
-	
+
 	if search != "" {
 		conditions = append(conditions, "(nzb_path LIKE ? OR watch_root LIKE ?)")
 		searchPattern := "%" + search + "%"
 		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
 	}
-	
+
 	if len(conditions) > 0 {
 		query = baseQuery + " WHERE " + strings.Join(conditions, " AND ")
 	} else {
 		query = baseQuery
 	}
-	
+
 	args = conditionArgs
-	
+
 	var count int
 	err := r.db.QueryRow(query, args...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count queue items: %w", err)
 	}
-	
+
 	return count, nil
 }
 
@@ -605,4 +605,20 @@ func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) 
 	}
 
 	return int(rowsAffected), nil
+}
+
+// IsFileInQueue checks if a file is already in the queue (pending, retrying, or processing)
+func (r *Repository) IsFileInQueue(filePath string) (bool, error) {
+	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'retrying', 'processing') LIMIT 1`
+
+	var exists int
+	err := r.db.QueryRow(query, filePath).Scan(&exists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check if file in queue: %w", err)
+	}
+
+	return true, nil
 }

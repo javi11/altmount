@@ -53,7 +53,6 @@ type QueueItemResponse struct {
 	ID           int64                  `json:"id"`
 	NzbPath      string                 `json:"nzb_path"`
 	TargetPath   string                 `json:"target_path"`
-	WatchRoot    *string                `json:"watch_root"`
 	Priority     database.QueuePriority `json:"priority"`
 	Status       database.QueueStatus   `json:"status"`
 	CreatedAt    time.Time              `json:"created_at"`
@@ -416,7 +415,6 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		ID:           item.ID,
 		NzbPath:      item.NzbPath,
 		TargetPath:   targetPath,
-		WatchRoot:    item.WatchRoot,
 		Priority:     item.Priority,
 		Status:       item.Status,
 		CreatedAt:    item.CreatedAt,
@@ -567,6 +565,17 @@ type ScanStatusResponse struct {
 	FilesAdded  int        `json:"files_added"`
 	CurrentFile string     `json:"current_file,omitempty"`
 	LastError   *string    `json:"last_error,omitempty"`
+}
+
+// ManualImportRequest represents a request to manually import a file by path
+type ManualImportRequest struct {
+	FilePath string `json:"file_path"`
+}
+
+// ManualImportResponse represents the response from manually importing a file
+type ManualImportResponse struct {
+	QueueID int64  `json:"queue_id"`
+	Message string `json:"message"`
 }
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses

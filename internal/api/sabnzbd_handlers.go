@@ -41,7 +41,7 @@ func (s *Server) handleSABnzbd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate API key using existing authentication system
-	if !s.validateSABnzbdAPIKey(r, apiKey) {
+	if !s.validateAPIKey(r, apiKey) {
 		s.writeSABnzbdError(w, "Invalid API key")
 		return
 	}
@@ -68,19 +68,6 @@ func (s *Server) handleSABnzbd(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validateSABnzbdAPIKey validates the API key using AltMount's existing authentication
-func (s *Server) validateSABnzbdAPIKey(r *http.Request, apiKey string) bool {
-	if s.userRepo == nil {
-		return false
-	}
-
-	user, err := s.userRepo.GetUserByAPIKey(apiKey)
-	if err != nil || user == nil {
-		return false
-	}
-
-	return true
-}
 
 // handleSABnzbdAddFile handles file upload for NZB files
 func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {

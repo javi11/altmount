@@ -162,3 +162,17 @@ type ValidationError struct {
 func (e *ValidationError) Error() string {
 	return e.Message
 }
+
+// validateAPIKey validates the API key using AltMount's authentication system
+func (s *Server) validateAPIKey(r *http.Request, apiKey string) bool {
+	if s.userRepo == nil {
+		return false
+	}
+
+	user, err := s.userRepo.GetUserByAPIKey(apiKey)
+	if err != nil || user == nil {
+		return false
+	}
+
+	return true
+}

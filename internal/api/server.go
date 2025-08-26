@@ -132,6 +132,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("POST /import/scan", s.handleStartManualScan)
 		apiMux.HandleFunc("GET /import/scan/status", s.handleGetScanStatus)
 		apiMux.HandleFunc("DELETE /import/scan", s.handleCancelScan)
+		apiMux.HandleFunc("POST /import/file", s.handleManualImportFile)
 	}
 
 	// System endpoints
