@@ -73,19 +73,6 @@ export function WebDAVConfigSection({
 					<p className="label">WebDAV server password</p>
 				</fieldset>
 			</div>
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">Debug Mode</legend>
-				<label className="label cursor-pointer">
-					<span className="label-text">Enable WebDAV debug logging</span>
-					<input
-						type="checkbox"
-						className="checkbox"
-						checked={formData.debug}
-						disabled={isReadOnly}
-						onChange={(e) => handleInputChange("debug", e.target.checked)}
-					/>
-				</label>
-			</fieldset>
 
 			{/* Save Button */}
 			{!isReadOnly && (

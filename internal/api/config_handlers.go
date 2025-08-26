@@ -243,7 +243,7 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			TLS:            p.TLS,
 			InsecureTLS:    p.InsecureTLS,
 			PasswordSet:    p.Password != "",
-			Enabled:        p.Enabled,
+			Enabled:        *p.Enabled,
 		}
 	}
 
@@ -251,8 +251,7 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 		WebDAV: WebDAVConfigResponse{
 			Port:     config.WebDAV.Port,
 			User:     config.WebDAV.User,
-			Password: config.WebDAV.Password, // Include password for admin editing
-			Debug:    config.WebDAV.Debug,
+			Password: config.WebDAV.Password,
 		},
 		API: APIConfigResponse{
 			Prefix: "/api", // Always hardcoded to /api
@@ -291,9 +290,6 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		}
 		if updates.WebDAV.Password != nil {
 			cfg.WebDAV.Password = *updates.WebDAV.Password
-		}
-		if updates.WebDAV.Debug != nil {
-			cfg.WebDAV.Debug = *updates.WebDAV.Debug
 		}
 	}
 
@@ -343,6 +339,8 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 
 	if updates.Providers != nil {
 		providers := make([]config.ProviderConfig, len(*updates.Providers))
+		providerEnabledDefault := true
+
 		for i, p := range *updates.Providers {
 			provider := config.ProviderConfig{}
 			if p.ID != nil {
@@ -370,8 +368,11 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 				provider.InsecureTLS = *p.InsecureTLS
 			}
 			if p.Enabled != nil {
-				provider.Enabled = *p.Enabled
+				provider.Enabled = p.Enabled
+			} else {
+				provider.Enabled = &providerEnabledDefault
 			}
+
 			providers[i] = provider
 		}
 		cfg.Providers = providers
@@ -397,9 +398,6 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 			}
 			if updates.WebDAV.Password != nil {
 				cfg.WebDAV.Password = *updates.WebDAV.Password
-			}
-			if updates.WebDAV.Debug != nil {
-				cfg.WebDAV.Debug = *updates.WebDAV.Debug
 			}
 		}
 	case "api":
@@ -568,7 +566,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		MaxConnections: createReq.MaxConnections,
 		TLS:            createReq.TLS,
 		InsecureTLS:    createReq.InsecureTLS,
-		Enabled:        createReq.Enabled,
+		Enabled:        &createReq.Enabled,
 	}
 
 	// Create a copy of current config and add new provider
@@ -603,7 +601,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		TLS:            newProvider.TLS,
 		InsecureTLS:    newProvider.InsecureTLS,
 		PasswordSet:    newProvider.Password != "",
-		Enabled:        newProvider.Enabled,
+		Enabled:        *newProvider.Enabled,
 	}
 
 	WriteSuccess(w, providerResponse, nil)
@@ -683,7 +681,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		updatedProvider.InsecureTLS = *updateReq.InsecureTLS
 	}
 	if updateReq.Enabled != nil {
-		updatedProvider.Enabled = *updateReq.Enabled
+		updatedProvider.Enabled = updateReq.Enabled
 	}
 
 	// Regenerate ID if any identifying fields changed
@@ -736,7 +734,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		TLS:            updatedProvider.TLS,
 		InsecureTLS:    updatedProvider.InsecureTLS,
 		PasswordSet:    updatedProvider.Password != "",
-		Enabled:        updatedProvider.Enabled,
+		Enabled:        *updatedProvider.Enabled,
 	}
 
 	WriteSuccess(w, providerResponse, nil)
@@ -885,7 +883,7 @@ func (s *Server) handleReorderProviders(w http.ResponseWriter, r *http.Request) 
 			TLS:            provider.TLS,
 			InsecureTLS:    provider.InsecureTLS,
 			PasswordSet:    provider.Password != "",
-			Enabled:        provider.Enabled,
+			Enabled:        *provider.Enabled,
 		}
 	}
 

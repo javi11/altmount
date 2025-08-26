@@ -19,7 +19,6 @@ export interface WebDAVConfig {
 	port: number;
 	user: string;
 	password: string;
-	debug: boolean;
 }
 
 // API server configuration
@@ -179,7 +178,6 @@ export type ConfigSection =
 	| "metadata"
 	| "streaming"
 	| "import"
-	| "log"
 	| "providers"
 	| "system";
 
@@ -188,7 +186,6 @@ export interface WebDAVFormData {
 	port: number;
 	user: string;
 	password: string;
-	debug: boolean;
 }
 
 export interface APIFormData {
@@ -301,12 +298,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Import Processing",
 		description: "NZB import and processing worker configuration",
 		icon: "Cog",
-		canEdit: true,
-	},
-	log: {
-		title: "Logging",
-		description: "Log rotation and output configuration",
-		icon: "FileText",
 		canEdit: true,
 	},
 	providers: {

@@ -108,7 +108,7 @@ export function ConfigurationPage() {
 		}
 
 		try {
-			await restartServer.mutateAsync(false);
+			await restartServer.mutateAsync();
 			// Clear local state since server is restarting
 			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);

@@ -562,7 +562,7 @@ func (hw *HealthWorker) updateStats(updateFunc func(*WorkerStats)) {
 
 // Helper methods to get dynamic health config values
 func (hw *HealthWorker) getEnabled() bool {
-	return hw.configGetter().Health.Enabled
+	return *hw.configGetter().Health.Enabled
 }
 
 func (hw *HealthWorker) getCheckInterval() time.Duration {

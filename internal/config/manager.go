@@ -33,7 +33,6 @@ type WebDAVConfig struct {
 	Port     int    `yaml:"port" mapstructure:"port"`
 	User     string `yaml:"user" mapstructure:"user"`
 	Password string `yaml:"password" mapstructure:"password"`
-	Debug    bool   `yaml:"debug" mapstructure:"debug"`
 }
 
 // APIConfig represents REST API configuration
@@ -81,7 +80,7 @@ type LogConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled               bool          `yaml:"enabled" mapstructure:"enabled"`
+	Enabled               *bool         `yaml:"enabled" mapstructure:"enabled"`
 	CheckInterval         time.Duration `yaml:"check_interval" mapstructure:"check_interval"`
 	MaxConcurrentJobs     int           `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs"`
 	MaxRetries            int           `yaml:"max_retries" mapstructure:"max_retries"`
@@ -106,7 +105,44 @@ type ProviderConfig struct {
 	MaxConnections int    `yaml:"max_connections" mapstructure:"max_connections"`
 	TLS            bool   `yaml:"tls" mapstructure:"tls"`
 	InsecureTLS    bool   `yaml:"insecure_tls" mapstructure:"insecure_tls"`
-	Enabled        bool   `yaml:"enabled" mapstructure:"enabled"`
+	Enabled        *bool  `yaml:"enabled" mapstructure:"enabled"`
+}
+
+// DeepCopy returns a deep copy of the configuration
+func (c *Config) DeepCopy() *Config {
+	if c == nil {
+		return nil
+	}
+
+	// Start with a shallow copy of value fields
+	copyCfg := *c
+
+	// Deep copy Health.Enabled pointer
+	if c.Health.Enabled != nil {
+		v := *c.Health.Enabled
+		copyCfg.Health.Enabled = &v
+	} else {
+		copyCfg.Health.Enabled = nil
+	}
+
+	// Deep copy Providers slice and their Enabled pointers
+	if c.Providers != nil {
+		copyCfg.Providers = make([]ProviderConfig, len(c.Providers))
+		for i, p := range c.Providers {
+			pc := p // copy struct value
+			if p.Enabled != nil {
+				ev := *p.Enabled
+				pc.Enabled = &ev
+			} else {
+				pc.Enabled = nil
+			}
+			copyCfg.Providers[i] = pc
+		}
+	} else {
+		copyCfg.Providers = nil
+	}
+
+	return &copyCfg
 }
 
 // Validate validates the configuration
@@ -180,7 +216,7 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate health configuration
-	if c.Health.Enabled {
+	if *c.Health.Enabled {
 		if c.Health.CheckInterval <= 0 {
 			return fmt.Errorf("health check_interval must be greater than 0")
 		}
@@ -211,12 +247,61 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ProvidersEqual compares the providers in this config with another config for equality
+func (c *Config) ProvidersEqual(other *Config) bool {
+	if len(c.Providers) != len(other.Providers) {
+		return false
+	}
+
+	// Create maps for comparison (using ID as key for proper matching)
+	oldMap := make(map[string]ProviderConfig)
+	newMap := make(map[string]ProviderConfig)
+
+	for _, provider := range c.Providers {
+		oldMap[provider.ID] = provider
+	}
+
+	for _, provider := range other.Providers {
+		newMap[provider.ID] = provider
+	}
+
+	// Check if all old providers exist in new config and are identical
+	for id, oldProvider := range oldMap {
+		newProvider, exists := newMap[id]
+		if !exists {
+			return false // Provider removed
+		}
+
+		// Compare all fields
+		if oldProvider.ID != newProvider.ID ||
+			oldProvider.Host != newProvider.Host ||
+			oldProvider.Port != newProvider.Port ||
+			oldProvider.Username != newProvider.Username ||
+			oldProvider.Password != newProvider.Password ||
+			oldProvider.MaxConnections != newProvider.MaxConnections ||
+			oldProvider.TLS != newProvider.TLS ||
+			oldProvider.InsecureTLS != newProvider.InsecureTLS ||
+			oldProvider.Enabled != newProvider.Enabled {
+			return false // Provider modified
+		}
+	}
+
+	// Check if any new providers were added
+	for id := range newMap {
+		if _, exists := oldMap[id]; !exists {
+			return false // Provider added
+		}
+	}
+
+	return true // All providers are identical
+}
+
 // ToNNTPProviders converts ProviderConfig slice to nntppool.UsenetProviderConfig slice (enabled only)
 func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 	var providers []nntppool.UsenetProviderConfig
 	for _, p := range c.Providers {
 		// Only include enabled providers
-		if p.Enabled {
+		if *p.Enabled {
 			providers = append(providers, nntppool.UsenetProviderConfig{
 				Host:                           p.Host,
 				Port:                           p.Port,
@@ -270,7 +355,11 @@ func (m *Manager) GetConfigGetter() ConfigGetter {
 // UpdateConfig updates the current configuration (thread-safe)
 func (m *Manager) UpdateConfig(config *Config) error {
 	m.mutex.Lock()
-	oldConfig := m.current
+	// Take a deep copy of the old config so callbacks get an immutable snapshot
+	var oldConfig *Config
+	if m.current != nil {
+		oldConfig = m.current.DeepCopy()
+	}
 	m.current = config
 	callbacks := make([]ChangeCallback, len(m.callbacks))
 	copy(callbacks, m.callbacks)
@@ -371,12 +460,13 @@ func (m *Manager) SaveConfig() error {
 
 // DefaultConfig returns a config with default values
 func DefaultConfig() *Config {
+	healthCheckEnabled := true
+
 	return &Config{
 		WebDAV: WebDAVConfig{
 			Port:     8080,
 			User:     "usenet",
 			Password: "usenet",
-			Debug:    false,
 		},
 		API: APIConfig{
 			Prefix: "/api",
@@ -408,7 +498,7 @@ func DefaultConfig() *Config {
 			Compress:   true,   // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:               true,
+			Enabled:               &healthCheckEnabled,
 			CheckInterval:         30 * time.Minute,
 			MaxConcurrentJobs:     1,
 			MaxRetries:            2,

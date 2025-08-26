@@ -79,28 +79,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		logger.Info("Configuration updated", "new_config", newConfig)
 
-		// Handle provider changes dynamically
-		providersChanged := len(oldConfig.Providers) != len(newConfig.Providers)
-		if !providersChanged {
-			// Check if any provider details changed
-			for i, oldProvider := range oldConfig.Providers {
-				if i >= len(newConfig.Providers) {
-					providersChanged = true
-					break
-				}
-				newProvider := newConfig.Providers[i]
-				if oldProvider.Host != newProvider.Host ||
-					oldProvider.Port != newProvider.Port ||
-					oldProvider.Username != newProvider.Username ||
-					oldProvider.Password != newProvider.Password ||
-					oldProvider.MaxConnections != newProvider.MaxConnections ||
-					oldProvider.TLS != newProvider.TLS ||
-					oldProvider.InsecureTLS != newProvider.InsecureTLS {
-					providersChanged = true
-					break
-				}
-			}
-		}
+		// Handle provider changes dynamically using comprehensive comparison
+		providersChanged := !oldConfig.ProvidersEqual(newConfig)
 
 		if providersChanged {
 			logger.Info("NNTP providers changed - updating connection pool",
@@ -260,7 +240,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create health worker if enabled
 	var healthWorker *health.HealthWorker
-	if cfg.Health.Enabled {
+	if *cfg.Health.Enabled {
 		// Create metadata service for health worker
 		metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
 

@@ -234,7 +234,6 @@ type WebDAVConfigResponse struct {
 	Port     int    `json:"port"`
 	User     string `json:"user"`
 	Password string `json:"password"`
-	Debug    bool   `json:"debug"`
 }
 
 // APIConfigResponse represents REST API configuration in API responses
@@ -540,13 +539,13 @@ type ScanStatusResponse struct {
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
-	ActiveConnections       int     `json:"active_connections"`
-	TotalBytesDownloaded    int64   `json:"total_bytes_downloaded"`
-	DownloadSpeed           float64 `json:"download_speed_bytes_per_sec"`
-	ErrorRate               float64 `json:"error_rate_percent"`
-	CurrentMemoryUsage      int64   `json:"current_memory_usage"`
-	TotalConnections        int64   `json:"total_connections"`
-	CommandSuccessRate      float64 `json:"command_success_rate_percent"`
-	AcquireWaitTimeMs       int64   `json:"acquire_wait_time_ms"`
-	LastUpdated             time.Time `json:"last_updated"`
+	ActiveConnections    int       `json:"active_connections"`
+	TotalBytesDownloaded int64     `json:"total_bytes_downloaded"`
+	DownloadSpeed        float64   `json:"download_speed_bytes_per_sec"`
+	ErrorRate            float64   `json:"error_rate_percent"`
+	CurrentMemoryUsage   int64     `json:"current_memory_usage"`
+	TotalConnections     int64     `json:"total_connections"`
+	CommandSuccessRate   float64   `json:"command_success_rate_percent"`
+	AcquireWaitTimeMs    int64     `json:"acquire_wait_time_ms"`
+	LastUpdated          time.Time `json:"last_updated"`
 }
