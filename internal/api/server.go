@@ -180,8 +180,13 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// SABnzbd-compatible API endpoints (protected by API key authentication)
-	apiMux.HandleFunc("/sabnzbd", s.handleSABnzbd)
+	// SABnzbd-compatible API endpoints (conditionally enabled and protected by API key authentication)
+	if s.configManager != nil {
+		config := s.configManager.GetConfig()
+		if config.SABnzbd.Enabled != nil && *config.SABnzbd.Enabled {
+			apiMux.HandleFunc("/sabnzbd", s.handleSABnzbd)
+		}
+	}
 
 	apiMux.ServeHTTP(w, r)
 }

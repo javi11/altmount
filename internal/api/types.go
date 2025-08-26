@@ -225,6 +225,7 @@ type ConfigResponse struct {
 	Streaming StreamingConfigResponse  `json:"streaming"`
 	RClone    RCloneConfigResponse     `json:"rclone"`
 	Import    ImportConfigResponse     `json:"import"`
+	SABnzbd   SABnzbdConfigData        `json:"sabnzbd"`
 	Providers []ProviderConfigResponse `json:"providers"`
 	LogLevel  string                   `json:"log_level"`
 }
@@ -269,6 +270,21 @@ type ImportConfigResponse struct {
 	MaxProcessorWorkers int `json:"max_processor_workers"`
 }
 
+// SABnzbdConfigData represents SABnzbd configuration in API responses
+type SABnzbdConfigData struct {
+	Enabled    bool                  `json:"enabled"`
+	MountDir   string                `json:"mount_dir"`
+	Categories []SABnzbdCategoryData `json:"categories"`
+}
+
+// SABnzbdCategoryData represents a SABnzbd category in API responses
+type SABnzbdCategoryData struct {
+	Name     string `json:"name"`
+	Order    int    `json:"order"`
+	Priority int    `json:"priority"`
+	Dir      string `json:"dir"`
+}
+
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
 type ProviderConfigResponse struct {
 	ID             string `json:"id"`
@@ -291,6 +307,7 @@ type ConfigUpdateRequest struct {
 	Streaming *StreamingConfigRequest  `json:"streaming,omitempty"`
 	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
 	Import    *ImportConfigRequest     `json:"import,omitempty"`
+	SABnzbd   *SABnzbdConfigUpdate     `json:"sabnzbd,omitempty"`
 	Providers *[]ProviderConfigRequest `json:"providers,omitempty"`
 	LogLevel  *string                  `json:"log_level,omitempty"`
 }
@@ -334,6 +351,21 @@ type RCloneConfigRequest struct {
 // ImportConfigRequest represents import configuration in update requests
 type ImportConfigRequest struct {
 	MaxProcessorWorkers *int `json:"max_processor_workers,omitempty"`
+}
+
+// SABnzbdConfigUpdate represents SABnzbd configuration in update requests
+type SABnzbdConfigUpdate struct {
+	Enabled    *bool                    `json:"enabled,omitempty"`
+	MountDir   *string                  `json:"complete_dir,omitempty"`
+	Categories *[]SABnzbdCategoryUpdate `json:"categories,omitempty"`
+}
+
+// SABnzbdCategoryUpdate represents a SABnzbd category in update requests
+type SABnzbdCategoryUpdate struct {
+	Name     *string `json:"name,omitempty"`
+	Order    *int    `json:"order,omitempty"`
+	Priority *int    `json:"priority,omitempty"`
+	Dir      *string `json:"dir,omitempty"`
 }
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests

@@ -10,6 +10,7 @@ export interface ConfigResponse {
 	rclone: RCloneConfig;
 	import: ImportConfig;
 	log: LogConfig;
+	sabnzbd: SABnzbdConfig;
 	providers: ProviderConfig[];
 	log_level: string;
 }
@@ -81,6 +82,21 @@ export interface ProviderConfig {
 	enabled: boolean;
 }
 
+// SABnzbd configuration
+export interface SABnzbdConfig {
+	enabled: boolean;
+	mount_dir: string;
+	categories: SABnzbdCategory[];
+}
+
+// SABnzbd category configuration
+export interface SABnzbdCategory {
+	name: string;
+	order: number;
+	priority: number;
+	dir: string;
+}
+
 // Configuration update request types
 export interface ConfigUpdateRequest {
 	webdav?: WebDAVUpdateRequest;
@@ -91,6 +107,7 @@ export interface ConfigUpdateRequest {
 	rclone?: RCloneUpdateRequest;
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
+	sabnzbd?: SABnzbdUpdateRequest;
 	providers?: ProviderUpdateRequest[];
 	log_level?: string;
 }
@@ -163,6 +180,13 @@ export interface ProviderUpdateRequest {
 	enabled?: boolean;
 }
 
+// SABnzbd update request
+export interface SABnzbdUpdateRequest {
+	enabled?: boolean;
+	mount_dir?: string;
+	categories?: SABnzbdCategory[];
+}
+
 // Configuration validation request
 export interface ConfigValidateRequest {
 	config: unknown;
@@ -188,6 +212,7 @@ export type ConfigSection =
 	| "import"
 	| "providers"
 	| "rclone"
+	| "sabnzbd"
 	| "system";
 
 // Form data interfaces for UI components
@@ -253,6 +278,12 @@ export interface LogFormData {
 
 export interface SystemFormData {
 	log_level: string;
+}
+
+export interface SABnzbdFormData {
+	enabled: boolean;
+	mount_dir: string;
+	categories: SABnzbdCategory[];
 }
 
 // Helper type for configuration sections
@@ -330,6 +361,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "RClone VFS",
 		description: "RClone VFS notification settings for external mounts",
 		icon: "HardDrive",
+		canEdit: true,
+	},
+	sabnzbd: {
+		title: "SABnzbd API",
+		description: "SABnzbd-compatible API configuration for download clients",
+		icon: "Download",
 		canEdit: true,
 	},
 	system: {

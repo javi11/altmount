@@ -24,6 +24,7 @@ type Config struct {
 	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
 	Import    ImportConfig     `yaml:"import" mapstructure:"import"`
 	Log       LogConfig        `yaml:"log" mapstructure:"log"`
+	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
 	LogLevel  string           `yaml:"log_level" mapstructure:"log_level"`
 }
@@ -112,6 +113,21 @@ type ProviderConfig struct {
 	Enabled        *bool  `yaml:"enabled" mapstructure:"enabled"`
 }
 
+// SABnzbdConfig represents SABnzbd-compatible API configuration
+type SABnzbdConfig struct {
+	Enabled    *bool             `yaml:"enabled" mapstructure:"enabled"`
+	MountDir   string            `yaml:"mount_dir" mapstructure:"mount_dir"`
+	Categories []SABnzbdCategory `yaml:"categories" mapstructure:"categories"`
+}
+
+// SABnzbdCategory represents a SABnzbd category configuration
+type SABnzbdCategory struct {
+	Name     string `yaml:"name" mapstructure:"name"`
+	Order    int    `yaml:"order" mapstructure:"order"`
+	Priority int    `yaml:"priority" mapstructure:"priority"`
+	Dir      string `yaml:"dir" mapstructure:"dir"`
+}
+
 // DeepCopy returns a deep copy of the configuration
 func (c *Config) DeepCopy() *Config {
 	if c == nil {
@@ -152,6 +168,22 @@ func (c *Config) DeepCopy() *Config {
 		}
 	} else {
 		copyCfg.Providers = nil
+	}
+
+	// Deep copy SABnzbd.Enabled pointer
+	if c.SABnzbd.Enabled != nil {
+		v := *c.SABnzbd.Enabled
+		copyCfg.SABnzbd.Enabled = &v
+	} else {
+		copyCfg.SABnzbd.Enabled = nil
+	}
+
+	// Deep copy SABnzbd Categories slice
+	if c.SABnzbd.Categories != nil {
+		copyCfg.SABnzbd.Categories = make([]SABnzbdCategory, len(c.SABnzbd.Categories))
+		copy(copyCfg.SABnzbd.Categories, c.SABnzbd.Categories)
+	} else {
+		copyCfg.SABnzbd.Categories = nil
 	}
 
 	return &copyCfg
@@ -247,6 +279,28 @@ func (c *Config) Validate() error {
 	if c.RClone.VFSEnabled != nil && *c.RClone.VFSEnabled {
 		if c.RClone.VFSUrl == "" {
 			return fmt.Errorf("rclone vfs_url cannot be empty when VFS is enabled")
+		}
+	}
+
+	// Validate SABnzbd configuration
+	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
+		if c.SABnzbd.MountDir == "" {
+			return fmt.Errorf("sabnzbd mount_dir cannot be empty when SABnzbd is enabled")
+		}
+		if !filepath.IsAbs(c.SABnzbd.MountDir) {
+			return fmt.Errorf("sabnzbd mount_dir must be an absolute path")
+		}
+
+		// Validate categories if provided
+		categoryNames := make(map[string]bool)
+		for i, category := range c.SABnzbd.Categories {
+			if category.Name == "" {
+				return fmt.Errorf("sabnzbd category %d: name cannot be empty", i)
+			}
+			if categoryNames[category.Name] {
+				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
+			}
+			categoryNames[category.Name] = true
 		}
 	}
 
@@ -481,6 +535,7 @@ func (m *Manager) SaveConfig() error {
 func DefaultConfig() *Config {
 	healthCheckEnabled := true
 	vfsEnabled := false
+	sabnzbdEnabled := false
 
 	return &Config{
 		WebDAV: WebDAVConfig{
@@ -528,6 +583,11 @@ func DefaultConfig() *Config {
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,
 			CheckAllSegments:      true,
+		},
+		SABnzbd: SABnzbdConfig{
+			Enabled:    &sabnzbdEnabled,
+			MountDir:   "",
+			Categories: []SABnzbdCategory{},
 		},
 		Providers: []ProviderConfig{},
 		LogLevel:  "info",

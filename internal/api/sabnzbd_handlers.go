@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -16,8 +17,19 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
+const completeDir = "/sabnzbd"
+
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(w http.ResponseWriter, r *http.Request) {
+	// Check if SABnzbd API is enabled
+	if s.configManager != nil {
+		config := s.configManager.GetConfig()
+		if config.SABnzbd.Enabled == nil || !*config.SABnzbd.Enabled {
+			http.NotFound(w, r)
+			return
+		}
+	}
+
 	// Parse query parameters
 	query := r.URL.Query()
 
@@ -104,7 +116,7 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 
 	// Create temporary file
 	tempDir := os.TempDir()
-	tempFile := filepath.Join(tempDir, header.Filename)
+	tempFile := filepath.Join(tempDir, completeDir, header.Filename)
 
 	outFile, err := os.Create(tempFile)
 	if err != nil {
@@ -126,16 +138,18 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get category from form
+	// Get and validate category from form
 	category := r.FormValue("cat")
-	if category == "" {
-		category = "default"
+	validatedCategory, err := s.validateSABnzbdCategory(category)
+	if err != nil {
+		s.writeSABnzbdError(w, err.Error())
+		return
 	}
 
 	// Add the file to the processing queue
 	item := &database.ImportQueueItem{
 		NzbPath:    tempFile,
-		Category:   &category,
+		Category:   &validatedCategory,
 		Priority:   s.parseSABnzbdPriority(r.FormValue("priority")),
 		Status:     database.QueueStatusPending,
 		RetryCount: 0,
@@ -197,7 +211,7 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		filename += ".nzb"
 	}
 
-	tempFile := filepath.Join(tempDir, filename)
+	tempFile := filepath.Join(tempDir, completeDir, filename)
 
 	outFile, err := os.Create(tempFile)
 	if err != nil {
@@ -219,15 +233,17 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get category from query parameters
+	// Get and validate category from query parameters
 	category := query.Get("cat")
-	if category == "" {
-		category = "default"
+	validatedCategory, err := s.validateSABnzbdCategory(category)
+	if err != nil {
+		s.writeSABnzbdError(w, err.Error())
+		return
 	}
 
 	item := &database.ImportQueueItem{
 		NzbPath:    tempFile,
-		Category:   &category,
+		Category:   &validatedCategory,
 		Priority:   s.parseSABnzbdPriority(query.Get("priority")),
 		Status:     database.QueueStatusPending,
 		RetryCount: 0,
@@ -491,30 +507,62 @@ func (s *Server) handleSABnzbdStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleSABnzbdGetConfig handles configuration request
 func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) {
-	// Return minimal configuration compatible with SABnzbd
-	config := map[string]interface{}{
-		"complete_dir": "/downloads/complete",
-		"download_dir": "/downloads/incomplete",
-		"categories": map[string]interface{}{
-			"*": map[string]interface{}{
-				"name":     "*",
-				"order":    0,
-				"pp":       "",
-				"script":   "Default",
-				"dir":      "",
-				"newzbin":  "",
-				"priority": -100,
-			},
-			"default": map[string]interface{}{
+	// Get configuration from config manager
+	var config map[string]interface{}
+
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+
+		completeDir := path.Join(cfg.SABnzbd.MountDir, completeDir)
+		// Build categories from configuration
+		categories := make(map[string]interface{})
+
+		if len(cfg.SABnzbd.Categories) > 0 {
+			// Use configured categories
+			for _, category := range cfg.SABnzbd.Categories {
+				categories[category.Name] = map[string]interface{}{
+					"name":     category.Name,
+					"order":    category.Order,
+					"pp":       "",
+					"script":   "",
+					"dir":      category.Dir,
+					"newzbin":  "",
+					"priority": category.Priority,
+				}
+			}
+		} else {
+			// Use default category when none configured
+			categories["default"] = map[string]interface{}{
 				"name":     "default",
-				"order":    1,
+				"order":    0,
 				"pp":       "",
 				"script":   "",
 				"dir":      "",
 				"newzbin":  "",
 				"priority": 0,
+			}
+		}
+
+		config = map[string]interface{}{
+			"complete_dir": completeDir,
+			"categories":   categories,
+		}
+	} else {
+		// Fallback configuration when no config manager
+		config = map[string]interface{}{
+			"complete_dir": "",
+			"categories": map[string]interface{}{
+				"default": map[string]interface{}{
+					"name":     "default",
+					"order":    0,
+					"pp":       "",
+					"script":   "",
+					"dir":      "",
+					"newzbin":  "",
+					"priority": 0,
+				},
 			},
-		},
+		}
 	}
 
 	response := SABnzbdConfigResponse{
@@ -546,6 +594,42 @@ func (s *Server) parseSABnzbdPriority(priority string) database.QueuePriority {
 	default:
 		return database.QueuePriorityNormal
 	}
+}
+
+// validateSABnzbdCategory validates and returns the category, or error if invalid
+func (s *Server) validateSABnzbdCategory(category string) (string, error) {
+	if s.configManager == nil {
+		// No config manager, allow any category and default to "default"
+		if category == "" {
+			return "default", nil
+		}
+		return category, nil
+	}
+
+	config := s.configManager.GetConfig()
+
+	// If no categories are configured, allow any category and default to "default"
+	if len(config.SABnzbd.Categories) == 0 {
+		if category == "" {
+			return "default", nil
+		}
+		return category, nil
+	}
+
+	// If categories are configured, validate against the list
+	if category == "" {
+		category = "default"
+	}
+
+	// Check if category exists in configuration
+	for _, configCategory := range config.SABnzbd.Categories {
+		if configCategory.Name == category {
+			return category, nil
+		}
+	}
+
+	// Category not found in configuration
+	return "", fmt.Errorf("invalid category '%s' - not found in configuration", category)
 }
 
 // writeSABnzbdResponse writes a successful SABnzbd-compatible response

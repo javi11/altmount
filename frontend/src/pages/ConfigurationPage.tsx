@@ -17,6 +17,7 @@ import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
+import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
@@ -36,6 +37,7 @@ import type {
 	ImportConfig,
 	MetadataConfig,
 	RCloneVFSFormData,
+	SABnzbdConfig,
 	StreamingConfig,
 	SystemFormData,
 	WebDAVConfig,
@@ -129,7 +131,7 @@ export function ConfigurationPage() {
 	// Handle configuration updates with restart detection
 	const handleConfigUpdate = async (
 		section: string,
-		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig | RCloneVFSFormData | SystemFormData,
+		data: WebDAVConfig | StreamingConfig | ImportConfig | MetadataConfig | RCloneVFSFormData | SystemFormData | SABnzbdConfig,
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -189,6 +191,11 @@ export function ConfigurationPage() {
 					config: {
 						log_level: systemData.log_level,
 					},
+				});
+			} else if (section === "sabnzbd") {
+				await updateConfigSection.mutateAsync({
+					section: "sabnzbd",
+					config: { sabnzbd: data as SABnzbdConfig },
 				});
 			}
 		} catch (error) {
@@ -432,8 +439,16 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "sabnzbd" && (
+									<SABnzbdConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{/* Placeholder for other sections */}
-								{!["webdav", "import", "metadata", "streaming", "system", "providers", "rclone"].includes(
+								{!["webdav", "import", "metadata", "streaming", "system", "providers", "rclone", "sabnzbd"].includes(
 									activeSection,
 								) && (
 									<ComingSoonSection

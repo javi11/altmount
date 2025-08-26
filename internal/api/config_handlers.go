@@ -274,8 +274,33 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 		Import: ImportConfigResponse{
 			MaxProcessorWorkers: config.Import.MaxProcessorWorkers,
 		},
+		SABnzbd:   s.toSABnzbdConfigData(&config.SABnzbd),
 		Providers: providers,
 		LogLevel:  config.LogLevel,
+	}
+}
+
+// toSABnzbdConfigData converts config.SABnzbdConfig to SABnzbdConfigData
+func (s *Server) toSABnzbdConfigData(config *config.SABnzbdConfig) SABnzbdConfigData {
+	categories := make([]SABnzbdCategoryData, len(config.Categories))
+	for i, cat := range config.Categories {
+		categories[i] = SABnzbdCategoryData{
+			Name:     cat.Name,
+			Order:    cat.Order,
+			Priority: cat.Priority,
+			Dir:      cat.Dir,
+		}
+	}
+
+	enabled := false
+	if config.Enabled != nil {
+		enabled = *config.Enabled
+	}
+
+	return SABnzbdConfigData{
+		Enabled:    enabled,
+		MountDir:   config.MountDir,
+		Categories: categories,
 	}
 }
 
@@ -378,6 +403,35 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		cfg.Providers = providers
 	}
 
+	if updates.SABnzbd != nil {
+		if updates.SABnzbd.Enabled != nil {
+			cfg.SABnzbd.Enabled = updates.SABnzbd.Enabled
+		}
+		if updates.SABnzbd.MountDir != nil {
+			cfg.SABnzbd.MountDir = *updates.SABnzbd.MountDir
+		}
+		if updates.SABnzbd.Categories != nil {
+			categories := make([]config.SABnzbdCategory, len(*updates.SABnzbd.Categories))
+			for i, cat := range *updates.SABnzbd.Categories {
+				category := config.SABnzbdCategory{}
+				if cat.Name != nil {
+					category.Name = *cat.Name
+				}
+				if cat.Order != nil {
+					category.Order = *cat.Order
+				}
+				if cat.Priority != nil {
+					category.Priority = *cat.Priority
+				}
+				if cat.Dir != nil {
+					category.Dir = *cat.Dir
+				}
+				categories[i] = category
+			}
+			cfg.SABnzbd.Categories = categories
+		}
+	}
+
 	if updates.LogLevel != nil {
 		cfg.LogLevel = *updates.LogLevel
 		// Apply the log level change immediately
@@ -473,6 +527,35 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 				providers[i] = provider
 			}
 			cfg.Providers = providers
+		}
+	case "sabnzbd":
+		if updates.SABnzbd != nil {
+			if updates.SABnzbd.Enabled != nil {
+				cfg.SABnzbd.Enabled = updates.SABnzbd.Enabled
+			}
+			if updates.SABnzbd.MountDir != nil {
+				cfg.SABnzbd.MountDir = *updates.SABnzbd.MountDir
+			}
+			if updates.SABnzbd.Categories != nil {
+				categories := make([]config.SABnzbdCategory, len(*updates.SABnzbd.Categories))
+				for i, cat := range *updates.SABnzbd.Categories {
+					category := config.SABnzbdCategory{}
+					if cat.Name != nil {
+						category.Name = *cat.Name
+					}
+					if cat.Order != nil {
+						category.Order = *cat.Order
+					}
+					if cat.Priority != nil {
+						category.Priority = *cat.Priority
+					}
+					if cat.Dir != nil {
+						category.Dir = *cat.Dir
+					}
+					categories[i] = category
+				}
+				cfg.SABnzbd.Categories = categories
+			}
 		}
 	case "system":
 		if updates.LogLevel != nil {
