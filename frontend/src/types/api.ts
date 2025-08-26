@@ -188,6 +188,7 @@ export interface User {
 	name: string;
 	avatar_url?: string;
 	provider: string;
+	api_key?: string;
 	is_admin: boolean;
 	last_login?: string;
 }

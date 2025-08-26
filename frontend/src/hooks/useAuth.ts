@@ -1,3 +1,5 @@
+import { useMutation } from "@tanstack/react-query";
+import { apiClient } from "../api/client";
 import { useAuth as useAuthContext } from "../contexts/AuthContext";
 
 // Re-export the auth context hook for convenience
@@ -27,4 +29,14 @@ export function useUser() {
 export function useRegistrationStatus() {
 	const { checkRegistrationStatus } = useAuth();
 	return { checkRegistrationStatus };
+}
+
+// Hook to regenerate API key
+export function useRegenerateAPIKey() {
+	return useMutation({
+		mutationFn: () => apiClient.regenerateAPIKey(),
+		onError: (error) => {
+			console.error("Failed to regenerate API key:", error);
+		},
+	});
 }

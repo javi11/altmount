@@ -171,6 +171,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			apiMux.Handle("GET /user", authMiddleware(http.HandlerFunc(s.handleAuthUser)))
 			apiMux.Handle("POST /user/refresh", authMiddleware(http.HandlerFunc(s.handleAuthRefresh)))
 			apiMux.Handle("POST /user/logout", authMiddleware(http.HandlerFunc(s.handleAuthLogout)))
+			apiMux.Handle("POST /user/api-key/regenerate", authMiddleware(http.HandlerFunc(s.handleRegenerateAPIKey)))
 
 			// Admin endpoints (require admin privileges)
 			adminMiddleware := auth.RequireAdmin(tokenService, s.userRepo)

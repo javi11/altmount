@@ -11,7 +11,7 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 	const { data: poolMetrics, isLoading, error } = usePoolMetrics();
 	console.log(poolMetrics);
 	// Helper function to format speed in human readable format
-	const formatSpeed = (bytesPerSec: number) => {
+	const _formatSpeed = (bytesPerSec: number) => {
 		const mbPerSec = bytesPerSec / (1024 * 1024);
 		return `${mbPerSec.toFixed(1)} MB/s`;
 	};

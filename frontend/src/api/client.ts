@@ -281,6 +281,12 @@ export class APIClient {
 		});
 	}
 
+	async regenerateAPIKey() {
+		return this.request<{ api_key: string; message: string }>("/user/api-key/regenerate", {
+			method: "POST",
+		});
+	}
+
 	async getUsers(params?: { limit?: number; offset?: number }) {
 		const searchParams = new URLSearchParams();
 		if (params?.limit) searchParams.set("limit", params.limit.toString());

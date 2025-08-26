@@ -90,6 +90,7 @@ type User struct {
 	Provider     string     `db:"provider"`       // Auth provider (direct, github, google, dev, etc.)
 	ProviderID   *string    `db:"provider_id"`    // Provider-specific user ID (nullable)
 	PasswordHash *string    `db:"password_hash"`  // Bcrypt password hash for direct auth (nullable)
+	APIKey       *string    `db:"api_key"`        // API key for user authentication (nullable)
 	IsAdmin      bool       `db:"is_admin"`       // Admin privileges flag
 	CreatedAt    time.Time  `db:"created_at"`     // Account creation timestamp
 	UpdatedAt    time.Time  `db:"updated_at"`     // Last profile update timestamp

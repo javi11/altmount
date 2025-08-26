@@ -1,7 +1,9 @@
 package database
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"time"
 )
@@ -28,7 +30,7 @@ func NewUserRepository(db interface {
 func (r *UserRepository) GetUserByID(userID string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id, 
-		       password_hash, is_admin, created_at, updated_at, last_login
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
 		FROM users 
 		WHERE user_id = ?
 	`
@@ -36,7 +38,7 @@ func (r *UserRepository) GetUserByID(userID string) (*User, error) {
 	var user User
 	err := r.db.QueryRow(query, userID).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
-		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.IsAdmin,
+		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
 	)
 	if err != nil {
@@ -53,7 +55,7 @@ func (r *UserRepository) GetUserByID(userID string) (*User, error) {
 func (r *UserRepository) GetUserByProvider(provider, providerID string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
-		       password_hash, is_admin, created_at, updated_at, last_login
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
 		FROM users 
 		WHERE provider = ? AND provider_id = ?
 	`
@@ -61,7 +63,7 @@ func (r *UserRepository) GetUserByProvider(provider, providerID string) (*User, 
 	var user User
 	err := r.db.QueryRow(query, provider, providerID).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
-		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.IsAdmin,
+		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
 	)
 	if err != nil {
@@ -77,13 +79,13 @@ func (r *UserRepository) GetUserByProvider(provider, providerID string) (*User, 
 // CreateUser creates a new user account
 func (r *UserRepository) CreateUser(user *User) error {
 	query := `
-		INSERT INTO users (user_id, email, name, avatar_url, provider, provider_id, password_hash, is_admin)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO users (user_id, email, name, avatar_url, provider, provider_id, password_hash, api_key, is_admin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := r.db.Exec(query,
 		user.UserID, user.Email, user.Name, user.AvatarURL,
-		user.Provider, user.ProviderID, user.PasswordHash, user.IsAdmin,
+		user.Provider, user.ProviderID, user.PasswordHash, user.APIKey, user.IsAdmin,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
@@ -180,7 +182,7 @@ func (r *UserRepository) SetAdminStatus(userID string, isAdmin bool) error {
 func (r *UserRepository) ListUsers(limit, offset int) ([]*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
-		       password_hash, is_admin, created_at, updated_at, last_login
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
 		FROM users 
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
@@ -197,7 +199,7 @@ func (r *UserRepository) ListUsers(limit, offset int) ([]*User, error) {
 		var user User
 		err := rows.Scan(
 			&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
-			&user.Provider, &user.ProviderID, &user.PasswordHash, &user.IsAdmin,
+			&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 			&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
 		)
 		if err != nil {
@@ -251,7 +253,7 @@ func (r *UserRepository) DeleteUser(userID string) error {
 func (r *UserRepository) GetUserByEmail(email string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
-		       password_hash, is_admin, created_at, updated_at, last_login
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
 		FROM users 
 		WHERE email = ? AND provider = 'direct'
 	`
@@ -259,7 +261,7 @@ func (r *UserRepository) GetUserByEmail(email string) (*User, error) {
 	var user User
 	err := r.db.QueryRow(query, email).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
-		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.IsAdmin,
+		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
 	)
 	if err != nil {
@@ -276,7 +278,7 @@ func (r *UserRepository) GetUserByEmail(email string) (*User, error) {
 func (r *UserRepository) GetUserByUsername(username string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
-		       password_hash, is_admin, created_at, updated_at, last_login
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
 		FROM users 
 		WHERE user_id = ? AND provider = 'direct'
 	`
@@ -284,7 +286,7 @@ func (r *UserRepository) GetUserByUsername(username string) (*User, error) {
 	var user User
 	err := r.db.QueryRow(query, username).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
-		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.IsAdmin,
+		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
 	)
 	if err != nil {
@@ -320,4 +322,49 @@ func (r *UserRepository) UpdatePassword(userID string, passwordHash string) erro
 	}
 
 	return nil
+}
+
+// generateAPIKey generates a cryptographically secure API key
+func (r *UserRepository) generateAPIKey() (string, error) {
+	// Generate 24 random bytes (will become 32 characters in base64)
+	bytes := make([]byte, 24)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
+	}
+	
+	// Encode to URL-safe base64 and remove padding
+	apiKey := base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(bytes)
+	return apiKey, nil
+}
+
+// RegenerateAPIKey generates and updates a new API key for the user
+func (r *UserRepository) RegenerateAPIKey(userID string) (string, error) {
+	// Generate new API key
+	apiKey, err := r.generateAPIKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate API key: %w", err)
+	}
+	
+	// Update user's API key in database
+	query := `
+		UPDATE users 
+		SET api_key = ?, updated_at = datetime('now')
+		WHERE user_id = ?
+	`
+	
+	result, err := r.db.Exec(query, apiKey, userID)
+	if err != nil {
+		return "", fmt.Errorf("failed to update API key: %w", err)
+	}
+	
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	
+	if rowsAffected == 0 {
+		return "", fmt.Errorf("user not found: %s", userID)
+	}
+	
+	return apiKey, nil
 }

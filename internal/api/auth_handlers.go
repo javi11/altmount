@@ -23,6 +23,7 @@ type UserResponse struct {
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url,omitempty"`
 	Provider  string `json:"provider"`
+	APIKey    string `json:"api_key,omitempty"`
 	IsAdmin   bool   `json:"is_admin"`
 	LastLogin string `json:"last_login,omitempty"`
 }
@@ -250,6 +251,28 @@ func (s *Server) handleUpdateUserAdmin(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, response, nil)
 }
 
+// handleRegenerateAPIKey regenerates API key for the authenticated user
+func (s *Server) handleRegenerateAPIKey(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUserFromContext(r.Context())
+	if user == nil {
+		WriteUnauthorized(w, "Not authenticated", "")
+		return
+	}
+
+	// Regenerate API key
+	apiKey, err := s.userRepo.RegenerateAPIKey(user.UserID)
+	if err != nil {
+		WriteInternalError(w, "Failed to regenerate API key", err.Error())
+		return
+	}
+
+	response := map[string]interface{}{
+		"api_key": apiKey,
+		"message": "API key regenerated successfully",
+	}
+	WriteSuccess(w, response, nil)
+}
+
 // mapUserToResponse converts database User to API UserResponse
 func (s *Server) mapUserToResponse(user *database.User) *UserResponse {
 	// Use username as display name if no name is set
@@ -275,6 +298,10 @@ func (s *Server) mapUserToResponse(user *database.User) *UserResponse {
 
 	if user.LastLogin != nil {
 		response.LastLogin = user.LastLogin.Format("2006-01-02T15:04:05Z")
+	}
+
+	if user.APIKey != nil {
+		response.APIKey = *user.APIKey
 	}
 
 	return response
