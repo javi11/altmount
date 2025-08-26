@@ -1,6 +1,7 @@
+/** biome-ignore-all lint/suspicious/noUnknownAtRules: wrong lint */
+/** biome-ignore-all lint/correctness/noUnknownProperty: wrong lint */
 @import "tailwindcss";
 @plugin "daisyui" {
-	/* biome-ignore lint/correctness/noUnknownProperty: wrong error */
 	themes:
 		cupcake --default,
 		dim --prefersdark,

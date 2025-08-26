@@ -29,10 +29,7 @@ export function SystemConfigSection({
 		setHasChanges(false);
 	}, [config.log_level]);
 
-	const handleInputChange = (
-		field: keyof SystemFormData,
-		value: string,
-	) => {
+	const handleInputChange = (field: keyof SystemFormData, value: string) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		const configData = {
@@ -49,16 +46,14 @@ export function SystemConfigSection({
 	};
 	return (
 		<div className="space-y-4">
-			<h3 className="text-lg font-semibold">System</h3>
+			<h3 className="font-semibold text-lg">System</h3>
 			<fieldset className="fieldset">
 				<legend className="fieldset-legend">Log Level</legend>
 				<select
 					className="select"
 					value={formData.log_level}
 					disabled={isReadOnly}
-					onChange={(e) =>
-						handleInputChange("log_level", e.target.value)
-					}
+					onChange={(e) => handleInputChange("log_level", e.target.value)}
 				>
 					<option value="debug">Debug</option>
 					<option value="info">Info</option>

@@ -6,7 +6,7 @@ interface BytesDisplayProps {
 }
 
 // Utility function to format bytes to human-readable format
-function formatBytes(bytes: number, decimals: number = 2): string {
+function formatBytes(bytes: number, decimals = 2): string {
 	if (bytes === 0) return "0 B";
 
 	const k = 1024;
@@ -15,7 +15,7 @@ function formatBytes(bytes: number, decimals: number = 2): string {
 
 	const i = Math.floor(Math.log(bytes) / Math.log(k));
 
-	return `${parseFloat((bytes / k ** i).toFixed(dm))} ${sizes[i]}`;
+	return `${Number.parseFloat((bytes / k ** i).toFixed(dm))} ${sizes[i]}`;
 }
 
 // Utility function to format large numbers with commas
@@ -30,21 +30,15 @@ export function BytesDisplay({ bytes, mode = "inline" }: BytesDisplayProps) {
 	switch (mode) {
 		case "badge":
 			return (
-				<div
-					className="tooltip tooltip-top"
-					data-tip={`${formattedBytes} bytes`}
-				>
+				<div className="tooltip tooltip-top" data-tip={`${formattedBytes} bytes`}>
 					<span className="badge badge-ghost badge-sm">{humanReadable}</span>
 				</div>
 			);
 
 		case "tooltip":
 			return (
-				<div
-					className="tooltip tooltip-top"
-					data-tip={`${formattedBytes} bytes`}
-				>
-					<div className="flex items-center gap-1 text-sm text-base-content/70">
+				<div className="tooltip tooltip-top" data-tip={`${formattedBytes} bytes`}>
+					<div className="flex items-center gap-1 text-base-content/70 text-sm">
 						<Info className="h-3 w-3" />
 						<span>{humanReadable}</span>
 					</div>
@@ -53,7 +47,7 @@ export function BytesDisplay({ bytes, mode = "inline" }: BytesDisplayProps) {
 
 		default:
 			return (
-				<span className="text-sm text-base-content/70">
+				<span className="text-base-content/70 text-sm">
 					{humanReadable} ({formattedBytes} bytes)
 				</span>
 			);

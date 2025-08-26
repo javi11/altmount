@@ -1,27 +1,15 @@
 export interface FileTypeInfo {
-	category:
-		| "image"
-		| "video"
-		| "audio"
-		| "text"
-		| "document"
-		| "archive"
-		| "unknown";
+	category: "image" | "video" | "audio" | "text" | "document" | "archive" | "unknown";
 	isPreviewable: boolean;
 	iconType: "image" | "video" | "audio" | "text" | "archive" | "file";
 }
 
-export function getFileTypeInfo(
-	filename: string,
-	mimeType?: string,
-): FileTypeInfo {
+export function getFileTypeInfo(filename: string, mimeType?: string): FileTypeInfo {
 	const extension = filename.split(".").pop()?.toLowerCase() || "";
 
 	// Image files
 	if (
-		["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "ico"].includes(
-			extension,
-		) ||
+		["jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "ico"].includes(extension) ||
 		mimeType?.startsWith("image/")
 	) {
 		return {
@@ -33,9 +21,7 @@ export function getFileTypeInfo(
 
 	// Video files
 	if (
-		["mp4", "webm", "avi", "mov", "mkv", "wmv", "flv", "m4v"].includes(
-			extension,
-		) ||
+		["mp4", "webm", "avi", "mov", "mkv", "wmv", "flv", "m4v"].includes(extension) ||
 		mimeType?.startsWith("video/")
 	) {
 		return {
@@ -59,19 +45,9 @@ export function getFileTypeInfo(
 
 	// Text and code files
 	if (
-		[
-			"txt",
-			"md",
-			"json",
-			"xml",
-			"csv",
-			"log",
-			"yml",
-			"yaml",
-			"ini",
-			"conf",
-			"cfg",
-		].includes(extension) ||
+		["txt", "md", "json", "xml", "csv", "log", "yml", "yaml", "ini", "conf", "cfg"].includes(
+			extension,
+		) ||
 		mimeType?.startsWith("text/")
 	) {
 		return {
@@ -141,7 +117,7 @@ export function formatFileSize(bytes: number): string {
 	const k = 1024;
 	const sizes = ["B", "KB", "MB", "GB", "TB"];
 	const i = Math.floor(Math.log(bytes) / Math.log(k));
-	return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
+	return `${Number.parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
 }
 
 export function createBlobUrl(blob: Blob): string {

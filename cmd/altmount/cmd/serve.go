@@ -204,6 +204,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		userRepo,
 		configManager,
 		nsys.MetadataReader(),
+		poolManager,
 		mux,
 		nsys.ImporterService())
 	logger.Info("API server enabled", "prefix", "/api")

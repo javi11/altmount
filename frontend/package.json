@@ -6,7 +6,8 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "tsc -b && vite build",
-		"lint": "biome check .",
+		"lint": "biome lint --write --unsafe ./src",
+		"check": "biome check --write --unsafe ./src",
 		"preview": "vite preview"
 	},
 	"dependencies": {
@@ -24,7 +25,7 @@
 		"zod": "^4.0.17"
 	},
 	"devDependencies": {
-    	"@biomejs/biome": "^2.2.2",
+		"@biomejs/biome": "^2.2.2",
 		"@tailwindcss/typography": "^0.5.16",
 		"@tailwindcss/vite": "^4.1.12",
 		"@types/react": "^19.1.10",

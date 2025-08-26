@@ -209,8 +209,53 @@ func (s *Server) performRestart() {
 	}
 }
 
-// Additional system management endpoints could be added here, such as:
-// - handleGetSystemConfig - GET /api/system/config - Get system configuration
-// - handleUpdateSystemConfig - PUT /api/system/config - Update system configuration
-// - handleGetSystemMetrics - GET /api/system/metrics - Get detailed system metrics
-// - handleSystemMaintenance - POST /api/system/maintenance - Perform maintenance tasks
+// handleGetPoolMetrics handles GET /api/system/pool/metrics
+func (s *Server) handleGetPoolMetrics(w http.ResponseWriter, r *http.Request) {
+	// Check if pool manager is available
+	if s.poolManager == nil {
+		WriteInternalError(w, "Pool manager not available", "NNTP pool manager not configured")
+		return
+	}
+
+	// Check if pool is available
+	if !s.poolManager.HasPool() {
+		response := PoolMetricsResponse{
+			ActiveConnections:       0,
+			TotalBytesDownloaded:    0,
+			DownloadSpeed:           0.0,
+			ErrorRate:               0.0,
+			CurrentMemoryUsage:      0,
+			TotalConnections:        0,
+			CommandSuccessRate:      0.0,
+			AcquireWaitTimeMs:       0,
+			LastUpdated:             time.Now(),
+		}
+		WriteSuccess(w, response, nil)
+		return
+	}
+
+	// Get the pool
+	pool, err := s.poolManager.GetPool()
+	if err != nil {
+		WriteInternalError(w, "Failed to get NNTP pool", err.Error())
+		return
+	}
+
+	// Get metrics snapshot from the pool
+	snapshot := pool.GetMetricsSnapshot()
+
+	// Map nntppool metrics to our response format
+	response := PoolMetricsResponse{
+		ActiveConnections:       int(snapshot.ActiveConnections),
+		TotalBytesDownloaded:    snapshot.TotalBytesDownloaded,
+		DownloadSpeed:           snapshot.DownloadSpeed,
+		ErrorRate:               snapshot.ErrorRate,
+		CurrentMemoryUsage:      int64(snapshot.CurrentMemoryUsage),
+		TotalConnections:        int64(snapshot.TotalConnections),
+		CommandSuccessRate:      snapshot.CommandSuccessRate,
+		AcquireWaitTimeMs:       int64(snapshot.AverageAcquireWaitTime.Milliseconds()),
+		LastUpdated:             time.Now(),
+	}
+
+	WriteSuccess(w, response, nil)
+}

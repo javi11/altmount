@@ -1,13 +1,4 @@
-import {
-	AlertTriangle,
-	Download,
-	FileText,
-	Image,
-	Music,
-	RefreshCw,
-	Video,
-	X,
-} from "lucide-react";
+import { AlertTriangle, Download, FileText, Image, Music, RefreshCw, Video, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { WebDAVFile } from "../../types/webdav";
 import {
@@ -31,6 +22,7 @@ interface FilePreviewProps {
 	onClose: () => void;
 	onRetry: () => void;
 	onDownload: (path: string, filename: string) => void;
+	currentPath?: string;
 }
 
 export function FilePreview({
@@ -44,6 +36,7 @@ export function FilePreview({
 	onClose,
 	onRetry,
 	onDownload,
+	currentPath,
 }: FilePreviewProps) {
 	const modalRef = useRef<HTMLDialogElement>(null);
 
@@ -79,7 +72,14 @@ export function FilePreview({
 	const fileInfo = getFileTypeInfo(file.basename, file.mime);
 
 	const handleDownload = () => {
-		onDownload(file.filename, file.basename);
+		if (!file) return;
+
+		// Use the same path construction as FileExplorer and other components
+		const filePath = currentPath
+			? `${currentPath}/${file.basename}`.replace(/\/+/g, "/")
+			: file.filename;
+
+		onDownload(filePath, file.basename);
 	};
 
 	const renderPreviewContent = () => {
@@ -94,28 +94,16 @@ export function FilePreview({
 
 		if (error) {
 			return (
-				<div className="flex flex-col items-center justify-center py-16 space-y-4">
-					<AlertTriangle className="h-16 w-16 text-error mb-4" />
-					<h3 className="text-xl font-semibold text-base-content/70">
-						Preview Failed
-					</h3>
-					<p className="text-base-content/50 text-center max-w-md">
-						{error.message}
-					</p>
+				<div className="flex flex-col items-center justify-center space-y-4 py-16">
+					<AlertTriangle className="mb-4 h-16 w-16 text-error" />
+					<h3 className="font-semibold text-base-content/70 text-xl">Preview Failed</h3>
+					<p className="max-w-md text-center text-base-content/50">{error.message}</p>
 					<div className="flex gap-2">
-						<button
-							type="button"
-							className="btn btn-outline btn-sm"
-							onClick={onRetry}
-						>
+						<button type="button" className="btn btn-outline btn-sm" onClick={onRetry}>
 							<RefreshCw className="h-4 w-4" />
 							Retry
 						</button>
-						<button
-							type="button"
-							className="btn btn-primary btn-sm"
-							onClick={handleDownload}
-						>
+						<button type="button" className="btn btn-primary btn-sm" onClick={handleDownload}>
 							<Download className="h-4 w-4" />
 							Download
 						</button>
@@ -127,11 +115,11 @@ export function FilePreview({
 		// Image preview
 		if (isImageFile(file.basename, file.mime) && blobUrl) {
 			return (
-				<div className="flex justify-center items-center min-h-[400px]">
+				<div className="flex min-h-[400px] items-center justify-center">
 					<img
 						src={blobUrl}
 						alt={file.basename}
-						className="max-w-full max-h-[70vh] object-contain rounded-lg"
+						className="max-h-[70vh] max-w-full rounded-lg object-contain"
 						onError={() => onRetry()}
 					/>
 				</div>
@@ -142,11 +130,11 @@ export function FilePreview({
 		if (isVideoFile(file.basename, file.mime) && (streamUrl || blobUrl)) {
 			const videoSrc = streamUrl || blobUrl || "";
 			return (
-				<div className="flex justify-center items-center min-h-[400px]">
+				<div className="flex min-h-[400px] items-center justify-center">
 					<video
 						src={videoSrc}
 						controls
-						className="max-w-full max-h-[70vh] rounded-lg"
+						className="max-h-[70vh] max-w-full rounded-lg"
 						onError={() => onRetry()}
 					>
 						<track kind="captions" src="" label="No captions available" />
@@ -160,15 +148,10 @@ export function FilePreview({
 		if (isAudioFile(file.basename, file.mime) && (streamUrl || blobUrl)) {
 			const audioSrc = streamUrl || blobUrl || "";
 			return (
-				<div className="flex flex-col items-center justify-center py-16 space-y-6">
+				<div className="flex flex-col items-center justify-center space-y-6 py-16">
 					<Music className="h-16 w-16 text-primary" />
-					<h3 className="text-xl font-semibold">{file.basename}</h3>
-					<audio
-						src={audioSrc}
-						controls
-						className="w-full max-w-md"
-						onError={() => onRetry()}
-					>
+					<h3 className="font-semibold text-xl">{file.basename}</h3>
+					<audio src={audioSrc} controls className="w-full max-w-md" onError={() => onRetry()}>
 						<track kind="captions" src="" label="No captions available" />
 						Your browser does not support audio playback.
 					</audio>
@@ -183,22 +166,20 @@ export function FilePreview({
 
 			return (
 				<div className="w-full">
-					<div className="bg-base-200 rounded-lg p-4">
-						<div className="flex items-center justify-between mb-3">
+					<div className="rounded-lg bg-base-200 p-4">
+						<div className="mb-3 flex items-center justify-between">
 							<div className="flex items-center space-x-2">
 								<FileText className="h-5 w-5 text-base-content/70" />
-								<span className="text-sm font-medium text-base-content/70">
+								<span className="font-medium text-base-content/70 text-sm">
 									{language.toUpperCase()} File
 								</span>
 							</div>
-							<span className="text-xs text-base-content/50">
+							<span className="text-base-content/50 text-xs">
 								{content.split("\n").length} lines
 							</span>
 						</div>
-						<div className="bg-base-100 rounded border p-4 max-h-[60vh] overflow-auto">
-							<pre
-								className={`text-sm ${isCode ? "font-mono" : "font-sans"} whitespace-pre-wrap`}
-							>
+						<div className="max-h-[60vh] overflow-auto rounded border bg-base-100 p-4">
+							<pre className={`text-sm ${isCode ? "font-mono" : "font-sans"} whitespace-pre-wrap`}>
 								{content}
 							</pre>
 						</div>
@@ -210,25 +191,19 @@ export function FilePreview({
 		// PDF preview (using browser's built-in PDF viewer)
 		if (file.basename.toLowerCase().endsWith(".pdf") && blobUrl) {
 			return (
-				<div className="w-full h-[70vh]">
+				<div className="h-[70vh] w-full">
 					<iframe
 						src={blobUrl}
-						className="w-full h-full rounded-lg border"
+						className="h-full w-full rounded-lg border"
 						title={`PDF Preview: ${file.basename}`}
 					>
-						<div className="flex flex-col items-center justify-center py-16 space-y-4">
+						<div className="flex flex-col items-center justify-center space-y-4 py-16">
 							<AlertTriangle className="h-16 w-16 text-warning" />
-							<h3 className="text-xl font-semibold text-base-content/70">
+							<h3 className="font-semibold text-base-content/70 text-xl">
 								PDF Preview Not Available
 							</h3>
-							<p className="text-base-content/50">
-								Your browser doesn't support PDF preview.
-							</p>
-							<button
-								type="button"
-								className="btn btn-primary"
-								onClick={handleDownload}
-							>
+							<p className="text-base-content/50">Your browser doesn't support PDF preview.</p>
+							<button type="button" className="btn btn-primary" onClick={handleDownload}>
 								<Download className="h-4 w-4" />
 								Download PDF
 							</button>
@@ -240,19 +215,11 @@ export function FilePreview({
 
 		// Fallback for unsupported types
 		return (
-			<div className="flex flex-col items-center justify-center py-16 space-y-4">
+			<div className="flex flex-col items-center justify-center space-y-4 py-16">
 				<AlertTriangle className="h-16 w-16 text-warning" />
-				<h3 className="text-xl font-semibold text-base-content/70">
-					Preview Not Available
-				</h3>
-				<p className="text-base-content/50">
-					This file type cannot be previewed.
-				</p>
-				<button
-					type="button"
-					className="btn btn-primary"
-					onClick={handleDownload}
-				>
+				<h3 className="font-semibold text-base-content/70 text-xl">Preview Not Available</h3>
+				<p className="text-base-content/50">This file type cannot be previewed.</p>
+				<button type="button" className="btn btn-primary" onClick={handleDownload}>
 					<Download className="h-4 w-4" />
 					Download File
 				</button>
@@ -277,16 +244,14 @@ export function FilePreview({
 
 	return (
 		<dialog ref={modalRef} className="modal modal-open" onClose={onClose}>
-			<div className="modal-box w-11/12 max-w-5xl h-5/6 flex flex-col">
+			<div className="modal-box flex h-5/6 w-11/12 max-w-5xl flex-col">
 				{/* Header */}
-				<div className="flex items-center justify-between pb-4 border-b border-base-300">
-					<div className="flex items-center space-x-3 min-w-0 flex-1">
+				<div className="flex items-center justify-between border-base-300 border-b pb-4">
+					<div className="flex min-w-0 flex-1 items-center space-x-3">
 						{getFileIcon()}
 						<div className="min-w-0 flex-1">
-							<h3 className="font-semibold text-lg truncate">
-								{file.basename}
-							</h3>
-							<p className="text-sm text-base-content/70">
+							<h3 className="truncate font-semibold text-lg">{file.basename}</h3>
+							<p className="text-base-content/70 text-sm">
 								{formatFileSize(file.size)} • {fileInfo.category}
 							</p>
 						</div>
@@ -312,18 +277,11 @@ export function FilePreview({
 				</div>
 
 				{/* Content */}
-				<div className="flex-1 py-4 overflow-auto">
-					{renderPreviewContent()}
-				</div>
+				<div className="flex-1 overflow-auto py-4">{renderPreviewContent()}</div>
 			</div>
 
 			{/* Backdrop */}
-			<button
-				type="button"
-				className="modal-backdrop"
-				onClick={onClose}
-				aria-label="Close modal"
-			></button>
+			<button type="button" className="modal-backdrop" onClick={onClose} aria-label="Close modal" />
 		</dialog>
 	);
 }

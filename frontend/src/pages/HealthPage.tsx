@@ -8,7 +8,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
@@ -17,13 +17,13 @@ import { useConfirm } from "../contexts/ModalContext";
 import { useToast } from "../contexts/ToastContext";
 import {
 	useAddHealthCheck,
+	useCancelHealthCheck,
 	useCleanupHealth,
-	useHealth,
 	useDeleteHealthItem,
+	useDirectHealthCheck,
+	useHealth,
 	useHealthStats,
 	useHealthWorkerStatus,
-	useDirectHealthCheck,
-	useCancelHealthCheck,
 } from "../hooks/useApi";
 import { formatRelativeTime, truncateText } from "../lib/utils";
 import type { FileHealth } from "../types/api";
@@ -39,7 +39,12 @@ export function HealthPage() {
 	});
 
 	const pageSize = 20;
-	const { data: healthResponse, isLoading, refetch, error } = useHealth({
+	const {
+		data: healthResponse,
+		isLoading,
+		refetch,
+		error,
+	} = useHealth({
 		limit: pageSize,
 		offset: page * pageSize,
 		search: searchTerm,
@@ -62,7 +67,6 @@ export function HealthPage() {
 		}
 	};
 
-
 	const handleCleanup = async () => {
 		const confirmed = await confirmAction(
 			"Cleanup Old Health Records",
@@ -70,14 +74,12 @@ export function HealthPage() {
 			{
 				type: "warning",
 				confirmText: "Cleanup",
-				confirmButtonClass: "btn-warning"
-			}
+				confirmButtonClass: "btn-warning",
+			},
 		);
 		if (confirmed) {
 			await cleanupHealth.mutateAsync({
-				older_than: new Date(
-					Date.now() - 7 * 24 * 60 * 60 * 1000,
-				).toISOString(),
+				older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
 			});
 		}
 	};
@@ -85,9 +87,9 @@ export function HealthPage() {
 	const handleAddHealthCheck = async () => {
 		if (!healthCheckForm.file_path.trim() || !healthCheckForm.source_nzb_path?.trim()) {
 			showToast({
-				type: 'warning',
-				title: 'Missing Required Fields',
-				message: 'Please fill in both file path and source NZB path',
+				type: "warning",
+				title: "Missing Required Fields",
+				message: "Please fill in both file path and source NZB path",
 			});
 			return;
 		}
@@ -120,8 +122,8 @@ export function HealthPage() {
 			{
 				type: "warning",
 				confirmText: "Cancel Check",
-				confirmButtonClass: "btn-warning"
-			}
+				confirmButtonClass: "btn-warning",
+			},
 		);
 		if (confirmed) {
 			try {
@@ -145,7 +147,7 @@ export function HealthPage() {
 	if (error) {
 		return (
 			<div className="space-y-4">
-				<h1 className="text-3xl font-bold">Health Monitoring</h1>
+				<h1 className="font-bold text-3xl">Health Monitoring</h1>
 				<ErrorAlert error={error as Error} onRetry={() => refetch()} />
 			</div>
 		);
@@ -154,9 +156,9 @@ export function HealthPage() {
 	return (
 		<div className="space-y-6">
 			{/* Header */}
-			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h1 className="text-3xl font-bold">Health Monitoring</h1>
+					<h1 className="font-bold text-3xl">Health Monitoring</h1>
 					<p className="text-base-content/70">
 						Monitor file integrity status - view all files being health checked
 					</p>
@@ -168,9 +170,7 @@ export function HealthPage() {
 						onClick={() => refetch()}
 						disabled={isLoading}
 					>
-						<RefreshCw
-							className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
-						/>
+						<RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
 						Refresh
 					</button>
 					<button
@@ -187,23 +187,23 @@ export function HealthPage() {
 
 			{/* Stats Cards */}
 			{stats && (
-				<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-					<div className="stat bg-base-100 rounded-box shadow">
+				<div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Files Tracked</div>
 						<div className="stat-value text-primary">{stats.total}</div>
 						<div className="stat-desc">Issues being monitored</div>
 					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Pending</div>
 						<div className="stat-value text-info">{stats.pending || 0}</div>
 						<div className="stat-desc">Awaiting check</div>
 					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Partial</div>
 						<div className="stat-value text-warning">{stats.partial}</div>
 						<div className="stat-desc">Need attention</div>
 					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Corrupted</div>
 						<div className="stat-value text-error">{stats.corrupted}</div>
 						<div className="stat-desc">Require action</div>
@@ -217,12 +217,14 @@ export function HealthPage() {
 					<div className="card-body">
 						<div className="flex items-center justify-between">
 							<h2 className="card-title">Health Worker Status</h2>
-							<div className={`badge ${workerStatus.status === 'running' ? 'badge-success' : 'badge-error'}`}>
-								{workerStatus.status === 'running' ? 'Running' : 'Stopped'}
+							<div
+								className={`badge ${workerStatus.status === "running" ? "badge-success" : "badge-error"}`}
+							>
+								{workerStatus.status === "running" ? "Running" : "Stopped"}
 							</div>
 						</div>
-						
-						<div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+
+						<div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
 							<div className="stat">
 								<div className="stat-title">Manual Checks</div>
 								<div className="stat-value text-info">{workerStatus.pending_manual_checks}</div>
@@ -240,15 +242,13 @@ export function HealthPage() {
 							</div>
 							<div className="stat">
 								<div className="stat-title">Runs</div>
-								<div className="stat-value text-sm">
-									{workerStatus.total_runs_completed}
-								</div>
+								<div className="stat-value text-sm">{workerStatus.total_runs_completed}</div>
 								<div className="stat-desc">Cycles completed</div>
 							</div>
 						</div>
-						
+
 						{workerStatus.last_run_time && (
-							<div className="text-sm text-base-content/70 mt-2">
+							<div className="mt-2 text-base-content/70 text-sm">
 								Last run: {formatRelativeTime(workerStatus.last_run_time)}
 							</div>
 						)}
@@ -259,7 +259,7 @@ export function HealthPage() {
 			{/* Filters and Search */}
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body">
-					<div className="flex flex-col sm:flex-row gap-4">
+					<div className="flex flex-col gap-4 sm:flex-row">
 						{/* Search */}
 						<fieldset className="fieldset flex-1">
 							<legend className="fieldset-legend">Search Files</legend>
@@ -282,7 +282,7 @@ export function HealthPage() {
 						<LoadingTable columns={6} />
 					) : data && data.length > 0 ? (
 						<div>
-							<table className="table table-zebra">
+							<table className="table-zebra table">
 								<thead>
 									<tr>
 										<th>File Path</th>
@@ -301,29 +301,26 @@ export function HealthPage() {
 													<Heart className="h-4 w-4 text-primary" />
 													<div>
 														<div className="font-bold">
-															{truncateText(
-																item.file_path.split("/").pop() || "",
-																40,
-															)}
+															{truncateText(item.file_path.split("/").pop() || "", 40)}
 														</div>
-														<div className="text-sm text-base-content/70 tooltip" data-tip={item.file_path}>
+														<div
+															className="tooltip text-base-content/70 text-sm"
+															data-tip={item.file_path}
+														>
 															{truncateText(item.file_path, 60)}
 														</div>
 													</div>
 												</div>
 											</td>
 											<td>
-												<div className="text-sm tooltip" data-tip={item.source_nzb_path}>
-													{truncateText(
-														item.source_nzb_path?.split("/").pop() || "",
-														40,
-													)}
+												<div className="tooltip text-sm" data-tip={item.source_nzb_path}>
+													{truncateText(item.source_nzb_path?.split("/").pop() || "", 40)}
 												</div>
 											</td>
 											<td>
 												<HealthBadge status={item.status} />
 												{item.error_message && (
-													<div className="text-xs text-error mt-1">
+													<div className="mt-1 text-error text-xs">
 														{truncateText(item.error_message, 50)}
 													</div>
 												)}
@@ -336,22 +333,16 @@ export function HealthPage() {
 												</span>
 											</td>
 											<td>
-												<span className="text-sm text-base-content/70">
-													{item.last_checked
-														? formatRelativeTime(item.last_checked)
-														: "Never"}
+												<span className="text-base-content/70 text-sm">
+													{item.last_checked ? formatRelativeTime(item.last_checked) : "Never"}
 												</span>
 											</td>
 											<td>
 												<div className="dropdown dropdown-end">
-													<button
-														tabIndex={0}
-														type="button"
-														className="btn btn-ghost btn-sm"
-													>
+													<button tabIndex={0} type="button" className="btn btn-ghost btn-sm">
 														<MoreHorizontal className="h-4 w-4" />
 													</button>
-													<ul className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48">
+													<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
 														{item.status === "checking" ? (
 															<li>
 																<button
@@ -397,8 +388,8 @@ export function HealthPage() {
 						</div>
 					) : (
 						<div className="flex flex-col items-center justify-center py-12">
-							<Shield className="h-12 w-12 text-base-content/30 mb-4" />
-							<h3 className="text-lg font-semibold text-base-content/70">
+							<Shield className="mb-4 h-12 w-12 text-base-content/30" />
+							<h3 className="font-semibold text-base-content/70 text-lg">
 								No health records found
 							</h3>
 							<p className="text-base-content/50">
@@ -412,7 +403,7 @@ export function HealthPage() {
 			</div>
 
 			{/* Pagination */}
-			{meta && meta.total && meta.total > pageSize && (
+			{meta?.total && meta.total > pageSize && (
 				<Pagination
 					currentPage={page + 1}
 					totalPages={Math.ceil(meta.total / pageSize)}
@@ -431,8 +422,7 @@ export function HealthPage() {
 						<div className="font-bold">File Integrity Issues Detected</div>
 						<div className="text-sm">
 							{stats.corrupted} corrupted files require immediate attention.
-							{stats.partial > 0 &&
-								` ${stats.partial} files have partial issues.`}
+							{stats.partial > 0 && ` ${stats.partial} files have partial issues.`}
 						</div>
 					</div>
 				</div>
@@ -442,7 +432,7 @@ export function HealthPage() {
 			{showAddHealthModal && (
 				<div className="modal modal-open">
 					<div className="modal-box">
-						<div className="flex items-center justify-between mb-4">
+						<div className="mb-4 flex items-center justify-between">
 							<h3 className="font-bold text-lg">Add Manual Health Check</h3>
 							<button
 								type="button"
@@ -452,7 +442,7 @@ export function HealthPage() {
 								✕
 							</button>
 						</div>
-						
+
 						<div className="space-y-4">
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">File Path</legend>
@@ -462,13 +452,13 @@ export function HealthPage() {
 									placeholder="/path/to/file.mkv"
 									value={healthCheckForm.file_path}
 									onChange={(e) =>
-										setHealthCheckForm(prev => ({
+										setHealthCheckForm((prev) => ({
 											...prev,
-											file_path: e.target.value
+											file_path: e.target.value,
 										}))
 									}
 								/>
-								<p className="label text-sm text-base-content/70">
+								<p className="label text-base-content/70 text-sm">
 									Full path to the file that needs health checking
 								</p>
 							</fieldset>
@@ -481,39 +471,39 @@ export function HealthPage() {
 									placeholder="/path/to/source.nzb"
 									value={healthCheckForm.source_nzb_path}
 									onChange={(e) =>
-										setHealthCheckForm(prev => ({
+										setHealthCheckForm((prev) => ({
 											...prev,
-											source_nzb_path: e.target.value
+											source_nzb_path: e.target.value,
 										}))
 									}
 								/>
-								<p className="label text-sm text-base-content/70">
+								<p className="label text-base-content/70 text-sm">
 									Path to the original NZB file used for this download
 								</p>
 							</fieldset>
 
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">Priority</legend>
-								<label className="cursor-pointer label">
+								<label className="label cursor-pointer">
 									<span className="label-text">Process with high priority</span>
 									<input
 										type="checkbox"
 										className="checkbox"
 										checked={healthCheckForm.priority}
 										onChange={(e) =>
-											setHealthCheckForm(prev => ({
+											setHealthCheckForm((prev) => ({
 												...prev,
-												priority: e.target.checked
+												priority: e.target.checked,
 											}))
 										}
 									/>
 								</label>
-								<p className="label text-sm text-base-content/70">
+								<p className="label text-base-content/70 text-sm">
 									Priority checks are processed before normal queue items
 								</p>
 							</fieldset>
 						</div>
-						
+
 						<div className="modal-action">
 							<button
 								type="button"

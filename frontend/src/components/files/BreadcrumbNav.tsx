@@ -37,7 +37,7 @@ export function BreadcrumbNav({ path, onNavigate }: BreadcrumbNavProps) {
 						<button
 							type="button"
 							onClick={() => onNavigate(crumb.path)}
-							className="flex items-center space-x-1 hover:text-primary transition-colors"
+							className="flex items-center space-x-1 transition-colors hover:text-primary"
 						>
 							{index === 0 && <Home className="h-4 w-4" />}
 							<span>{crumb.name}</span>

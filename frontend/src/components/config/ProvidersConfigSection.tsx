@@ -1,31 +1,18 @@
-import {
-	Edit,
-	GripVertical,
-	Plus,
-	Power,
-	PowerOff,
-	Trash2,
-	Wifi,
-	WifiOff,
-} from "lucide-react";
+import { Edit, GripVertical, Plus, Power, PowerOff, Trash2, Wifi, WifiOff } from "lucide-react";
 import { useState } from "react";
+import { useConfirm } from "../../contexts/ModalContext";
+import { useToast } from "../../contexts/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
 import type { ConfigResponse, ProviderConfig } from "../../types/config";
 import { ProviderModal } from "./ProviderModal";
-import { useConfirm } from "../../contexts/ModalContext";
-import { useToast } from "../../contexts/ToastContext";
 
 interface ProvidersConfigSectionProps {
 	config: ConfigResponse;
 }
 
-export function ProvidersConfigSection({
-	config,
-}: ProvidersConfigSectionProps) {
+export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) {
 	const [isModalOpen, setIsModalOpen] = useState(false);
-	const [editingProvider, setEditingProvider] = useState<ProviderConfig | null>(
-		null,
-	);
+	const [editingProvider, setEditingProvider] = useState<ProviderConfig | null>(null);
 	const [modalMode, setModalMode] = useState<"create" | "edit">("create");
 	const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
 	const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
@@ -54,9 +41,9 @@ export function ProvidersConfigSection({
 			} catch (error) {
 				console.error("Failed to delete provider:", error);
 				showToast({
-					type: 'error',
-					title: 'Delete Failed',
-					message: 'Failed to delete provider. Please try again.',
+					type: "error",
+					title: "Delete Failed",
+					message: "Failed to delete provider. Please try again.",
 				});
 			}
 		}
@@ -71,9 +58,9 @@ export function ProvidersConfigSection({
 		} catch (error) {
 			console.error("Failed to toggle provider:", error);
 			showToast({
-				type: 'error',
-				title: 'Update Failed',
-				message: 'Failed to update provider. Please try again.',
+				type: "error",
+				title: "Update Failed",
+				message: "Failed to update provider. Please try again.",
 			});
 		}
 	};
@@ -118,12 +105,8 @@ export function ProvidersConfigSection({
 		}
 
 		// Find current positions
-		const draggedIndex = config.providers.findIndex(
-			(p) => p.id === draggedProviderId,
-		);
-		const targetIndex = config.providers.findIndex(
-			(p) => p.id === targetProviderId,
-		);
+		const draggedIndex = config.providers.findIndex((p) => p.id === draggedProviderId);
+		const targetIndex = config.providers.findIndex((p) => p.id === targetProviderId);
 
 		if (draggedIndex === -1 || targetIndex === -1) {
 			return;
@@ -142,9 +125,9 @@ export function ProvidersConfigSection({
 		} catch (error) {
 			console.error("Failed to reorder providers:", error);
 			showToast({
-				type: 'error',
-				title: 'Reorder Failed',
-				message: 'Failed to reorder providers. Please try again.',
+				type: "error",
+				title: "Reorder Failed",
+				message: "Failed to reorder providers. Please try again.",
 			});
 		}
 	};
@@ -159,22 +142,18 @@ export function ProvidersConfigSection({
 			{/* Header */}
 			<div className="flex items-center justify-between">
 				<div>
-					<h3 className="text-lg font-semibold">NNTP Providers</h3>
-					<p className="text-sm text-base-content/70">
+					<h3 className="font-semibold text-lg">NNTP Providers</h3>
+					<p className="text-base-content/70 text-sm">
 						Manage Usenet provider connections for downloading
 					</p>
 					{config.providers.length > 1 && (
-						<p className="text-xs text-base-content/50 mt-1">
-							<GripVertical className="inline h-3 w-3 mr-1" />
+						<p className="mt-1 text-base-content/50 text-xs">
+							<GripVertical className="mr-1 inline h-3 w-3" />
 							Drag to reorder • Higher priority providers are used first
 						</p>
 					)}
 				</div>
-				<button
-					type="button"
-					className="btn btn-primary btn-sm"
-					onClick={handleCreate}
-				>
+				<button type="button" className="btn btn-primary btn-sm" onClick={handleCreate}>
 					<Plus className="h-4 w-4" />
 					Add Provider
 				</button>
@@ -182,17 +161,13 @@ export function ProvidersConfigSection({
 
 			{/* Providers List */}
 			{config.providers.length === 0 ? (
-				<div className="text-center py-12 bg-base-200 rounded-lg">
-					<Wifi className="h-12 w-12 mx-auto text-base-content/30 mb-4" />
-					<h4 className="text-lg font-medium mb-2">No Providers Configured</h4>
-					<p className="text-base-content/70 mb-4">
+				<div className="rounded-lg bg-base-200 py-12 text-center">
+					<Wifi className="mx-auto mb-4 h-12 w-12 text-base-content/30" />
+					<h4 className="mb-2 font-medium text-lg">No Providers Configured</h4>
+					<p className="mb-4 text-base-content/70">
 						Add NNTP providers to enable downloading from Usenet
 					</p>
-					<button
-						type="button"
-						className="btn btn-primary"
-						onClick={handleCreate}
-					>
+					<button type="button" className="btn btn-primary" onClick={handleCreate}>
 						<Plus className="h-4 w-4" />
 						Add First Provider
 					</button>
@@ -212,14 +187,10 @@ export function ProvidersConfigSection({
 							onDragLeave={handleDragLeave}
 							onDrop={(e) => handleDrop(e, provider.id)}
 							onDragEnd={handleDragEnd}
-							className={`card bg-base-100 border-2 cursor-move transition-all duration-200 ${
+							className={`card cursor-move border-2 bg-base-100 transition-all duration-200 ${
 								provider.enabled ? "border-success/20" : "border-base-300"
-							} ${
-								draggedProvider === provider.id ? "opacity-50 scale-95" : ""
-							} ${
-								dragOverProvider === provider.id
-									? "border-primary border-dashed bg-primary/5"
-									: ""
+							} ${draggedProvider === provider.id ? "scale-95 opacity-50" : ""} ${
+								dragOverProvider === provider.id ? "border-primary border-dashed bg-primary/5" : ""
 							}`}
 						>
 							<div className="card-body p-4">
@@ -228,13 +199,11 @@ export function ProvidersConfigSection({
 										<div className="flex items-center space-x-2">
 											<GripVertical className="h-4 w-4 text-base-content/40" />
 											<div
-												className={`w-3 h-3 rounded-full ${
+												className={`h-3 w-3 rounded-full ${
 													provider.enabled ? "bg-success" : "bg-base-300"
 												}`}
 											/>
-											<div className="text-xs text-base-content/50">
-												#{index + 1}
-											</div>
+											<div className="text-base-content/50 text-xs">#{index + 1}</div>
 										</div>
 										<div>
 											<h4 className="font-semibold">
@@ -246,9 +215,7 @@ export function ProvidersConfigSection({
 									<div className="flex items-center space-x-2">
 										{/* Status Badge */}
 										<div
-											className={`badge ${
-												provider.enabled ? "badge-success" : "badge-neutral"
-											}`}
+											className={`badge ${provider.enabled ? "badge-success" : "badge-neutral"}`}
 										>
 											{provider.enabled ? "Enabled" : "Disabled"}
 										</div>
@@ -290,19 +257,15 @@ export function ProvidersConfigSection({
 								</div>
 
 								{/* Provider Details */}
-								<div className="mt-3 pt-3 border-t border-base-300">
-									<div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+								<div className="mt-3 border-base-300 border-t pt-3">
+									<div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
 										<div>
 											<span className="text-base-content/60">Username:</span>
 											<div className="font-mono">{provider.username}</div>
 										</div>
 										<div>
-											<span className="text-base-content/60">
-												Max Connections:
-											</span>
-											<div className="font-mono">
-												{provider.max_connections}
-											</div>
+											<span className="text-base-content/60">Max Connections:</span>
+											<div className="font-mono">{provider.max_connections}</div>
 										</div>
 										<div>
 											<span className="text-base-content/60">TLS:</span>
@@ -324,13 +287,9 @@ export function ProvidersConfigSection({
 											<span className="text-base-content/60">Password:</span>
 											<div className="flex items-center space-x-1">
 												{provider.password_set ? (
-													<span className="badge badge-success badge-sm">
-														Set
-													</span>
+													<span className="badge badge-success badge-sm">Set</span>
 												) : (
-													<span className="badge badge-error badge-sm">
-														Not Set
-													</span>
+													<span className="badge badge-error badge-sm">Not Set</span>
 												)}
 											</div>
 										</div>

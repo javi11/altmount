@@ -64,20 +64,18 @@ export function Pagination({
 
 	const getSummaryText = () => {
 		if (!totalItems || !itemsPerPage) return "";
-		
+
 		const startItem = (currentPage - 1) * itemsPerPage + 1;
 		const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-		
+
 		return `Showing ${startItem}-${endItem} of ${totalItems} results`;
 	};
 
 	return (
-		<div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+		<div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
 			{/* Results Summary */}
 			{showSummary && totalItems && itemsPerPage && (
-				<div className="text-sm text-base-content/70">
-					{getSummaryText()}
-				</div>
+				<div className="text-base-content/70 text-sm">{getSummaryText()}</div>
 			)}
 
 			{/* Pagination Controls */}
@@ -124,9 +122,7 @@ export function Pagination({
 						<button
 							key={pageNum}
 							type="button"
-							className={`join-item btn btn-sm ${
-								pageNum === currentPage ? "btn-active" : ""
-							}`}
+							className={`join-item btn btn-sm ${pageNum === currentPage ? "btn-active" : ""}`}
 							onClick={() => onPageChange(pageNum)}
 						>
 							{pageNum}

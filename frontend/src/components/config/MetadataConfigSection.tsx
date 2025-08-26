@@ -39,7 +39,7 @@ export function MetadataConfigSection({
 
 	return (
 		<div className="space-y-4">
-			<h3 className="text-lg font-semibold">Metadata Storage Configuration</h3>
+			<h3 className="font-semibold text-lg">Metadata Storage Configuration</h3>
 			<div className="grid grid-cols-1 gap-4">
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Root Path</legend>
@@ -48,15 +48,11 @@ export function MetadataConfigSection({
 						className="input"
 						value={formData.root_path}
 						readOnly={isReadOnly}
-						onChange={(e) =>
-							handleInputChange("root_path", e.target.value)
-						}
+						onChange={(e) => handleInputChange("root_path", e.target.value)}
 						placeholder="/path/to/metadata"
 						required
 					/>
-					<p className="label">
-						Directory path where file metadata will be stored (required)
-					</p>
+					<p className="label">Directory path where file metadata will be stored (required)</p>
 				</fieldset>
 			</div>
 

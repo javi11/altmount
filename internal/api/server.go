@@ -12,6 +12,7 @@ import (
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/pool"
 )
 
 // Config represents API server configuration
@@ -37,6 +38,7 @@ type Server struct {
 	metadataReader  *metadata.MetadataReader
 	healthWorker    *health.HealthWorker
 	importerService *importer.Service
+	poolManager     pool.Manager
 	logger          *slog.Logger
 	startTime       time.Time
 	mux             *http.ServeMux
@@ -51,6 +53,7 @@ func NewServer(
 	userRepo *database.UserRepository,
 	configManager ConfigManager,
 	metadataReader *metadata.MetadataReader,
+	poolManager pool.Manager,
 	mux *http.ServeMux,
 	importService *importer.Service) *Server {
 	if config == nil {
@@ -66,6 +69,7 @@ func NewServer(
 		configManager:   configManager,
 		metadataReader:  metadataReader,
 		importerService: importService, // Will be set later via SetImporterService
+		poolManager:     poolManager,
 		logger:          slog.Default(),
 		startTime:       time.Now(),
 		mux:             mux,
@@ -133,6 +137,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	// System endpoints
 	apiMux.HandleFunc("GET /system/stats", s.handleGetSystemStats)
 	apiMux.HandleFunc("GET /system/health", s.handleGetSystemHealth)
+	apiMux.HandleFunc("GET /system/pool/metrics", s.handleGetPoolMetrics)
 	apiMux.HandleFunc("POST /system/cleanup", s.handleSystemCleanup)
 	apiMux.HandleFunc("POST /system/restart", s.handleSystemRestart)
 

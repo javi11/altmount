@@ -1,7 +1,7 @@
 import { Download, Eye, Info, MoreHorizontal, Trash2 } from "lucide-react";
+import { useConfirm } from "../../contexts/ModalContext";
 import type { WebDAVFile } from "../../types/webdav";
 import { getFileTypeInfo } from "../../utils/fileUtils";
-import { useConfirm } from "../../contexts/ModalContext";
 
 interface FileActionsProps {
 	file: WebDAVFile;
@@ -51,8 +51,7 @@ export function FileActions({
 	};
 
 	const fileInfo = getFileTypeInfo(file.basename, file.mime);
-	const canPreview =
-		file.type === "file" && fileInfo.isPreviewable && onPreview;
+	const canPreview = file.type === "file" && fileInfo.isPreviewable && onPreview;
 
 	return (
 		<div className="dropdown dropdown-end">
@@ -64,7 +63,7 @@ export function FileActions({
 			>
 				<MoreHorizontal className="h-4 w-4" />
 			</button>
-			<ul className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48 z-10">
+			<ul className="dropdown-content menu z-10 w-48 rounded-box bg-base-100 shadow-lg">
 				<li>
 					<button type="button" onClick={handleInfo}>
 						<Info className="h-4 w-4" />
@@ -81,23 +80,14 @@ export function FileActions({
 				)}
 				{file.type === "file" && (
 					<li>
-						<button
-							type="button"
-							onClick={handleDownload}
-							disabled={isDownloading}
-						>
+						<button type="button" onClick={handleDownload} disabled={isDownloading}>
 							<Download className="h-4 w-4" />
 							{isDownloading ? "Downloading..." : "Download"}
 						</button>
 					</li>
 				)}
 				<li>
-					<button
-						type="button"
-						onClick={handleDelete}
-						disabled={isDeleting}
-						className="text-error"
-					>
+					<button type="button" onClick={handleDelete} disabled={isDeleting} className="text-error">
 						<Trash2 className="h-4 w-4" />
 						{isDeleting ? "Deleting..." : "Delete"}
 					</button>

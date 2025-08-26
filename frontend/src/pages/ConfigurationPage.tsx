@@ -14,12 +14,12 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
+import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
-import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { RestartRequiredBanner } from "../components/ui/RestartRequiredBanner";
@@ -32,11 +32,11 @@ import {
 } from "../hooks/useConfig";
 import type {
 	ConfigSection,
-	StreamingConfig,
-	WebDAVConfig,
 	ImportConfig,
 	MetadataConfig,
+	StreamingConfig,
 	SystemFormData,
+	WebDAVConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
 
@@ -60,27 +60,23 @@ export function ConfigurationPage() {
 	const restartServer = useRestartServer();
 	const updateConfigSection = useUpdateConfigSection();
 	const { confirmAction } = useConfirm();
-	const [activeSection, setActiveSection] = useState<ConfigSection | "system">(
-		"webdav",
-	);
+	const [activeSection, setActiveSection] = useState<ConfigSection | "system">("webdav");
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 	const [restartRequiredConfigs, setRestartRequiredConfigs] = useState<string[]>([]);
 	const [isRestartBannerDismissed, setIsRestartBannerDismissed] = useState(() => {
 		// Initialize from session storage on component mount
-		return sessionStorage.getItem('restartBannerDismissed') === 'true';
+		return sessionStorage.getItem("restartBannerDismissed") === "true";
 	});
 
 	// Helper functions for restart required state
 	const addRestartRequiredConfig = (configName: string) => {
-		setRestartRequiredConfigs(prev => 
-			prev.includes(configName) ? prev : [...prev, configName]
-		);
+		setRestartRequiredConfigs((prev) => (prev.includes(configName) ? prev : [...prev, configName]));
 		setIsRestartBannerDismissed(false);
 	};
 
 	const handleDismissRestartBanner = () => {
 		setIsRestartBannerDismissed(true);
-		sessionStorage.setItem('restartBannerDismissed', 'true');
+		sessionStorage.setItem("restartBannerDismissed", "true");
 	};
 
 	// Clear restart state on config reload (indicates server restart)
@@ -90,7 +86,7 @@ export function ConfigurationPage() {
 			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);
 			setIsRestartBannerDismissed(false);
-			sessionStorage.removeItem('restartBannerDismissed');
+			sessionStorage.removeItem("restartBannerDismissed");
 		} catch (error) {
 			console.error("Failed to reload configuration:", error);
 		}
@@ -104,8 +100,8 @@ export function ConfigurationPage() {
 			{
 				type: "error",
 				confirmText: "Restart Server",
-				confirmButtonClass: "btn-error"
-			}
+				confirmButtonClass: "btn-error",
+			},
 		);
 		if (!confirmed) {
 			return;
@@ -117,8 +113,8 @@ export function ConfigurationPage() {
 			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);
 			setIsRestartBannerDismissed(false);
-			sessionStorage.removeItem('restartBannerDismissed');
-			
+			sessionStorage.removeItem("restartBannerDismissed");
+
 			// Wait a bit for the server to restart, then reload the page
 			setTimeout(() => {
 				window.location.reload();
@@ -137,12 +133,12 @@ export function ConfigurationPage() {
 			if (section === "webdav" && config) {
 				const webdavData = data as WebDAVConfig;
 				const portChanged = webdavData.port !== config.webdav.port;
-				
+
 				await updateConfigSection.mutateAsync({
 					section: "webdav",
 					config: { webdav: webdavData },
 				});
-				
+
 				// Only add restart requirement after successful update
 				if (portChanged) {
 					addRestartRequiredConfig("WebDAV Port");
@@ -154,13 +150,14 @@ export function ConfigurationPage() {
 				});
 			} else if (section === "import" && config) {
 				const importData = data as ImportConfig;
-				const workersChanged = importData.max_processor_workers !== config.import.max_processor_workers;
-				
+				const workersChanged =
+					importData.max_processor_workers !== config.import.max_processor_workers;
+
 				await updateConfigSection.mutateAsync({
 					section: "import",
 					config: { import: importData },
 				});
-				
+
 				// Only add restart requirement after successful update
 				if (workersChanged) {
 					addRestartRequiredConfig("Import Max Processor Workers");
@@ -168,12 +165,12 @@ export function ConfigurationPage() {
 			} else if (section === "metadata" && config) {
 				const metadataData = data as MetadataConfig;
 				const rootPathChanged = metadataData.root_path !== config.metadata.root_path;
-				
+
 				await updateConfigSection.mutateAsync({
 					section: "metadata",
 					config: { metadata: metadataData },
 				});
-				
+
 				// Only add restart requirement after successful update
 				if (rootPathChanged) {
 					addRestartRequiredConfig("Metadata Root Path");
@@ -196,7 +193,7 @@ export function ConfigurationPage() {
 
 	if (isLoading) {
 		return (
-			<div className="flex justify-center items-center min-h-[400px]">
+			<div className="flex min-h-[400px] items-center justify-center">
 				<LoadingSpinner size="lg" />
 			</div>
 		);
@@ -205,7 +202,7 @@ export function ConfigurationPage() {
 	if (error) {
 		return (
 			<div className="space-y-4">
-				<h1 className="text-3xl font-bold">Configuration</h1>
+				<h1 className="font-bold text-3xl">Configuration</h1>
 				<ErrorAlert error={error as Error} onRetry={() => refetch()} />
 			</div>
 		);
@@ -214,7 +211,7 @@ export function ConfigurationPage() {
 	if (!config) {
 		return (
 			<div className="space-y-4">
-				<h1 className="text-3xl font-bold">Configuration</h1>
+				<h1 className="font-bold text-3xl">Configuration</h1>
 				<div className="alert alert-warning">
 					<AlertTriangle className="h-6 w-6" />
 					<div>
@@ -240,17 +237,15 @@ export function ConfigurationPage() {
 				<div className="flex items-center space-x-3">
 					<Settings className="h-8 w-8 text-primary" />
 					<div>
-						<h1 className="text-3xl font-bold">Configuration</h1>
-						<p className="text-base-content/70">
-							Manage system settings and preferences
-						</p>
+						<h1 className="font-bold text-3xl">Configuration</h1>
+						<p className="text-base-content/70">Manage system settings and preferences</p>
 					</div>
 				</div>
 
 				<div className="flex items-center space-x-2">
 					{hasUnsavedChanges && (
 						<div className="badge badge-warning">
-							<AlertTriangle className="h-4 w-4 mr-1" />
+							<AlertTriangle className="mr-1 h-4 w-4" />
 							Unsaved Changes
 						</div>
 					)}
@@ -276,11 +271,7 @@ export function ConfigurationPage() {
 						disabled={restartServer.isPending}
 						title="Restart the entire server"
 					>
-						{restartServer.isPending ? (
-							<LoadingSpinner size="sm" />
-						) : (
-							<Radio className="h-4 w-4" />
-						)}
+						{restartServer.isPending ? <LoadingSpinner size="sm" /> : <Radio className="h-4 w-4" />}
 						Restart Server
 					</button>
 				</div>
@@ -329,13 +320,13 @@ export function ConfigurationPage() {
 			)}
 
 			{/* Main Content */}
-			<div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
 				{/* Menu Navigation */}
 				<div className="lg:col-span-1">
 					<div className="card bg-base-100 shadow-lg">
 						<div className="card-body p-4">
-							<h3 className="font-semibold mb-4">Configuration Sections</h3>
-							<ul className="menu bg-base-200 rounded-box">
+							<h3 className="mb-4 font-semibold">Configuration Sections</h3>
+							<ul className="menu rounded-box bg-base-200">
 								{sections.map(([key, section]) => {
 									const IconComponent = getIconComponent(section.icon);
 									return (
@@ -346,16 +337,12 @@ export function ConfigurationPage() {
 												onClick={() => setActiveSection(key)}
 											>
 												<IconComponent className="h-5 w-5" />
-												<div className="flex-1 min-w-0">
+												<div className="min-w-0 flex-1">
 													<div className="font-medium">{section.title}</div>
-													<div className="text-xs opacity-70 truncate">
-														{section.description}
-													</div>
+													<div className="truncate text-xs opacity-70">{section.description}</div>
 												</div>
 												{!section.canEdit && (
-													<span className="badge badge-ghost badge-xs">
-														Read Only
-													</span>
+													<span className="badge badge-ghost badge-xs">Read Only</span>
 												)}
 											</button>
 										</li>
@@ -372,17 +359,13 @@ export function ConfigurationPage() {
 						<div className="card-body">
 							{/* Section Header */}
 							<div className="mb-6">
-								<div className="flex items-center space-x-3 mb-2">
+								<div className="mb-2 flex items-center space-x-3">
 									{(() => {
-										const IconComponent = getIconComponent(
-											CONFIG_SECTIONS[activeSection].icon,
-										);
+										const IconComponent = getIconComponent(CONFIG_SECTIONS[activeSection].icon);
 										return <IconComponent className="h-8 w-8 text-primary" />;
 									})()}
 									<div>
-										<h2 className="text-2xl font-bold">
-											{CONFIG_SECTIONS[activeSection].title}
-										</h2>
+										<h2 className="font-bold text-2xl">{CONFIG_SECTIONS[activeSection].title}</h2>
 										<p className="text-base-content/70">
 											{CONFIG_SECTIONS[activeSection].description}
 										</p>
@@ -425,30 +408,21 @@ export function ConfigurationPage() {
 								)}
 
 								{activeSection === "system" && (
-									<SystemConfigSection 
+									<SystemConfigSection
 										config={config}
 										onUpdate={handleConfigUpdate}
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
 
-								{activeSection === "providers" && (
-									<ProvidersConfigSection config={config} />
-								)}
+								{activeSection === "providers" && <ProvidersConfigSection config={config} />}
 
 								{/* Placeholder for other sections */}
-								{![
-									"webdav",
-									"import",
-									"metadata",
-									"streaming",
-									"system",
-									"providers",
-								].includes(activeSection) && (
+								{!["webdav", "import", "metadata", "streaming", "system", "providers"].includes(
+									activeSection,
+								) && (
 									<ComingSoonSection
-										sectionName={
-											CONFIG_SECTIONS[activeSection]?.title || activeSection
-										}
+										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
 									/>
 								)}
 							</div>

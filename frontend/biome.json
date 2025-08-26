@@ -1,47 +1,84 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.1.1/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.2.2/schema.json",
 	"vcs": {
-		"enabled": false,
+		"enabled": true,
 		"clientKind": "git",
-		"useIgnoreFile": false
+		"defaultBranch": "main",
+		"useIgnoreFile": true
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"experimentalScannerIgnores": ["node_modules", ".next"],
 		"includes": [
-			"src/**/*.{js,jsx,ts,tsx,json,md,mdx,yml,yaml,html,css,scss,sass}",
-			"!**/node_modules/**/*",
-			"!**/.next/**",
-			"!**/dist/**",
-			"!**/out/**",
-			"!**/.vercel/**",
-			"!**/.git/**"
+			"**",
+			"!**/convex/_generated",
+			"!**/env.d.ts",
+			"!**/bun.lock",
+			"!**/convex.json",
+			"!**/styles/**/*.css"
 		]
 	},
 	"formatter": {
 		"enabled": true,
-		"indentStyle": "tab"
-	},
-	"linter": {
-		"enabled": true,
-		"rules": {
-			"recommended": true,
-			"suspicious": {
-				"noArrayIndexKey": "off"
-			}
-		}
-	},
-	"javascript": {
-		"formatter": {
-			"quoteStyle": "double"
-		}
+		"useEditorconfig": true,
+		"lineWidth": 100
 	},
 	"assist": {
-		"enabled": true,
 		"actions": {
 			"source": {
 				"organizeImports": "on"
 			}
 		}
-	}
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"nursery": {
+				"useSortedClasses": {
+					"level": "warn",
+					"fix": "safe",
+					"options": {
+						"functions": [
+							"clsx",
+							"cva",
+							"cn"
+						]
+					}
+				}
+			},
+			"correctness": {
+				"noUnusedImports": "error",
+				"useUniqueElementIds": "off"
+			},
+			"suspicious": {
+				"noArrayIndexKey": "off"
+			},
+			"recommended": true,
+			"style": {
+				"noParameterAssign": "error",
+				"useAsConstAssertion": "error",
+				"useDefaultParameterLast": "error",
+				"useEnumInitializers": "error",
+				"useSelfClosingElements": "error",
+				"useSingleVarDeclarator": "error",
+				"noUnusedTemplateLiteral": "error",
+				"useNumberNamespace": "error",
+				"noInferrableTypes": "error",
+				"noUselessElse": "error"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"src/**/*.css"
+			],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnknownProperty": "off"
+					}
+				}
+			}
+		}
+	]
 }

@@ -278,10 +278,7 @@ export interface ProviderReorderRequest {
 	provider_ids: string[];
 }
 
-export const CONFIG_SECTIONS: Record<
-	ConfigSection | "system",
-	ConfigSectionInfo
-> = {
+export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo> = {
 	webdav: {
 		title: "WebDAV Server",
 		description: "WebDAV server settings for file access",

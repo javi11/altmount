@@ -537,3 +537,16 @@ type ScanStatusResponse struct {
 	CurrentFile string     `json:"current_file,omitempty"`
 	LastError   *string    `json:"last_error,omitempty"`
 }
+
+// PoolMetricsResponse represents NNTP pool metrics in API responses
+type PoolMetricsResponse struct {
+	ActiveConnections       int     `json:"active_connections"`
+	TotalBytesDownloaded    int64   `json:"total_bytes_downloaded"`
+	DownloadSpeed           float64 `json:"download_speed_bytes_per_sec"`
+	ErrorRate               float64 `json:"error_rate_percent"`
+	CurrentMemoryUsage      int64   `json:"current_memory_usage"`
+	TotalConnections        int64   `json:"total_connections"`
+	CommandSuccessRate      float64 `json:"command_success_rate_percent"`
+	AcquireWaitTimeMs       int64   `json:"acquire_wait_time_ms"`
+	LastUpdated             time.Time `json:"last_updated"`
+}

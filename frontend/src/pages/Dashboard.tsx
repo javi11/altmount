@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle, Download } from "lucide-react";
 import { HealthChart, QueueChart } from "../components/charts/QueueChart";
+import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { StatusBadge } from "../components/ui/StatusBadge";
@@ -14,11 +15,8 @@ export function Dashboard() {
 	if (hasError) {
 		return (
 			<div className="space-y-4">
-				<h1 className="text-3xl font-bold">Dashboard</h1>
-				<ErrorAlert
-					error={hasError as Error}
-					onRetry={() => window.location.reload()}
-				/>
+				<h1 className="font-bold text-3xl">Dashboard</h1>
+				<ErrorAlert error={hasError as Error} onRetry={() => window.location.reload()} />
 			</div>
 		);
 	}
@@ -26,21 +24,21 @@ export function Dashboard() {
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
-				<h1 className="text-3xl font-bold">Dashboard</h1>
+				<h1 className="font-bold text-3xl">Dashboard</h1>
 			</div>
 
 			{/* System Stats Cards */}
-			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+			<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
 				{/* Queue Status */}
 				<div className="card bg-base-100 shadow-lg">
 					<div className="card-body">
 						<div className="flex items-center justify-between">
 							<div>
-								<h2 className="card-title text-sm font-medium text-base-content/70">
+								<h2 className="card-title font-medium text-base-content/70 text-sm">
 									Queue Status
 								</h2>
 								{queueStats ? (
-									<div className="text-2xl font-bold">
+									<div className="font-bold text-2xl">
 										{queueStats.total_processing} / {queueStats.total_queued}
 									</div>
 								) : (
@@ -51,12 +49,11 @@ export function Dashboard() {
 						</div>
 						{queueStats && (
 							<div className="mt-2">
-								<div className="text-sm text-base-content/70">
-									{queueStats.total_completed} completed,{" "}
-									{queueStats.total_failed} failed
+								<div className="text-base-content/70 text-sm">
+									{queueStats.total_completed} completed, {queueStats.total_failed} failed
 								</div>
 								<progress
-									className="progress progress-primary w-full mt-2"
+									className="progress progress-primary mt-2 w-full"
 									value={queueStats.total_completed}
 									max={queueStats.total_failed}
 								/>
@@ -70,11 +67,9 @@ export function Dashboard() {
 					<div className="card-body">
 						<div className="flex items-center justify-between">
 							<div>
-								<h2 className="card-title text-sm font-medium text-base-content/70">
-									File Health
-								</h2>
+								<h2 className="card-title font-medium text-base-content/70 text-sm">File Health</h2>
 								{healthStats ? (
-									<div className="text-2xl font-bold text-success">
+									<div className="font-bold text-2xl text-success">
 										{healthStats.healthy} / {healthStats.total}
 									</div>
 								) : (
@@ -85,17 +80,18 @@ export function Dashboard() {
 						</div>
 						{healthStats && healthStats.corrupted > 0 && (
 							<div className="mt-2">
-								<div className="text-sm text-error">
-									{healthStats.corrupted} corrupted files
-								</div>
+								<div className="text-error text-sm">{healthStats.corrupted} corrupted files</div>
 							</div>
 						)}
 					</div>
 				</div>
+
+				{/* Pool Metrics */}
+				<PoolMetricsCard />
 			</div>
 
 			{/* Detailed Status */}
-			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
 				{/* Queue Details */}
 				<div className="card bg-base-100 shadow-lg">
 					<div className="card-body">
@@ -105,21 +101,19 @@ export function Dashboard() {
 						</h2>
 						{queueStats ? (
 							<div className="space-y-3">
-								<div className="flex justify-between items-center">
+								<div className="flex items-center justify-between">
 									<span>Pending</span>
 									<StatusBadge status={`${queueStats.total_queued} items`} />
 								</div>
-								<div className="flex justify-between items-center">
+								<div className="flex items-center justify-between">
 									<span>Processing</span>
-									<StatusBadge
-										status={`${queueStats.total_processing} items`}
-									/>
+									<StatusBadge status={`${queueStats.total_processing} items`} />
 								</div>
-								<div className="flex justify-between items-center">
+								<div className="flex items-center justify-between">
 									<span>Completed</span>
 									<StatusBadge status={`${queueStats.total_completed} items`} />
 								</div>
-								<div className="flex justify-between items-center">
+								<div className="flex items-center justify-between">
 									<span>Failed</span>
 									<StatusBadge status={`${queueStats.total_failed} items`} />
 								</div>
@@ -132,7 +126,7 @@ export function Dashboard() {
 			</div>
 
 			{/* Charts */}
-			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
 				<div className="card bg-base-100 shadow-lg">
 					<div className="card-body">
 						<h2 className="card-title">
@@ -155,8 +149,7 @@ export function Dashboard() {
 			</div>
 
 			{/* Issues Alert */}
-			{(queueStats && queueStats.total_failed > 0) ||
-			(healthStats && healthStats.corrupted > 0) ? (
+			{(queueStats && queueStats.total_failed > 0) || (healthStats && healthStats.corrupted > 0) ? (
 				<div className="alert alert-warning">
 					<AlertTriangle className="h-6 w-6" />
 					<div>

@@ -48,13 +48,8 @@ export const useRetryQueueItem = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({
-			id,
-			resetRetryCount,
-		}: {
-			id: number;
-			resetRetryCount?: boolean;
-		}) => apiClient.retryQueueItem(id, resetRetryCount),
+		mutationFn: ({ id, resetRetryCount }: { id: number; resetRetryCount?: boolean }) =>
+			apiClient.retryQueueItem(id, resetRetryCount),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["queue"] });
 		},
@@ -65,8 +60,7 @@ export const useClearCompletedQueue = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (olderThan?: string) =>
-			apiClient.clearCompletedQueue(olderThan),
+		mutationFn: (olderThan?: string) => apiClient.clearCompletedQueue(olderThan),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["queue"] });
 		},
@@ -87,7 +81,7 @@ export const useHealth = (params?: {
 		refetchInterval: (query) => {
 			// Poll every 5 seconds if any items are in "checking" status
 			const data = query.state.data?.data;
-			const hasCheckingItems = data?.some(item => item.status === 'checking');
+			const hasCheckingItems = data?.some((item) => item.status === "checking");
 			return hasCheckingItems ? 5000 : false;
 		},
 	});
@@ -101,10 +95,7 @@ export const useHealthItem = (id: string) => {
 	});
 };
 
-export const useCorruptedFiles = (params?: {
-	limit?: number;
-	offset?: number;
-}) => {
+export const useCorruptedFiles = (params?: { limit?: number; offset?: number }) => {
 	return useQuery({
 		queryKey: ["health", "corrupted", params],
 		queryFn: () => apiClient.getCorruptedFiles(params),
@@ -174,12 +165,19 @@ export const useHealthWorkerStatus = () => {
 	});
 };
 
+export const usePoolMetrics = () => {
+	return useQuery({
+		queryKey: ["system", "pool", "metrics"],
+		queryFn: () => apiClient.getPoolMetrics(),
+		refetchInterval: 5000, // Refetch every 5 seconds
+	});
+};
+
 export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePath: string) =>
-			apiClient.directHealthCheck(filePath),
+		mutationFn: (filePath: string) => apiClient.directHealthCheck(filePath),
 		onSuccess: () => {
 			// Immediately refresh health data to show "checking" status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -192,8 +190,7 @@ export const useCancelHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePath: string) =>
-			apiClient.cancelHealthCheck(filePath),
+		mutationFn: (filePath: string) => apiClient.cancelHealthCheck(filePath),
 		onSuccess: () => {
 			// Immediately refresh health data to show cancelled status
 			queryClient.invalidateQueries({ queryKey: ["health"] });

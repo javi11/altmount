@@ -16,11 +16,7 @@ export function ErrorAlert({ error, onRetry, className }: ErrorAlertProps) {
 			</div>
 			{onRetry && (
 				<div>
-					<button
-						type="button"
-						className="btn btn-sm btn-outline"
-						onClick={onRetry}
-					>
+					<button type="button" className="btn btn-sm btn-outline" onClick={onRetry}>
 						<RefreshCw className="h-4 w-4" />
 						Retry
 					</button>

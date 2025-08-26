@@ -1,12 +1,4 @@
-import {
-	Bar,
-	BarChart,
-	CartesianGrid,
-	ResponsiveContainer,
-	Tooltip,
-	XAxis,
-	YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useHealthStats, useQueueStats } from "../../hooks/useApi";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
@@ -15,7 +7,7 @@ export function QueueChart() {
 
 	if (isLoading) {
 		return (
-			<div className="flex justify-center items-center h-64">
+			<div className="flex h-64 items-center justify-center">
 				<LoadingSpinner size="lg" />
 			</div>
 		);
@@ -23,7 +15,7 @@ export function QueueChart() {
 
 	if (error || !stats) {
 		return (
-			<div className="flex justify-center items-center h-64 text-error">
+			<div className="flex h-64 items-center justify-center text-error">
 				Failed to load queue statistics
 			</div>
 		);
@@ -40,11 +32,7 @@ export function QueueChart() {
 		<ResponsiveContainer width="100%" height={300}>
 			<BarChart data={data}>
 				<CartesianGrid strokeDasharray="3 3" />
-				<XAxis
-					dataKey="name"
-					tick={{ fontSize: 12 }}
-					className="text-base-content"
-				/>
+				<XAxis dataKey="name" tick={{ fontSize: 12 }} className="text-base-content" />
 				<YAxis tick={{ fontSize: 12 }} className="text-base-content" />
 				<Tooltip
 					contentStyle={{
@@ -65,7 +53,7 @@ export function HealthChart() {
 
 	if (isLoading) {
 		return (
-			<div className="flex justify-center items-center h-64">
+			<div className="flex h-64 items-center justify-center">
 				<LoadingSpinner size="lg" />
 			</div>
 		);
@@ -73,7 +61,7 @@ export function HealthChart() {
 
 	if (error || !stats) {
 		return (
-			<div className="flex justify-center items-center h-64 text-error">
+			<div className="flex h-64 items-center justify-center text-error">
 				Failed to load health statistics
 			</div>
 		);
@@ -89,11 +77,7 @@ export function HealthChart() {
 		<ResponsiveContainer width="100%" height={300}>
 			<BarChart data={data}>
 				<CartesianGrid strokeDasharray="3 3" />
-				<XAxis
-					dataKey="name"
-					tick={{ fontSize: 12 }}
-					className="text-base-content"
-				/>
+				<XAxis dataKey="name" tick={{ fontSize: 12 }} className="text-base-content" />
 				<YAxis tick={{ fontSize: 12 }} className="text-base-content" />
 				<Tooltip
 					contentStyle={{

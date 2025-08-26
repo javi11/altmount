@@ -118,15 +118,14 @@ func (s *Server) handleGetHealth(w http.ResponseWriter, r *http.Request) {
 // handleDeleteHealth handles DELETE /api/health/{id}
 func (s *Server) handleDeleteHealth(w http.ResponseWriter, r *http.Request) {
 	// Extract ID from path parameter
-	idStr := r.PathValue("id")
-	if idStr == "" {
+	filePath := r.PathValue("id")
+	if filePath == "" {
 		WriteBadRequest(w, "Health record identifier is required", "")
 		return
 	}
 
-	// For now, we'll treat this as a file path since that's what our repository supports
-	// First check if the record exists
-	item, err := s.healthRepo.GetFileHealth(idStr)
+	// Check if the record exists
+	item, err := s.healthRepo.GetFileHealth(filePath)
 	if err != nil {
 		WriteInternalError(w, "Failed to check health record", err.Error())
 		return
@@ -137,9 +136,36 @@ func (s *Server) handleDeleteHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We need to implement a delete method in the health repository
-	// For now, return not implemented
-	WriteInternalError(w, "Delete health record not yet implemented", "This feature needs to be added to the health repository")
+	// If the item is currently being checked, cancel the check first
+	if item.Status == database.HealthStatusChecking {
+		// Check if health worker is available
+		if s.healthWorker != nil {
+			// Check if there's actually an active check to cancel
+			if s.healthWorker.IsCheckActive(filePath) {
+				// Cancel the health check before deletion
+				err = s.healthWorker.CancelHealthCheck(filePath)
+				if err != nil {
+					WriteInternalError(w, "Failed to cancel health check before deletion", err.Error())
+					return
+				}
+			}
+		}
+	}
+
+	// Delete the health record from database
+	err = s.healthRepo.DeleteHealthRecord(filePath)
+	if err != nil {
+		WriteInternalError(w, "Failed to delete health record", err.Error())
+		return
+	}
+
+	response := map[string]interface{}{
+		"message":    "Health record deleted successfully",
+		"file_path":  filePath,
+		"deleted_at": time.Now().Format(time.RFC3339),
+	}
+
+	WriteSuccess(w, response, nil)
 }
 
 // handleRetryHealth handles POST /api/health/{id}/retry
@@ -435,6 +461,13 @@ func (s *Server) handleDirectHealthCheck(w http.ResponseWriter, r *http.Request)
 	err = s.healthWorker.PerformBackgroundCheck(context.Background(), filePath)
 	if err != nil {
 		WriteInternalError(w, "Failed to start background health check", err.Error())
+		return
+	}
+
+	// Verify that the file still exists
+	f, err := s.metadataReader.GetFileMetadata(filePath)
+	if f == nil || err != nil {
+		WriteInternalError(w, "Failed to retrieve file metadata", err.Error())
 		return
 	}
 

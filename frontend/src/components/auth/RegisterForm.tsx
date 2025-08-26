@@ -15,9 +15,7 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 		password: "",
 		confirmPassword: "",
 	});
-	const [validationErrors, setValidationErrors] = useState<
-		Record<string, string>
-	>({});
+	const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
 	const validateForm = (): boolean => {
 		const errors: Record<string, string> = {};
@@ -78,19 +76,16 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 
 	return (
 		<form onSubmit={handleSubmit} className="space-y-6">
-			<div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+			<div className="rounded-md border border-blue-200 bg-blue-50 p-4">
 				<div className="flex">
 					<div className="flex-shrink-0">
 						<User />
 					</div>
 					<div className="ml-3">
-						<h3 className="text-sm font-medium text-blue-800">
-							First User Registration
-						</h3>
-						<div className="mt-2 text-sm text-blue-700">
+						<h3 className="font-medium text-blue-800 text-sm">First User Registration</h3>
+						<div className="mt-2 text-blue-700 text-sm">
 							<p>
-								You're registering as the first user and will be granted
-								administrator privileges.
+								You're registering as the first user and will be granted administrator privileges.
 							</p>
 						</div>
 					</div>
@@ -98,10 +93,7 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 			</div>
 
 			<div>
-				<label
-					htmlFor="username"
-					className="block text-sm font-medium text-gray-700"
-				>
+				<label htmlFor="username" className="block font-medium text-gray-700 text-sm">
 					Username *
 				</label>
 				<input
@@ -112,23 +104,18 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					required
 					value={formData.username}
 					onChange={handleChange}
-					className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
 						validationErrors.username ? "border-red-300" : "border-gray-300"
 					}`}
 					placeholder="Choose a username (min 3 characters)"
 				/>
 				{validationErrors.username && (
-					<p className="mt-1 text-sm text-red-600">
-						{validationErrors.username}
-					</p>
+					<p className="mt-1 text-red-600 text-sm">{validationErrors.username}</p>
 				)}
 			</div>
 
 			<div>
-				<label
-					htmlFor="email"
-					className="block text-sm font-medium text-gray-700"
-				>
+				<label htmlFor="email" className="block font-medium text-gray-700 text-sm">
 					Email (optional)
 				</label>
 				<input
@@ -138,21 +125,18 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					autoComplete="email"
 					value={formData.email}
 					onChange={handleChange}
-					className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
 						validationErrors.email ? "border-red-300" : "border-gray-300"
 					}`}
 					placeholder="Enter your email address"
 				/>
 				{validationErrors.email && (
-					<p className="mt-1 text-sm text-red-600">{validationErrors.email}</p>
+					<p className="mt-1 text-red-600 text-sm">{validationErrors.email}</p>
 				)}
 			</div>
 
 			<div>
-				<label
-					htmlFor="password"
-					className="block text-sm font-medium text-gray-700"
-				>
+				<label htmlFor="password" className="block font-medium text-gray-700 text-sm">
 					Password *
 				</label>
 				<input
@@ -163,23 +147,18 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					required
 					value={formData.password}
 					onChange={handleChange}
-					className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
+					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
 						validationErrors.password ? "border-red-300" : "border-gray-300"
 					}`}
 					placeholder="Choose a secure password (min 8 characters)"
 				/>
 				{validationErrors.password && (
-					<p className="mt-1 text-sm text-red-600">
-						{validationErrors.password}
-					</p>
+					<p className="mt-1 text-red-600 text-sm">{validationErrors.password}</p>
 				)}
 			</div>
 
 			<div>
-				<label
-					htmlFor="confirmPassword"
-					className="block text-sm font-medium text-gray-700"
-				>
+				<label htmlFor="confirmPassword" className="block font-medium text-gray-700 text-sm">
 					Confirm Password *
 				</label>
 				<input
@@ -190,17 +169,13 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					required
 					value={formData.confirmPassword}
 					onChange={handleChange}
-					className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-						validationErrors.confirmPassword
-							? "border-red-300"
-							: "border-gray-300"
+					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
+						validationErrors.confirmPassword ? "border-red-300" : "border-gray-300"
 					}`}
 					placeholder="Confirm your password"
 				/>
 				{validationErrors.confirmPassword && (
-					<p className="mt-1 text-sm text-red-600">
-						{validationErrors.confirmPassword}
-					</p>
+					<p className="mt-1 text-red-600 text-sm">{validationErrors.confirmPassword}</p>
 				)}
 			</div>
 
@@ -222,10 +197,8 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 							</svg>
 						</div>
 						<div className="ml-3">
-							<h3 className="text-sm font-medium text-red-800">
-								Registration Failed
-							</h3>
-							<div className="mt-2 text-sm text-red-700">
+							<h3 className="font-medium text-red-800 text-sm">Registration Failed</h3>
+							<div className="mt-2 text-red-700 text-sm">
 								<p>{error}</p>
 							</div>
 						</div>
@@ -237,15 +210,15 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 				<button
 					type="submit"
 					disabled={isLoading}
-					className={`w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+					className={`flex w-full justify-center rounded-md border border-transparent px-4 py-2 font-medium text-sm text-white shadow-sm ${
 						isLoading
-							? "bg-gray-400 cursor-not-allowed"
-							: "bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+							? "cursor-not-allowed bg-gray-400"
+							: "bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
 					}`}
 				>
 					{isLoading ? (
 						<div className="flex items-center">
-							<div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+							<div className="mr-2 h-4 w-4 animate-spin rounded-full border-white border-b-2" />
 							Creating account...
 						</div>
 					) : (

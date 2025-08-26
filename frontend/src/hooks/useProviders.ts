@@ -37,11 +37,7 @@ export function useCreateProvider() {
 export function useUpdateProvider() {
 	const queryClient = useQueryClient();
 
-	return useMutation<
-		ProviderConfig,
-		Error,
-		{ id: string; data: Partial<ProviderUpdateRequest> }
-	>({
+	return useMutation<ProviderConfig, Error, { id: string; data: Partial<ProviderUpdateRequest> }>({
 		mutationFn: ({ id, data }) => apiClient.updateProvider(id, data),
 		onSuccess: () => {
 			// Invalidate config cache to refetch providers

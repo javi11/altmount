@@ -73,11 +73,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 // Auth context interface
 interface AuthContextType extends AuthState {
 	login: (username: string, password: string) => Promise<boolean>;
-	register: (
-		username: string,
-		email: string | undefined,
-		password: string,
-	) => Promise<boolean>;
+	register: (username: string, email: string | undefined, password: string) => Promise<boolean>;
 	logout: () => Promise<void>;
 	refreshToken: () => Promise<void>;
 	clearError: () => void;
@@ -117,23 +113,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	}, []);
 
 	// Login function (direct authentication)
-	const login = async (
-		username: string,
-		password: string,
-	): Promise<boolean> => {
+	const login = async (username: string, password: string): Promise<boolean> => {
 		try {
 			dispatch({ type: "AUTH_START" });
 			const response = await apiClient.login(username, password);
 			if (response.user) {
 				dispatch({ type: "AUTH_SUCCESS", payload: response.user });
 				return true;
-			} else {
-				dispatch({ type: "AUTH_ERROR", payload: "Login failed" });
-				return false;
 			}
+			dispatch({ type: "AUTH_ERROR", payload: "Login failed" });
+			return false;
 		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Login failed";
+			const errorMessage = error instanceof Error ? error.message : "Login failed";
 			dispatch({ type: "AUTH_ERROR", payload: errorMessage });
 			return false;
 		}
@@ -151,13 +142,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 			if (response.user) {
 				dispatch({ type: "AUTH_SUCCESS", payload: response.user });
 				return true;
-			} else {
-				dispatch({ type: "AUTH_ERROR", payload: "Registration failed" });
-				return false;
 			}
+			dispatch({ type: "AUTH_ERROR", payload: "Registration failed" });
+			return false;
 		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Registration failed";
+			const errorMessage = error instanceof Error ? error.message : "Registration failed";
 			dispatch({ type: "AUTH_ERROR", payload: errorMessage });
 			return false;
 		}
@@ -192,8 +181,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 			const user = await apiClient.getCurrentUser();
 			dispatch({ type: "AUTH_SUCCESS", payload: user });
 		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : "Token refresh failed";
+			const errorMessage = error instanceof Error ? error.message : "Token refresh failed";
 			dispatch({ type: "AUTH_ERROR", payload: errorMessage });
 		}
 	};
@@ -213,9 +201,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 		checkRegistrationStatus,
 	};
 
-	return (
-		<AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
-	);
+	return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
 }
 
 // Hook to use auth context

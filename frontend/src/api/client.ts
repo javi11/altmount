@@ -7,6 +7,7 @@ import type {
 	HealthStats,
 	HealthWorkerStatus,
 	ManualScanRequest,
+	PoolMetrics,
 	QueueItem,
 	QueueStats,
 	ScanStatusResponse,
@@ -40,14 +41,11 @@ export class APIError extends Error {
 export class APIClient {
 	private baseURL: string;
 
-	constructor(baseURL: string = "/api") {
+	constructor(baseURL = "/api") {
 		this.baseURL = baseURL;
 	}
 
-	private async request<T>(
-		endpoint: string,
-		options: RequestInit = {},
-	): Promise<T> {
+	private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
 		const url = `${this.baseURL}${endpoint}`;
 
 		const config: RequestInit = {
@@ -62,10 +60,7 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
-				throw new APIError(
-					response.status,
-					`HTTP ${response.status}: ${response.statusText}`,
-				);
+				throw new APIError(response.status, `HTTP ${response.status}: ${response.statusText}`);
 			}
 
 			const data: APIResponse<T> = await response.json();
@@ -79,10 +74,7 @@ export class APIClient {
 			if (error instanceof APIError) {
 				throw error;
 			}
-			throw new APIError(
-				0,
-				error instanceof Error ? error.message : "Network error",
-			);
+			throw new APIError(0, error instanceof Error ? error.message : "Network error");
 		}
 	}
 
@@ -104,10 +96,7 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
-				throw new APIError(
-					response.status,
-					`HTTP ${response.status}: ${response.statusText}`,
-				);
+				throw new APIError(response.status, `HTTP ${response.status}: ${response.statusText}`);
 			}
 
 			const data: APIResponse<T> = await response.json();
@@ -121,10 +110,7 @@ export class APIClient {
 			if (error instanceof APIError) {
 				throw error;
 			}
-			throw new APIError(
-				0,
-				error instanceof Error ? error.message : "Network error",
-			);
+			throw new APIError(0, error instanceof Error ? error.message : "Network error");
 		}
 	}
 
@@ -171,12 +157,9 @@ export class APIClient {
 		if (olderThan) searchParams.set("older_than", olderThan);
 
 		const query = searchParams.toString();
-		return this.request<QueueStats>(
-			`/queue/completed${query ? `?${query}` : ""}`,
-			{
-				method: "DELETE",
-			},
-		);
+		return this.request<QueueStats>(`/queue/completed${query ? `?${query}` : ""}`, {
+			method: "DELETE",
+		});
 	}
 
 	// Health endpoints
@@ -221,9 +204,7 @@ export class APIClient {
 		if (params?.offset) searchParams.set("offset", params.offset.toString());
 
 		const query = searchParams.toString();
-		return this.request<FileHealth[]>(
-			`/health/corrupted${query ? `?${query}` : ""}`,
-		);
+		return this.request<FileHealth[]>(`/health/corrupted${query ? `?${query}` : ""}`);
 	}
 
 	async getHealthStats() {
@@ -248,6 +229,10 @@ export class APIClient {
 		return this.request<HealthWorkerStatus>("/health/worker/status");
 	}
 
+	async getPoolMetrics() {
+		return this.request<PoolMetrics>("/system/pool/metrics");
+	}
+
 	async directHealthCheck(filePath: string) {
 		return this.request<{
 			message: string;
@@ -256,12 +241,9 @@ export class APIClient {
 			new_status: string;
 			checked_at: string;
 			health_data: FileHealth;
-		}>(
-			`/health/${encodeURIComponent(filePath)}/check-now`,
-			{
-				method: "POST",
-			}
-		);
+		}>(`/health/${encodeURIComponent(filePath)}/check-now`, {
+			method: "POST",
+		});
 	}
 
 	async cancelHealthCheck(filePath: string) {
@@ -272,19 +254,14 @@ export class APIClient {
 			new_status: string;
 			cancelled_at: string;
 			health_data: FileHealth;
-		}>(
-			`/health/${encodeURIComponent(filePath)}/cancel`,
-			{
-				method: "POST",
-			}
-		);
+		}>(`/health/${encodeURIComponent(filePath)}/cancel`, {
+			method: "POST",
+		});
 	}
 
 	// File metadata endpoints
 	async getFileMetadata(path: string) {
-		return this.request<FileMetadata>(
-			`/files/info?path=${encodeURIComponent(path)}`,
-		);
+		return this.request<FileMetadata>(`/files/info?path=${encodeURIComponent(path)}`);
 	}
 
 	// Authentication endpoints
@@ -328,11 +305,7 @@ export class APIClient {
 		});
 	}
 
-	async register(
-		username: string,
-		email: string | undefined,
-		password: string,
-	) {
+	async register(username: string, email: string | undefined, password: string) {
 		return this.request<AuthResponse>("/auth/register", {
 			method: "POST",
 			body: JSON.stringify({
@@ -361,10 +334,7 @@ export class APIClient {
 		});
 	}
 
-	async updateConfigSection(
-		section: ConfigSection,
-		config: ConfigUpdateRequest,
-	) {
+	async updateConfigSection(section: ConfigSection, config: ConfigUpdateRequest) {
 		return this.request<ConfigResponse>(`/config/${section}`, {
 			method: "PATCH",
 			body: JSON.stringify(config),
@@ -385,14 +355,11 @@ export class APIClient {
 	}
 
 	// System endpoints
-	async restartServer(force: boolean = false) {
-		return this.request<{ message: string; timestamp: string }>(
-			"/system/restart",
-			{
-				method: "POST",
-				body: JSON.stringify({ force }),
-			}
-		);
+	async restartServer(force = false) {
+		return this.request<{ message: string; timestamp: string }>("/system/restart", {
+			method: "POST",
+			body: JSON.stringify({ force }),
+		});
 	}
 
 	// Provider endpoints

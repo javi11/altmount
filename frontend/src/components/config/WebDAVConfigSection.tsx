@@ -24,10 +24,7 @@ export function WebDAVConfigSection({
 		setHasChanges(false);
 	}, [config.webdav]);
 
-	const handleInputChange = (
-		field: keyof WebDAVConfig,
-		value: string | boolean | number,
-	) => {
+	const handleInputChange = (field: keyof WebDAVConfig, value: string | boolean | number) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.webdav));
@@ -41,8 +38,8 @@ export function WebDAVConfigSection({
 	};
 	return (
 		<div className="space-y-4">
-			<h3 className="text-lg font-semibold">WebDAV Server Settings</h3>
-			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+			<h3 className="font-semibold text-lg">WebDAV Server Settings</h3>
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Port</legend>
 					<input
@@ -50,9 +47,7 @@ export function WebDAVConfigSection({
 						className="input"
 						value={formData.port}
 						readOnly={isReadOnly}
-						onChange={(e) =>
-							handleInputChange("port", parseInt(e.target.value, 10) || 0)
-						}
+						onChange={(e) => handleInputChange("port", Number.parseInt(e.target.value, 10) || 0)}
 					/>
 					<p className="label">WebDAV server port for client connections</p>
 				</fieldset>
@@ -80,7 +75,7 @@ export function WebDAVConfigSection({
 			</div>
 			<fieldset className="fieldset">
 				<legend className="fieldset-legend">Debug Mode</legend>
-				<label className="cursor-pointer label">
+				<label className="label cursor-pointer">
 					<span className="label-text">Enable WebDAV debug logging</span>
 					<input
 						type="checkbox"

@@ -21,6 +21,7 @@ const (
 	EventTypeFileRecovered EventType = "file_recovered"
 	EventTypeFileCorrupted EventType = "file_corrupted"
 	EventTypeCheckFailed   EventType = "check_failed"
+	EventTypeFileRemoved   EventType = "file_removed"
 )
 
 // HealthEvent represents a health check event
@@ -103,8 +104,11 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string) HealthE
 		}
 	}
 	if fileMeta == nil {
+		// File not found - remove from health database
+		_ = hc.healthRepo.DeleteHealthRecord(filePath)
+
 		return HealthEvent{
-			Type:      EventTypeCheckFailed,
+			Type:      EventTypeFileRemoved,
 			FilePath:  filePath,
 			Status:    database.HealthStatusCorrupted,
 			Error:     fmt.Errorf("file not found: %s", filePath),

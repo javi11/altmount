@@ -1,8 +1,8 @@
 import { AlertTriangle, Check, Loader, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useToast } from "../../contexts/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
 import type { ProviderConfig, ProviderFormData } from "../../types/config";
-import { useToast } from "../../contexts/ToastContext";
 
 interface ProviderModalProps {
 	mode: "create" | "edit";
@@ -22,12 +22,7 @@ const defaultFormData: ProviderFormData = {
 	enabled: true,
 };
 
-export function ProviderModal({
-	mode,
-	provider,
-	onSuccess,
-	onCancel,
-}: ProviderModalProps) {
+export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
 	const [formData, setFormData] = useState<ProviderFormData>(defaultFormData);
 	const [isTestingConnection, setIsTestingConnection] = useState(false);
 	const [connectionTestResult, setConnectionTestResult] = useState<{
@@ -62,18 +57,11 @@ export function ProviderModal({
 		setConnectionTestResult(null);
 	}, [mode, provider]);
 
-	const handleInputChange = (
-		field: keyof ProviderFormData,
-		value: string | number | boolean,
-	) => {
+	const handleInputChange = (field: keyof ProviderFormData, value: string | number | boolean) => {
 		setFormData((prev) => ({ ...prev, [field]: value }));
 
 		// Reset connection test if connection-related fields change
-		if (
-			["host", "port", "username", "password", "tls", "insecure_tls"].includes(
-				field,
-			)
-		) {
+		if (["host", "port", "username", "password", "tls", "insecure_tls"].includes(field)) {
 			setConnectionTestResult(null);
 			setCanSave(false);
 		}
@@ -82,9 +70,9 @@ export function ProviderModal({
 	const handleTestConnection = async () => {
 		if (!formData.host || !formData.username || !formData.password) {
 			showToast({
-				type: 'warning',
-				title: 'Missing Required Fields',
-				message: 'Please fill in all required fields before testing connection',
+				type: "warning",
+				title: "Missing Required Fields",
+				message: "Please fill in all required fields before testing connection",
 			});
 			return;
 		}
@@ -112,8 +100,7 @@ export function ProviderModal({
 		} catch (error) {
 			setConnectionTestResult({
 				success: false,
-				message:
-					error instanceof Error ? error.message : "Connection test failed",
+				message: error instanceof Error ? error.message : "Connection test failed",
 			});
 			setCanSave(false);
 		} finally {
@@ -124,9 +111,9 @@ export function ProviderModal({
 	const handleSave = async () => {
 		if (!canSave) {
 			showToast({
-				type: 'warning',
-				title: 'Connection Test Required',
-				message: 'Please test the connection successfully before saving',
+				type: "warning",
+				title: "Connection Test Required",
+				message: "Please test the connection successfully before saving",
 			});
 			return;
 		}
@@ -140,16 +127,14 @@ export function ProviderModal({
 
 				if (formData.host !== provider.host) updateData.host = formData.host;
 				if (formData.port !== provider.port) updateData.port = formData.port;
-				if (formData.username !== provider.username)
-					updateData.username = formData.username;
+				if (formData.username !== provider.username) updateData.username = formData.username;
 				if (formData.password) updateData.password = formData.password; // Only include if not empty
 				if (formData.max_connections !== provider.max_connections)
 					updateData.max_connections = formData.max_connections;
 				if (formData.tls !== provider.tls) updateData.tls = formData.tls;
 				if (formData.insecure_tls !== provider.insecure_tls)
 					updateData.insecure_tls = formData.insecure_tls;
-				if (formData.enabled !== provider.enabled)
-					updateData.enabled = formData.enabled;
+				if (formData.enabled !== provider.enabled) updateData.enabled = formData.enabled;
 
 				await updateProvider.mutateAsync({
 					id: provider.id,
@@ -161,9 +146,9 @@ export function ProviderModal({
 		} catch (error) {
 			console.error("Failed to save provider:", error);
 			showToast({
-				type: 'error',
-				title: 'Save Failed',
-				message: 'Failed to save provider. Please try again.',
+				type: "error",
+				title: "Save Failed",
+				message: "Failed to save provider. Please try again.",
 			});
 		}
 	};
@@ -174,14 +159,14 @@ export function ProviderModal({
 	return (
 		<div className="modal modal-open">
 			<div className="modal-box max-w-2xl">
-				<h3 className="font-bold text-lg mb-4">
+				<h3 className="mb-4 font-bold text-lg">
 					{mode === "create" ? "Add New Provider" : "Edit Provider"}
 				</h3>
 
 				<form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
 					{/* Host */}
-					<fieldset className="border border-base-300 rounded-lg p-4">
-						<legend className="font-medium px-2">Host *</legend>
+					<fieldset className="rounded-lg border border-base-300 p-4">
+						<legend className="px-2 font-medium">Host *</legend>
 						<input
 							id="host"
 							type="text"
@@ -194,34 +179,31 @@ export function ProviderModal({
 					</fieldset>
 
 					{/* Connection Details */}
-					<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<fieldset className="border border-base-300 rounded-lg p-4">
-							<legend className="font-medium px-2">Port</legend>
+					<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<fieldset className="rounded-lg border border-base-300 p-4">
+							<legend className="px-2 font-medium">Port</legend>
 							<input
 								id="port"
 								type="number"
 								className="input input-bordered w-full"
 								value={formData.port}
 								onChange={(e) =>
-									handleInputChange("port", parseInt(e.target.value) || 119)
+									handleInputChange("port", Number.parseInt(e.target.value, 10) || 119)
 								}
 								min={1}
 								max={65535}
 							/>
 						</fieldset>
 
-						<fieldset className="border border-base-300 rounded-lg p-4">
-							<legend className="font-medium px-2">Max Connections</legend>
+						<fieldset className="rounded-lg border border-base-300 p-4">
+							<legend className="px-2 font-medium">Max Connections</legend>
 							<input
 								id="max_connections"
 								type="number"
 								className="input input-bordered w-full"
 								value={formData.max_connections}
 								onChange={(e) =>
-									handleInputChange(
-										"max_connections",
-										parseInt(e.target.value) || 1,
-									)
+									handleInputChange("max_connections", Number.parseInt(e.target.value, 10) || 1)
 								}
 								min={1}
 								max={50}
@@ -230,9 +212,9 @@ export function ProviderModal({
 					</div>
 
 					{/* Authentication */}
-					<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<fieldset className="border border-base-300 rounded-lg p-4">
-							<legend className="font-medium px-2">Username *</legend>
+					<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<fieldset className="rounded-lg border border-base-300 p-4">
+							<legend className="px-2 font-medium">Username *</legend>
 							<input
 								id="username"
 								type="text"
@@ -243,30 +225,25 @@ export function ProviderModal({
 							/>
 						</fieldset>
 
-						<fieldset className="border border-base-300 rounded-lg p-4">
-							<legend className="font-medium px-2">Password *</legend>
+						<fieldset className="rounded-lg border border-base-300 p-4">
+							<legend className="px-2 font-medium">Password *</legend>
 							<input
 								id="password"
 								type="password"
 								className="input input-bordered w-full"
 								value={formData.password}
 								onChange={(e) => handleInputChange("password", e.target.value)}
-								placeholder={
-									mode === "edit" ? "Leave empty to keep current" : ""
-								}
+								placeholder={mode === "edit" ? "Leave empty to keep current" : ""}
 								required={mode === "create"}
 							/>
 						</fieldset>
 					</div>
 
 					{/* Security Settings */}
-					<fieldset className="border border-base-300 rounded-lg p-4 space-y-3">
-						<legend className="font-medium px-2">Security & Options</legend>
+					<fieldset className="space-y-3 rounded-lg border border-base-300 p-4">
+						<legend className="px-2 font-medium">Security & Options</legend>
 
-						<label
-							htmlFor="tls"
-							className="label cursor-pointer justify-start space-x-2"
-						>
+						<label htmlFor="tls" className="label cursor-pointer justify-start space-x-2">
 							<input
 								id="tls"
 								type="checkbox"
@@ -280,20 +257,16 @@ export function ProviderModal({
 						{formData.tls && (
 							<label
 								htmlFor="insecure_tls"
-								className="label cursor-pointer justify-start space-x-2 ml-6"
+								className="label ml-6 cursor-pointer justify-start space-x-2"
 							>
 								<input
 									id="insecure_tls"
 									type="checkbox"
 									className="checkbox"
 									checked={formData.insecure_tls}
-									onChange={(e) =>
-										handleInputChange("insecure_tls", e.target.checked)
-									}
+									onChange={(e) => handleInputChange("insecure_tls", e.target.checked)}
 								/>
-								<span className="label-text">
-									Skip TLS certificate verification (insecure)
-								</span>
+								<span className="label-text">Skip TLS certificate verification (insecure)</span>
 							</label>
 						)}
 					</fieldset>
@@ -330,19 +303,13 @@ export function ProviderModal({
 								)}
 								<div>
 									<div className="font-medium">
-										{connectionTestResult.success
-											? "Connection successful!"
-											: "Connection failed"}
+										{connectionTestResult.success ? "Connection successful!" : "Connection failed"}
 									</div>
 									{connectionTestResult.message && (
-										<div className="text-sm">
-											{connectionTestResult.message}
-										</div>
+										<div className="text-sm">{connectionTestResult.message}</div>
 									)}
 									{connectionTestResult.latency && (
-										<div className="text-sm">
-											Latency: {connectionTestResult.latency}ms
-										</div>
+										<div className="text-sm">Latency: {connectionTestResult.latency}ms</div>
 									)}
 								</div>
 							</div>
@@ -360,11 +327,7 @@ export function ProviderModal({
 						onClick={handleSave}
 						disabled={!canSave || isSaving}
 					>
-						{isSaving ? (
-							<Loader className="h-4 w-4 animate-spin" />
-						) : (
-							<Check className="h-4 w-4" />
-						)}
+						{isSaving ? <Loader className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
 						{mode === "create" ? "Create Provider" : "Update Provider"}
 					</button>
 				</div>

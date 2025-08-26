@@ -39,7 +39,7 @@ export function ImportConfigSection({
 
 	return (
 		<div className="space-y-4">
-			<h3 className="text-lg font-semibold">Import Processing Configuration</h3>
+			<h3 className="font-semibold text-lg">Import Processing Configuration</h3>
 			<div className="grid grid-cols-1 gap-4">
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Processor Workers</legend>
@@ -51,12 +51,10 @@ export function ImportConfigSection({
 						min={1}
 						max={20}
 						onChange={(e) =>
-							handleInputChange("max_processor_workers", parseInt(e.target.value) || 1)
+							handleInputChange("max_processor_workers", Number.parseInt(e.target.value, 10) || 1)
 						}
 					/>
-					<p className="label">
-						Number of concurrent NZB processing threads for import operations
-					</p>
+					<p className="label">Number of concurrent NZB processing threads for import operations</p>
 				</fieldset>
 			</div>
 

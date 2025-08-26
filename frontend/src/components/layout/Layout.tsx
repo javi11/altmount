@@ -19,11 +19,7 @@ export function Layout() {
 
 			{/* Sidebar */}
 			<div className="drawer-side">
-				<label
-					htmlFor="sidebar-toggle"
-					aria-label="close sidebar"
-					className="drawer-overlay"
-				/>
+				<label htmlFor="sidebar-toggle" aria-label="close sidebar" className="drawer-overlay" />
 				<Sidebar />
 			</div>
 		</div>

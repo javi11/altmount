@@ -77,6 +77,10 @@ func (nfs *NzbFilesystem) Stat(name string) (fs.FileInfo, error) {
 // Remove removes a file (not supported)
 func (nfs *NzbFilesystem) Remove(name string) error {
 	ctx := context.Background()
+	defer func() {
+		_ = nfs.remoteFile.healthRepository.DeleteHealthRecord(name)
+	}()
+
 	ok, err := nfs.remoteFile.RemoveFile(ctx, name)
 	if err != nil {
 		return err

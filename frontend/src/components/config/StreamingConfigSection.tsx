@@ -39,8 +39,8 @@ export function StreamingConfigSection({
 	};
 	return (
 		<div className="space-y-4">
-			<h3 className="text-lg font-semibold">Streaming & Download Configuration</h3>
-			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+			<h3 className="font-semibold text-lg">Streaming & Download Configuration</h3>
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Max Range Size</legend>
 					<input
@@ -51,12 +51,10 @@ export function StreamingConfigSection({
 						min={0}
 						step={1048576} // 1MB steps
 						onChange={(e) =>
-							handleInputChange("max_range_size", parseInt(e.target.value) || 0)
+							handleInputChange("max_range_size", Number.parseInt(e.target.value, 10) || 0)
 						}
 					/>
-					<p className="label">
-						Higher of this range the streaming will be chunked.
-					</p>
+					<p className="label">Higher of this range the streaming will be chunked.</p>
 					<BytesDisplay bytes={formData.max_range_size} mode="badge" />
 				</fieldset>
 				<fieldset className="fieldset">
@@ -69,15 +67,12 @@ export function StreamingConfigSection({
 						min={0}
 						step={1048576} // 1MB steps
 						onChange={(e) =>
-							handleInputChange(
-								"streaming_chunk_size",
-								parseInt(e.target.value) || 0,
-							)
+							handleInputChange("streaming_chunk_size", Number.parseInt(e.target.value, 10) || 0)
 						}
 					/>
 					<p className="label">
-						The limit of memory to be used for each streaming operation (Range
-						of articles to download ahead)
+						The limit of memory to be used for each streaming operation (Range of articles to
+						download ahead)
 					</p>
 					<BytesDisplay bytes={formData.streaming_chunk_size} mode="badge" />
 				</fieldset>
@@ -91,26 +86,20 @@ export function StreamingConfigSection({
 						min={1}
 						max={50}
 						onChange={(e) =>
-							handleInputChange(
-								"max_download_workers",
-								parseInt(e.target.value) || 1,
-							)
+							handleInputChange("max_download_workers", Number.parseInt(e.target.value, 10) || 1)
 						}
 					/>
-					<p className="label">
-						Number of concurrent download threads
-					</p>
+					<p className="label">Number of concurrent download threads</p>
 				</fieldset>
 			</div>
 			<div className="alert alert-info">
 				<div>
 					<div className="font-bold">Note</div>
 					<div className="text-sm">
-						These settings control how files are streamed and chunked during
-						download. Higher values may improve performance but use more memory.
-						Download workers control the number of concurrent downloads from NNTP servers.
-						If you don't understand these settings, it's recommended to keep the
-						default values.
+						These settings control how files are streamed and chunked during download. Higher values
+						may improve performance but use more memory. Download workers control the number of
+						concurrent downloads from NNTP servers. If you don't understand these settings, it's
+						recommended to keep the default values.
 					</div>
 				</div>
 			</div>

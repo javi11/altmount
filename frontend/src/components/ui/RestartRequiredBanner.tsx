@@ -1,4 +1,4 @@
-import { AlertTriangle, X, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw, X } from "lucide-react";
 
 interface RestartRequiredBannerProps {
 	restartRequiredConfigs: string[];
@@ -22,14 +22,12 @@ export function RestartRequiredBanner({
 				<div className="font-bold">Server restart required</div>
 				<div className="text-sm">
 					The following settings have been updated and require a server restart to take effect:
-					<span className="font-medium ml-1">
-						{restartRequiredConfigs.join(", ")}
-					</span>
+					<span className="ml-1 font-medium">{restartRequiredConfigs.join(", ")}</span>
 				</div>
 			</div>
 			<div className="flex items-center space-x-2">
-				<div className="flex items-center text-sm text-base-content/70">
-					<RefreshCw className="h-4 w-4 mr-1" />
+				<div className="flex items-center text-base-content/70 text-sm">
+					<RefreshCw className="mr-1 h-4 w-4" />
 					Restart the server to apply changes
 				</div>
 				<button

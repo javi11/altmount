@@ -1,18 +1,10 @@
-import {
-	Download,
-	MoreHorizontal,
-	Pause,
-	Play,
-	PlayCircle,
-	RefreshCw,
-	Trash2,
-} from "lucide-react";
+import { Download, MoreHorizontal, Pause, Play, PlayCircle, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
-import { StatusBadge } from "../components/ui/StatusBadge";
 import { Pagination } from "../components/ui/Pagination";
-import { ManualScanSection } from "../components/queue/ManualScanSection";
+import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
 	useClearCompletedQueue,
@@ -76,8 +68,8 @@ export function QueuePage() {
 			{
 				type: "warning",
 				confirmText: "Clear All",
-				confirmButtonClass: "btn-warning"
-			}
+				confirmButtonClass: "btn-warning",
+			},
 		);
 		if (confirmed) {
 			await clearCompleted.mutateAsync("");
@@ -105,9 +97,8 @@ export function QueuePage() {
 			const interval = setInterval(updateNextRefreshTime, refreshInterval);
 
 			return () => clearInterval(interval);
-		} else {
-			setNextRefreshTime(null);
 		}
+		setNextRefreshTime(null);
 	}, [autoRefreshEnabled, refreshInterval, userInteracting]);
 
 	// Pause auto-refresh during user interactions
@@ -136,21 +127,20 @@ export function QueuePage() {
 			const timer = setInterval(updateCountdown, 1000);
 
 			return () => clearInterval(timer);
-		} else {
-			setCountdown(0);
 		}
+		setCountdown(0);
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting]);
 
 	// Reset to page 1 when search or status filter changes
 	// biome-ignore lint/correctness/useExhaustiveDependencies: only want to run this when searchTerm or statusFilter changes
-		useEffect(() => {
+	useEffect(() => {
 		setPage(0);
 	}, [searchTerm, statusFilter]);
 
 	if (error) {
 		return (
 			<div className="space-y-4">
-				<h1 className="text-3xl font-bold">Queue Management</h1>
+				<h1 className="font-bold text-3xl">Queue Management</h1>
 				<ErrorAlert error={error as Error} onRetry={() => refetch()} />
 			</div>
 		);
@@ -159,24 +149,20 @@ export function QueuePage() {
 	return (
 		<div className="space-y-6">
 			{/* Header */}
-			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h1 className="text-3xl font-bold">Queue Management</h1>
+					<h1 className="font-bold text-3xl">Queue Management</h1>
 					<p className="text-base-content/70">
 						Manage and monitor your download queue
 						{autoRefreshEnabled && !userInteracting && countdown > 0 && (
-							<span className="ml-2 text-sm text-info">
-								• Auto-refresh in {countdown}s
-							</span>
+							<span className="ml-2 text-info text-sm">• Auto-refresh in {countdown}s</span>
 						)}
 						{userInteracting && autoRefreshEnabled && (
-							<span className="ml-2 text-sm text-warning">
-								• Auto-refresh paused
-							</span>
+							<span className="ml-2 text-sm text-warning">• Auto-refresh paused</span>
 						)}
 					</p>
 				</div>
-				<div className="flex gap-2 flex-wrap">
+				<div className="flex flex-wrap gap-2">
 					{/* Auto-refresh controls */}
 					<div className="flex items-center gap-2">
 						<button
@@ -185,14 +171,10 @@ export function QueuePage() {
 							onClick={toggleAutoRefresh}
 							title={autoRefreshEnabled ? "Disable auto-refresh" : "Enable auto-refresh"}
 						>
-							{autoRefreshEnabled ? (
-								<Pause className="h-4 w-4" />
-							) : (
-								<Play className="h-4 w-4" />
-							)}
+							{autoRefreshEnabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
 							Auto
 						</button>
-						
+
 						{autoRefreshEnabled && (
 							<select
 								className="select select-sm"
@@ -208,16 +190,14 @@ export function QueuePage() {
 							</select>
 						)}
 					</div>
-					
+
 					<button
 						type="button"
 						className="btn btn-outline"
 						onClick={() => refetch()}
 						disabled={isLoading}
 					>
-						<RefreshCw
-							className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
-						/>
+						<RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
 						Refresh
 					</button>
 					{stats && stats.total_completed > 0 && (
@@ -239,28 +219,24 @@ export function QueuePage() {
 
 			{/* Stats Cards */}
 			{stats && (
-				<div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-					<div className="stat bg-base-100 rounded-box shadow">
+				<div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Total</div>
-						<div className="stat-value text-primary">
-							{stats.total_completed}
-						</div>
+						<div className="stat-value text-primary">{stats.total_completed}</div>
 					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Pending</div>
 						<div className="stat-value text-warning">{stats.total_queued}</div>
 					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Processing</div>
 						<div className="stat-value text-info">{stats.total_processing}</div>
 					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Completed</div>
-						<div className="stat-value text-success">
-							{stats.total_completed}
-						</div>
+						<div className="stat-value text-success">{stats.total_completed}</div>
 					</div>
-					<div className="stat bg-base-100 rounded-box shadow">
+					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Failed</div>
 						<div className="stat-value text-error">{stats.total_failed}</div>
 					</div>
@@ -270,7 +246,7 @@ export function QueuePage() {
 			{/* Filters and Search */}
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body">
-					<div className="flex flex-col sm:flex-row gap-4">
+					<div className="flex flex-col gap-4 sm:flex-row">
 						{/* Search */}
 						<fieldset className="fieldset flex-1">
 							<legend className="fieldset-legend">Search Queue Items</legend>
@@ -314,7 +290,7 @@ export function QueuePage() {
 						<LoadingTable columns={6} />
 					) : queueData && queueData.length > 0 ? (
 						<div className="overflow-x-auto">
-							<table className="table table-zebra">
+							<table className="table-zebra table">
 								<thead>
 									<tr>
 										<th>NZB File</th>
@@ -333,21 +309,14 @@ export function QueuePage() {
 													<Download className="h-4 w-4 text-primary" />
 													<div>
 														<div className="font-bold">
-															{truncateText(
-																item.nzb_path.split("/").pop() || "",
-																40,
-															)}
+															{truncateText(item.nzb_path.split("/").pop() || "", 40)}
 														</div>
-														<div className="text-sm text-base-content/70">
-															ID: {item.id}
-														</div>
+														<div className="text-base-content/70 text-sm">ID: {item.id}</div>
 													</div>
 												</div>
 											</td>
 											<td>
-												<div className="text-sm">
-													{truncateText(item.target_path, 50)}
-												</div>
+												<div className="text-sm">{truncateText(item.target_path, 50)}</div>
 											</td>
 											<td>
 												<StatusBadge status={item.status} />
@@ -360,20 +329,16 @@ export function QueuePage() {
 												</span>
 											</td>
 											<td>
-												<span className="text-sm text-base-content/70">
+												<span className="text-base-content/70 text-sm">
 													{formatRelativeTime(item.updated_at)}
 												</span>
 											</td>
 											<td>
 												<div className="dropdown dropdown-end">
-													<button
-														tabIndex={0}
-														type="button"
-														className="btn btn-ghost btn-sm"
-													>
+													<button tabIndex={0} type="button" className="btn btn-ghost btn-sm">
 														<MoreHorizontal className="h-4 w-4" />
 													</button>
-													<ul className="dropdown-content menu bg-base-100 shadow-lg rounded-box w-48">
+													<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
 														{(item.status === QueueStatus.FAILED ||
 															item.status === QueueStatus.COMPLETED) && (
 															<>
@@ -422,10 +387,8 @@ export function QueuePage() {
 						</div>
 					) : (
 						<div className="flex flex-col items-center justify-center py-12">
-							<Download className="h-12 w-12 text-base-content/30 mb-4" />
-							<h3 className="text-lg font-semibold text-base-content/70">
-								No queue items found
-							</h3>
+							<Download className="mb-4 h-12 w-12 text-base-content/30" />
+							<h3 className="font-semibold text-base-content/70 text-lg">No queue items found</h3>
 							<p className="text-base-content/50">
 								{searchTerm || statusFilter
 									? "No items match your search or filters"

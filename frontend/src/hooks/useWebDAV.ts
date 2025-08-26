@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { apiClient } from "../api/client";
+import { useToast } from "../contexts/ToastContext";
 import { webdavClient } from "../services/webdavClient";
 import type { WebDAVDirectory } from "../types/webdav";
 
@@ -14,9 +15,7 @@ export function useWebDAVConnection() {
 			webdavClient.connect(); // Connect using cookie authentication
 			const success = await webdavClient.testConnection();
 			if (!success) {
-				throw new Error(
-					"Failed to connect to WebDAV server - authentication required",
-				);
+				throw new Error("Failed to connect to WebDAV server - authentication required");
 			}
 			return success;
 		},
@@ -41,11 +40,7 @@ export function useWebDAVConnection() {
 	};
 }
 
-export function useWebDAVDirectory(
-	path: string,
-	isConnected = true,
-	hasConnectionFailed = false,
-) {
+export function useWebDAVDirectory(path: string, isConnected = true, hasConnectionFailed = false) {
 	return useQuery<WebDAVDirectory>({
 		queryKey: ["webdav", "directory", path],
 		queryFn: () => webdavClient.listDirectory(path),
@@ -87,28 +82,70 @@ export function useWebDAVDirectory(
 
 export function useWebDAVFileOperations() {
 	const queryClient = useQueryClient();
+	const { showToast } = useToast();
 
 	const downloadFile = useMutation({
-		mutationFn: async ({
-			path,
-			filename,
-		}: {
-			path: string;
-			filename: string;
-		}) => {
-			const blob = await webdavClient.downloadFile(path);
+		mutationFn: async ({ path, filename }: { path: string; filename: string }) => {
+			// Use direct WebDAV URL for download
+			const downloadUrl = `/webdav${path}`;
+			let downloadMethod = "window";
 
-			// Create download link
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = filename;
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
+			try {
+				// Try to open in new window/tab to trigger download dialog
+				const downloadWindow = window.open(downloadUrl, "_blank");
 
-			return true;
+				// Check if popup was blocked
+				if (
+					!downloadWindow ||
+					downloadWindow.closed ||
+					typeof downloadWindow.closed === "undefined"
+				) {
+					// Popup blocked, fall back to creating a download link
+					downloadMethod = "link";
+					const a = document.createElement("a");
+					a.href = downloadUrl;
+					a.download = filename;
+					a.target = "_blank";
+					a.rel = "noopener noreferrer";
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+				}
+
+				// Give the download a moment to start
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			} catch (_) {
+				// If window.open fails entirely, use link method
+				downloadMethod = "fallback";
+				const a = document.createElement("a");
+				a.href = downloadUrl;
+				a.download = filename;
+				document.body.appendChild(a);
+				a.click();
+				document.body.removeChild(a);
+			}
+
+			return { filename, downloadUrl, downloadMethod };
+		},
+		onSuccess: ({ filename, downloadMethod }) => {
+			const messages = {
+				window: `Download window opened for "${filename}"`,
+				link: `Download started for "${filename}" (popup was blocked)`,
+				fallback: `Download initiated for "${filename}"`,
+			};
+
+			showToast({
+				type: "success",
+				title: "Download Started",
+				message: messages[downloadMethod as keyof typeof messages] || messages.fallback,
+			});
+		},
+		onError: (error, { filename }) => {
+			showToast({
+				type: "error",
+				title: "Download Failed",
+				message: `Failed to start download for "${filename}": ${error.message}`,
+			});
 		},
 	});
 
@@ -132,10 +169,7 @@ export function useWebDAVFileOperations() {
 				return await apiClient.getFileMetadata(path);
 			} catch (error) {
 				// If metadata fails, fall back to basic WebDAV info
-				console.warn(
-					"Failed to get file metadata, falling back to basic info:",
-					error,
-				);
+				console.warn("Failed to get file metadata, falling back to basic info:", error);
 				throw error;
 			}
 		},

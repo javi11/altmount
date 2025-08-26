@@ -1,10 +1,7 @@
 import { AlertTriangle, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useState } from "react";
 import { useFilePreview } from "../../hooks/useFilePreview";
-import {
-	useWebDAVDirectory,
-	useWebDAVFileOperations,
-} from "../../hooks/useWebDAV";
+import { useWebDAVDirectory, useWebDAVFileOperations } from "../../hooks/useWebDAV";
 import type { WebDAVFile } from "../../types/webdav";
 import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
@@ -99,10 +96,7 @@ export function FileExplorer({
 
 	const handleRetryFileInfo = () => {
 		if (fileInfoModal.file) {
-			const filePath = `${currentPath}/${fileInfoModal.file.basename}`.replace(
-				/\/+/g,
-				"/",
-			);
+			const filePath = `${currentPath}/${fileInfoModal.file.basename}`.replace(/\/+/g, "/");
 			getFileMetadata(filePath);
 		}
 	};
@@ -111,13 +105,9 @@ export function FileExplorer({
 	if (isConnecting) {
 		return (
 			<div className="flex flex-col items-center justify-center py-16">
-				<Wifi className="h-16 w-16 text-primary animate-pulse mb-4" />
-				<h3 className="text-xl font-semibold text-base-content/70 mb-2">
-					Connecting...
-				</h3>
-				<p className="text-base-content/50 mb-6">
-					Authenticating with WebDAV server
-				</p>
+				<Wifi className="mb-4 h-16 w-16 animate-pulse text-primary" />
+				<h3 className="mb-2 font-semibold text-base-content/70 text-xl">Connecting...</h3>
+				<p className="mb-6 text-base-content/50">Authenticating with WebDAV server</p>
 				<LoadingSpinner />
 			</div>
 		);
@@ -127,21 +117,13 @@ export function FileExplorer({
 	if (!isConnected && connectionError) {
 		return (
 			<div className="flex flex-col items-center justify-center py-16">
-				<WifiOff className="h-16 w-16 text-error mb-4" />
-				<h3 className="text-xl font-semibold text-base-content/70 mb-2">
-					Connection Failed
-				</h3>
-				<p className="text-base-content/50 mb-4">
+				<WifiOff className="mb-4 h-16 w-16 text-error" />
+				<h3 className="mb-2 font-semibold text-base-content/70 text-xl">Connection Failed</h3>
+				<p className="mb-4 text-base-content/50">
 					{connectionError.message || "Unable to connect to WebDAV server"}
 				</p>
-				<p className="text-base-content/40 mb-6">
-					Make sure you're logged in to the application
-				</p>
-				<button
-					type="button"
-					className="btn btn-primary"
-					onClick={onRetryConnection}
-				>
+				<p className="mb-6 text-base-content/40">Make sure you're logged in to the application</p>
+				<button type="button" className="btn btn-primary" onClick={onRetryConnection}>
 					<RefreshCw className="h-4 w-4" />
 					Retry Connection
 				</button>
@@ -153,18 +135,10 @@ export function FileExplorer({
 	if (!isConnected) {
 		return (
 			<div className="flex flex-col items-center justify-center py-16">
-				<WifiOff className="h-16 w-16 text-base-content/30 mb-4" />
-				<h3 className="text-xl font-semibold text-base-content/70 mb-2">
-					Not Connected
-				</h3>
-				<p className="text-base-content/50 mb-6">
-					WebDAV connection required to browse files
-				</p>
-				<button
-					type="button"
-					className="btn btn-primary"
-					onClick={onRetryConnection}
-				>
+				<WifiOff className="mb-4 h-16 w-16 text-base-content/30" />
+				<h3 className="mb-2 font-semibold text-base-content/70 text-xl">Not Connected</h3>
+				<p className="mb-6 text-base-content/50">WebDAV connection required to browse files</p>
+				<button type="button" className="btn btn-primary" onClick={onRetryConnection}>
 					<Wifi className="h-4 w-4" />
 					Connect
 				</button>
@@ -176,12 +150,8 @@ export function FileExplorer({
 		return (
 			<div className="space-y-4">
 				<div className="flex items-center justify-between">
-					<h2 className="text-2xl font-bold">Files</h2>
-					<button
-						type="button"
-						className="btn btn-outline"
-						onClick={() => refetch()}
-					>
+					<h2 className="font-bold text-2xl">Files</h2>
+					<button type="button" className="btn btn-outline" onClick={() => refetch()}>
 						<RefreshCw className="h-4 w-4" />
 						Retry
 					</button>
@@ -194,9 +164,9 @@ export function FileExplorer({
 	return (
 		<div className="space-y-6">
 			{/* Header */}
-			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h2 className="text-2xl font-bold">Files</h2>
+					<h2 className="font-bold text-2xl">Files</h2>
 					<p className="text-base-content/70">Browse WebDAV filesystem</p>
 				</div>
 				<div className="flex items-center gap-2">
@@ -210,9 +180,7 @@ export function FileExplorer({
 						onClick={() => refetch()}
 						disabled={isLoading}
 					>
-						<RefreshCw
-							className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
-						/>
+						<RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
 						Refresh
 					</button>
 				</div>
@@ -231,9 +199,7 @@ export function FileExplorer({
 					<AlertTriangle className="h-6 w-6" />
 					<div>
 						<div className="font-bold">Operation Failed</div>
-						<div className="text-sm">
-							{downloadError?.message || deleteError?.message}
-						</div>
+						<div className="text-sm">{downloadError?.message || deleteError?.message}</div>
 					</div>
 				</div>
 			)}
@@ -271,6 +237,7 @@ export function FileExplorer({
 				onClose={preview.closePreview}
 				onRetry={preview.retryPreview}
 				onDownload={handleDownload}
+				currentPath={preview.currentPath || undefined}
 			/>
 
 			{/* File Info Modal */}

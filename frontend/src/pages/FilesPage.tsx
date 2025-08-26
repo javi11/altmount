@@ -3,13 +3,8 @@ import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
 
 export function FilesPage() {
-	const {
-		isConnected,
-		hasConnectionFailed,
-		connect,
-		isConnecting,
-		connectionError,
-	} = useWebDAVConnection();
+	const { isConnected, hasConnectionFailed, connect, isConnecting, connectionError } =
+		useWebDAVConnection();
 
 	// Track connection attempts to prevent rapid retries
 	const connectionAttempted = useRef(false);

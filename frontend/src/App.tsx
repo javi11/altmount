@@ -21,43 +21,43 @@ function App() {
 				<ModalProvider>
 					<AuthProvider>
 						<BrowserRouter>
-						<div className="min-h-screen bg-base-100" data-theme="light">
-							<Routes>
-								{/* Protected routes */}
-								<Route
-									path="/"
-									element={
-										<ProtectedRoute>
-											<Layout />
-										</ProtectedRoute>
-									}
-								>
-									<Route index element={<Dashboard />} />
-									<Route path="queue" element={<QueuePage />} />
-									<Route path="health" element={<HealthPage />} />
-									<Route path="files" element={<FilesPage />} />
+							<div className="min-h-screen bg-base-100" data-theme="light">
+								<Routes>
+									{/* Protected routes */}
+									<Route
+										path="/"
+										element={
+											<ProtectedRoute>
+												<Layout />
+											</ProtectedRoute>
+										}
+									>
+										<Route index element={<Dashboard />} />
+										<Route path="queue" element={<QueuePage />} />
+										<Route path="health" element={<HealthPage />} />
+										<Route path="files" element={<FilesPage />} />
 
-									{/* Admin-only routes */}
-									<Route
-										path="admin"
-										element={
-											<ProtectedRoute requireAdmin>
-												<UserManagement />
-											</ProtectedRoute>
-										}
-									/>
-									<Route
-										path="config"
-										element={
-											<ProtectedRoute requireAdmin>
-												<ConfigurationPage />
-											</ProtectedRoute>
-										}
-									/>
-								</Route>
-							</Routes>
-						</div>
-						<ToastContainer />
+										{/* Admin-only routes */}
+										<Route
+											path="admin"
+											element={
+												<ProtectedRoute requireAdmin>
+													<UserManagement />
+												</ProtectedRoute>
+											}
+										/>
+										<Route
+											path="config"
+											element={
+												<ProtectedRoute requireAdmin>
+													<ConfigurationPage />
+												</ProtectedRoute>
+											}
+										/>
+									</Route>
+								</Routes>
+							</div>
+							<ToastContainer />
 						</BrowserRouter>
 					</AuthProvider>
 				</ModalProvider>

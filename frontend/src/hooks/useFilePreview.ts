@@ -19,6 +19,7 @@ interface PreviewState {
 	streamUrl: string | null;
 	isLoading: boolean;
 	error: Error | null;
+	currentPath: string | null;
 }
 
 export function useFilePreview() {
@@ -30,6 +31,7 @@ export function useFilePreview() {
 		streamUrl: null,
 		isLoading: false,
 		error: null,
+		currentPath: null,
 	});
 
 	const currentBlobUrl = useRef<string | null>(null);
@@ -52,10 +54,7 @@ export function useFilePreview() {
 			}
 
 			// For video and audio files, use direct streaming URL
-			if (
-				isVideoFile(file.basename, file.mime) ||
-				isAudioFile(file.basename, file.mime)
-			) {
+			if (isVideoFile(file.basename, file.mime) || isAudioFile(file.basename, file.mime)) {
 				const streamUrl = `/webdav${path}`;
 				return { content: null, shouldGetAsText: false, fileInfo, streamUrl };
 			}
@@ -80,6 +79,7 @@ export function useFilePreview() {
 				content: null,
 				blobUrl: null,
 				streamUrl: null,
+				currentPath: null,
 			}));
 		},
 		onSuccess: ({ content, shouldGetAsText, streamUrl }) => {
@@ -129,6 +129,7 @@ export function useFilePreview() {
 			setState((prev) => ({
 				...prev,
 				isOpen: true,
+				currentPath,
 			}));
 
 			fetchContent.mutate({ path: filePath, file });
@@ -151,6 +152,7 @@ export function useFilePreview() {
 			streamUrl: null,
 			isLoading: false,
 			error: null,
+			currentPath: null,
 		});
 	}, []);
 

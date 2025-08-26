@@ -26,21 +26,13 @@ export class WebDAVClient {
 			const status = err.status || err.response?.status;
 			switch (status) {
 				case 401:
-					return new Error(
-						`401 Unauthorized: Authentication required for ${operation}${pathInfo}`,
-					);
+					return new Error(`401 Unauthorized: Authentication required for ${operation}${pathInfo}`);
 				case 403:
-					return new Error(
-						`403 Forbidden: Access denied for ${operation}${pathInfo}`,
-					);
+					return new Error(`403 Forbidden: Access denied for ${operation}${pathInfo}`);
 				case 404:
-					return new Error(
-						`404 Not Found: Path does not exist for ${operation}${pathInfo}`,
-					);
+					return new Error(`404 Not Found: Path does not exist for ${operation}${pathInfo}`);
 				case 500:
-					return new Error(
-						`500 Server Error: WebDAV server error during ${operation}${pathInfo}`,
-					);
+					return new Error(`500 Server Error: WebDAV server error during ${operation}${pathInfo}`);
 				case 502:
 					return new Error(
 						`502 Bad Gateway: WebDAV server unavailable during ${operation}${pathInfo}`,
@@ -50,17 +42,13 @@ export class WebDAVClient {
 						`503 Service Unavailable: WebDAV server overloaded during ${operation}${pathInfo}`,
 					);
 				default:
-					return new Error(
-						`${status} Error: HTTP error during ${operation}${pathInfo}`,
-					);
+					return new Error(`${status} Error: HTTP error during ${operation}${pathInfo}`);
 			}
 		}
 
 		// Handle timeout errors
 		if (err.message?.toLowerCase().includes("timeout")) {
-			return new Error(
-				`Timeout error during ${operation}${pathInfo}: Request took too long`,
-			);
+			return new Error(`Timeout error during ${operation}${pathInfo}: Request took too long`);
 		}
 
 		// Handle other WebDAV-specific errors
@@ -93,7 +81,7 @@ export class WebDAVClient {
 		return this.client !== null;
 	}
 
-	async listDirectory(path: string = "/"): Promise<WebDAVDirectory> {
+	async listDirectory(path = "/"): Promise<WebDAVDirectory> {
 		if (!this.client) {
 			throw new Error("WebDAV client not connected");
 		}
@@ -154,12 +142,11 @@ export class WebDAVClient {
 					format: "text",
 				});
 				return content as string;
-			} else {
-				const buffer = await this.client.getFileContents(path, {
-					format: "binary",
-				});
-				return new Blob([buffer as ArrayBuffer]);
 			}
+			const buffer = await this.client.getFileContents(path, {
+				format: "binary",
+			});
+			return new Blob([buffer as ArrayBuffer]);
 		} catch (error) {
 			console.error("Failed to get file contents:", error);
 			throw this.parseError(error, "get file contents", path);

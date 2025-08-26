@@ -58,7 +58,7 @@ export interface QueueRetryRequest {
 // Manual Scan types
 export const ScanStatus = {
 	IDLE: "idle",
-	SCANNING: "scanning", 
+	SCANNING: "scanning",
 	CANCELING: "canceling",
 } as const;
 
@@ -226,4 +226,17 @@ export interface HealthWorkerStatus {
 	last_run_time?: string;
 	next_run_time?: string;
 	last_error?: string;
+}
+
+// Pool Metrics types
+export interface PoolMetrics {
+	active_connections: number;
+	total_bytes_downloaded: number;
+	download_speed_bytes_per_sec: number;
+	error_rate_percent: number;
+	current_memory_usage: number;
+	total_connections: number;
+	command_success_rate_percent: number;
+	acquire_wait_time_ms: number;
+	last_updated: string;
 }

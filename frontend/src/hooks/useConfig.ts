@@ -1,10 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import type {
-	ConfigSection,
-	ConfigUpdateRequest,
-	ConfigValidateRequest,
-} from "../types/config";
+import type { ConfigSection, ConfigUpdateRequest, ConfigValidateRequest } from "../types/config";
 
 // Query keys for React Query
 export const configKeys = {
@@ -43,13 +39,8 @@ export function useUpdateConfigSection() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({
-			section,
-			config,
-		}: {
-			section: ConfigSection;
-			config: ConfigUpdateRequest;
-		}) => apiClient.updateConfigSection(section, config),
+		mutationFn: ({ section, config }: { section: ConfigSection; config: ConfigUpdateRequest }) =>
+			apiClient.updateConfigSection(section, config),
 		onSuccess: (data) => {
 			// Update the cache with new configuration
 			queryClient.setQueryData(configKeys.current(), data);
@@ -63,8 +54,7 @@ export function useUpdateConfigSection() {
 // Hook to validate configuration
 export function useValidateConfig() {
 	return useMutation({
-		mutationFn: (config: ConfigValidateRequest) =>
-			apiClient.validateConfig(config),
+		mutationFn: (config: ConfigValidateRequest) => apiClient.validateConfig(config),
 		onError: (error) => {
 			console.error("Failed to validate configuration:", error);
 		},
@@ -90,7 +80,7 @@ export function useReloadConfig() {
 // Hook to restart server
 export function useRestartServer() {
 	return useMutation({
-		mutationFn: (force: boolean = false) => apiClient.restartServer(force),
+		mutationFn: (force = false) => apiClient.restartServer(force),
 		onError: (error) => {
 			console.error("Failed to restart server:", error);
 		},

@@ -75,16 +75,12 @@ export function Sidebar() {
 	};
 
 	return (
-		<aside className="bg-base-200 w-64 min-h-full">
+		<aside className="min-h-full w-64 bg-base-200">
 			<div className="p-4">
-				<div className="flex items-center space-x-3 mb-8">
+				<div className="mb-8 flex items-center space-x-3">
 					<div className="avatar placeholder">
-						<div className=" w-12 h-12 flex items-center justify-center overflow-hidden">
-							<img
-								src="/logo.png"
-								alt="AltMount Logo"
-								className="w-12 h-12 object-contain"
-							/>
+						<div className="flex h-12 w-12 items-center justify-center overflow-hidden">
+							<img src="/logo.png" alt="AltMount Logo" className="h-12 w-12 object-contain" />
 						</div>
 					</div>
 					<div>
@@ -102,19 +98,15 @@ export function Sidebar() {
 								key={item.name}
 								to={item.href}
 								className={({ isActive }) =>
-									`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-										isActive
-											? "bg-primary text-primary-content"
-											: "hover:bg-base-300"
+									`flex items-center space-x-3 rounded-lg px-4 py-3 transition-colors ${
+										isActive ? "bg-primary text-primary-content" : "hover:bg-base-300"
 									}`
 								}
 							>
 								<item.icon className="h-5 w-5" />
 								<span className="flex-1">{item.name}</span>
 								{badgeCount > 0 && (
-									<div className={`badge badge-sm ${badgeColor}`}>
-										{badgeCount}
-									</div>
+									<div className={`badge badge-sm ${badgeColor}`}>{badgeCount}</div>
 								)}
 							</NavLink>
 						);
@@ -122,7 +114,7 @@ export function Sidebar() {
 				</nav>
 
 				{/* System info section */}
-				<div className="mt-8 pt-6 border-t border-base-300">
+				<div className="mt-8 border-base-300 border-t pt-6">
 					<div className="space-y-4">
 						<div className="flex items-center justify-between">
 							<div className="flex items-center space-x-2">
@@ -138,7 +130,7 @@ export function Sidebar() {
 									<Database className="h-4 w-4" />
 									<span className="text-sm">Queue</span>
 								</div>
-								<div className="text-sm text-base-content/70">
+								<div className="text-base-content/70 text-sm">
 									{queueStats.total_processing} / {queueStats.total_queued}
 								</div>
 							</div>
@@ -150,9 +142,7 @@ export function Sidebar() {
 									<AlertTriangle className="h-4 w-4 text-error" />
 									<span className="text-sm">Issues</span>
 								</div>
-								<div className="text-sm text-error">
-									{healthStats.corrupted}
-								</div>
+								<div className="text-error text-sm">{healthStats.corrupted}</div>
 							</div>
 						)}
 					</div>

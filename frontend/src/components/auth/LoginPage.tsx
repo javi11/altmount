@@ -6,8 +6,7 @@ import { RegisterForm } from "./RegisterForm";
 
 export function LoginPage() {
 	const { isAuthenticated, checkRegistrationStatus } = useAuth();
-	const [registrationEnabled, setRegistrationEnabled] =
-		useState<boolean>(false);
+	const [registrationEnabled, setRegistrationEnabled] = useState<boolean>(false);
 	const [userCount, setUserCount] = useState<number>(0);
 	const [isLoading, setIsLoading] = useState(true);
 	const [showRegister, setShowRegister] = useState(false);
@@ -42,21 +41,21 @@ export function LoginPage() {
 
 	if (isLoading) {
 		return (
-			<div className="min-h-screen flex items-center justify-center bg-gray-50">
-				<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+			<div className="flex min-h-screen items-center justify-center bg-gray-50">
+				<div className="h-8 w-8 animate-spin rounded-full border-blue-600 border-b-2" />
 			</div>
 		);
 	}
 
 	return (
-		<div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-			<div className="max-w-md w-full space-y-8 flex items-center justify-center flex-col">
+		<div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+			<div className="flex w-full max-w-md flex-col items-center justify-center space-y-8">
 				<Logo width={48} height={48} />
 				<div className="text-center">
-					<h2 className="mt-6 text-3xl font-extrabold text-gray-900">
+					<h2 className="mt-6 font-extrabold text-3xl text-gray-900">
 						{showRegister ? "Create Admin Account" : "Sign in to Altmount"}
 					</h2>
-					<p className="mt-2 text-sm text-gray-600">
+					<p className="mt-2 text-gray-600 text-sm">
 						{showRegister
 							? "Set up your administrator account to get started"
 							: userCount === 0
@@ -80,7 +79,7 @@ export function LoginPage() {
 								<button
 									type="button"
 									onClick={() => setShowRegister(false)}
-									className="text-sm text-blue-600 hover:text-blue-500"
+									className="text-blue-600 text-sm hover:text-blue-500"
 								>
 									Already have an account? Sign in
 								</button>
@@ -102,7 +101,7 @@ export function LoginPage() {
 								<button
 									type="button"
 									onClick={() => setShowRegister(true)}
-									className="text-sm text-blue-600 hover:text-blue-500"
+									className="text-blue-600 text-sm hover:text-blue-500"
 								>
 									Need to create an account? Register
 								</button>
@@ -111,12 +110,11 @@ export function LoginPage() {
 					</div>
 				)}
 
-				<div className="text-center text-xs text-gray-500">
+				<div className="text-center text-gray-500 text-xs">
 					<p>By signing in, you agree to use this application responsibly.</p>
 					{userCount === 0 && (
 						<p className="mt-1 text-blue-600">
-							The first user will automatically receive administrator
-							privileges.
+							The first user will automatically receive administrator privileges.
 						</p>
 					)}
 				</div>

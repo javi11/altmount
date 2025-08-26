@@ -1,13 +1,5 @@
 import { formatDistanceToNow } from "date-fns";
-import {
-	File,
-	FileArchive,
-	FileImage,
-	FileText,
-	FileVideo,
-	Folder,
-	Music,
-} from "lucide-react";
+import { File, FileArchive, FileImage, FileText, FileVideo, Folder, Music } from "lucide-react";
 import type { WebDAVFile } from "../../types/webdav";
 import { FileActions } from "./FileActions";
 
@@ -63,7 +55,7 @@ export function FileList({
 		const k = 1024;
 		const sizes = ["B", "KB", "MB", "GB", "TB"];
 		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
+		return `${Number.parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
 	};
 
 	const handleItemClick = (file: WebDAVFile) => {
@@ -76,33 +68,31 @@ export function FileList({
 	if (files.length === 0) {
 		return (
 			<div className="flex flex-col items-center justify-center py-12">
-				<Folder className="h-12 w-12 text-base-content/30 mb-4" />
-				<h3 className="text-lg font-semibold text-base-content/70">
-					Empty Directory
-				</h3>
+				<Folder className="mb-4 h-12 w-12 text-base-content/30" />
+				<h3 className="font-semibold text-base-content/70 text-lg">Empty Directory</h3>
 				<p className="text-base-content/50">This directory contains no files</p>
 			</div>
 		);
 	}
 
 	return (
-		<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+		<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 			{files.map((file) => (
 				<div
 					key={file.filename}
-					className="card bg-base-100 shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+					className="card cursor-pointer bg-base-100 shadow-md transition-shadow hover:shadow-lg"
 				>
 					<div className="card-body p-4">
-						<div className="flex items-start justify-between mb-2">
+						<div className="mb-2 flex items-start justify-between">
 							<button
-								className="flex items-center space-x-3 flex-1 min-w-0 bg-transparent border-none cursor-pointer"
+								className="flex min-w-0 flex-1 cursor-pointer items-center space-x-3 border-none bg-transparent"
 								onClick={() => handleItemClick(file)}
 								type="button"
 							>
 								{getFileIcon(file)}
 								<div className="min-w-0 flex-1">
 									<h3
-										className={`font-medium truncate ${
+										className={`truncate font-medium ${
 											file.type === "directory"
 												? "text-primary hover:text-primary-focus"
 												: "text-base-content"
@@ -124,7 +114,7 @@ export function FileList({
 							/>
 						</div>
 
-						<div className="text-sm text-base-content/70 space-y-1">
+						<div className="space-y-1 text-base-content/70 text-sm">
 							{file.type === "file" && (
 								<div className="flex justify-between">
 									<span>Size:</span>

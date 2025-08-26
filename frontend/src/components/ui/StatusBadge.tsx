@@ -1,4 +1,4 @@
-import { Heart, FileWarning, FileX, FileClock, FileScan } from "lucide-react";
+import { FileClock, FileScan, FileWarning, FileX, Heart } from "lucide-react";
 import { cn, getStatusColor } from "../../lib/utils";
 
 interface StatusBadgeProps {
@@ -9,9 +9,7 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, className }: StatusBadgeProps) {
 	const colorClass = getStatusColor(status);
 
-	return (
-		<div className={cn(`badge badge-${colorClass}`, className)}>{status}</div>
-	);
+	return <div className={cn(`badge badge-${colorClass}`, className)}>{status}</div>;
 }
 
 const icons = {
@@ -22,9 +20,7 @@ const icons = {
 	checking: <FileScan className="inline-block" />,
 };
 
-
 export function HealthBadge({ status, className }: StatusBadgeProps) {
-
 	const fileIcon = icons[status.toLowerCase() as keyof typeof icons];
 	const colorClass = getStatusColor(status);
 

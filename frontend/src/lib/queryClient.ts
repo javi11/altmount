@@ -6,10 +6,7 @@ export const queryClient = new QueryClient({
 		queries: {
 			retry: (failureCount, error: unknown) => {
 				// Don't retry on 4xx errors
-				if (
-					(error as ApiError)?.status >= 400 &&
-					(error as ApiError)?.status < 500
-				) {
+				if ((error as ApiError)?.status >= 400 && (error as ApiError)?.status < 500) {
 					return false;
 				}
 				return failureCount < 3;

@@ -33,9 +33,7 @@ export function UserManagement() {
 
 			// Update local state
 			setUsers(
-				users.map((user) =>
-					user.id === userId ? { ...user, is_admin: !currentStatus } : user,
-				),
+				users.map((user) => (user.id === userId ? { ...user, is_admin: !currentStatus } : user)),
 			);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to update user");
@@ -47,7 +45,7 @@ export function UserManagement() {
 	if (loading) {
 		return (
 			<div className="flex justify-center py-8">
-				<div className="loading loading-spinner loading-lg text-primary"></div>
+				<div className="loading loading-spinner loading-lg text-primary" />
 			</div>
 		);
 	}
@@ -56,11 +54,7 @@ export function UserManagement() {
 		return (
 			<div className="alert alert-error">
 				<div>{error}</div>
-				<button
-					type="button"
-					onClick={loadUsers}
-					className="btn btn-sm btn-outline"
-				>
+				<button type="button" onClick={loadUsers} className="btn btn-sm btn-outline">
 					Try again
 				</button>
 			</div>
@@ -69,13 +63,9 @@ export function UserManagement() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex justify-between items-center">
-				<h2 className="text-2xl font-bold">User Management</h2>
-				<button
-					type="button"
-					onClick={loadUsers}
-					className="btn btn-sm btn-secondary"
-				>
+			<div className="flex items-center justify-between">
+				<h2 className="font-bold text-2xl">User Management</h2>
+				<button type="button" onClick={loadUsers} className="btn btn-sm btn-secondary">
 					<RefreshCcw className="h-4 w-4" /> Refresh
 				</button>
 			</div>
@@ -88,26 +78,19 @@ export function UserManagement() {
 								<div className="flex items-center justify-between">
 									<div className="flex items-center">
 										<div className="avatar placeholder">
-											<UserIcon className="w-5 h-5" />
+											<UserIcon className="h-5 w-5" />
 										</div>
 										<div className="ml-4">
 											<div className="flex items-center gap-2">
-												<p className="text-sm font-medium">{user.name}</p>
-												{user.is_admin && (
-													<div className="badge badge-primary badge-sm">
-														Admin
-													</div>
-												)}
+												<p className="font-medium text-sm">{user.name}</p>
+												{user.is_admin && <div className="badge badge-primary badge-sm">Admin</div>}
 											</div>
-											<p className="text-sm text-base-content/70">
-												{user.email}
-											</p>
-											<p className="text-xs text-base-content/50 capitalize">
+											<p className="text-base-content/70 text-sm">{user.email}</p>
+											<p className="text-base-content/50 text-xs capitalize">
 												via {user.provider}
 												{user.last_login && (
 													<span className="ml-2">
-														• Last login:{" "}
-														{new Date(user.last_login).toLocaleDateString()}
+														• Last login: {new Date(user.last_login).toLocaleDateString()}
 													</span>
 												)}
 											</p>
@@ -120,9 +103,7 @@ export function UserManagement() {
 											onClick={() => toggleAdminStatus(user.id, user.is_admin)}
 											disabled={updatingUserId === user.id}
 											className={`btn btn-xs ${
-												user.is_admin
-													? "btn-error btn-outline"
-													: "btn-success btn-outline"
+												user.is_admin ? "btn-error btn-outline" : "btn-success btn-outline"
 											} ${updatingUserId === user.id ? "loading" : ""}`}
 										>
 											{updatingUserId === user.id
@@ -140,9 +121,7 @@ export function UserManagement() {
 			</div>
 
 			{users.length === 0 && (
-				<div className="text-center py-8 text-base-content/60">
-					No users found.
-				</div>
+				<div className="py-8 text-center text-base-content/60">No users found.</div>
 			)}
 		</div>
 	);

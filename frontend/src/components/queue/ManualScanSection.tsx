@@ -1,7 +1,7 @@
-import { FolderOpen, Play, Square, AlertCircle, CheckCircle2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, FolderOpen, Play, Square } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ScanStatus } from "../../types/api";
 import { useCancelScan, useScanStatus, useStartManualScan } from "../../hooks/useApi";
+import { ScanStatus } from "../../types/api";
 import { ErrorAlert } from "../ui/ErrorAlert";
 
 export function ManualScanSection() {
@@ -29,7 +29,7 @@ export function ManualScanSection() {
 			setValidationError("Path is required");
 			return false;
 		}
-		
+
 		if (!path.startsWith("/")) {
 			setValidationError("Path must be absolute (start with /)");
 			return false;
@@ -83,13 +83,13 @@ export function ManualScanSection() {
 	return (
 		<div className="card bg-base-100 shadow-lg">
 			<div className="card-body">
-				<div className="flex items-center gap-2 mb-4">
+				<div className="mb-4 flex items-center gap-2">
 					<FolderOpen className="h-5 w-5 text-primary" />
 					<h2 className="card-title">Manual Directory Scan</h2>
 				</div>
 
 				{/* Path Input and Controls */}
-				<div className="flex flex-col sm:flex-row gap-4 mb-4">
+				<div className="mb-4 flex flex-col gap-4 sm:flex-row">
 					<fieldset className="fieldset flex-1">
 						<legend className="fieldset-legend">Directory Path</legend>
 						<input
@@ -100,12 +100,10 @@ export function ManualScanSection() {
 							onChange={(e) => setScanPath(e.target.value)}
 							disabled={isScanning || isCanceling}
 						/>
-						{validationError && (
-							<p className="label text-error">{validationError}</p>
-						)}
+						{validationError && <p className="label text-error">{validationError}</p>}
 					</fieldset>
 
-					<div className="flex gap-2 items-end">
+					<div className="flex items-end gap-2">
 						{isIdle && (
 							<button
 								type="button"
@@ -133,14 +131,14 @@ export function ManualScanSection() {
 				</div>
 
 				{/* Status Display */}
-				<div className="bg-base-200 rounded-lg p-4">
-					<div className="flex items-center justify-between mb-2">
+				<div className="rounded-lg bg-base-200 p-4">
+					<div className="mb-2 flex items-center justify-between">
 						<div className="flex items-center gap-2">
 							{getStatusIcon()}
 							<span className="font-medium">Status: {getStatusText()}</span>
 						</div>
-						
-						<div className="flex gap-4 text-sm text-base-content/70">
+
+						<div className="flex gap-4 text-base-content/70 text-sm">
 							<span>Files Found: {scanStatus?.files_found || 0}</span>
 							<span>Files Added: {scanStatus?.files_added || 0}</span>
 						</div>
@@ -149,13 +147,13 @@ export function ManualScanSection() {
 					{/* Progress Bar */}
 					{isScanning && (
 						<div className="mb-2">
-							<div className="flex justify-between text-xs text-base-content/70 mb-1">
+							<div className="mb-1 flex justify-between text-base-content/70 text-xs">
 								<span>Progress</span>
 								<span>{Math.round(getProgressPercentage())}%</span>
 							</div>
-							<div className="w-full bg-base-300 rounded-full h-2">
+							<div className="h-2 w-full rounded-full bg-base-300">
 								<div
-									className="bg-primary h-2 rounded-full transition-all duration-300"
+									className="h-2 rounded-full bg-primary transition-all duration-300"
 									style={{ width: `${getProgressPercentage()}%` }}
 								/>
 							</div>
@@ -164,7 +162,7 @@ export function ManualScanSection() {
 
 					{/* Current File */}
 					{isScanning && scanStatus?.current_file && (
-						<div className="text-xs text-base-content/70">
+						<div className="text-base-content/70 text-xs">
 							<span>Current: </span>
 							<span className="font-mono">
 								{scanStatus.current_file.length > 60
@@ -176,7 +174,7 @@ export function ManualScanSection() {
 
 					{/* Scan Path */}
 					{scanStatus?.path && scanStatus.path !== scanPath && (
-						<div className="text-xs text-base-content/70 mt-1">
+						<div className="mt-1 text-base-content/70 text-xs">
 							<span>Scanning: </span>
 							<span className="font-mono">{scanStatus.path}</span>
 						</div>
@@ -185,8 +183,8 @@ export function ManualScanSection() {
 					{/* Error Display */}
 					{scanStatus?.last_error && (
 						<div className="mt-2">
-							<ErrorAlert 
-								error={new Error(scanStatus.last_error)} 
+							<ErrorAlert
+								error={new Error(scanStatus.last_error)}
 								onRetry={() => scanStatus?.path && handleStartScan()}
 							/>
 						</div>
@@ -195,8 +193,8 @@ export function ManualScanSection() {
 					{/* API Error Display */}
 					{(startScan.error || cancelScan.error) && (
 						<div className="mt-2">
-							<ErrorAlert 
-								error={(startScan.error || cancelScan.error) as Error} 
+							<ErrorAlert
+								error={(startScan.error || cancelScan.error) as Error}
 								onRetry={() => {
 									startScan.reset();
 									cancelScan.reset();
