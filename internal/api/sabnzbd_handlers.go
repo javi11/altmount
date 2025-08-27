@@ -118,21 +118,24 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 
 	// Build category path and create temporary file with category subdirectory
 	tempDir := os.TempDir()
+
+	relativePath := filepath.Join(tempDir, completeDir)
+
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, header.Filename)
+		tempFile = filepath.Join(relativePath, categoryPath, header.Filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
+		categoryDir := filepath.Join(relativePath, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create category directory")
 			return
 		}
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, header.Filename)
+		tempFile = filepath.Join(relativePath, header.Filename)
+
 		// Ensure base directory exists
-		baseDir := filepath.Join(tempDir, completeDir)
-		if err := os.MkdirAll(baseDir, 0755); err != nil {
+		if err := os.MkdirAll(relativePath, 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create base directory")
 			return
 		}
@@ -224,22 +227,23 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		filename += ".nzb"
 	}
 
+	relativePath := filepath.Join(tempDir, completeDir)
+
 	// Build category path and create temporary file with category subdirectory
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, filename)
+		tempFile = filepath.Join(relativePath, categoryPath, filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
+		categoryDir := filepath.Join(relativePath, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create category directory")
 			return
 		}
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, filename)
+		tempFile = filepath.Join(relativePath, filename)
 		// Ensure base directory exists
-		baseDir := filepath.Join(tempDir, completeDir)
-		if err := os.MkdirAll(baseDir, 0755); err != nil {
+		if err := os.MkdirAll(relativePath, 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create base directory")
 			return
 		}
@@ -269,7 +273,7 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 
 	// Add the file to the processing queue using centralized method
 	priority := s.parseSABnzbdPriority(query.Get("priority"))
-	item, err := s.importerService.AddToQueue(tempFile, nil, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(tempFile, &relativePath, &validatedCategory, &priority)
 	if err != nil {
 		s.writeSABnzbdError(w, "Failed to add to queue")
 		return
@@ -407,51 +411,51 @@ func (s *Server) handleSABnzbdHistory(w http.ResponseWriter, r *http.Request) {
 	// Create the proper history response structure using the new struct
 	response := SABnzbdCompleteHistoryResponse{
 		History: SABnzbdHistoryObject{
-			ActiveLang:       "en",
-			Paused:           false,
-			Session:          "1234567890abcdef0987654321fedcba",
-			RestartReq:       false,
-			PowerOptions:     true,
-			Slots:            slots,
-			Speed:            "0 ",
-			HelpURI:          "http://wiki.sabnzbd.org/",
-			Size:             "0 B",
-			Uptime:           time.Since(s.startTime).String(),
-			TotalSize:        "0 B",
-			MonthSize:        "0 B",
-			WeekSize:         "0 B",
-			Version:          "4.5.0",
-			NewRelURL:        "",
-			DiskspaceTotal2:  "74.43",
-			ColorScheme:      "white",
-			DiskspaceTotal1:  "74.43",
-			Nt:               runtime.GOOS == "windows",
-			Status:           "Idle",
-			LastWarning:      "",
-			HaveWarnings:     "0",
-			CacheArt:         "0",
-			SizeLeft:         "0 B",
-			FinishAction:     nil,
-			PausedAll:        false,
-			CacheSize:        "0 B",
-			NewzbinURL:       "www.newzbin2.es",
-			NewRelease:       "",
-			PauseInt:         "0",
-			MbLeft:           "0.00",
-			Diskspace1:       "10.42",
-			Darwin:           runtime.GOOS == "darwin",
-			TimeLeft:         "0:00:00",
-			Mb:               "0.00",
-			NoOfSlots:        len(slots),
-			DaySize:          "0 B",
-			ETA:              "unknown",
-			NzbQuota:         "",
-			LoadAvg:          "",
-			CacheMax:         "134217728",
-			KbPerSec:         "0.00",
-			SpeedLimit:       "",
-			WebDir:           "",
-			Diskspace2:       "10.42",
+			ActiveLang:      "en",
+			Paused:          false,
+			Session:         "1234567890abcdef0987654321fedcba",
+			RestartReq:      false,
+			PowerOptions:    true,
+			Slots:           slots,
+			Speed:           "0 ",
+			HelpURI:         "http://wiki.sabnzbd.org/",
+			Size:            "0 B",
+			Uptime:          time.Since(s.startTime).String(),
+			TotalSize:       "0 B",
+			MonthSize:       "0 B",
+			WeekSize:        "0 B",
+			Version:         "4.5.0",
+			NewRelURL:       "",
+			DiskspaceTotal2: "74.43",
+			ColorScheme:     "white",
+			DiskspaceTotal1: "74.43",
+			Nt:              runtime.GOOS == "windows",
+			Status:          "Idle",
+			LastWarning:     "",
+			HaveWarnings:    "0",
+			CacheArt:        "0",
+			SizeLeft:        "0 B",
+			FinishAction:    nil,
+			PausedAll:       false,
+			CacheSize:       "0 B",
+			NewzbinURL:      "www.newzbin2.es",
+			NewRelease:      "",
+			PauseInt:        "0",
+			MbLeft:          "0.00",
+			Diskspace1:      "10.42",
+			Darwin:          runtime.GOOS == "darwin",
+			TimeLeft:        "0:00:00",
+			Mb:              "0.00",
+			NoOfSlots:       len(slots),
+			DaySize:         "0 B",
+			ETA:             "unknown",
+			NzbQuota:        "",
+			LoadAvg:         "",
+			CacheMax:        "134217728",
+			KbPerSec:        "0.00",
+			SpeedLimit:      "",
+			WebDir:          "",
+			Diskspace2:      "10.42",
 		},
 	}
 
