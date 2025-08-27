@@ -197,6 +197,60 @@ type SABnzbdDeleteResponse struct {
 	Error  *string `json:"error,omitempty"`
 }
 
+// SABnzbdHistoryObject represents the nested history object in the complete response
+type SABnzbdHistoryObject struct {
+	ActiveLang      string               `json:"active_lang"`
+	Paused          bool                 `json:"paused"`
+	Session         string               `json:"session"`
+	RestartReq      bool                 `json:"restart_req"`
+	PowerOptions    bool                 `json:"power_options"`
+	Slots           []SABnzbdHistorySlot `json:"slots"`
+	Speed           string               `json:"speed"`
+	HelpURI         string               `json:"helpuri"`
+	Size            string               `json:"size"`
+	Uptime          string               `json:"uptime"`
+	TotalSize       string               `json:"total_size"`
+	MonthSize       string               `json:"month_size"`
+	WeekSize        string               `json:"week_size"`
+	Version         string               `json:"version"`
+	NewRelURL       string               `json:"new_rel_url"`
+	DiskspaceTotal2 string               `json:"diskspacetotal2"`
+	ColorScheme     string               `json:"color_scheme"`
+	DiskspaceTotal1 string               `json:"diskspacetotal1"`
+	Nt              bool                 `json:"nt"`
+	Status          string               `json:"status"`
+	LastWarning     string               `json:"last_warning"`
+	HaveWarnings    string               `json:"have_warnings"`
+	CacheArt        string               `json:"cache_art"`
+	SizeLeft        string               `json:"sizeleft"`
+	FinishAction    *string              `json:"finishaction"`
+	PausedAll       bool                 `json:"paused_all"`
+	CacheSize       string               `json:"cache_size"`
+	NewzbinURL      string               `json:"newzbin_url"`
+	NewRelease      string               `json:"new_release"`
+	PauseInt        string               `json:"pause_int"`
+	MbLeft          string               `json:"mbleft"`
+	Diskspace1      string               `json:"diskspace1"`
+	Darwin          bool                 `json:"darwin"`
+	TimeLeft        string               `json:"timeleft"`
+	Mb              string               `json:"mb"`
+	NoOfSlots       int                  `json:"noofslots"`
+	DaySize         string               `json:"day_size"`
+	ETA             string               `json:"eta"`
+	NzbQuota        string               `json:"nzb_quota"`
+	LoadAvg         string               `json:"loadavg"`
+	CacheMax        string               `json:"cache_max"`
+	KbPerSec        string               `json:"kbpersec"`
+	SpeedLimit      string               `json:"speedlimit"`
+	WebDir          string               `json:"webdir"`
+	Diskspace2      string               `json:"diskspace2"`
+}
+
+// SABnzbdCompleteHistoryResponse represents the complete history response structure
+type SABnzbdCompleteHistoryResponse struct {
+	History SABnzbdHistoryObject `json:"history"`
+}
+
 // Helper functions to convert AltMount data to SABnzbd format
 
 // formatSizeMB formats bytes as megabytes string (like C# FormatSizeMB)
@@ -275,7 +329,11 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueS
 	}
 
 	// Mock total size (could be enhanced to track actual file sizes)
-	totalSizeBytes := int64(100 * 1024 * 1024) // 100MB default
+	var totalSizeBytes int64
+	if item.FileSize != nil {
+		totalSizeBytes = *item.FileSize
+	}
+
 	sizeLeftBytes := int64((100 - progressPercentage) * int(totalSizeBytes) / 100)
 
 	return SABnzbdQueueSlot{
@@ -346,7 +404,7 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int) SABnzbdHist
 
 	return SABnzbdHistorySlot{
 		Index:        index,
-		NzoID:        string(rune(item.ID)),
+		NzoID:        fmt.Sprintf("%d", item.ID),
 		Name:         name,
 		Category:     category,
 		PP:           "",

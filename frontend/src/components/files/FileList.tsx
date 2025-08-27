@@ -1,6 +1,7 @@
 import { formatDistanceToNow } from "date-fns";
 import { File, FileArchive, FileImage, FileText, FileVideo, Folder, Music } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WebDAVFile } from "../../types/webdav";
 import { FileActions } from "./FileActions";
 
@@ -57,10 +58,10 @@ export function FileList({
 		const visibleRows = Math.ceil(containerHeight / ITEM_HEIGHT);
 		const startRow = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - BUFFER_SIZE);
 		const endRow = Math.min(totalRows, startRow + visibleRows + BUFFER_SIZE * 2);
-		
+
 		const startIndex = startRow * itemsPerRow;
 		const endIndex = Math.min(files.length, endRow * itemsPerRow);
-		
+
 		return {
 			totalRows,
 			totalHeight: totalRows * ITEM_HEIGHT,
@@ -96,7 +97,7 @@ export function FileList({
 	// Set up resize observer
 	useEffect(() => {
 		updateDimensions();
-		
+
 		const resizeObserver = new ResizeObserver(updateDimensions);
 		if (containerRef.current) {
 			resizeObserver.observe(containerRef.current);
@@ -183,11 +184,7 @@ export function FileList({
 	// Virtual scrolling for large lists
 	return (
 		<div className="relative">
-			<div
-				ref={containerRef}
-				className="h-[600px] overflow-auto"
-				onScroll={handleScroll}
-			>
+			<div ref={containerRef} className="h-[600px] overflow-auto" onScroll={handleScroll}>
 				<div
 					ref={scrollElementRef}
 					style={{ height: virtualScrolling.totalHeight }}
@@ -198,10 +195,13 @@ export function FileList({
 							transform: `translateY(${virtualScrolling.offsetY}px)`,
 						}}
 						className={`grid gap-4 ${
-							itemsPerRow === 1 ? 'grid-cols-1' :
-							itemsPerRow === 2 ? 'grid-cols-2' :
-							itemsPerRow === 3 ? 'grid-cols-3' :
-							'grid-cols-4'
+							itemsPerRow === 1
+								? "grid-cols-1"
+								: itemsPerRow === 2
+									? "grid-cols-2"
+									: itemsPerRow === 3
+										? "grid-cols-3"
+										: "grid-cols-4"
 						}`}
 					>
 						{visibleFiles.map((file) => (

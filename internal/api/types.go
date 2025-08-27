@@ -65,6 +65,7 @@ type QueueItemResponse struct {
 	ErrorMessage *string                `json:"error_message"`
 	BatchID      *string                `json:"batch_id"`
 	Metadata     *string                `json:"metadata"`
+	FileSize     *int64                 `json:"file_size"`
 }
 
 // QueueListRequest represents request parameters for listing queue items
@@ -428,6 +429,7 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		ErrorMessage: item.ErrorMessage,
 		BatchID:      item.BatchID,
 		Metadata:     item.Metadata,
+		FileSize:     item.FileSize,
 	}
 }
 

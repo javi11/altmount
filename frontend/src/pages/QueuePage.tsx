@@ -14,6 +14,7 @@ import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
+import { PathDisplay } from "../components/ui/PathDisplay";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
@@ -23,7 +24,7 @@ import {
 	useQueueStats,
 	useRetryQueueItem,
 } from "../hooks/useApi";
-import { formatRelativeTime, truncateText } from "../lib/utils";
+import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
 import { type QueueItem, QueueStatus } from "../types/api";
 
 export function QueuePage() {
@@ -299,7 +300,7 @@ export function QueuePage() {
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body p-0">
 					{isLoading ? (
-						<LoadingTable columns={7} />
+						<LoadingTable columns={8} />
 					) : queueData && queueData.length > 0 ? (
 						<table className="table-zebra table">
 							<thead>
@@ -307,6 +308,7 @@ export function QueuePage() {
 									<th>NZB File</th>
 									<th>Target Path</th>
 									<th>Category</th>
+									<th>File Size</th>
 									<th>Status</th>
 									<th>Retry Count</th>
 									<th>Updated</th>
@@ -321,18 +323,25 @@ export function QueuePage() {
 												<Download className="h-4 w-4 text-primary" />
 												<div>
 													<div className="font-bold">
-														{truncateText(item.nzb_path.split("/").pop() || "", 40)}
+														<PathDisplay path={item.nzb_path} maxLength={40} showFileName={true} />
 													</div>
 													<div className="text-base-content/70 text-sm">ID: {item.id}</div>
 												</div>
 											</div>
 										</td>
 										<td>
-											<div className="text-sm">{truncateText(item.target_path, 50)}</div>
+											<PathDisplay path={item.target_path} maxLength={50} className="text-sm" />
 										</td>
 										<td>
 											{item.category ? (
 												<span className="badge badge-outline badge-sm">{item.category}</span>
+											) : (
+												<span className="text-base-content/50 text-sm">—</span>
+											)}
+										</td>
+										<td>
+											{item.file_size ? (
+												<span className="text-sm">{formatBytes(item.file_size)}</span>
 											) : (
 												<span className="text-base-content/50 text-sm">—</span>
 											)}

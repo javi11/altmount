@@ -41,6 +41,7 @@ type ImportQueueItem struct {
 	ErrorMessage *string       `db:"error_message"`
 	BatchID      *string       `db:"batch_id"`
 	Metadata     *string       `db:"metadata"` // JSON metadata
+	FileSize     *int64        `db:"file_size"` // Total size in bytes calculated from segments
 }
 
 // QueueStats represents statistics about the import queue

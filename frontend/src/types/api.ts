@@ -41,6 +41,7 @@ export interface QueueItem {
 	error_message?: string;
 	batch_id?: string;
 	metadata?: string;
+	file_size?: number;
 }
 
 export interface QueueStats {

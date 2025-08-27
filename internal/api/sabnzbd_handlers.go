@@ -160,18 +160,9 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 
 	// Category validation was moved above file creation
 
-	// Add the file to the processing queue
-	item := &database.ImportQueueItem{
-		NzbPath:    tempFile,
-		Category:   &validatedCategory,
-		Priority:   s.parseSABnzbdPriority(r.FormValue("priority")),
-		Status:     database.QueueStatusPending,
-		RetryCount: 0,
-		MaxRetries: 3,
-		CreatedAt:  time.Now(),
-	}
-
-	err = s.queueRepo.AddToQueue(item)
+	// Add the file to the processing queue using centralized method
+	priority := s.parseSABnzbdPriority(r.FormValue("priority"))
+	item, err := s.importerService.AddToQueue(tempFile, nil, &validatedCategory, &priority)
 	if err != nil {
 		s.writeSABnzbdError(w, "Failed to add to queue")
 		return
@@ -276,17 +267,9 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 
 	// Category validation was moved above file creation
 
-	item := &database.ImportQueueItem{
-		NzbPath:    tempFile,
-		Category:   &validatedCategory,
-		Priority:   s.parseSABnzbdPriority(query.Get("priority")),
-		Status:     database.QueueStatusPending,
-		RetryCount: 0,
-		MaxRetries: 3,
-		CreatedAt:  time.Now(),
-	}
-
-	err = s.queueRepo.AddToQueue(item)
+	// Add the file to the processing queue using centralized method
+	priority := s.parseSABnzbdPriority(query.Get("priority"))
+	item, err := s.importerService.AddToQueue(tempFile, nil, &validatedCategory, &priority)
 	if err != nil {
 		s.writeSABnzbdError(w, "Failed to add to queue")
 		return
@@ -421,16 +404,55 @@ func (s *Server) handleSABnzbdHistory(w http.ResponseWriter, r *http.Request) {
 		index++
 	}
 
-	response := SABnzbdHistoryResponse{
-		Status:    true,
-		Version:   "4.5.0",
-		Paused:    false,
-		NoOfSlots: len(slots),
-		Slots:     slots,
-		TotalSize: "0 B",
-		MonthSize: "0 B",
-		WeekSize:  "0 B",
-		DaySize:   "0 B",
+	// Create the proper history response structure using the new struct
+	response := SABnzbdCompleteHistoryResponse{
+		History: SABnzbdHistoryObject{
+			ActiveLang:       "en",
+			Paused:           false,
+			Session:          "1234567890abcdef0987654321fedcba",
+			RestartReq:       false,
+			PowerOptions:     true,
+			Slots:            slots,
+			Speed:            "0 ",
+			HelpURI:          "http://wiki.sabnzbd.org/",
+			Size:             "0 B",
+			Uptime:           time.Since(s.startTime).String(),
+			TotalSize:        "0 B",
+			MonthSize:        "0 B",
+			WeekSize:         "0 B",
+			Version:          "4.5.0",
+			NewRelURL:        "",
+			DiskspaceTotal2:  "74.43",
+			ColorScheme:      "white",
+			DiskspaceTotal1:  "74.43",
+			Nt:               runtime.GOOS == "windows",
+			Status:           "Idle",
+			LastWarning:      "",
+			HaveWarnings:     "0",
+			CacheArt:         "0",
+			SizeLeft:         "0 B",
+			FinishAction:     nil,
+			PausedAll:        false,
+			CacheSize:        "0 B",
+			NewzbinURL:       "www.newzbin2.es",
+			NewRelease:       "",
+			PauseInt:         "0",
+			MbLeft:           "0.00",
+			Diskspace1:       "10.42",
+			Darwin:           runtime.GOOS == "darwin",
+			TimeLeft:         "0:00:00",
+			Mb:               "0.00",
+			NoOfSlots:        len(slots),
+			DaySize:          "0 B",
+			ETA:              "unknown",
+			NzbQuota:         "",
+			LoadAvg:          "",
+			CacheMax:         "134217728",
+			KbPerSec:         "0.00",
+			SpeedLimit:       "",
+			WebDir:           "",
+			Diskspace2:       "10.42",
+		},
 	}
 
 	s.writeSABnzbdResponse(w, response)

@@ -27,20 +27,21 @@ func NewQueueRepository(db interface {
 // AddToQueue adds a new NZB file to the import queue
 func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 	query := `
-		INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(nzb_path) DO UPDATE SET
 		priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
 		category = excluded.category,
 		batch_id = excluded.batch_id,
 		metadata = excluded.metadata,
+		file_size = excluded.file_size,
 		updated_at = datetime('now')
 		WHERE status NOT IN ('processing', 'completed')
 	`
 
 	result, err := r.db.Exec(query,
 		item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata)
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
 	if err != nil {
 		return fmt.Errorf("failed to add queue item: %w", err)
 	}
@@ -123,7 +124,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		// Get the complete claimed item data
 		getQuery := `
 			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
 			FROM import_queue 
 			WHERE id = ?
 		`
@@ -132,7 +133,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
 			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get claimed item: %w", err)
@@ -239,13 +240,14 @@ func (r *QueueRepository) AddBatchToQueue(items []*ImportQueueItem) error {
 	return r.withQueueTransaction(func(txRepo *QueueRepository) error {
 		// Prepare batch insert statement
 		query := `
-			INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+			INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 			ON CONFLICT(nzb_path) DO UPDATE SET
 			priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
 			category = excluded.category,
 			batch_id = excluded.batch_id,
 			metadata = excluded.metadata,
+			file_size = excluded.file_size,
 			updated_at = datetime('now')
 			WHERE status NOT IN ('processing', 'completed')
 		`
@@ -254,7 +256,7 @@ func (r *QueueRepository) AddBatchToQueue(items []*ImportQueueItem) error {
 		for _, item := range items {
 			result, err := txRepo.db.Exec(query,
 				item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata)
+				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
 			if err != nil {
 				return fmt.Errorf("failed to insert queue item %s: %w", item.NzbPath, err)
 			}

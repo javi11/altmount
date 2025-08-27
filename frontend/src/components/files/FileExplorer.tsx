@@ -55,9 +55,9 @@ export function FileExplorer({
 		if (!directory?.files || !searchTerm.trim()) {
 			return directory?.files || [];
 		}
-		
+
 		return directory.files.filter((file) =>
-			file.basename.toLowerCase().includes(searchTerm.toLowerCase())
+			file.basename.toLowerCase().includes(searchTerm.toLowerCase()),
 		);
 	}, [directory?.files, searchTerm]);
 

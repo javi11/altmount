@@ -427,7 +427,7 @@ export class APIClient {
 		const formData = new FormData();
 		formData.append("nzbfile", file);
 
-		const url = `/api/sabnzbd?mode=addfile&apikey=${encodeURIComponent(apiKey)}`;
+		const url = `/sabnzbd/api/?mode=addfile&apikey=${encodeURIComponent(apiKey)}`;
 
 		const response = await fetch(url, {
 			method: "POST",

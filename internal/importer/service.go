@@ -1,11 +1,17 @@
 package importer
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
+	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/pkg/rclonecli"
+	"github.com/javi11/nzbparser"
 )
 
 // ServiceConfig holds configuration for the NZB import service
@@ -299,7 +306,9 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 		}
 
 		// Add to queue
-		s.addToQueue(path, &scanPath)
+		if _, err := s.AddToQueue(path, &scanPath, nil, nil); err != nil {
+			s.log.Error("Failed to add file to queue during scan", "file", path, "error", err)
+		}
 
 		// Update files added counter
 		s.scanMu.Lock()
@@ -332,24 +341,48 @@ func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 	return inQueue
 }
 
-// addToQueue adds a new NZB file to the import queue
-func (s *Service) addToQueue(filePath string, relativePath *string) {
+// AddToQueue adds a new NZB file to the import queue with optional category and priority
+func (s *Service) AddToQueue(filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+	// Calculate file size before adding to queue
+	var fileSize *int64
+	if size, err := s.CalculateFileSizeOnly(filePath); err != nil {
+		s.log.Warn("Failed to calculate file size", "file", filePath, "error", err)
+		// Continue with NULL file size - don't fail the queue addition
+		fileSize = nil
+	} else {
+		fileSize = &size
+	}
+
+	// Use default priority if not specified
+	itemPriority := database.QueuePriorityNormal
+	if priority != nil {
+		itemPriority = *priority
+	}
+
 	item := &database.ImportQueueItem{
 		NzbPath:      filePath,
 		RelativePath: relativePath,
-		Priority:     database.QueuePriorityNormal,
+		Category:     category,
+		Priority:     itemPriority,
 		Status:       database.QueueStatusPending,
 		RetryCount:   0,
 		MaxRetries:   3,
+		FileSize:     fileSize,
 		CreatedAt:    time.Now(),
 	}
 
 	if err := s.database.Repository.AddToQueue(item); err != nil {
 		s.log.Error("Failed to add file to queue", "file", filePath, "error", err)
-		return
+		return nil, err
 	}
 
-	s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID)
+	if fileSize != nil {
+		s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
+	} else {
+		s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
+	}
+
+	return item, nil
 }
 
 // workerLoop processes queue items
@@ -616,4 +649,81 @@ func (s *Service) calculateVirtualDirectory(nzbPath, relativePath string) string
 	// Ensure virtual path starts with / and uses forward slashes
 	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
 	return filepath.Clean(virtualPath)
+}
+
+// CalculateFileSizeOnly calculates the total file size from NZB/STRM segments
+// This is a lightweight parser that only extracts size information without full processing
+func (s *Service) CalculateFileSizeOnly(filePath string) (int64, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, NewNonRetryableError("failed to open file for size calculation", err)
+	}
+	defer file.Close()
+
+	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
+		return s.calculateStrmFileSize(file)
+	} else {
+		return s.calculateNzbFileSize(file)
+	}
+}
+
+// calculateNzbFileSize calculates the total size from NZB file segments
+func (s *Service) calculateNzbFileSize(r io.Reader) (int64, error) {
+	n, err := nzbparser.Parse(r)
+	if err != nil {
+		return 0, NewNonRetryableError("failed to parse NZB XML for size calculation", err)
+	}
+
+	if len(n.Files) == 0 {
+		return 0, NewNonRetryableError("NZB file contains no files", nil)
+	}
+
+	var totalSize int64
+	par2Pattern := regexp.MustCompile(`(?i)\.par2$|\.p\d+$|\.vol\d+\+\d+\.par2$`)
+
+	for _, file := range n.Files {
+		// Skip PAR2 files (same logic as existing parser)
+		if par2Pattern.MatchString(file.Filename) {
+			continue
+		}
+
+		// Sum all segment bytes directly
+		for _, segment := range file.Segments {
+			totalSize += int64(segment.Bytes)
+		}
+	}
+
+	return totalSize, nil
+}
+
+// calculateStrmFileSize extracts file size from STRM file NXG link
+func (s *Service) calculateStrmFileSize(r io.Reader) (int64, error) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && strings.HasPrefix(line, "nxglnk://") {
+			u, err := url.Parse(line)
+			if err != nil {
+				return 0, NewNonRetryableError("invalid NXG URL in STRM file", err)
+			}
+
+			fileSizeStr := u.Query().Get("file_size")
+			if fileSizeStr == "" {
+				return 0, NewNonRetryableError("missing file_size parameter in NXG link", nil)
+			}
+
+			fileSize, err := strconv.ParseInt(fileSizeStr, 10, 64)
+			if err != nil {
+				return 0, NewNonRetryableError("invalid file_size parameter in NXG link", err)
+			}
+
+			return fileSize, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, NewNonRetryableError("failed to read STRM file for size calculation", err)
+	}
+
+	return 0, NewNonRetryableError("no valid NXG link found in STRM file", nil)
 }
