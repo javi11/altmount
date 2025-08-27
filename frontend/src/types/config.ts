@@ -57,6 +57,7 @@ export interface RCloneConfig {
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
+	queue_processing_interval: number; // Interval in seconds for queue processing
 }
 
 // Log configuration
@@ -155,6 +156,7 @@ export interface RCloneUpdateRequest {
 // Import update request
 export interface ImportUpdateRequest {
 	max_processor_workers?: number;
+	queue_processing_interval?: number; // Interval in seconds for queue processing
 }
 
 // Log update request
@@ -228,6 +230,7 @@ export interface APIFormData {
 
 export interface ImportFormData {
 	max_processor_workers: number;
+	queue_processing_interval: number; // Interval in seconds for queue processing
 }
 
 export interface MetadataFormData {

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
@@ -55,6 +56,7 @@ type Service struct {
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
 	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
+	configGetter    config.ConfigGetter      // Config getter for dynamic configuration access
 	log             *slog.Logger
 
 	// Runtime state
@@ -71,7 +73,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -88,6 +90,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		database:        database,
 		processor:       processor,
 		rcloneClient:    rcloneClient,
+		configGetter:    configGetter,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -390,9 +393,12 @@ func (s *Service) workerLoop(workerID int) {
 	defer s.wg.Done()
 
 	log := s.log.With("worker_id", workerID)
-	log.Info("Queue worker started")
-
-	ticker := time.NewTicker(5 * time.Second) // Check for work every 5 seconds
+	
+	// Get processing interval from configuration
+	processingInterval := s.configGetter().Import.QueueProcessingInterval
+	log.Info("Queue worker started", "processing_interval", processingInterval)
+	
+	ticker := time.NewTicker(processingInterval)
 	defer ticker.Stop()
 
 	for {

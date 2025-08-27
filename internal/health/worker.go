@@ -385,6 +385,9 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		return fmt.Errorf("failed to handle health check result: %w", err)
 	}
 
+	// Notify rclone VFS about the status change
+	hw.healthChecker.notifyRcloneVFS(filePath, event)
+
 	// Update stats
 	hw.updateStats(func(s *WorkerStats) {
 		s.TotalFilesChecked++

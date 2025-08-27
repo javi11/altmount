@@ -268,7 +268,8 @@ type RCloneConfigResponse struct {
 
 // ImportConfigResponse represents import configuration in API responses
 type ImportConfigResponse struct {
-	MaxProcessorWorkers int `json:"max_processor_workers"`
+	MaxProcessorWorkers      int `json:"max_processor_workers"`
+	QueueProcessingInterval  int `json:"queue_processing_interval"` // Interval in seconds for queue processing
 }
 
 // SABnzbdConfigData represents SABnzbd configuration in API responses
@@ -351,7 +352,8 @@ type RCloneConfigRequest struct {
 
 // ImportConfigRequest represents import configuration in update requests
 type ImportConfigRequest struct {
-	MaxProcessorWorkers *int `json:"max_processor_workers,omitempty"`
+	MaxProcessorWorkers     *int `json:"max_processor_workers,omitempty"`
+	QueueProcessingInterval *int `json:"queue_processing_interval,omitempty"` // Interval in seconds for queue processing
 }
 
 // SABnzbdConfigUpdate represents SABnzbd configuration in update requests

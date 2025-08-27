@@ -268,7 +268,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 			metadataService,
 			poolManager,
 			configManager.GetConfigGetter(),
-			nil, // No event handler for now
+			rcloneClient, // Pass rclone client for VFS notifications
+			nil,          // No event handler for now
 		)
 
 		healthWorker = health.NewHealthWorker(

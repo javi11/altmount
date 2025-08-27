@@ -35,8 +35,12 @@ func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 		batch_id = excluded.batch_id,
 		metadata = excluded.metadata,
 		file_size = excluded.file_size,
-		updated_at = datetime('now')
-		WHERE status NOT IN ('processing', 'completed')
+		status = excluded.status,
+		retry_count = 0,
+		started_at = NULL,
+		updated_at = datetime('now'),
+		relative_path = excluded.relative_path
+		WHERE status NOT IN ('processing', 'retrying', 'pending')
 	`
 
 	result, err := r.db.Exec(query,

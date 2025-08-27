@@ -56,6 +56,22 @@ export function ImportConfigSection({
 					/>
 					<p className="label">Number of concurrent NZB processing threads for import operations</p>
 				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Queue Processing Interval</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.queue_processing_interval}
+						readOnly={isReadOnly}
+						min={1}
+						max={300}
+						onChange={(e) =>
+							handleInputChange("queue_processing_interval", Number.parseInt(e.target.value, 10) || 5)
+						}
+					/>
+					<p className="label">How often workers check for new queue items (1-300 seconds). Changes require service restart.</p>
+				</fieldset>
 			</div>
 
 			{/* Save Button */}

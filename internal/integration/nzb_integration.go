@@ -75,7 +75,7 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter confi
 	}
 
 	// Create service with poolManager for dynamic pool access
-	service, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient)
+	service, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create NZB service: %w", err)

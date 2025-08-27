@@ -70,7 +70,8 @@ type RCloneConfig struct {
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers int `yaml:"max_processor_workers" mapstructure:"max_processor_workers"`
+	MaxProcessorWorkers      int           `yaml:"max_processor_workers" mapstructure:"max_processor_workers"`
+	QueueProcessingInterval time.Duration `yaml:"queue_processing_interval" mapstructure:"queue_processing_interval"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -201,6 +202,14 @@ func (c *Config) Validate() error {
 
 	if c.Import.MaxProcessorWorkers <= 0 {
 		return fmt.Errorf("import max_processor_workers must be greater than 0")
+	}
+
+	if c.Import.QueueProcessingInterval < 1*time.Second {
+		return fmt.Errorf("import queue_processing_interval must be at least 1 second")
+	}
+
+	if c.Import.QueueProcessingInterval > 5*time.Minute {
+		return fmt.Errorf("import queue_processing_interval must not exceed 5 minutes")
 	}
 
 	// Validate log level (both old and new config)
@@ -566,7 +575,8 @@ func DefaultConfig() *Config {
 			VFSPass:    "",
 		},
 		Import: ImportConfig{
-			MaxProcessorWorkers: 2, // Default: 2 processor workers
+			MaxProcessorWorkers:      2,              // Default: 2 processor workers
+			QueueProcessingInterval: 5 * time.Second, // Default: check for work every 5 seconds
 		},
 		Log: LogConfig{
 			File:       "",     // Empty = console only

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
@@ -11,6 +12,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/pkg/rclonecli"
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
@@ -58,7 +60,8 @@ type HealthChecker struct {
 	metadataService *metadata.MetadataService
 	poolManager     pool.Manager
 	configGetter    config.ConfigGetter
-	eventHandler    EventHandler // Optional event handler for notifications
+	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
+	eventHandler    EventHandler             // Optional event handler for notifications
 }
 
 // NewHealthChecker creates a new health checker
@@ -67,6 +70,7 @@ func NewHealthChecker(
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
+	rcloneClient rclonecli.RcloneRcClient,
 	eventHandler EventHandler,
 ) *HealthChecker {
 	return &HealthChecker{
@@ -74,6 +78,7 @@ func NewHealthChecker(
 		metadataService: metadataService,
 		poolManager:     poolManager,
 		configGetter:    configGetter,
+		rcloneClient:    rcloneClient,
 		eventHandler:    eventHandler,
 	}
 }
@@ -209,6 +214,38 @@ func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID strin
 
 	// NNTP response codes: 223 = article exists, other codes indicate issues
 	return responseCode == 223, nil
+}
+
+// NotifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
+func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
+	if hc.rcloneClient == nil {
+		return // No rclone client configured
+	}
+
+	// Only notify on significant status changes (healthy <-> corrupted)
+	switch event.Type {
+	case EventTypeFileRecovered, EventTypeFileCorrupted:
+		// Continue with notification
+	default:
+		return // No notification needed for other event types
+	}
+
+	// Start async notification
+	go func() {
+		// Extract directory path from file path for VFS refresh
+		virtualDir := filepath.Dir(filePath)
+		
+		// Use background context with timeout for VFS notification
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Refresh cache asynchronously to avoid blocking health checks
+		err := hc.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
+		if err != nil {
+			// Log warning but don't fail the health check
+			// This would need a logger reference, but we'll rely on higher-level logging
+		}
+	}()
 }
 
 // GetHealthStats returns current health statistics

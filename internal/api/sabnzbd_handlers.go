@@ -119,23 +119,21 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 	// Build category path and create temporary file with category subdirectory
 	tempDir := os.TempDir()
 
-	relativePath := filepath.Join(tempDir, completeDir)
-
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(relativePath, categoryPath, header.Filename)
+		tempFile = filepath.Join(tempDir, completeDir, categoryPath, header.Filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(relativePath, categoryPath)
+		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create category directory")
 			return
 		}
 	} else {
-		tempFile = filepath.Join(relativePath, header.Filename)
+		tempFile = filepath.Join(tempDir, completeDir, header.Filename)
 
 		// Ensure base directory exists
-		if err := os.MkdirAll(relativePath, 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create base directory")
 			return
 		}
@@ -165,7 +163,7 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 
 	// Add the file to the processing queue using centralized method
 	priority := s.parseSABnzbdPriority(r.FormValue("priority"))
-	item, err := s.importerService.AddToQueue(tempFile, nil, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(tempFile, &tempDir, &validatedCategory, &priority)
 	if err != nil {
 		s.writeSABnzbdError(w, "Failed to add to queue")
 		return
@@ -227,23 +225,22 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		filename += ".nzb"
 	}
 
-	relativePath := filepath.Join(tempDir, completeDir)
-
 	// Build category path and create temporary file with category subdirectory
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(relativePath, categoryPath, filename)
+		tempFile = filepath.Join(tempDir, completeDir, categoryPath, filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(relativePath, categoryPath)
+		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create category directory")
 			return
 		}
 	} else {
-		tempFile = filepath.Join(relativePath, filename)
+		tempFile = filepath.Join(tempDir, completeDir, filename)
+
 		// Ensure base directory exists
-		if err := os.MkdirAll(relativePath, 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
 			s.writeSABnzbdError(w, "Failed to create base directory")
 			return
 		}
@@ -273,7 +270,7 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 
 	// Add the file to the processing queue using centralized method
 	priority := s.parseSABnzbdPriority(query.Get("priority"))
-	item, err := s.importerService.AddToQueue(tempFile, &relativePath, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(tempFile, &tempDir, &validatedCategory, &priority)
 	if err != nil {
 		s.writeSABnzbdError(w, "Failed to add to queue")
 		return

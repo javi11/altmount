@@ -272,7 +272,8 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			SaltSet:     config.RClone.Salt != "",
 		},
 		Import: ImportConfigResponse{
-			MaxProcessorWorkers: config.Import.MaxProcessorWorkers,
+			MaxProcessorWorkers:     config.Import.MaxProcessorWorkers,
+			QueueProcessingInterval: int(config.Import.QueueProcessingInterval.Seconds()),
 		},
 		SABnzbd:   s.toSABnzbdConfigData(&config.SABnzbd),
 		Providers: providers,
@@ -359,6 +360,9 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 	if updates.Import != nil {
 		if updates.Import.MaxProcessorWorkers != nil {
 			cfg.Import.MaxProcessorWorkers = *updates.Import.MaxProcessorWorkers
+		}
+		if updates.Import.QueueProcessingInterval != nil {
+			cfg.Import.QueueProcessingInterval = time.Duration(*updates.Import.QueueProcessingInterval) * time.Second
 		}
 	}
 
@@ -496,6 +500,9 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 		if updates.Import != nil {
 			if updates.Import.MaxProcessorWorkers != nil {
 				cfg.Import.MaxProcessorWorkers = *updates.Import.MaxProcessorWorkers
+			}
+			if updates.Import.QueueProcessingInterval != nil {
+				cfg.Import.QueueProcessingInterval = time.Duration(*updates.Import.QueueProcessingInterval) * time.Second
 			}
 		}
 	case "providers":
