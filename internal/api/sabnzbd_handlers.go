@@ -333,27 +333,11 @@ func (s *Server) handleSABnzbdQueue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := SABnzbdQueueResponse{
-		Status:          true,
-		Version:         "4.5.0", // Emulate SABnzbd version
-		Paused:          false,
-		PauseInt:        0,
-		SizeLeft:        "0 B",
-		Size:            "0 B",
-		Speed:           "0 B/s",
-		SpeedLimit:      "",
-		SpeedLimitAbs:   "0",
-		NoOfSlots:       len(slots),
-		NoOfSlotsTotal:  len(slots),
-		KbPerSec:        "0",
-		MbLeft:          0,
-		Mb:              0,
-		TimeLeft:        "0:00:00",
-		ETA:             "unknown",
-		Slots:           slots,
-		Diskspace1:      "0 B",
-		Diskspace2:      "0 B",
-		DiskspaceTotal1: "0 B",
-		DiskspaceTotal2: "0 B",
+		Status: true,
+		Queue: SABnzbdQueueObject{
+			Paused: false,
+			Slots:  slots,
+		},
 	}
 
 	s.writeSABnzbdResponse(w, response)
@@ -542,61 +526,75 @@ func (s *Server) handleSABnzbdStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleSABnzbdGetConfig handles configuration request
 func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) {
-	// Get configuration from config manager
-	var config map[string]interface{}
+	var config SABnzbdConfig
 
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 
 		completeDirPath := path.Join(cfg.SABnzbd.MountDir, completeDir)
-		// Build categories from configuration
-		categories := make(map[string]interface{})
+		
+		// Build misc configuration
+		config.Misc = SABnzbdMiscConfig{
+			CompleteDir:              completeDirPath,
+			PreCheck:                 0,
+			HistoryRetention:         "",
+			HistoryRetentionOption:   "all",
+			HistoryRetentionNumber:   1,
+		}
 
+		// Build categories from configuration
 		if len(cfg.SABnzbd.Categories) > 0 {
 			// Use configured categories
 			for _, category := range cfg.SABnzbd.Categories {
-				categories[category.Name] = map[string]interface{}{
-					"name":     category.Name,
-					"order":    category.Order,
-					"pp":       "",
-					"script":   "",
-					"dir":      category.Dir,
-					"newzbin":  "",
-					"priority": category.Priority,
-				}
+				config.Categories = append(config.Categories, SABnzbdCategory{
+					Name:     category.Name,
+					Order:    category.Order,
+					PP:       "3", // Default post-processing
+					Script:   "None",
+					Dir:      category.Dir,
+					Newzbin:  "",
+					Priority: category.Priority,
+				})
 			}
 		} else {
 			// Use default category when none configured
-			categories["default"] = map[string]interface{}{
-				"name":     "default",
-				"order":    0,
-				"pp":       "",
-				"script":   "",
-				"dir":      "",
-				"newzbin":  "",
-				"priority": 0,
+			config.Categories = []SABnzbdCategory{
+				{
+					Name:     "default",
+					Order:    0,
+					PP:       "3",
+					Script:   "None",
+					Dir:      "",
+					Newzbin:  "",
+					Priority: 0,
+				},
 			}
 		}
 
-		config = map[string]interface{}{
-			"complete_dir": completeDirPath,
-			"categories":   categories,
-		}
+		// Empty servers array (not exposing actual server configuration)
+		config.Servers = []SABnzbdServer{}
 	} else {
 		// Fallback configuration when no config manager
-		config = map[string]interface{}{
-			"complete_dir": "",
-			"categories": map[string]interface{}{
-				"default": map[string]interface{}{
-					"name":     "default",
-					"order":    0,
-					"pp":       "",
-					"script":   "",
-					"dir":      "",
-					"newzbin":  "",
-					"priority": 0,
+		config = SABnzbdConfig{
+			Misc: SABnzbdMiscConfig{
+				CompleteDir:              "",
+				PreCheck:                 0,
+				HistoryRetention:         "",
+				HistoryRetentionOption:   "all",
+				HistoryRetentionNumber:   1,
+			},
+			Categories: []SABnzbdCategory{
+				{
+					Name:     "default",
+					Order:    0,
+					PP:       "3",
+					Script:   "None",
+					Dir:      "",
+					Newzbin:  "",
+					Priority: 0,
 				},
 			},
+			Servers: []SABnzbdServer{},
 		}
 	}
 

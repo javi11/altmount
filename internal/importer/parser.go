@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/nntppool"
 	"github.com/javi11/nzbparser"
 )
 
@@ -142,6 +144,10 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 			p.log.Warn("Failed to normalize segment sizes with yEnc headers",
 				"error", err,
 				"segments", len(file.Segments))
+
+			if errors.Is(err, nntppool.ErrArticleNotFoundInProviders) {
+				return nil, errors.Join(ErrNoRetryable, fmt.Errorf("failed to fetch yEnc headers: missing articles in all providers"))
+			}
 		}
 	}
 
@@ -207,6 +213,8 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 
 	if IsProbablyObfuscated(filename) {
 		p.log.Warn("File appears obfuscated", "filename", filename, "subject", file.Subject)
+
+		return nil, fmt.Errorf("file appears obfuscated: %s", filename)
 	}
 
 	// Check if this is a RAR file

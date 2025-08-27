@@ -301,124 +301,122 @@ export function QueuePage() {
 					{isLoading ? (
 						<LoadingTable columns={7} />
 					) : queueData && queueData.length > 0 ? (
-						<div className="overflow-x-auto">
-							<table className="table-zebra table">
-								<thead>
-									<tr>
-										<th>NZB File</th>
-										<th>Target Path</th>
-										<th>Category</th>
-										<th>Status</th>
-										<th>Retry Count</th>
-										<th>Updated</th>
-										<th>Actions</th>
-									</tr>
-								</thead>
-								<tbody>
-									{queueData.map((item: QueueItem) => (
-										<tr key={item.id} className="hover">
-											<td>
-												<div className="flex items-center space-x-3">
-													<Download className="h-4 w-4 text-primary" />
-													<div>
-														<div className="font-bold">
-															{truncateText(item.nzb_path.split("/").pop() || "", 40)}
-														</div>
-														<div className="text-base-content/70 text-sm">ID: {item.id}</div>
+						<table className="table-zebra table">
+							<thead>
+								<tr>
+									<th>NZB File</th>
+									<th>Target Path</th>
+									<th>Category</th>
+									<th>Status</th>
+									<th>Retry Count</th>
+									<th>Updated</th>
+									<th>Actions</th>
+								</tr>
+							</thead>
+							<tbody>
+								{queueData.map((item: QueueItem) => (
+									<tr key={item.id} className="hover">
+										<td>
+											<div className="flex items-center space-x-3">
+												<Download className="h-4 w-4 text-primary" />
+												<div>
+													<div className="font-bold">
+														{truncateText(item.nzb_path.split("/").pop() || "", 40)}
+													</div>
+													<div className="text-base-content/70 text-sm">ID: {item.id}</div>
+												</div>
+											</div>
+										</td>
+										<td>
+											<div className="text-sm">{truncateText(item.target_path, 50)}</div>
+										</td>
+										<td>
+											{item.category ? (
+												<span className="badge badge-outline badge-sm">{item.category}</span>
+											) : (
+												<span className="text-base-content/50 text-sm">—</span>
+											)}
+										</td>
+										<td>
+											{(item.status === QueueStatus.FAILED ||
+												item.status === QueueStatus.RETRYING) &&
+											item.error_message ? (
+												<div
+													className="tooltip tooltip-top"
+													data-tip={truncateText(item.error_message, 200)}
+												>
+													<div className="flex items-center gap-1">
+														<StatusBadge status={item.status} />
+														<AlertCircle className="h-3 w-3 text-error" />
 													</div>
 												</div>
-											</td>
-											<td>
-												<div className="text-sm">{truncateText(item.target_path, 50)}</div>
-											</td>
-											<td>
-												{item.category ? (
-													<span className="badge badge-outline badge-sm">{item.category}</span>
-												) : (
-													<span className="text-base-content/50 text-sm">—</span>
-												)}
-											</td>
-											<td>
-												{(item.status === QueueStatus.FAILED ||
-													item.status === QueueStatus.RETRYING) &&
-												item.error_message ? (
-													<div
-														className="tooltip tooltip-top"
-														data-tip={truncateText(item.error_message, 200)}
-													>
-														<div className="flex items-center gap-1">
-															<StatusBadge status={item.status} />
-															<AlertCircle className="h-3 w-3 text-error" />
-														</div>
-													</div>
-												) : (
-													<StatusBadge status={item.status} />
-												)}
-											</td>
-											<td>
-												<span
-													className={`badge ${item.retry_count > 0 ? "badge-warning" : "badge-ghost"}`}
-												>
-													{item.retry_count}
-												</span>
-											</td>
-											<td>
-												<span className="text-base-content/70 text-sm">
-													{formatRelativeTime(item.updated_at)}
-												</span>
-											</td>
-											<td>
-												<div className="dropdown dropdown-end">
-													<button tabIndex={0} type="button" className="btn btn-ghost btn-sm">
-														<MoreHorizontal className="h-4 w-4" />
-													</button>
-													<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
-														{(item.status === QueueStatus.FAILED ||
-															item.status === QueueStatus.COMPLETED) && (
-															<>
-																<li>
-																	<button
-																		type="button"
-																		onClick={() => handleRetry(item.id)}
-																		disabled={retryItem.isPending}
-																	>
-																		<PlayCircle className="h-4 w-4" />
-																		Retry
-																	</button>
-																</li>
-																<li>
-																	<button
-																		type="button"
-																		onClick={() => handleRetry(item.id, true)}
-																		disabled={retryItem.isPending}
-																	>
-																		<RefreshCw className="h-4 w-4" />
-																		Reset & Retry
-																	</button>
-																</li>
-															</>
-														)}
-														{item.status !== QueueStatus.PROCESSING && (
+											) : (
+												<StatusBadge status={item.status} />
+											)}
+										</td>
+										<td>
+											<span
+												className={`badge ${item.retry_count > 0 ? "badge-warning" : "badge-ghost"}`}
+											>
+												{item.retry_count}
+											</span>
+										</td>
+										<td>
+											<span className="text-base-content/70 text-sm">
+												{formatRelativeTime(item.updated_at)}
+											</span>
+										</td>
+										<td>
+											<div className="dropdown dropdown-end">
+												<button tabIndex={0} type="button" className="btn btn-ghost btn-sm">
+													<MoreHorizontal className="h-4 w-4" />
+												</button>
+												<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
+													{(item.status === QueueStatus.FAILED ||
+														item.status === QueueStatus.COMPLETED) && (
+														<>
 															<li>
 																<button
 																	type="button"
-																	onClick={() => handleDelete(item.id)}
-																	disabled={deleteItem.isPending}
-																	className="text-error"
+																	onClick={() => handleRetry(item.id)}
+																	disabled={retryItem.isPending}
 																>
-																	<Trash2 className="h-4 w-4" />
-																	Delete
+																	<PlayCircle className="h-4 w-4" />
+																	Retry
 																</button>
 															</li>
-														)}
-													</ul>
-												</div>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
+															<li>
+																<button
+																	type="button"
+																	onClick={() => handleRetry(item.id, true)}
+																	disabled={retryItem.isPending}
+																>
+																	<RefreshCw className="h-4 w-4" />
+																	Reset & Retry
+																</button>
+															</li>
+														</>
+													)}
+													{item.status !== QueueStatus.PROCESSING && (
+														<li>
+															<button
+																type="button"
+																onClick={() => handleDelete(item.id)}
+																disabled={deleteItem.isPending}
+																className="text-error"
+															>
+																<Trash2 className="h-4 w-4" />
+																Delete
+															</button>
+														</li>
+													)}
+												</ul>
+											</div>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
 					) : (
 						<div className="flex flex-col items-center justify-center py-12">
 							<Download className="mb-4 h-12 w-12 text-base-content/30" />

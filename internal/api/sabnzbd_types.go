@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+
 	"github.com/javi11/altmount/internal/database"
 )
 
@@ -9,71 +11,51 @@ import (
 
 // SABnzbdResponse represents the standard SABnzbd API response wrapper
 type SABnzbdResponse struct {
-	Status bool        `json:"status"`
-	Queue  interface{} `json:"queue,omitempty"`
+	Status  bool        `json:"status"`
+	Queue   interface{} `json:"queue,omitempty"`
 	History interface{} `json:"history,omitempty"`
-	Config interface{} `json:"config,omitempty"`
+	Config  interface{} `json:"config,omitempty"`
 	Version interface{} `json:"version,omitempty"`
-	Error  *string     `json:"error,omitempty"`
+	Error   *string     `json:"error,omitempty"`
+}
+
+// SABnzbdQueueObject represents the nested queue object in the response
+type SABnzbdQueueObject struct {
+	Paused bool               `json:"paused"`
+	Slots  []SABnzbdQueueSlot `json:"slots"`
 }
 
 // SABnzbdQueueResponse represents the queue response structure
 type SABnzbdQueueResponse struct {
-	Status         bool                 `json:"status"`
-	Version        string               `json:"version"`
-	Paused         bool                 `json:"paused"`
-	PauseInt       int                  `json:"pause_int"`
-	SizeLeft       string               `json:"sizeleft"`
-	Size           string               `json:"size"`
-	Speed          string               `json:"speed"`
-	SpeedLimit     string               `json:"speedlimit"`
-	SpeedLimitAbs  string               `json:"speedlimit_abs"`
-	NoOfSlots      int                  `json:"noofslots"`
-	NoOfSlotsTotal int                  `json:"noofslots_total"`
-	KbPerSec       string               `json:"kbpersec"`
-	MbLeft         float64              `json:"mbleft"`
-	Mb             float64              `json:"mb"`
-	TimeLeft       string               `json:"timeleft"`
-	ETA            string               `json:"eta"`
-	Slots          []SABnzbdQueueSlot   `json:"slots"`
-	Diskspace1     string               `json:"diskspace1"`
-	Diskspace2     string               `json:"diskspace2"`
-	DiskspaceTotal1 string              `json:"diskspacetotal1"`
-	DiskspaceTotal2 string              `json:"diskspacetotal2"`
+	Status bool               `json:"status"`
+	Queue  SABnzbdQueueObject `json:"queue"`
 }
 
 // SABnzbdQueueSlot represents a single item in the download queue
 type SABnzbdQueueSlot struct {
-	Index      int     `json:"index"`
-	NzoID      string  `json:"nzo_id"`
-	Unpackopts string  `json:"unpackopts"`
-	Priority   string  `json:"priority"`
-	Script     string  `json:"script"`
-	Filename   string  `json:"filename"`
-	Labels     []string `json:"labels"`
-	Password   string  `json:"password"`
-	Cat        string  `json:"cat"`
-	Mbleft     float64 `json:"mbleft"`
-	Mb         float64 `json:"mb"`
-	Size       string  `json:"size"`
-	Sizeleft   string  `json:"sizeleft"`
-	Percentage string  `json:"percentage"`
-	Eta        string  `json:"eta"`
-	Timeleft   string  `json:"timeleft"`
-	Status     string  `json:"status"`
+	Index      int    `json:"index"`
+	NzoID      string `json:"nzo_id"`
+	Priority   string `json:"priority"`
+	Filename   string `json:"filename"`
+	Cat        string `json:"cat"`
+	Percentage string `json:"percentage"`
+	Status     string `json:"status"`
+	Timeleft   string `json:"timeleft"`
+	Mb         string `json:"mb"`
+	Mbleft     string `json:"mbleft"`
 }
 
 // SABnzbdHistoryResponse represents the history response structure
 type SABnzbdHistoryResponse struct {
-	Status    bool                   `json:"status"`
-	Version   string                 `json:"version"`
-	Paused    bool                   `json:"paused"`
-	NoOfSlots int                    `json:"noofslots"`
-	Slots     []SABnzbdHistorySlot   `json:"slots"`
-	TotalSize string                 `json:"total_size"`
-	MonthSize string                 `json:"month_size"`
-	WeekSize  string                 `json:"week_size"`
-	DaySize   string                 `json:"day_size"`
+	Status    bool                 `json:"status"`
+	Version   string               `json:"version"`
+	Paused    bool                 `json:"paused"`
+	NoOfSlots int                  `json:"noofslots"`
+	Slots     []SABnzbdHistorySlot `json:"slots"`
+	TotalSize string               `json:"total_size"`
+	MonthSize string               `json:"month_size"`
+	WeekSize  string               `json:"week_size"`
+	DaySize   string               `json:"day_size"`
 }
 
 // SABnzbdHistorySlot represents a single item in the download history
@@ -111,38 +93,89 @@ type SABnzbdHistorySlot struct {
 
 // SABnzbdStatusResponse represents the full status response
 type SABnzbdStatusResponse struct {
-	Status         bool    `json:"status"`
-	Version        string  `json:"version"`
-	Uptime         string  `json:"uptime"`
-	Color          string  `json:"color"`
-	Darwin         bool    `json:"darwin"`
-	Nt             bool    `json:"nt"`
-	Pid            int     `json:"pid"`
-	NewRelURL      string  `json:"new_rel_url"`
-	ActiveDownload bool    `json:"active_download"`
-	Paused         bool    `json:"paused"`
-	PauseInt       int     `json:"pause_int"`
-	Remaining      string  `json:"remaining"`
-	MbLeft         float64 `json:"mbleft"`
-	Diskspace1     string  `json:"diskspace1"`
-	Diskspace2     string  `json:"diskspace2"`
-	DiskspaceTotal1 string `json:"diskspacetotal1"`
-	DiskspaceTotal2 string `json:"diskspacetotal2"`
-	Loadavg        string  `json:"loadavg"`
-	Cache          struct {
-		Max    int `json:"max"`
-		Left   int `json:"left"`
-		Art    int `json:"art"`
+	Status          bool    `json:"status"`
+	Version         string  `json:"version"`
+	Uptime          string  `json:"uptime"`
+	Color           string  `json:"color"`
+	Darwin          bool    `json:"darwin"`
+	Nt              bool    `json:"nt"`
+	Pid             int     `json:"pid"`
+	NewRelURL       string  `json:"new_rel_url"`
+	ActiveDownload  bool    `json:"active_download"`
+	Paused          bool    `json:"paused"`
+	PauseInt        int     `json:"pause_int"`
+	Remaining       string  `json:"remaining"`
+	MbLeft          float64 `json:"mbleft"`
+	Diskspace1      string  `json:"diskspace1"`
+	Diskspace2      string  `json:"diskspace2"`
+	DiskspaceTotal1 string  `json:"diskspacetotal1"`
+	DiskspaceTotal2 string  `json:"diskspacetotal2"`
+	Loadavg         string  `json:"loadavg"`
+	Cache           struct {
+		Max  int `json:"max"`
+		Left int `json:"left"`
+		Art  int `json:"art"`
 	} `json:"cache"`
-	Folders []string `json:"folders"`
+	Folders []string           `json:"folders"`
 	Slots   []SABnzbdQueueSlot `json:"slots"`
+}
+
+// SABnzbdConfig represents the SABnzbd configuration structure
+type SABnzbdConfig struct {
+	Misc       SABnzbdMiscConfig `json:"misc"`
+	Categories []SABnzbdCategory `json:"categories"`
+	Servers    []SABnzbdServer   `json:"servers"`
+}
+
+// SABnzbdMiscConfig represents miscellaneous configuration settings
+type SABnzbdMiscConfig struct {
+	CompleteDir            string `json:"complete_dir"`
+	PreCheck               int    `json:"pre_check"`
+	HistoryRetention       string `json:"history_retention"`
+	HistoryRetentionOption string `json:"history_retention_option"`
+	HistoryRetentionNumber int    `json:"history_retention_number"`
+}
+
+// SABnzbdCategory represents a download category configuration
+type SABnzbdCategory struct {
+	Name     string `json:"name"`
+	Order    int    `json:"order"`
+	PP       string `json:"pp"`
+	Script   string `json:"script"`
+	Dir      string `json:"dir"`
+	Newzbin  string `json:"newzbin"`
+	Priority int    `json:"priority"`
+}
+
+// SABnzbdServer represents a news server configuration
+type SABnzbdServer struct {
+	Name         string `json:"name"`
+	DisplayName  string `json:"displayname"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Timeout      int    `json:"timeout"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	Connections  int    `json:"connections"`
+	SSL          int    `json:"ssl"`
+	SSLVerify    int    `json:"ssl_verify"`
+	SSLCiphers   string `json:"ssl_ciphers"`
+	Enable       int    `json:"enable"`
+	Required     int    `json:"required"`
+	Optional     int    `json:"optional"`
+	Retention    int    `json:"retention"`
+	ExpireDate   string `json:"expire_date"`
+	Quota        string `json:"quota"`
+	UsageAtStart int    `json:"usage_at_start"`
+	Priority     int    `json:"priority"`
+	Notes        string `json:"notes"`
 }
 
 // SABnzbdConfigResponse represents the configuration response
 type SABnzbdConfigResponse struct {
-	Status  bool                        `json:"status"`
-	Version string                      `json:"version"`
-	Config  map[string]interface{}      `json:"config"`
+	Status  bool          `json:"status"`
+	Version string        `json:"version"`
+	Config  SABnzbdConfig `json:"config"`
 }
 
 // SABnzbdVersionResponse represents the version response
@@ -165,6 +198,15 @@ type SABnzbdDeleteResponse struct {
 }
 
 // Helper functions to convert AltMount data to SABnzbd format
+
+// formatSizeMB formats bytes as megabytes string (like C# FormatSizeMB)
+func formatSizeMB(bytes int64) string {
+	if bytes == 0 {
+		return "0.00"
+	}
+	megabytes := float64(bytes) / (1024.0 * 1024.0)
+	return fmt.Sprintf("%.2f", megabytes)
+}
 
 // ToSABnzbdQueueSlot converts an AltMount ImportQueueItem to SABnzbd format
 func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueSlot {
@@ -222,24 +264,31 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueS
 		category = *item.Category
 	}
 
+	// Calculate progress percentage (simplified for now)
+	progressPercentage := 0
+	switch item.Status {
+	case database.QueueStatusProcessing:
+		// Could be enhanced with actual progress tracking
+		progressPercentage = 50
+	case database.QueueStatusCompleted:
+		progressPercentage = 100
+	}
+
+	// Mock total size (could be enhanced to track actual file sizes)
+	totalSizeBytes := int64(100 * 1024 * 1024) // 100MB default
+	sizeLeftBytes := int64((100 - progressPercentage) * int(totalSizeBytes) / 100)
+
 	return SABnzbdQueueSlot{
 		Index:      index,
-		NzoID:      string(rune(item.ID)), // Convert ID to string
-		Unpackopts: "3",
+		NzoID:      fmt.Sprintf("%d", item.ID),
 		Priority:   priority,
-		Script:     "", // No script support
 		Filename:   filename,
-		Labels:     []string{},
-		Password:   "",
 		Cat:        category,
-		Mbleft:     0.0,
-		Mb:         0.0,
-		Size:       "0 B",
-		Sizeleft:   "0 B",
-		Percentage: "0",
-		Eta:        "unknown",
-		Timeleft:   "0:00:00",
+		Percentage: fmt.Sprintf("%d", progressPercentage),
 		Status:     status,
+		Timeleft:   "0:0:0:0", // Format: d:h:m:s
+		Mb:         formatSizeMB(totalSizeBytes),
+		Mbleft:     formatSizeMB(sizeLeftBytes),
 	}
 }
 

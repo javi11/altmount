@@ -298,7 +298,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			ctx := context.Background()
 			rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, sortedRarFiles)
 			if err != nil {
-				proc.log.Error("Failed to analyze RAR archive content, falling back to simplified mode",
+				proc.log.Error("Failed to analyze RAR archive content",
 					"archive", archiveName,
 					"error", err)
 				// Fallback to simplified mode if RAR analysis fails

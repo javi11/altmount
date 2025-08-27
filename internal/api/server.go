@@ -94,6 +94,16 @@ func (s *Server) setupRoutes() {
 	// Register API routes with middleware
 	apiHandler := s.applyMiddleware(http.HandlerFunc(s.handleAPI))
 	s.mux.Handle(s.config.Prefix+"/", http.StripPrefix(s.config.Prefix, apiHandler))
+
+	// SABnzbd-compatible API endpoints (conditionally enabled and protected by API key authentication)
+	if s.configManager != nil {
+		config := s.configManager.GetConfig()
+		if config.SABnzbd.Enabled != nil && *config.SABnzbd.Enabled {
+			sabnzbdHandler := s.applyMiddleware(http.HandlerFunc(s.handleSABnzbd))
+			s.mux.Handle("/sabnzbd/api/", sabnzbdHandler)
+		}
+	}
+
 }
 
 // handleAPI routes API requests to appropriate handlers
@@ -178,14 +188,6 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			adminMiddleware := auth.RequireAdmin(tokenService, s.userRepo)
 			apiMux.Handle("GET /users", adminMiddleware(http.HandlerFunc(s.handleListUsers)))
 			apiMux.Handle("PUT /users/{user_id}/admin", adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdmin)))
-		}
-	}
-
-	// SABnzbd-compatible API endpoints (conditionally enabled and protected by API key authentication)
-	if s.configManager != nil {
-		config := s.configManager.GetConfig()
-		if config.SABnzbd.Enabled != nil && *config.SABnzbd.Enabled {
-			apiMux.HandleFunc("/sabnzbd", s.handleSABnzbd)
 		}
 	}
 
