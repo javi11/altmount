@@ -2,7 +2,6 @@ package importer
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"path/filepath"
 	"time"
@@ -69,12 +68,12 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 // Returns an array of files to be added to the metadata with all the info and segments for each file
 func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]rarContent, error) {
 	if rh.poolManager == nil {
-		return nil, fmt.Errorf("no pool manager available")
+		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
 
 	cp, err := rh.poolManager.GetPool()
 	if err != nil {
-		return nil, fmt.Errorf("no connection pool available: %w", err)
+		return nil, NewNonRetryableError("no connection pool available", err)
 	}
 
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
@@ -84,7 +83,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Get sorted RAR files for proper multi-part reading
 	rarFileNames := ufs.GetRarFiles()
 	if len(rarFileNames) == 0 {
-		return nil, fmt.Errorf("no RAR files found in the archive")
+		return nil, NewNonRetryableError("no RAR files found in the archive", nil)
 	}
 
 	// Start with the first RAR file (usually .rar or .part001.rar)
@@ -97,11 +96,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	aggregatedFiles, err := rarlist.ListFilesFS(ufs, mainRarFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to aggregate RAR files: %w", err)
+		return nil, NewNonRetryableError("failed to aggregate RAR files", err)
 	}
 
 	if len(aggregatedFiles) == 0 {
-		return nil, fmt.Errorf("no valid files found in RAR archive. Compressed or encrypted RARs are not supported")
+		return nil, NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
 	}
 
 	rh.log.Debug("Successfully analyzed RAR archive via rarlist",
@@ -111,7 +110,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Convert rarlist results to RarContent
 	rarContents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert rarlist results to RarContent: %w", err)
+		return nil, NewNonRetryableError("failed to convert rarlist results to RarContent", err)
 	}
 
 	return rarContents, nil
@@ -192,7 +191,7 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 		return nil, 0, nil
 	}
 	if dataOffset < 0 {
-		return nil, 0, fmt.Errorf("negative dataOffset")
+		return nil, 0, NewNonRetryableError("negative dataOffset", nil)
 	}
 
 	targetStart := dataOffset

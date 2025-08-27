@@ -79,11 +79,11 @@ func NewParser(poolManager pool.Manager) *Parser {
 func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	n, err := nzbparser.Parse(r)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse NZB XML: %w", err)
+		return nil, NewNonRetryableError("failed to parse NZB XML", err)
 	}
 
 	if len(n.Files) == 0 {
-		return nil, fmt.Errorf("NZB file contains no files")
+		return nil, NewNonRetryableError("NZB file contains no files", nil)
 	}
 
 	parsed := &ParsedNzb{
@@ -146,7 +146,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 				"segments", len(file.Segments))
 
 			if errors.Is(err, nntppool.ErrArticleNotFoundInProviders) {
-				return nil, errors.Join(ErrNoRetryable, fmt.Errorf("failed to fetch yEnc headers: missing articles in all providers"))
+				return nil, NewNonRetryableError("failed to fetch yEnc headers: missing articles in all providers", err)
 			}
 		}
 	}
@@ -195,7 +195,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 
 				decSize, err := rclone.DecryptedSize(totalSize)
 				if err != nil {
-					return nil, fmt.Errorf("failed to get decrypted size: %w", err)
+					return nil, NewNonRetryableError("failed to get decrypted size", err)
 				}
 
 				totalSize = decSize
@@ -214,7 +214,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 	if IsProbablyObfuscated(filename) {
 		p.log.Warn("File appears obfuscated", "filename", filename, "subject", file.Subject)
 
-		return nil, fmt.Errorf("file appears obfuscated: %s", filename)
+		return nil, NewNonRetryableError(fmt.Sprintf("file appears obfuscated: %s", filename), nil)
 	}
 
 	// Check if this is a RAR file
@@ -274,12 +274,12 @@ func (p *Parser) calculateSegmentSum(file nzbparser.NzbFile) int64 {
 // fetchActualFileSizeFromYencHeader fetches the yenc header to get the actual file size
 func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int64, error) {
 	if p.poolManager == nil {
-		return 0, fmt.Errorf("no pool manager available")
+		return 0, NewNonRetryableError("no pool manager available", nil)
 	}
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
-		return 0, fmt.Errorf("no connection pool available")
+		return 0, NewNonRetryableError("no connection pool available", err)
 	}
 
 	if len(file.Segments) == 0 {
@@ -316,12 +316,12 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 // fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment
 func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string) (int64, error) {
 	if p.poolManager == nil {
-		return 0, fmt.Errorf("no pool manager available")
+		return 0, NewNonRetryableError("no pool manager available", nil)
 	}
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
-		return 0, fmt.Errorf("no connection pool available")
+		return 0, NewNonRetryableError("no connection pool available", err)
 	}
 
 	// Create context with timeout
@@ -433,24 +433,24 @@ func (p *Parser) GetMetadata(nzbXML *nzbparser.Nzb) map[string]string {
 // ValidateNzb performs basic validation on the parsed NZB
 func (p *Parser) ValidateNzb(parsed *ParsedNzb) error {
 	if parsed.TotalSize <= 0 {
-		return fmt.Errorf("invalid NZB: total size is zero")
+		return NewNonRetryableError("invalid NZB: total size is zero", nil)
 	}
 
 	if parsed.SegmentsCount <= 0 {
-		return fmt.Errorf("invalid NZB: no segments found")
+		return NewNonRetryableError("invalid NZB: no segments found", nil)
 	}
 
 	for i, file := range parsed.Files {
 		if len(file.Segments) == 0 {
-			return fmt.Errorf("invalid NZB: file %d has no segments", i)
+			return NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has no segments", i), nil)
 		}
 
 		if file.Size <= 0 {
-			return fmt.Errorf("invalid NZB: file %d has invalid size", i)
+			return NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has invalid size", i), nil)
 		}
 
 		if len(file.Groups) == 0 {
-			return fmt.Errorf("invalid NZB: file %d has no groups", i)
+			return NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has no groups", i), nil)
 		}
 	}
 

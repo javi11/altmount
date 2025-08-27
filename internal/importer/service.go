@@ -2,7 +2,6 @@ package importer
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -478,7 +477,7 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 		"max_retries", item.MaxRetries)
 
 	// Check if we should retry
-	if !errors.Is(processingErr, ErrNoRetryable) && item.RetryCount < item.MaxRetries {
+	if !IsNonRetryable(processingErr) && item.RetryCount < item.MaxRetries {
 		// Mark for retry in queue database
 		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusRetrying, &errorMessage); err != nil {
 			log.Error("Failed to mark item for retry", "queue_id", item.ID, "error", err)

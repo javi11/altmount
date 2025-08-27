@@ -47,7 +47,7 @@ func (proc *Processor) ProcessNzbFileWithRelativePath(filePath, relativePath str
 	// Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
+		return NewNonRetryableError("failed to open file", err)
 	}
 	defer file.Close()
 
@@ -57,22 +57,22 @@ func (proc *Processor) ProcessNzbFileWithRelativePath(filePath, relativePath str
 	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
 		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
 		if err != nil {
-			return fmt.Errorf("failed to parse STRM file: %w", err)
+			return NewNonRetryableError("failed to parse STRM file", err)
 		}
 
 		// Validate the parsed STRM
 		if err := proc.strmParser.ValidateStrmFile(parsed); err != nil {
-			return fmt.Errorf("STRM validation failed: %w", err)
+			return NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
 		parsed, err = proc.parser.ParseFile(file, filePath)
 		if err != nil {
-			return fmt.Errorf("failed to parse NZB file: %w", err)
+			return NewNonRetryableError("failed to parse NZB file", err)
 		}
 
 		// Validate the parsed NZB
 		if err := proc.parser.ValidateNzb(parsed); err != nil {
-			return fmt.Errorf("NZB validation failed: %w", err)
+			return NewNonRetryableError("NZB validation failed", err)
 		}
 	}
 
@@ -97,7 +97,7 @@ func (proc *Processor) ProcessNzbFileWithRelativePath(filePath, relativePath str
 	case NzbTypeStrm:
 		return proc.processStrmFileWithDir(parsed, virtualDir)
 	default:
-		return fmt.Errorf("unknown file type: %s", parsed.Type)
+		return NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
 }
 
@@ -652,7 +652,7 @@ func (proc *Processor) parseInt(s string) int {
 // processStrmFileWithDir handles STRM files (single file from NXG link) in a specific virtual directory
 func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string) error {
 	if len(parsed.Files) != 1 {
-		return fmt.Errorf("STRM file should contain exactly one file, got %d", len(parsed.Files))
+		return NewNonRetryableError(fmt.Sprintf("STRM file should contain exactly one file, got %d", len(parsed.Files)), nil)
 	}
 
 	file := parsed.Files[0]

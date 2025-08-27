@@ -325,11 +325,9 @@ func (s *Server) handleSABnzbdQueue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert to SABnzbd format
-	var slots []SABnzbdQueueSlot
+	slots := make([]SABnzbdQueueSlot, 0, len(items))
 	for i, item := range items {
-		if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing || item.Status == database.QueueStatusRetrying {
-			slots = append(slots, ToSABnzbdQueueSlot(item, i))
-		}
+		slots = append(slots, ToSABnzbdQueueSlot(item, i))
 	}
 
 	response := SABnzbdQueueResponse{
@@ -532,14 +530,14 @@ func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) 
 		cfg := s.configManager.GetConfig()
 
 		completeDirPath := path.Join(cfg.SABnzbd.MountDir, completeDir)
-		
+
 		// Build misc configuration
 		config.Misc = SABnzbdMiscConfig{
-			CompleteDir:              completeDirPath,
-			PreCheck:                 0,
-			HistoryRetention:         "",
-			HistoryRetentionOption:   "all",
-			HistoryRetentionNumber:   1,
+			CompleteDir:            completeDirPath,
+			PreCheck:               0,
+			HistoryRetention:       "",
+			HistoryRetentionOption: "all",
+			HistoryRetentionNumber: 1,
 		}
 
 		// Build categories from configuration
@@ -577,11 +575,11 @@ func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) 
 		// Fallback configuration when no config manager
 		config = SABnzbdConfig{
 			Misc: SABnzbdMiscConfig{
-				CompleteDir:              "",
-				PreCheck:                 0,
-				HistoryRetention:         "",
-				HistoryRetentionOption:   "all",
-				HistoryRetentionNumber:   1,
+				CompleteDir:            "",
+				PreCheck:               0,
+				HistoryRetention:       "",
+				HistoryRetentionOption: "all",
+				HistoryRetentionNumber: 1,
 			},
 			Categories: []SABnzbdCategory{
 				{
