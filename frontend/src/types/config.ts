@@ -81,6 +81,7 @@ export interface ProviderConfig {
 	insecure_tls: boolean;
 	password_set: boolean;
 	enabled: boolean;
+	is_backup_provider: boolean;
 }
 
 // SABnzbd configuration
@@ -180,6 +181,7 @@ export interface ProviderUpdateRequest {
 	tls?: boolean;
 	insecure_tls?: boolean;
 	enabled?: boolean;
+	is_backup_provider?: boolean;
 }
 
 // SABnzbd update request
@@ -268,6 +270,7 @@ export interface ProviderFormData {
 	tls: boolean;
 	insecure_tls: boolean;
 	enabled: boolean;
+	is_backup_provider: boolean;
 }
 
 export interface LogFormData {
@@ -323,6 +326,7 @@ export interface ProviderCreateRequest {
 	tls: boolean;
 	insecure_tls: boolean;
 	enabled: boolean;
+	is_backup_provider: boolean;
 }
 
 export interface ProviderReorderRequest {

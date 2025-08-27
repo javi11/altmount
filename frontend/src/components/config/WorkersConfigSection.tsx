@@ -67,10 +67,16 @@ export function ImportConfigSection({
 						min={1}
 						max={300}
 						onChange={(e) =>
-							handleInputChange("queue_processing_interval", Number.parseInt(e.target.value, 10) || 5)
+							handleInputChange(
+								"queue_processing_interval",
+								Number.parseInt(e.target.value, 10) || 5,
+							)
 						}
 					/>
-					<p className="label">How often workers check for new queue items (1-300 seconds). Changes require service restart.</p>
+					<p className="label">
+						How often workers check for new queue items (1-300 seconds). Changes require service
+						restart.
+					</p>
 				</fieldset>
 			</div>
 

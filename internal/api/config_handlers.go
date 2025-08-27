@@ -234,16 +234,21 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 	// Convert providers and sanitize passwords
 	providers := make([]ProviderConfigResponse, len(config.Providers))
 	for i, p := range config.Providers {
+		isBackup := false
+		if p.IsBackupProvider != nil {
+			isBackup = *p.IsBackupProvider
+		}
 		providers[i] = ProviderConfigResponse{
-			ID:             p.ID,
-			Host:           p.Host,
-			Port:           p.Port,
-			Username:       p.Username,
-			MaxConnections: p.MaxConnections,
-			TLS:            p.TLS,
-			InsecureTLS:    p.InsecureTLS,
-			PasswordSet:    p.Password != "",
-			Enabled:        *p.Enabled,
+			ID:               p.ID,
+			Host:             p.Host,
+			Port:             p.Port,
+			Username:         p.Username,
+			MaxConnections:   p.MaxConnections,
+			TLS:              p.TLS,
+			InsecureTLS:      p.InsecureTLS,
+			PasswordSet:      p.Password != "",
+			Enabled:          *p.Enabled,
+			IsBackupProvider: isBackup,
 		}
 	}
 
@@ -401,6 +406,12 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 			} else {
 				provider.Enabled = &providerEnabledDefault
 			}
+			if p.IsBackupProvider != nil {
+				provider.IsBackupProvider = p.IsBackupProvider
+			} else {
+				providerIsBackupDefault := false
+				provider.IsBackupProvider = &providerIsBackupDefault
+			}
 
 			providers[i] = provider
 		}
@@ -531,6 +542,12 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 				if p.InsecureTLS != nil {
 					provider.InsecureTLS = *p.InsecureTLS
 				}
+				if p.IsBackupProvider != nil {
+					provider.IsBackupProvider = p.IsBackupProvider
+				} else {
+					providerIsBackupDefault := false
+					provider.IsBackupProvider = &providerIsBackupDefault
+				}
 				providers[i] = provider
 			}
 			cfg.Providers = providers
@@ -648,15 +665,16 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	// Create new provider with hash-generated ID
 	providerID := config.GenerateProviderID(createReq.Host, createReq.Port, createReq.Username)
 	newProvider := config.ProviderConfig{
-		ID:             providerID,
-		Host:           createReq.Host,
-		Port:           createReq.Port,
-		Username:       createReq.Username,
-		Password:       createReq.Password,
-		MaxConnections: createReq.MaxConnections,
-		TLS:            createReq.TLS,
-		InsecureTLS:    createReq.InsecureTLS,
-		Enabled:        &createReq.Enabled,
+		ID:               providerID,
+		Host:             createReq.Host,
+		Port:             createReq.Port,
+		Username:         createReq.Username,
+		Password:         createReq.Password,
+		MaxConnections:   createReq.MaxConnections,
+		TLS:              createReq.TLS,
+		InsecureTLS:      createReq.InsecureTLS,
+		Enabled:          &createReq.Enabled,
+		IsBackupProvider: &createReq.IsBackupProvider,
 	}
 
 	// Create a copy of current config and add new provider
@@ -683,15 +701,16 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 
 	// Return the new provider
 	providerResponse := ProviderConfigResponse{
-		ID:             newProvider.ID,
-		Host:           newProvider.Host,
-		Port:           newProvider.Port,
-		Username:       newProvider.Username,
-		MaxConnections: newProvider.MaxConnections,
-		TLS:            newProvider.TLS,
-		InsecureTLS:    newProvider.InsecureTLS,
-		PasswordSet:    newProvider.Password != "",
-		Enabled:        *newProvider.Enabled,
+		ID:               newProvider.ID,
+		Host:             newProvider.Host,
+		Port:             newProvider.Port,
+		Username:         newProvider.Username,
+		MaxConnections:   newProvider.MaxConnections,
+		TLS:              newProvider.TLS,
+		InsecureTLS:      newProvider.InsecureTLS,
+		PasswordSet:      newProvider.Password != "",
+		Enabled:          *newProvider.Enabled,
+		IsBackupProvider: *newProvider.IsBackupProvider,
 	}
 
 	WriteSuccess(w, providerResponse, nil)
@@ -773,6 +792,9 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	if updateReq.Enabled != nil {
 		updatedProvider.Enabled = updateReq.Enabled
 	}
+	if updateReq.IsBackupProvider != nil {
+		updatedProvider.IsBackupProvider = updateReq.IsBackupProvider
+	}
 
 	// Regenerate ID if any identifying fields changed
 	if hostChanged || portChanged || usernameChanged {
@@ -815,16 +837,21 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the updated provider
+	isBackup := false
+	if updatedProvider.IsBackupProvider != nil {
+		isBackup = *updatedProvider.IsBackupProvider
+	}
 	providerResponse := ProviderConfigResponse{
-		ID:             updatedProvider.ID,
-		Host:           updatedProvider.Host,
-		Port:           updatedProvider.Port,
-		Username:       updatedProvider.Username,
-		MaxConnections: updatedProvider.MaxConnections,
-		TLS:            updatedProvider.TLS,
-		InsecureTLS:    updatedProvider.InsecureTLS,
-		PasswordSet:    updatedProvider.Password != "",
-		Enabled:        *updatedProvider.Enabled,
+		ID:               updatedProvider.ID,
+		Host:             updatedProvider.Host,
+		Port:             updatedProvider.Port,
+		Username:         updatedProvider.Username,
+		MaxConnections:   updatedProvider.MaxConnections,
+		TLS:              updatedProvider.TLS,
+		InsecureTLS:      updatedProvider.InsecureTLS,
+		PasswordSet:      updatedProvider.Password != "",
+		Enabled:          *updatedProvider.Enabled,
+		IsBackupProvider: isBackup,
 	}
 
 	WriteSuccess(w, providerResponse, nil)
@@ -964,16 +991,21 @@ func (s *Server) handleReorderProviders(w http.ResponseWriter, r *http.Request) 
 	// Return updated provider list
 	response := make([]ProviderConfigResponse, len(newConfig.Providers))
 	for i, provider := range newConfig.Providers {
+		isBackup := false
+		if provider.IsBackupProvider != nil {
+			isBackup = *provider.IsBackupProvider
+		}
 		response[i] = ProviderConfigResponse{
-			ID:             provider.ID,
-			Host:           provider.Host,
-			Port:           provider.Port,
-			Username:       provider.Username,
-			MaxConnections: provider.MaxConnections,
-			TLS:            provider.TLS,
-			InsecureTLS:    provider.InsecureTLS,
-			PasswordSet:    provider.Password != "",
-			Enabled:        *provider.Enabled,
+			ID:               provider.ID,
+			Host:             provider.Host,
+			Port:             provider.Port,
+			Username:         provider.Username,
+			MaxConnections:   provider.MaxConnections,
+			TLS:              provider.TLS,
+			InsecureTLS:      provider.InsecureTLS,
+			PasswordSet:      provider.Password != "",
+			Enabled:          *provider.Enabled,
+			IsBackupProvider: isBackup,
 		}
 	}
 

@@ -20,6 +20,7 @@ const defaultFormData: ProviderFormData = {
 	tls: false,
 	insecure_tls: false,
 	enabled: true,
+	is_backup_provider: false,
 };
 
 export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderModalProps) {
@@ -47,6 +48,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				tls: provider.tls,
 				insecure_tls: provider.insecure_tls,
 				enabled: provider.enabled,
+				is_backup_provider: provider.is_backup_provider,
 			});
 			// For edit mode, allow saving without testing if only non-connection fields change
 			setCanSave(true);
@@ -135,6 +137,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				if (formData.insecure_tls !== provider.insecure_tls)
 					updateData.insecure_tls = formData.insecure_tls;
 				if (formData.enabled !== provider.enabled) updateData.enabled = formData.enabled;
+				if (formData.is_backup_provider !== provider.is_backup_provider)
+					updateData.is_backup_provider = formData.is_backup_provider;
 
 				await updateProvider.mutateAsync({
 					id: provider.id,
@@ -269,6 +273,25 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								<span className="label-text">Skip TLS certificate verification (insecure)</span>
 							</label>
 						)}
+
+						<label
+							htmlFor="is_backup_provider"
+							className="label cursor-pointer justify-start space-x-2"
+						>
+							<input
+								id="is_backup_provider"
+								type="checkbox"
+								className="checkbox"
+								checked={formData.is_backup_provider}
+								onChange={(e) => handleInputChange("is_backup_provider", e.target.checked)}
+							/>
+							<div>
+								<span className="label-text">Use only as backup provider</span>
+								<div className="text-base-content/60 text-xs">
+									Backup providers are only used when articles cannot be found on primary providers
+								</div>
+							</div>
+						</label>
 					</fieldset>
 
 					{/* Connection Test */}

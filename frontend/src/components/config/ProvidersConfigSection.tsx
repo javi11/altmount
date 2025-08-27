@@ -188,7 +188,11 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 							onDrop={(e) => handleDrop(e, provider.id)}
 							onDragEnd={handleDragEnd}
 							className={`card cursor-move border-2 bg-base-100 transition-all duration-200 ${
-								provider.enabled ? "border-success/20" : "border-base-300"
+								provider.enabled
+									? provider.is_backup_provider
+										? "border-warning/20"
+										: "border-success/20"
+									: "border-base-300"
 							} ${draggedProvider === provider.id ? "scale-95 opacity-50" : ""} ${
 								dragOverProvider === provider.id ? "border-primary border-dashed bg-primary/5" : ""
 							}`}
@@ -219,6 +223,11 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 										>
 											{provider.enabled ? "Enabled" : "Disabled"}
 										</div>
+
+										{/* Backup Provider Badge */}
+										{provider.is_backup_provider && (
+											<div className="badge badge-warning badge-sm">Backup</div>
+										)}
 
 										{/* Actions */}
 										<div className="join">
@@ -258,7 +267,7 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 
 								{/* Provider Details */}
 								<div className="mt-3 border-base-300 border-t pt-3">
-									<div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
+									<div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-5">
 										<div>
 											<span className="text-base-content/60">Username:</span>
 											<div className="font-mono">{provider.username}</div>
@@ -290,6 +299,16 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													<span className="badge badge-success badge-sm">Set</span>
 												) : (
 													<span className="badge badge-error badge-sm">Not Set</span>
+												)}
+											</div>
+										</div>
+										<div>
+											<span className="text-base-content/60">Type:</span>
+											<div className="flex items-center space-x-1">
+												{provider.is_backup_provider ? (
+													<span className="badge badge-warning badge-sm">Backup</span>
+												) : (
+													<span className="badge badge-primary badge-sm">Primary</span>
 												)}
 											</div>
 										</div>

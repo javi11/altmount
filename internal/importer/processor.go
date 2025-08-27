@@ -146,8 +146,13 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 
 // processMultiFileWithDir handles NZBs with multiple files in a specific virtual directory
 func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir string) error {
-	// Create directory structure based on common path prefixes within the virtual directory
-	dirStructure := proc.analyzeDirectoryStructureWithBase(parsed.Files, virtualDir)
+	// Create a folder named after the NZB file for multi-file imports
+	nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
+	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
+	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
+	
+	// Create directory structure based on common path prefixes within the NZB virtual directory
+	dirStructure := proc.analyzeDirectoryStructureWithBase(parsed.Files, nzbVirtualDir)
 
 	// Create directories first using real filesystem
 	for _, dir := range dirStructure.directories {
@@ -160,7 +165,7 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 
 	// Create file entries
 	for _, file := range regularFiles {
-		parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, virtualDir)
+		parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, nzbVirtualDir)
 
 		// Ensure parent directory exists
 		if err := proc.ensureDirectoryExists(parentPath); err != nil {
@@ -199,7 +204,7 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 	}
 
 	proc.log.Info("Successfully processed multi-file NZB",
-		"virtual_dir", virtualDir,
+		"virtual_dir", nzbVirtualDir,
 		"files", len(regularFiles),
 		"directories", len(dirStructure.directories))
 

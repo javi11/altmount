@@ -289,15 +289,16 @@ type SABnzbdCategoryData struct {
 
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
 type ProviderConfigResponse struct {
-	ID             string `json:"id"`
-	Host           string `json:"host"`
-	Port           int    `json:"port"`
-	Username       string `json:"username"`
-	MaxConnections int    `json:"max_connections"`
-	TLS            bool   `json:"tls"`
-	InsecureTLS    bool   `json:"insecure_tls"`
-	PasswordSet    bool   `json:"password_set"`
-	Enabled        bool   `json:"enabled"`
+	ID               string `json:"id"`
+	Host             string `json:"host"`
+	Port             int    `json:"port"`
+	Username         string `json:"username"`
+	MaxConnections   int    `json:"max_connections"`
+	TLS              bool   `json:"tls"`
+	InsecureTLS      bool   `json:"insecure_tls"`
+	PasswordSet      bool   `json:"password_set"`
+	Enabled          bool   `json:"enabled"`
+	IsBackupProvider bool   `json:"is_backup_provider"`
 }
 
 // ConfigUpdateRequest represents a request to update configuration
@@ -373,15 +374,16 @@ type SABnzbdCategoryUpdate struct {
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests
 type ProviderConfigRequest struct {
-	ID             *string `json:"id,omitempty"`
-	Host           *string `json:"host,omitempty"`
-	Port           *int    `json:"port,omitempty"`
-	Username       *string `json:"username,omitempty"`
-	Password       *string `json:"password,omitempty"`
-	MaxConnections *int    `json:"max_connections,omitempty"`
-	TLS            *bool   `json:"tls,omitempty"`
-	InsecureTLS    *bool   `json:"insecure_tls,omitempty"`
-	Enabled        *bool   `json:"enabled,omitempty"`
+	ID               *string `json:"id,omitempty"`
+	Host             *string `json:"host,omitempty"`
+	Port             *int    `json:"port,omitempty"`
+	Username         *string `json:"username,omitempty"`
+	Password         *string `json:"password,omitempty"`
+	MaxConnections   *int    `json:"max_connections,omitempty"`
+	TLS              *bool   `json:"tls,omitempty"`
+	InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
+	Enabled          *bool   `json:"enabled,omitempty"`
+	IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
 }
 
 // ConfigValidateRequest represents a request to validate configuration
@@ -528,26 +530,28 @@ type ProviderTestResponse struct {
 
 // ProviderCreateRequest represents a request to create a new provider
 type ProviderCreateRequest struct {
-	Host           string `json:"host"`
-	Port           int    `json:"port"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	MaxConnections int    `json:"max_connections"`
-	TLS            bool   `json:"tls"`
-	InsecureTLS    bool   `json:"insecure_tls"`
-	Enabled        bool   `json:"enabled"`
+	Host             string `json:"host"`
+	Port             int    `json:"port"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	MaxConnections   int    `json:"max_connections"`
+	TLS              bool   `json:"tls"`
+	InsecureTLS      bool   `json:"insecure_tls"`
+	Enabled          bool   `json:"enabled"`
+	IsBackupProvider bool   `json:"is_backup_provider"`
 }
 
 // ProviderUpdateRequest represents a request to update an existing provider
 type ProviderUpdateRequest struct {
-	Host           *string `json:"host,omitempty"`
-	Port           *int    `json:"port,omitempty"`
-	Username       *string `json:"username,omitempty"`
-	Password       *string `json:"password,omitempty"`
-	MaxConnections *int    `json:"max_connections,omitempty"`
-	TLS            *bool   `json:"tls,omitempty"`
-	InsecureTLS    *bool   `json:"insecure_tls,omitempty"`
-	Enabled        *bool   `json:"enabled,omitempty"`
+	Host             *string `json:"host,omitempty"`
+	Port             *int    `json:"port,omitempty"`
+	Username         *string `json:"username,omitempty"`
+	Password         *string `json:"password,omitempty"`
+	MaxConnections   *int    `json:"max_connections,omitempty"`
+	TLS              *bool   `json:"tls,omitempty"`
+	InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
+	Enabled          *bool   `json:"enabled,omitempty"`
+	IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
 }
 
 // ProviderReorderRequest represents a request to reorder providers

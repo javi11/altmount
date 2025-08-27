@@ -103,15 +103,16 @@ func GenerateProviderID(host string, port int, username string) string {
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	ID             string `yaml:"id" mapstructure:"id"`
-	Host           string `yaml:"host" mapstructure:"host"`
-	Port           int    `yaml:"port" mapstructure:"port"`
-	Username       string `yaml:"username" mapstructure:"username"`
-	Password       string `yaml:"password" mapstructure:"password"`
-	MaxConnections int    `yaml:"max_connections" mapstructure:"max_connections"`
-	TLS            bool   `yaml:"tls" mapstructure:"tls"`
-	InsecureTLS    bool   `yaml:"insecure_tls" mapstructure:"insecure_tls"`
-	Enabled        *bool  `yaml:"enabled" mapstructure:"enabled"`
+	ID               string `yaml:"id" mapstructure:"id"`
+	Host             string `yaml:"host" mapstructure:"host"`
+	Port             int    `yaml:"port" mapstructure:"port"`
+	Username         string `yaml:"username" mapstructure:"username"`
+	Password         string `yaml:"password" mapstructure:"password"`
+	MaxConnections   int    `yaml:"max_connections" mapstructure:"max_connections"`
+	TLS              bool   `yaml:"tls" mapstructure:"tls"`
+	InsecureTLS      bool   `yaml:"insecure_tls" mapstructure:"insecure_tls"`
+	Enabled          *bool  `yaml:"enabled" mapstructure:"enabled"`
+	IsBackupProvider *bool  `yaml:"is_backup_provider" mapstructure:"is_backup_provider"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
@@ -154,7 +155,7 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.RClone.VFSEnabled = nil
 	}
 
-	// Deep copy Providers slice and their Enabled pointers
+	// Deep copy Providers slice and their pointer fields
 	if c.Providers != nil {
 		copyCfg.Providers = make([]ProviderConfig, len(c.Providers))
 		for i, p := range c.Providers {
@@ -164,6 +165,12 @@ func (c *Config) DeepCopy() *Config {
 				pc.Enabled = &ev
 			} else {
 				pc.Enabled = nil
+			}
+			if p.IsBackupProvider != nil {
+				bv := *p.IsBackupProvider
+				pc.IsBackupProvider = &bv
+			} else {
+				pc.IsBackupProvider = nil
 			}
 			copyCfg.Providers[i] = pc
 		}
@@ -363,7 +370,8 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 			oldProvider.MaxConnections != newProvider.MaxConnections ||
 			oldProvider.TLS != newProvider.TLS ||
 			oldProvider.InsecureTLS != newProvider.InsecureTLS ||
-			oldProvider.Enabled != newProvider.Enabled {
+			oldProvider.Enabled != newProvider.Enabled ||
+			oldProvider.IsBackupProvider != newProvider.IsBackupProvider {
 			return false // Provider modified
 		}
 	}
@@ -384,6 +392,10 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 	for _, p := range c.Providers {
 		// Only include enabled providers
 		if *p.Enabled {
+			isBackup := false
+			if p.IsBackupProvider != nil {
+				isBackup = *p.IsBackupProvider
+			}
 			providers = append(providers, nntppool.UsenetProviderConfig{
 				Host:                           p.Host,
 				Port:                           p.Port,
@@ -394,6 +406,7 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 				TLS:                            p.TLS,
 				InsecureSSL:                    p.InsecureTLS,
 				MaxConnectionTTLInSeconds:      3600, // Default connection TTL
+				IsBackupProvider:               isBackup,
 			})
 		}
 	}
