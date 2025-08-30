@@ -300,13 +300,20 @@ type ScraperConfigData struct {
 	SonarrInstances       []ScraperInstanceData     `json:"sonarr_instances"`
 }
 
+// PathMappingData represents a path mapping in API responses
+type PathMappingData struct {
+	FromPath string `json:"from_path"`
+	ToPath   string `json:"to_path"`
+}
+
 // ScraperInstanceData represents a scraper instance in API responses
 type ScraperInstanceData struct {
-	Name                 string  `json:"name"`
-	URL                  string  `json:"url"`
-	APIKey               string  `json:"api_key"`
-	Enabled              bool    `json:"enabled"`
-	ScrapeIntervalHours  int     `json:"scrape_interval_hours"`
+	Name                 string            `json:"name"`
+	URL                  string            `json:"url"`
+	APIKey               string            `json:"api_key"`
+	Enabled              bool              `json:"enabled"`
+	ScrapeIntervalHours  int               `json:"scrape_interval_hours"`
+	PathMappings         []PathMappingData `json:"path_mappings"`
 }
 
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
@@ -407,13 +414,20 @@ type ScraperConfigUpdate struct {
 	SonarrInstances       *[]ScraperInstanceUpdate    `json:"sonarr_instances,omitempty"`
 }
 
+// PathMappingUpdate represents a path mapping in update requests
+type PathMappingUpdate struct {
+	FromPath *string `json:"from_path,omitempty"`
+	ToPath   *string `json:"to_path,omitempty"`
+}
+
 // ScraperInstanceUpdate represents a scraper instance in update requests
 type ScraperInstanceUpdate struct {
-	Name                 *string `json:"name,omitempty"`
-	URL                  *string `json:"url,omitempty"`
-	APIKey               *string `json:"api_key,omitempty"`
-	Enabled              *bool   `json:"enabled,omitempty"`
-	ScrapeIntervalHours  *int    `json:"scrape_interval_hours,omitempty"`
+	Name                 *string               `json:"name,omitempty"`
+	URL                  *string               `json:"url,omitempty"`
+	APIKey               *string               `json:"api_key,omitempty"`
+	Enabled              *bool                 `json:"enabled,omitempty"`
+	ScrapeIntervalHours  *int                  `json:"scrape_interval_hours,omitempty"`
+	PathMappings         *[]PathMappingUpdate  `json:"path_mappings,omitempty"`
 }
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests

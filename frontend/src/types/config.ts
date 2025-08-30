@@ -301,12 +301,18 @@ export type ScraperType = "radarr" | "sonarr";
 // Scraper status types
 export type ScrapeStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
 
+export interface PathMappingConfig {
+	from_path: string;
+	to_path: string;
+}
+
 export interface ScraperInstanceConfig {
 	name: string;
 	url: string;
 	api_key: string;
 	enabled: boolean;
 	scrape_interval_hours: number;
+	path_mappings: PathMappingConfig[];
 }
 
 // Database-backed scraper instance (includes real ID from database)

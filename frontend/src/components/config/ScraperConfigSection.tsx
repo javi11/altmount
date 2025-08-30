@@ -1,7 +1,7 @@
 import { AlertTriangle, Plus, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import ScraperInstanceCard from "./ScraperInstanceCard";
-import type { ConfigResponse, ScraperConfig, ScraperInstanceConfig, ScraperType } from "../../types/config";
+import type { ConfigResponse, PathMappingConfig, ScraperConfig, ScraperInstanceConfig, ScraperType } from "../../types/config";
 
 interface ScraperConfigSectionProps {
 	config: ConfigResponse;
@@ -17,6 +17,7 @@ interface NewInstanceForm {
 	api_key: string;
 	enabled: boolean;
 	scrape_interval_hours: number;
+	path_mappings: PathMappingConfig[];
 }
 
 const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
@@ -26,6 +27,7 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 	api_key: "",
 	enabled: true,
 	scrape_interval_hours: 24,
+	path_mappings: [],
 };
 
 export function ScraperConfigSection({

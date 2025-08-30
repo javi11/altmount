@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,12 +64,13 @@ type ScraperInstanceState struct {
 
 // ConfigInstance represents a scraper instance from configuration
 type ConfigInstance struct {
-	Name                string `json:"name"`
-	Type                string `json:"type"` // "radarr" or "sonarr"
-	URL                 string `json:"url"`
-	APIKey              string `json:"api_key"`
-	Enabled             bool   `json:"enabled"`
-	ScrapeIntervalHours int    `json:"scrape_interval_hours"`
+	Name                string                      `json:"name"`
+	Type                string                      `json:"type"` // "radarr" or "sonarr"
+	URL                 string                      `json:"url"`
+	APIKey              string                      `json:"api_key"`
+	Enabled             bool                        `json:"enabled"`
+	ScrapeIntervalHours int                         `json:"scrape_interval_hours"`
+	PathMappings        []config.PathMappingConfig  `json:"path_mappings"`
 }
 
 // Service manages the scraping of Radarr and Sonarr instances using configuration-first approach
@@ -129,6 +131,7 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 				APIKey:              radarrConfig.APIKey,
 				Enabled:             radarrConfig.Enabled != nil && *radarrConfig.Enabled,
 				ScrapeIntervalHours: scrapeInterval,
+				PathMappings:        radarrConfig.PathMappings,
 			}
 			instances = append(instances, instance)
 		}
@@ -149,6 +152,7 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 				APIKey:              sonarrConfig.APIKey,
 				Enabled:             sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
 				ScrapeIntervalHours: scrapeInterval,
+				PathMappings:        sonarrConfig.PathMappings,
 			}
 			instances = append(instances, instance)
 		}
@@ -286,9 +290,9 @@ func (s *Service) scrapeConfigInstance(instance *ConfigInstance) {
 	// Get or create state for this instance
 	state := s.getOrCreateInstanceState(instance.Type, instance.Name)
 
-	// Check if already scraping this instance
+	// Check if already scraping this instance (only block if actively running)
 	s.stateMutex.RLock()
-	if state.ActiveStatus != nil {
+	if state.ActiveStatus != nil && (state.ActiveStatus.Status == ScrapeStatusRunning || state.ActiveStatus.Status == ScrapeStatusCancelling) {
 		s.stateMutex.RUnlock()
 		s.logger.Warn("Instance is already being scraped", "instance", instance.Name, "type", instance.Type)
 		return
@@ -318,11 +322,15 @@ func (s *Service) scrapeConfigInstance(instance *ConfigInstance) {
 	state.ActiveStatus = progress
 	s.stateMutex.Unlock()
 
-	// Ensure cleanup on exit
+	// Ensure cleanup on exit - preserve final status for visibility
 	defer func() {
-		s.stateMutex.Lock()
-		state.ActiveStatus = nil // Clear active status
-		s.stateMutex.Unlock()
+		if progress.Status == ScrapeStatusRunning || progress.Status == ScrapeStatusCancelling {
+			// Only clear status if we're still in a transient state
+			s.stateMutex.Lock()
+			state.ActiveStatus = nil
+			s.stateMutex.Unlock()
+		}
+		// For completed/failed states, keep ActiveStatus so frontend can see the final result
 	}()
 
 	var err error
@@ -404,7 +412,7 @@ func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeP
 				InstanceName: instance.Name,
 				InstanceType: "radarr",
 				ExternalID:   int64(movie.ID),
-				FilePath:     movie.MovieFile.Path,
+				FilePath:     s.applyPathMappings(movie.MovieFile.Path, instance),
 				FileSize:     fileSize,
 			}
 			mediaFiles = append(mediaFiles, mediaFile)
@@ -451,33 +459,55 @@ func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeP
 		return fmt.Errorf("failed to get Sonarr client: %w", err)
 	}
 
-	// Update progress: fetching episode files
-	progress.Progress.CurrentBatch = "fetching episode files from Sonarr"
+	// Update progress: fetching series list
+	progress.Progress.CurrentBatch = "fetching series list from Sonarr"
 
 	series, err := client.GetAllSeries()
 	if err != nil {
 		return fmt.Errorf("failed to get series from Sonarr: %w", err)
 	}
 
+	// Set up progress tracking based on show count
+	totalShows := len(series)
+	progress.Progress.TotalItems = &totalShows
+	progress.Progress.ProcessedCount = 0
+
+	s.logger.Info("Processing Sonarr series",
+		"instance", instance.Name,
+		"total_shows", totalShows)
+
+	// Collect all media files from all shows
+	var allMediaFiles []database.MediaFileInput
+	processedShows := 0
+
 	for _, show := range series {
+		processedShows++
+		
+		// Update progress to show current show being processed
+		progress.Progress.ProcessedCount = processedShows
+		progress.Progress.CurrentBatch = fmt.Sprintf("processing show %d/%d: %s", processedShows, totalShows, show.Title)
+
 		// Get all episode files from Sonarr - this gives us the actual files
-		s.logger.Debug("Fetching episode files from Sonarr", "instance", instance.Name)
+		s.logger.Debug("Fetching episode files from Sonarr", 
+			"instance", instance.Name, 
+			"show", show.Title,
+			"show_id", show.ID)
+			
 		episodeFiles, err := client.GetSeriesEpisodeFiles(show.ID)
 		if err != nil {
-			return fmt.Errorf("failed to get episode files from Sonarr: %w", err)
+			s.logger.Error("Failed to get episode files for show",
+				"instance", instance.Name,
+				"show", show.Title,
+				"error", err)
+			continue // Skip this show but continue with others
 		}
 
-		s.logger.Debug("Processing Sonarr episode files",
+		s.logger.Debug("Found episode files for show",
 			"instance", instance.Name,
+			"show", show.Title,
 			"episode_files_count", len(episodeFiles))
 
-		// Update progress
-		totalFiles := len(episodeFiles)
-		progress.Progress.TotalItems = &totalFiles
-		progress.Progress.CurrentBatch = fmt.Sprintf("processing %d episode files", totalFiles)
-
-		// Extract file information
-		var mediaFiles []database.MediaFileInput
+		// Extract file information for this show
 		for _, episodeFile := range episodeFiles {
 			// Convert file size from int64 to *int64
 			var fileSize *int64
@@ -489,30 +519,33 @@ func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeP
 				InstanceName: instance.Name,
 				InstanceType: "sonarr",
 				ExternalID:   int64(episodeFile.ID),
-				FilePath:     episodeFile.Path,
+				FilePath:     s.applyPathMappings(episodeFile.Path, instance),
 				FileSize:     fileSize,
 			}
-			mediaFiles = append(mediaFiles, mediaFile)
+			allMediaFiles = append(allMediaFiles, mediaFile)
 		}
+	}
 
-		// Store media files in database if we have a repository
-		if s.mediaRepo != nil && len(mediaFiles) > 0 {
-			result, err := s.mediaRepo.SyncMediaFiles(instance.Name, "sonarr", mediaFiles)
-			if err != nil {
-				s.logger.Error("Failed to sync media files to database",
-					"instance", instance.Name,
-					"error", err)
-				return fmt.Errorf("failed to sync media files: %w", err)
-			}
+	// Update progress for database sync
+	progress.Progress.CurrentBatch = fmt.Sprintf("storing %d episode files in database", len(allMediaFiles))
 
-			s.logger.Info("Synced Sonarr media files to database",
+	// Store all media files in database if we have a repository
+	if s.mediaRepo != nil && len(allMediaFiles) > 0 {
+		result, err := s.mediaRepo.SyncMediaFiles(instance.Name, "sonarr", allMediaFiles)
+		if err != nil {
+			s.logger.Error("Failed to sync media files to database",
 				"instance", instance.Name,
-				"added", result.Added,
-				"updated", result.Updated,
-				"removed", result.Removed)
+				"error", err)
+			return fmt.Errorf("failed to sync media files: %w", err)
 		}
 
-		progress.Progress.ProcessedCount = len(mediaFiles)
+		s.logger.Info("Synced Sonarr media files to database",
+			"instance", instance.Name,
+			"total_shows", totalShows,
+			"total_episode_files", len(allMediaFiles),
+			"added", result.Added,
+			"updated", result.Updated,
+			"removed", result.Removed)
 	}
 
 	return nil
@@ -544,6 +577,38 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 	client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
 	s.sonarrClients[instanceName] = client
 	return client, nil
+}
+
+// applyPathMappings transforms a file path using configured path mappings
+// It finds the longest matching prefix and replaces it with the mapped path
+func (s *Service) applyPathMappings(originalPath string, instance *ConfigInstance) string {
+	if len(instance.PathMappings) == 0 {
+		return originalPath
+	}
+	
+	// Find the longest matching prefix
+	var bestMatch *config.PathMappingConfig
+	longestMatch := 0
+	
+	for i := range instance.PathMappings {
+		mapping := &instance.PathMappings[i]
+		if strings.HasPrefix(originalPath, mapping.FromPath) && len(mapping.FromPath) > longestMatch {
+			bestMatch = mapping
+			longestMatch = len(mapping.FromPath)
+		}
+	}
+	
+	if bestMatch != nil && longestMatch > 0 {
+		mappedPath := strings.Replace(originalPath, bestMatch.FromPath, bestMatch.ToPath, 1)
+		s.logger.Debug("Applied path mapping",
+			"original", originalPath,
+			"mapped", mappedPath,
+			"from", bestMatch.FromPath,
+			"to", bestMatch.ToPath)
+		return mappedPath
+	}
+	
+	return originalPath
 }
 
 // GetScrapeStatus returns the current scrape status for an instance by type and name

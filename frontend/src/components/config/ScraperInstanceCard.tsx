@@ -46,7 +46,19 @@ const getStatusIcon = (status: ScrapeStatus) => {
 const formatDuration = (startTime: string, endTime?: string) => {
   const start = new Date(startTime);
   const end = endTime ? new Date(endTime) : new Date();
+  
+  // Validate dates and ensure start time is not in the future
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    return "0m 0s";
+  }
+  
   const diffMs = end.getTime() - start.getTime();
+  
+  // Ensure duration is not negative (handle edge cases)
+  if (diffMs < 0) {
+    return "0m 0s";
+  }
+  
   const minutes = Math.floor(diffMs / 60000);
   const seconds = Math.floor((diffMs % 60000) / 1000);
   return `${minutes}m ${seconds}s`;
@@ -315,6 +327,81 @@ export function ScraperInstanceCard({
             />
             <p className="label">How often to scrape for new files</p>
           </fieldset>
+        </div>
+
+        {/* Path Mappings Section */}
+        <div className="mt-6">
+          <h5 className="mb-3 font-semibold text-base-content">Path Mappings</h5>
+          <p className="mb-4 text-sm text-base-content/70">
+            Map paths from scraper to WebDAV mounted paths. For example: <br />
+            <code className="text-xs bg-base-200 px-1 py-0.5 rounded">/mnt/unionfs/Media → /mnt/altmount/Media</code>
+          </p>
+          
+          <div className="space-y-3">
+            {instance.path_mappings.map((mapping, mappingIndex) => (
+              <div key={mappingIndex} className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
+                <fieldset className="fieldset">
+                  <legend className="fieldset-legend">From Path</legend>
+                  <input
+                    type="text"
+                    className="input"
+                    value={mapping.from_path}
+                    onChange={(e) => {
+                      const newMappings = [...instance.path_mappings];
+                      newMappings[mappingIndex] = { ...mapping, from_path: e.target.value };
+                      onInstanceChange("path_mappings", newMappings);
+                    }}
+                    placeholder="/mnt/unionfs/Media"
+                    disabled={isReadOnly}
+                  />
+                </fieldset>
+                
+                <fieldset className="fieldset">
+                  <legend className="fieldset-legend">To Path</legend>
+                  <input
+                    type="text"
+                    className="input"
+                    value={mapping.to_path}
+                    onChange={(e) => {
+                      const newMappings = [...instance.path_mappings];
+                      newMappings[mappingIndex] = { ...mapping, to_path: e.target.value };
+                      onInstanceChange("path_mappings", newMappings);
+                    }}
+                    placeholder="/mnt/altmount/Media"
+                    disabled={isReadOnly}
+                  />
+                </fieldset>
+                
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-error btn-outline"
+                    onClick={() => {
+                      const newMappings = instance.path_mappings.filter((_, i) => i !== mappingIndex);
+                      onInstanceChange("path_mappings", newMappings);
+                    }}
+                    disabled={isReadOnly}
+                    title="Remove mapping"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            
+            {/* Add new mapping button */}
+            <button
+              type="button"
+              className="btn btn-sm btn-outline btn-secondary"
+              onClick={() => {
+                const newMappings = [...instance.path_mappings, { from_path: "", to_path: "" }];
+                onInstanceChange("path_mappings", newMappings);
+              }}
+              disabled={isReadOnly}
+            >
+              + Add Path Mapping
+            </button>
+          </div>
         </div>
 
         <div className="mt-4">
