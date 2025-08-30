@@ -26,14 +26,57 @@ streaming:
   streaming_chunk_size: 8388608    # 8MB - Chunk size for streaming when end=-1
   max_download_workers: 15         # Number of download workers
 
-# RClone encryption settings (optional)
+# RClone VFS configuration (optional)
 rclone:
-  password: ""
-  salt: ""
+  password: ""                    # Encryption password (optional)
+  salt: ""                        # Encryption salt (optional)
+  vfs_enabled: false              # Enable VFS notifications
+  vfs_url: ""                     # RClone VFS URL (e.g., "http://localhost:5572")
+  vfs_user: ""                    # VFS authentication username (optional)
+  vfs_pass: ""                    # VFS authentication password (optional)
 
 # Import processing configuration
 import:
-  max_processor_workers: 2      # Number of NZB processor workers
+  max_processor_workers: 2        # Number of NZB processor workers
+  queue_processing_interval: 5    # Queue processing interval in seconds
+
+# Health monitoring configuration
+health:
+  enabled: true                   # Enable health monitoring service
+
+# SABnzbd-compatible API configuration
+sabnzbd:
+  enabled: false                  # Enable SABnzbd-compatible API
+  mount_dir: "/mnt/altmount"      # Directory where WebDAV is mounted
+  categories:                     # Download categories (optional)
+    - name: "movies"
+      order: 1
+      priority: 0
+      dir: "movies"
+    - name: "tv"
+      order: 2
+      priority: 0
+      dir: "tv"
+
+# Radarr/Sonarr scraper configuration
+scraper:
+  enabled: false                  # Enable scraper service
+  default_interval_hours: 24      # Default scrape interval in hours
+  radarr_instances: []            # Radarr instances (configured via UI)
+  sonarr_instances: []            # Sonarr instances (configured via UI)
+  # Example instance configuration (use the web UI instead):
+  # radarr_instances:
+  #   - name: "radarr-main"
+  #     url: "http://localhost:7878"
+  #     api_key: "your-radarr-api-key"
+  #     enabled: true
+  #     scrape_interval_hours: 24
+  # sonarr_instances:
+  #   - name: "sonarr-main"
+  #     url: "http://localhost:8989"
+  #     api_key: "your-sonarr-api-key"
+  #     enabled: true
+  #     scrape_interval_hours: 24
 
 # Logging configuration with rotation support
 log:
@@ -43,6 +86,9 @@ log:
   max_age: 30                   # Maximum age in days to keep old files
   max_backups: 10               # Maximum number of old files to keep
   compress: true                # Compress old log files
+
+# Global log level (legacy - use log.level instead)
+log_level: "info"
   
 # NNTP Providers Configuration
 # Configure multiple providers for redundancy and load balancing
@@ -80,18 +126,18 @@ providers:
 # Configuration Notes:
 # 
 # 1. REST API:
-#    - Provides HTTP endpoints for queue and health management
+#    - Provides HTTP endpoints for queue, health, and configuration management
 #    - Available at http://server:port/api/ when enabled
 #    - Optional authentication using same credentials as WebDAV
 #    - Supports JSON responses with pagination and filtering
 #
 # 2. Architecture:
 #    - Uses filesystem-based metadata instead of main database
-#    - Queue database still used for processing workflows
+#    - Queue database still used for processing workflows and scraper data
 #    - Better performance and scalability than database approach
 #
 # 3. NNTP Providers:
-#    - At least one provider must be configured
+#    - At least one provider must be configured for download functionality
 #    - Multiple providers provide redundancy and load balancing
 #    - SSL/TLS is recommended when available (port 563)
 #    - Standard unencrypted connections typically use port 119
@@ -102,7 +148,7 @@ providers:
 #    - Typical range: 10-50 connections per provider
 #
 # 5. Workers:
-#    - Download workers: Number of concurrent download threads (now in streaming section)
+#    - Download workers: Number of concurrent download threads (streaming section)
 #    - Import processor workers: Number of NZB processing threads
 #    - Adjust based on your system resources and provider limits
 #
@@ -111,20 +157,44 @@ providers:
 #    - Streaming Chunk Size: Size of chunks when streaming files
 #    - Max Download Workers: Number of concurrent download workers
 #
-# 7. Paths:
-#    - Use absolute paths for production deployments
-#    - Relative paths are relative to the working directory
-#    - Ensure the application has read/write access to all paths
-#    - Metadata directory will be created automatically
+# 7. RClone VFS Integration:
+#    - Enable VFS notifications for external mount synchronization
+#    - Configure URL and authentication for RClone remote control
+#    - Optional encryption with password and salt
 #
-# 7. Logging Configuration:
-#    - Set 'file' to enable log rotation to file (e.g., "./logs/altmount.log")
-#    - Leave 'file' empty to log to console only
-#    - Log rotation prevents disk space issues in production
-#    - Old files are automatically compressed when 'compress: true'
-#    - Supports backward compatibility with top-level 'log_level'
+# 8. Health Monitoring:
+#    - Provides system health checks and monitoring
+#    - Monitors database, metadata, providers, and VFS status
+#    - Accessible via REST API endpoints
 #
-# 8. Security:
-#    - Store credentials securely
-#    - Consider using environment variables for sensitive data
-#    - Use strong passwords for WebDAV authentication
+# 9. SABnzbd Compatibility:
+#    - Provides SABnzbd-compatible API endpoints
+#    - Configure mount directory where WebDAV will be accessible
+#    - Optional download categories for organization
+#    - Enable for integration with existing download clients
+#
+# 10. Scraper Service:
+#     - Automatically index files from Radarr and Sonarr instances
+#     - Configure multiple instances of each service type
+#     - Customizable scrape intervals (default 24 hours)
+#     - Manage instances through the web interface
+#     - Indexes movie and TV episode file paths for fast searching
+#
+# 11. Paths:
+#     - Use absolute paths for production deployments
+#     - Relative paths are relative to the working directory
+#     - Ensure the application has read/write access to all paths
+#     - Metadata directory will be created automatically
+#
+# 12. Logging Configuration:
+#     - Set 'file' to enable log rotation to file (e.g., "./logs/altmount.log")
+#     - Leave 'file' empty to log to console only
+#     - Log rotation prevents disk space issues in production
+#     - Old files are automatically compressed when 'compress: true'
+#     - Supports backward compatibility with top-level 'log_level'
+#
+# 13. Security:
+#     - Store credentials securely
+#     - Consider using environment variables for sensitive data
+#     - Use strong passwords for WebDAV authentication
+#     - API keys for Radarr/Sonarr should be kept secure

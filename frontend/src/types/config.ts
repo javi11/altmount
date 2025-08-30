@@ -11,6 +11,7 @@ export interface ConfigResponse {
 	import: ImportConfig;
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
+	scraper: ScraperConfig;
 	providers: ProviderConfig[];
 	log_level: string;
 }
@@ -110,6 +111,7 @@ export interface ConfigUpdateRequest {
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;
+	scraper?: ScraperConfig;
 	providers?: ProviderUpdateRequest[];
 	log_level?: string;
 }
@@ -217,6 +219,7 @@ export type ConfigSection =
 	| "providers"
 	| "rclone"
 	| "sabnzbd"
+	| "scraper"
 	| "system";
 
 // Form data interfaces for UI components
@@ -290,6 +293,78 @@ export interface SABnzbdFormData {
 	enabled: boolean;
 	mount_dir: string;
 	categories: SABnzbdCategory[];
+}
+
+// Scraper configuration types
+export type ScraperType = "radarr" | "sonarr";
+
+// Scraper status types
+export type ScrapeStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
+
+export interface ScraperInstanceConfig {
+	name: string;
+	url: string;
+	api_key: string;
+	enabled: boolean;
+	scrape_interval_hours: number;
+}
+
+// Database-backed scraper instance (includes real ID from database)
+export interface ScraperInstance {
+	id: number;
+	name: string;
+	type: ScraperType;
+	url: string;
+	api_key: string;
+	enabled: boolean;
+	scrape_interval_hours: number;
+	last_scrape_at?: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface ScraperConfig {
+	enabled: boolean;
+	default_interval_hours: number;
+	max_workers: number;
+	radarr_instances: ScraperInstanceConfig[];
+	sonarr_instances: ScraperInstanceConfig[];
+}
+
+// Scraper status and progress types
+export interface ScrapeProgressInfo {
+	processed_count: number;
+	error_count: number;
+	total_items?: number;
+	current_batch: string;
+}
+
+export interface ScrapeProgress {
+	instance_id: number;
+	status: ScrapeStatus;
+	started_at: string;
+	processed_count: number;
+	error_count: number;
+	total_items?: number;
+	current_batch: string;
+}
+
+export interface ScrapeResult {
+	instance_id: number;
+	status: ScrapeStatus;
+	started_at: string;
+	completed_at: string;
+	processed_count: number;
+	error_count: number;
+	error_message?: string;
+}
+
+export interface ScraperFormData {
+	enabled: boolean;
+	default_interval_hours: number;
+	max_workers: number;
+	radarr_instances: ScraperInstanceConfig[];
+	sonarr_instances: ScraperInstanceConfig[];
 }
 
 // Helper type for configuration sections
@@ -374,6 +449,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "SABnzbd API",
 		description: "SABnzbd-compatible API configuration for download clients",
 		icon: "Download",
+		canEdit: true,
+	},
+	scraper: {
+		title: "Radarr/Sonarr Scraper",
+		description: "Configure Radarr and Sonarr instances for movie and TV show file indexing. This will allow to repair broken files by notifying the appropriate service.",
+		icon: "Cog",
 		canEdit: true,
 	},
 	system: {

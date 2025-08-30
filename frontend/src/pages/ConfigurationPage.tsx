@@ -18,6 +18,7 @@ import { MetadataConfigSection } from "../components/config/MetadataConfigSectio
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
+import { ScraperConfigSection } from "../components/config/ScraperConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
@@ -38,6 +39,7 @@ import type {
 	MetadataConfig,
 	RCloneVFSFormData,
 	SABnzbdConfig,
+	ScraperConfig,
 	StreamingConfig,
 	SystemFormData,
 	WebDAVConfig,
@@ -112,7 +114,7 @@ export function ConfigurationPage() {
 		}
 
 		try {
-			await restartServer.mutateAsync();
+			await restartServer.mutateAsync(false);
 			// Clear local state since server is restarting
 			setHasUnsavedChanges(false);
 			setRestartRequiredConfigs([]);
@@ -138,7 +140,8 @@ export function ConfigurationPage() {
 			| MetadataConfig
 			| RCloneVFSFormData
 			| SystemFormData
-			| SABnzbdConfig,
+			| SABnzbdConfig
+			| ScraperConfig,
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -203,6 +206,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "sabnzbd",
 					config: { sabnzbd: data as SABnzbdConfig },
+				});
+			} else if (section === "scraper") {
+				await updateConfigSection.mutateAsync({
+					section: "scraper",
+					config: { scraper: data as ScraperConfig },
 				});
 			}
 		} catch (error) {
@@ -454,6 +462,14 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "scraper" && (
+									<ScraperConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{/* Placeholder for other sections */}
 								{![
 									"webdav",
@@ -464,6 +480,7 @@ export function ConfigurationPage() {
 									"providers",
 									"rclone",
 									"sabnzbd",
+									"scraper",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

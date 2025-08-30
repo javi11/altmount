@@ -61,15 +61,12 @@ export function RCloneConfigSection({
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
 			// Only send non-empty values for VFS password
-			const updateData: Partial<RCloneVFSFormData> = {
-				vfs_enabled: formData.vfs_enabled,
-				vfs_url: formData.vfs_url,
-				vfs_user: formData.vfs_user,
+			const updateData: RCloneVFSFormData = {
+				vfs_enabled: formData.vfs_enabled ?? false,
+				vfs_url: formData.vfs_url || "",
+				vfs_user: formData.vfs_user || "",
+				vfs_pass: formData.vfs_pass.trim() !== "" ? formData.vfs_pass : "",
 			};
-
-			if (formData.vfs_pass.trim() !== "") {
-				updateData.vfs_pass = formData.vfs_pass;
-			}
 
 			await onUpdate("rclone", updateData);
 			setHasChanges(false);

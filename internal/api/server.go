@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/scraper"
 )
 
 // Config represents API server configuration
@@ -39,6 +40,7 @@ type Server struct {
 	healthWorker    *health.HealthWorker
 	importerService *importer.Service
 	poolManager     pool.Manager
+	scraperService  *scraper.Service
 	logger          *slog.Logger
 	startTime       time.Time
 	mux             *http.ServeMux
@@ -55,7 +57,8 @@ func NewServer(
 	metadataReader *metadata.MetadataReader,
 	poolManager pool.Manager,
 	mux *http.ServeMux,
-	importService *importer.Service) *Server {
+	importService *importer.Service,
+	scraperService *scraper.Service) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -70,6 +73,7 @@ func NewServer(
 		metadataReader:  metadataReader,
 		importerService: importService, // Will be set later via SetImporterService
 		poolManager:     poolManager,
+		scraperService:  scraperService,
 		logger:          slog.Default(),
 		startTime:       time.Now(),
 		mux:             mux,
@@ -166,6 +170,26 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("PUT /providers/{id}", s.handleUpdateProvider)
 		apiMux.HandleFunc("DELETE /providers/{id}", s.handleDeleteProvider)
 		apiMux.HandleFunc("PUT /providers/reorder", s.handleReorderProviders)
+	}
+
+	// Scraper endpoints (if scraper service is available)
+	if s.scraperService != nil {
+		// Configuration-based instance endpoints
+		apiMux.HandleFunc("GET /scraper/instances", s.handleListScraperInstances)
+		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}", s.handleGetScraperInstance)
+		apiMux.HandleFunc("POST /scraper/instances", s.handleCreateScraperInstance) // Deprecated
+		apiMux.HandleFunc("PUT /scraper/instances/{id}", s.handleUpdateScraperInstance) // Deprecated  
+		apiMux.HandleFunc("DELETE /scraper/instances/{id}", s.handleDeleteScraperInstance) // Deprecated
+		apiMux.HandleFunc("POST /scraper/instances/test", s.handleTestScraperConnection)
+		apiMux.HandleFunc("POST /scraper/instances/{type}/{name}/scrape", s.handleTriggerScrape)
+		apiMux.HandleFunc("GET /scraper/stats", s.handleGetScraperStats)
+		apiMux.HandleFunc("GET /scraper/movies/search", s.handleSearchMovies) // Deprecated
+		apiMux.HandleFunc("GET /scraper/episodes/search", s.handleSearchEpisodes) // Deprecated
+		// Status and control endpoints
+		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}/status", s.handleGetScrapeStatus)
+		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}/result", s.handleGetLastScrapeResult)
+		apiMux.HandleFunc("POST /scraper/instances/{type}/{name}/cancel", s.handleCancelScrape)
+		apiMux.HandleFunc("GET /scraper/active", s.handleGetAllActiveScrapes)
 	}
 
 	// Authentication endpoints (if auth service is available)

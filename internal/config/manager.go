@@ -25,6 +25,7 @@ type Config struct {
 	Import    ImportConfig     `yaml:"import" mapstructure:"import"`
 	Log       LogConfig        `yaml:"log" mapstructure:"log"`
 	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd"`
+	Scraper   ScraperConfig    `yaml:"scraper" mapstructure:"scraper"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
 	LogLevel  string           `yaml:"log_level" mapstructure:"log_level"`
 }
@@ -70,7 +71,7 @@ type RCloneConfig struct {
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers      int           `yaml:"max_processor_workers" mapstructure:"max_processor_workers"`
+	MaxProcessorWorkers     int           `yaml:"max_processor_workers" mapstructure:"max_processor_workers"`
 	QueueProcessingInterval time.Duration `yaml:"queue_processing_interval" mapstructure:"queue_processing_interval"`
 }
 
@@ -128,6 +129,24 @@ type SABnzbdCategory struct {
 	Order    int    `yaml:"order" mapstructure:"order"`
 	Priority int    `yaml:"priority" mapstructure:"priority"`
 	Dir      string `yaml:"dir" mapstructure:"dir"`
+}
+
+// ScraperConfig represents scraper configuration
+type ScraperConfig struct {
+	Enabled              *bool                   `yaml:"enabled" mapstructure:"enabled"`
+	DefaultIntervalHours int                     `yaml:"default_interval_hours" mapstructure:"default_interval_hours"`
+	MaxWorkers           int                     `yaml:"max_workers" mapstructure:"max_workers"`
+	RadarrInstances      []ScraperInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances"`
+	SonarrInstances      []ScraperInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances"`
+}
+
+// ScraperInstanceConfig represents a single scraper instance configuration
+type ScraperInstanceConfig struct {
+	Name                string `yaml:"name" mapstructure:"name"`
+	URL                 string `yaml:"url" mapstructure:"url"`
+	APIKey              string `yaml:"api_key" mapstructure:"api_key"`
+	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled"`
+	ScrapeIntervalHours *int   `yaml:"scrape_interval_hours" mapstructure:"scrape_interval_hours"`
 }
 
 // DeepCopy returns a deep copy of the configuration
@@ -192,6 +211,60 @@ func (c *Config) DeepCopy() *Config {
 		copy(copyCfg.SABnzbd.Categories, c.SABnzbd.Categories)
 	} else {
 		copyCfg.SABnzbd.Categories = nil
+	}
+
+	// Deep copy Scraper.Enabled pointer
+	if c.Scraper.Enabled != nil {
+		v := *c.Scraper.Enabled
+		copyCfg.Scraper.Enabled = &v
+	} else {
+		copyCfg.Scraper.Enabled = nil
+	}
+
+	// Deep copy Scraper Radarr instances
+	if c.Scraper.RadarrInstances != nil {
+		copyCfg.Scraper.RadarrInstances = make([]ScraperInstanceConfig, len(c.Scraper.RadarrInstances))
+		for i, inst := range c.Scraper.RadarrInstances {
+			ic := inst // copy struct value
+			if inst.Enabled != nil {
+				ev := *inst.Enabled
+				ic.Enabled = &ev
+			} else {
+				ic.Enabled = nil
+			}
+			if inst.ScrapeIntervalHours != nil {
+				iv := *inst.ScrapeIntervalHours
+				ic.ScrapeIntervalHours = &iv
+			} else {
+				ic.ScrapeIntervalHours = nil
+			}
+			copyCfg.Scraper.RadarrInstances[i] = ic
+		}
+	} else {
+		copyCfg.Scraper.RadarrInstances = nil
+	}
+
+	// Deep copy Scraper Sonarr instances
+	if c.Scraper.SonarrInstances != nil {
+		copyCfg.Scraper.SonarrInstances = make([]ScraperInstanceConfig, len(c.Scraper.SonarrInstances))
+		for i, inst := range c.Scraper.SonarrInstances {
+			ic := inst // copy struct value
+			if inst.Enabled != nil {
+				ev := *inst.Enabled
+				ic.Enabled = &ev
+			} else {
+				ic.Enabled = nil
+			}
+			if inst.ScrapeIntervalHours != nil {
+				iv := *inst.ScrapeIntervalHours
+				ic.ScrapeIntervalHours = &iv
+			} else {
+				ic.ScrapeIntervalHours = nil
+			}
+			copyCfg.Scraper.SonarrInstances[i] = ic
+		}
+	} else {
+		copyCfg.Scraper.SonarrInstances = nil
 	}
 
 	return &copyCfg
@@ -558,6 +631,7 @@ func DefaultConfig() *Config {
 	healthCheckEnabled := true
 	vfsEnabled := false
 	sabnzbdEnabled := false
+	scrapperEnabled := false
 
 	return &Config{
 		WebDAV: WebDAVConfig{
@@ -588,7 +662,7 @@ func DefaultConfig() *Config {
 			VFSPass:    "",
 		},
 		Import: ImportConfig{
-			MaxProcessorWorkers:      2,              // Default: 2 processor workers
+			MaxProcessorWorkers:     2,               // Default: 2 processor workers
 			QueueProcessingInterval: 5 * time.Second, // Default: check for work every 5 seconds
 		},
 		Log: LogConfig{
@@ -614,6 +688,13 @@ func DefaultConfig() *Config {
 		},
 		Providers: []ProviderConfig{},
 		LogLevel:  "info",
+		Scraper: ScraperConfig{
+			Enabled:              &scrapperEnabled, // Disabled by default
+			DefaultIntervalHours: 24,               // Default to 24 hours
+			MaxWorkers:           5,                // Default to 5 concurrent workers
+			RadarrInstances:      []ScraperInstanceConfig{},
+			SonarrInstances:      []ScraperInstanceConfig{},
+		},
 	}
 }
 

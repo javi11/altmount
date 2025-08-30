@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/scraper"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/spf13/cobra"
@@ -188,6 +189,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Create media repository for scraper
+	mediaRepo := database.NewMediaRepository(dbConn, logger)
+
+	// Create scraper service
+	scraperService := scraper.NewService(configManager.GetConfigGetter(), mediaRepo, logger)
+
 	// Create API server configuration (hardcoded to /api)
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -204,7 +211,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		nsys.MetadataReader(),
 		poolManager,
 		mux,
-		nsys.ImporterService())
+		nsys.ImporterService(),
+		scraperService)
 	logger.Info("API server enabled", "prefix", "/api")
 
 	// Register API server for auth updates
@@ -293,6 +301,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Health worker is disabled in configuration")
 	}
 
+	// Start scraper service if enabled
+	if cfg.Scraper.Enabled != nil && *cfg.Scraper.Enabled {
+		if err := scraperService.Start(); err != nil {
+			logger.Error("Failed to start scraper service", "error", err)
+		} else {
+			logger.Info("Scraper service started")
+		}
+	} else {
+		logger.Info("Scraper service is disabled in configuration")
+	}
+
 	mux.Handle("/", getStaticFileHandler())
 
 	// Set up signal handling for graceful shutdown
@@ -315,6 +334,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Error("Failed to stop health worker", "error", err)
 		} else {
 			logger.Info("Health worker stopped")
+		}
+	}
+
+	// Stop scraper service if running
+	if cfg.Scraper.Enabled != nil && *cfg.Scraper.Enabled {
+		if err := scraperService.Stop(); err != nil {
+			logger.Error("Failed to stop scraper service", "error", err)
+		} else {
+			logger.Info("Scraper service stopped")
 		}
 	}
 

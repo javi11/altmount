@@ -273,14 +273,19 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			MaxDownloadWorkers: config.Streaming.MaxDownloadWorkers,
 		},
 		RClone: RCloneConfigResponse{
-			PasswordSet: config.RClone.Password != "",
-			SaltSet:     config.RClone.Salt != "",
+			PasswordSet:  config.RClone.Password != "",
+			SaltSet:      config.RClone.Salt != "",
+			VFSEnabled:   config.RClone.VFSEnabled != nil && *config.RClone.VFSEnabled,
+			VFSURL:       config.RClone.VFSUrl,
+			VFSUser:      config.RClone.VFSUser,
+			VFSPassSet:   config.RClone.VFSPass != "",
 		},
 		Import: ImportConfigResponse{
 			MaxProcessorWorkers:     config.Import.MaxProcessorWorkers,
 			QueueProcessingInterval: int(config.Import.QueueProcessingInterval.Seconds()),
 		},
 		SABnzbd:   s.toSABnzbdConfigData(&config.SABnzbd),
+		Scraper:   s.toScraperConfigData(&config.Scraper),
 		Providers: providers,
 		LogLevel:  config.LogLevel,
 	}
@@ -307,6 +312,63 @@ func (s *Server) toSABnzbdConfigData(config *config.SABnzbdConfig) SABnzbdConfig
 		Enabled:    enabled,
 		MountDir:   config.MountDir,
 		Categories: categories,
+	}
+}
+
+// toScraperConfigData converts config.ScraperConfig to ScraperConfigData
+func (s *Server) toScraperConfigData(config *config.ScraperConfig) ScraperConfigData {
+	scraperEnabled := false
+	if config.Enabled != nil {
+		scraperEnabled = *config.Enabled
+	}
+
+	radarrInstances := make([]ScraperInstanceData, len(config.RadarrInstances))
+	for i, instance := range config.RadarrInstances {
+		instanceEnabled := false
+		if instance.Enabled != nil {
+			instanceEnabled = *instance.Enabled
+		}
+		
+		intervalHours := 24
+		if instance.ScrapeIntervalHours != nil {
+			intervalHours = *instance.ScrapeIntervalHours
+		}
+		
+		radarrInstances[i] = ScraperInstanceData{
+			Name:                instance.Name,
+			URL:                 instance.URL,
+			APIKey:              instance.APIKey,
+			Enabled:             instanceEnabled,
+			ScrapeIntervalHours: intervalHours,
+		}
+	}
+
+	sonarrInstances := make([]ScraperInstanceData, len(config.SonarrInstances))
+	for i, instance := range config.SonarrInstances {
+		instanceEnabled := false
+		if instance.Enabled != nil {
+			instanceEnabled = *instance.Enabled
+		}
+		
+		intervalHours := 24
+		if instance.ScrapeIntervalHours != nil {
+			intervalHours = *instance.ScrapeIntervalHours
+		}
+		
+		sonarrInstances[i] = ScraperInstanceData{
+			Name:                instance.Name,
+			URL:                 instance.URL,
+			APIKey:              instance.APIKey,
+			Enabled:             instanceEnabled,
+			ScrapeIntervalHours: intervalHours,
+		}
+	}
+
+	return ScraperConfigData{
+		Enabled:              scraperEnabled,
+		DefaultIntervalHours: config.DefaultIntervalHours,
+		RadarrInstances:      radarrInstances,
+		SonarrInstances:      sonarrInstances,
 	}
 }
 
@@ -359,6 +421,18 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		}
 		if updates.RClone.Salt != nil {
 			cfg.RClone.Salt = *updates.RClone.Salt
+		}
+		if updates.RClone.VFSEnabled != nil {
+			cfg.RClone.VFSEnabled = updates.RClone.VFSEnabled
+		}
+		if updates.RClone.VFSURL != nil {
+			cfg.RClone.VFSUrl = *updates.RClone.VFSURL
+		}
+		if updates.RClone.VFSUser != nil {
+			cfg.RClone.VFSUser = *updates.RClone.VFSUser
+		}
+		if updates.RClone.VFSPass != nil {
+			cfg.RClone.VFSPass = *updates.RClone.VFSPass
 		}
 	}
 
@@ -447,6 +521,61 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		}
 	}
 
+	if updates.Scraper != nil {
+		if updates.Scraper.Enabled != nil {
+			cfg.Scraper.Enabled = updates.Scraper.Enabled
+		}
+		if updates.Scraper.DefaultIntervalHours != nil {
+			cfg.Scraper.DefaultIntervalHours = *updates.Scraper.DefaultIntervalHours
+		}
+		if updates.Scraper.RadarrInstances != nil {
+			radarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.RadarrInstances))
+			for i, instance := range *updates.Scraper.RadarrInstances {
+				scraperInstance := config.ScraperInstanceConfig{}
+				if instance.Name != nil {
+					scraperInstance.Name = *instance.Name
+				}
+				if instance.URL != nil {
+					scraperInstance.URL = *instance.URL
+				}
+				if instance.APIKey != nil {
+					scraperInstance.APIKey = *instance.APIKey
+				}
+				if instance.Enabled != nil {
+					scraperInstance.Enabled = instance.Enabled
+				}
+				if instance.ScrapeIntervalHours != nil {
+					scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+				}
+				radarrInstances[i] = scraperInstance
+			}
+			cfg.Scraper.RadarrInstances = radarrInstances
+		}
+		if updates.Scraper.SonarrInstances != nil {
+			sonarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.SonarrInstances))
+			for i, instance := range *updates.Scraper.SonarrInstances {
+				scraperInstance := config.ScraperInstanceConfig{}
+				if instance.Name != nil {
+					scraperInstance.Name = *instance.Name
+				}
+				if instance.URL != nil {
+					scraperInstance.URL = *instance.URL
+				}
+				if instance.APIKey != nil {
+					scraperInstance.APIKey = *instance.APIKey
+				}
+				if instance.Enabled != nil {
+					scraperInstance.Enabled = instance.Enabled
+				}
+				if instance.ScrapeIntervalHours != nil {
+					scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+				}
+				sonarrInstances[i] = scraperInstance
+			}
+			cfg.Scraper.SonarrInstances = sonarrInstances
+		}
+	}
+
 	if updates.LogLevel != nil {
 		cfg.LogLevel = *updates.LogLevel
 		// Apply the log level change immediately
@@ -505,6 +634,18 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 			}
 			if updates.RClone.Salt != nil {
 				cfg.RClone.Salt = *updates.RClone.Salt
+			}
+			if updates.RClone.VFSEnabled != nil {
+				cfg.RClone.VFSEnabled = updates.RClone.VFSEnabled
+			}
+			if updates.RClone.VFSURL != nil {
+				cfg.RClone.VFSUrl = *updates.RClone.VFSURL
+			}
+			if updates.RClone.VFSUser != nil {
+				cfg.RClone.VFSUser = *updates.RClone.VFSUser
+			}
+			if updates.RClone.VFSPass != nil {
+				cfg.RClone.VFSPass = *updates.RClone.VFSPass
 			}
 		}
 	case "import":
@@ -579,6 +720,61 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 					categories[i] = category
 				}
 				cfg.SABnzbd.Categories = categories
+			}
+		}
+	case "scraper":
+		if updates.Scraper != nil {
+			if updates.Scraper.Enabled != nil {
+				cfg.Scraper.Enabled = updates.Scraper.Enabled
+			}
+			if updates.Scraper.DefaultIntervalHours != nil {
+				cfg.Scraper.DefaultIntervalHours = *updates.Scraper.DefaultIntervalHours
+			}
+			if updates.Scraper.RadarrInstances != nil {
+				radarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.RadarrInstances))
+				for i, instance := range *updates.Scraper.RadarrInstances {
+					scraperInstance := config.ScraperInstanceConfig{}
+					if instance.Name != nil {
+						scraperInstance.Name = *instance.Name
+					}
+					if instance.URL != nil {
+						scraperInstance.URL = *instance.URL
+					}
+					if instance.APIKey != nil {
+						scraperInstance.APIKey = *instance.APIKey
+					}
+					if instance.Enabled != nil {
+						scraperInstance.Enabled = instance.Enabled
+					}
+					if instance.ScrapeIntervalHours != nil {
+						scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+					}
+					radarrInstances[i] = scraperInstance
+				}
+				cfg.Scraper.RadarrInstances = radarrInstances
+			}
+			if updates.Scraper.SonarrInstances != nil {
+				sonarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.SonarrInstances))
+				for i, instance := range *updates.Scraper.SonarrInstances {
+					scraperInstance := config.ScraperInstanceConfig{}
+					if instance.Name != nil {
+						scraperInstance.Name = *instance.Name
+					}
+					if instance.URL != nil {
+						scraperInstance.URL = *instance.URL
+					}
+					if instance.APIKey != nil {
+						scraperInstance.APIKey = *instance.APIKey
+					}
+					if instance.Enabled != nil {
+						scraperInstance.Enabled = instance.Enabled
+					}
+					if instance.ScrapeIntervalHours != nil {
+						scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+					}
+					sonarrInstances[i] = scraperInstance
+				}
+				cfg.Scraper.SonarrInstances = sonarrInstances
 			}
 		}
 	case "system":

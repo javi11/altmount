@@ -227,6 +227,7 @@ type ConfigResponse struct {
 	RClone    RCloneConfigResponse     `json:"rclone"`
 	Import    ImportConfigResponse     `json:"import"`
 	SABnzbd   SABnzbdConfigData        `json:"sabnzbd"`
+	Scraper   ScraperConfigData        `json:"scraper"`
 	Providers []ProviderConfigResponse `json:"providers"`
 	LogLevel  string                   `json:"log_level"`
 }
@@ -262,8 +263,12 @@ type StreamingConfigResponse struct {
 
 // RCloneConfigResponse represents rclone configuration in API responses (sanitized)
 type RCloneConfigResponse struct {
-	PasswordSet bool `json:"password_set"`
-	SaltSet     bool `json:"salt_set"`
+	PasswordSet bool   `json:"password_set"`
+	SaltSet     bool   `json:"salt_set"`
+	VFSEnabled  bool   `json:"vfs_enabled"`
+	VFSURL      string `json:"vfs_url"`
+	VFSUser     string `json:"vfs_user"`
+	VFSPassSet  bool   `json:"vfs_pass_set"`
 }
 
 // ImportConfigResponse represents import configuration in API responses
@@ -285,6 +290,23 @@ type SABnzbdCategoryData struct {
 	Order    int    `json:"order"`
 	Priority int    `json:"priority"`
 	Dir      string `json:"dir"`
+}
+
+// ScraperConfigData represents scraper configuration in API responses
+type ScraperConfigData struct {
+	Enabled               bool                      `json:"enabled"`
+	DefaultIntervalHours  int                       `json:"default_interval_hours"`
+	RadarrInstances       []ScraperInstanceData     `json:"radarr_instances"`
+	SonarrInstances       []ScraperInstanceData     `json:"sonarr_instances"`
+}
+
+// ScraperInstanceData represents a scraper instance in API responses
+type ScraperInstanceData struct {
+	Name                 string  `json:"name"`
+	URL                  string  `json:"url"`
+	APIKey               string  `json:"api_key"`
+	Enabled              bool    `json:"enabled"`
+	ScrapeIntervalHours  int     `json:"scrape_interval_hours"`
 }
 
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
@@ -311,6 +333,7 @@ type ConfigUpdateRequest struct {
 	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
 	Import    *ImportConfigRequest     `json:"import,omitempty"`
 	SABnzbd   *SABnzbdConfigUpdate     `json:"sabnzbd,omitempty"`
+	Scraper   *ScraperConfigUpdate     `json:"scraper,omitempty"`
 	Providers *[]ProviderConfigRequest `json:"providers,omitempty"`
 	LogLevel  *string                  `json:"log_level,omitempty"`
 }
@@ -347,8 +370,12 @@ type StreamingConfigRequest struct {
 
 // RCloneConfigRequest represents rclone configuration in update requests
 type RCloneConfigRequest struct {
-	Password *string `json:"password,omitempty"`
-	Salt     *string `json:"salt,omitempty"`
+	Password   *string `json:"password,omitempty"`
+	Salt       *string `json:"salt,omitempty"`
+	VFSEnabled *bool   `json:"vfs_enabled,omitempty"`
+	VFSURL     *string `json:"vfs_url,omitempty"`
+	VFSUser    *string `json:"vfs_user,omitempty"`
+	VFSPass    *string `json:"vfs_pass,omitempty"`
 }
 
 // ImportConfigRequest represents import configuration in update requests
@@ -370,6 +397,23 @@ type SABnzbdCategoryUpdate struct {
 	Order    *int    `json:"order,omitempty"`
 	Priority *int    `json:"priority,omitempty"`
 	Dir      *string `json:"dir,omitempty"`
+}
+
+// ScraperConfigUpdate represents scraper configuration in update requests
+type ScraperConfigUpdate struct {
+	Enabled               *bool                       `json:"enabled,omitempty"`
+	DefaultIntervalHours  *int                        `json:"default_interval_hours,omitempty"`
+	RadarrInstances       *[]ScraperInstanceUpdate    `json:"radarr_instances,omitempty"`
+	SonarrInstances       *[]ScraperInstanceUpdate    `json:"sonarr_instances,omitempty"`
+}
+
+// ScraperInstanceUpdate represents a scraper instance in update requests
+type ScraperInstanceUpdate struct {
+	Name                 *string `json:"name,omitempty"`
+	URL                  *string `json:"url,omitempty"`
+	APIKey               *string `json:"api_key,omitempty"`
+	Enabled              *bool   `json:"enabled,omitempty"`
+	ScrapeIntervalHours  *int    `json:"scrape_interval_hours,omitempty"`
 }
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests
