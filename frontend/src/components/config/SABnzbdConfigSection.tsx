@@ -172,18 +172,17 @@ export function SABnzbdConfigSection({
 				<>
 					{/* Complete Directory */}
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Mount Directory</legend>
+						<legend className="fieldset-legend">Complete directory</legend>
 						<input
 							type="text"
 							className="input"
 							value={formData.mount_dir}
 							readOnly={isReadOnly}
-							placeholder="/mnt/altmount"
+							placeholder="/mnt/altmount/complete"
 							onChange={(e) => handleMountDirChange(e.target.value)}
 						/>
 						<p className="label">
-							Absolute path to the directory where you will mount the WebDAV server. This path will
-							be reported to download clients.
+							Absolute path to the directory where the complete imports will be placed. FROM THE MOUNTED FOLDER POINT OF VIEW.
 						</p>
 					</fieldset>
 

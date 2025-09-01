@@ -332,6 +332,7 @@ export interface ScraperConfig {
 	enabled: boolean;
 	default_interval_hours: number;
 	max_workers: number;
+	mount_path: string;
 	radarr_instances: ScraperInstanceConfig[];
 	sonarr_instances: ScraperInstanceConfig[];
 }
@@ -368,6 +369,7 @@ export interface ScraperFormData {
 	enabled: boolean;
 	default_interval_hours: number;
 	max_workers: number;
+	mount_path: string;
 	radarr_instances: ScraperInstanceConfig[];
 	sonarr_instances: ScraperInstanceConfig[];
 }

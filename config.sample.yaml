@@ -62,6 +62,7 @@ sabnzbd:
 scraper:
   enabled: false                  # Enable scraper service
   default_interval_hours: 24      # Default scrape interval in hours
+  mount_path: ""                  # WebDAV mount path to strip from file paths (required when enabled)
   radarr_instances: []            # Radarr instances (configured via UI)
   sonarr_instances: []            # Sonarr instances (configured via UI)
   # Example instance configuration (use the web UI instead):

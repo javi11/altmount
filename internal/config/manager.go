@@ -136,6 +136,7 @@ type ScraperConfig struct {
 	Enabled              *bool                   `yaml:"enabled" mapstructure:"enabled"`
 	DefaultIntervalHours int                     `yaml:"default_interval_hours" mapstructure:"default_interval_hours"`
 	MaxWorkers           int                     `yaml:"max_workers" mapstructure:"max_workers"`
+	MountPath            string                  `yaml:"mount_path" mapstructure:"mount_path"`
 	RadarrInstances      []ScraperInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances"`
 	SonarrInstances      []ScraperInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances"`
 }
@@ -392,6 +393,22 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
 			}
 			categoryNames[category.Name] = true
+		}
+	}
+
+	// Validate scraper configuration
+	if c.Scraper.Enabled != nil && *c.Scraper.Enabled {
+		if c.Scraper.MountPath == "" {
+			return fmt.Errorf("scraper mount_path cannot be empty when scraper is enabled")
+		}
+		if !filepath.IsAbs(c.Scraper.MountPath) {
+			return fmt.Errorf("scraper mount_path must be an absolute path")
+		}
+		if c.Scraper.DefaultIntervalHours <= 0 {
+			return fmt.Errorf("scraper default_interval_hours must be greater than 0")
+		}
+		if c.Scraper.MaxWorkers <= 0 {
+			return fmt.Errorf("scraper max_workers must be greater than 0")
 		}
 	}
 
@@ -694,6 +711,7 @@ func DefaultConfig() *Config {
 			Enabled:              &scrapperEnabled, // Disabled by default
 			DefaultIntervalHours: 24,               // Default to 24 hours
 			MaxWorkers:           5,                // Default to 5 concurrent workers
+			MountPath:            "",               // Empty by default - required when enabled
 			RadarrInstances:      []ScraperInstanceConfig{},
 			SonarrInstances:      []ScraperInstanceConfig{},
 		},

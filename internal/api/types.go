@@ -296,6 +296,7 @@ type SABnzbdCategoryData struct {
 type ScraperConfigData struct {
 	Enabled              bool                  `json:"enabled"`
 	DefaultIntervalHours int                   `json:"default_interval_hours"`
+	MountPath            string                `json:"mount_path"`
 	RadarrInstances      []ScraperInstanceData `json:"radarr_instances"`
 	SonarrInstances      []ScraperInstanceData `json:"sonarr_instances"`
 }
@@ -403,6 +404,7 @@ type SABnzbdCategoryUpdate struct {
 type ScraperConfigUpdate struct {
 	Enabled              *bool                    `json:"enabled,omitempty"`
 	DefaultIntervalHours *int                     `json:"default_interval_hours,omitempty"`
+	MountPath            *string                  `json:"mount_path,omitempty"`
 	RadarrInstances      *[]ScraperInstanceUpdate `json:"radarr_instances,omitempty"`
 	SonarrInstances      *[]ScraperInstanceUpdate `json:"sonarr_instances,omitempty"`
 }

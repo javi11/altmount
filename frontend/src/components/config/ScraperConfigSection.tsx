@@ -58,6 +58,13 @@ export function ScraperConfigSection({
 				errors.push("Default scrape interval must be greater than 0 hours");
 			}
 
+			// Validate mount path
+			if (!data.mount_path.trim()) {
+				errors.push("Mount path is required when scraper is enabled");
+			} else if (!data.mount_path.startsWith("/")) {
+				errors.push("Mount path must be an absolute path (start with /)");
+			}
+
 			// Validate instances
 			const allInstanceNames = [
 				...data.radarr_instances.map((i) => ({ name: i.name, type: "Radarr" })),
@@ -229,7 +236,7 @@ export function ScraperConfigSection({
 						<div>
 							<h3 className="font-semibold">Enable Scraper Service</h3>
 							<p className="text-base-content/70 text-sm">
-								Enable automatic scraping of Radarr and Sonarr instances for file indexing
+								Enable automatic scraping of Radarr and Sonarr instances for file indexing. This will enable file redownloading feature in case is corrupted.
 							</p>
 						</div>
 						<input
@@ -249,24 +256,42 @@ export function ScraperConfigSection({
 					<div className="card-body">
 						<h3 className="mb-4 font-semibold">Default Settings</h3>
 
-						<fieldset className="fieldset max-w-md">
-							<legend className="fieldset-legend">Default Scrape Interval (hours)</legend>
-							<input
-								type="number"
-								className="input"
-								value={formData.default_interval_hours}
-								onChange={(e) =>
-									handleFormChange(
-										"default_interval_hours",
-										Number.parseInt(e.target.value, 10) || 24,
-									)
-								}
-								min="1"
-								max="168"
-								disabled={isReadOnly}
-							/>
-							<p className="label">Default interval for new instances (1-168 hours)</p>
-						</fieldset>
+						<div className="space-y-4">
+							<fieldset className="fieldset max-w-md">
+								<legend className="fieldset-legend">Default Scrape Interval (hours)</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.default_interval_hours}
+									onChange={(e) =>
+										handleFormChange(
+											"default_interval_hours",
+											Number.parseInt(e.target.value, 10) || 24,
+										)
+									}
+									min="1"
+									max="168"
+									disabled={isReadOnly}
+								/>
+								<p className="label">Default interval for new instances (1-168 hours)</p>
+							</fieldset>
+
+							<fieldset className="fieldset max-w-md">
+								<legend className="fieldset-legend">WebDAV Mount Path</legend>
+								<input
+									type="text"
+									className="input"
+									value={formData.mount_path}
+									onChange={(e) => handleFormChange("mount_path", e.target.value)}
+									placeholder="/mnt/altmount"
+									disabled={isReadOnly}
+								/>
+								<p className="label">
+									Absolute path where WebDAV is mounted. File paths from Radarr/Sonarr will be 
+									stripped of this prefix before storage.
+								</p>
+							</fieldset>
+						</div>
 					</div>
 				</div>
 			)}

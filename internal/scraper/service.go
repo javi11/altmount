@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,6 +108,23 @@ func NewService(configGetter config.ConfigGetter, mediaRepo *database.MediaRepos
 // getInstanceKey generates a unique key for an instance
 func getInstanceKey(instanceType, instanceName string) string {
 	return instanceType + ":" + instanceName
+}
+
+// stripMountPath strips the mount path from a file path and ensures the result starts with /
+func stripMountPath(filePath, mountPath string) string {
+	if mountPath == "" {
+		return filePath
+	}
+	
+	// Remove the mount path prefix
+	stripped := strings.TrimPrefix(filePath, mountPath)
+	
+	// Ensure the result starts with /
+	if !strings.HasPrefix(stripped, "/") {
+		stripped = "/" + stripped
+	}
+	
+	return stripped
 }
 
 // getConfigInstances returns all scraper instances from current configuration
@@ -377,6 +395,10 @@ func (s *Service) scrapeConfigInstance(instance *ConfigInstance) {
 
 // scrapeRadarrConfig scrapes a Radarr instance using configuration
 func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeProgress) error {
+	// Get configuration for mount path
+	cfg := s.configGetter()
+	mountPath := cfg.Scraper.MountPath
+
 	// Get or create Radarr client
 	client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
 	if err != nil {
@@ -404,11 +426,24 @@ func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeP
 				fileSize = &size
 			}
 
+			// Strip mount path from file path
+			originalPath := movie.MovieFile.Path
+			strippedPath := stripMountPath(originalPath, mountPath)
+			
+			// Log if path doesn't match mount path prefix (potential issue)
+			if mountPath != "" && !strings.HasPrefix(originalPath, mountPath) {
+				s.logger.Warn("Movie file path does not start with mount path",
+					"instance", instance.Name,
+					"movie_title", movie.Title,
+					"file_path", originalPath,
+					"mount_path", mountPath)
+			}
+
 			mediaFile := database.MediaFileInput{
 				InstanceName: instance.Name,
 				InstanceType: "radarr",
 				ExternalID:   int64(movie.ID),
-				FilePath:     movie.MovieFile.Path,
+				FilePath:     strippedPath,
 				FileSize:     fileSize,
 			}
 			mediaFiles = append(mediaFiles, mediaFile)
@@ -449,6 +484,10 @@ func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeP
 
 // scrapeSonarrConfig scrapes a Sonarr instance using configuration
 func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeProgress) error {
+	// Get configuration for mount path
+	cfg := s.configGetter()
+	mountPath := cfg.Scraper.MountPath
+
 	// Get or create Sonarr client
 	client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
 	if err != nil {
@@ -511,11 +550,24 @@ func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeP
 				fileSize = &episodeFile.Size
 			}
 
+			// Strip mount path from file path
+			originalPath := episodeFile.Path
+			strippedPath := stripMountPath(originalPath, mountPath)
+			
+			// Log if path doesn't match mount path prefix (potential issue)
+			if mountPath != "" && !strings.HasPrefix(originalPath, mountPath) {
+				s.logger.Warn("Episode file path does not start with mount path",
+					"instance", instance.Name,
+					"show_title", show.Title,
+					"file_path", originalPath,
+					"mount_path", mountPath)
+			}
+
 			mediaFile := database.MediaFileInput{
 				InstanceName: instance.Name,
 				InstanceType: "sonarr",
 				ExternalID:   int64(episodeFile.ID),
-				FilePath:     episodeFile.Path,
+				FilePath:     strippedPath,
 				FileSize:     fileSize,
 			}
 			allMediaFiles = append(allMediaFiles, mediaFile)

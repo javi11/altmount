@@ -367,6 +367,7 @@ func (s *Server) toScraperConfigData(config *config.ScraperConfig) ScraperConfig
 	return ScraperConfigData{
 		Enabled:              scraperEnabled,
 		DefaultIntervalHours: config.DefaultIntervalHours,
+		MountPath:            config.MountPath,
 		RadarrInstances:      radarrInstances,
 		SonarrInstances:      sonarrInstances,
 	}
@@ -527,6 +528,9 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		}
 		if updates.Scraper.DefaultIntervalHours != nil {
 			cfg.Scraper.DefaultIntervalHours = *updates.Scraper.DefaultIntervalHours
+		}
+		if updates.Scraper.MountPath != nil {
+			cfg.Scraper.MountPath = *updates.Scraper.MountPath
 		}
 		if updates.Scraper.RadarrInstances != nil {
 			radarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.RadarrInstances))
@@ -730,6 +734,9 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 			}
 			if updates.Scraper.DefaultIntervalHours != nil {
 				cfg.Scraper.DefaultIntervalHours = *updates.Scraper.DefaultIntervalHours
+			}
+			if updates.Scraper.MountPath != nil {
+				cfg.Scraper.MountPath = *updates.Scraper.MountPath
 			}
 			if updates.Scraper.RadarrInstances != nil {
 				radarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.RadarrInstances))

@@ -48,7 +48,7 @@ const formatDuration = (startTime: string, endTime?: string) => {
   const end = endTime ? new Date(endTime) : new Date();
   
   // Validate dates and ensure start time is not in the future
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return "0m 0s";
   }
   
