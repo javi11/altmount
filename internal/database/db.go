@@ -10,8 +10,8 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-//go:embed queue_migrations/*.sql
-var embedQueueMigrations embed.FS
+//go:embed migrations/*.sql
+var embedMigrations embed.FS
 
 // DB wraps the database connection and provides access to operations
 type DB struct {
@@ -85,13 +85,13 @@ func NewDB(config Config) (*DB, error) {
 // runMigrations runs database migrations using Goose
 func runMigrations(db *sql.DB) error {
 	// Set the migration provider for embedded filesystem
-	goose.SetBaseFS(embedQueueMigrations)
+	goose.SetBaseFS(embedMigrations)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return fmt.Errorf("failed to set goose dialect: %w", err)
 	}
 
-	if err := goose.Up(db, "queue_migrations"); err != nil {
+	if err := goose.Up(db, "migrations"); err != nil {
 		return fmt.Errorf("failed to run queue migrations: %w", err)
 	}
 
