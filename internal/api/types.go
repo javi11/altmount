@@ -273,8 +273,8 @@ type RCloneConfigResponse struct {
 
 // ImportConfigResponse represents import configuration in API responses
 type ImportConfigResponse struct {
-	MaxProcessorWorkers      int `json:"max_processor_workers"`
-	QueueProcessingInterval  int `json:"queue_processing_interval"` // Interval in seconds for queue processing
+	MaxProcessorWorkers     int `json:"max_processor_workers"`
+	QueueProcessingInterval int `json:"queue_processing_interval"` // Interval in seconds for queue processing
 }
 
 // SABnzbdConfigData represents SABnzbd configuration in API responses
@@ -294,26 +294,19 @@ type SABnzbdCategoryData struct {
 
 // ScraperConfigData represents scraper configuration in API responses
 type ScraperConfigData struct {
-	Enabled               bool                      `json:"enabled"`
-	DefaultIntervalHours  int                       `json:"default_interval_hours"`
-	RadarrInstances       []ScraperInstanceData     `json:"radarr_instances"`
-	SonarrInstances       []ScraperInstanceData     `json:"sonarr_instances"`
-}
-
-// PathMappingData represents a path mapping in API responses
-type PathMappingData struct {
-	FromPath string `json:"from_path"`
-	ToPath   string `json:"to_path"`
+	Enabled              bool                  `json:"enabled"`
+	DefaultIntervalHours int                   `json:"default_interval_hours"`
+	RadarrInstances      []ScraperInstanceData `json:"radarr_instances"`
+	SonarrInstances      []ScraperInstanceData `json:"sonarr_instances"`
 }
 
 // ScraperInstanceData represents a scraper instance in API responses
 type ScraperInstanceData struct {
-	Name                 string            `json:"name"`
-	URL                  string            `json:"url"`
-	APIKey               string            `json:"api_key"`
-	Enabled              bool              `json:"enabled"`
-	ScrapeIntervalHours  int               `json:"scrape_interval_hours"`
-	PathMappings         []PathMappingData `json:"path_mappings"`
+	Name                string `json:"name"`
+	URL                 string `json:"url"`
+	APIKey              string `json:"api_key"`
+	Enabled             bool   `json:"enabled"`
+	ScrapeIntervalHours int    `json:"scrape_interval_hours"`
 }
 
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
@@ -408,26 +401,19 @@ type SABnzbdCategoryUpdate struct {
 
 // ScraperConfigUpdate represents scraper configuration in update requests
 type ScraperConfigUpdate struct {
-	Enabled               *bool                       `json:"enabled,omitempty"`
-	DefaultIntervalHours  *int                        `json:"default_interval_hours,omitempty"`
-	RadarrInstances       *[]ScraperInstanceUpdate    `json:"radarr_instances,omitempty"`
-	SonarrInstances       *[]ScraperInstanceUpdate    `json:"sonarr_instances,omitempty"`
-}
-
-// PathMappingUpdate represents a path mapping in update requests
-type PathMappingUpdate struct {
-	FromPath *string `json:"from_path,omitempty"`
-	ToPath   *string `json:"to_path,omitempty"`
+	Enabled              *bool                    `json:"enabled,omitempty"`
+	DefaultIntervalHours *int                     `json:"default_interval_hours,omitempty"`
+	RadarrInstances      *[]ScraperInstanceUpdate `json:"radarr_instances,omitempty"`
+	SonarrInstances      *[]ScraperInstanceUpdate `json:"sonarr_instances,omitempty"`
 }
 
 // ScraperInstanceUpdate represents a scraper instance in update requests
 type ScraperInstanceUpdate struct {
-	Name                 *string               `json:"name,omitempty"`
-	URL                  *string               `json:"url,omitempty"`
-	APIKey               *string               `json:"api_key,omitempty"`
-	Enabled              *bool                 `json:"enabled,omitempty"`
-	ScrapeIntervalHours  *int                  `json:"scrape_interval_hours,omitempty"`
-	PathMappings         *[]PathMappingUpdate  `json:"path_mappings,omitempty"`
+	Name                *string `json:"name,omitempty"`
+	URL                 *string `json:"url,omitempty"`
+	APIKey              *string `json:"api_key,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty"`
+	ScrapeIntervalHours *int    `json:"scrape_interval_hours,omitempty"`
 }
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests

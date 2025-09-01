@@ -71,20 +71,12 @@ scraper:
   #     api_key: "your-radarr-api-key"
   #     enabled: true
   #     scrape_interval_hours: 24
-  #     path_mappings:                    # Optional: Map paths from scraper to WebDAV
-  #       - from_path: "/mnt/unionfs/Media"
-  #         to_path: "/mnt/altmount/Media"
-  #       - from_path: "/storage/movies"
-  #         to_path: "/media/movies"
   # sonarr_instances:
   #   - name: "sonarr-main"
   #     url: "http://localhost:8989"
   #     api_key: "your-sonarr-api-key"
   #     enabled: true
   #     scrape_interval_hours: 24
-  #     path_mappings:                    # Optional: Map paths from scraper to WebDAV
-  #       - from_path: "/mnt/unionfs/TV"
-  #         to_path: "/mnt/altmount/TV"
 
 # Logging configuration with rotation support
 log:

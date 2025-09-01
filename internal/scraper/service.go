@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -64,13 +63,12 @@ type ScraperInstanceState struct {
 
 // ConfigInstance represents a scraper instance from configuration
 type ConfigInstance struct {
-	Name                string                      `json:"name"`
-	Type                string                      `json:"type"` // "radarr" or "sonarr"
-	URL                 string                      `json:"url"`
-	APIKey              string                      `json:"api_key"`
-	Enabled             bool                        `json:"enabled"`
-	ScrapeIntervalHours int                         `json:"scrape_interval_hours"`
-	PathMappings        []config.PathMappingConfig  `json:"path_mappings"`
+	Name                string `json:"name"`
+	Type                string `json:"type"` // "radarr" or "sonarr"
+	URL                 string `json:"url"`
+	APIKey              string `json:"api_key"`
+	Enabled             bool   `json:"enabled"`
+	ScrapeIntervalHours int    `json:"scrape_interval_hours"`
 }
 
 // Service manages the scraping of Radarr and Sonarr instances using configuration-first approach
@@ -131,7 +129,6 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 				APIKey:              radarrConfig.APIKey,
 				Enabled:             radarrConfig.Enabled != nil && *radarrConfig.Enabled,
 				ScrapeIntervalHours: scrapeInterval,
-				PathMappings:        radarrConfig.PathMappings,
 			}
 			instances = append(instances, instance)
 		}
@@ -152,7 +149,6 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 				APIKey:              sonarrConfig.APIKey,
 				Enabled:             sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
 				ScrapeIntervalHours: scrapeInterval,
-				PathMappings:        sonarrConfig.PathMappings,
 			}
 			instances = append(instances, instance)
 		}
@@ -412,7 +408,7 @@ func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeP
 				InstanceName: instance.Name,
 				InstanceType: "radarr",
 				ExternalID:   int64(movie.ID),
-				FilePath:     s.applyPathMappings(movie.MovieFile.Path, instance),
+				FilePath:     movie.MovieFile.Path,
 				FileSize:     fileSize,
 			}
 			mediaFiles = append(mediaFiles, mediaFile)
@@ -482,17 +478,17 @@ func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeP
 
 	for _, show := range series {
 		processedShows++
-		
+
 		// Update progress to show current show being processed
 		progress.Progress.ProcessedCount = processedShows
 		progress.Progress.CurrentBatch = fmt.Sprintf("processing show %d/%d: %s", processedShows, totalShows, show.Title)
 
 		// Get all episode files from Sonarr - this gives us the actual files
-		s.logger.Debug("Fetching episode files from Sonarr", 
-			"instance", instance.Name, 
+		s.logger.Debug("Fetching episode files from Sonarr",
+			"instance", instance.Name,
 			"show", show.Title,
 			"show_id", show.ID)
-			
+
 		episodeFiles, err := client.GetSeriesEpisodeFiles(show.ID)
 		if err != nil {
 			s.logger.Error("Failed to get episode files for show",
@@ -519,7 +515,7 @@ func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeP
 				InstanceName: instance.Name,
 				InstanceType: "sonarr",
 				ExternalID:   int64(episodeFile.ID),
-				FilePath:     s.applyPathMappings(episodeFile.Path, instance),
+				FilePath:     episodeFile.Path,
 				FileSize:     fileSize,
 			}
 			allMediaFiles = append(allMediaFiles, mediaFile)
@@ -577,38 +573,6 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 	client := sonarr.New(&starr.Config{URL: url, APIKey: apiKey})
 	s.sonarrClients[instanceName] = client
 	return client, nil
-}
-
-// applyPathMappings transforms a file path using configured path mappings
-// It finds the longest matching prefix and replaces it with the mapped path
-func (s *Service) applyPathMappings(originalPath string, instance *ConfigInstance) string {
-	if len(instance.PathMappings) == 0 {
-		return originalPath
-	}
-	
-	// Find the longest matching prefix
-	var bestMatch *config.PathMappingConfig
-	longestMatch := 0
-	
-	for i := range instance.PathMappings {
-		mapping := &instance.PathMappings[i]
-		if strings.HasPrefix(originalPath, mapping.FromPath) && len(mapping.FromPath) > longestMatch {
-			bestMatch = mapping
-			longestMatch = len(mapping.FromPath)
-		}
-	}
-	
-	if bestMatch != nil && longestMatch > 0 {
-		mappedPath := strings.Replace(originalPath, bestMatch.FromPath, bestMatch.ToPath, 1)
-		s.logger.Debug("Applied path mapping",
-			"original", originalPath,
-			"mapped", mappedPath,
-			"from", bestMatch.FromPath,
-			"to", bestMatch.ToPath)
-		return mappedPath
-	}
-	
-	return originalPath
 }
 
 // GetScrapeStatus returns the current scrape status for an instance by type and name

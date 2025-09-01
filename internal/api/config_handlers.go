@@ -273,12 +273,12 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			MaxDownloadWorkers: config.Streaming.MaxDownloadWorkers,
 		},
 		RClone: RCloneConfigResponse{
-			PasswordSet:  config.RClone.Password != "",
-			SaltSet:      config.RClone.Salt != "",
-			VFSEnabled:   config.RClone.VFSEnabled != nil && *config.RClone.VFSEnabled,
-			VFSURL:       config.RClone.VFSUrl,
-			VFSUser:      config.RClone.VFSUser,
-			VFSPassSet:   config.RClone.VFSPass != "",
+			PasswordSet: config.RClone.Password != "",
+			SaltSet:     config.RClone.Salt != "",
+			VFSEnabled:  config.RClone.VFSEnabled != nil && *config.RClone.VFSEnabled,
+			VFSURL:      config.RClone.VFSUrl,
+			VFSUser:     config.RClone.VFSUser,
+			VFSPassSet:  config.RClone.VFSPass != "",
 		},
 		Import: ImportConfigResponse{
 			MaxProcessorWorkers:     config.Import.MaxProcessorWorkers,
@@ -328,27 +328,18 @@ func (s *Server) toScraperConfigData(config *config.ScraperConfig) ScraperConfig
 		if instance.Enabled != nil {
 			instanceEnabled = *instance.Enabled
 		}
-		
+
 		intervalHours := 24
 		if instance.ScrapeIntervalHours != nil {
 			intervalHours = *instance.ScrapeIntervalHours
 		}
-		
-		pathMappings := make([]PathMappingData, len(instance.PathMappings))
-		for j, mapping := range instance.PathMappings {
-			pathMappings[j] = PathMappingData{
-				FromPath: mapping.FromPath,
-				ToPath:   mapping.ToPath,
-			}
-		}
-		
+
 		radarrInstances[i] = ScraperInstanceData{
 			Name:                instance.Name,
 			URL:                 instance.URL,
 			APIKey:              instance.APIKey,
 			Enabled:             instanceEnabled,
 			ScrapeIntervalHours: intervalHours,
-			PathMappings:        pathMappings,
 		}
 	}
 
@@ -358,27 +349,18 @@ func (s *Server) toScraperConfigData(config *config.ScraperConfig) ScraperConfig
 		if instance.Enabled != nil {
 			instanceEnabled = *instance.Enabled
 		}
-		
+
 		intervalHours := 24
 		if instance.ScrapeIntervalHours != nil {
 			intervalHours = *instance.ScrapeIntervalHours
 		}
-		
-		pathMappings := make([]PathMappingData, len(instance.PathMappings))
-		for j, mapping := range instance.PathMappings {
-			pathMappings[j] = PathMappingData{
-				FromPath: mapping.FromPath,
-				ToPath:   mapping.ToPath,
-			}
-		}
-		
+
 		sonarrInstances[i] = ScraperInstanceData{
 			Name:                instance.Name,
 			URL:                 instance.URL,
 			APIKey:              instance.APIKey,
 			Enabled:             instanceEnabled,
 			ScrapeIntervalHours: intervalHours,
-			PathMappings:        pathMappings,
 		}
 	}
 
@@ -565,20 +547,7 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 				if instance.ScrapeIntervalHours != nil {
 					scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
 				}
-				if instance.PathMappings != nil {
-					pathMappings := make([]config.PathMappingConfig, len(*instance.PathMappings))
-					for j, mapping := range *instance.PathMappings {
-						pathMapping := config.PathMappingConfig{}
-						if mapping.FromPath != nil {
-							pathMapping.FromPath = *mapping.FromPath
-						}
-						if mapping.ToPath != nil {
-							pathMapping.ToPath = *mapping.ToPath
-						}
-						pathMappings[j] = pathMapping
-					}
-					scraperInstance.PathMappings = pathMappings
-				}
+
 				radarrInstances[i] = scraperInstance
 			}
 			cfg.Scraper.RadarrInstances = radarrInstances
@@ -601,20 +570,6 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 				}
 				if instance.ScrapeIntervalHours != nil {
 					scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
-				}
-				if instance.PathMappings != nil {
-					pathMappings := make([]config.PathMappingConfig, len(*instance.PathMappings))
-					for j, mapping := range *instance.PathMappings {
-						pathMapping := config.PathMappingConfig{}
-						if mapping.FromPath != nil {
-							pathMapping.FromPath = *mapping.FromPath
-						}
-						if mapping.ToPath != nil {
-							pathMapping.ToPath = *mapping.ToPath
-						}
-						pathMappings[j] = pathMapping
-					}
-					scraperInstance.PathMappings = pathMappings
 				}
 				sonarrInstances[i] = scraperInstance
 			}
@@ -795,20 +750,6 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 					if instance.ScrapeIntervalHours != nil {
 						scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
 					}
-					if instance.PathMappings != nil {
-						pathMappings := make([]config.PathMappingConfig, len(*instance.PathMappings))
-						for j, mapping := range *instance.PathMappings {
-							pathMapping := config.PathMappingConfig{}
-							if mapping.FromPath != nil {
-								pathMapping.FromPath = *mapping.FromPath
-							}
-							if mapping.ToPath != nil {
-								pathMapping.ToPath = *mapping.ToPath
-							}
-							pathMappings[j] = pathMapping
-						}
-						scraperInstance.PathMappings = pathMappings
-					}
 					radarrInstances[i] = scraperInstance
 				}
 				cfg.Scraper.RadarrInstances = radarrInstances
@@ -831,20 +772,6 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 					}
 					if instance.ScrapeIntervalHours != nil {
 						scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
-					}
-					if instance.PathMappings != nil {
-						pathMappings := make([]config.PathMappingConfig, len(*instance.PathMappings))
-						for j, mapping := range *instance.PathMappings {
-							pathMapping := config.PathMappingConfig{}
-							if mapping.FromPath != nil {
-								pathMapping.FromPath = *mapping.FromPath
-							}
-							if mapping.ToPath != nil {
-								pathMapping.ToPath = *mapping.ToPath
-							}
-							pathMappings[j] = pathMapping
-						}
-						scraperInstance.PathMappings = pathMappings
 					}
 					sonarrInstances[i] = scraperInstance
 				}

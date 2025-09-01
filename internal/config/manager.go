@@ -140,20 +140,13 @@ type ScraperConfig struct {
 	SonarrInstances      []ScraperInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances"`
 }
 
-// PathMappingConfig represents a path mapping from scraper path to WebDAV path
-type PathMappingConfig struct {
-	FromPath string `yaml:"from_path" mapstructure:"from_path"`
-	ToPath   string `yaml:"to_path" mapstructure:"to_path"`
-}
-
 // ScraperInstanceConfig represents a single scraper instance configuration
 type ScraperInstanceConfig struct {
-	Name                string              `yaml:"name" mapstructure:"name"`
-	URL                 string              `yaml:"url" mapstructure:"url"`
-	APIKey              string              `yaml:"api_key" mapstructure:"api_key"`
-	Enabled             *bool               `yaml:"enabled" mapstructure:"enabled"`
-	ScrapeIntervalHours *int                `yaml:"scrape_interval_hours" mapstructure:"scrape_interval_hours"`
-	PathMappings        []PathMappingConfig `yaml:"path_mappings" mapstructure:"path_mappings"`
+	Name                string `yaml:"name" mapstructure:"name"`
+	URL                 string `yaml:"url" mapstructure:"url"`
+	APIKey              string `yaml:"api_key" mapstructure:"api_key"`
+	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled"`
+	ScrapeIntervalHours *int   `yaml:"scrape_interval_hours" mapstructure:"scrape_interval_hours"`
 }
 
 // DeepCopy returns a deep copy of the configuration
@@ -245,13 +238,7 @@ func (c *Config) DeepCopy() *Config {
 			} else {
 				ic.ScrapeIntervalHours = nil
 			}
-			// Deep copy path mappings
-			if inst.PathMappings != nil {
-				ic.PathMappings = make([]PathMappingConfig, len(inst.PathMappings))
-				copy(ic.PathMappings, inst.PathMappings)
-			} else {
-				ic.PathMappings = nil
-			}
+
 			copyCfg.Scraper.RadarrInstances[i] = ic
 		}
 	} else {
@@ -275,13 +262,7 @@ func (c *Config) DeepCopy() *Config {
 			} else {
 				ic.ScrapeIntervalHours = nil
 			}
-			// Deep copy path mappings
-			if inst.PathMappings != nil {
-				ic.PathMappings = make([]PathMappingConfig, len(inst.PathMappings))
-				copy(ic.PathMappings, inst.PathMappings)
-			} else {
-				ic.PathMappings = nil
-			}
+
 			copyCfg.Scraper.SonarrInstances[i] = ic
 		}
 	} else {
