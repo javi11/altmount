@@ -109,9 +109,8 @@ export function QueuePage() {
 			}, refreshInterval);
 
 			return () => clearInterval(interval);
-		} else {
-			setNextRefreshTime(null);
 		}
+			setNextRefreshTime(null);
 	}, [autoRefreshEnabled, refreshInterval, userInteracting]);
 
 	// Pause auto-refresh during user interactions
@@ -146,9 +145,8 @@ export function QueuePage() {
 			const timer = setInterval(updateCountdown, 1000);
 
 			return () => clearInterval(timer);
-		} else {
-			setCountdown(0);
 		}
+			setCountdown(0);
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval]);
 
 	// Reset to page 1 when search or status filter changes

@@ -2,6 +2,8 @@ import {
 	AlertTriangle,
 	Heart,
 	MoreHorizontal,
+	Pause,
+	Play,
 	PlayCircle,
 	RefreshCw,
 	Shield,
@@ -39,6 +41,11 @@ export function HealthPage() {
 		source_nzb_path: "",
 		priority: false,
 	});
+	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+	const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds default
+	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
+	const [userInteracting, setUserInteracting] = useState(false);
+	const [countdown, setCountdown] = useState(0);
 
 	const pageSize = 20;
 	const {
@@ -50,6 +57,7 @@ export function HealthPage() {
 		limit: pageSize,
 		offset: page * pageSize,
 		search: searchTerm,
+		refetchInterval: autoRefreshEnabled && !userInteracting ? refreshInterval : undefined,
 	});
 
 	const { data: stats } = useHealthStats();
@@ -207,8 +215,74 @@ export function HealthPage() {
 		}
 	};
 
+	const toggleAutoRefresh = () => {
+		setAutoRefreshEnabled(!autoRefreshEnabled);
+		setNextRefreshTime(null);
+	};
+
+	const handleRefreshIntervalChange = (interval: number) => {
+		setRefreshInterval(interval);
+		setNextRefreshTime(null);
+	};
+
+	// Pause auto-refresh during user interactions
+	const handleUserInteractionStart = () => {
+		setUserInteracting(true);
+	};
+
+	const handleUserInteractionEnd = () => {
+		// Resume auto-refresh after a short delay
+		const timer = setTimeout(() => {
+			setUserInteracting(false);
+		}, 2000); // 2 second delay before resuming auto-refresh
+
+		return () => clearTimeout(timer);
+	};
+
 	const data = healthResponse?.data;
 	const meta = healthResponse?.meta;
+
+	// Update next refresh time when auto-refresh is enabled
+	useEffect(() => {
+		if (!autoRefreshEnabled || userInteracting) {
+			setNextRefreshTime(null);
+			return;
+		}
+		
+		// Set initial next refresh time
+		setNextRefreshTime(new Date(Date.now() + refreshInterval));
+		
+		// Reset the timer every time React Query refetches
+		const interval = setInterval(() => {
+			setNextRefreshTime(new Date(Date.now() + refreshInterval));
+		}, refreshInterval);
+
+		return () => clearInterval(interval);
+	}, [autoRefreshEnabled, refreshInterval, userInteracting]);
+
+	// Update countdown timer every second
+	useEffect(() => {
+		if (!nextRefreshTime || !autoRefreshEnabled || userInteracting) {
+			setCountdown(0);
+			return;
+		}
+		
+		const updateCountdown = () => {
+			const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
+			setCountdown(remaining);
+			
+			// If countdown reaches 0, reset to the full interval (handles any sync issues)
+			if (remaining === 0) {
+				setNextRefreshTime(new Date(Date.now() + refreshInterval));
+			}
+		};
+
+		// Initial countdown update
+		updateCountdown();
+		const timer = setInterval(updateCountdown, 1000);
+
+		return () => clearInterval(timer);
+	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval]);
 
 	// Reset page when search term changes
 	useEffect(() => {
@@ -234,9 +308,43 @@ export function HealthPage() {
 					<h1 className="font-bold text-3xl">Health Monitoring</h1>
 					<p className="text-base-content/70">
 						Monitor file integrity status - view all files being health checked
+						{autoRefreshEnabled && !userInteracting && countdown > 0 && (
+							<span className="ml-2 text-info text-sm">• Auto-refresh in {countdown}s</span>
+						)}
+						{userInteracting && autoRefreshEnabled && (
+							<span className="ml-2 text-sm text-warning">• Auto-refresh paused</span>
+						)}
 					</p>
 				</div>
-				<div className="flex gap-2">
+				<div className="flex flex-wrap gap-2">
+					{/* Auto-refresh controls */}
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							className={`btn btn-sm ${autoRefreshEnabled ? "btn-success" : "btn-outline"}`}
+							onClick={toggleAutoRefresh}
+							title={autoRefreshEnabled ? "Disable auto-refresh" : "Enable auto-refresh"}
+						>
+							{autoRefreshEnabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+							Auto
+						</button>
+
+						{autoRefreshEnabled && (
+							<select
+								className="select select-sm"
+								value={refreshInterval}
+								onChange={(e) => handleRefreshIntervalChange(Number(e.target.value))}
+								onFocus={handleUserInteractionStart}
+								onBlur={handleUserInteractionEnd}
+							>
+								<option value={5000}>5s</option>
+								<option value={10000}>10s</option>
+								<option value={30000}>30s</option>
+								<option value={60000}>60s</option>
+							</select>
+						)}
+					</div>
+
 					<button
 						type="button"
 						className="btn btn-outline"
@@ -342,6 +450,8 @@ export function HealthPage() {
 								className="input"
 								value={searchTerm}
 								onChange={(e) => setSearchTerm(e.target.value)}
+								onFocus={handleUserInteractionStart}
+								onBlur={handleUserInteractionEnd}
 							/>
 						</fieldset>
 					</div>

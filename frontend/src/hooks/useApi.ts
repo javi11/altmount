@@ -73,12 +73,17 @@ export const useHealth = (params?: {
 	status?: string;
 	since?: string;
 	search?: string;
+	refetchInterval?: number;
 }) => {
 	return useQuery({
 		queryKey: ["health", params],
 		queryFn: () => apiClient.getHealth(params),
 		refetchInterval: (query) => {
-			// Poll every 5 seconds if any items are in "checking" status
+			// Use custom refetch interval if provided
+			if (params?.refetchInterval !== undefined) {
+				return params.refetchInterval;
+			}
+			// Otherwise, poll every 5 seconds if any items are in "checking" status
 			const data = query.state.data?.data;
 			const hasCheckingItems = data?.some((item) => item.status === "checking");
 			return hasCheckingItems ? 5000 : false;
