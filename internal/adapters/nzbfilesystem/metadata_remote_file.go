@@ -357,10 +357,6 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 
 	// Add directories first
 	for _, dirInfo := range dirInfos {
-		// Skip the current directory itself
-		if dirInfo.Name() == filepath.Base(mvd.normalizedPath) || dirInfo.Name() == "." {
-			continue
-		}
 		infos = append(infos, dirInfo)
 		if count > 0 && len(infos) >= count {
 			return infos, nil

@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -63,6 +65,162 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 	}
 }
 
+// getFirstRarPart finds and returns the filename of the first part of a RAR archive
+// This method prioritizes .rar files over .part001.rar over .r00 files
+func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
+	if len(rarFileNames) == 0 {
+		return "", NewNonRetryableError("no RAR files provided", nil)
+	}
+
+	// If only one file, return it
+	if len(rarFileNames) == 1 {
+		return rarFileNames[0], nil
+	}
+
+	// Group files by base name and find first parts
+	type candidateFile struct {
+		filename string
+		baseName string
+		partNum  int
+		priority int // Lower number = higher priority
+	}
+
+	var candidates []candidateFile
+
+	for _, filename := range rarFileNames {
+		base, part := rh.parseRarFilename(filename)
+		
+		// Only consider files that are actually first parts (part 0)
+		if part != 0 {
+			continue
+		}
+
+		// Determine priority based on file extension pattern
+		priority := rh.getRarFilePriority(filename)
+		
+		candidates = append(candidates, candidateFile{
+			filename: filename,
+			baseName: base,
+			partNum:  part,
+			priority: priority,
+		})
+	}
+
+	if len(candidates) == 0 {
+		return "", NewNonRetryableError("no valid first RAR part found in archive", nil)
+	}
+
+	// Sort by priority (lower number = higher priority), then by filename for consistency
+	best := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if candidate.priority < best.priority || 
+		   (candidate.priority == best.priority && candidate.filename < best.filename) {
+			best = candidate
+		}
+	}
+
+	rh.log.Debug("Selected first RAR part",
+		"filename", best.filename,
+		"base_name", best.baseName,
+		"priority", best.priority,
+		"total_candidates", len(candidates))
+
+	return best.filename, nil
+}
+
+// getRarFilePriority returns the priority for different RAR file types
+// Lower number = higher priority
+func (rh *rarProcessor) getRarFilePriority(filename string) int {
+	lowerName := strings.ToLower(filename)
+	
+	// Priority 1: .rar files (main archive)
+	if strings.HasSuffix(lowerName, ".rar") && !strings.Contains(lowerName, ".part") {
+		return 1
+	}
+	
+	// Priority 2: .part001.rar, .part01.rar patterns
+	if strings.Contains(lowerName, ".part") && strings.HasSuffix(lowerName, ".rar") {
+		return 2
+	}
+	
+	// Priority 3: .r00 patterns
+	if strings.Contains(lowerName, ".r0") {
+		return 3
+	}
+	
+	// Priority 4: .001 numeric patterns  
+	if len(lowerName) > 4 && lowerName[len(lowerName)-4:len(lowerName)-3] == "." {
+		return 4
+	}
+	
+	// Priority 5: Everything else
+	return 5
+}
+
+// parseRarFilename extracts base name and part number from RAR filename
+// This is a simplified version of the logic from processor.go
+func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int) {
+	lowerFilename := strings.ToLower(filename)
+	
+	// Pattern 1: filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
+	partPattern := regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`)
+	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 2 {
+		base = matches[1]
+		if partNum := rh.parseInt(matches[2]); partNum >= 0 {
+			// Convert 1-based part numbers to 0-based (part001 becomes 0, part002 becomes 1)
+			if partNum > 0 {
+				part = partNum - 1
+			}
+			return base, part
+		}
+	}
+	
+	// Pattern 2: filename.rar (first part)
+	if strings.HasSuffix(lowerFilename, ".rar") {
+		base = strings.TrimSuffix(filename, filepath.Ext(filename))
+		return base, 0 // First part
+	}
+	
+	// Pattern 3: filename.r## or filename.r### (e.g., movie.r00, movie.r01)
+	rPattern := regexp.MustCompile(`^(.+)\.r(\d+)$`)
+	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
+		base = matches[1]
+		if partNum := rh.parseInt(matches[2]); partNum >= 0 {
+			// .r00 is part 0, .r01 is part 1, etc.
+			return base, partNum
+		}
+	}
+	
+	// Pattern 4: filename.### (numeric extensions like .001, .002)
+	numericPattern := regexp.MustCompile(`^(.+)\.(\d+)$`)
+	if matches := numericPattern.FindStringSubmatch(filename); len(matches) > 2 {
+		base = matches[1]
+		if partNum := rh.parseInt(matches[2]); partNum >= 0 {
+			// .001 becomes part 0, .002 becomes part 1, etc.
+			if partNum > 0 {
+				part = partNum - 1
+			}
+			return base, part
+		}
+	}
+	
+	// Unknown pattern - return filename as base with high part number (sorts last)
+	return filename, 999999
+}
+
+// parseInt safely converts string to int
+func (rh *rarProcessor) parseInt(s string) int {
+	num := 0
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			num = num*10 + int(r-'0')
+		} else {
+			return -1
+		}
+	}
+	return num
+}
+
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses rarlist with UsenetFileSystem to analyze RAR structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
@@ -86,8 +244,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, NewNonRetryableError("no RAR files found in the archive", nil)
 	}
 
-	// Start with the first RAR file (usually .rar or .part001.rar)
-	mainRarFile := rarFileNames[0]
+	// Find the first RAR part using intelligent detection
+	mainRarFile, err := rh.getFirstRarPart(rarFileNames)
+	if err != nil {
+		return nil, err
+	}
 
 	rh.log.Info("Starting RAR analysis via rarlist with Usenet streaming",
 		"main_file", mainRarFile,

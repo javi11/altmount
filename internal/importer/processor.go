@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/javi11/altmount/internal/metadata"
@@ -23,6 +22,11 @@ type Processor struct {
 	rarProcessor    RarProcessor
 	poolManager     pool.Manager // Pool manager for dynamic pool access
 	log             *slog.Logger
+
+	// Pre-compiled regex patterns for RAR file sorting
+	rarPartPattern    *regexp.Regexp // pattern.part###.rar
+	rarRPattern       *regexp.Regexp // pattern.r### or pattern.r##
+	rarNumericPattern *regexp.Regexp // pattern.### (numeric extensions)
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
@@ -34,6 +38,11 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		rarProcessor:    NewRarProcessor(poolManager, 10), // 10 max workers for RAR analysis
 		poolManager:     poolManager,
 		log:             slog.Default().With("component", "nzb-processor"),
+
+		// Initialize pre-compiled regex patterns for RAR file sorting
+		rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
+		rarRPattern:       regexp.MustCompile(`^(.+)\.r(\d+)$`),         // filename.r00, filename.r01
+		rarNumericPattern: regexp.MustCompile(`^(.+)\.(\d+)$`),          // filename.001, filename.002
 	}
 }
 
@@ -277,85 +286,80 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 	// Process RAR archives if any exist
 	if len(rarFiles) > 0 {
-		// Group RAR files by their archive base name
-		rarArchives := proc.groupRarFilesByArchive(rarFiles)
+		// Rename RAR files to match the first file's base name that will allow parse rar that have different files name
+		rarFiles = renameRarFilesToMatchFirstFile(rarFiles)
 
-		// Process each RAR archive
-		for archiveName, archiveFiles := range rarArchives {
-			// Create directory for the RAR archive content in virtual directory
-			rarDirPath := filepath.Join(nzbVirtualDir, archiveName)
-			rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
+		// Create directory for the single RAR archive content
+		nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
+		rarDirPath := filepath.Join(nzbVirtualDir, nzbBaseName)
+		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
 
-			// Ensure RAR archive directory exists
-			if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
-				return "", fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
-			}
-
-			proc.log.Info("Processing RAR archive with content analysis",
-				"archive", archiveName,
-				"parts", len(archiveFiles),
-				"rar_dir", rarDirPath)
-
-			// Sort RAR files for proper analysis
-			sortedRarFiles := proc.sortRarFiles(archiveFiles)
-
-			// Analyze RAR content using the new RAR handler
-			ctx := context.Background()
-			rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, sortedRarFiles)
-			if err != nil {
-				proc.log.Error("Failed to analyze RAR archive content",
-					"archive", archiveName,
-					"error", err)
-				// Fallback to simplified mode if RAR analysis fails
-				return "", err
-			}
-
-			proc.log.Info("Successfully analyzed RAR archive content",
-				"archive", archiveName,
-				"files_in_archive", len(rarContents))
-
-			// Process each file found in the RAR archive
-			for _, rarContent := range rarContents {
-				// Skip directories
-				if rarContent.IsDirectory {
-					proc.log.Debug("Skipping directory in RAR archive", "path", rarContent.InternalPath)
-					continue
-				}
-
-				// Determine the virtual file path for this extracted file
-				// The file path should be relative to the RAR directory
-				virtualFilePath := filepath.Join(rarDirPath, rarContent.InternalPath)
-				virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
-
-				// Ensure parent directory exists for nested files
-				parentDir := filepath.Dir(virtualFilePath)
-				if err := proc.ensureDirectoryExists(parentDir); err != nil {
-					return "", fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
-				}
-
-				// Create file metadata using the RAR handler's helper function
-				fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
-					rarContent,
-					parsed.Path,
-				)
-
-				// Write file metadata to disk
-				if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-					return "", fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
-				}
-
-				proc.log.Debug("Created metadata for RAR extracted file",
-					"file", rarContent.Filename,
-					"internal_path", rarContent.InternalPath,
-					"virtual_path", virtualFilePath,
-					"size", rarContent.Size,
-					"segments", len(rarContent.Segments))
-			}
-
-			proc.log.Info("Successfully processed RAR archive with content analysis",
-				"archive", archiveName,
-				"files_processed", len(rarContents))
+		// Ensure RAR archive directory exists
+		if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
+			return "", fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
 		}
+
+		proc.log.Info("Processing RAR archive with content analysis",
+			"archive", nzbBaseName,
+			"parts", len(rarFiles),
+			"rar_dir", rarDirPath)
+
+		// Analyze RAR content using the new RAR handler
+		ctx := context.Background()
+		rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, rarFiles)
+		if err != nil {
+			proc.log.Error("Failed to analyze RAR archive content",
+				"archive", nzbBaseName,
+				"error", err)
+			// Fallback to simplified mode if RAR analysis fails
+			return "", err
+		}
+
+		proc.log.Info("Successfully analyzed RAR archive content",
+			"archive", nzbBaseName,
+			"files_in_archive", len(rarContents))
+
+		// Process each file found in the RAR archive
+		for _, rarContent := range rarContents {
+			// Skip directories
+			if rarContent.IsDirectory {
+				proc.log.Debug("Skipping directory in RAR archive", "path", rarContent.InternalPath)
+				continue
+			}
+
+			// Determine the virtual file path for this extracted file
+			// The file path should be relative to the RAR directory
+			virtualFilePath := filepath.Join(rarDirPath, rarContent.InternalPath)
+			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+			// Ensure parent directory exists for nested files
+			parentDir := filepath.Dir(virtualFilePath)
+			if err := proc.ensureDirectoryExists(parentDir); err != nil {
+				return "", fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
+			}
+
+			// Create file metadata using the RAR handler's helper function
+			fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
+				rarContent,
+				parsed.Path,
+			)
+
+			// Write file metadata to disk
+			if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+				return "", fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
+			}
+
+			proc.log.Debug("Created metadata for RAR extracted file",
+				"file", rarContent.Filename,
+				"internal_path", rarContent.InternalPath,
+				"virtual_path", virtualFilePath,
+				"size", rarContent.Size,
+				"segments", len(rarContent.Segments))
+		}
+
+		proc.log.Info("Successfully processed RAR archive with content analysis",
+			"archive", nzbBaseName,
+			"files_processed", len(rarContents))
 	}
 
 	return nzbVirtualDir, nil
@@ -519,141 +523,6 @@ func (proc *Processor) separateRarFiles(files []ParsedFile) ([]ParsedFile, []Par
 	return regularFiles, rarFiles
 }
 
-// groupRarFilesByArchive groups RAR files by their archive base name
-func (proc *Processor) groupRarFilesByArchive(files []ParsedFile) map[string][]ParsedFile {
-	rarArchives := make(map[string][]ParsedFile)
-
-	for _, file := range files {
-		if !file.IsRarArchive {
-			continue
-		}
-
-		// Get the base archive name (remove part numbers and extensions)
-		baseName := proc.getRarArchiveBaseName(file.Filename)
-		if baseName == "" {
-			baseName = file.Filename // Fallback to original filename
-		}
-
-		rarArchives[baseName] = append(rarArchives[baseName], file)
-	}
-
-	return rarArchives
-}
-
-// getRarArchiveBaseName extracts the base name of a RAR archive (without part numbers)
-func (proc *Processor) getRarArchiveBaseName(filename string) string {
-	// Handle patterns like movie.part001.rar, movie.part01.rar
-	partPattern := regexp.MustCompile(`^(.+)\.part\d+\.rar$`)
-	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
-		return matches[1]
-	}
-
-	// Handle patterns like movie.rar, movie.r00, movie.r01
-	if strings.HasSuffix(strings.ToLower(filename), ".rar") {
-		return strings.TrimSuffix(filename, filepath.Ext(filename))
-	}
-
-	rPattern := regexp.MustCompile(`^(.+)\.r\d+$`)
-	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 1 {
-		return matches[1]
-	}
-
-	// Fallback: remove common RAR suffixes
-	rarDirPattern := regexp.MustCompile(`\.(part\d+|r\d+)$`)
-	baseName := strings.TrimSuffix(filename, filepath.Ext(filename))
-	return rarDirPattern.ReplaceAllString(baseName, "")
-}
-
-// sortRarFiles sorts RAR files in the correct order (first part first)
-func (proc *Processor) sortRarFiles(files []ParsedFile) []ParsedFile {
-	sorted := make([]ParsedFile, len(files))
-	copy(sorted, files)
-
-	sort.Slice(sorted, func(i, j int) bool {
-		return proc.compareRarFilenames(sorted[i].Filename, sorted[j].Filename)
-	})
-
-	return sorted
-}
-
-// compareRarFilenames compares RAR filenames for proper sorting
-func (proc *Processor) compareRarFilenames(a, b string) bool {
-	// Extract base names and extensions
-	aBase, aExt := proc.splitRarFilename(a)
-	bBase, bExt := proc.splitRarFilename(b)
-
-	// If different base names, use lexical order
-	if aBase != bBase {
-		return aBase < bBase
-	}
-
-	// Same base name, sort by extension/part number
-	aNum := proc.extractRarPartNumber(aExt)
-	bNum := proc.extractRarPartNumber(bExt)
-
-	return aNum < bNum
-}
-
-// splitRarFilename splits a RAR filename into base and extension parts
-func (proc *Processor) splitRarFilename(filename string) (base, ext string) {
-	// Handle patterns like .part001.rar, .part01.rar
-	partPattern := regexp.MustCompile(`^(.+)\.part\d+\.rar$`)
-	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
-		return matches[1], strings.TrimPrefix(filename, matches[1]+".")
-	}
-
-	// Handle patterns like .rar, .r00, .r01
-	if strings.HasSuffix(strings.ToLower(filename), ".rar") {
-		return strings.TrimSuffix(filename, filepath.Ext(filename)), "rar"
-	}
-
-	rPattern := regexp.MustCompile(`^(.+)\.r(\d+)$`)
-	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
-		return matches[1], "r" + matches[2]
-	}
-
-	return filename, ""
-}
-
-// extractRarPartNumber extracts numeric part from RAR extension for sorting
-func (proc *Processor) extractRarPartNumber(ext string) int {
-	// .rar is always first (part 0)
-	if ext == "rar" {
-		return 0
-	}
-
-	// Extract number from .r00, .r01, etc.
-	rPattern := regexp.MustCompile(`^r(\d+)$`)
-	if matches := rPattern.FindStringSubmatch(ext); len(matches) > 1 {
-		if num := proc.parseInt(matches[1]); num >= 0 {
-			return num + 1 // .r00 becomes 1, .r01 becomes 2, etc.
-		}
-	}
-
-	// Extract number from .part001.rar, .part01.rar, etc.
-	partPattern := regexp.MustCompile(`^part(\d+)\.rar$`)
-	if matches := partPattern.FindStringSubmatch(ext); len(matches) > 1 {
-		if num := proc.parseInt(matches[1]); num >= 0 {
-			return num
-		}
-	}
-
-	return 999999 // Unknown format goes last
-}
-
-// parseInt safely converts string to int
-func (proc *Processor) parseInt(s string) int {
-	num := 0
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			num = num*10 + int(r-'0')
-		} else {
-			return -1
-		}
-	}
-	return num
-}
-
 // processStrmFileWithDir handles STRM files (single file from NXG link) in a specific virtual directory
 func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
 	if len(parsed.Files) != 1 {
@@ -694,4 +563,36 @@ func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir stri
 		"segments", len(file.Segments))
 
 	return virtualDir, nil
+}
+
+func renameRarFilesToMatchFirstFile(rarFiles []ParsedFile) []ParsedFile {
+	// Get the base name of the first RAR file (without extension)
+	firstFileBase := strings.TrimSuffix(rarFiles[0].Filename, filepath.Ext(rarFiles[0].Filename))
+
+	// Rename all RAR files to match the base name of the first file while preserving original part naming
+	for i := range rarFiles {
+		originalFileName := rarFiles[i].Filename
+
+		// Try to extract the part suffix from the original filename
+		var partSuffix string
+
+		// Check for .part###.rar pattern
+		if matches := regexp.MustCompile(`\.part(\d+)\.rar$`).FindStringSubmatch(originalFileName); len(matches) > 1 {
+			partSuffix = fmt.Sprintf(".part%s.rar", matches[1])
+		} else if matches := regexp.MustCompile(`\.r(\d+)$`).FindStringSubmatch(originalFileName); len(matches) > 1 {
+			// Check for .r### pattern
+			partSuffix = fmt.Sprintf(".r%s", matches[1])
+		} else if matches := regexp.MustCompile(`\.(\d+)$`).FindStringSubmatch(originalFileName); len(matches) > 1 {
+			// Check for .### pattern
+			partSuffix = fmt.Sprintf(".%s", matches[1])
+		} else {
+			// If no pattern matches, keep the original extension
+			partSuffix = filepath.Ext(originalFileName)
+		}
+
+		// Construct new filename with first file's base name and original part suffix
+		rarFiles[i].Filename = firstFileBase + partSuffix
+	}
+
+	return rarFiles
 }
