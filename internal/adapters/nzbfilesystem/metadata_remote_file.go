@@ -91,6 +91,11 @@ func (mrf *MetadataRemoteFile) getStreamingChunkSize() int64 {
 
 // OpenFile opens a virtual file backed by metadata
 func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r utils.PathWithArgs) (bool, afero.File, error) {
+	// Forbid COPY operations - nzbfilesystem is read-only
+	if r.IsCopy() {
+		return false, nil, os.ErrPermission
+	}
+
 	// Normalize the path to handle trailing slashes consistently
 	normalizedName := normalizePath(name)
 
