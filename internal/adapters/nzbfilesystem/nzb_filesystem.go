@@ -57,12 +57,14 @@ func (nfs *NzbFilesystem) OpenFile(name string, flag int, perm os.FileMode) (afe
 		return nil, os.ErrPermission
 	}
 
-	// Check if this is a COPY operation and forbid it
+	// Parse path to check for COPY operations
 	pr, err := utils.NewPathWithArgsFromString(name)
 	if err != nil {
 		return nil, err
 	}
 	
+	// If this is a COPY operation, we need to handle it carefully
+	// Block COPY operations entirely - they should use MOVE instead
 	if pr.IsCopy() {
 		return nil, os.ErrPermission
 	}

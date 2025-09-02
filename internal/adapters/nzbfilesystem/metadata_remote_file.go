@@ -233,18 +233,7 @@ func (mrf *MetadataRemoteFile) Stat(name string) (bool, fs.FileInfo, error) {
 	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
-		// Check if this could be a valid empty directory
-		if mrf.isValidEmptyDirectory(normalizedName) {
-			info := &MetadataFileInfo{
-				name:    filepath.Base(normalizedName),
-				size:    0,
-				mode:    os.ModeDir | 0755,
-				modTime: time.Now(),
-				isDir:   true,
-			}
-			return true, info, nil
-		}
-		return false, nil, nil
+		return false, nil, fs.ErrNotExist
 	}
 
 	// Get file metadata using simplified schema
@@ -254,7 +243,7 @@ func (mrf *MetadataRemoteFile) Stat(name string) (bool, fs.FileInfo, error) {
 	}
 
 	if fileMeta == nil {
-		return false, nil, nil
+		return false, nil, fs.ErrNotExist
 	}
 
 	// Convert to fs.FileInfo

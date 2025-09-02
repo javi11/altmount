@@ -32,7 +32,7 @@ export function QueuePage() {
 	const [statusFilter, setStatusFilter] = useState<string>("");
 	const [searchTerm, setSearchTerm] = useState("");
 	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-	const [refreshInterval, setRefreshInterval] = useState(10000); // 10 seconds default
+	const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds default
 	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
 	const [userInteracting, setUserInteracting] = useState(false);
 	const [countdown, setCountdown] = useState(0);
@@ -100,16 +100,18 @@ export function QueuePage() {
 	// Update next refresh time when auto-refresh is enabled
 	useEffect(() => {
 		if (autoRefreshEnabled && !userInteracting) {
-			const updateNextRefreshTime = () => {
+			// Set initial next refresh time
+			setNextRefreshTime(new Date(Date.now() + refreshInterval));
+			
+			// Reset the timer every time React Query refetches
+			const interval = setInterval(() => {
 				setNextRefreshTime(new Date(Date.now() + refreshInterval));
-			};
-
-			updateNextRefreshTime();
-			const interval = setInterval(updateNextRefreshTime, refreshInterval);
+			}, refreshInterval);
 
 			return () => clearInterval(interval);
+		} else {
+			setNextRefreshTime(null);
 		}
-		setNextRefreshTime(null);
 	}, [autoRefreshEnabled, refreshInterval, userInteracting]);
 
 	// Pause auto-refresh during user interactions
@@ -132,15 +134,22 @@ export function QueuePage() {
 			const updateCountdown = () => {
 				const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
 				setCountdown(remaining);
+				
+				// If countdown reaches 0, reset to the full interval (handles any sync issues)
+				if (remaining === 0) {
+					setNextRefreshTime(new Date(Date.now() + refreshInterval));
+				}
 			};
 
+			// Initial countdown update
 			updateCountdown();
 			const timer = setInterval(updateCountdown, 1000);
 
 			return () => clearInterval(timer);
+		} else {
+			setCountdown(0);
 		}
-		setCountdown(0);
-	}, [nextRefreshTime, autoRefreshEnabled, userInteracting]);
+	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval]);
 
 	// Reset to page 1 when search or status filter changes
 	useEffect(() => {

@@ -95,6 +95,11 @@ var liveProps = map[xml.Name]struct {
 		findFn: findSupportedLock,
 		dir:    true,
 	},
+	// Custom property to help clients identify same filesystem for MOVE operations
+	{Space: "altmount:", Local: "filesystem-id"}: {
+		findFn: findFilesystemId,
+		dir:    true,
+	},
 }
 
 // props returns the status of the properties named pnames for resource name.
@@ -244,6 +249,15 @@ func findSupportedLock(ctx context.Context, name string, fi os.FileInfo) (string
 		`<D:lockscope><D:exclusive/></D:lockscope>` +
 		`<D:locktype><D:write/></D:locktype>` +
 		`</D:lockentry>`, nil
+}
+
+// findFilesystemId returns a unique identifier for the filesystem
+// to help WebDAV clients identify when source and destination are on the same filesystem
+func findFilesystemId(ctx context.Context, name string, fi os.FileInfo) (string, error) {
+	// Return a static filesystem ID that's unique to this altmount instance
+	// This helps clients like Sonarr/Radarr understand that MOVE operations 
+	// should be used instead of COPY for files within the same mount
+	return "altmount-nzbfs-v1", nil
 }
 
 // slashClean is equivalent to but slightly more efficient than

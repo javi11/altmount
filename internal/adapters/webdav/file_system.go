@@ -2,6 +2,7 @@ package webdav
 
 import (
 	"context"
+	"log/slog"
 	"os"
 
 	"github.com/javi11/altmount/internal/utils"
@@ -53,6 +54,10 @@ func (fs *fileSystem) RemoveAll(ctx context.Context, name string) error {
 }
 
 func (fs *fileSystem) Rename(ctx context.Context, oldName, newName string) error {
+	// Add logging to understand when MOVE operations trigger renames
+	slog.InfoContext(ctx, "WebDAV filesystem Rename called", 
+		"oldName", oldName, 
+		"newName", newName)
 	return fs.Fs.Rename(oldName, newName)
 }
 
