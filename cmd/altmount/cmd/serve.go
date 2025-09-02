@@ -168,7 +168,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create repositories for API access
 	dbConn := nsys.Database().Connection()
 	mainRepo := database.NewRepository(dbConn)
-	healthRepo := database.NewHealthRepository(dbConn)
+	
+	// Create media repository for scraper and health correlation
+	mediaRepo := database.NewMediaRepository(dbConn, logger)
+	
+	// Create health repository with media repository for repair triggering
+	healthRepo := database.NewHealthRepository(dbConn, mediaRepo)
 	userRepo = database.NewUserRepository(dbConn)
 
 	// Create authentication service
@@ -188,9 +193,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-
-	// Create media repository for scraper
-	mediaRepo := database.NewMediaRepository(dbConn, logger)
 
 	// Create scraper service
 	scraperService := scraper.NewService(configManager.GetConfigGetter(), mediaRepo, logger)

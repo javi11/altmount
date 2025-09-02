@@ -287,8 +287,7 @@ export function ScraperConfigSection({
 									disabled={isReadOnly}
 								/>
 								<p className="label">
-									Absolute path where WebDAV is mounted. File paths from Radarr/Sonarr will be 
-									stripped of this prefix before storage.
+									Absolute path where WebDAV is mounted. In case you have a setup an union in the arrs, add the union instead. Ex: "/mnt/unionfs", "/mnt/altmount"
 								</p>
 							</fieldset>
 						</div>

@@ -43,7 +43,16 @@ export function useWebDAVConnection() {
 export function useWebDAVDirectory(path: string, isConnected = true, hasConnectionFailed = false) {
 	return useQuery<WebDAVDirectory>({
 		queryKey: ["webdav", "directory", path],
-		queryFn: () => webdavClient.listDirectory(path),
+		queryFn: async () => {
+			const result = await webdavClient.listDirectory(path);
+			
+			// Log successful empty directory access for debugging
+			if (result.files.length === 0) {
+				console.debug(`Successfully accessed empty directory: ${path}`);
+			}
+			
+			return result;
+		},
 		// Only enable based on React state - the mutationFn already verifies connection
 		enabled: isConnected && !hasConnectionFailed,
 		staleTime: 30000, // 30 seconds

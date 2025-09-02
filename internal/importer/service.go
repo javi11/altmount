@@ -112,6 +112,12 @@ func (s *Service) Start(ctx context.Context) error {
 	s.log.InfoContext(ctx, "Starting NZB import service",
 		"workers", s.config.Workers)
 
+	// Reset any stale queue items from processing/retrying back to pending
+	if err := s.database.Repository.ResetStaleItems(); err != nil {
+		s.log.ErrorContext(ctx, "Failed to reset stale queue items", "error", err)
+		return fmt.Errorf("failed to reset stale queue items: %w", err)
+	}
+
 	// Start worker pool for processing queue items
 	for i := 0; i < s.config.Workers; i++ {
 		s.wg.Add(1)
@@ -393,11 +399,11 @@ func (s *Service) workerLoop(workerID int) {
 	defer s.wg.Done()
 
 	log := s.log.With("worker_id", workerID)
-	
+
 	// Get processing interval from configuration
 	processingInterval := s.configGetter().Import.QueueProcessingInterval
 	log.Info("Queue worker started", "processing_interval", processingInterval)
-	
+
 	ticker := time.NewTicker(processingInterval)
 	defer ticker.Stop()
 
@@ -480,11 +486,14 @@ func (s *Service) processQueueItems(workerID int) {
 	log.Debug("Processing claimed queue item", "queue_id", item.ID, "file", item.NzbPath)
 
 	// Step 3: Process the NZB file and write to main database
-	var processingErr error
+	var (
+		processingErr error
+		resultingPath string
+	)
 	if item.RelativePath != nil {
-		processingErr = s.processor.ProcessNzbFileWithRelativePath(item.NzbPath, *item.RelativePath)
+		resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
 	} else {
-		processingErr = s.processor.ProcessNzbFile(item.NzbPath)
+		resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, "")
 	}
 
 	// Step 4: Update queue database with results
@@ -492,6 +501,10 @@ func (s *Service) processQueueItems(workerID int) {
 		// Handle failure in queue database
 		s.handleProcessingFailure(item, processingErr, log)
 	} else {
+		if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
+			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
+		}
+
 		// Mark as completed in queue database
 		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
 			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
@@ -655,6 +668,64 @@ func (s *Service) calculateVirtualDirectory(nzbPath, relativePath string) string
 	// Ensure virtual path starts with / and uses forward slashes
 	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
 	return filepath.Clean(virtualPath)
+}
+
+// ProcessItemInBackground processes a specific queue item in the background
+func (s *Service) ProcessItemInBackground(itemID int64) {
+	go func() {
+		log := s.log.With("item_id", itemID, "background", true)
+		log.Debug("Starting background processing of queue item")
+
+		// Get the queue item
+		item, err := s.database.Repository.GetQueueItem(itemID)
+		if err != nil {
+			log.Error("Failed to get queue item for background processing", "error", err)
+			return
+		}
+
+		if item == nil {
+			log.Warn("Queue item not found for background processing")
+			return
+		}
+
+		// Update status to processing
+		if err := s.database.Repository.UpdateQueueItemStatus(itemID, database.QueueStatusProcessing, nil); err != nil {
+			log.Error("Failed to update item status to processing", "error", err)
+			return
+		}
+
+		// Process the NZB file
+		var (
+			processingErr error
+			resultingPath string
+		)
+		if item.RelativePath != nil {
+			resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
+		} else {
+			resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, "")
+		}
+
+		// Update queue database with results
+		if processingErr != nil {
+			// Handle failure
+			s.handleProcessingFailure(item, processingErr, log)
+		} else {
+			// Handle success
+			if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
+				log.Error("Failed to add storage path", "error", err)
+			}
+
+			// Mark as completed
+			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+				log.Error("Failed to mark item as completed", "error", err)
+			} else {
+				log.Info("Successfully processed queue item in background", "resulting_path", resultingPath)
+
+				// Notify rclone VFS about the new import (async, don't fail on error)
+				s.notifyRcloneVFS(item, log)
+			}
+		}
+	}()
 }
 
 // CalculateFileSizeOnly calculates the total file size from NZB/STRM segments

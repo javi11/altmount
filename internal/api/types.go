@@ -85,27 +85,24 @@ type QueueStatsResponse struct {
 	LastUpdated         time.Time `json:"last_updated"`
 }
 
-// QueueRetryRequest represents request to retry a queue item
-type QueueRetryRequest struct {
-	ResetRetryCount bool `json:"reset_retry_count,omitempty"`
-}
-
 // Health API Types
 
 // HealthItemResponse represents a health record in API responses
 type HealthItemResponse struct {
-	ID            int64                 `json:"id"`
-	FilePath      string                `json:"file_path"`
-	Status        database.HealthStatus `json:"status"`
-	LastChecked   time.Time             `json:"last_checked"`
-	LastError     *string               `json:"last_error"`
-	RetryCount    int                   `json:"retry_count"`
-	MaxRetries    int                   `json:"max_retries"`
-	NextRetryAt   *time.Time            `json:"next_retry_at"`
-	SourceNzbPath *string               `json:"source_nzb_path"`
-	ErrorDetails  *string               `json:"error_details"`
-	CreatedAt     time.Time             `json:"created_at"`
-	UpdatedAt     time.Time             `json:"updated_at"`
+	ID               int64                 `json:"id"`
+	FilePath         string                `json:"file_path"`
+	Status           database.HealthStatus `json:"status"`
+	LastChecked      time.Time             `json:"last_checked"`
+	LastError        *string               `json:"last_error"`
+	RetryCount       int                   `json:"retry_count"`
+	MaxRetries       int                   `json:"max_retries"`
+	NextRetryAt      *time.Time            `json:"next_retry_at"`
+	SourceNzbPath    *string               `json:"source_nzb_path"`
+	ErrorDetails     *string               `json:"error_details"`
+	RepairRetryCount int                   `json:"repair_retry_count"`
+	MaxRepairRetries int                   `json:"max_repair_retries"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
 }
 
 // HealthListRequest represents request parameters for listing health records
@@ -127,6 +124,11 @@ type HealthStatsResponse struct {
 // HealthRetryRequest represents request to retry a corrupted file
 type HealthRetryRequest struct {
 	ResetRetryCount bool `json:"reset_retry_count,omitempty"`
+}
+
+// HealthRepairRequest represents request to trigger repair for a corrupted file
+type HealthRepairRequest struct {
+	ResetRepairRetryCount bool `json:"reset_repair_retry_count,omitempty"`
 }
 
 // HealthCleanupRequest represents request to cleanup health records
@@ -504,18 +506,20 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 		return nil
 	}
 	return &HealthItemResponse{
-		ID:            item.ID,
-		FilePath:      item.FilePath,
-		Status:        item.Status,
-		LastChecked:   item.LastChecked,
-		LastError:     item.LastError,
-		RetryCount:    item.RetryCount,
-		MaxRetries:    item.MaxRetries,
-		NextRetryAt:   item.NextRetryAt,
-		SourceNzbPath: item.SourceNzbPath,
-		ErrorDetails:  item.ErrorDetails,
-		CreatedAt:     item.CreatedAt,
-		UpdatedAt:     item.UpdatedAt,
+		ID:               item.ID,
+		FilePath:         item.FilePath,
+		Status:           item.Status,
+		LastChecked:      item.LastChecked,
+		LastError:        item.LastError,
+		RetryCount:       item.RetryCount,
+		MaxRetries:       item.MaxRetries,
+		NextRetryAt:      item.NextRetryAt,
+		SourceNzbPath:    item.SourceNzbPath,
+		ErrorDetails:     item.ErrorDetails,
+		RepairRetryCount: item.RepairRetryCount,
+		MaxRepairRetries: item.MaxRepairRetries,
+		CreatedAt:        item.CreatedAt,
+		UpdatedAt:        item.UpdatedAt,
 	}
 }
 

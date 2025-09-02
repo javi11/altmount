@@ -394,65 +394,26 @@ func (s *Server) handleSABnzbdHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Combine and convert to SABnzbd format
-	var slots []SABnzbdHistorySlot
+	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
 	for _, item := range completed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
 		index++
 	}
 	for _, item := range failed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
 		index++
 	}
 
 	// Create the proper history response structure using the new struct
 	response := SABnzbdCompleteHistoryResponse{
 		History: SABnzbdHistoryObject{
-			ActiveLang:      "en",
-			Paused:          false,
-			Session:         "1234567890abcdef0987654321fedcba",
-			RestartReq:      false,
-			PowerOptions:    true,
-			Slots:           slots,
-			Speed:           "0 ",
-			HelpURI:         "http://wiki.sabnzbd.org/",
-			Size:            "0 B",
-			Uptime:          time.Since(s.startTime).String(),
-			TotalSize:       "0 B",
-			MonthSize:       "0 B",
-			WeekSize:        "0 B",
-			Version:         "4.5.0",
-			NewRelURL:       "",
-			DiskspaceTotal2: "74.43",
-			ColorScheme:     "white",
-			DiskspaceTotal1: "74.43",
-			Nt:              runtime.GOOS == "windows",
-			Status:          "Idle",
-			LastWarning:     "",
-			HaveWarnings:    "0",
-			CacheArt:        "0",
-			SizeLeft:        "0 B",
-			FinishAction:    nil,
-			PausedAll:       false,
-			CacheSize:       "0 B",
-			NewzbinURL:      "www.newzbin2.es",
-			NewRelease:      "",
-			PauseInt:        "0",
-			MbLeft:          "0.00",
-			Diskspace1:      "10.42",
-			Darwin:          runtime.GOOS == "darwin",
-			TimeLeft:        "0:00:00",
-			Mb:              "0.00",
-			NoOfSlots:       len(slots),
-			DaySize:         "0 B",
-			ETA:             "unknown",
-			NzbQuota:        "",
-			LoadAvg:         "",
-			CacheMax:        "134217728",
-			KbPerSec:        "0.00",
-			SpeedLimit:      "",
-			WebDir:          "",
-			Diskspace2:      "10.42",
+			Slots:     slots,
+			TotalSize: "0 B",
+			MonthSize: "0 B",
+			WeekSize:  "0 B",
+			Version:   "4.5.0",
+			DaySize:   "0 B",
 		},
 	}
 

@@ -128,6 +128,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	apiMux.HandleFunc("GET /health/{id}", s.handleGetHealth)
 	apiMux.HandleFunc("DELETE /health/{id}", s.handleDeleteHealth)
 	apiMux.HandleFunc("POST /health/{id}/retry", s.handleRetryHealth)
+	apiMux.HandleFunc("POST /health/{id}/repair", s.handleRepairHealth)
 	apiMux.HandleFunc("GET /health/corrupted", s.handleListCorrupted)
 	apiMux.HandleFunc("GET /health/stats", s.handleGetHealthStats)
 	apiMux.HandleFunc("DELETE /health/cleanup", s.handleCleanupHealth)

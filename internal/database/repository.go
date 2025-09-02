@@ -329,7 +329,7 @@ func (r *Repository) UpdateQueueItemStatus(id int64, status QueueStatus, errorMe
 func (r *Repository) GetQueueItem(id int64) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
 		FROM import_queue WHERE id = ?
 	`
 
@@ -337,7 +337,7 @@ func (r *Repository) GetQueueItem(id int64) (*ImportQueueItem, error) {
 	err := r.db.QueryRow(query, id).Scan(
 		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
 	)
 
 	if err != nil {
@@ -354,7 +354,7 @@ func (r *Repository) GetQueueItem(id int64) (*ImportQueueItem, error) {
 func (r *Repository) GetQueueItemByPath(nzbPath string) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
 		FROM import_queue WHERE nzb_path = ?
 	`
 
@@ -362,7 +362,7 @@ func (r *Repository) GetQueueItemByPath(nzbPath string) (*ImportQueueItem, error
 	err := r.db.QueryRow(query, nzbPath).Scan(
 		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
 	)
 
 	if err != nil {
@@ -502,7 +502,7 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 	var args []interface{}
 
 	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
+	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
 	               FROM import_queue`
 
 	var conditions []string
@@ -540,7 +540,7 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 		err := rows.Scan(
 			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan queue item: %w", err)

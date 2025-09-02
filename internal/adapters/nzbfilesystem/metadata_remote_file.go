@@ -108,6 +108,16 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
+		// Check if this could be a valid empty directory
+		if mrf.isValidEmptyDirectory(normalizedName) {
+			// Create a directory handle for empty directory
+			virtualDir := &MetadataVirtualDirectory{
+				name:            name,
+				normalizedPath:  normalizedName,
+				metadataService: mrf.metadataService,
+			}
+			return true, virtualDir, nil
+		}
 		// Neither file nor directory found
 		return false, nil, nil
 	}
@@ -218,6 +228,17 @@ func (mrf *MetadataRemoteFile) Stat(name string) (bool, fs.FileInfo, error) {
 	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
+		// Check if this could be a valid empty directory
+		if mrf.isValidEmptyDirectory(normalizedName) {
+			info := &MetadataFileInfo{
+				name:    filepath.Base(normalizedName),
+				size:    0,
+				mode:    os.ModeDir | 0755,
+				modTime: time.Now(),
+				isDir:   true,
+			}
+			return true, info, nil
+		}
 		return false, nil, nil
 	}
 
@@ -904,6 +925,29 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
 		}
 	}()
+}
+
+// isValidEmptyDirectory checks if a path could represent a valid empty directory
+// by examining parent directories and path structure
+func (mrf *MetadataRemoteFile) isValidEmptyDirectory(normalizedPath string) bool {
+	// Root directory is always valid
+	if normalizedPath == RootPath {
+		return true
+	}
+
+	// Get parent directory
+	parentDir := filepath.Dir(normalizedPath)
+	if parentDir == "." {
+		parentDir = RootPath
+	}
+
+	// Check if parent directory exists (either physically or as a valid empty directory)
+	if mrf.metadataService.DirectoryExists(parentDir) {
+		return true
+	}
+
+	// Recursively check if parent could be a valid empty directory
+	return mrf.isValidEmptyDirectory(parentDir)
 }
 
 // Dynamic configuration is now handled through config getters

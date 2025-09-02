@@ -37,17 +37,12 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 	}
 }
 
-// ProcessNzbFile processes an NZB file and stores it in the database
-func (proc *Processor) ProcessNzbFile(nzbPath string) error {
-	return proc.ProcessNzbFileWithRelativePath(nzbPath, "")
-}
-
-// ProcessNzbFileWithelativePath processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFileWithRelativePath(filePath, relativePath string) error {
+// ProcessNzbFileWithRelativePath processes an NZB or STRM file maintaining the folder structure relative to relative path
+func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, error) {
 	// Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
-		return NewNonRetryableError("failed to open file", err)
+		return "", NewNonRetryableError("failed to open file", err)
 	}
 	defer file.Close()
 
@@ -57,22 +52,22 @@ func (proc *Processor) ProcessNzbFileWithRelativePath(filePath, relativePath str
 	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
 		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
 		if err != nil {
-			return NewNonRetryableError("failed to parse STRM file", err)
+			return "", NewNonRetryableError("failed to parse STRM file", err)
 		}
 
 		// Validate the parsed STRM
 		if err := proc.strmParser.ValidateStrmFile(parsed); err != nil {
-			return NewNonRetryableError("STRM validation failed", err)
+			return "", NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
 		parsed, err = proc.parser.ParseFile(file, filePath)
 		if err != nil {
-			return NewNonRetryableError("failed to parse NZB file", err)
+			return "", NewNonRetryableError("failed to parse NZB file", err)
 		}
 
 		// Validate the parsed NZB
 		if err := proc.parser.ValidateNzb(parsed); err != nil {
-			return NewNonRetryableError("NZB validation failed", err)
+			return "", NewNonRetryableError("NZB validation failed", err)
 		}
 	}
 
@@ -97,19 +92,19 @@ func (proc *Processor) ProcessNzbFileWithRelativePath(filePath, relativePath str
 	case NzbTypeStrm:
 		return proc.processStrmFileWithDir(parsed, virtualDir)
 	default:
-		return NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
+		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
 }
 
 // processSingleFileWithDir handles NZBs with a single file in a specific virtual directory
-func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir string) error {
+func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
 	regularFiles, _ := proc.separatePar2Files(parsed.Files)
 
 	file := regularFiles[0] // Single file NZB, take the first regular file
 
 	// Create the directory structure if needed
 	if err := proc.ensureDirectoryExists(virtualDir); err != nil {
-		return fmt.Errorf("failed to create directory structure: %w", err)
+		return "", fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
 	// Create virtual file path
@@ -128,7 +123,7 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 
 	// Write file metadata to disk
 	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-		return fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)
+		return "", fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)
 	}
 
 	// Store additional metadata if needed
@@ -141,23 +136,23 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 		"virtual_path", virtualFilePath,
 		"size", file.Size)
 
-	return nil
+	return virtualFilePath, nil
 }
 
 // processMultiFileWithDir handles NZBs with multiple files in a specific virtual directory
-func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir string) error {
+func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
 	// Create a folder named after the NZB file for multi-file imports
 	nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
 	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
 	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
-	
+
 	// Create directory structure based on common path prefixes within the NZB virtual directory
 	dirStructure := proc.analyzeDirectoryStructureWithBase(parsed.Files, nzbVirtualDir)
 
 	// Create directories first using real filesystem
 	for _, dir := range dirStructure.directories {
 		if err := proc.ensureDirectoryExists(dir.path); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir.path, err)
+			return "", fmt.Errorf("failed to create directory %s: %w", dir.path, err)
 		}
 	}
 
@@ -169,7 +164,7 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 
 		// Ensure parent directory exists
 		if err := proc.ensureDirectoryExists(parentPath); err != nil {
-			return fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
+			return "", fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
 		}
 
 		// Create virtual file path
@@ -189,7 +184,7 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 
 		// Write file metadata to disk
 		if err := proc.metadataService.WriteFileMetadata(virtualPath, fileMeta); err != nil {
-			return fmt.Errorf("failed to write metadata for file %s: %w", filename, err)
+			return "", fmt.Errorf("failed to write metadata for file %s: %w", filename, err)
 		}
 
 		// Store additional metadata if needed
@@ -208,11 +203,16 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 		"files", len(regularFiles),
 		"directories", len(dirStructure.directories))
 
-	return nil
+	return nzbVirtualDir, nil
 }
 
 // processRarArchiveWithDir handles NZBs containing RAR archives and regular files in a specific virtual directory
-func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir string) error {
+func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
+	// Create a folder named after the NZB file for multi-file imports
+	nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
+	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
+	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
+
 	// Separate RAR files from regular files
 	regularFiles, rarFiles := proc.separateRarFiles(parsed.Files)
 
@@ -222,26 +222,26 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 	// Process regular files first (non-RAR files like MKV, MP4, etc.)
 	if len(regularFiles) > 0 {
 		proc.log.Info("Processing regular files in RAR archive NZB",
-			"virtual_dir", virtualDir,
+			"virtual_dir", nzbVirtualDir,
 			"regular_files", len(regularFiles))
 
 		// Create directory structure for regular files
-		dirStructure := proc.analyzeDirectoryStructureWithBase(regularFiles, virtualDir)
+		dirStructure := proc.analyzeDirectoryStructureWithBase(regularFiles, nzbVirtualDir)
 
 		// Create directories first
 		for _, dir := range dirStructure.directories {
 			if err := proc.ensureDirectoryExists(dir.path); err != nil {
-				return fmt.Errorf("failed to create directory %s: %w", dir.path, err)
+				return "", fmt.Errorf("failed to create directory %s: %w", dir.path, err)
 			}
 		}
 
 		// Process each regular file
 		for _, file := range regularFiles {
-			parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, virtualDir)
+			parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, nzbVirtualDir)
 
 			// Ensure parent directory exists
 			if err := proc.ensureDirectoryExists(parentPath); err != nil {
-				return fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
+				return "", fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
 			}
 
 			// Create virtual file path
@@ -261,7 +261,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 			// Write file metadata to disk
 			if err := proc.metadataService.WriteFileMetadata(virtualPath, fileMeta); err != nil {
-				return fmt.Errorf("failed to write metadata for regular file %s: %w", filename, err)
+				return "", fmt.Errorf("failed to write metadata for regular file %s: %w", filename, err)
 			}
 
 			proc.log.Debug("Created metadata for regular file",
@@ -271,7 +271,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 		}
 
 		proc.log.Info("Successfully processed regular files",
-			"virtual_dir", virtualDir,
+			"virtual_dir", nzbVirtualDir,
 			"files_processed", len(regularFiles))
 	}
 
@@ -283,12 +283,12 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 		// Process each RAR archive
 		for archiveName, archiveFiles := range rarArchives {
 			// Create directory for the RAR archive content in virtual directory
-			rarDirPath := filepath.Join(virtualDir, archiveName)
+			rarDirPath := filepath.Join(nzbVirtualDir, archiveName)
 			rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
 
 			// Ensure RAR archive directory exists
 			if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
-				return fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
+				return "", fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
 			}
 
 			proc.log.Info("Processing RAR archive with content analysis",
@@ -307,7 +307,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 					"archive", archiveName,
 					"error", err)
 				// Fallback to simplified mode if RAR analysis fails
-				return err
+				return "", err
 			}
 
 			proc.log.Info("Successfully analyzed RAR archive content",
@@ -330,7 +330,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 				// Ensure parent directory exists for nested files
 				parentDir := filepath.Dir(virtualFilePath)
 				if err := proc.ensureDirectoryExists(parentDir); err != nil {
-					return fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
+					return "", fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
 				}
 
 				// Create file metadata using the RAR handler's helper function
@@ -341,7 +341,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 				// Write file metadata to disk
 				if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-					return fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
+					return "", fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
 				}
 
 				proc.log.Debug("Created metadata for RAR extracted file",
@@ -358,7 +358,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 		}
 	}
 
-	return nil
+	return nzbVirtualDir, nil
 }
 
 // DirectoryStructure represents the analyzed directory structure
@@ -655,16 +655,16 @@ func (proc *Processor) parseInt(s string) int {
 }
 
 // processStrmFileWithDir handles STRM files (single file from NXG link) in a specific virtual directory
-func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string) error {
+func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
 	if len(parsed.Files) != 1 {
-		return NewNonRetryableError(fmt.Sprintf("STRM file should contain exactly one file, got %d", len(parsed.Files)), nil)
+		return "", NewNonRetryableError(fmt.Sprintf("STRM file should contain exactly one file, got %d", len(parsed.Files)), nil)
 	}
 
 	file := parsed.Files[0]
 
 	// Create the directory structure if needed
 	if err := proc.ensureDirectoryExists(virtualDir); err != nil {
-		return fmt.Errorf("failed to create directory structure: %w", err)
+		return "", fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
 	// Create virtual file path
@@ -684,7 +684,7 @@ func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir stri
 
 	// Write file metadata to disk
 	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-		return fmt.Errorf("failed to write metadata for STRM file %s: %w", file.Filename, err)
+		return "", fmt.Errorf("failed to write metadata for STRM file %s: %w", file.Filename, err)
 	}
 
 	proc.log.Info("Successfully processed STRM file",
@@ -693,5 +693,5 @@ func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir stri
 		"size", file.Size,
 		"segments", len(file.Segments))
 
-	return nil
+	return virtualDir, nil
 }

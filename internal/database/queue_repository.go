@@ -61,6 +61,21 @@ func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 	return nil
 }
 
+func (r *QueueRepository) AddStoragePath(itemID int64, storagePath string) error {
+	query := `
+		UPDATE import_queue
+		SET storage_path = ?, updated_at = datetime('now')
+		WHERE id = ?
+	`
+
+	_, err := r.db.Exec(query, storagePath, itemID)
+	if err != nil {
+		return fmt.Errorf("failed to add storage path: %w", err)
+	}
+
+	return nil
+}
+
 // IsFileInQueue checks if a file is already in the queue (pending, retrying, or processing)
 func (r *QueueRepository) IsFileInQueue(filePath string) (bool, error) {
 	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'retrying', 'processing') LIMIT 1`
@@ -277,6 +292,30 @@ func (r *QueueRepository) AddBatchToQueue(items []*ImportQueueItem) error {
 	})
 }
 
+// GetQueueItem retrieves a specific queue item by ID
+func (r *QueueRepository) GetQueueItem(id int64) (*ImportQueueItem, error) {
+	query := `
+		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
+		FROM import_queue WHERE id = ?
+	`
+
+	var item ImportQueueItem
+	err := r.db.QueryRow(query, id).Scan(
+		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // Item not found
+		}
+		return nil, fmt.Errorf("failed to get queue item: %w", err)
+	}
+
+	return &item, nil
+}
+
 // withQueueTransaction executes a function within a queue database transaction
 func (r *QueueRepository) withQueueTransaction(fn func(*QueueRepository) error) error {
 	// Cast to *sql.DB to access Begin method
@@ -303,6 +342,32 @@ func (r *QueueRepository) withQueueTransaction(fn func(*QueueRepository) error) 
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit queue transaction: %w", err)
+	}
+
+	return nil
+}
+
+// ResetStaleItems resets processing and retrying items back to pending on service startup
+func (r *QueueRepository) ResetStaleItems() error {
+	query := `
+		UPDATE import_queue 
+		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
+		WHERE status IN ('processing', 'retrying')
+	`
+
+	result, err := r.db.Exec(query)
+	if err != nil {
+		return fmt.Errorf("failed to reset stale queue items: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected > 0 {
+		// Log the reset operation for operational visibility
+		fmt.Printf("Reset %d stale queue items from processing/retrying to pending\n", rowsAffected)
 	}
 
 	return nil

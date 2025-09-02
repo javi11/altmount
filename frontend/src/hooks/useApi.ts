@@ -48,8 +48,7 @@ export const useRetryQueueItem = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ id, resetRetryCount }: { id: number; resetRetryCount?: boolean }) =>
-			apiClient.retryQueueItem(id, resetRetryCount),
+		mutationFn: (id: number) => apiClient.retryQueueItem(id),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["queue"] });
 		},
@@ -127,6 +126,18 @@ export const useRetryHealthItem = () => {
 	return useMutation({
 		mutationFn: ({ id, resetStatus }: { id: string; resetStatus?: boolean }) =>
 			apiClient.retryHealthItem(id, resetStatus),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
+export const useRepairHealthItem = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ id, resetRepairRetryCount }: { id: string; resetRepairRetryCount?: boolean }) =>
+			apiClient.repairHealthItem(id, resetRepairRetryCount),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},

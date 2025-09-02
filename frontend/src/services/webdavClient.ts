@@ -88,15 +88,20 @@ export class WebDAVClient {
 
 		try {
 			const contents = await this.client.getDirectoryContents(path);
-			const files: WebDAVFile[] = (contents as FileStat[]).map((item) => ({
-				filename: item.filename,
-				basename: item.basename,
-				lastmod: item.lastmod,
-				size: item.size || 0,
-				type: item.type as "file" | "directory",
-				etag: item.etag ?? undefined,
-				mime: item.mime,
-			}));
+			
+			// Handle empty directories - contents could be empty array or null
+			let files: WebDAVFile[] = [];
+			if (Array.isArray(contents) && contents.length > 0) {
+				files = (contents as FileStat[]).map((item) => ({
+					filename: item.filename,
+					basename: item.basename,
+					lastmod: item.lastmod,
+					size: item.size || 0,
+					type: item.type as "file" | "directory",
+					etag: item.etag ?? undefined,
+					mime: item.mime,
+				}));
+			}
 
 			return {
 				path,

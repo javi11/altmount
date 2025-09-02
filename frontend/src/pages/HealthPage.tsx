@@ -6,6 +6,7 @@ import {
 	RefreshCw,
 	Shield,
 	Trash2,
+	Wrench,
 	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -24,6 +25,7 @@ import {
 	useHealth,
 	useHealthStats,
 	useHealthWorkerStatus,
+	useRepairHealthItem,
 } from "../hooks/useApi";
 import { formatRelativeTime, truncateText } from "../lib/utils";
 import type { FileHealth } from "../types/api";
@@ -57,6 +59,7 @@ export function HealthPage() {
 	const addHealthCheck = useAddHealthCheck();
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
+	const repairHealthItem = useRepairHealthItem();
 	const { confirmDelete, confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
@@ -130,6 +133,76 @@ export function HealthPage() {
 				await cancelHealthCheck.mutateAsync(filePath);
 			} catch (err) {
 				console.error("Failed to cancel health check:", err);
+			}
+		}
+	};
+
+	const handleRepair = async (filePath: string) => {
+		const confirmed = await confirmAction(
+			"Trigger Repair",
+			"This will attempt to redownload the corrupted file from your media library. Are you sure you want to proceed?",
+			{
+				type: "info",
+				confirmText: "Trigger Repair",
+				confirmButtonClass: "btn-info",
+			},
+		);
+		if (confirmed) {
+			try {
+				await repairHealthItem.mutateAsync({ 
+					id: filePath, 
+					resetRepairRetryCount: false 
+				});
+				showToast({
+					title: "Repair Triggered",
+					message: "Repair triggered successfully",
+					type: "success",
+				});
+			} catch (err: unknown) {
+				const error = err as { 
+					message?: string; 
+					response?: { 
+						data?: { 
+							error?: { 
+								message?: string;
+								details?: string;
+							} 
+						} 
+					} 
+				};
+				console.error("Failed to trigger repair:", err);
+				
+				// Get error message from response or direct error
+				const apiErrorMessage = error.response?.data?.error?.message;
+				const apiErrorDetails = error.response?.data?.error?.details;
+				const errorMessage = apiErrorMessage || error.message || "Unknown error";
+				
+				// Handle specific error cases
+				if (errorMessage.includes("Repair not available")) {
+					showToast({
+						title: "Repair not available",
+						message: apiErrorDetails || "File not found in media library",
+						type: "error",
+					});
+				} else if (errorMessage.includes("Media library not configured")) {
+					showToast({
+						title: "Configuration Required",
+						message: "Media library must be configured to use repair functionality",
+						type: "error",
+					});
+				} else if (errorMessage.includes("Media library error")) {
+					showToast({
+						title: "Media Library Error",
+						message: "Unable to access media library to verify file availability",
+						type: "error",
+					});
+				} else {
+					showToast({
+						title: "Failed to trigger repair",
+						message: errorMessage,
+						type: "error",
+					});
+				}
 			}
 		}
 	};
@@ -288,7 +361,7 @@ export function HealthPage() {
 										<th>File Path</th>
 										<th>Source NZB</th>
 										<th>Status</th>
-										<th>Retry Count</th>
+										<th>Retries (H/R)</th>
 										<th>Last Check</th>
 										<th>Actions</th>
 									</tr>
@@ -319,18 +392,44 @@ export function HealthPage() {
 											</td>
 											<td>
 												<HealthBadge status={item.status} />
-												{item.error_message && (
-													<div className="mt-1 text-error text-xs">
-														{truncateText(item.error_message, 50)}
+												{/* Show last_error for repair failures and general errors */}
+												{item.last_error && (
+													<div className="mt-1">
+														<div className="tooltip tooltip-bottom text-left" data-tip={item.last_error}>
+															<div className="cursor-help text-error text-xs">
+																{truncateText(item.last_error, 50)}
+															</div>
+														</div>
+													</div>
+												)}
+												{/* Show error_details for additional technical details */}
+												{item.error_details && item.error_details !== item.last_error && (
+													<div className="mt-1">
+														<div className="tooltip tooltip-bottom text-left" data-tip={item.error_details}>
+															<div className="cursor-help text-warning text-xs">
+																Technical: {truncateText(item.error_details, 40)}
+															</div>
+														</div>
 													</div>
 												)}
 											</td>
 											<td>
-												<span
-													className={`badge ${item.retry_count > 0 ? "badge-warning" : "badge-ghost"}`}
-												>
-													{item.retry_count}
-												</span>
+												<div className="flex flex-col gap-1">
+													<span
+														className={`badge badge-sm ${item.retry_count > 0 ? "badge-warning" : "badge-ghost"}`}
+														title="Health check retries"
+													>
+														H: {item.retry_count}/{item.max_retries}
+													</span>
+													{(item.status === "repair_triggered" || item.repair_retry_count > 0) && (
+														<span
+															className={`badge badge-sm ${item.repair_retry_count > 0 ? "badge-info" : "badge-ghost"}`}
+															title="Repair retries"
+														>
+															R: {item.repair_retry_count}/{item.max_repair_retries}
+														</span>
+													)}
+												</div>
 											</td>
 											<td>
 												<span className="text-base-content/70 text-sm">
@@ -365,6 +464,36 @@ export function HealthPage() {
 																	<PlayCircle className="h-4 w-4" />
 																	Retry Check
 																</button>
+															</li>
+														)}
+														{item.status === "corrupted" && (
+															<li>
+																{/* Check if repair is available based on error message */}
+																{item.last_error && 
+																 (item.last_error.includes("Cannot repair: File not found in media library") ||
+																  item.last_error.includes("Cannot repair: Media library not configured") ||
+																  item.last_error.includes("Failed to check media library")) ? (
+																	<div className="tooltip tooltip-left" data-tip={item.last_error}>
+																		<button
+																			type="button"
+																			disabled={true}
+																			className="w-full cursor-not-allowed text-left text-base-content/50"
+																		>
+																			<Wrench className="h-4 w-4" />
+																			Repair Not Available
+																		</button>
+																	</div>
+																) : (
+																	<button
+																		type="button"
+																		onClick={() => handleRepair(item.file_path)}
+																		disabled={repairHealthItem.isPending}
+																		className="text-info"
+																	>
+																		<Wrench className="h-4 w-4" />
+																		Trigger Repair
+																	</button>
+																)}
 															</li>
 														)}
 														<li>

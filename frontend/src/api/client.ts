@@ -142,10 +142,9 @@ export class APIClient {
 		return this.request<QueueItem>(`/queue/${id}`, { method: "DELETE" });
 	}
 
-	async retryQueueItem(id: number, resetRetryCount?: boolean) {
+	async retryQueueItem(id: number) {
 		return this.request<QueueItem>(`/queue/${id}/retry`, {
 			method: "POST",
-			body: JSON.stringify({ reset_retry_count: resetRetryCount }),
 		});
 	}
 
@@ -196,6 +195,13 @@ export class APIClient {
 		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/retry`, {
 			method: "POST",
 			body: JSON.stringify({ reset_status: resetStatus }),
+		});
+	}
+
+	async repairHealthItem(id: string, resetRepairRetryCount?: boolean) {
+		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/repair`, {
+			method: "POST",
+			body: JSON.stringify({ reset_repair_retry_count: resetRepairRetryCount }),
 		});
 	}
 

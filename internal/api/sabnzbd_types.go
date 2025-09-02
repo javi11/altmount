@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/javi11/altmount/internal/database"
 )
@@ -72,6 +73,7 @@ type SABnzbdHistorySlot struct {
 	NzbName      string   `json:"nzb_name"`
 	Download     string   `json:"download"`
 	Path         string   `json:"path"`
+	Storage      string   `json:"storage"`
 	Postproc     string   `json:"postproc"`
 	Downloaded   int64    `json:"downloaded"`
 	Completetime int64    `json:"completetime"`
@@ -89,6 +91,7 @@ type SABnzbdHistorySlot struct {
 	Size         string   `json:"size"`
 	Loaded       bool     `json:"loaded"`
 	Retry        int      `json:"retry"`
+	StateLog     []string `json:"stage_log"`
 }
 
 // SABnzbdStatusResponse represents the full status response
@@ -199,51 +202,15 @@ type SABnzbdDeleteResponse struct {
 
 // SABnzbdHistoryObject represents the nested history object in the complete response
 type SABnzbdHistoryObject struct {
-	ActiveLang      string               `json:"active_lang"`
-	Paused          bool                 `json:"paused"`
-	Session         string               `json:"session"`
-	RestartReq      bool                 `json:"restart_req"`
-	PowerOptions    bool                 `json:"power_options"`
-	Slots           []SABnzbdHistorySlot `json:"slots"`
-	Speed           string               `json:"speed"`
-	HelpURI         string               `json:"helpuri"`
-	Size            string               `json:"size"`
-	Uptime          string               `json:"uptime"`
-	TotalSize       string               `json:"total_size"`
-	MonthSize       string               `json:"month_size"`
-	WeekSize        string               `json:"week_size"`
-	Version         string               `json:"version"`
-	NewRelURL       string               `json:"new_rel_url"`
-	DiskspaceTotal2 string               `json:"diskspacetotal2"`
-	ColorScheme     string               `json:"color_scheme"`
-	DiskspaceTotal1 string               `json:"diskspacetotal1"`
-	Nt              bool                 `json:"nt"`
-	Status          string               `json:"status"`
-	LastWarning     string               `json:"last_warning"`
-	HaveWarnings    string               `json:"have_warnings"`
-	CacheArt        string               `json:"cache_art"`
-	SizeLeft        string               `json:"sizeleft"`
-	FinishAction    *string              `json:"finishaction"`
-	PausedAll       bool                 `json:"paused_all"`
-	CacheSize       string               `json:"cache_size"`
-	NewzbinURL      string               `json:"newzbin_url"`
-	NewRelease      string               `json:"new_release"`
-	PauseInt        string               `json:"pause_int"`
-	MbLeft          string               `json:"mbleft"`
-	Diskspace1      string               `json:"diskspace1"`
-	Darwin          bool                 `json:"darwin"`
-	TimeLeft        string               `json:"timeleft"`
-	Mb              string               `json:"mb"`
-	NoOfSlots       int                  `json:"noofslots"`
-	DaySize         string               `json:"day_size"`
-	ETA             string               `json:"eta"`
-	NzbQuota        string               `json:"nzb_quota"`
-	LoadAvg         string               `json:"loadavg"`
-	CacheMax        string               `json:"cache_max"`
-	KbPerSec        string               `json:"kbpersec"`
-	SpeedLimit      string               `json:"speedlimit"`
-	WebDir          string               `json:"webdir"`
-	Diskspace2      string               `json:"diskspace2"`
+	Slots             []SABnzbdHistorySlot `json:"slots"`
+	TotalSize         string               `json:"total_size"`
+	MonthSize         string               `json:"month_size"`
+	WeekSize          string               `json:"week_size"`
+	DaySize           string               `json:"day_size"`
+	Ppslots           int                  `json:"ppslots"`
+	Noofslots         int                  `json:"noofslots"`
+	LastHistoryUpdate int                  `json:"last_history_update"`
+	Version           string               `json:"version"`
 }
 
 // SABnzbdCompleteHistoryResponse represents the complete history response structure
@@ -351,7 +318,7 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueS
 }
 
 // ToSABnzbdHistorySlot converts an AltMount ImportQueueItem to SABnzbd history format
-func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int) SABnzbdHistorySlot {
+func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, completePath string) SABnzbdHistorySlot {
 	if item == nil {
 		return SABnzbdHistorySlot{}
 	}
@@ -402,6 +369,12 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int) SABnzbdHist
 		category = *item.Category
 	}
 
+	storagePath := completePath
+
+	if item.StoragePath != nil {
+		storagePath = filepath.Join(completePath, *item.StoragePath)
+	}
+
 	return SABnzbdHistorySlot{
 		Index:        index,
 		NzoID:        fmt.Sprintf("%d", item.ID),
@@ -414,7 +387,8 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int) SABnzbdHist
 		Status:       status,
 		NzbName:      filename,
 		Download:     name,
-		Path:         item.NzbPath,
+		Storage:      storagePath,
+		Path:         storagePath,
 		Postproc:     "",
 		Downloaded:   0,
 		Completetime: completetime,
@@ -432,5 +406,6 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int) SABnzbdHist
 		Size:         "0 B",
 		Loaded:       true,
 		Retry:        item.RetryCount,
+		StateLog:     []string{},
 	}
 }

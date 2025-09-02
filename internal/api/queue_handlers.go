@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,16 +12,16 @@ import (
 func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination
 	pagination := ParsePagination(r)
-	
+
 	// Parse status filter
 	var statusFilter *database.QueueStatus
 	if statusStr := r.URL.Query().Get("status"); statusStr != "" {
 		status := database.QueueStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.QueueStatusPending, database.QueueStatusProcessing, 
-			 database.QueueStatusCompleted, database.QueueStatusFailed, 
-			 database.QueueStatusRetrying:
+		case database.QueueStatusPending, database.QueueStatusProcessing,
+			database.QueueStatusCompleted, database.QueueStatusFailed,
+			database.QueueStatusRetrying:
 			statusFilter = &status
 		default:
 			WriteValidationError(w, "Invalid status filter", "Valid values: pending, processing, completed, failed, retrying")
@@ -174,15 +173,6 @@ func (s *Server) handleRetryQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body
-	var req QueueRetryRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteBadRequest(w, "Invalid request body", err.Error())
-			return
-		}
-	}
-
 	// Check if item exists
 	item, err := s.queueRepo.GetQueueItem(id)
 	if err != nil {
@@ -201,17 +191,16 @@ func (s *Server) handleRetryQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reset retry count if requested
-	if req.ResetRetryCount {
-		// This would require a new method in the repository
-		// For now, we'll update the status and let the retry count be managed by the processing system
-	}
-
 	// Update status to retrying
 	err = s.queueRepo.UpdateQueueItemStatus(id, database.QueueStatusRetrying, nil)
 	if err != nil {
 		WriteInternalError(w, "Failed to retry queue item", err.Error())
 		return
+	}
+
+	// Trigger background processing immediately
+	if s.importerService != nil {
+		s.importerService.ProcessItemInBackground(id)
 	}
 
 	// Get updated item

@@ -290,7 +290,7 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 	firstSegment := file.Segments[0]
 
 	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
 	// Get a connection from the pool
@@ -325,7 +325,7 @@ func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string
 	}
 
 	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
 	// Get a connection from the pool

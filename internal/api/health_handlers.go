@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
@@ -25,10 +26,10 @@ func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted:
+		case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 			statusFilter = &status
 		default:
-			WriteValidationError(w, "Invalid status filter", "Valid values: healthy, partial, corrupted")
+			WriteValidationError(w, "Invalid status filter", "Valid values: healthy, partial, corrupted, repair_triggered")
 			return
 		}
 	}
@@ -222,6 +223,80 @@ func (s *Server) handleRetryHealth(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, response, nil)
 }
 
+// handleRepairHealth handles POST /api/health/{id}/repair
+func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from path parameter
+	filePath := r.PathValue("id")
+	if filePath == "" {
+		WriteBadRequest(w, "Health record identifier is required", "")
+		return
+	}
+
+	// Parse request body
+	var req HealthRepairRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			WriteBadRequest(w, "Invalid request body", err.Error())
+			return
+		}
+	}
+
+	// Check if item exists
+	item, err := s.healthRepo.GetFileHealth(filePath)
+	if err != nil {
+		WriteInternalError(w, "Failed to check health record", err.Error())
+		return
+	}
+
+	if item == nil {
+		WriteNotFound(w, "Health record not found", "")
+		return
+	}
+
+	// Only allow repair of corrupted files
+	if item.Status != database.HealthStatusCorrupted {
+		WriteConflict(w, "Can only repair corrupted files", "Current status: "+string(item.Status))
+		return
+	}
+
+	// Reset repair retry count if requested
+	if req.ResetRepairRetryCount {
+		// This would require implementing a method in health repository to reset repair retry count
+		// For now, we'll proceed with the repair trigger
+	}
+
+	// Trigger repair using the health repository
+	err = s.healthRepo.TriggerRepair(filePath, nil)
+	if err != nil {
+		// Check if the error indicates repair is not available
+		if err.Error() == "file not found in media_files table, cannot trigger repair" {
+			WriteConflict(w, "Repair not available", "File not found in media library. This file cannot be repaired automatically.")
+			return
+		}
+		// Check for other specific repair errors
+		if strings.Contains(err.Error(), "Failed to check media library") {
+			WriteInternalError(w, "Media library error", "Unable to access media library to verify file availability.")
+			return
+		}
+		if strings.Contains(err.Error(), "Media library not configured") {
+			WriteConflict(w, "Media library not configured", "Repair functionality requires media library configuration.")
+			return
+		}
+		WriteInternalError(w, "Failed to trigger repair", err.Error())
+		return
+	}
+
+	// Get updated item
+	updatedItem, err := s.healthRepo.GetFileHealth(filePath)
+	if err != nil {
+		WriteInternalError(w, "Failed to retrieve updated health record", err.Error())
+		return
+	}
+
+	response := ToHealthItemResponse(updatedItem)
+	WriteSuccess(w, response, nil)
+}
+
 // handleListCorrupted handles GET /api/health/corrupted
 func (s *Server) handleListCorrupted(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination
@@ -307,10 +382,10 @@ func (s *Server) handleCleanupHealth(w http.ResponseWriter, r *http.Request) {
 		if statusStr := r.URL.Query().Get("status"); statusStr != "" {
 			status := database.HealthStatus(statusStr)
 			switch status {
-			case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted:
+			case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 				req.Status = &status
 			default:
-				WriteValidationError(w, "Invalid status filter", "Valid values: healthy, partial, corrupted")
+				WriteValidationError(w, "Invalid status filter", "Valid values: healthy, partial, corrupted, repair_triggered")
 				return
 			}
 		}

@@ -14,6 +14,7 @@ type HealthRepository struct {
 		Query(query string, args ...interface{}) (*sql.Rows, error)
 		QueryRow(query string, args ...interface{}) *sql.Row
 	}
+	mediaRepo *MediaRepository
 }
 
 // NewHealthRepository creates a new health repository
@@ -21,15 +22,18 @@ func NewHealthRepository(db interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
-}) *HealthRepository {
-	return &HealthRepository{db: db}
+}, mediaRepo *MediaRepository) *HealthRepository {
+	return &HealthRepository{
+		db:        db,
+		mediaRepo: mediaRepo,
+	}
 }
 
 // UpdateFileHealth updates or inserts a file health record
 func (r *HealthRepository) UpdateFileHealth(filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string) error {
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), ?, ?, ?, 0, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, repair_retry_count, created_at, updated_at)
+		VALUES (?, ?, datetime('now'), ?, ?, ?, 0, 0, datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		status = excluded.status,
 		last_checked = datetime('now'),
@@ -52,7 +56,8 @@ func (r *HealthRepository) UpdateFileHealth(filePath string, status HealthStatus
 func (r *HealthRepository) GetFileHealth(filePath string) (*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
-		       next_retry_at, source_nzb_path, error_details, created_at, updated_at
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       error_details, created_at, updated_at
 		FROM file_health
 		WHERE file_path = ?
 	`
@@ -61,6 +66,7 @@ func (r *HealthRepository) GetFileHealth(filePath string) (*FileHealth, error) {
 	err := r.db.QueryRow(query, filePath).Scan(
 		&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
 		&health.LastError, &health.RetryCount, &health.MaxRetries,
+		&health.RepairRetryCount, &health.MaxRepairRetries,
 		&health.NextRetryAt, &health.SourceNzbPath, &health.ErrorDetails,
 		&health.CreatedAt, &health.UpdatedAt,
 	)
@@ -74,17 +80,24 @@ func (r *HealthRepository) GetFileHealth(filePath string) (*FileHealth, error) {
 	return &health, nil
 }
 
-// GetUnhealthyFiles returns files that need retry checks (including pending files)
+// GetUnhealthyFiles returns files that need retry checks (including pending files and repair_triggered files)
 func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
-		       next_retry_at, source_nzb_path, error_details, created_at, updated_at
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       error_details, created_at, updated_at
 		FROM file_health
-		WHERE status IN ('pending', 'partial', 'corrupted')
-		  AND retry_count < max_retries
+		WHERE (
+			(status IN ('pending', 'partial', 'corrupted') AND retry_count < max_retries) OR
+			(status = 'repair_triggered' AND repair_retry_count < max_repair_retries)
+		)
 		  AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
 		ORDER BY 
-		  CASE WHEN status = 'pending' THEN 0 ELSE 1 END,  -- Prioritize pending files
+		  CASE 
+		    WHEN status = 'pending' THEN 0 
+		    WHEN status = 'repair_triggered' THEN 1
+		    ELSE 2 
+		  END,  -- Prioritize pending, then repair_triggered, then others
 		  last_checked ASC
 		LIMIT ?
 	`
@@ -101,6 +114,7 @@ func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 		err := rows.Scan(
 			&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
 			&health.LastError, &health.RetryCount, &health.MaxRetries,
+			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.NextRetryAt, &health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt,
 		)
@@ -144,7 +158,120 @@ func (r *HealthRepository) IncrementRetryCount(filePath string, errorMessage *st
 	return nil
 }
 
-// MarkAsCorrupted permanently marks a file as corrupted after max retries
+// TriggerRepair triggers repair for a file after health check retries are exhausted
+// If file is found in media_files table, set status to repair_triggered
+// Otherwise, mark as permanently corrupted
+func (r *HealthRepository) TriggerRepair(filePath string, finalError *string) error {
+	// Check if file exists in media_files table (if mediaRepo is available)
+	var shouldTriggerRepair bool
+	var errorMessage *string
+	
+	if r.mediaRepo != nil {
+		mediaFiles, err := r.mediaRepo.GetMediaFilesByPath(filePath)
+		if err != nil {
+			// Log error but don't fail - continue with corrupted status
+			fmt.Printf("Warning: Failed to check media files for path %s: %v\n", filePath, err)
+			shouldTriggerRepair = false
+			errMsg := fmt.Sprintf("Failed to check media library: %v", err)
+			errorMessage = &errMsg
+		} else {
+			shouldTriggerRepair = len(mediaFiles) > 0
+			if shouldTriggerRepair {
+				fmt.Printf("File %s found in media_files, triggering repair (found %d media file(s))\n", filePath, len(mediaFiles))
+				// Clear any previous error when repair is triggered successfully
+				errorMessage = nil
+			} else {
+				fmt.Printf("File %s not found in media_files, marking as corrupted\n", filePath)
+				errMsg := "Cannot repair: File not found in media library"
+				errorMessage = &errMsg
+			}
+		}
+	} else {
+		// No media repository available
+		shouldTriggerRepair = false
+		errMsg := "Cannot repair: Media library not configured"
+		errorMessage = &errMsg
+	}
+	
+	var targetStatus string
+	if shouldTriggerRepair {
+		targetStatus = "repair_triggered"
+		// Use the provided finalError if repair is triggered, otherwise clear it
+		if finalError != nil {
+			errorMessage = finalError
+		}
+	} else {
+		targetStatus = "corrupted"
+		// Use our generated error message for repair failures
+		// If finalError is provided, append it to our message
+		if finalError != nil && *finalError != "" {
+			if errorMessage != nil {
+				combined := *errorMessage + ": " + *finalError
+				errorMessage = &combined
+			} else {
+				errorMessage = finalError
+			}
+		}
+	}
+
+	query := `
+		UPDATE file_health 
+		SET status = ?,
+		    last_error = ?,
+		    next_retry_at = NULL,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	result, err := r.db.Exec(query, targetStatus, errorMessage, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to update file status to %s: %w", targetStatus, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no file found to update status: %s", filePath)
+	}
+
+	// Return an error that the API can catch when repair is not available
+	if !shouldTriggerRepair && r.mediaRepo != nil {
+		return fmt.Errorf("file not found in media_files table, cannot trigger repair")
+	}
+
+	return nil
+}
+
+// IncrementRepairRetryCount increments the repair retry count and calculates next retry time
+func (r *HealthRepository) IncrementRepairRetryCount(filePath string, errorMessage *string) error {
+	// Exponential backoff for repair retries: 5, 10, 20 minutes
+	query := `
+		UPDATE file_health 
+		SET repair_retry_count = repair_retry_count + 1,
+		    last_error = ?,
+		    next_retry_at = datetime('now', '+' || (CASE 
+		        WHEN repair_retry_count = 0 THEN 5
+		        WHEN repair_retry_count = 1 THEN 10
+		        WHEN repair_retry_count = 2 THEN 20
+		        ELSE 30
+		    END) || ' minutes'),
+		    status = 'repair_triggered',
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	_, err := r.db.Exec(query, errorMessage, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to increment repair retry count: %w", err)
+	}
+
+	return nil
+}
+
+// MarkAsCorrupted permanently marks a file as corrupted after all retries are exhausted
 func (r *HealthRepository) MarkAsCorrupted(filePath string, finalError *string) error {
 	query := `
 		UPDATE file_health 
@@ -258,10 +385,11 @@ func (r *HealthRepository) CleanupHealthRecords(existingFiles []string) error {
 // AddFileToHealthCheck adds a file to the health database for checking
 func (r *HealthRepository) AddFileToHealthCheck(filePath string, maxRetries int, sourceNzbPath *string) error {
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, source_nzb_path, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), 0, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, created_at, updated_at)
+		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		max_retries = excluded.max_retries,
+		max_repair_retries = excluded.max_repair_retries,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
 		updated_at = datetime('now')
 	`
@@ -278,7 +406,8 @@ func (r *HealthRepository) AddFileToHealthCheck(filePath string, maxRetries int,
 func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time, search string) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
-		       next_retry_at, source_nzb_path, error_details, created_at, updated_at
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       error_details, created_at, updated_at
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
@@ -320,6 +449,7 @@ func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, of
 		err := rows.Scan(
 			&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
 			&health.LastError, &health.RetryCount, &health.MaxRetries,
+			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.NextRetryAt, &health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt,
 		)

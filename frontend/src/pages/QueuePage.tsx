@@ -68,8 +68,8 @@ export function QueuePage() {
 		}
 	};
 
-	const handleRetry = async (id: number, resetRetryCount = false) => {
-		await retryItem.mutateAsync({ id, resetRetryCount });
+	const handleRetry = async (id: number) => {
+		await retryItem.mutateAsync(id);
 	};
 
 	const handleClearCompleted = async () => {
@@ -383,28 +383,16 @@ export function QueuePage() {
 												<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
 													{(item.status === QueueStatus.FAILED ||
 														item.status === QueueStatus.COMPLETED) && (
-														<>
-															<li>
-																<button
-																	type="button"
-																	onClick={() => handleRetry(item.id)}
-																	disabled={retryItem.isPending}
-																>
-																	<PlayCircle className="h-4 w-4" />
-																	Retry
-																</button>
-															</li>
-															<li>
-																<button
-																	type="button"
-																	onClick={() => handleRetry(item.id, true)}
-																	disabled={retryItem.isPending}
-																>
-																	<RefreshCw className="h-4 w-4" />
-																	Reset & Retry
-																</button>
-															</li>
-														</>
+														<li>
+															<button
+																type="button"
+																onClick={() => handleRetry(item.id)}
+																disabled={retryItem.isPending}
+															>
+																<PlayCircle className="h-4 w-4" />
+																Retry
+															</button>
+														</li>
 													)}
 													{item.status !== QueueStatus.PROCESSING && (
 														<li>

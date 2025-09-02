@@ -29,6 +29,7 @@ type ImportQueueItem struct {
 	ID           int64         `db:"id"`
 	NzbPath      string        `db:"nzb_path"`
 	RelativePath *string       `db:"relative_path"`
+	StoragePath  *string       `db:"storage_path"`
 	Category     *string       `db:"category"` // SABnzbd-compatible category
 	Priority     QueuePriority `db:"priority"`
 	Status       QueueStatus   `db:"status"`
@@ -40,7 +41,7 @@ type ImportQueueItem struct {
 	MaxRetries   int           `db:"max_retries"`
 	ErrorMessage *string       `db:"error_message"`
 	BatchID      *string       `db:"batch_id"`
-	Metadata     *string       `db:"metadata"` // JSON metadata
+	Metadata     *string       `db:"metadata"`  // JSON metadata
 	FileSize     *int64        `db:"file_size"` // Total size in bytes calculated from segments
 }
 
@@ -59,27 +60,30 @@ type QueueStats struct {
 type HealthStatus string
 
 const (
-	HealthStatusPending   HealthStatus = "pending"   // File has not been checked yet
-	HealthStatusChecking  HealthStatus = "checking"  // File is currently being checked
-	HealthStatusHealthy   HealthStatus = "healthy"   // File is fully available and healthy
-	HealthStatusPartial   HealthStatus = "partial"   // File has some missing segments but is recoverable
-	HealthStatusCorrupted HealthStatus = "corrupted" // File is corrupted or permanently unavailable
+	HealthStatusPending         HealthStatus = "pending"          // File has not been checked yet
+	HealthStatusChecking        HealthStatus = "checking"         // File is currently being checked
+	HealthStatusHealthy         HealthStatus = "healthy"          // File is fully available and healthy
+	HealthStatusPartial         HealthStatus = "partial"          // File has some missing segments but is recoverable
+	HealthStatusRepairTriggered HealthStatus = "repair_triggered" // File repair has been triggered in Arrs
+	HealthStatusCorrupted       HealthStatus = "corrupted"        // File is corrupted or permanently unavailable
 )
 
 // FileHealth represents the health tracking of files in the filesystem
 type FileHealth struct {
-	ID            int64        `db:"id"`
-	FilePath      string       `db:"file_path"`
-	Status        HealthStatus `db:"status"`
-	LastChecked   time.Time    `db:"last_checked"`
-	LastError     *string      `db:"last_error"`
-	RetryCount    int          `db:"retry_count"`
-	MaxRetries    int          `db:"max_retries"`
-	NextRetryAt   *time.Time   `db:"next_retry_at"`
-	SourceNzbPath *string      `db:"source_nzb_path"`
-	ErrorDetails  *string      `db:"error_details"` // JSON error details
-	CreatedAt     time.Time    `db:"created_at"`
-	UpdatedAt     time.Time    `db:"updated_at"`
+	ID               int64        `db:"id"`
+	FilePath         string       `db:"file_path"`
+	Status           HealthStatus `db:"status"`
+	LastChecked      time.Time    `db:"last_checked"`
+	LastError        *string      `db:"last_error"`
+	RetryCount       int          `db:"retry_count"`        // Health check retry count
+	MaxRetries       int          `db:"max_retries"`        // Max health check retries
+	RepairRetryCount int          `db:"repair_retry_count"` // Repair retry count
+	MaxRepairRetries int          `db:"max_repair_retries"` // Max repair retries
+	NextRetryAt      *time.Time   `db:"next_retry_at"`
+	SourceNzbPath    *string      `db:"source_nzb_path"`
+	ErrorDetails     *string      `db:"error_details"` // JSON error details
+	CreatedAt        time.Time    `db:"created_at"`
+	UpdatedAt        time.Time    `db:"updated_at"`
 }
 
 // User represents a user account in the system
@@ -110,4 +114,3 @@ type MediaFile struct {
 	CreatedAt    time.Time `db:"created_at"`    // When record was created
 	UpdatedAt    time.Time `db:"updated_at"`    // When record was last updated
 }
-

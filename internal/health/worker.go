@@ -425,7 +425,7 @@ func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
 		hw.logger.Info("Removed health record for recovered file", "file_path", event.FilePath)
 
 	case EventTypeFileCorrupted, EventTypeCheckFailed:
-		// Get current health record to check retry count
+		// Get current health record to check retry counts
 		fileHealth, err := hw.healthRepo.GetFileHealth(event.FilePath)
 		if err != nil {
 			hw.logger.Error("Failed to get file health record", "file_path", event.FilePath, "error", err)
@@ -442,24 +442,66 @@ func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
 			errorMsg = &errorText
 		}
 
-		if event.Type == EventTypeFileCorrupted {
-			hw.logger.Warn("File still corrupted", "file_path", event.FilePath, "retry_count", fileHealth.RetryCount, "max_retries", fileHealth.MaxRetries)
-		} else {
-			hw.logger.Error("Health check failed", "file_path", event.FilePath, "error", event.Error)
-		}
-
-		if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
-			// Max retries reached - mark as permanently corrupted
-			if err := hw.healthRepo.MarkAsCorrupted(event.FilePath, errorMsg); err != nil {
-				hw.logger.Error("Failed to mark file as corrupted", "error", err)
-				return fmt.Errorf("failed to mark file as corrupted: %w", err)
+		// Determine the current phase based on status
+		switch fileHealth.Status {
+		case database.HealthStatusRepairTriggered:
+			// We're in repair phase - handle repair retry logic
+			if event.Type == EventTypeFileCorrupted {
+				hw.logger.Warn("Repair attempt failed, file still corrupted", 
+					"file_path", event.FilePath, 
+					"repair_retry_count", fileHealth.RepairRetryCount, 
+					"max_repair_retries", fileHealth.MaxRepairRetries)
+			} else {
+				hw.logger.Error("Repair check failed", "file_path", event.FilePath, "error", event.Error)
 			}
-			hw.logger.Error("File permanently marked as corrupted", "file_path", event.FilePath)
-		} else {
-			// Increment retry count
-			if err := hw.healthRepo.IncrementRetryCount(event.FilePath, errorMsg); err != nil {
-				hw.logger.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
-				return fmt.Errorf("failed to increment retry count: %w", err)
+
+			if fileHealth.RepairRetryCount >= fileHealth.MaxRepairRetries-1 {
+				// Max repair retries reached - mark as permanently corrupted
+				if err := hw.healthRepo.MarkAsCorrupted(event.FilePath, errorMsg); err != nil {
+					hw.logger.Error("Failed to mark file as corrupted after repair retries", "error", err)
+					return fmt.Errorf("failed to mark file as corrupted: %w", err)
+				}
+				hw.logger.Error("File permanently marked as corrupted after repair retries exhausted", "file_path", event.FilePath)
+			} else {
+				// Increment repair retry count
+				if err := hw.healthRepo.IncrementRepairRetryCount(event.FilePath, errorMsg); err != nil {
+					hw.logger.Error("Failed to increment repair retry count", "file_path", event.FilePath, "error", err)
+					return fmt.Errorf("failed to increment repair retry count: %w", err)
+				}
+				hw.logger.Info("Repair retry scheduled", 
+					"file_path", event.FilePath, 
+					"repair_retry_count", fileHealth.RepairRetryCount+1, 
+					"max_repair_retries", fileHealth.MaxRepairRetries)
+			}
+
+		default:
+			// We're in health check phase - handle health check retry logic
+			if event.Type == EventTypeFileCorrupted {
+				hw.logger.Warn("File still corrupted", 
+					"file_path", event.FilePath, 
+					"retry_count", fileHealth.RetryCount, 
+					"max_retries", fileHealth.MaxRetries)
+			} else {
+				hw.logger.Error("Health check failed", "file_path", event.FilePath, "error", event.Error)
+			}
+
+			if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
+				// Max health check retries reached - trigger repair phase
+				if err := hw.healthRepo.TriggerRepair(event.FilePath, errorMsg); err != nil {
+					hw.logger.Error("Failed to trigger repair", "error", err)
+					return fmt.Errorf("failed to trigger repair: %w", err)
+				}
+				hw.logger.Info("Health check retries exhausted, repair triggered", "file_path", event.FilePath)
+			} else {
+				// Increment health check retry count
+				if err := hw.healthRepo.IncrementRetryCount(event.FilePath, errorMsg); err != nil {
+					hw.logger.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
+					return fmt.Errorf("failed to increment retry count: %w", err)
+				}
+				hw.logger.Info("Health check retry scheduled", 
+					"file_path", event.FilePath, 
+					"retry_count", fileHealth.RetryCount+1, 
+					"max_retries", fileHealth.MaxRetries)
 			}
 		}
 	}

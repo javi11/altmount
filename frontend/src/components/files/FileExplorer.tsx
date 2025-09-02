@@ -252,25 +252,61 @@ export function FileExplorer({
 			{/* File List */}
 			<div className="card bg-base-100 shadow-md">
 				<div className="card-body p-6">
+					{/* Search Results Info */}
 					{searchTerm && directory && (
-						<div className="mb-4 text-base-content/70 text-sm">
-							{filteredFiles.length} of {directory.files.length} items match "{searchTerm}"
+						<div className="mb-4">
+							{directory.files.length === 0 ? (
+								<div className="text-base-content/70 text-sm">
+									Cannot search - directory is empty
+								</div>
+							) : filteredFiles.length === 0 ? (
+								<div className="text-base-content/70 text-sm">
+									No items match "{searchTerm}" in this directory ({directory.files.length} total items)
+								</div>
+							) : (
+								<div className="text-base-content/70 text-sm">
+									{filteredFiles.length} of {directory.files.length} items match "{searchTerm}"
+								</div>
+							)}
 						</div>
 					)}
+					
+					{/* Loading State */}
 					{isLoading && isConnected ? (
 						<LoadingSpinner />
 					) : directory ? (
-						<FileList
-							files={filteredFiles}
-							currentPath={currentPath}
-							onNavigate={handleNavigate}
-							onDownload={handleDownload}
-							onDelete={handleDelete}
-							onInfo={handleFileInfo}
-							onPreview={preview.openPreview}
-							isDownloading={isDownloading}
-							isDeleting={isDeleting}
-						/>
+						/* Directory Content */
+						searchTerm && filteredFiles.length === 0 && directory.files.length > 0 ? (
+							/* No Search Results State */
+							<div className="flex flex-col items-center justify-center py-12">
+								<Search className="mb-4 h-12 w-12 text-base-content/30" />
+								<h3 className="mb-2 font-semibold text-base-content/70 text-lg">No Search Results</h3>
+								<p className="mb-4 text-center text-base-content/50">
+									No files match "{searchTerm}" in this directory
+								</p>
+								<button
+									type="button"
+									className="btn btn-outline btn-sm"
+									onClick={handleClearSearch}
+								>
+									<X className="h-4 w-4" />
+									Clear Search
+								</button>
+							</div>
+						) : (
+							/* File List or Empty Directory */
+							<FileList
+								files={filteredFiles}
+								currentPath={currentPath}
+								onNavigate={handleNavigate}
+								onDownload={handleDownload}
+								onDelete={handleDelete}
+								onInfo={handleFileInfo}
+								onPreview={preview.openPreview}
+								isDownloading={isDownloading}
+								isDeleting={isDeleting}
+							/>
+						)
 					) : null}
 				</div>
 			</div>

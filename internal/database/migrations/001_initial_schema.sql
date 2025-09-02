@@ -8,6 +8,7 @@ CREATE TABLE import_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nzb_path TEXT NOT NULL,
     relative_path TEXT DEFAULT NULL,
+    storage_path TEXT DEFAULT NULL,
     priority INTEGER NOT NULL DEFAULT 1, -- 1=high, 2=normal, 3=low
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'retrying')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -58,7 +59,7 @@ CREATE TABLE file_health (
     last_checked DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_error TEXT DEFAULT NULL,
     retry_count INTEGER NOT NULL DEFAULT 0,
-    max_retries INTEGER NOT NULL DEFAULT 5,
+    max_retries INTEGER NOT NULL DEFAULT 2,
     next_retry_at DATETIME DEFAULT NULL,
     source_nzb_path TEXT DEFAULT NULL, -- Source NZB file for reference
     error_details TEXT DEFAULT NULL, -- JSON error details (missing segments, etc)

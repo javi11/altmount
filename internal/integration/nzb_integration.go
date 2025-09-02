@@ -82,7 +82,10 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter confi
 	}
 
 	// Create health repository for file health tracking
-	healthRepo := database.NewHealthRepository(db.Connection())
+	// Note: MediaRepository is not available in this context, so pass nil
+	// This means repair triggering via Arrs won't work in this integration,
+	// but basic health checking functionality will still work
+	healthRepo := database.NewHealthRepository(db.Connection(), nil)
 
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(); err != nil {

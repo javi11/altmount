@@ -53,9 +53,6 @@ export interface QueueStats {
 	last_updated: string;
 }
 
-export interface QueueRetryRequest {
-	reset_retry_count?: boolean;
-}
 
 // Manual Scan types
 export const ScanStatus = {
@@ -87,6 +84,7 @@ export const HealthStatus = {
 	HEALTHY: "healthy",
 	PARTIAL: "partial",
 	CORRUPTED: "corrupted",
+	REPAIR_TRIGGERED: "repair_triggered",
 } as const;
 
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
@@ -95,10 +93,15 @@ export interface FileHealth {
 	id: number;
 	file_path: string;
 	status: HealthStatus;
+	last_checked: string;
+	last_error?: string;
 	retry_count: number;
+	max_retries: number;
+	next_retry_at?: string;
 	source_nzb_path?: string;
-	error_message?: string;
-	last_checked?: string;
+	error_details?: string;
+	repair_retry_count: number;
+	max_repair_retries: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -113,6 +116,10 @@ export interface HealthStats {
 
 export interface HealthRetryRequest {
 	reset_status?: boolean;
+}
+
+export interface HealthRepairRequest {
+	reset_repair_retry_count?: boolean;
 }
 
 export interface HealthCleanupRequest {
