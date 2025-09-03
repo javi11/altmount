@@ -1,22 +1,22 @@
 import { AlertTriangle, Plus, Save } from "lucide-react";
 import { useEffect, useState } from "react";
-import ScraperInstanceCard from "./ScraperInstanceCard";
-import type { ConfigResponse, ScraperConfig, ScraperInstanceConfig, ScraperType } from "../../types/config";
+import ArrsInstanceCard from "./ArrsInstanceCard";
+import type { ConfigResponse, ArrsConfig, ArrsInstanceConfig, ArrsType } from "../../types/config";
 
-interface ScraperConfigSectionProps {
+interface ArrsConfigSectionProps {
 	config: ConfigResponse;
-	onUpdate?: (section: string, data: ScraperConfig) => Promise<void>;
+	onUpdate?: (section: string, data: ArrsConfig) => Promise<void>;
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
 }
 
 interface NewInstanceForm {
 	name: string;
-	type: ScraperType;
+	type: ArrsType;
 	url: string;
 	api_key: string;
 	enabled: boolean;
-	scrape_interval_hours: number;
+	sync_interval_hours: number;
 }
 
 const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
@@ -25,16 +25,16 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 	url: "",
 	api_key: "",
 	enabled: true,
-	scrape_interval_hours: 24,
+	sync_interval_hours: 24,
 };
 
-export function ScraperConfigSection({
+export function ArrsConfigSection({
 	config,
 	onUpdate,
 	isReadOnly = false,
 	isUpdating = false,
-}: ScraperConfigSectionProps) {
-	const [formData, setFormData] = useState<ScraperConfig>(config.scraper);
+}: ArrsConfigSectionProps) {
+	const [formData, setFormData] = useState<ArrsConfig>(config.arrs);
 	const [hasChanges, setHasChanges] = useState(false);
 	const [showAddInstance, setShowAddInstance] = useState(false);
 	const [newInstance, setNewInstance] = useState<NewInstanceForm>(DEFAULT_NEW_INSTANCE);
@@ -44,23 +44,23 @@ export function ScraperConfigSection({
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
-		setFormData(config.scraper);
+		setFormData(config.arrs);
 		setHasChanges(false);
 		setValidationErrors([]);
-	}, [config.scraper]);
+	}, [config.arrs]);
 
-	const validateForm = (data: ScraperConfig): string[] => {
+	const validateForm = (data: ArrsConfig): string[] => {
 		const errors: string[] = [];
 
 		if (data.enabled) {
 			// Validate default interval
 			if (data.default_interval_hours <= 0) {
-				errors.push("Default scrape interval must be greater than 0 hours");
+				errors.push("Default sync interval must be greater than 0 hours");
 			}
 
 			// Validate mount path
 			if (!data.mount_path.trim()) {
-				errors.push("Mount path is required when scraper is enabled");
+				errors.push("Mount path is required when arrs is enabled");
 			} else if (!data.mount_path.startsWith("/")) {
 				errors.push("Mount path must be an absolute path (start with /)");
 			}
@@ -105,9 +105,9 @@ export function ScraperConfigSection({
 					errors.push(`${instanceType} instance "${instance.name}": API key is required`);
 				}
 
-				if (instance.scrape_interval_hours <= 0) {
+				if (instance.sync_interval_hours <= 0) {
 					errors.push(
-						`${instanceType} instance "${instance.name}": Scrape interval must be greater than 0 hours`,
+						`${instanceType} instance "${instance.name}": Sync interval must be greater than 0 hours`,
 					);
 				}
 			});
@@ -117,8 +117,8 @@ export function ScraperConfigSection({
 	};
 
 	const handleFormChange = (
-		field: keyof ScraperConfig,
-		value: ScraperConfig[keyof ScraperConfig],
+		field: keyof ArrsConfig,
+		value: ArrsConfig[keyof ArrsConfig],
 	) => {
 		const newFormData = { ...formData, [field]: value };
 		setFormData(newFormData);
@@ -127,10 +127,10 @@ export function ScraperConfigSection({
 	};
 
 	const handleInstanceChange = (
-		type: ScraperType,
+		type: ArrsType,
 		index: number,
-		field: keyof ScraperInstanceConfig,
-		value: ScraperInstanceConfig[keyof ScraperInstanceConfig],
+		field: keyof ArrsInstanceConfig,
+		value: ArrsInstanceConfig[keyof ArrsInstanceConfig],
 	) => {
 		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
 		const instances = [...formData[instancesKey]];
@@ -142,7 +142,7 @@ export function ScraperConfigSection({
 		setValidationErrors(validateForm(newFormData));
 	};
 
-	const removeInstance = (type: ScraperType, index: number) => {
+	const removeInstance = (type: ArrsType, index: number) => {
 		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
 		const instances = [...formData[instancesKey]];
 		instances.splice(index, 1);
@@ -166,7 +166,7 @@ export function ScraperConfigSection({
 				url: newInstance.url,
 				api_key: newInstance.api_key,
 				enabled: newInstance.enabled,
-				scrape_interval_hours: newInstance.scrape_interval_hours,
+				sync_interval_hours: newInstance.sync_interval_hours,
 			},
 		];
 
@@ -184,10 +184,10 @@ export function ScraperConfigSection({
 		if (!onUpdate || validationErrors.length > 0) return;
 
 		try {
-			await onUpdate("scraper", formData);
+			await onUpdate("arrs", formData);
 			setHasChanges(false);
 		} catch (error) {
-			console.error("Failed to save scraper configuration:", error);
+			console.error("Failed to save arrs configuration:", error);
 		}
 	};
 
@@ -205,13 +205,13 @@ export function ScraperConfigSection({
 		}));
 	};
 
-	const renderInstance = (instance: ScraperInstanceConfig, type: ScraperType, index: number) => {
+	const renderInstance = (instance: ArrsInstanceConfig, type: ArrsType, index: number) => {
 		const instanceId = `${type}-${index}`; // Use index-based key for UI state
 		const isApiKeyVisible = showApiKeys[instanceId] || false;
 		const isExpanded = expandedInstances[instanceId] || false;
 
 		return (
-			<ScraperInstanceCard
+			<ArrsInstanceCard
 				key={instanceId}
 				instance={instance}
 				type={type}
@@ -229,14 +229,14 @@ export function ScraperConfigSection({
 
 	return (
 		<div className="space-y-6">
-			{/* Enable/Disable Scraper */}
+			{/* Enable/Disable Arrs */}
 			<div className="card bg-base-200">
 				<div className="card-body">
 					<div className="flex items-center justify-between">
 						<div>
-							<h3 className="font-semibold">Enable Scraper Service</h3>
+							<h3 className="font-semibold">Enable Arrs Service</h3>
 							<p className="text-base-content/70 text-sm">
-								Enable automatic scraping of Radarr and Sonarr instances for file indexing. This will enable file redownloading feature in case is corrupted.
+								Enable automatic syncing of Radarr and Sonarr instances for file indexing. This will enable file redownloading feature in case is corrupted.
 							</p>
 						</div>
 						<input
@@ -258,7 +258,7 @@ export function ScraperConfigSection({
 
 						<div className="space-y-4">
 							<fieldset className="fieldset max-w-md">
-								<legend className="fieldset-legend">Default Scrape Interval (hours)</legend>
+								<legend className="fieldset-legend">Default Sync Interval (hours)</legend>
 								<input
 									type="number"
 									className="input"
@@ -408,15 +408,15 @@ export function ScraperConfigSection({
 							</fieldset>
 
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Scrape Interval (hours)</legend>
+								<legend className="fieldset-legend">Sync Interval (hours)</legend>
 								<input
 									type="number"
 									className="input"
-									value={newInstance.scrape_interval_hours}
+									value={newInstance.sync_interval_hours}
 									onChange={(e) =>
 										setNewInstance((prev) => ({
 											...prev,
-											scrape_interval_hours: Number.parseInt(e.target.value, 10) || 24,
+											sync_interval_hours: Number.parseInt(e.target.value, 10) || 24,
 										}))
 									}
 									min="1"

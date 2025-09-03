@@ -11,7 +11,7 @@ export interface ConfigResponse {
 	import: ImportConfig;
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
-	scraper: ScraperConfig;
+	arrs: ArrsConfig;
 	providers: ProviderConfig[];
 	log_level: string;
 }
@@ -111,7 +111,7 @@ export interface ConfigUpdateRequest {
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;
-	scraper?: ScraperConfig;
+	arrs?: ArrsConfig;
 	providers?: ProviderUpdateRequest[];
 	log_level?: string;
 }
@@ -219,7 +219,7 @@ export type ConfigSection =
 	| "providers"
 	| "rclone"
 	| "sabnzbd"
-	| "scraper"
+	| "arrs"
 	| "system";
 
 // Form data interfaces for UI components
@@ -295,59 +295,59 @@ export interface SABnzbdFormData {
 	categories: SABnzbdCategory[];
 }
 
-// Scraper configuration types
-export type ScraperType = "radarr" | "sonarr";
+// Arrs configuration types
+export type ArrsType = "radarr" | "sonarr";
 
-// Scraper status types
-export type ScrapeStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
+// Sync status types
+export type SyncStatus = "idle" | "running" | "cancelling" | "completed" | "failed";
 
 export interface PathMappingConfig {
 	from_path: string;
 	to_path: string;
 }
 
-export interface ScraperInstanceConfig {
+export interface ArrsInstanceConfig {
 	name: string;
 	url: string;
 	api_key: string;
 	enabled: boolean;
-	scrape_interval_hours: number;
+	sync_interval_hours: number;
 }
 
-// Database-backed scraper instance (includes real ID from database)
-export interface ScraperInstance {
+// Database-backed arrs instance (includes real ID from database)
+export interface ArrsInstance {
 	id: number;
 	name: string;
-	type: ScraperType;
+	type: ArrsType;
 	url: string;
 	api_key: string;
 	enabled: boolean;
-	scrape_interval_hours: number;
-	last_scrape_at?: string;
+	sync_interval_hours: number;
+	last_sync_at?: string;
 	created_at: string;
 	updated_at: string;
 }
 
-export interface ScraperConfig {
+export interface ArrsConfig {
 	enabled: boolean;
 	default_interval_hours: number;
 	max_workers: number;
 	mount_path: string;
-	radarr_instances: ScraperInstanceConfig[];
-	sonarr_instances: ScraperInstanceConfig[];
+	radarr_instances: ArrsInstanceConfig[];
+	sonarr_instances: ArrsInstanceConfig[];
 }
 
-// Scraper status and progress types
-export interface ScrapeProgressInfo {
+// Sync status and progress types
+export interface SyncProgressInfo {
 	processed_count: number;
 	error_count: number;
 	total_items?: number;
 	current_batch: string;
 }
 
-export interface ScrapeProgress {
+export interface SyncProgress {
 	instance_id: number;
-	status: ScrapeStatus;
+	status: SyncStatus;
 	started_at: string;
 	processed_count: number;
 	error_count: number;
@@ -355,9 +355,9 @@ export interface ScrapeProgress {
 	current_batch: string;
 }
 
-export interface ScrapeResult {
+export interface SyncResult {
 	instance_id: number;
-	status: ScrapeStatus;
+	status: SyncStatus;
 	started_at: string;
 	completed_at: string;
 	processed_count: number;
@@ -365,13 +365,13 @@ export interface ScrapeResult {
 	error_message?: string;
 }
 
-export interface ScraperFormData {
+export interface ArrsFormData {
 	enabled: boolean;
 	default_interval_hours: number;
 	max_workers: number;
 	mount_path: string;
-	radarr_instances: ScraperInstanceConfig[];
-	sonarr_instances: ScraperInstanceConfig[];
+	radarr_instances: ArrsInstanceConfig[];
+	sonarr_instances: ArrsInstanceConfig[];
 }
 
 // Helper type for configuration sections
@@ -458,9 +458,9 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "Download",
 		canEdit: true,
 	},
-	scraper: {
-		title: "Radarr/Sonarr Scraper",
-		description: "Configure Radarr and Sonarr instances for movie and TV show file indexing. This will allow to repair broken files by notifying the appropriate service.",
+	arrs: {
+		title: "Radarr/Sonarr Management",
+		description: "Configure Radarr and Sonarr instances for movie and TV show file synchronization. This will allow to repair broken files by notifying the appropriate service.",
 		icon: "Cog",
 		canEdit: true,
 	},

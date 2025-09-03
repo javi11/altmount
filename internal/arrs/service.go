@@ -1,4 +1,4 @@
-package scraper
+package arrs
 
 import (
 	"context"
@@ -15,64 +15,64 @@ import (
 	"golift.io/starr/sonarr"
 )
 
-// ScrapeStatus represents the status of a scraping operation
-type ScrapeStatus string
+// SyncStatus represents the status of a sync operation
+type SyncStatus string
 
 const (
-	ScrapeStatusRunning    ScrapeStatus = "running"
-	ScrapeStatusCompleted  ScrapeStatus = "completed"
-	ScrapeStatusFailed     ScrapeStatus = "failed"
-	ScrapeStatusCancelling ScrapeStatus = "cancelling"
-	ScrapeStatusCancelled  ScrapeStatus = "cancelled"
+	SyncStatusRunning    SyncStatus = "running"
+	SyncStatusCompleted  SyncStatus = "completed"
+	SyncStatusFailed     SyncStatus = "failed"
+	SyncStatusCancelling SyncStatus = "cancelling"
+	SyncStatusCancelled  SyncStatus = "cancelled"
 )
 
-// ScrapeProgressInfo contains detailed progress information
-type ScrapeProgressInfo struct {
+// SyncProgressInfo contains detailed progress information
+type SyncProgressInfo struct {
 	ProcessedCount int    `json:"processed_count"`
 	ErrorCount     int    `json:"error_count"`
 	TotalItems     *int   `json:"total_items,omitempty"`
 	CurrentBatch   string `json:"current_batch,omitempty"`
 }
 
-// ScrapeProgress tracks the progress of a scraping operation
-type ScrapeProgress struct {
+// SyncProgress tracks the progress of a sync operation
+type SyncProgress struct {
 	InstanceType string             `json:"instance_type"`
 	InstanceName string             `json:"instance_name"`
-	Status       ScrapeStatus       `json:"status"`
+	Status       SyncStatus         `json:"status"`
 	StartedAt    time.Time          `json:"started_at"`
-	Progress     ScrapeProgressInfo `json:"progress"`
+	Progress     SyncProgressInfo   `json:"progress"`
 	Cancel       context.CancelFunc `json:"-"` // Not serialized
 }
 
-// ScrapeResult contains the final result of a scraping operation
-type ScrapeResult struct {
+// SyncResult contains the final result of a sync operation
+type SyncResult struct {
 	InstanceType   string       `json:"instance_type"`
 	InstanceName   string       `json:"instance_name"`
 	CompletedAt    time.Time    `json:"completed_at"`
-	Status         ScrapeStatus `json:"status"`
+	Status         SyncStatus   `json:"status"`
 	ProcessedCount int          `json:"processed_count"`
 	ErrorCount     int          `json:"error_count"`
 	ErrorMessage   *string      `json:"error_message,omitempty"`
 }
 
-// ScraperInstanceState holds runtime state for a scraper instance
-type ScraperInstanceState struct {
-	LastScrapeAt     *time.Time      `json:"last_scrape_at"`
-	LastScrapeResult *ScrapeResult   `json:"last_result"`
-	ActiveStatus     *ScrapeProgress `json:"active_status"`
+// ArrsInstanceState holds runtime state for an arrs instance
+type ArrsInstanceState struct {
+	LastSyncAt     *time.Time    `json:"last_sync_at"`
+	LastSyncResult *SyncResult   `json:"last_result"`
+	ActiveStatus   *SyncProgress `json:"active_status"`
 }
 
-// ConfigInstance represents a scraper instance from configuration
+// ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
 	Name                string `json:"name"`
 	Type                string `json:"type"` // "radarr" or "sonarr"
 	URL                 string `json:"url"`
 	APIKey              string `json:"api_key"`
 	Enabled             bool   `json:"enabled"`
-	ScrapeIntervalHours int    `json:"scrape_interval_hours"`
+	SyncIntervalHours   int    `json:"sync_interval_hours"`
 }
 
-// Service manages the scraping of Radarr and Sonarr instances using configuration-first approach
+// Service manages syncing with Radarr and Sonarr instances using configuration-first approach
 type Service struct {
 	configGetter  config.ConfigGetter
 	mediaRepo     *database.MediaRepository
@@ -87,10 +87,10 @@ type Service struct {
 
 	// In-memory state tracking
 	stateMutex    sync.RWMutex
-	instanceState map[string]*ScraperInstanceState // key: "type:name"
+	instanceState map[string]*ArrsInstanceState // key: "type:name"
 }
 
-// NewService creates a new scraper service with configuration-first approach
+// NewService creates a new arrs service with configuration-first approach
 func NewService(configGetter config.ConfigGetter, mediaRepo *database.MediaRepository, logger *slog.Logger) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
@@ -101,7 +101,7 @@ func NewService(configGetter config.ConfigGetter, mediaRepo *database.MediaRepos
 		cancel:        cancel,
 		radarrClients: make(map[string]*radarr.Radarr),
 		sonarrClients: make(map[string]*sonarr.Sonarr),
-		instanceState: make(map[string]*ScraperInstanceState),
+		instanceState: make(map[string]*ArrsInstanceState),
 	}
 }
 
@@ -127,17 +127,17 @@ func stripMountPath(filePath, mountPath string) string {
 	return stripped
 }
 
-// getConfigInstances returns all scraper instances from current configuration
+// getConfigInstances returns all arrs instances from current configuration
 func (s *Service) getConfigInstances() []*ConfigInstance {
 	cfg := s.configGetter()
 	instances := make([]*ConfigInstance, 0)
 
 	// Convert Radarr instances
-	if len(cfg.Scraper.RadarrInstances) > 0 {
-		for _, radarrConfig := range cfg.Scraper.RadarrInstances {
-			scrapeInterval := 24 // default
-			if radarrConfig.ScrapeIntervalHours != nil {
-				scrapeInterval = *radarrConfig.ScrapeIntervalHours
+	if len(cfg.Arrs.RadarrInstances) > 0 {
+		for _, radarrConfig := range cfg.Arrs.RadarrInstances {
+			syncInterval := 24 // default
+			if radarrConfig.SyncIntervalHours != nil {
+				syncInterval = *radarrConfig.SyncIntervalHours
 			}
 
 			instance := &ConfigInstance{
@@ -146,18 +146,18 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 				URL:                 radarrConfig.URL,
 				APIKey:              radarrConfig.APIKey,
 				Enabled:             radarrConfig.Enabled != nil && *radarrConfig.Enabled,
-				ScrapeIntervalHours: scrapeInterval,
+				SyncIntervalHours:   syncInterval,
 			}
 			instances = append(instances, instance)
 		}
 	}
 
 	// Convert Sonarr instances
-	if len(cfg.Scraper.SonarrInstances) > 0 {
-		for _, sonarrConfig := range cfg.Scraper.SonarrInstances {
-			scrapeInterval := 24 // default
-			if sonarrConfig.ScrapeIntervalHours != nil {
-				scrapeInterval = *sonarrConfig.ScrapeIntervalHours
+	if len(cfg.Arrs.SonarrInstances) > 0 {
+		for _, sonarrConfig := range cfg.Arrs.SonarrInstances {
+			syncInterval := 24 // default
+			if sonarrConfig.SyncIntervalHours != nil {
+				syncInterval = *sonarrConfig.SyncIntervalHours
 			}
 
 			instance := &ConfigInstance{
@@ -166,7 +166,7 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 				URL:                 sonarrConfig.URL,
 				APIKey:              sonarrConfig.APIKey,
 				Enabled:             sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
-				ScrapeIntervalHours: scrapeInterval,
+				SyncIntervalHours:   syncInterval,
 			}
 			instances = append(instances, instance)
 		}
@@ -188,38 +188,38 @@ func (s *Service) findConfigInstance(instanceType, instanceName string) (*Config
 }
 
 // getOrCreateInstanceState gets or creates state for an instance
-func (s *Service) getOrCreateInstanceState(instanceType, instanceName string) *ScraperInstanceState {
+func (s *Service) getOrCreateInstanceState(instanceType, instanceName string) *ArrsInstanceState {
 	s.stateMutex.Lock()
 	defer s.stateMutex.Unlock()
 
 	key := getInstanceKey(instanceType, instanceName)
 	state, exists := s.instanceState[key]
 	if !exists {
-		state = &ScraperInstanceState{}
+		state = &ArrsInstanceState{}
 		s.instanceState[key] = state
 	}
 
 	return state
 }
 
-// Start starts the scraper service
+// Start starts the arrs service
 func (s *Service) Start() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.running {
-		return fmt.Errorf("scraper service is already running")
+		return fmt.Errorf("arrs service is already running")
 	}
 
 	s.running = true
 	s.wg.Add(1)
-	go s.scraperLoop()
+	go s.serviceLoop()
 
-	s.logger.Info("Scraper service started")
+	s.logger.Info("Arrs service started")
 	return nil
 }
 
-// Stop stops the scraper service
+// Stop stops the arrs service
 func (s *Service) Stop() error {
 	s.mu.Lock()
 	if !s.running {
@@ -250,16 +250,16 @@ func (s *Service) Stop() error {
 		delete(s.sonarrClients, name)
 	}
 
-	s.logger.Info("Scraper service stopped")
+	s.logger.Info("Arrs service stopped")
 	return nil
 }
 
-// scraperLoop runs the main scraping loop
-func (s *Service) scraperLoop() {
+// serviceLoop runs the main service loop
+func (s *Service) serviceLoop() {
 	defer s.wg.Done()
 
-	// For now, we only support manual scraping
-	// Scheduled scraping can be added later if needed
+	// For now, we only support manual sync
+	// Scheduled sync can be added later if needed
 
 	for {
 		select {
@@ -267,24 +267,24 @@ func (s *Service) scraperLoop() {
 			return
 		case <-time.After(30 * time.Second):
 			// Check if we should do any scheduled work
-			s.performScrape()
+			s.performSync()
 		}
 	}
 }
 
-// performScrape checks for instances that need scraping and scrapes them
-func (s *Service) performScrape() {
+// performSync checks for instances that need syncing and syncs them
+func (s *Service) performSync() {
 	for _, instance := range s.getConfigInstances() {
 		if instance.Enabled {
-			if err := s.TriggerScrape(instance.Type, instance.Name); err != nil {
-				s.logger.Error("Failed to trigger scrape", "instance", instance.Name, "type", instance.Type, "error", err)
+			if err := s.TriggerSync(instance.Type, instance.Name); err != nil {
+				s.logger.Error("Failed to trigger sync", "instance", instance.Name, "type", instance.Type, "error", err)
 			}
 		}
 	}
 }
 
-// TriggerScrape triggers a manual scrape for a specific instance by type and name
-func (s *Service) TriggerScrape(instanceType, instanceName string) error {
+// TriggerSync triggers a manual sync for a specific instance by type and name
+func (s *Service) TriggerSync(instanceType, instanceName string) error {
 	// Find the instance in configuration
 	instance, err := s.findConfigInstance(instanceType, instanceName)
 	if err != nil {
@@ -295,39 +295,39 @@ func (s *Service) TriggerScrape(instanceType, instanceName string) error {
 		return fmt.Errorf("instance is disabled: %s/%s", instanceType, instanceName)
 	}
 
-	// Start scraping in a goroutine
-	go s.scrapeConfigInstance(instance)
+	// Start syncing in a goroutine
+	go s.syncConfigInstance(instance)
 
 	return nil
 }
 
-// scrapeConfigInstance performs scraping for a configuration-based instance
-func (s *Service) scrapeConfigInstance(instance *ConfigInstance) {
-	s.logger.Info("Starting manual scrape", "instance", instance.Name, "type", instance.Type)
+// syncConfigInstance performs syncing for a configuration-based instance
+func (s *Service) syncConfigInstance(instance *ConfigInstance) {
+	s.logger.Info("Starting manual sync", "instance", instance.Name, "type", instance.Type)
 
 	// Get or create state for this instance
 	state := s.getOrCreateInstanceState(instance.Type, instance.Name)
 
-	// Check if already scraping this instance (only block if actively running)
+	// Check if already syncing this instance (only block if actively running)
 	s.stateMutex.RLock()
-	if state.ActiveStatus != nil && (state.ActiveStatus.Status == ScrapeStatusRunning || state.ActiveStatus.Status == ScrapeStatusCancelling) {
+	if state.ActiveStatus != nil && (state.ActiveStatus.Status == SyncStatusRunning || state.ActiveStatus.Status == SyncStatusCancelling) {
 		s.stateMutex.RUnlock()
-		s.logger.Warn("Instance is already being scraped", "instance", instance.Name, "type", instance.Type)
+		s.logger.Warn("Instance is already being synced", "instance", instance.Name, "type", instance.Type)
 		return
 	}
 	s.stateMutex.RUnlock()
 
-	// Create cancellation context for this scrape
+	// Create cancellation context for this sync
 	_, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
 	// Initialize progress tracking
-	progress := &ScrapeProgress{
+	progress := &SyncProgress{
 		InstanceType: instance.Type,
 		InstanceName: instance.Name,
-		Status:       ScrapeStatusRunning,
+		Status:       SyncStatusRunning,
 		StartedAt:    time.Now(),
-		Progress: ScrapeProgressInfo{
+		Progress: SyncProgressInfo{
 			ProcessedCount: 0,
 			ErrorCount:     0,
 			CurrentBatch:   "initializing",
@@ -335,14 +335,14 @@ func (s *Service) scrapeConfigInstance(instance *ConfigInstance) {
 		Cancel: cancel,
 	}
 
-	// Register active scraping
+	// Register active syncing
 	s.stateMutex.Lock()
 	state.ActiveStatus = progress
 	s.stateMutex.Unlock()
 
 	// Ensure cleanup on exit - preserve final status for visibility
 	defer func() {
-		if progress.Status == ScrapeStatusRunning || progress.Status == ScrapeStatusCancelling {
+		if progress.Status == SyncStatusRunning || progress.Status == SyncStatusCancelling {
 			// Only clear status if we're still in a transient state
 			s.stateMutex.Lock()
 			state.ActiveStatus = nil
@@ -353,24 +353,24 @@ func (s *Service) scrapeConfigInstance(instance *ConfigInstance) {
 
 	var err error
 	if instance.Type == "radarr" {
-		err = s.scrapeRadarrConfig(instance, progress)
+		err = s.syncRadarrConfig(instance, progress)
 	} else if instance.Type == "sonarr" {
-		err = s.scrapeSonarrConfig(instance, progress)
+		err = s.syncSonarrConfig(instance, progress)
 	} else {
 		err = fmt.Errorf("unsupported instance type: %s", instance.Type)
 	}
 
 	// Update final status
 	if err != nil {
-		progress.Status = ScrapeStatusFailed
-		s.logger.Error("Scraping failed", "instance", instance.Name, "type", instance.Type, "error", err)
+		progress.Status = SyncStatusFailed
+		s.logger.Error("Sync failed", "instance", instance.Name, "type", instance.Type, "error", err)
 	} else {
-		progress.Status = ScrapeStatusCompleted
-		s.logger.Info("Scraping completed", "instance", instance.Name, "type", instance.Type)
+		progress.Status = SyncStatusCompleted
+		s.logger.Info("Sync completed", "instance", instance.Name, "type", instance.Type)
 	}
 
 	// Record the final result
-	result := &ScrapeResult{
+	result := &SyncResult{
 		InstanceType:   instance.Type,
 		InstanceName:   instance.Name,
 		CompletedAt:    time.Now(),
@@ -386,22 +386,22 @@ func (s *Service) scrapeConfigInstance(instance *ConfigInstance) {
 
 	// Store the result in state
 	s.stateMutex.Lock()
-	state.LastScrapeAt = &result.CompletedAt
-	state.LastScrapeResult = result
+	state.LastSyncAt = &result.CompletedAt
+	state.LastSyncResult = result
 	s.stateMutex.Unlock()
 
 	duration := time.Since(progress.StartedAt)
-	s.logger.Info("Scrape completed",
+	s.logger.Info("Sync completed",
 		"instance", instance.Name,
 		"type", instance.Type,
 		"duration", duration)
 }
 
-// scrapeRadarrConfig scrapes a Radarr instance using configuration
-func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeProgress) error {
+// syncRadarrConfig syncs a Radarr instance using configuration
+func (s *Service) syncRadarrConfig(instance *ConfigInstance, progress *SyncProgress) error {
 	// Get configuration for mount path
 	cfg := s.configGetter()
-	mountPath := cfg.Scraper.MountPath
+	mountPath := cfg.Arrs.MountPath
 
 	// Get or create Radarr client
 	client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
@@ -486,11 +486,11 @@ func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeP
 	return nil
 }
 
-// scrapeSonarrConfig scrapes a Sonarr instance using configuration
-func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeProgress) error {
+// syncSonarrConfig syncs a Sonarr instance using configuration
+func (s *Service) syncSonarrConfig(instance *ConfigInstance, progress *SyncProgress) error {
 	// Get configuration for mount path
 	cfg := s.configGetter()
-	mountPath := cfg.Scraper.MountPath
+	mountPath := cfg.Arrs.MountPath
 
 	// Get or create Sonarr client
 	client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
@@ -631,8 +631,8 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 	return client, nil
 }
 
-// GetScrapeStatus returns the current scrape status for an instance by type and name
-func (s *Service) GetScrapeStatus(instanceType, instanceName string) (*ScrapeProgress, error) {
+// GetSyncStatus returns the current sync status for an instance by type and name
+func (s *Service) GetSyncStatus(instanceType, instanceName string) (*SyncProgress, error) {
 	// Verify instance exists in configuration
 	_, err := s.findConfigInstance(instanceType, instanceName)
 	if err != nil {
@@ -651,8 +651,8 @@ func (s *Service) GetScrapeStatus(instanceType, instanceName string) (*ScrapePro
 	return state.ActiveStatus, nil
 }
 
-// GetLastScrapeResult returns the last scrape result for an instance by type and name
-func (s *Service) GetLastScrapeResult(instanceType, instanceName string) (*ScrapeResult, error) {
+// GetLastSyncResult returns the last sync result for an instance by type and name
+func (s *Service) GetLastSyncResult(instanceType, instanceName string) (*SyncResult, error) {
 	// Verify instance exists in configuration
 	_, err := s.findConfigInstance(instanceType, instanceName)
 	if err != nil {
@@ -668,25 +668,25 @@ func (s *Service) GetLastScrapeResult(instanceType, instanceName string) (*Scrap
 		return nil, nil // No result available
 	}
 
-	return state.LastScrapeResult, nil
+	return state.LastSyncResult, nil
 }
 
-// GetAllActiveScrapes returns all currently active scrapes
-func (s *Service) GetAllActiveScrapes() []*ScrapeProgress {
+// GetAllActiveSyncs returns all currently active syncs
+func (s *Service) GetAllActiveSyncs() []*SyncProgress {
 	s.stateMutex.RLock()
 	defer s.stateMutex.RUnlock()
 
-	var activeScrapes []*ScrapeProgress
+	var activeSyncs []*SyncProgress
 	for _, state := range s.instanceState {
 		if state.ActiveStatus != nil {
-			activeScrapes = append(activeScrapes, state.ActiveStatus)
+			activeSyncs = append(activeSyncs, state.ActiveStatus)
 		}
 	}
 
-	return activeScrapes
+	return activeSyncs
 }
 
-// GetAllInstances returns all scraper instances from configuration with their state
+// GetAllInstances returns all arrs instances from configuration with their state
 func (s *Service) GetAllInstances() []*ConfigInstance {
 	return s.getConfigInstances()
 }
@@ -702,14 +702,14 @@ func (s *Service) GetInstance(instanceType, instanceName string) *ConfigInstance
 	return nil
 }
 
-// CancelScrape cancels an active scrape by type and name
-func (s *Service) CancelScrape(instanceType, instanceName string) error {
+// CancelSync cancels an active sync by type and name
+func (s *Service) CancelSync(instanceType, instanceName string) error {
 	s.stateMutex.RLock()
 	key := getInstanceKey(instanceType, instanceName)
 	state, exists := s.instanceState[key]
 	if !exists || state.ActiveStatus == nil {
 		s.stateMutex.RUnlock()
-		return fmt.Errorf("no active scrape found for instance: %s/%s", instanceType, instanceName)
+		return fmt.Errorf("no active sync found for instance: %s/%s", instanceType, instanceName)
 	}
 
 	progress := state.ActiveStatus
@@ -718,15 +718,15 @@ func (s *Service) CancelScrape(instanceType, instanceName string) error {
 	// Cancel the operation
 	if progress.Cancel != nil {
 		progress.Cancel()
-		progress.Status = ScrapeStatusCancelling
-		s.logger.Info("Cancelled scrape", "instance", instanceName, "type", instanceType)
+		progress.Status = SyncStatusCancelling
+		s.logger.Info("Cancelled sync", "instance", instanceName, "type", instanceType)
 		return nil
 	}
 
-	return fmt.Errorf("cannot cancel scrape - no cancellation context available")
+	return fmt.Errorf("cannot cancel sync - no cancellation context available")
 }
 
-// TestConnection tests the connection to a scraper instance
+// TestConnection tests the connection to an arrs instance
 func (s *Service) TestConnection(instanceType, url, apiKey string) error {
 	switch instanceType {
 	case "radarr":

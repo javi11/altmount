@@ -9,12 +9,12 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { useCancelScrape, useScraperInstanceInfo, useTriggerScrape } from "../../hooks/useScraper";
-import type { ScraperInstanceConfig, ScraperType, ScrapeStatus } from "../../types/config";
+import { useCancelSync, useArrsInstanceInfo, useTriggerSync } from "../../hooks/useArrs";
+import type { ArrsInstanceConfig, ArrsType, SyncStatus } from "../../types/config";
 
-interface ScraperInstanceCardProps {
-  instance: ScraperInstanceConfig;
-  type: ScraperType;
+interface ArrsInstanceCardProps {
+  instance: ArrsInstanceConfig;
+  type: ArrsType;
   index: number;
   isReadOnly: boolean;
   isApiKeyVisible: boolean;
@@ -23,12 +23,12 @@ interface ScraperInstanceCardProps {
   onToggleExpanded: () => void;
   onRemove: () => void;
   onInstanceChange: (
-    field: keyof ScraperInstanceConfig,
-    value: ScraperInstanceConfig[keyof ScraperInstanceConfig]
+    field: keyof ArrsInstanceConfig,
+    value: ArrsInstanceConfig[keyof ArrsInstanceConfig]
   ) => void;
 }
 
-const getStatusIcon = (status: ScrapeStatus) => {
+const getStatusIcon = (status: SyncStatus) => {
   switch (status) {
     case "running":
       return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
@@ -64,7 +64,7 @@ const formatDuration = (startTime: string, endTime?: string) => {
   return `${minutes}m ${seconds}s`;
 };
 
-export function ScraperInstanceCard({
+export function ArrsInstanceCard({
   instance,
   type,
   index,
@@ -75,11 +75,11 @@ export function ScraperInstanceCard({
   onToggleExpanded,
   onRemove,
   onInstanceChange,
-}: ScraperInstanceCardProps) {
-  // Configuration-first approach: always enable scraper instance info
-  const scraperInfo = useScraperInstanceInfo(type, instance.name, true);
-  const triggerScrape = useTriggerScrape();
-  const cancelScrape = useCancelScrape();
+}: ArrsInstanceCardProps) {
+  // Configuration-first approach: always enable arrs instance info
+  const arrsInfo = useArrsInstanceInfo(type, instance.name, true);
+  const triggerSync = useTriggerSync();
+  const cancelSync = useCancelSync();
 
   const instanceKey = `${type}-${index}`;
 
@@ -90,10 +90,10 @@ export function ScraperInstanceCard({
           <div className="flex items-center space-x-3">
             <h4 className="font-semibold capitalize">{type} Instance</h4>
             <div className="flex items-center space-x-2">
-              {scraperInfo.status && getStatusIcon(scraperInfo.status.status)}
-              {scraperInfo.status && (
+              {arrsInfo.status && getStatusIcon(arrsInfo.status.status)}
+              {arrsInfo.status && (
                 <span className="text-base-content/70 text-sm capitalize">
-                  {scraperInfo.status.status}
+                  {arrsInfo.status.status}
                 </span>
               )}
             </div>
@@ -104,12 +104,12 @@ export function ScraperInstanceCard({
               {isExpanded ? "Hide Status" : "Show Status"}
             </button>
             {/* Control buttons */}
-            {scraperInfo.hasActiveStatus ? (
+            {arrsInfo.hasActiveStatus ? (
               <button
                 type="button"
                 className="btn btn-sm btn-warning"
-                onClick={() => cancelScrape.mutate({ instanceType: type, instanceName: instance.name })}
-                disabled={cancelScrape.isPending || scraperInfo.status?.status !== "running"}
+                onClick={() => cancelSync.mutate({ instanceType: type, instanceName: instance.name })}
+                disabled={cancelSync.isPending || arrsInfo.status?.status !== "running"}
               >
                 <Square className="h-4 w-4" />
                 Cancel
@@ -118,8 +118,8 @@ export function ScraperInstanceCard({
               <button
                 type="button"
                 className="btn btn-sm btn-primary"
-                onClick={() => triggerScrape.mutate({ instanceType: type, instanceName: instance.name })}
-                disabled={triggerScrape.isPending || !instance.enabled}
+                onClick={() => triggerSync.mutate({ instanceType: type, instanceName: instance.name })}
+                disabled={triggerSync.isPending || !instance.enabled}
               >
                 <Play className="h-4 w-4" />
                 Run
@@ -142,49 +142,49 @@ export function ScraperInstanceCard({
           <div className="mb-4 space-y-4 rounded-lg bg-base-100 p-4">
             <h5 className="font-medium text-base-content/80">Status Dashboard</h5>
 
-            {scraperInfo.status && (scraperInfo.status.status === "running" || scraperInfo.status.status === "cancelling") ? (
+            {arrsInfo.status && (arrsInfo.status.status === "running" || arrsInfo.status.status === "cancelling") ? (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <div className="stat rounded-lg bg-base-200">
                   <div className="stat-title">Current Status</div>
                   <div className="stat-value flex items-center space-x-2 text-lg">
-                    {getStatusIcon(scraperInfo.status.status)}
-                    <span className="capitalize">{scraperInfo.status.status}</span>
+                    {getStatusIcon(arrsInfo.status.status)}
+                    <span className="capitalize">{arrsInfo.status.status}</span>
                   </div>
                   <div className="stat-desc">
-                    Started: {new Date(scraperInfo.status.started_at).toLocaleString()}
+                    Started: {new Date(arrsInfo.status.started_at).toLocaleString()}
                   </div>
                 </div>
 
                 <div className="stat rounded-lg bg-base-200">
                   <div className="stat-title">Progress</div>
                   <div className="stat-value text-lg">
-                    {scraperInfo.status.processed_count}
-                    {scraperInfo.status.total_items && ` / ${scraperInfo.status.total_items}`}
+                    {arrsInfo.status.processed_count}
+                    {arrsInfo.status.total_items && ` / ${arrsInfo.status.total_items}`}
                   </div>
                   <div className="stat-desc">
-                    {scraperInfo.status.error_count > 0 && (
-                      <span className="text-error">{scraperInfo.status.error_count} errors</span>
+                    {arrsInfo.status.error_count > 0 && (
+                      <span className="text-error">{arrsInfo.status.error_count} errors</span>
                     )}
                   </div>
                 </div>
 
                 <div className="stat rounded-lg bg-base-200">
                   <div className="stat-title">Duration</div>
-                  <div className="stat-value text-lg">{formatDuration(scraperInfo.status.started_at)}</div>
-                  <div className="stat-desc">{scraperInfo.status.current_batch}</div>
+                  <div className="stat-value text-lg">{formatDuration(arrsInfo.status.started_at)}</div>
+                  <div className="stat-desc">{arrsInfo.status.current_batch}</div>
                 </div>
 
-                {scraperInfo.status.total_items && scraperInfo.status.total_items > 0 && (
+                {arrsInfo.status.total_items && arrsInfo.status.total_items > 0 && (
                   <div className="stat col-span-full rounded-lg bg-base-200">
                     <div className="stat-title">Progress Bar</div>
                     <progress
                       className="progress progress-primary w-full"
-                      value={scraperInfo.status.processed_count}
-                      max={scraperInfo.status.total_items}
+                      value={arrsInfo.status.processed_count}
+                      max={arrsInfo.status.total_items}
                     />
                     <div className="stat-desc">
                       {Math.round(
-                        (scraperInfo.status.processed_count / scraperInfo.status.total_items) * 100,
+                        (arrsInfo.status.processed_count / arrsInfo.status.total_items) * 100,
                       )}
                       % complete
                     </div>
@@ -194,15 +194,15 @@ export function ScraperInstanceCard({
             ) : null}
 
             {/* Last Result */}
-            {(scraperInfo.result || (scraperInfo.status && (scraperInfo.status.status === "completed" || scraperInfo.status.status === "failed"))) && (() => {
-              // Use result data if available, otherwise fallback to status data for completed/failed scrapes
-              const resultData = scraperInfo.result || (scraperInfo.status && (scraperInfo.status.status === "completed" || scraperInfo.status.status === "failed") 
+            {(arrsInfo.result || (arrsInfo.status && (arrsInfo.status.status === "completed" || arrsInfo.status.status === "failed"))) && (() => {
+              // Use result data if available, otherwise fallback to status data for completed/failed syncs
+              const resultData = arrsInfo.result || (arrsInfo.status && (arrsInfo.status.status === "completed" || arrsInfo.status.status === "failed") 
                 ? {
-                    status: scraperInfo.status.status,
-                    started_at: scraperInfo.status.started_at,
+                    status: arrsInfo.status.status,
+                    started_at: arrsInfo.status.started_at,
                     completed_at: new Date().toISOString(), // Current time as fallback
-                    processed_count: scraperInfo.status.processed_count || 0,
-                    error_count: scraperInfo.status.error_count || 0,
+                    processed_count: arrsInfo.status.processed_count || 0,
+                    error_count: arrsInfo.status.error_count || 0,
                     error_message: null
                   }
                 : null);
@@ -212,7 +212,7 @@ export function ScraperInstanceCard({
               return (
                 <div>
                   <h6 className="mb-2 font-medium text-base-content/70">
-                    {scraperInfo.result ? "Last Scrape Result" : "Scrape Result"}
+                    {arrsInfo.result ? "Last Sync Result" : "Sync Result"}
                   </h6>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                     <div className="stat rounded-lg bg-base-200">
@@ -255,11 +255,11 @@ export function ScraperInstanceCard({
             })()}
 
             {/* No Status Available */}
-            {!scraperInfo.status && !scraperInfo.result && (
+            {!arrsInfo.status && !arrsInfo.result && (
               <div className="py-8 text-center text-base-content/50">
                 <Clock className="mx-auto mb-2 h-12 w-12" />
                 <p>No scraping activity yet</p>
-                <p className="text-sm">Click "Run" to start a manual scrape</p>
+                <p className="text-sm">Click "Run" to start a manual sync</p>
               </div>
             )}
           </div>
@@ -313,19 +313,19 @@ export function ScraperInstanceCard({
           </fieldset>
 
           <fieldset className="fieldset">
-            <legend className="fieldset-legend">Scrape Interval (hours)</legend>
+            <legend className="fieldset-legend">Sync Interval (hours)</legend>
             <input
               type="number"
               className="input"
-              value={instance.scrape_interval_hours}
+              value={instance.sync_interval_hours}
               onChange={(e) =>
-                onInstanceChange("scrape_interval_hours", Number.parseInt(e.target.value, 10) || 24)
+                onInstanceChange("sync_interval_hours", Number.parseInt(e.target.value, 10) || 24)
               }
               min="1"
               max="168"
               disabled={isReadOnly}
             />
-            <p className="label">How often to scrape for new files</p>
+            <p className="label">How often to sync for new files</p>
           </fieldset>
         </div>
 
@@ -346,4 +346,4 @@ export function ScraperInstanceCard({
   );
 }
 
-export default ScraperInstanceCard;
+export default ArrsInstanceCard;

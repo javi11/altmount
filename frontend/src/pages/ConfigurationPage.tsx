@@ -18,7 +18,7 @@ import { MetadataConfigSection } from "../components/config/MetadataConfigSectio
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
-import { ScraperConfigSection } from "../components/config/ScraperConfigSection";
+import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
@@ -39,7 +39,7 @@ import type {
 	MetadataConfig,
 	RCloneVFSFormData,
 	SABnzbdConfig,
-	ScraperConfig,
+	ArrsConfig,
 	StreamingConfig,
 	SystemFormData,
 	WebDAVConfig,
@@ -141,7 +141,7 @@ export function ConfigurationPage() {
 			| RCloneVFSFormData
 			| SystemFormData
 			| SABnzbdConfig
-			| ScraperConfig,
+			| ArrsConfig,
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -207,10 +207,10 @@ export function ConfigurationPage() {
 					section: "sabnzbd",
 					config: { sabnzbd: data as SABnzbdConfig },
 				});
-			} else if (section === "scraper") {
+			} else if (section === "arrs") {
 				await updateConfigSection.mutateAsync({
-					section: "scraper",
-					config: { scraper: data as ScraperConfig },
+					section: "arrs",
+					config: { arrs: data as ArrsConfig },
 				});
 			}
 		} catch (error) {
@@ -462,8 +462,8 @@ export function ConfigurationPage() {
 									/>
 								)}
 
-								{activeSection === "scraper" && (
-									<ScraperConfigSection
+								{activeSection === "arrs" && (
+									<ArrsConfigSection
 										config={config}
 										onUpdate={handleConfigUpdate}
 										isUpdating={updateConfigSection.isPending}
@@ -480,7 +480,7 @@ export function ConfigurationPage() {
 									"providers",
 									"rclone",
 									"sabnzbd",
-									"scraper",
+									"arrs",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

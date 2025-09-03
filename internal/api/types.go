@@ -229,7 +229,7 @@ type ConfigResponse struct {
 	RClone    RCloneConfigResponse     `json:"rclone"`
 	Import    ImportConfigResponse     `json:"import"`
 	SABnzbd   SABnzbdConfigData        `json:"sabnzbd"`
-	Scraper   ScraperConfigData        `json:"scraper"`
+	Arrs      ArrsConfigData           `json:"arrs"`
 	Providers []ProviderConfigResponse `json:"providers"`
 	LogLevel  string                   `json:"log_level"`
 }
@@ -294,22 +294,22 @@ type SABnzbdCategoryData struct {
 	Dir      string `json:"dir"`
 }
 
-// ScraperConfigData represents scraper configuration in API responses
-type ScraperConfigData struct {
+// ArrsConfigData represents arrs configuration in API responses
+type ArrsConfigData struct {
 	Enabled              bool                  `json:"enabled"`
 	DefaultIntervalHours int                   `json:"default_interval_hours"`
 	MountPath            string                `json:"mount_path"`
-	RadarrInstances      []ScraperInstanceData `json:"radarr_instances"`
-	SonarrInstances      []ScraperInstanceData `json:"sonarr_instances"`
+	RadarrInstances      []ArrsInstanceData `json:"radarr_instances"`
+	SonarrInstances      []ArrsInstanceData `json:"sonarr_instances"`
 }
 
-// ScraperInstanceData represents a scraper instance in API responses
-type ScraperInstanceData struct {
+// ArrsInstanceData represents an arrs instance in API responses
+type ArrsInstanceData struct {
 	Name                string `json:"name"`
 	URL                 string `json:"url"`
 	APIKey              string `json:"api_key"`
 	Enabled             bool   `json:"enabled"`
-	ScrapeIntervalHours int    `json:"scrape_interval_hours"`
+	SyncIntervalHours   int    `json:"sync_interval_hours"`
 }
 
 // ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
@@ -336,7 +336,7 @@ type ConfigUpdateRequest struct {
 	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
 	Import    *ImportConfigRequest     `json:"import,omitempty"`
 	SABnzbd   *SABnzbdConfigUpdate     `json:"sabnzbd,omitempty"`
-	Scraper   *ScraperConfigUpdate     `json:"scraper,omitempty"`
+	Arrs      *ArrsConfigUpdate        `json:"arrs,omitempty"`
 	Providers *[]ProviderConfigRequest `json:"providers,omitempty"`
 	LogLevel  *string                  `json:"log_level,omitempty"`
 }
@@ -402,22 +402,22 @@ type SABnzbdCategoryUpdate struct {
 	Dir      *string `json:"dir,omitempty"`
 }
 
-// ScraperConfigUpdate represents scraper configuration in update requests
-type ScraperConfigUpdate struct {
+// ArrsConfigUpdate represents arrs configuration in update requests
+type ArrsConfigUpdate struct {
 	Enabled              *bool                    `json:"enabled,omitempty"`
 	DefaultIntervalHours *int                     `json:"default_interval_hours,omitempty"`
 	MountPath            *string                  `json:"mount_path,omitempty"`
-	RadarrInstances      *[]ScraperInstanceUpdate `json:"radarr_instances,omitempty"`
-	SonarrInstances      *[]ScraperInstanceUpdate `json:"sonarr_instances,omitempty"`
+	RadarrInstances      *[]ArrsInstanceUpdate `json:"radarr_instances,omitempty"`
+	SonarrInstances      *[]ArrsInstanceUpdate `json:"sonarr_instances,omitempty"`
 }
 
-// ScraperInstanceUpdate represents a scraper instance in update requests
-type ScraperInstanceUpdate struct {
-	Name                *string `json:"name,omitempty"`
-	URL                 *string `json:"url,omitempty"`
-	APIKey              *string `json:"api_key,omitempty"`
-	Enabled             *bool   `json:"enabled,omitempty"`
-	ScrapeIntervalHours *int    `json:"scrape_interval_hours,omitempty"`
+// ArrsInstanceUpdate represents an arrs instance in update requests
+type ArrsInstanceUpdate struct {
+	Name              *string `json:"name,omitempty"`
+	URL               *string `json:"url,omitempty"`
+	APIKey            *string `json:"api_key,omitempty"`
+	Enabled           *bool   `json:"enabled,omitempty"`
+	SyncIntervalHours *int    `json:"sync_interval_hours,omitempty"`
 }
 
 // ProviderConfigRequest represents a single NNTP provider configuration in update requests

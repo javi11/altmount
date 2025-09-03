@@ -25,7 +25,7 @@ type Config struct {
 	Import    ImportConfig     `yaml:"import" mapstructure:"import"`
 	Log       LogConfig        `yaml:"log" mapstructure:"log"`
 	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd"`
-	Scraper   ScraperConfig    `yaml:"scraper" mapstructure:"scraper"`
+	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
 	LogLevel  string           `yaml:"log_level" mapstructure:"log_level"`
 }
@@ -131,23 +131,23 @@ type SABnzbdCategory struct {
 	Dir      string `yaml:"dir" mapstructure:"dir"`
 }
 
-// ScraperConfig represents scraper configuration
-type ScraperConfig struct {
+// ArrsConfig represents arrs configuration
+type ArrsConfig struct {
 	Enabled              *bool                   `yaml:"enabled" mapstructure:"enabled"`
 	DefaultIntervalHours int                     `yaml:"default_interval_hours" mapstructure:"default_interval_hours"`
 	MaxWorkers           int                     `yaml:"max_workers" mapstructure:"max_workers"`
 	MountPath            string                  `yaml:"mount_path" mapstructure:"mount_path"`
-	RadarrInstances      []ScraperInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances"`
-	SonarrInstances      []ScraperInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances"`
+	RadarrInstances      []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances"`
+	SonarrInstances      []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances"`
 }
 
-// ScraperInstanceConfig represents a single scraper instance configuration
-type ScraperInstanceConfig struct {
+// ArrsInstanceConfig represents a single arrs instance configuration
+type ArrsInstanceConfig struct {
 	Name                string `yaml:"name" mapstructure:"name"`
 	URL                 string `yaml:"url" mapstructure:"url"`
 	APIKey              string `yaml:"api_key" mapstructure:"api_key"`
 	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled"`
-	ScrapeIntervalHours *int   `yaml:"scrape_interval_hours" mapstructure:"scrape_interval_hours"`
+	SyncIntervalHours   *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours"`
 }
 
 // DeepCopy returns a deep copy of the configuration
@@ -214,18 +214,18 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.SABnzbd.Categories = nil
 	}
 
-	// Deep copy Scraper.Enabled pointer
-	if c.Scraper.Enabled != nil {
-		v := *c.Scraper.Enabled
-		copyCfg.Scraper.Enabled = &v
+	// Deep copy Arrs.Enabled pointer
+	if c.Arrs.Enabled != nil {
+		v := *c.Arrs.Enabled
+		copyCfg.Arrs.Enabled = &v
 	} else {
-		copyCfg.Scraper.Enabled = nil
+		copyCfg.Arrs.Enabled = nil
 	}
 
 	// Deep copy Scraper Radarr instances
-	if c.Scraper.RadarrInstances != nil {
-		copyCfg.Scraper.RadarrInstances = make([]ScraperInstanceConfig, len(c.Scraper.RadarrInstances))
-		for i, inst := range c.Scraper.RadarrInstances {
+	if c.Arrs.RadarrInstances != nil {
+		copyCfg.Arrs.RadarrInstances = make([]ArrsInstanceConfig, len(c.Arrs.RadarrInstances))
+		for i, inst := range c.Arrs.RadarrInstances {
 			ic := inst // copy struct value
 			if inst.Enabled != nil {
 				ev := *inst.Enabled
@@ -233,23 +233,23 @@ func (c *Config) DeepCopy() *Config {
 			} else {
 				ic.Enabled = nil
 			}
-			if inst.ScrapeIntervalHours != nil {
-				iv := *inst.ScrapeIntervalHours
-				ic.ScrapeIntervalHours = &iv
+			if inst.SyncIntervalHours != nil {
+				iv := *inst.SyncIntervalHours
+				ic.SyncIntervalHours = &iv
 			} else {
-				ic.ScrapeIntervalHours = nil
+				ic.SyncIntervalHours = nil
 			}
 
-			copyCfg.Scraper.RadarrInstances[i] = ic
+			copyCfg.Arrs.RadarrInstances[i] = ic
 		}
 	} else {
-		copyCfg.Scraper.RadarrInstances = nil
+		copyCfg.Arrs.RadarrInstances = nil
 	}
 
 	// Deep copy Scraper Sonarr instances
-	if c.Scraper.SonarrInstances != nil {
-		copyCfg.Scraper.SonarrInstances = make([]ScraperInstanceConfig, len(c.Scraper.SonarrInstances))
-		for i, inst := range c.Scraper.SonarrInstances {
+	if c.Arrs.SonarrInstances != nil {
+		copyCfg.Arrs.SonarrInstances = make([]ArrsInstanceConfig, len(c.Arrs.SonarrInstances))
+		for i, inst := range c.Arrs.SonarrInstances {
 			ic := inst // copy struct value
 			if inst.Enabled != nil {
 				ev := *inst.Enabled
@@ -257,17 +257,17 @@ func (c *Config) DeepCopy() *Config {
 			} else {
 				ic.Enabled = nil
 			}
-			if inst.ScrapeIntervalHours != nil {
-				iv := *inst.ScrapeIntervalHours
-				ic.ScrapeIntervalHours = &iv
+			if inst.SyncIntervalHours != nil {
+				iv := *inst.SyncIntervalHours
+				ic.SyncIntervalHours = &iv
 			} else {
-				ic.ScrapeIntervalHours = nil
+				ic.SyncIntervalHours = nil
 			}
 
-			copyCfg.Scraper.SonarrInstances[i] = ic
+			copyCfg.Arrs.SonarrInstances[i] = ic
 		}
 	} else {
-		copyCfg.Scraper.SonarrInstances = nil
+		copyCfg.Arrs.SonarrInstances = nil
 	}
 
 	return &copyCfg
@@ -397,17 +397,17 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate scraper configuration
-	if c.Scraper.Enabled != nil && *c.Scraper.Enabled {
-		if c.Scraper.MountPath == "" {
+	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
+		if c.Arrs.MountPath == "" {
 			return fmt.Errorf("scraper mount_path cannot be empty when scraper is enabled")
 		}
-		if !filepath.IsAbs(c.Scraper.MountPath) {
+		if !filepath.IsAbs(c.Arrs.MountPath) {
 			return fmt.Errorf("scraper mount_path must be an absolute path")
 		}
-		if c.Scraper.DefaultIntervalHours <= 0 {
+		if c.Arrs.DefaultIntervalHours <= 0 {
 			return fmt.Errorf("scraper default_interval_hours must be greater than 0")
 		}
-		if c.Scraper.MaxWorkers <= 0 {
+		if c.Arrs.MaxWorkers <= 0 {
 			return fmt.Errorf("scraper max_workers must be greater than 0")
 		}
 	}
@@ -707,13 +707,13 @@ func DefaultConfig() *Config {
 		},
 		Providers: []ProviderConfig{},
 		LogLevel:  "info",
-		Scraper: ScraperConfig{
+		Arrs: ArrsConfig{
 			Enabled:              &scrapperEnabled, // Disabled by default
 			DefaultIntervalHours: 24,               // Default to 24 hours
 			MaxWorkers:           5,                // Default to 5 concurrent workers
 			MountPath:            "",               // Empty by default - required when enabled
-			RadarrInstances:      []ScraperInstanceConfig{},
-			SonarrInstances:      []ScraperInstanceConfig{},
+			RadarrInstances:      []ArrsInstanceConfig{},
+			SonarrInstances:      []ArrsInstanceConfig{},
 		},
 	}
 }

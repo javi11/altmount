@@ -285,7 +285,7 @@ func (s *Server) toConfigResponse(config *config.Config) *ConfigResponse {
 			QueueProcessingInterval: int(config.Import.QueueProcessingInterval.Seconds()),
 		},
 		SABnzbd:   s.toSABnzbdConfigData(&config.SABnzbd),
-		Scraper:   s.toScraperConfigData(&config.Scraper),
+		Arrs:   s.toArrsConfigData(&config.Arrs),
 		Providers: providers,
 		LogLevel:  config.LogLevel,
 	}
@@ -315,14 +315,14 @@ func (s *Server) toSABnzbdConfigData(config *config.SABnzbdConfig) SABnzbdConfig
 	}
 }
 
-// toScraperConfigData converts config.ScraperConfig to ScraperConfigData
-func (s *Server) toScraperConfigData(config *config.ScraperConfig) ScraperConfigData {
-	scraperEnabled := false
+// toArrsConfigData converts config.ScraperConfig to ArrsConfigData
+func (s *Server) toArrsConfigData(config *config.ArrsConfig) ArrsConfigData {
+	arrsEnabled := false
 	if config.Enabled != nil {
-		scraperEnabled = *config.Enabled
+		arrsEnabled = *config.Enabled
 	}
 
-	radarrInstances := make([]ScraperInstanceData, len(config.RadarrInstances))
+	radarrInstances := make([]ArrsInstanceData, len(config.RadarrInstances))
 	for i, instance := range config.RadarrInstances {
 		instanceEnabled := false
 		if instance.Enabled != nil {
@@ -330,20 +330,20 @@ func (s *Server) toScraperConfigData(config *config.ScraperConfig) ScraperConfig
 		}
 
 		intervalHours := 24
-		if instance.ScrapeIntervalHours != nil {
-			intervalHours = *instance.ScrapeIntervalHours
+		if instance.SyncIntervalHours != nil {
+			intervalHours = *instance.SyncIntervalHours
 		}
 
-		radarrInstances[i] = ScraperInstanceData{
+		radarrInstances[i] = ArrsInstanceData{
 			Name:                instance.Name,
 			URL:                 instance.URL,
 			APIKey:              instance.APIKey,
 			Enabled:             instanceEnabled,
-			ScrapeIntervalHours: intervalHours,
+			SyncIntervalHours: intervalHours,
 		}
 	}
 
-	sonarrInstances := make([]ScraperInstanceData, len(config.SonarrInstances))
+	sonarrInstances := make([]ArrsInstanceData, len(config.SonarrInstances))
 	for i, instance := range config.SonarrInstances {
 		instanceEnabled := false
 		if instance.Enabled != nil {
@@ -351,21 +351,21 @@ func (s *Server) toScraperConfigData(config *config.ScraperConfig) ScraperConfig
 		}
 
 		intervalHours := 24
-		if instance.ScrapeIntervalHours != nil {
-			intervalHours = *instance.ScrapeIntervalHours
+		if instance.SyncIntervalHours != nil {
+			intervalHours = *instance.SyncIntervalHours
 		}
 
-		sonarrInstances[i] = ScraperInstanceData{
+		sonarrInstances[i] = ArrsInstanceData{
 			Name:                instance.Name,
 			URL:                 instance.URL,
 			APIKey:              instance.APIKey,
 			Enabled:             instanceEnabled,
-			ScrapeIntervalHours: intervalHours,
+			SyncIntervalHours: intervalHours,
 		}
 	}
 
-	return ScraperConfigData{
-		Enabled:              scraperEnabled,
+	return ArrsConfigData{
+		Enabled:              arrsEnabled,
 		DefaultIntervalHours: config.DefaultIntervalHours,
 		MountPath:            config.MountPath,
 		RadarrInstances:      radarrInstances,
@@ -522,62 +522,62 @@ func (s *Server) applyConfigUpdates(cfg *config.Config, updates *ConfigUpdateReq
 		}
 	}
 
-	if updates.Scraper != nil {
-		if updates.Scraper.Enabled != nil {
-			cfg.Scraper.Enabled = updates.Scraper.Enabled
+	if updates.Arrs != nil {
+		if updates.Arrs.Enabled != nil {
+			cfg.Arrs.Enabled = updates.Arrs.Enabled
 		}
-		if updates.Scraper.DefaultIntervalHours != nil {
-			cfg.Scraper.DefaultIntervalHours = *updates.Scraper.DefaultIntervalHours
+		if updates.Arrs.DefaultIntervalHours != nil {
+			cfg.Arrs.DefaultIntervalHours = *updates.Arrs.DefaultIntervalHours
 		}
-		if updates.Scraper.MountPath != nil {
-			cfg.Scraper.MountPath = *updates.Scraper.MountPath
+		if updates.Arrs.MountPath != nil {
+			cfg.Arrs.MountPath = *updates.Arrs.MountPath
 		}
-		if updates.Scraper.RadarrInstances != nil {
-			radarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.RadarrInstances))
-			for i, instance := range *updates.Scraper.RadarrInstances {
-				scraperInstance := config.ScraperInstanceConfig{}
+		if updates.Arrs.RadarrInstances != nil {
+			radarrInstances := make([]config.ArrsInstanceConfig, len(*updates.Arrs.RadarrInstances))
+			for i, instance := range *updates.Arrs.RadarrInstances {
+				arrsInstance := config.ArrsInstanceConfig{}
 				if instance.Name != nil {
-					scraperInstance.Name = *instance.Name
+					arrsInstance.Name = *instance.Name
 				}
 				if instance.URL != nil {
-					scraperInstance.URL = *instance.URL
+					arrsInstance.URL = *instance.URL
 				}
 				if instance.APIKey != nil {
-					scraperInstance.APIKey = *instance.APIKey
+					arrsInstance.APIKey = *instance.APIKey
 				}
 				if instance.Enabled != nil {
-					scraperInstance.Enabled = instance.Enabled
+					arrsInstance.Enabled = instance.Enabled
 				}
-				if instance.ScrapeIntervalHours != nil {
-					scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+				if instance.SyncIntervalHours != nil {
+					arrsInstance.SyncIntervalHours = instance.SyncIntervalHours
 				}
 
-				radarrInstances[i] = scraperInstance
+				radarrInstances[i] = arrsInstance
 			}
-			cfg.Scraper.RadarrInstances = radarrInstances
+			cfg.Arrs.RadarrInstances = radarrInstances
 		}
-		if updates.Scraper.SonarrInstances != nil {
-			sonarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.SonarrInstances))
-			for i, instance := range *updates.Scraper.SonarrInstances {
-				scraperInstance := config.ScraperInstanceConfig{}
+		if updates.Arrs.SonarrInstances != nil {
+			sonarrInstances := make([]config.ArrsInstanceConfig, len(*updates.Arrs.SonarrInstances))
+			for i, instance := range *updates.Arrs.SonarrInstances {
+				arrsInstance := config.ArrsInstanceConfig{}
 				if instance.Name != nil {
-					scraperInstance.Name = *instance.Name
+					arrsInstance.Name = *instance.Name
 				}
 				if instance.URL != nil {
-					scraperInstance.URL = *instance.URL
+					arrsInstance.URL = *instance.URL
 				}
 				if instance.APIKey != nil {
-					scraperInstance.APIKey = *instance.APIKey
+					arrsInstance.APIKey = *instance.APIKey
 				}
 				if instance.Enabled != nil {
-					scraperInstance.Enabled = instance.Enabled
+					arrsInstance.Enabled = instance.Enabled
 				}
-				if instance.ScrapeIntervalHours != nil {
-					scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+				if instance.SyncIntervalHours != nil {
+					arrsInstance.SyncIntervalHours = instance.SyncIntervalHours
 				}
-				sonarrInstances[i] = scraperInstance
+				sonarrInstances[i] = arrsInstance
 			}
-			cfg.Scraper.SonarrInstances = sonarrInstances
+			cfg.Arrs.SonarrInstances = sonarrInstances
 		}
 	}
 
@@ -727,62 +727,62 @@ func (s *Server) applySectionUpdate(cfg *config.Config, section string, updates 
 				cfg.SABnzbd.Categories = categories
 			}
 		}
-	case "scraper":
-		if updates.Scraper != nil {
-			if updates.Scraper.Enabled != nil {
-				cfg.Scraper.Enabled = updates.Scraper.Enabled
+	case "arrs":
+		if updates.Arrs != nil {
+			if updates.Arrs.Enabled != nil {
+				cfg.Arrs.Enabled = updates.Arrs.Enabled
 			}
-			if updates.Scraper.DefaultIntervalHours != nil {
-				cfg.Scraper.DefaultIntervalHours = *updates.Scraper.DefaultIntervalHours
+			if updates.Arrs.DefaultIntervalHours != nil {
+				cfg.Arrs.DefaultIntervalHours = *updates.Arrs.DefaultIntervalHours
 			}
-			if updates.Scraper.MountPath != nil {
-				cfg.Scraper.MountPath = *updates.Scraper.MountPath
+			if updates.Arrs.MountPath != nil {
+				cfg.Arrs.MountPath = *updates.Arrs.MountPath
 			}
-			if updates.Scraper.RadarrInstances != nil {
-				radarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.RadarrInstances))
-				for i, instance := range *updates.Scraper.RadarrInstances {
-					scraperInstance := config.ScraperInstanceConfig{}
+			if updates.Arrs.RadarrInstances != nil {
+				radarrInstances := make([]config.ArrsInstanceConfig, len(*updates.Arrs.RadarrInstances))
+				for i, instance := range *updates.Arrs.RadarrInstances {
+					arrsInstance := config.ArrsInstanceConfig{}
 					if instance.Name != nil {
-						scraperInstance.Name = *instance.Name
+						arrsInstance.Name = *instance.Name
 					}
 					if instance.URL != nil {
-						scraperInstance.URL = *instance.URL
+						arrsInstance.URL = *instance.URL
 					}
 					if instance.APIKey != nil {
-						scraperInstance.APIKey = *instance.APIKey
+						arrsInstance.APIKey = *instance.APIKey
 					}
 					if instance.Enabled != nil {
-						scraperInstance.Enabled = instance.Enabled
+						arrsInstance.Enabled = instance.Enabled
 					}
-					if instance.ScrapeIntervalHours != nil {
-						scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+					if instance.SyncIntervalHours != nil {
+						arrsInstance.SyncIntervalHours = instance.SyncIntervalHours
 					}
-					radarrInstances[i] = scraperInstance
+					radarrInstances[i] = arrsInstance
 				}
-				cfg.Scraper.RadarrInstances = radarrInstances
+				cfg.Arrs.RadarrInstances = radarrInstances
 			}
-			if updates.Scraper.SonarrInstances != nil {
-				sonarrInstances := make([]config.ScraperInstanceConfig, len(*updates.Scraper.SonarrInstances))
-				for i, instance := range *updates.Scraper.SonarrInstances {
-					scraperInstance := config.ScraperInstanceConfig{}
+			if updates.Arrs.SonarrInstances != nil {
+				sonarrInstances := make([]config.ArrsInstanceConfig, len(*updates.Arrs.SonarrInstances))
+				for i, instance := range *updates.Arrs.SonarrInstances {
+					arrsInstance := config.ArrsInstanceConfig{}
 					if instance.Name != nil {
-						scraperInstance.Name = *instance.Name
+						arrsInstance.Name = *instance.Name
 					}
 					if instance.URL != nil {
-						scraperInstance.URL = *instance.URL
+						arrsInstance.URL = *instance.URL
 					}
 					if instance.APIKey != nil {
-						scraperInstance.APIKey = *instance.APIKey
+						arrsInstance.APIKey = *instance.APIKey
 					}
 					if instance.Enabled != nil {
-						scraperInstance.Enabled = instance.Enabled
+						arrsInstance.Enabled = instance.Enabled
 					}
-					if instance.ScrapeIntervalHours != nil {
-						scraperInstance.ScrapeIntervalHours = instance.ScrapeIntervalHours
+					if instance.SyncIntervalHours != nil {
+						arrsInstance.SyncIntervalHours = instance.SyncIntervalHours
 					}
-					sonarrInstances[i] = scraperInstance
+					sonarrInstances[i] = arrsInstance
 				}
-				cfg.Scraper.SonarrInstances = sonarrInstances
+				cfg.Arrs.SonarrInstances = sonarrInstances
 			}
 		}
 	case "system":

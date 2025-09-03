@@ -58,10 +58,10 @@ sabnzbd:
       priority: 0
       dir: "tv"
 
-# Radarr/Sonarr scraper configuration
-scraper:
-  enabled: false                  # Enable scraper service
-  default_interval_hours: 24      # Default scrape interval in hours
+# Radarr/Sonarr arrs configuration
+arrs:
+  enabled: false                  # Enable arrs service
+  default_interval_hours: 24      # Default sync interval in hours
   mount_path: ""                  # WebDAV mount path to strip from file paths (required when enabled)
   radarr_instances: []            # Radarr instances (configured via UI)
   sonarr_instances: []            # Sonarr instances (configured via UI)
@@ -71,13 +71,13 @@ scraper:
   #     url: "http://localhost:7878"
   #     api_key: "your-radarr-api-key"
   #     enabled: true
-  #     scrape_interval_hours: 24
+  #     sync_interval_hours: 24
   # sonarr_instances:
   #   - name: "sonarr-main"
   #     url: "http://localhost:8989"
   #     api_key: "your-sonarr-api-key"
   #     enabled: true
-  #     scrape_interval_hours: 24
+  #     sync_interval_hours: 24
 
 # Logging configuration with rotation support
 log:

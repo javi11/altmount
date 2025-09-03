@@ -774,18 +774,18 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 }
 
 // findConfigInstance finds a specific ARR instance in the configuration
-func (hw *HealthWorker) findConfigInstance(instanceType, instanceName string) (*config.ScraperInstanceConfig, error) {
+func (hw *HealthWorker) findConfigInstance(instanceType, instanceName string) (*config.ArrsInstanceConfig, error) {
 	cfg := hw.configGetter()
 
 	switch instanceType {
 	case "radarr":
-		for _, instance := range cfg.Scraper.RadarrInstances {
+		for _, instance := range cfg.Arrs.RadarrInstances {
 			if instance.Name == instanceName {
 				return &instance, nil
 			}
 		}
 	case "sonarr":
-		for _, instance := range cfg.Scraper.SonarrInstances {
+		for _, instance := range cfg.Arrs.SonarrInstances {
 			if instance.Name == instanceName {
 				return &instance, nil
 			}
@@ -796,7 +796,7 @@ func (hw *HealthWorker) findConfigInstance(instanceType, instanceName string) (*
 }
 
 // createRadarrClient creates a Radarr client for the given instance
-func (hw *HealthWorker) createRadarrClient(instanceConfig *config.ScraperInstanceConfig) (*radarr.Radarr, error) {
+func (hw *HealthWorker) createRadarrClient(instanceConfig *config.ArrsInstanceConfig) (*radarr.Radarr, error) {
 	if instanceConfig.URL == "" {
 		return nil, fmt.Errorf("Radarr instance URL is empty")
 	}
@@ -813,7 +813,7 @@ func (hw *HealthWorker) createRadarrClient(instanceConfig *config.ScraperInstanc
 }
 
 // createSonarrClient creates a Sonarr client for the given instance
-func (hw *HealthWorker) createSonarrClient(instanceConfig *config.ScraperInstanceConfig) (*sonarr.Sonarr, error) {
+func (hw *HealthWorker) createSonarrClient(instanceConfig *config.ArrsInstanceConfig) (*sonarr.Sonarr, error) {
 	if instanceConfig.URL == "" {
 		return nil, fmt.Errorf("Sonarr instance URL is empty")
 	}

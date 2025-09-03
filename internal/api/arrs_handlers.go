@@ -5,43 +5,43 @@ import (
 	"net/http"
 )
 
-// ScraperInstanceRequest represents a request to create/update a scraper instance
-type ScraperInstanceRequest struct {
-	Name                string `json:"name"`
-	Type                string `json:"type"`
-	URL                 string `json:"url"`
-	APIKey              string `json:"api_key"`
-	Enabled             bool   `json:"enabled"`
-	ScrapeIntervalHours int    `json:"scrape_interval_hours"`
+// ArrsInstanceRequest represents a request to create/update an arrs instance
+type ArrsInstanceRequest struct {
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	URL               string `json:"url"`
+	APIKey            string `json:"api_key"`
+	Enabled           bool   `json:"enabled"`
+	SyncIntervalHours int    `json:"sync_interval_hours"`
 }
 
-// ScraperInstanceResponse represents a scraper instance in API responses
-type ScraperInstanceResponse struct {
-	ID                  int64   `json:"id"`
-	Name                string  `json:"name"`
-	Type                string  `json:"type"`
-	URL                 string  `json:"url"`
-	Enabled             bool    `json:"enabled"`
-	ScrapeIntervalHours int     `json:"scrape_interval_hours"`
-	LastScrapeAt        *string `json:"last_scrape_at"`
-	CreatedAt           string  `json:"created_at"`
-	UpdatedAt           string  `json:"updated_at"`
+// ArrsInstanceResponse represents an arrs instance in API responses
+type ArrsInstanceResponse struct {
+	ID                int64   `json:"id"`
+	Name              string  `json:"name"`
+	Type              string  `json:"type"`
+	URL               string  `json:"url"`
+	Enabled           bool    `json:"enabled"`
+	SyncIntervalHours int     `json:"sync_interval_hours"`
+	LastSyncAt        *string `json:"last_sync_at"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
 }
 
-// ScraperStatsResponse represents scraper statistics
-type ScraperStatsResponse struct {
+// ArrsStatsResponse represents arrs statistics
+type ArrsStatsResponse struct {
 	TotalInstances   int     `json:"total_instances"`
 	EnabledInstances int     `json:"enabled_instances"`
 	TotalRadarr      int     `json:"total_radarr"`
 	EnabledRadarr    int     `json:"enabled_radarr"`
 	TotalSonarr      int     `json:"total_sonarr"`
 	EnabledSonarr    int     `json:"enabled_sonarr"`
-	DueForScrape     int     `json:"due_for_scrape"`
-	LastScrape       *string `json:"last_scrape"`
+	DueForSync       int     `json:"due_for_sync"`
+	LastSync         *string `json:"last_sync"`
 }
 
-// ScraperMovieResponse represents a movie in API responses
-type ScraperMovieResponse struct {
+// ArrsMovieResponse represents a movie in API responses
+type ArrsMovieResponse struct {
 	ID          int64   `json:"id"`
 	InstanceID  int64   `json:"instance_id"`
 	MovieID     int64   `json:"movie_id"`
@@ -55,8 +55,8 @@ type ScraperMovieResponse struct {
 	LastUpdated string  `json:"last_updated"`
 }
 
-// ScraperEpisodeResponse represents an episode in API responses
-type ScraperEpisodeResponse struct {
+// ArrsEpisodeResponse represents an episode in API responses
+type ArrsEpisodeResponse struct {
 	ID            int64   `json:"id"`
 	InstanceID    int64   `json:"instance_id"`
 	SeriesID      int64   `json:"series_id"`
@@ -81,8 +81,8 @@ type TestConnectionRequest struct {
 	APIKey string `json:"api_key"`
 }
 
-// ScrapeProgressResponse represents scrape progress in API responses
-type ScrapeProgressResponse struct {
+// SyncProgressResponse represents sync progress in API responses
+type SyncProgressResponse struct {
 	InstanceID     int64  `json:"instance_id"`
 	Status         string `json:"status"`
 	StartedAt      string `json:"started_at"`
@@ -92,8 +92,8 @@ type ScrapeProgressResponse struct {
 	CurrentBatch   string `json:"current_batch"`
 }
 
-// ScrapeResultResponse represents scrape result in API responses
-type ScrapeResultResponse struct {
+// SyncResultResponse represents sync result in API responses
+type SyncResultResponse struct {
 	InstanceID     int64   `json:"instance_id"`
 	Status         string  `json:"status"`
 	StartedAt      string  `json:"started_at"`
@@ -103,35 +103,35 @@ type ScrapeResultResponse struct {
 	ErrorMessage   *string `json:"error_message,omitempty"`
 }
 
-// handleListScraperInstances returns all scraper instances
-func (s *Server) handleListScraperInstances(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		s.logger.Error("Scraper service is not available")
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleListArrsInstances returns all arrs instances
+func (s *Server) handleListArrsInstances(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		s.logger.Error("Arrs service is not available")
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	s.logger.Debug("Listing scraper instances")
-	instances := s.scraperService.GetAllInstances()
-	s.logger.Debug("Found scraper instances", "count", len(instances))
+	s.logger.Debug("Listing arrs instances")
+	instances := s.arrsService.GetAllInstances()
+	s.logger.Debug("Found arrs instances", "count", len(instances))
 
-	response := make([]*ScraperInstanceResponse, len(instances))
+	response := make([]*ArrsInstanceResponse, len(instances))
 	for i, instance := range instances {
-		response[i] = &ScraperInstanceResponse{
-			ID:                  0, // No longer using database IDs
-			Name:                instance.Name,
-			Type:                instance.Type,
-			URL:                 instance.URL,
-			Enabled:             instance.Enabled,
-			ScrapeIntervalHours: instance.ScrapeIntervalHours,
-			CreatedAt:           "", // No longer tracked
-			UpdatedAt:           "", // No longer tracked
+		response[i] = &ArrsInstanceResponse{
+			ID:                0, // No longer using database IDs
+			Name:              instance.Name,
+			Type:              instance.Type,
+			URL:               instance.URL,
+			Enabled:           instance.Enabled,
+			SyncIntervalHours: instance.SyncIntervalHours,
+			CreatedAt:         "", // No longer tracked
+			UpdatedAt:         "", // No longer tracked
 		}
 
 		// Get state information from in-memory state
-		if state, err := s.scraperService.GetLastScrapeResult(instance.Type, instance.Name); err == nil && state != nil {
-			lastScrape := state.CompletedAt.Format("2006-01-02T15:04:05Z")
-			response[i].LastScrapeAt = &lastScrape
+		if state, err := s.arrsService.GetLastSyncResult(instance.Type, instance.Name); err == nil && state != nil {
+			lastSync := state.CompletedAt.Format("2006-01-02T15:04:05Z")
+			response[i].LastSyncAt = &lastSync
 		}
 	}
 
@@ -139,11 +139,11 @@ func (s *Server) handleListScraperInstances(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetScraperInstance returns a single scraper instance by type and name
-func (s *Server) handleGetScraperInstance(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		s.logger.Error("Scraper service is not available")
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleGetArrsInstance returns a single arrs instance by type and name
+func (s *Server) handleGetArrsInstance(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		s.logger.Error("Arrs service is not available")
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -155,57 +155,57 @@ func (s *Server) handleGetScraperInstance(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.logger.Debug("Getting scraper instance", "type", instanceType, "name", instanceName)
-	instance := s.scraperService.GetInstance(instanceType, instanceName)
+	s.logger.Debug("Getting arrs instance", "type", instanceType, "name", instanceName)
+	instance := s.arrsService.GetInstance(instanceType, instanceName)
 	if instance == nil {
-		s.logger.Debug("Scraper instance not found", "type", instanceType, "name", instanceName)
+		s.logger.Debug("Arrs instance not found", "type", instanceType, "name", instanceName)
 		http.Error(w, "Instance not found", http.StatusNotFound)
 		return
 	}
 
-	response := &ScraperInstanceResponse{
-		ID:                  0, // No longer using database IDs
-		Name:                instance.Name,
-		Type:                instance.Type,
-		URL:                 instance.URL,
-		Enabled:             instance.Enabled,
-		ScrapeIntervalHours: instance.ScrapeIntervalHours,
-		CreatedAt:           "", // No longer tracked
-		UpdatedAt:           "", // No longer tracked
+	response := &ArrsInstanceResponse{
+		ID:                0, // No longer using database IDs
+		Name:              instance.Name,
+		Type:              instance.Type,
+		URL:               instance.URL,
+		Enabled:           instance.Enabled,
+		SyncIntervalHours: instance.SyncIntervalHours,
+		CreatedAt:         "", // No longer tracked
+		UpdatedAt:         "", // No longer tracked
 	}
 
 	// Get state information from in-memory state
-	if state, err := s.scraperService.GetLastScrapeResult(instanceType, instanceName); err == nil && state != nil {
-		lastScrape := state.CompletedAt.Format("2006-01-02T15:04:05Z")
-		response.LastScrapeAt = &lastScrape
+	if state, err := s.arrsService.GetLastSyncResult(instanceType, instanceName); err == nil && state != nil {
+		lastSync := state.CompletedAt.Format("2006-01-02T15:04:05Z")
+		response.LastSyncAt = &lastSync
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleCreateScraperInstance creates a new scraper instance (now deprecated - use config instead)
-func (s *Server) handleCreateScraperInstance(w http.ResponseWriter, r *http.Request) {
+// handleCreateArrsInstance creates a new arrs instance (now deprecated - use config instead)
+func (s *Server) handleCreateArrsInstance(w http.ResponseWriter, r *http.Request) {
 	// This endpoint is deprecated in favor of configuration-first approach
 	http.Error(w, "Creating instances via API is no longer supported. Please use configuration file.", http.StatusMethodNotAllowed)
 }
 
-// handleUpdateScraperInstance updates an existing scraper instance (now deprecated - use config instead)
-func (s *Server) handleUpdateScraperInstance(w http.ResponseWriter, r *http.Request) {
+// handleUpdateArrsInstance updates an existing arrs instance (now deprecated - use config instead)
+func (s *Server) handleUpdateArrsInstance(w http.ResponseWriter, r *http.Request) {
 	// This endpoint is deprecated in favor of configuration-first approach
 	http.Error(w, "Updating instances via API is no longer supported. Please use configuration file.", http.StatusMethodNotAllowed)
 }
 
-// handleDeleteScraperInstance deletes a scraper instance (now deprecated - use config instead)
-func (s *Server) handleDeleteScraperInstance(w http.ResponseWriter, r *http.Request) {
+// handleDeleteArrsInstance deletes an arrs instance (now deprecated - use config instead)
+func (s *Server) handleDeleteArrsInstance(w http.ResponseWriter, r *http.Request) {
 	// This endpoint is deprecated in favor of configuration-first approach
 	http.Error(w, "Deleting instances via API is no longer supported. Please use configuration file.", http.StatusMethodNotAllowed)
 }
 
-// handleTestScraperConnection tests connection to a scraper instance
-func (s *Server) handleTestScraperConnection(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleTestArrsConnection tests connection to an arrs instance
+func (s *Server) handleTestArrsConnection(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -220,7 +220,7 @@ func (s *Server) handleTestScraperConnection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := s.scraperService.TestConnection(string(req.Type), req.URL, req.APIKey); err != nil {
+	if err := s.arrsService.TestConnection(string(req.Type), req.URL, req.APIKey); err != nil {
 		response := map[string]interface{}{
 			"success": false,
 			"error":   err.Error(),
@@ -239,10 +239,10 @@ func (s *Server) handleTestScraperConnection(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleTriggerScrape manually triggers a scrape for an instance
-func (s *Server) handleTriggerScrape(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleTriggerSync manually triggers a sync for an instance
+func (s *Server) handleTriggerSync(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -254,8 +254,8 @@ func (s *Server) handleTriggerScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.scraperService.TriggerScrape(instanceType, instanceName); err != nil {
-		s.logger.Error("Failed to trigger scrape",
+	if err := s.arrsService.TriggerSync(instanceType, instanceName); err != nil {
+		s.logger.Error("Failed to trigger sync",
 			"type", instanceType,
 			"name", instanceName,
 			"error", err)
@@ -265,21 +265,21 @@ func (s *Server) handleTriggerScrape(w http.ResponseWriter, r *http.Request) {
 
 	response := map[string]interface{}{
 		"success": true,
-		"message": "Scrape triggered successfully",
+		"message": "Sync triggered successfully",
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetScraperStats returns scraper statistics
-func (s *Server) handleGetScraperStats(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleGetArrsStats returns arrs statistics
+func (s *Server) handleGetArrsStats(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
 	// Get all instances from configuration
-	instances := s.scraperService.GetAllInstances()
+	instances := s.arrsService.GetAllInstances()
 
 	// Calculate stats from instances
 	var totalRadarr, enabledRadarr, totalSonarr, enabledSonarr int
@@ -297,14 +297,14 @@ func (s *Server) handleGetScraperStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	response := &ScraperStatsResponse{
+	response := &ArrsStatsResponse{
 		TotalInstances:   totalRadarr + totalSonarr,
 		EnabledInstances: enabledRadarr + enabledSonarr,
 		TotalRadarr:      totalRadarr,
 		EnabledRadarr:    enabledRadarr,
 		TotalSonarr:      totalSonarr,
 		EnabledSonarr:    enabledSonarr,
-		DueForScrape:     0, // Not applicable with config-first approach
+		DueForSync:       0, // Not applicable with config-first approach
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -323,11 +323,11 @@ func (s *Server) handleSearchEpisodes(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Episode search is no longer supported. Scraped data is not stored in database.", http.StatusMethodNotAllowed)
 }
 
-// handleGetScrapeStatus returns the current scrape status for an instance
-func (s *Server) handleGetScrapeStatus(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		s.logger.Error("Scraper service is not available")
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleGetSyncStatus returns the current sync status for an instance
+func (s *Server) handleGetSyncStatus(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		s.logger.Error("Arrs service is not available")
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -339,23 +339,23 @@ func (s *Server) handleGetScrapeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logger.Debug("Getting scrape status", "type", instanceType, "name", instanceName)
+	s.logger.Debug("Getting sync status", "type", instanceType, "name", instanceName)
 
-	progress, err := s.scraperService.GetScrapeStatus(instanceType, instanceName)
+	progress, err := s.arrsService.GetSyncStatus(instanceType, instanceName)
 	if err != nil {
-		s.logger.Debug("No scrape status found", "type", instanceType, "name", instanceName, "error", err)
-		http.Error(w, "No active scraping for this instance", http.StatusNotFound)
+		s.logger.Debug("No sync status found", "type", instanceType, "name", instanceName, "error", err)
+		http.Error(w, "No active sync for this instance", http.StatusNotFound)
 		return
 	}
 
 	// Check if progress is nil (no active scraping)
 	if progress == nil {
-		s.logger.Debug("No active scraping status", "type", instanceType, "name", instanceName)
-		http.Error(w, "No active scraping for this instance", http.StatusNotFound)
+		s.logger.Debug("No active sync status", "type", instanceType, "name", instanceName)
+		http.Error(w, "No active sync for this instance", http.StatusNotFound)
 		return
 	}
 
-	response := &ScrapeProgressResponse{
+	response := &SyncProgressResponse{
 		InstanceID:     0, // No longer used for config-based instances
 		Status:         string(progress.Status),
 		StartedAt:      progress.StartedAt.Format("2006-01-02T15:04:05Z"),
@@ -369,11 +369,11 @@ func (s *Server) handleGetScrapeStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetLastScrapeResult returns the last scrape result for an instance
-func (s *Server) handleGetLastScrapeResult(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		s.logger.Error("Scraper service is not available")
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleGetLastSyncResult returns the last sync result for an instance
+func (s *Server) handleGetLastSyncResult(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		s.logger.Error("Arrs service is not available")
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -385,25 +385,25 @@ func (s *Server) handleGetLastScrapeResult(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.logger.Debug("Getting last scrape result", "type", instanceType, "name", instanceName)
+	s.logger.Debug("Getting last sync result", "type", instanceType, "name", instanceName)
 
-	result, err := s.scraperService.GetLastScrapeResult(instanceType, instanceName)
+	result, err := s.arrsService.GetLastSyncResult(instanceType, instanceName)
 	if err != nil {
-		s.logger.Debug("No scrape result found", "type", instanceType, "name", instanceName, "error", err)
-		http.Error(w, "No scrape result found for this instance", http.StatusNotFound)
+		s.logger.Debug("No sync result found", "type", instanceType, "name", instanceName, "error", err)
+		http.Error(w, "No sync result found for this instance", http.StatusNotFound)
 		return
 	}
 
 	// Check if result is nil (no result available)
 	if result == nil {
-		s.logger.Debug("No scrape result available", "type", instanceType, "name", instanceName)
-		http.Error(w, "No scrape result found for this instance", http.StatusNotFound)
+		s.logger.Debug("No sync result available", "type", instanceType, "name", instanceName)
+		http.Error(w, "No sync result found for this instance", http.StatusNotFound)
 		return
 	}
 
 	completedAtStr := result.CompletedAt.Format("2006-01-02T15:04:05Z")
 
-	response := &ScrapeResultResponse{
+	response := &SyncResultResponse{
 		InstanceID:     0, // No longer used for config-based instances
 		Status:         string(result.Status),
 		StartedAt:      completedAtStr, // Use CompletedAt as the time reference
@@ -417,10 +417,10 @@ func (s *Server) handleGetLastScrapeResult(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleCancelScrape cancels an active scraping operation
-func (s *Server) handleCancelScrape(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleCancelSync cancels an active sync operation
+func (s *Server) handleCancelSync(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -432,8 +432,8 @@ func (s *Server) handleCancelScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.scraperService.CancelScrape(instanceType, instanceName); err != nil {
-		s.logger.Error("Failed to cancel scrape",
+	if err := s.arrsService.CancelSync(instanceType, instanceName); err != nil {
+		s.logger.Error("Failed to cancel sync",
 			"type", instanceType,
 			"name", instanceName,
 			"error", err)
@@ -443,24 +443,24 @@ func (s *Server) handleCancelScrape(w http.ResponseWriter, r *http.Request) {
 
 	response := map[string]interface{}{
 		"success": true,
-		"message": "Scrape cancelled successfully",
+		"message": "Sync cancelled successfully",
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-// handleGetAllActiveScrapes returns all currently active scraping operations
-func (s *Server) handleGetAllActiveScrapes(w http.ResponseWriter, r *http.Request) {
-	if s.scraperService == nil {
-		http.Error(w, "Scraper not available", http.StatusServiceUnavailable)
+// handleGetAllActiveSyncs returns all currently active sync operations
+func (s *Server) handleGetAllActiveSyncs(w http.ResponseWriter, r *http.Request) {
+	if s.arrsService == nil {
+		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	activeScrapes := s.scraperService.GetAllActiveScrapes()
+	activeSyncs := s.arrsService.GetAllActiveSyncs()
 
-	response := make([]*ScrapeProgressResponse, 0, len(activeScrapes))
-	for _, progress := range activeScrapes {
-		response = append(response, &ScrapeProgressResponse{
+	response := make([]*SyncProgressResponse, 0, len(activeSyncs))
+	for _, progress := range activeSyncs {
+		response = append(response, &SyncProgressResponse{
 			InstanceID:     0, // No longer used for config-based instances
 			Status:         string(progress.Status),
 			StartedAt:      progress.StartedAt.Format("2006-01-02T15:04:05Z"),

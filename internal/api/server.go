@@ -13,7 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/scraper"
+	"github.com/javi11/altmount/internal/arrs"
 )
 
 // Config represents API server configuration
@@ -40,7 +40,7 @@ type Server struct {
 	healthWorker    *health.HealthWorker
 	importerService *importer.Service
 	poolManager     pool.Manager
-	scraperService  *scraper.Service
+	arrsService     *arrs.Service
 	logger          *slog.Logger
 	startTime       time.Time
 	mux             *http.ServeMux
@@ -58,7 +58,7 @@ func NewServer(
 	poolManager pool.Manager,
 	mux *http.ServeMux,
 	importService *importer.Service,
-	scraperService *scraper.Service) *Server {
+	arrsService *arrs.Service) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -73,7 +73,7 @@ func NewServer(
 		metadataReader:  metadataReader,
 		importerService: importService, // Will be set later via SetImporterService
 		poolManager:     poolManager,
-		scraperService:  scraperService,
+		arrsService:     arrsService,
 		logger:          slog.Default(),
 		startTime:       time.Now(),
 		mux:             mux,
@@ -173,24 +173,24 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("PUT /providers/reorder", s.handleReorderProviders)
 	}
 
-	// Scraper endpoints (if scraper service is available)
-	if s.scraperService != nil {
+	// Arrs endpoints (if arrs service is available)
+	if s.arrsService != nil {
 		// Configuration-based instance endpoints
-		apiMux.HandleFunc("GET /scraper/instances", s.handleListScraperInstances)
-		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}", s.handleGetScraperInstance)
-		apiMux.HandleFunc("POST /scraper/instances", s.handleCreateScraperInstance)        // Deprecated
-		apiMux.HandleFunc("PUT /scraper/instances/{id}", s.handleUpdateScraperInstance)    // Deprecated
-		apiMux.HandleFunc("DELETE /scraper/instances/{id}", s.handleDeleteScraperInstance) // Deprecated
-		apiMux.HandleFunc("POST /scraper/instances/test", s.handleTestScraperConnection)
-		apiMux.HandleFunc("POST /scraper/instances/{type}/{name}/scrape", s.handleTriggerScrape)
-		apiMux.HandleFunc("GET /scraper/stats", s.handleGetScraperStats)
-		apiMux.HandleFunc("GET /scraper/movies/search", s.handleSearchMovies)     // Deprecated
-		apiMux.HandleFunc("GET /scraper/episodes/search", s.handleSearchEpisodes) // Deprecated
+		apiMux.HandleFunc("GET /arrs/instances", s.handleListArrsInstances)
+		apiMux.HandleFunc("GET /arrs/instances/{type}/{name}", s.handleGetArrsInstance)
+		apiMux.HandleFunc("POST /arrs/instances", s.handleCreateArrsInstance)        // Deprecated
+		apiMux.HandleFunc("PUT /arrs/instances/{id}", s.handleUpdateArrsInstance)    // Deprecated
+		apiMux.HandleFunc("DELETE /arrs/instances/{id}", s.handleDeleteArrsInstance) // Deprecated
+		apiMux.HandleFunc("POST /arrs/instances/test", s.handleTestArrsConnection)
+		apiMux.HandleFunc("POST /arrs/instances/{type}/{name}/sync", s.handleTriggerSync)
+		apiMux.HandleFunc("GET /arrs/stats", s.handleGetArrsStats)
+		apiMux.HandleFunc("GET /arrs/movies/search", s.handleSearchMovies)     // Deprecated
+		apiMux.HandleFunc("GET /arrs/episodes/search", s.handleSearchEpisodes) // Deprecated
 		// Status and control endpoints
-		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}/status", s.handleGetScrapeStatus)
-		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}/result", s.handleGetLastScrapeResult)
-		apiMux.HandleFunc("POST /scraper/instances/{type}/{name}/cancel", s.handleCancelScrape)
-		apiMux.HandleFunc("GET /scraper/active", s.handleGetAllActiveScrapes)
+		apiMux.HandleFunc("GET /arrs/instances/{type}/{name}/status", s.handleGetSyncStatus)
+		apiMux.HandleFunc("GET /arrs/instances/{type}/{name}/result", s.handleGetLastSyncResult)
+		apiMux.HandleFunc("POST /arrs/instances/{type}/{name}/cancel", s.handleCancelSync)
+		apiMux.HandleFunc("GET /arrs/active", s.handleGetAllActiveSyncs)
 	}
 
 	// Authentication endpoints (if auth service is available)

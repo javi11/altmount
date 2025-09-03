@@ -18,7 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/scraper"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
@@ -195,7 +195,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create scraper service
-	scraperService := scraper.NewService(configManager.GetConfigGetter(), mediaRepo, logger)
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), mediaRepo, logger)
 
 	// Create API server configuration (hardcoded to /api)
 	apiConfig := &api.Config{
@@ -214,7 +214,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		poolManager,
 		mux,
 		nsys.ImporterService(),
-		scraperService)
+		arrsService)
 	logger.Info("API server enabled", "prefix", "/api")
 
 	// Register API server for auth updates
@@ -305,14 +305,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Start scraper service if enabled
-	if cfg.Scraper.Enabled != nil && *cfg.Scraper.Enabled {
-		if err := scraperService.Start(); err != nil {
-			logger.Error("Failed to start scraper service", "error", err)
+	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
+		if err := arrsService.Start(); err != nil {
+			logger.Error("Failed to start arrs service", "error", err)
 		} else {
-			logger.Info("Scraper service started")
+			logger.Info("Arrs service started")
 		}
 	} else {
-		logger.Info("Scraper service is disabled in configuration")
+		logger.Info("Arrs service is disabled in configuration")
 	}
 
 	mux.Handle("/", getStaticFileHandler())
@@ -341,11 +341,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Stop scraper service if running
-	if cfg.Scraper.Enabled != nil && *cfg.Scraper.Enabled {
-		if err := scraperService.Stop(); err != nil {
-			logger.Error("Failed to stop scraper service", "error", err)
+	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
+		if err := arrsService.Stop(); err != nil {
+			logger.Error("Failed to stop arrs service", "error", err)
 		} else {
-			logger.Info("Scraper service stopped")
+			logger.Info("Arrs service stopped")
 		}
 	}
 
