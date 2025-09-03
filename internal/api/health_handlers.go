@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
@@ -265,24 +264,11 @@ func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
 		// For now, we'll proceed with the repair trigger
 	}
 
-	// Trigger repair using the health repository
-	err = s.healthRepo.TriggerRepair(filePath, nil)
+	// Trigger repair by setting status to repair_triggered
+	// This will make the health worker pick it up in the next cycle for ARR notification
+	err = s.healthRepo.SetRepairTriggered(filePath, nil)
 	if err != nil {
-		// Check if the error indicates repair is not available
-		if err.Error() == "file not found in media_files table, cannot trigger repair" {
-			WriteConflict(w, "Repair not available", "File not found in media library. This file cannot be repaired automatically.")
-			return
-		}
-		// Check for other specific repair errors
-		if strings.Contains(err.Error(), "Failed to check media library") {
-			WriteInternalError(w, "Media library error", "Unable to access media library to verify file availability.")
-			return
-		}
-		if strings.Contains(err.Error(), "Media library not configured") {
-			WriteConflict(w, "Media library not configured", "Repair functionality requires media library configuration.")
-			return
-		}
-		WriteInternalError(w, "Failed to trigger repair", err.Error())
+		WriteBadRequest(w, "Failed to trigger repair", "Failed to update file status for repair: "+err.Error())
 		return
 	}
 

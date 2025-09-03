@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	ixml "github.com/javi11/altmount/internal/adapters/webdav/propfind/xml"
+	ixml "github.com/javi11/altmount/internal/webdav/propfind/xml"
 	"golang.org/x/net/webdav"
 )
 

@@ -13,6 +13,9 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/sourcegraph/conc"
+	"golift.io/starr"
+	"golift.io/starr/radarr"
+	"golift.io/starr/sonarr"
 )
 
 // WorkerStatus represents the current status of the health worker
@@ -45,6 +48,7 @@ type WorkerStats struct {
 type HealthWorker struct {
 	healthChecker   *HealthChecker
 	healthRepo      *database.HealthRepository
+	mediaRepo       *database.MediaRepository
 	metadataService *metadata.MetadataService
 	configGetter    config.ConfigGetter
 	logger          *slog.Logger
@@ -70,6 +74,7 @@ type HealthWorker struct {
 func NewHealthWorker(
 	healthChecker *HealthChecker,
 	healthRepo *database.HealthRepository,
+	mediaRepo *database.MediaRepository,
 	metadataService *metadata.MetadataService,
 	configGetter config.ConfigGetter,
 	logger *slog.Logger,
@@ -77,6 +82,7 @@ func NewHealthWorker(
 	return &HealthWorker{
 		healthChecker:   healthChecker,
 		healthRepo:      healthRepo,
+		mediaRepo:       mediaRepo,
 		metadataService: metadataService,
 		configGetter:    configGetter,
 		logger:          logger,
@@ -388,7 +394,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 	}
 
 	// Handle the result
-	if err := hw.handleHealthCheckResult(event); err != nil {
+	if err := hw.handleHealthCheckResult(ctx, event); err != nil {
 		hw.logger.Error("Failed to handle health check result", "file_path", filePath, "error", err)
 		return fmt.Errorf("failed to handle health check result: %w", err)
 	}
@@ -413,7 +419,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 }
 
 // handleHealthCheckResult handles the result of a health check
-func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
+func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event HealthEvent) error {
 	switch event.Type {
 	case EventTypeFileRecovered:
 		// File is now healthy - update metadata and delete from health database
@@ -501,7 +507,7 @@ func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
 
 			if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
 				// Max health check retries reached - trigger repair phase
-				if err := hw.healthRepo.TriggerRepair(event.FilePath, errorMsg); err != nil {
+				if err := hw.triggerFileRepair(ctx, event.FilePath, errorMsg); err != nil {
 					hw.logger.Error("Failed to trigger repair", "error", err)
 					return fmt.Errorf("failed to trigger repair: %w", err)
 				}
@@ -529,25 +535,25 @@ func (hw *HealthWorker) processRepairNotification(ctx context.Context, fileHealt
 
 	hw.logger.Info("Notifying ARRs for repair", "file_path", fileHealth.FilePath, "source_nzb", fileHealth.SourceNzbPath)
 
-	// Use TriggerRepair to handle the actual ARR notification logic
+	// Use triggerFileRepair to handle the actual ARR notification logic
 	// This will check if the file exists in media_files and trigger repair if available
-	err := hw.healthRepo.TriggerRepair(fileHealth.FilePath, nil)
+	err := hw.triggerFileRepair(ctx, fileHealth.FilePath, nil)
 	if err != nil {
-		// If TriggerRepair fails, increment repair retry count for later retry
+		// If triggerFileRepair fails, increment repair retry count for later retry
 		hw.logger.Warn("Repair trigger failed, will retry later", "file_path", fileHealth.FilePath, "error", err)
-		
+
 		errorMsg := err.Error()
 		retryErr := hw.healthRepo.IncrementRepairRetryCount(fileHealth.FilePath, &errorMsg)
 		if retryErr != nil {
 			return fmt.Errorf("failed to increment repair retry count after trigger failure: %w", retryErr)
 		}
-		
+
 		hw.logger.Info("Repair notification retry scheduled",
 			"file_path", fileHealth.FilePath,
 			"repair_retry_count", fileHealth.RepairRetryCount+1,
 			"max_repair_retries", fileHealth.MaxRepairRetries,
 			"error", err)
-		
+
 		return nil // Don't return error - retry was scheduled
 	}
 
@@ -702,4 +708,227 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 		return 1 // Default
 	}
 	return jobs
+}
+
+// triggerFileRepair handles the business logic for triggering repair of a corrupted file
+// It uses media files to determine the ARR instance and notifies the appropriate service
+func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string) error {
+	// Get media file information to determine which ARR instance to notify
+	mediaFiles, err := hw.mediaRepo.GetMediaFilesByPath(filePath)
+	if err != nil {
+		hw.logger.Warn("Failed to get media files for repair", "file_path", filePath, "error", err)
+		// If we can't find media files, still mark as corrupted for manual investigation
+		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
+	}
+
+	// If no media files found, mark as corrupted for manual handling
+	if len(mediaFiles) == 0 {
+		hw.logger.Info("No media files found, marking as corrupted", "file_path", filePath)
+		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
+	}
+
+	// Try to notify ARR instances for each media file
+	var lastErr error
+	notificationSuccess := false
+
+	for _, mediaFile := range mediaFiles {
+		if mediaFile.InstanceName == "" || mediaFile.InstanceType == "" {
+			hw.logger.Warn("Media file has incomplete instance information",
+				"file_path", filePath,
+				"instance_name", mediaFile.InstanceName,
+				"instance_type", mediaFile.InstanceType)
+			continue
+		}
+
+		// Try to notify this ARR instance
+		err := hw.notifyARRInstance(ctx, &mediaFile)
+		if err != nil {
+			hw.logger.Error("Failed to notify ARR instance",
+				"file_path", filePath,
+				"instance_name", mediaFile.InstanceName,
+				"instance_type", mediaFile.InstanceType,
+				"error", err)
+			lastErr = err
+			continue
+		}
+
+		notificationSuccess = true
+		hw.logger.Info("Successfully notified ARR instance",
+			"file_path", filePath,
+			"instance_name", mediaFile.InstanceName,
+			"instance_type", mediaFile.InstanceType)
+	}
+
+	// Update database status based on notification success
+	if notificationSuccess {
+		// At least one notification succeeded - set repair triggered
+		return hw.healthRepo.SetRepairTriggered(filePath, errorMsg)
+	} else {
+		// All notifications failed - mark as corrupted for manual investigation
+		if lastErr != nil {
+			errMsg := lastErr.Error()
+			return hw.healthRepo.SetCorrupted(filePath, &errMsg)
+		}
+		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
+	}
+}
+
+// findConfigInstance finds a specific ARR instance in the configuration
+func (hw *HealthWorker) findConfigInstance(instanceType, instanceName string) (*config.ScraperInstanceConfig, error) {
+	cfg := hw.configGetter()
+
+	switch instanceType {
+	case "radarr":
+		for _, instance := range cfg.Scraper.RadarrInstances {
+			if instance.Name == instanceName {
+				return &instance, nil
+			}
+		}
+	case "sonarr":
+		for _, instance := range cfg.Scraper.SonarrInstances {
+			if instance.Name == instanceName {
+				return &instance, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("instance not found: %s/%s", instanceType, instanceName)
+}
+
+// createRadarrClient creates a Radarr client for the given instance
+func (hw *HealthWorker) createRadarrClient(instanceConfig *config.ScraperInstanceConfig) (*radarr.Radarr, error) {
+	if instanceConfig.URL == "" {
+		return nil, fmt.Errorf("Radarr instance URL is empty")
+	}
+	if instanceConfig.APIKey == "" {
+		return nil, fmt.Errorf("Radarr instance API key is empty")
+	}
+
+	client := radarr.New(&starr.Config{
+		URL:    instanceConfig.URL,
+		APIKey: instanceConfig.APIKey,
+	})
+
+	return client, nil
+}
+
+// createSonarrClient creates a Sonarr client for the given instance
+func (hw *HealthWorker) createSonarrClient(instanceConfig *config.ScraperInstanceConfig) (*sonarr.Sonarr, error) {
+	if instanceConfig.URL == "" {
+		return nil, fmt.Errorf("Sonarr instance URL is empty")
+	}
+	if instanceConfig.APIKey == "" {
+		return nil, fmt.Errorf("Sonarr instance API key is empty")
+	}
+
+	client := sonarr.New(&starr.Config{
+		URL:    instanceConfig.URL,
+		APIKey: instanceConfig.APIKey,
+	})
+
+	return client, nil
+}
+
+// notifyARRInstance notifies a specific ARR instance about a file that needs repair
+func (hw *HealthWorker) notifyARRInstance(ctx context.Context, mediaFile *database.MediaFile) error {
+	// Find the instance configuration
+	instanceConfig, err := hw.findConfigInstance(mediaFile.InstanceType, mediaFile.InstanceName)
+	if err != nil {
+		return fmt.Errorf("failed to find instance config: %w", err)
+	}
+
+	// Check if instance is enabled
+	if instanceConfig.Enabled == nil || !*instanceConfig.Enabled {
+		return fmt.Errorf("instance %s/%s is disabled", mediaFile.InstanceType, mediaFile.InstanceName)
+	}
+
+	// Create client and trigger rescan based on instance type
+	switch mediaFile.InstanceType {
+	case "radarr":
+		client, err := hw.createRadarrClient(instanceConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create Radarr client: %w", err)
+		}
+		return hw.triggerRadarrRescan(ctx, client, mediaFile)
+
+	case "sonarr":
+		client, err := hw.createSonarrClient(instanceConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create Sonarr client: %w", err)
+		}
+		return hw.triggerSonarrRescan(ctx, client, mediaFile)
+
+	default:
+		return fmt.Errorf("unsupported instance type: %s", mediaFile.InstanceType)
+	}
+}
+
+// triggerRadarrRescan triggers a rescan in Radarr for the given media file
+func (hw *HealthWorker) triggerRadarrRescan(ctx context.Context, client *radarr.Radarr, mediaFile *database.MediaFile) error {
+	// Check if external ID is available
+	if mediaFile.ExternalID == 0 {
+		return fmt.Errorf("no external ID available for media file")
+	}
+
+	movieID := mediaFile.ExternalID
+
+	hw.logger.Info("Triggering Radarr rescan",
+		"instance", mediaFile.InstanceName,
+		"movie_id", movieID,
+		"file_path", mediaFile.FilePath)
+
+	// Create a refresh movie command
+	cmd := &radarr.CommandRequest{
+		Name:     "RefreshMovie",
+		MovieIDs: []int64{movieID},
+	}
+
+	// Send the command to trigger a refresh/rescan of the movie
+	// This will make Radarr re-check the file and potentially re-download if corrupted
+	response, err := client.SendCommandContext(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Radarr rescan for movie ID %d: %w", movieID, err)
+	}
+
+	hw.logger.Info("Successfully triggered Radarr rescan",
+		"instance", mediaFile.InstanceName,
+		"movie_id", movieID,
+		"command_id", response.ID)
+
+	return nil
+}
+
+// triggerSonarrRescan triggers a rescan in Sonarr for the given media file
+func (hw *HealthWorker) triggerSonarrRescan(ctx context.Context, client *sonarr.Sonarr, mediaFile *database.MediaFile) error {
+	// Check if external ID is available
+	if mediaFile.ExternalID == 0 {
+		return fmt.Errorf("no external ID available for media file")
+	}
+
+	episodeID := mediaFile.ExternalID
+
+	hw.logger.Info("Triggering Sonarr rescan",
+		"instance", mediaFile.InstanceName,
+		"episode_id", episodeID,
+		"file_path", mediaFile.FilePath)
+
+	// Create a refresh series command
+	cmd := &sonarr.CommandRequest{
+		Name:       "RefreshSeries",
+		EpisodeIDs: []int64{episodeID},
+	}
+
+	// Send the command to trigger a refresh/rescan of the series
+	// This will make Sonarr re-check the file and potentially re-download if corrupted
+	response, err := client.SendCommandContext(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Sonarr rescan for episode ID %d: %w", episodeID, err)
+	}
+
+	hw.logger.Info("Successfully triggered Sonarr rescan",
+		"instance", mediaFile.InstanceName,
+		"episode_id", episodeID,
+		"command_id", response.ID)
+
+	return nil
 }

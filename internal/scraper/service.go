@@ -274,9 +274,13 @@ func (s *Service) scraperLoop() {
 
 // performScrape checks for instances that need scraping and scrapes them
 func (s *Service) performScrape() {
-	// For now, disable automatic scraping - only support manual scraping
-	s.logger.Debug("Scheduled scraping temporarily disabled - using manual scraping only")
-	return
+	for _, instance := range s.getConfigInstances() {
+		if instance.Enabled {
+			if err := s.TriggerScrape(instance.Type, instance.Name); err != nil {
+				s.logger.Error("Failed to trigger scrape", "instance", instance.Name, "type", instance.Type, "error", err)
+			}
+		}
+	}
 }
 
 // TriggerScrape triggers a manual scrape for a specific instance by type and name

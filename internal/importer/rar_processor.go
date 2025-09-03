@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"regexp"
@@ -413,4 +414,36 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 	}
 
 	return out, covered, nil
+}
+
+func renameRarFilesToMatchFirstFile(rarFiles []ParsedFile) []ParsedFile {
+	// Get the base name of the first RAR file (without extension)
+	firstFileBase := strings.TrimSuffix(rarFiles[0].Filename, filepath.Ext(rarFiles[0].Filename))
+
+	// Rename all RAR files to match the base name of the first file while preserving original part naming
+	for i := range rarFiles {
+		originalFileName := rarFiles[i].Filename
+
+		// Try to extract the part suffix from the original filename
+		var partSuffix string
+
+		// Check for .part###.rar pattern
+		if matches := regexp.MustCompile(`\.part(\d+)\.rar$`).FindStringSubmatch(originalFileName); len(matches) > 1 {
+			partSuffix = fmt.Sprintf(".part%s.rar", matches[1])
+		} else if matches := regexp.MustCompile(`\.r(\d+)$`).FindStringSubmatch(originalFileName); len(matches) > 1 {
+			// Check for .r### pattern
+			partSuffix = fmt.Sprintf(".r%s", matches[1])
+		} else if matches := regexp.MustCompile(`\.(\d+)$`).FindStringSubmatch(originalFileName); len(matches) > 1 {
+			// Check for .### pattern
+			partSuffix = fmt.Sprintf(".%s", matches[1])
+		} else {
+			// If no pattern matches, keep the original extension
+			partSuffix = filepath.Ext(originalFileName)
+		}
+
+		// Construct new filename with first file's base name and original part suffix
+		rarFiles[i].Filename = firstFileBase + partSuffix
+	}
+
+	return rarFiles
 }

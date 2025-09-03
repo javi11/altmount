@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/javi11/altmount/internal/adapters/nzbfilesystem"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/spf13/afero"
@@ -82,10 +82,9 @@ func NewNzbSystem(config NzbConfig, poolManager pool.Manager, configGetter confi
 	}
 
 	// Create health repository for file health tracking
-	// Note: MediaRepository is not available in this context, so pass nil
-	// This means repair triggering via Arrs won't work in this integration,
+	// Note: MediaRepository is not available in this integration context,
 	// but basic health checking functionality will still work
-	healthRepo := database.NewHealthRepository(db.Connection(), nil)
+	healthRepo := database.NewHealthRepository(db.Connection())
 
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(); err != nil {

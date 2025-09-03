@@ -3,7 +3,6 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 )
@@ -15,7 +14,6 @@ type HealthRepository struct {
 		Query(query string, args ...interface{}) (*sql.Rows, error)
 		QueryRow(query string, args ...interface{}) *sql.Row
 	}
-	mediaRepo *MediaRepository
 }
 
 // NewHealthRepository creates a new health repository
@@ -23,10 +21,9 @@ func NewHealthRepository(db interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
-}, mediaRepo *MediaRepository) *HealthRepository {
+}) *HealthRepository {
 	return &HealthRepository{
-		db:        db,
-		mediaRepo: mediaRepo,
+		db: db,
 	}
 }
 
@@ -199,73 +196,20 @@ func (r *HealthRepository) IncrementRetryCount(filePath string, errorMessage *st
 	return nil
 }
 
-// TriggerRepair triggers repair for a file after health check retries are exhausted
-// If file is found in media_files table, set status to repair_triggered
-// Otherwise, mark as permanently corrupted
-func (r *HealthRepository) TriggerRepair(filePath string, finalError *string) error {
-	// Check if file exists in media_files table (if mediaRepo is available)
-	var shouldTriggerRepair bool
-	var errorMessage *string
-
-	if r.mediaRepo != nil {
-		mediaFiles, err := r.mediaRepo.GetMediaFilesByPath(filePath)
-		if err != nil {
-			slog.Warn(fmt.Sprintf("Warning: Failed to check media files for path %s: %v\n", filePath, err))
-			shouldTriggerRepair = false
-			errMsg := fmt.Sprintf("Failed to check media library: %v", err)
-			errorMessage = &errMsg
-		} else {
-			shouldTriggerRepair = len(mediaFiles) > 0
-			if shouldTriggerRepair {
-				fmt.Printf("File %s found in media_files, triggering repair (found %d media file(s))\n", filePath, len(mediaFiles))
-				// Clear any previous error when repair is triggered successfully
-				errorMessage = nil
-			} else {
-				fmt.Printf("File %s not found in media_files, marking as corrupted\n", filePath)
-				errMsg := "Cannot repair: File not found in media library"
-				errorMessage = &errMsg
-			}
-		}
-	} else {
-		// No media repository available
-		shouldTriggerRepair = false
-		errMsg := "Cannot repair: Media library not configured"
-		errorMessage = &errMsg
-	}
-
-	var targetStatus string
-	if shouldTriggerRepair {
-		targetStatus = "repair_triggered"
-		// Use the provided finalError if repair is triggered, otherwise clear it
-		if finalError != nil {
-			errorMessage = finalError
-		}
-	} else {
-		targetStatus = "corrupted"
-		// Use our generated error message for repair failures
-		// If finalError is provided, append it to our message
-		if finalError != nil && *finalError != "" {
-			if errorMessage != nil {
-				combined := *errorMessage + ": " + *finalError
-				errorMessage = &combined
-			} else {
-				errorMessage = finalError
-			}
-		}
-	}
-
+// SetRepairTriggered sets a file's status to repair_triggered
+func (r *HealthRepository) SetRepairTriggered(filePath string, errorMessage *string) error {
 	query := `
 		UPDATE file_health 
-		SET status = ?,
+		SET status = 'repair_triggered',
 		    last_error = ?,
 		    next_retry_at = NULL,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.Exec(query, targetStatus, errorMessage, filePath)
+	result, err := r.db.Exec(query, errorMessage, filePath)
 	if err != nil {
-		return fmt.Errorf("failed to update file status to %s: %w", targetStatus, err)
+		return fmt.Errorf("failed to update file status to repair_triggered: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -277,9 +221,32 @@ func (r *HealthRepository) TriggerRepair(filePath string, finalError *string) er
 		return fmt.Errorf("no file found to update status: %s", filePath)
 	}
 
-	// Return an error that the API can catch when repair is not available
-	if !shouldTriggerRepair && r.mediaRepo != nil {
-		return fmt.Errorf("file not found in media_files table, cannot trigger repair")
+	return nil
+}
+
+// SetCorrupted sets a file's status to corrupted
+func (r *HealthRepository) SetCorrupted(filePath string, errorMessage *string) error {
+	query := `
+		UPDATE file_health 
+		SET status = 'corrupted',
+		    last_error = ?,
+		    next_retry_at = NULL,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	result, err := r.db.Exec(query, errorMessage, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to update file status to corrupted: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no file found to update status: %s", filePath)
 	}
 
 	return nil

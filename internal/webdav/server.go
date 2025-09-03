@@ -14,10 +14,10 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/go-pkgz/auth/v2/token"
-	"github.com/javi11/altmount/internal/adapters/webdav/propfind"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/utils"
+	"github.com/javi11/altmount/internal/webdav/propfind"
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 )

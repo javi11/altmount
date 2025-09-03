@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/javi11/altmount/internal/adapters/nzbfilesystem"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/slogutil"
 	"golang.org/x/net/webdav"
 )

@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/frontend"
-	"github.com/javi11/altmount/internal/adapters/webdav"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
@@ -21,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/scraper"
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/spf13/cobra"
 )
@@ -172,8 +172,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create media repository for scraper and health correlation
 	mediaRepo := database.NewMediaRepository(dbConn, logger)
 
-	// Create health repository with media repository for repair triggering
-	healthRepo := database.NewHealthRepository(dbConn, mediaRepo)
+	// Create health repository
+	healthRepo := database.NewHealthRepository(dbConn)
 	userRepo = database.NewUserRepository(dbConn)
 
 	// Create authentication service
@@ -285,6 +285,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		healthWorker = health.NewHealthWorker(
 			healthChecker,
 			healthRepo,
+			mediaRepo,
 			metadataService,
 			configManager.GetConfigGetter(),
 			logger,
