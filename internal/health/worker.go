@@ -455,12 +455,17 @@ func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
 		case database.HealthStatusRepairTriggered:
 			// We're in repair phase - handle repair retry logic
 			if event.Type == EventTypeFileCorrupted {
-				hw.logger.Warn("Repair attempt failed, file still corrupted", 
-					"file_path", event.FilePath, 
-					"repair_retry_count", fileHealth.RepairRetryCount, 
+				hw.logger.Warn("Repair attempt failed, file still corrupted",
+					"file_path", event.FilePath,
+					"repair_retry_count", fileHealth.RepairRetryCount,
 					"max_repair_retries", fileHealth.MaxRepairRetries)
 			} else {
 				hw.logger.Error("Repair check failed", "file_path", event.FilePath, "error", event.Error)
+			}
+
+			if err := hw.healthRepo.IncrementRepairRetryCount(event.FilePath, errorMsg); err != nil {
+				hw.logger.Error("Failed to increment repair retry count", "file_path", event.FilePath, "error", err)
+				return fmt.Errorf("failed to increment repair retry count: %w", err)
 			}
 
 			if fileHealth.RepairRetryCount >= fileHealth.MaxRepairRetries-1 {
@@ -471,26 +476,27 @@ func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
 				}
 				hw.logger.Error("File permanently marked as corrupted after repair retries exhausted", "file_path", event.FilePath)
 			} else {
-				// Increment repair retry count
-				if err := hw.healthRepo.IncrementRepairRetryCount(event.FilePath, errorMsg); err != nil {
-					hw.logger.Error("Failed to increment repair retry count", "file_path", event.FilePath, "error", err)
-					return fmt.Errorf("failed to increment repair retry count: %w", err)
-				}
-				hw.logger.Info("Repair retry scheduled", 
-					"file_path", event.FilePath, 
-					"repair_retry_count", fileHealth.RepairRetryCount+1, 
+				hw.logger.Info("Repair retry scheduled",
+					"file_path", event.FilePath,
+					"repair_retry_count", fileHealth.RepairRetryCount+1,
 					"max_repair_retries", fileHealth.MaxRepairRetries)
 			}
 
 		default:
 			// We're in health check phase - handle health check retry logic
 			if event.Type == EventTypeFileCorrupted {
-				hw.logger.Warn("File still corrupted", 
-					"file_path", event.FilePath, 
-					"retry_count", fileHealth.RetryCount, 
+				hw.logger.Warn("File still corrupted",
+					"file_path", event.FilePath,
+					"retry_count", fileHealth.RetryCount,
 					"max_retries", fileHealth.MaxRetries)
 			} else {
 				hw.logger.Error("Health check failed", "file_path", event.FilePath, "error", event.Error)
+			}
+
+			// Increment health check retry count
+			if err := hw.healthRepo.IncrementRetryCount(event.FilePath, errorMsg); err != nil {
+				hw.logger.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
+				return fmt.Errorf("failed to increment retry count: %w", err)
 			}
 
 			if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
@@ -501,18 +507,51 @@ func (hw *HealthWorker) handleHealthCheckResult(event HealthEvent) error {
 				}
 				hw.logger.Info("Health check retries exhausted, repair triggered", "file_path", event.FilePath)
 			} else {
-				// Increment health check retry count
-				if err := hw.healthRepo.IncrementRetryCount(event.FilePath, errorMsg); err != nil {
-					hw.logger.Error("Failed to increment retry count", "file_path", event.FilePath, "error", err)
-					return fmt.Errorf("failed to increment retry count: %w", err)
-				}
-				hw.logger.Info("Health check retry scheduled", 
-					"file_path", event.FilePath, 
-					"retry_count", fileHealth.RetryCount+1, 
+				hw.logger.Info("Health check retry scheduled",
+					"file_path", event.FilePath,
+					"retry_count", fileHealth.RetryCount+1,
 					"max_retries", fileHealth.MaxRetries)
 			}
 		}
 	}
+
+	return nil
+}
+
+// processRepairNotification processes a file that needs repair notification to ARRs
+func (hw *HealthWorker) processRepairNotification(ctx context.Context, fileHealth *database.FileHealth) error {
+	// Check if context is cancelled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	hw.logger.Info("Notifying ARRs for repair", "file_path", fileHealth.FilePath, "source_nzb", fileHealth.SourceNzbPath)
+
+	// Use TriggerRepair to handle the actual ARR notification logic
+	// This will check if the file exists in media_files and trigger repair if available
+	err := hw.healthRepo.TriggerRepair(fileHealth.FilePath, nil)
+	if err != nil {
+		// If TriggerRepair fails, increment repair retry count for later retry
+		hw.logger.Warn("Repair trigger failed, will retry later", "file_path", fileHealth.FilePath, "error", err)
+		
+		errorMsg := err.Error()
+		retryErr := hw.healthRepo.IncrementRepairRetryCount(fileHealth.FilePath, &errorMsg)
+		if retryErr != nil {
+			return fmt.Errorf("failed to increment repair retry count after trigger failure: %w", retryErr)
+		}
+		
+		hw.logger.Info("Repair notification retry scheduled",
+			"file_path", fileHealth.FilePath,
+			"repair_retry_count", fileHealth.RepairRetryCount+1,
+			"max_repair_retries", fileHealth.MaxRepairRetries,
+			"error", err)
+		
+		return nil // Don't return error - retry was scheduled
+	}
+
+	hw.logger.Info("Repair notification completed successfully", "file_path", fileHealth.FilePath)
 
 	return nil
 }
@@ -543,7 +582,14 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
 
-	if len(unhealthyFiles) == 0 {
+	// Get files that need repair notifications
+	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(hw.getMaxConcurrentJobs())
+	if err != nil {
+		return fmt.Errorf("failed to get files for repair notification: %w", err)
+	}
+
+	totalFiles := len(unhealthyFiles) + len(repairFiles)
+	if totalFiles == 0 {
 		hw.logger.Debug("No unhealthy files found, skipping health check cycle")
 		hw.updateStats(func(s *WorkerStats) {
 			s.CurrentRunStartTime = nil
@@ -556,11 +602,16 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		return nil
 	}
 
-	hw.logger.Info("Found unhealthy files to check - processing in parallel", "count", len(unhealthyFiles), "max_concurrent_jobs", hw.getMaxConcurrentJobs())
+	hw.logger.Info("Found files to process",
+		"health_check_files", len(unhealthyFiles),
+		"repair_notification_files", len(repairFiles),
+		"total", totalFiles,
+		"max_concurrent_jobs", hw.getMaxConcurrentJobs())
 
 	// Process files in parallel using conc
 	wg := conc.NewWaitGroup()
 
+	// Process health check files
 	for _, fileHealth := range unhealthyFiles {
 		wg.Go(func() {
 			hw.logger.Info("Checking unhealthy file", "file_path", fileHealth.FilePath)
@@ -586,6 +637,23 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		})
 	}
 
+	// Process repair notification files
+	for _, fileHealth := range repairFiles {
+		wg.Go(func() {
+			hw.logger.Info("Processing repair notification for file", "file_path", fileHealth.FilePath)
+
+			err := hw.processRepairNotification(ctx, fileHealth)
+			if err != nil {
+				hw.logger.Error("Repair notification failed", "file_path", fileHealth.FilePath, "error", err)
+			}
+
+			// Update cycle progress stats
+			hw.updateStats(func(s *WorkerStats) {
+				s.CurrentRunFilesChecked++
+			})
+		})
+	}
+
 	// Wait for all files to complete processing
 	wg.Wait()
 
@@ -600,7 +668,9 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	})
 
 	hw.logger.Info("Health check cycle completed",
-		"files_checked", len(unhealthyFiles),
+		"health_check_files", len(unhealthyFiles),
+		"repair_notification_files", len(repairFiles),
+		"total_files", totalFiles,
 		"duration", time.Since(now))
 
 	return nil

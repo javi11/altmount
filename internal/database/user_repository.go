@@ -331,7 +331,7 @@ func (r *UserRepository) generateAPIKey() (string, error) {
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("failed to generate random bytes: %w", err)
 	}
-	
+
 	// Encode to URL-safe base64 and remove padding
 	apiKey := base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(bytes)
 	return apiKey, nil
@@ -344,28 +344,28 @@ func (r *UserRepository) RegenerateAPIKey(userID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to generate API key: %w", err)
 	}
-	
+
 	// Update user's API key in database
 	query := `
 		UPDATE users 
 		SET api_key = ?, updated_at = datetime('now')
 		WHERE user_id = ?
 	`
-	
+
 	result, err := r.db.Exec(query, apiKey, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to update API key: %w", err)
 	}
-	
+
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return "", fmt.Errorf("failed to get rows affected: %w", err)
 	}
-	
+
 	if rowsAffected == 0 {
 		return "", fmt.Errorf("user not found: %s", userID)
 	}
-	
+
 	return apiKey, nil
 }
 

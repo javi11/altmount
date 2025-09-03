@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -80,24 +81,21 @@ func (r *HealthRepository) GetFileHealth(filePath string) (*FileHealth, error) {
 	return &health, nil
 }
 
-// GetUnhealthyFiles returns files that need retry checks (including pending files and repair_triggered files)
+// GetUnhealthyFiles returns files that need health checks (excluding repair_triggered files)
 func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
 		       error_details, created_at, updated_at
 		FROM file_health
-		WHERE (
-			(status IN ('pending', 'partial', 'corrupted') AND retry_count < max_retries) OR
-			(status = 'repair_triggered' AND repair_retry_count < max_repair_retries)
-		)
+		WHERE status IN ('pending', 'partial', 'corrupted') 
+		  AND retry_count < max_retries
 		  AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
 		ORDER BY 
 		  CASE 
 		    WHEN status = 'pending' THEN 0 
-		    WHEN status = 'repair_triggered' THEN 1
-		    ELSE 2 
-		  END,  -- Prioritize pending, then repair_triggered, then others
+		    ELSE 1 
+		  END,  -- Prioritize pending files
 		  last_checked ASC
 		LIMIT ?
 	`
@@ -126,6 +124,49 @@ func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate unhealthy files: %w", err)
+	}
+
+	return files, nil
+}
+
+// GetFilesForRepairNotification returns files that need repair notification (repair_triggered status)
+func (r *HealthRepository) GetFilesForRepairNotification(limit int) ([]*FileHealth, error) {
+	query := `
+		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       error_details, created_at, updated_at
+		FROM file_health
+		WHERE status = 'repair_triggered'
+		  AND repair_retry_count < max_repair_retries
+		  AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
+		ORDER BY last_checked ASC
+		LIMIT ?
+	`
+
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files for repair notification: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*FileHealth
+	for rows.Next() {
+		var health FileHealth
+		err := rows.Scan(
+			&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
+			&health.LastError, &health.RetryCount, &health.MaxRetries,
+			&health.RepairRetryCount, &health.MaxRepairRetries,
+			&health.NextRetryAt, &health.SourceNzbPath, &health.ErrorDetails,
+			&health.CreatedAt, &health.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan file health for repair notification: %w", err)
+		}
+		files = append(files, &health)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate files for repair notification: %w", err)
 	}
 
 	return files, nil
@@ -165,12 +206,11 @@ func (r *HealthRepository) TriggerRepair(filePath string, finalError *string) er
 	// Check if file exists in media_files table (if mediaRepo is available)
 	var shouldTriggerRepair bool
 	var errorMessage *string
-	
+
 	if r.mediaRepo != nil {
 		mediaFiles, err := r.mediaRepo.GetMediaFilesByPath(filePath)
 		if err != nil {
-			// Log error but don't fail - continue with corrupted status
-			fmt.Printf("Warning: Failed to check media files for path %s: %v\n", filePath, err)
+			slog.Warn(fmt.Sprintf("Warning: Failed to check media files for path %s: %v\n", filePath, err))
 			shouldTriggerRepair = false
 			errMsg := fmt.Sprintf("Failed to check media library: %v", err)
 			errorMessage = &errMsg
@@ -192,7 +232,7 @@ func (r *HealthRepository) TriggerRepair(filePath string, finalError *string) er
 		errMsg := "Cannot repair: Media library not configured"
 		errorMessage = &errMsg
 	}
-	
+
 	var targetStatus string
 	if shouldTriggerRepair {
 		targetStatus = "repair_triggered"
@@ -432,7 +472,7 @@ func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, of
 
 	args := []interface{}{
 		statusParam, statusParam, // status filter (checked twice in WHERE clause)
-		sinceParam, sinceParam,   // since filter (checked twice in WHERE clause)
+		sinceParam, sinceParam, // since filter (checked twice in WHERE clause)
 		search, searchPattern, searchPattern, // search filter (file_path and source_nzb_path)
 		limit, offset,
 	}
@@ -492,7 +532,7 @@ func (r *HealthRepository) CountHealthItems(statusFilter *HealthStatus, sinceFil
 
 	args := []interface{}{
 		statusParam, statusParam, // status filter (checked twice in WHERE clause)
-		sinceParam, sinceParam,   // since filter (checked twice in WHERE clause)
+		sinceParam, sinceParam, // since filter (checked twice in WHERE clause)
 		search, searchPattern, searchPattern, // search filter (file_path and source_nzb_path)
 	}
 

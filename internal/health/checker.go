@@ -234,7 +234,7 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 	go func() {
 		// Extract directory path from file path for VFS refresh
 		virtualDir := filepath.Dir(filePath)
-		
+
 		// Use background context with timeout for VFS notification
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

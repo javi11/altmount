@@ -55,9 +55,9 @@ func NewAPIErrorResponse(code, message, details string) *APIErrorResponse {
 func WriteError(w http.ResponseWriter, statusCode int, code, message, details string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	
+
 	errorResponse := NewAPIErrorResponse(code, message, details)
-	
+
 	if err := json.NewEncoder(w).Encode(errorResponse); err != nil {
 		slog.Error("Failed to encode error response", "err", err)
 		// Fallback to plain text if JSON encoding fails
@@ -71,13 +71,13 @@ func WriteError(w http.ResponseWriter, statusCode int, code, message, details st
 func WriteSuccess(w http.ResponseWriter, data interface{}, meta *APIMeta) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
+
 	response := &APIResponse{
 		Success: true,
 		Data:    data,
 		Meta:    meta,
 	}
-	
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		slog.Error("Failed to encode success response", "err", err)
 		WriteError(w, http.StatusInternalServerError, ErrCodeInternalServer, ErrMsgInternalServer, "Failed to encode response")
@@ -88,12 +88,12 @@ func WriteSuccess(w http.ResponseWriter, data interface{}, meta *APIMeta) {
 func WriteCreated(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	
+
 	response := &APIResponse{
 		Success: true,
 		Data:    data,
 	}
-	
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		slog.Error("Failed to encode created response", "err", err)
 		WriteError(w, http.StatusInternalServerError, ErrCodeInternalServer, ErrMsgInternalServer, "Failed to encode response")

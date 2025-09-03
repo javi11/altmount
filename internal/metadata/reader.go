@@ -21,7 +21,6 @@ func NewMetadataReader(service *MetadataService) *MetadataReader {
 	}
 }
 
-
 // ListDirectoryContents lists all contents in a virtual directory path
 // Returns real directories as fs.FileInfo and virtual files as FileMetadata
 func (mr *MetadataReader) ListDirectoryContents(virtualPath string) ([]fs.FileInfo, []*metapb.FileMetadata, error) {
@@ -30,10 +29,10 @@ func (mr *MetadataReader) ListDirectoryContents(virtualPath string) ([]fs.FileIn
 	if virtualPath == "." {
 		virtualPath = "/"
 	}
-	
+
 	// Convert virtual path to metadata filesystem path
 	metadataDir := filepath.Join(mr.service.GetMetadataDirectoryPath(virtualPath))
-	
+
 	// Single os.ReadDir call to get all entries
 	entries, err := os.ReadDir(metadataDir)
 	if err != nil {
@@ -42,10 +41,10 @@ func (mr *MetadataReader) ListDirectoryContents(virtualPath string) ([]fs.FileIn
 		}
 		return nil, nil, fmt.Errorf("failed to read directory: %w", err)
 	}
-	
+
 	var dirs []fs.FileInfo
 	var files []*metapb.FileMetadata
-	
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			// It's a real directory - get fs.FileInfo
@@ -57,7 +56,7 @@ func (mr *MetadataReader) ListDirectoryContents(virtualPath string) ([]fs.FileIn
 			// It's a metadata file - read the FileMetadata
 			virtualName := entry.Name()[:len(entry.Name())-5] // Remove .meta extension
 			virtualFilePath := filepath.Join(virtualPath, virtualName)
-			
+
 			fileMeta, err := mr.service.ReadFileMetadata(virtualFilePath)
 			if err == nil && fileMeta != nil {
 				files = append(files, fileMeta)
@@ -65,7 +64,7 @@ func (mr *MetadataReader) ListDirectoryContents(virtualPath string) ([]fs.FileIn
 		}
 		// Ignore other files (not directories or .meta files)
 	}
-	
+
 	return dirs, files, nil
 }
 
@@ -93,12 +92,12 @@ func (mr *MetadataReader) PathExists(virtualPath string) (bool, error) {
 	if mr.service.DirectoryExists(virtualPath) {
 		return true, nil
 	}
-	
+
 	// Check if it's a file
 	if mr.service.FileExists(virtualPath) {
 		return true, nil
 	}
-	
+
 	return false, nil
 }
 
@@ -108,15 +107,14 @@ func (mr *MetadataReader) IsDirectory(virtualPath string) (bool, error) {
 	if mr.service.DirectoryExists(virtualPath) {
 		return true, nil
 	}
-	
+
 	// Check if it's a file
 	if mr.service.FileExists(virtualPath) {
 		return false, nil
 	}
-	
+
 	return false, fmt.Errorf("path does not exist: %s", virtualPath)
 }
-
 
 // GetFileSegments retrieves usenet segments for a virtual file
 func (mr *MetadataReader) GetFileSegments(virtualPath string) ([]*metapb.SegmentData, error) {
@@ -124,17 +122,11 @@ func (mr *MetadataReader) GetFileSegments(virtualPath string) ([]*metapb.Segment
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file metadata: %w", err)
 	}
-	
+
 	if fileMeta == nil {
 		return nil, fmt.Errorf("file not found: %s", virtualPath)
 	}
-	
+
 	// Return the protobuf segments directly
 	return fileMeta.SegmentData, nil
 }
-
-
-
-
-
-

@@ -7,37 +7,37 @@ import (
 
 // ScraperInstanceRequest represents a request to create/update a scraper instance
 type ScraperInstanceRequest struct {
-	Name                string                   `json:"name"`
-	Type                string                   `json:"type"`
-	URL                 string                   `json:"url"`
-	APIKey              string                   `json:"api_key"`
-	Enabled             bool                     `json:"enabled"`
-	ScrapeIntervalHours int                      `json:"scrape_interval_hours"`
+	Name                string `json:"name"`
+	Type                string `json:"type"`
+	URL                 string `json:"url"`
+	APIKey              string `json:"api_key"`
+	Enabled             bool   `json:"enabled"`
+	ScrapeIntervalHours int    `json:"scrape_interval_hours"`
 }
 
 // ScraperInstanceResponse represents a scraper instance in API responses
 type ScraperInstanceResponse struct {
-	ID                  int64                    `json:"id"`
-	Name                string                   `json:"name"`
-	Type                string                   `json:"type"`
-	URL                 string                   `json:"url"`
-	Enabled             bool                     `json:"enabled"`
-	ScrapeIntervalHours int                      `json:"scrape_interval_hours"`
-	LastScrapeAt        *string                  `json:"last_scrape_at"`
-	CreatedAt           string                   `json:"created_at"`
-	UpdatedAt           string                   `json:"updated_at"`
+	ID                  int64   `json:"id"`
+	Name                string  `json:"name"`
+	Type                string  `json:"type"`
+	URL                 string  `json:"url"`
+	Enabled             bool    `json:"enabled"`
+	ScrapeIntervalHours int     `json:"scrape_interval_hours"`
+	LastScrapeAt        *string `json:"last_scrape_at"`
+	CreatedAt           string  `json:"created_at"`
+	UpdatedAt           string  `json:"updated_at"`
 }
 
 // ScraperStatsResponse represents scraper statistics
 type ScraperStatsResponse struct {
-	TotalInstances    int    `json:"total_instances"`
-	EnabledInstances  int    `json:"enabled_instances"`
-	TotalRadarr       int    `json:"total_radarr"`
-	EnabledRadarr     int    `json:"enabled_radarr"`
-	TotalSonarr       int    `json:"total_sonarr"`
-	EnabledSonarr     int    `json:"enabled_sonarr"`
-	DueForScrape      int    `json:"due_for_scrape"`
-	LastScrape        *string `json:"last_scrape"`
+	TotalInstances   int     `json:"total_instances"`
+	EnabledInstances int     `json:"enabled_instances"`
+	TotalRadarr      int     `json:"total_radarr"`
+	EnabledRadarr    int     `json:"enabled_radarr"`
+	TotalSonarr      int     `json:"total_sonarr"`
+	EnabledSonarr    int     `json:"enabled_sonarr"`
+	DueForScrape     int     `json:"due_for_scrape"`
+	LastScrape       *string `json:"last_scrape"`
 }
 
 // ScraperMovieResponse represents a movie in API responses
@@ -127,7 +127,7 @@ func (s *Server) handleListScraperInstances(w http.ResponseWriter, r *http.Reque
 			CreatedAt:           "", // No longer tracked
 			UpdatedAt:           "", // No longer tracked
 		}
-		
+
 		// Get state information from in-memory state
 		if state, err := s.scraperService.GetLastScrapeResult(instance.Type, instance.Name); err == nil && state != nil {
 			lastScrape := state.CompletedAt.Format("2006-01-02T15:04:05Z")
@@ -149,7 +149,7 @@ func (s *Server) handleGetScraperInstance(w http.ResponseWriter, r *http.Request
 
 	instanceType := r.PathValue("type")
 	instanceName := r.PathValue("name")
-	
+
 	if instanceType == "" || instanceName == "" {
 		http.Error(w, "Instance type and name are required", http.StatusBadRequest)
 		return
@@ -248,16 +248,16 @@ func (s *Server) handleTriggerScrape(w http.ResponseWriter, r *http.Request) {
 
 	instanceType := r.PathValue("type")
 	instanceName := r.PathValue("name")
-	
+
 	if instanceType == "" || instanceName == "" {
 		http.Error(w, "Instance type and name are required", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.scraperService.TriggerScrape(instanceType, instanceName); err != nil {
-		s.logger.Error("Failed to trigger scrape", 
-			"type", instanceType, 
-			"name", instanceName, 
+		s.logger.Error("Failed to trigger scrape",
+			"type", instanceType,
+			"name", instanceName,
 			"error", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -333,7 +333,7 @@ func (s *Server) handleGetScrapeStatus(w http.ResponseWriter, r *http.Request) {
 
 	instanceType := r.PathValue("type")
 	instanceName := r.PathValue("name")
-	
+
 	if instanceType == "" || instanceName == "" {
 		http.Error(w, "Instance type and name are required", http.StatusBadRequest)
 		return
@@ -379,7 +379,7 @@ func (s *Server) handleGetLastScrapeResult(w http.ResponseWriter, r *http.Reques
 
 	instanceType := r.PathValue("type")
 	instanceName := r.PathValue("name")
-	
+
 	if instanceType == "" || instanceName == "" {
 		http.Error(w, "Instance type and name are required", http.StatusBadRequest)
 		return
@@ -426,16 +426,16 @@ func (s *Server) handleCancelScrape(w http.ResponseWriter, r *http.Request) {
 
 	instanceType := r.PathValue("type")
 	instanceName := r.PathValue("name")
-	
+
 	if instanceType == "" || instanceName == "" {
 		http.Error(w, "Instance type and name are required", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.scraperService.CancelScrape(instanceType, instanceName); err != nil {
-		s.logger.Error("Failed to cancel scrape", 
-			"type", instanceType, 
-			"name", instanceName, 
+		s.logger.Error("Failed to cancel scrape",
+			"type", instanceType,
+			"name", instanceName,
 			"error", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

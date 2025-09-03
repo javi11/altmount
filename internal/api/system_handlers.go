@@ -51,12 +51,12 @@ func (s *Server) handleGetSystemHealth(w http.ResponseWriter, r *http.Request) {
 		// Return 503 Service Unavailable for unhealthy status
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		
+
 		response := &APIResponse{
 			Success: false,
 			Data:    healthCheck,
 		}
-		
+
 		json.NewEncoder(w).Encode(response)
 	}
 }
@@ -139,7 +139,7 @@ func (s *Server) handleSystemCleanup(w http.ResponseWriter, r *http.Request) {
 	response := SystemCleanupResponse{
 		QueueItemsRemoved:    queueItemsRemoved,
 		HealthRecordsRemoved: healthRecordsRemoved,
-		DryRun:              req.DryRun,
+		DryRun:               req.DryRun,
 	}
 
 	WriteSuccess(w, response, nil)
@@ -174,36 +174,36 @@ func (s *Server) handleSystemRestart(w http.ResponseWriter, r *http.Request) {
 // performRestart performs the actual server restart
 func (s *Server) performRestart() {
 	s.logger.Info("Initiating server restart process")
-	
+
 	// Give a moment for the HTTP response to be sent
 	time.Sleep(100 * time.Millisecond)
-	
+
 	// Get the current executable path
 	executable, err := os.Executable()
 	if err != nil {
 		s.logger.Error("Failed to get executable path for restart", "error", err)
 		return
 	}
-	
+
 	s.logger.Info("Restarting server", "executable", executable, "args", os.Args)
-	
+
 	// Use syscall.Exec to replace the current process
 	// This preserves the process ID and is the cleanest way to restart
 	err = syscall.Exec(executable, os.Args, os.Environ())
 	if err != nil {
 		s.logger.Error("Failed to restart using syscall.Exec, trying exec.Command", "error", err)
-		
+
 		// Fallback: use exec.Command (this creates a new process)
 		cmd := exec.Command(executable, os.Args[1:]...)
 		cmd.Env = os.Environ()
-		
+
 		if err := cmd.Start(); err != nil {
 			s.logger.Error("Failed to restart server using exec.Command", "error", err)
 			return
 		}
-		
+
 		s.logger.Info("Server restart initiated with new process", "pid", cmd.Process.Pid)
-		
+
 		// Exit the current process
 		os.Exit(0)
 	}
@@ -220,15 +220,15 @@ func (s *Server) handleGetPoolMetrics(w http.ResponseWriter, r *http.Request) {
 	// Check if pool is available
 	if !s.poolManager.HasPool() {
 		response := PoolMetricsResponse{
-			ActiveConnections:       0,
-			TotalBytesDownloaded:    0,
-			DownloadSpeed:           0.0,
-			ErrorRate:               0.0,
-			CurrentMemoryUsage:      0,
-			TotalConnections:        0,
-			CommandSuccessRate:      0.0,
-			AcquireWaitTimeMs:       0,
-			LastUpdated:             time.Now(),
+			ActiveConnections:    0,
+			TotalBytesDownloaded: 0,
+			DownloadSpeed:        0.0,
+			ErrorRate:            0.0,
+			CurrentMemoryUsage:   0,
+			TotalConnections:     0,
+			CommandSuccessRate:   0.0,
+			AcquireWaitTimeMs:    0,
+			LastUpdated:          time.Now(),
 		}
 		WriteSuccess(w, response, nil)
 		return
@@ -246,15 +246,15 @@ func (s *Server) handleGetPoolMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// Map nntppool metrics to our response format
 	response := PoolMetricsResponse{
-		ActiveConnections:       int(snapshot.ActiveConnections),
-		TotalBytesDownloaded:    snapshot.TotalBytesDownloaded,
-		DownloadSpeed:           snapshot.DownloadSpeed,
-		ErrorRate:               snapshot.ErrorRate,
-		CurrentMemoryUsage:      int64(snapshot.CurrentMemoryUsage),
-		TotalConnections:        int64(snapshot.TotalConnections),
-		CommandSuccessRate:      snapshot.CommandSuccessRate,
-		AcquireWaitTimeMs:       int64(snapshot.AverageAcquireWaitTime.Milliseconds()),
-		LastUpdated:             time.Now(),
+		ActiveConnections:    int(snapshot.ActiveConnections),
+		TotalBytesDownloaded: snapshot.TotalBytesDownloaded,
+		DownloadSpeed:        snapshot.DownloadSpeed,
+		ErrorRate:            snapshot.ErrorRate,
+		CurrentMemoryUsage:   int64(snapshot.CurrentMemoryUsage),
+		TotalConnections:     int64(snapshot.TotalConnections),
+		CommandSuccessRate:   snapshot.CommandSuccessRate,
+		AcquireWaitTimeMs:    int64(snapshot.AverageAcquireWaitTime.Milliseconds()),
+		LastUpdated:          time.Now(),
 	}
 
 	WriteSuccess(w, response, nil)

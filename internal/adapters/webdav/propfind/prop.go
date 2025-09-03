@@ -255,7 +255,7 @@ func findSupportedLock(ctx context.Context, name string, fi os.FileInfo) (string
 // to help WebDAV clients identify when source and destination are on the same filesystem
 func findFilesystemId(ctx context.Context, name string, fi os.FileInfo) (string, error) {
 	// Return a static filesystem ID that's unique to this altmount instance
-	// This helps clients like Sonarr/Radarr understand that MOVE operations 
+	// This helps clients like Sonarr/Radarr understand that MOVE operations
 	// should be used instead of COPY for files within the same mount
 	return "altmount-nzbfs-v1", nil
 }

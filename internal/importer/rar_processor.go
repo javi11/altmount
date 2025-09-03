@@ -89,7 +89,7 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 
 	for _, filename := range rarFileNames {
 		base, part := rh.parseRarFilename(filename)
-		
+
 		// Only consider files that are actually first parts (part 0)
 		if part != 0 {
 			continue
@@ -97,7 +97,7 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 
 		// Determine priority based on file extension pattern
 		priority := rh.getRarFilePriority(filename)
-		
+
 		candidates = append(candidates, candidateFile{
 			filename: filename,
 			baseName: base,
@@ -113,8 +113,8 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 	// Sort by priority (lower number = higher priority), then by filename for consistency
 	best := candidates[0]
 	for _, candidate := range candidates[1:] {
-		if candidate.priority < best.priority || 
-		   (candidate.priority == best.priority && candidate.filename < best.filename) {
+		if candidate.priority < best.priority ||
+			(candidate.priority == best.priority && candidate.filename < best.filename) {
 			best = candidate
 		}
 	}
@@ -132,27 +132,27 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 // Lower number = higher priority
 func (rh *rarProcessor) getRarFilePriority(filename string) int {
 	lowerName := strings.ToLower(filename)
-	
+
 	// Priority 1: .rar files (main archive)
 	if strings.HasSuffix(lowerName, ".rar") && !strings.Contains(lowerName, ".part") {
 		return 1
 	}
-	
+
 	// Priority 2: .part001.rar, .part01.rar patterns
 	if strings.Contains(lowerName, ".part") && strings.HasSuffix(lowerName, ".rar") {
 		return 2
 	}
-	
+
 	// Priority 3: .r00 patterns
 	if strings.Contains(lowerName, ".r0") {
 		return 3
 	}
-	
-	// Priority 4: .001 numeric patterns  
+
+	// Priority 4: .001 numeric patterns
 	if len(lowerName) > 4 && lowerName[len(lowerName)-4:len(lowerName)-3] == "." {
 		return 4
 	}
-	
+
 	// Priority 5: Everything else
 	return 5
 }
@@ -161,7 +161,7 @@ func (rh *rarProcessor) getRarFilePriority(filename string) int {
 // This is a simplified version of the logic from processor.go
 func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int) {
 	lowerFilename := strings.ToLower(filename)
-	
+
 	// Pattern 1: filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
 	partPattern := regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`)
 	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 2 {
@@ -174,13 +174,13 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 			return base, part
 		}
 	}
-	
+
 	// Pattern 2: filename.rar (first part)
 	if strings.HasSuffix(lowerFilename, ".rar") {
 		base = strings.TrimSuffix(filename, filepath.Ext(filename))
 		return base, 0 // First part
 	}
-	
+
 	// Pattern 3: filename.r## or filename.r### (e.g., movie.r00, movie.r01)
 	rPattern := regexp.MustCompile(`^(.+)\.r(\d+)$`)
 	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
@@ -190,7 +190,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 			return base, partNum
 		}
 	}
-	
+
 	// Pattern 4: filename.### (numeric extensions like .001, .002)
 	numericPattern := regexp.MustCompile(`^(.+)\.(\d+)$`)
 	if matches := numericPattern.FindStringSubmatch(filename); len(matches) > 2 {
@@ -203,7 +203,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 			return base, part
 		}
 	}
-	
+
 	// Unknown pattern - return filename as base with high part number (sorts last)
 	return filename, 999999
 }

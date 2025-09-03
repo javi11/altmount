@@ -178,13 +178,13 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		// Configuration-based instance endpoints
 		apiMux.HandleFunc("GET /scraper/instances", s.handleListScraperInstances)
 		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}", s.handleGetScraperInstance)
-		apiMux.HandleFunc("POST /scraper/instances", s.handleCreateScraperInstance) // Deprecated
-		apiMux.HandleFunc("PUT /scraper/instances/{id}", s.handleUpdateScraperInstance) // Deprecated  
+		apiMux.HandleFunc("POST /scraper/instances", s.handleCreateScraperInstance)        // Deprecated
+		apiMux.HandleFunc("PUT /scraper/instances/{id}", s.handleUpdateScraperInstance)    // Deprecated
 		apiMux.HandleFunc("DELETE /scraper/instances/{id}", s.handleDeleteScraperInstance) // Deprecated
 		apiMux.HandleFunc("POST /scraper/instances/test", s.handleTestScraperConnection)
 		apiMux.HandleFunc("POST /scraper/instances/{type}/{name}/scrape", s.handleTriggerScrape)
 		apiMux.HandleFunc("GET /scraper/stats", s.handleGetScraperStats)
-		apiMux.HandleFunc("GET /scraper/movies/search", s.handleSearchMovies) // Deprecated
+		apiMux.HandleFunc("GET /scraper/movies/search", s.handleSearchMovies)     // Deprecated
 		apiMux.HandleFunc("GET /scraper/episodes/search", s.handleSearchEpisodes) // Deprecated
 		// Status and control endpoints
 		apiMux.HandleFunc("GET /scraper/instances/{type}/{name}/status", s.handleGetScrapeStatus)

@@ -115,15 +115,15 @@ func stripMountPath(filePath, mountPath string) string {
 	if mountPath == "" {
 		return filePath
 	}
-	
+
 	// Remove the mount path prefix
 	stripped := strings.TrimPrefix(filePath, mountPath)
-	
+
 	// Ensure the result starts with /
 	if !strings.HasPrefix(stripped, "/") {
 		stripped = "/" + stripped
 	}
-	
+
 	return stripped
 }
 
@@ -429,7 +429,7 @@ func (s *Service) scrapeRadarrConfig(instance *ConfigInstance, progress *ScrapeP
 			// Strip mount path from file path
 			originalPath := movie.MovieFile.Path
 			strippedPath := stripMountPath(originalPath, mountPath)
-			
+
 			// Log if path doesn't match mount path prefix (potential issue)
 			if mountPath != "" && !strings.HasPrefix(originalPath, mountPath) {
 				s.logger.Warn("Movie file path does not start with mount path",
@@ -553,7 +553,7 @@ func (s *Service) scrapeSonarrConfig(instance *ConfigInstance, progress *ScrapeP
 			// Strip mount path from file path
 			originalPath := episodeFile.Path
 			strippedPath := stripMountPath(originalPath, mountPath)
-			
+
 			// Log if path doesn't match mount path prefix (potential issue)
 			if mountPath != "" && !strings.HasPrefix(originalPath, mountPath) {
 				s.logger.Warn("Episode file path does not start with mount path",

@@ -64,7 +64,7 @@ func (s *Server) handleDirectLogin(w http.ResponseWriter, r *http.Request) {
 	// Create JWT token
 	tokenService := s.authService.TokenService()
 	claims := auth.CreateClaimsFromUser(user)
-	
+
 	_, err = tokenService.Set(w, claims)
 	if err != nil {
 		WriteInternalError(w, "Failed to create session", err.Error())
@@ -140,7 +140,7 @@ func (s *Server) handleCheckRegistration(w http.ResponseWriter, r *http.Request)
 
 	response := map[string]interface{}{
 		"registration_enabled": userCount == 0,
-		"user_count":          userCount,
+		"user_count":           userCount,
 	}
 	WriteSuccess(w, response, nil)
 }

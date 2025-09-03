@@ -59,10 +59,10 @@ func (u *AuthUpdater) UpdateAuth(username, password string) error {
 	if u.credentials == nil {
 		return fmt.Errorf("auth credentials not initialized")
 	}
-	
+
 	u.logger.Info("Updating WebDAV authentication credentials", "username", username)
 	u.credentials.UpdateCredentials(username, password)
 	u.logger.Info("WebDAV authentication credentials updated successfully")
-	
+
 	return nil
 }

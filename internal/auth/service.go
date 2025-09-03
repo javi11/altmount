@@ -26,11 +26,11 @@ type Service struct {
 // Config represents authentication service configuration
 type Config struct {
 	// JWT configuration
-	JWTSecret       string        // JWT signing secret
-	TokenDuration   time.Duration // JWT token duration
-	CookieDomain    string        // Cookie domain
-	CookieSecure    bool          // Secure cookie flag
-	CookieSameSite  http.SameSite // SameSite cookie attribute
+	JWTSecret      string        // JWT signing secret
+	TokenDuration  time.Duration // JWT token duration
+	CookieDomain   string        // Cookie domain
+	CookieSecure   bool          // Secure cookie flag
+	CookieSameSite http.SameSite // SameSite cookie attribute
 
 	// Direct authentication
 	DirectAuthEnabled bool   // Enable direct username/password authentication
@@ -294,7 +294,7 @@ func (s *Service) RegisterUser(username, email, password string) (*database.User
 		PasswordHash: &passwordHash,
 		IsAdmin:      true, // First user is always admin
 	}
-	
+
 	// Set name to username if no separate name provided
 	user.Name = &username
 
@@ -353,7 +353,6 @@ func (s *Service) HashPassword(password string) (string, error) {
 	}
 	return string(hash), nil
 }
-
 
 // CreateClaimsFromUser creates JWT claims from a database user
 func CreateClaimsFromUser(user *database.User) token.Claims {

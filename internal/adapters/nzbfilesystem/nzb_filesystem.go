@@ -62,7 +62,7 @@ func (nfs *NzbFilesystem) OpenFile(name string, flag int, perm os.FileMode) (afe
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// If this is a COPY operation, we need to handle it carefully
 	// Block COPY operations entirely - they should use MOVE instead
 	if pr.IsCopy() {

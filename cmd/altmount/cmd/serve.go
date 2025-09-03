@@ -168,10 +168,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create repositories for API access
 	dbConn := nsys.Database().Connection()
 	mainRepo := database.NewRepository(dbConn)
-	
+
 	// Create media repository for scraper and health correlation
 	mediaRepo := database.NewMediaRepository(dbConn, logger)
-	
+
 	// Create health repository with media repository for repair triggering
 	healthRepo := database.NewHealthRepository(dbConn, mediaRepo)
 	userRepo = database.NewUserRepository(dbConn)

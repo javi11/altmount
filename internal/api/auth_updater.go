@@ -19,11 +19,11 @@ func NewAuthUpdater(server *Server) *AuthUpdater {
 func (u *AuthUpdater) UpdateAuth(username, password string) error {
 	u.mutex.Lock()
 	defer u.mutex.Unlock()
-	
+
 	// Basic authentication has been removed - OAuth flow handles authentication
 	// This method is kept for interface compatibility but does nothing
 	_ = username
 	_ = password
-	
+
 	return nil
 }
