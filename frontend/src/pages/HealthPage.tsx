@@ -501,7 +501,38 @@ export function HealthPage() {
 												</div>
 											</td>
 											<td>
-												<HealthBadge status={item.status} />
+												<div className="flex items-center gap-2">
+													<HealthBadge status={item.status} />
+													{/* Show repair button for corrupted files */}
+													{item.status === "corrupted" && (
+														<div className="tooltip tooltip-top" data-tip="Trigger repair to redownload file">
+															{item.last_error && 
+															 (item.last_error.includes("Cannot repair: File not found in media library") ||
+															  item.last_error.includes("Cannot repair: Media library not configured") ||
+															  item.last_error.includes("Failed to check media library")) ? (
+																<button
+																	type="button"
+																	disabled={true}
+																	className="btn btn-xs btn-outline btn-disabled cursor-not-allowed"
+																	title={item.last_error}
+																>
+																	<Wrench className="h-3 w-3" />
+																	Repair N/A
+																</button>
+															) : (
+																<button
+																	type="button"
+																	onClick={() => handleRepair(item.file_path)}
+																	disabled={repairHealthItem.isPending}
+																	className="btn btn-xs btn-info"
+																>
+																	<Wrench className="h-3 w-3" />
+																	Repair
+																</button>
+															)}
+														</div>
+													)}
+												</div>
 												{/* Show last_error for repair failures and general errors */}
 												{item.last_error && (
 													<div className="mt-1">
