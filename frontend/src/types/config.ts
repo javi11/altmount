@@ -7,6 +7,7 @@ export interface ConfigResponse {
 	database: DatabaseConfig;
 	metadata: MetadataConfig;
 	streaming: StreamingConfig;
+	health: HealthConfig;
 	rclone: RCloneConfig;
 	import: ImportConfig;
 	log: LogConfig;
@@ -43,6 +44,17 @@ export interface StreamingConfig {
 	max_range_size: number;
 	streaming_chunk_size: number;
 	max_download_workers: number;
+}
+
+// Health configuration
+export interface HealthConfig {
+	enabled: boolean;
+	auto_repair_enabled: boolean;
+	check_interval?: number; // Duration in nanoseconds (optional)
+	max_concurrent_jobs?: number;
+	max_retries?: number;
+	max_segment_connections?: number;
+	check_all_segments?: boolean;
 }
 
 // RClone configuration (sanitized)
@@ -107,6 +119,7 @@ export interface ConfigUpdateRequest {
 	database?: DatabaseUpdateRequest;
 	metadata?: MetadataUpdateRequest;
 	streaming?: StreamingUpdateRequest;
+	health?: HealthUpdateRequest;
 	rclone?: RCloneUpdateRequest;
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
@@ -144,6 +157,17 @@ export interface StreamingUpdateRequest {
 	max_range_size?: number;
 	streaming_chunk_size?: number;
 	max_download_workers?: number;
+}
+
+// Health update request
+export interface HealthUpdateRequest {
+	enabled?: boolean;
+	auto_repair_enabled?: boolean;
+	check_interval?: number; // Duration in nanoseconds (optional)
+	max_concurrent_jobs?: number;
+	max_retries?: number;
+	max_segment_connections?: number;
+	check_all_segments?: boolean;
 }
 
 // RClone update request
@@ -215,6 +239,7 @@ export type ConfigSection =
 	| "webdav"
 	| "metadata"
 	| "streaming"
+	| "health"
 	| "import"
 	| "providers"
 	| "rclone"
@@ -432,6 +457,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "Streaming & Downloads",
 		description: "File streaming, chunking and download worker configuration",
 		icon: "Download",
+		canEdit: true,
+	},
+	health: {
+		title: "Health Monitoring",
+		description: "File health monitoring and automatic repair settings",
+		icon: "Shield",
 		canEdit: true,
 	},
 	import: {

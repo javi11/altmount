@@ -43,6 +43,7 @@ import:
 # Health monitoring configuration
 health:
   enabled: true                   # Enable health monitoring service
+  auto_repair_enabled: false      # Enable automatic repair of corrupted files via ARRs (default: false)
 
 # SABnzbd-compatible API configuration
 sabnzbd:
@@ -167,6 +168,7 @@ providers:
 #    - Provides system health checks and monitoring
 #    - Monitors database, metadata, providers, and VFS status
 #    - Accessible via REST API endpoints
+#    - Auto-repair: When enabled, automatically triggers ARRs to re-download corrupted files
 #
 # 9. SABnzbd Compatibility:
 #    - Provides SABnzbd-compatible API endpoints

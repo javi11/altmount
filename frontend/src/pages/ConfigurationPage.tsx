@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
+import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
@@ -35,6 +36,7 @@ import {
 } from "../hooks/useConfig";
 import type {
 	ConfigSection,
+	HealthConfig,
 	ImportConfig,
 	MetadataConfig,
 	RCloneVFSFormData,
@@ -136,6 +138,7 @@ export function ConfigurationPage() {
 		data:
 			| WebDAVConfig
 			| StreamingConfig
+			| HealthConfig
 			| ImportConfig
 			| MetadataConfig
 			| RCloneVFSFormData
@@ -211,6 +214,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "arrs",
 					config: { arrs: data as ArrsConfig },
+				});
+			} else if (section === "health") {
+				await updateConfigSection.mutateAsync({
+					section: "health",
+					config: { health: data as HealthConfig },
 				});
 			}
 		} catch (error) {
@@ -470,6 +478,14 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "health" && (
+									<HealthConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{/* Placeholder for other sections */}
 								{![
 									"webdav",
@@ -481,6 +497,7 @@ export function ConfigurationPage() {
 									"rclone",
 									"sabnzbd",
 									"arrs",
+									"health",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

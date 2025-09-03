@@ -714,6 +714,13 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file
 // It uses media files to determine the ARR instance and notifies the appropriate service
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string) error {
+	// Check if auto-repair is enabled in configuration
+	cfg := hw.configGetter()
+	if cfg.Health.AutoRepairEnabled == nil || !*cfg.Health.AutoRepairEnabled {
+		hw.logger.Info("Auto-repair is disabled, marking file as corrupted for manual investigation", "file_path", filePath)
+		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
+	}
+
 	// Get media file information to determine which ARR instance to notify
 	mediaFiles, err := hw.mediaRepo.GetMediaFilesByPath(filePath)
 	if err != nil {
