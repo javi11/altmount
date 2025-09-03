@@ -46,13 +46,13 @@ type SyncProgress struct {
 
 // SyncResult contains the final result of a sync operation
 type SyncResult struct {
-	InstanceType   string       `json:"instance_type"`
-	InstanceName   string       `json:"instance_name"`
-	CompletedAt    time.Time    `json:"completed_at"`
-	Status         SyncStatus   `json:"status"`
-	ProcessedCount int          `json:"processed_count"`
-	ErrorCount     int          `json:"error_count"`
-	ErrorMessage   *string      `json:"error_message,omitempty"`
+	InstanceType   string     `json:"instance_type"`
+	InstanceName   string     `json:"instance_name"`
+	CompletedAt    time.Time  `json:"completed_at"`
+	Status         SyncStatus `json:"status"`
+	ProcessedCount int        `json:"processed_count"`
+	ErrorCount     int        `json:"error_count"`
+	ErrorMessage   *string    `json:"error_message,omitempty"`
 }
 
 // ArrsInstanceState holds runtime state for an arrs instance
@@ -64,12 +64,12 @@ type ArrsInstanceState struct {
 
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
-	Name                string `json:"name"`
-	Type                string `json:"type"` // "radarr" or "sonarr"
-	URL                 string `json:"url"`
-	APIKey              string `json:"api_key"`
-	Enabled             bool   `json:"enabled"`
-	SyncIntervalHours   int    `json:"sync_interval_hours"`
+	Name              string `json:"name"`
+	Type              string `json:"type"` // "radarr" or "sonarr"
+	URL               string `json:"url"`
+	APIKey            string `json:"api_key"`
+	Enabled           bool   `json:"enabled"`
+	SyncIntervalHours int    `json:"sync_interval_hours"`
 }
 
 // Service manages syncing with Radarr and Sonarr instances using configuration-first approach
@@ -141,12 +141,12 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 			}
 
 			instance := &ConfigInstance{
-				Name:                radarrConfig.Name,
-				Type:                "radarr",
-				URL:                 radarrConfig.URL,
-				APIKey:              radarrConfig.APIKey,
-				Enabled:             radarrConfig.Enabled != nil && *radarrConfig.Enabled,
-				SyncIntervalHours:   syncInterval,
+				Name:              radarrConfig.Name,
+				Type:              "radarr",
+				URL:               radarrConfig.URL,
+				APIKey:            radarrConfig.APIKey,
+				Enabled:           radarrConfig.Enabled != nil && *radarrConfig.Enabled,
+				SyncIntervalHours: syncInterval,
 			}
 			instances = append(instances, instance)
 		}
@@ -161,12 +161,12 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 			}
 
 			instance := &ConfigInstance{
-				Name:                sonarrConfig.Name,
-				Type:                "sonarr",
-				URL:                 sonarrConfig.URL,
-				APIKey:              sonarrConfig.APIKey,
-				Enabled:             sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
-				SyncIntervalHours:   syncInterval,
+				Name:              sonarrConfig.Name,
+				Type:              "sonarr",
+				URL:               sonarrConfig.URL,
+				APIKey:            sonarrConfig.APIKey,
+				Enabled:           sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
+				SyncIntervalHours: syncInterval,
 			}
 			instances = append(instances, instance)
 		}
@@ -258,14 +258,15 @@ func (s *Service) Stop() error {
 func (s *Service) serviceLoop() {
 	defer s.wg.Done()
 
-	// For now, we only support manual sync
-	// Scheduled sync can be added later if needed
+	// Check for scheduled syncs every 5 minutes
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-ticker.C:
 			// Check if we should do any scheduled work
 			s.performSync()
 		}
@@ -274,10 +275,44 @@ func (s *Service) serviceLoop() {
 
 // performSync checks for instances that need syncing and syncs them
 func (s *Service) performSync() {
+	now := time.Now()
+
 	for _, instance := range s.getConfigInstances() {
-		if instance.Enabled {
+		if !instance.Enabled {
+			continue
+		}
+
+		// Check if enough time has passed since last sync
+		state := s.getOrCreateInstanceState(instance.Type, instance.Name)
+
+		s.stateMutex.RLock()
+		shouldSync := false
+		if state.LastSyncAt == nil {
+			// Never synced before, sync now
+			shouldSync = true
+		} else {
+			// Check if sync interval has elapsed
+			syncInterval := time.Duration(instance.SyncIntervalHours) * time.Hour
+			timeSinceLastSync := now.Sub(*state.LastSyncAt)
+			shouldSync = timeSinceLastSync >= syncInterval
+		}
+
+		// Also check if there's already an active sync
+		hasActiveSync := state.ActiveStatus != nil &&
+			(state.ActiveStatus.Status == SyncStatusRunning || state.ActiveStatus.Status == SyncStatusCancelling)
+		s.stateMutex.RUnlock()
+
+		if shouldSync && !hasActiveSync {
+			s.logger.Debug("Triggering scheduled sync",
+				"instance", instance.Name,
+				"type", instance.Type,
+				"sync_interval_hours", instance.SyncIntervalHours)
+
 			if err := s.TriggerSync(instance.Type, instance.Name); err != nil {
-				s.logger.Error("Failed to trigger sync", "instance", instance.Name, "type", instance.Type, "error", err)
+				s.logger.Error("Failed to trigger scheduled sync",
+					"instance", instance.Name,
+					"type", instance.Type,
+					"error", err)
 			}
 		}
 	}
@@ -570,7 +605,7 @@ func (s *Service) syncSonarrConfig(instance *ConfigInstance, progress *SyncProgr
 			mediaFile := database.MediaFileInput{
 				InstanceName: instance.Name,
 				InstanceType: "sonarr",
-				ExternalID:   int64(episodeFile.ID),
+				ExternalID:   episodeFile.ID,
 				FilePath:     strippedPath,
 				FileSize:     fileSize,
 			}
@@ -674,20 +709,31 @@ func (s *Service) triggerRadarrRescan(ctx context.Context, client *radarr.Radarr
 
 	movieID := mediaFile.ExternalID
 
-	s.logger.Info("Triggering Radarr rescan",
+	s.logger.Info("Triggering Radarr rescan/re-download",
 		"instance", mediaFile.InstanceName,
 		"movie_id", movieID,
 		"file_path", mediaFile.FilePath)
 
-	// Create a refresh movie command
-	cmd := &radarr.CommandRequest{
-		Name:     "RefreshMovie",
-		MovieIDs: []int64{movieID},
+	movie, err := client.GetMovieByIDContext(ctx, movieID)
+	if err != nil {
+		return fmt.Errorf("failed to get movie details: %w", err)
 	}
 
-	// Send the command to trigger a refresh/rescan of the movie
-	// This will make Radarr re-check the file and potentially re-download if corrupted
-	response, err := client.SendCommandContext(ctx, cmd)
+	// Delete the existing file
+	err = client.DeleteMovieFilesContext(ctx, movie.MovieFile.ID)
+	if err != nil {
+		s.logger.Warn("Failed to delete movie file, continuing with rescan",
+			"instance", mediaFile.InstanceName,
+			"movie_id", movieID,
+			"file_id", movie.MovieFile.ID,
+			"error", err)
+	}
+
+	// Fallback to rescan if file deletion didn't work
+	response, err := client.SendCommandContext(ctx, &radarr.CommandRequest{
+		Name:     "RescanMovie",
+		MovieIDs: []int64{movieID},
+	})
 	if err != nil {
 		return fmt.Errorf("failed to trigger Radarr rescan for movie ID %d: %w", movieID, err)
 	}
@@ -709,25 +755,41 @@ func (s *Service) triggerSonarrRescan(ctx context.Context, client *sonarr.Sonarr
 
 	episodeID := mediaFile.ExternalID
 
-	s.logger.Info("Triggering Sonarr rescan",
+	s.logger.Info("Triggering Sonarr rescan/re-download",
 		"instance", mediaFile.InstanceName,
 		"episode_id", episodeID,
-		"file_path", mediaFile.FilePath)
+	)
 
-	// Create a refresh series command
-	cmd := &sonarr.CommandRequest{
-		Name:       "RefreshSeries",
-		EpisodeIDs: []int64{episodeID},
-	}
-
-	// Send the command to trigger a refresh/rescan of the series
-	// This will make Sonarr re-check the file and potentially re-download if corrupted
-	response, err := client.SendCommandContext(ctx, cmd)
+	// Get the episodes that were using this file
+	episode, err := client.GetEpisodeByIDContext(ctx, episodeID)
 	if err != nil {
-		return fmt.Errorf("failed to trigger Sonarr rescan for episode ID %d: %w", episodeID, err)
+		s.logger.Warn("Failed to get episodes for deleted file, triggering series search",
+			"instance", mediaFile.InstanceName,
+			"episode_id", episodeID)
+
+		return err
 	}
 
-	s.logger.Info("Successfully triggered Sonarr rescan",
+	err = client.DeleteEpisodeFileContext(ctx,
+		episode.EpisodeFileID)
+	if err != nil {
+		s.logger.Warn("Failed to delete episode file",
+			"instance", mediaFile.InstanceName,
+			"episode_file_id", episode.EpisodeFileID,
+			"error", err)
+	}
+
+	searchCmd := &sonarr.CommandRequest{
+		Name:      "EpisodeSearch",
+		EpisodeID: episodeID,
+	}
+
+	response, err := client.SendCommandContext(ctx, searchCmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger episode search: %w", err)
+	}
+
+	s.logger.Info("Successfully triggered episode search for re-download",
 		"instance", mediaFile.InstanceName,
 		"episode_id", episodeID,
 		"command_id", response.ID)
