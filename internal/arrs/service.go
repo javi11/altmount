@@ -631,6 +631,110 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 	return client, nil
 }
 
+// TriggerFileRescan triggers a rescan for a specific file through the appropriate ARR instance
+func (s *Service) TriggerFileRescan(ctx context.Context, instanceType, instanceName string, mediaFile *database.MediaFile) error {
+	// Find the instance configuration
+	instanceConfig, err := s.findConfigInstance(instanceType, instanceName)
+	if err != nil {
+		return fmt.Errorf("failed to find instance config: %w", err)
+	}
+
+	// Check if instance is enabled
+	if !instanceConfig.Enabled {
+		return fmt.Errorf("instance %s/%s is disabled", instanceType, instanceName)
+	}
+
+	// Trigger rescan based on instance type
+	switch instanceType {
+	case "radarr":
+		client, err := s.getOrCreateRadarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+		if err != nil {
+			return fmt.Errorf("failed to create Radarr client: %w", err)
+		}
+		return s.triggerRadarrRescan(ctx, client, mediaFile)
+
+	case "sonarr":
+		client, err := s.getOrCreateSonarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
+		if err != nil {
+			return fmt.Errorf("failed to create Sonarr client: %w", err)
+		}
+		return s.triggerSonarrRescan(ctx, client, mediaFile)
+
+	default:
+		return fmt.Errorf("unsupported instance type: %s", instanceType)
+	}
+}
+
+// triggerRadarrRescan triggers a rescan in Radarr for the given media file
+func (s *Service) triggerRadarrRescan(ctx context.Context, client *radarr.Radarr, mediaFile *database.MediaFile) error {
+	// Check if external ID is available
+	if mediaFile.ExternalID == 0 {
+		return fmt.Errorf("no external ID available for media file")
+	}
+
+	movieID := mediaFile.ExternalID
+
+	s.logger.Info("Triggering Radarr rescan",
+		"instance", mediaFile.InstanceName,
+		"movie_id", movieID,
+		"file_path", mediaFile.FilePath)
+
+	// Create a refresh movie command
+	cmd := &radarr.CommandRequest{
+		Name:     "RefreshMovie",
+		MovieIDs: []int64{movieID},
+	}
+
+	// Send the command to trigger a refresh/rescan of the movie
+	// This will make Radarr re-check the file and potentially re-download if corrupted
+	response, err := client.SendCommandContext(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Radarr rescan for movie ID %d: %w", movieID, err)
+	}
+
+	s.logger.Info("Successfully triggered Radarr rescan",
+		"instance", mediaFile.InstanceName,
+		"movie_id", movieID,
+		"command_id", response.ID)
+
+	return nil
+}
+
+// triggerSonarrRescan triggers a rescan in Sonarr for the given media file
+func (s *Service) triggerSonarrRescan(ctx context.Context, client *sonarr.Sonarr, mediaFile *database.MediaFile) error {
+	// Check if external ID is available
+	if mediaFile.ExternalID == 0 {
+		return fmt.Errorf("no external ID available for media file")
+	}
+
+	episodeID := mediaFile.ExternalID
+
+	s.logger.Info("Triggering Sonarr rescan",
+		"instance", mediaFile.InstanceName,
+		"episode_id", episodeID,
+		"file_path", mediaFile.FilePath)
+
+	// Create a refresh series command
+	cmd := &sonarr.CommandRequest{
+		Name:       "RefreshSeries",
+		EpisodeIDs: []int64{episodeID},
+	}
+
+	// Send the command to trigger a refresh/rescan of the series
+	// This will make Sonarr re-check the file and potentially re-download if corrupted
+	response, err := client.SendCommandContext(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Sonarr rescan for episode ID %d: %w", episodeID, err)
+	}
+
+	s.logger.Info("Successfully triggered Sonarr rescan",
+		"instance", mediaFile.InstanceName,
+		"episode_id", episodeID,
+		"command_id", response.ID)
+
+	return nil
+}
+
 // GetSyncStatus returns the current sync status for an instance by type and name
 func (s *Service) GetSyncStatus(instanceType, instanceName string) (*SyncProgress, error) {
 	// Verify instance exists in configuration

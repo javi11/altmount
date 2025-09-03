@@ -287,6 +287,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			healthRepo,
 			mediaRepo,
 			metadataService,
+			arrsService,
 			configManager.GetConfigGetter(),
 			logger,
 		)
