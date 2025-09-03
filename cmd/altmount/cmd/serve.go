@@ -207,6 +207,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		apiConfig,
 		mainRepo,
 		healthRepo,
+		mediaRepo,
 		authService,
 		userRepo,
 		configManager,

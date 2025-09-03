@@ -33,6 +33,7 @@ type Server struct {
 	config          *Config
 	queueRepo       *database.Repository
 	healthRepo      *database.HealthRepository
+	mediaRepo       *database.MediaRepository
 	authService     *auth.Service
 	userRepo        *database.UserRepository
 	configManager   ConfigManager
@@ -51,6 +52,7 @@ func NewServer(
 	config *Config,
 	queueRepo *database.Repository,
 	healthRepo *database.HealthRepository,
+	mediaRepo *database.MediaRepository,
 	authService *auth.Service,
 	userRepo *database.UserRepository,
 	configManager ConfigManager,
@@ -67,6 +69,7 @@ func NewServer(
 		config:          config,
 		queueRepo:       queueRepo,
 		healthRepo:      healthRepo,
+		mediaRepo:       mediaRepo,
 		authService:     authService,
 		userRepo:        userRepo,
 		configManager:   configManager,

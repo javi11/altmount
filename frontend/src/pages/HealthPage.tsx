@@ -148,7 +148,7 @@ export function HealthPage() {
 	const handleRepair = async (filePath: string) => {
 		const confirmed = await confirmAction(
 			"Trigger Repair",
-			"This will attempt to redownload the corrupted file from your media library. Are you sure you want to proceed?",
+			"This will attempt to ask the ARR to redownload the corrupted file from your media library. THIS FILE WILL BE DELETED IF THE REPAIR IS SUCCESSFUL. Are you sure you want to proceed?",
 			{
 				type: "info",
 				confirmText: "Trigger Repair",
@@ -157,9 +157,9 @@ export function HealthPage() {
 		);
 		if (confirmed) {
 			try {
-				await repairHealthItem.mutateAsync({ 
-					id: filePath, 
-					resetRepairRetryCount: false 
+				await repairHealthItem.mutateAsync({
+					id: filePath,
+					resetRepairRetryCount: false,
 				});
 				showToast({
 					title: "Repair Triggered",
@@ -167,24 +167,24 @@ export function HealthPage() {
 					type: "success",
 				});
 			} catch (err: unknown) {
-				const error = err as { 
-					message?: string; 
-					response?: { 
-						data?: { 
-							error?: { 
+				const error = err as {
+					message?: string;
+					response?: {
+						data?: {
+							error?: {
 								message?: string;
 								details?: string;
-							} 
-						} 
-					} 
+							};
+						};
+					};
 				};
 				console.error("Failed to trigger repair:", err);
-				
+
 				// Get error message from response or direct error
 				const apiErrorMessage = error.response?.data?.error?.message;
 				const apiErrorDetails = error.response?.data?.error?.details;
 				const errorMessage = apiErrorMessage || error.message || "Unknown error";
-				
+
 				// Handle specific error cases
 				if (errorMessage.includes("Repair not available")) {
 					showToast({
@@ -248,10 +248,10 @@ export function HealthPage() {
 			setNextRefreshTime(null);
 			return;
 		}
-		
+
 		// Set initial next refresh time
 		setNextRefreshTime(new Date(Date.now() + refreshInterval));
-		
+
 		// Reset the timer every time React Query refetches
 		const interval = setInterval(() => {
 			setNextRefreshTime(new Date(Date.now() + refreshInterval));
@@ -266,11 +266,11 @@ export function HealthPage() {
 			setCountdown(0);
 			return;
 		}
-		
+
 		const updateCountdown = () => {
 			const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
 			setCountdown(remaining);
-			
+
 			// If countdown reaches 0, reset to the full interval (handles any sync issues)
 			if (remaining === 0) {
 				setNextRefreshTime(new Date(Date.now() + refreshInterval));
@@ -503,40 +503,14 @@ export function HealthPage() {
 											<td>
 												<div className="flex items-center gap-2">
 													<HealthBadge status={item.status} />
-													{/* Show repair button for corrupted files */}
-													{item.status === "corrupted" && (
-														<div className="tooltip tooltip-top" data-tip="Trigger repair to redownload file">
-															{item.last_error && 
-															 (item.last_error.includes("Cannot repair: File not found in media library") ||
-															  item.last_error.includes("Cannot repair: Media library not configured") ||
-															  item.last_error.includes("Failed to check media library")) ? (
-																<button
-																	type="button"
-																	disabled={true}
-																	className="btn btn-xs btn-outline btn-disabled cursor-not-allowed"
-																	title={item.last_error}
-																>
-																	<Wrench className="h-3 w-3" />
-																	Repair N/A
-																</button>
-															) : (
-																<button
-																	type="button"
-																	onClick={() => handleRepair(item.file_path)}
-																	disabled={repairHealthItem.isPending}
-																	className="btn btn-xs btn-info"
-																>
-																	<Wrench className="h-3 w-3" />
-																	Repair
-																</button>
-															)}
-														</div>
-													)}
 												</div>
 												{/* Show last_error for repair failures and general errors */}
 												{item.last_error && (
 													<div className="mt-1">
-														<div className="tooltip tooltip-bottom text-left" data-tip={item.last_error}>
+														<div
+															className="tooltip tooltip-bottom text-left"
+															data-tip={item.last_error}
+														>
 															<div className="cursor-help text-error text-xs">
 																{truncateText(item.last_error, 50)}
 															</div>
@@ -546,7 +520,10 @@ export function HealthPage() {
 												{/* Show error_details for additional technical details */}
 												{item.error_details && item.error_details !== item.last_error && (
 													<div className="mt-1">
-														<div className="tooltip tooltip-bottom text-left" data-tip={item.error_details}>
+														<div
+															className="tooltip tooltip-bottom text-left"
+															data-tip={item.error_details}
+														>
 															<div className="cursor-help text-warning text-xs">
 																Technical: {truncateText(item.error_details, 40)}
 															</div>
@@ -607,36 +584,17 @@ export function HealthPage() {
 																</button>
 															</li>
 														)}
-														{item.status === "corrupted" && (
-															<li>
-																{/* Check if repair is available based on error message */}
-																{item.last_error && 
-																 (item.last_error.includes("Cannot repair: File not found in media library") ||
-																  item.last_error.includes("Cannot repair: Media library not configured") ||
-																  item.last_error.includes("Failed to check media library")) ? (
-																	<div className="tooltip tooltip-left" data-tip={item.last_error}>
-																		<button
-																			type="button"
-																			disabled={true}
-																			className="w-full cursor-not-allowed text-left text-base-content/50"
-																		>
-																			<Wrench className="h-4 w-4" />
-																			Repair Not Available
-																		</button>
-																	</div>
-																) : (
-																	<button
-																		type="button"
-																		onClick={() => handleRepair(item.file_path)}
-																		disabled={repairHealthItem.isPending}
-																		className="text-info"
-																	>
-																		<Wrench className="h-4 w-4" />
-																		Trigger Repair
-																	</button>
-																)}
-															</li>
-														)}
+														<li>
+															<button
+																type="button"
+																onClick={() => handleRepair(item.file_path)}
+																disabled={repairHealthItem.isPending}
+																className="text-info"
+															>
+																<Wrench className="h-4 w-4" />
+																Trigger Repair
+															</button>
+														</li>
 														<li>
 															<button
 																type="button"

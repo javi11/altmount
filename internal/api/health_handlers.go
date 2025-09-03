@@ -252,23 +252,40 @@ func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only allow repair of corrupted files
-	if item.Status != database.HealthStatusCorrupted {
-		WriteConflict(w, "Can only repair corrupted files", "Current status: "+string(item.Status))
+	// Only allow repair of corrupted or partial files
+	if item.Status != database.HealthStatusCorrupted && item.Status != database.HealthStatusPartial {
+		WriteConflict(w, "Can only repair corrupted or partial files", "Current status: "+string(item.Status))
 		return
 	}
 
-	// Reset repair retry count if requested
-	if req.ResetRepairRetryCount {
-		// This would require implementing a method in health repository to reset repair retry count
-		// For now, we'll proceed with the repair trigger
+	// Get media file information to determine which ARR instance to use for repair
+	mediaFiles, err := s.mediaRepo.GetMediaFilesByPath(filePath)
+	if err != nil {
+		WriteInternalError(w, "Failed to get media file information", err.Error())
+		return
 	}
 
-	// Trigger repair by setting status to repair_triggered
-	// This will make the health worker pick it up in the next cycle for ARR notification
+	if len(mediaFiles) == 0 {
+		WriteBadRequest(w, "Cannot repair file", "File is not tracked in any ARR instance")
+		return
+	}
+
+	// Try to repair using the first available media file
+	// (in practice, a file path should only be associated with one ARR instance)
+	mediaFile := mediaFiles[0]
+	
+	// Trigger repair through ARR service
+	ctx := r.Context()
+	err = s.arrsService.TriggerFileRescan(ctx, mediaFile.InstanceType, mediaFile.InstanceName, &mediaFile)
+	if err != nil {
+		WriteInternalError(w, "Failed to trigger repair in ARR instance", err.Error())
+		return
+	}
+
+	// Set repair triggered status after successful ARR notification
 	err = s.healthRepo.SetRepairTriggered(filePath, nil)
 	if err != nil {
-		WriteBadRequest(w, "Failed to trigger repair", "Failed to update file status for repair: "+err.Error())
+		WriteInternalError(w, "Failed to update repair status", "ARR repair triggered but failed to update database: "+err.Error())
 		return
 	}
 
