@@ -15,84 +15,84 @@ import (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav"`
-	API       APIConfig        `yaml:"api" mapstructure:"api"`
-	Database  DatabaseConfig   `yaml:"database" mapstructure:"database"`
-	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata"`
-	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming"`
-	Health    HealthConfig     `yaml:"health" mapstructure:"health"`
-	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone"`
-	Import    ImportConfig     `yaml:"import" mapstructure:"import"`
-	Log       LogConfig        `yaml:"log" mapstructure:"log"`
-	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd"`
-	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs"`
-	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers"`
-	LogLevel  string           `yaml:"log_level" mapstructure:"log_level"`
+	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API       APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
+	Database  DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health    HealthConfig     `yaml:"health" mapstructure:"health" json:"health,omitempty"`
+	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import    ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
+	Log       LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
+	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
+	LogLevel  string           `yaml:"log_level" mapstructure:"log_level" json:"log_level"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
 type WebDAVConfig struct {
-	Port     int    `yaml:"port" mapstructure:"port"`
-	User     string `yaml:"user" mapstructure:"user"`
-	Password string `yaml:"password" mapstructure:"password"`
+	Port     int    `yaml:"port" mapstructure:"port" json:"port"`
+	User     string `yaml:"user" mapstructure:"user" json:"user"`
+	Password string `yaml:"password" mapstructure:"password" json:"password"`
 }
 
 // APIConfig represents REST API configuration
 type APIConfig struct {
-	Prefix string `yaml:"prefix" mapstructure:"prefix"`
+	Prefix string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
 }
 
 // DatabaseConfig represents database configuration
 type DatabaseConfig struct {
-	Path string `yaml:"path" mapstructure:"path"`
+	Path string `yaml:"path" mapstructure:"path" json:"path"`
 }
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath string `yaml:"root_path" mapstructure:"root_path"`
+	RootPath string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
 }
 
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxRangeSize       int64 `yaml:"max_range_size" mapstructure:"max_range_size"`
-	StreamingChunkSize int64 `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size"`
-	MaxDownloadWorkers int   `yaml:"max_download_workers" mapstructure:"max_download_workers"`
+	MaxRangeSize       int64 `yaml:"max_range_size" mapstructure:"max_range_size" json:"max_range_size"`
+	StreamingChunkSize int64 `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size" json:"streaming_chunk_size"`
+	MaxDownloadWorkers int   `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
 }
 
 // RCloneConfig represents rclone configuration
 type RCloneConfig struct {
-	Password   string `yaml:"password" mapstructure:"password"`
-	Salt       string `yaml:"salt" mapstructure:"salt"`
-	VFSEnabled *bool  `yaml:"vfs_enabled" mapstructure:"vfs_enabled"`
-	VFSUrl     string `yaml:"vfs_url" mapstructure:"vfs_url"`
-	VFSUser    string `yaml:"vfs_user" mapstructure:"vfs_user"`
-	VFSPass    string `yaml:"vfs_pass" mapstructure:"vfs_pass"`
+	Password   string `yaml:"password" mapstructure:"password" json:"-"`
+	Salt       string `yaml:"salt" mapstructure:"salt" json:"-"`
+	VFSEnabled *bool  `yaml:"vfs_enabled" mapstructure:"vfs_enabled" json:"vfs_enabled"`
+	VFSUrl     string `yaml:"vfs_url" mapstructure:"vfs_url" json:"vfs_url"`
+	VFSUser    string `yaml:"vfs_user" mapstructure:"vfs_user" json:"vfs_user"`
+	VFSPass    string `yaml:"vfs_pass" mapstructure:"vfs_pass" json:"-"`
 }
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers     int           `yaml:"max_processor_workers" mapstructure:"max_processor_workers"`
-	QueueProcessingInterval time.Duration `yaml:"queue_processing_interval" mapstructure:"queue_processing_interval"`
+	MaxProcessorWorkers     int           `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingInterval time.Duration `yaml:"queue_processing_interval" mapstructure:"queue_processing_interval" json:"queue_processing_interval"`
 }
 
 // LogConfig represents logging configuration with rotation support
 type LogConfig struct {
-	File       string `yaml:"file" mapstructure:"file"`               // Log file path (empty = console only)
-	Level      string `yaml:"level" mapstructure:"level"`             // Log level (debug, info, warn, error)
-	MaxSize    int    `yaml:"max_size" mapstructure:"max_size"`       // Max size in MB before rotation
-	MaxAge     int    `yaml:"max_age" mapstructure:"max_age"`         // Max age in days to keep files
-	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups"` // Max number of old files to keep
-	Compress   bool   `yaml:"compress" mapstructure:"compress"`       // Compress old log files
+	File       string `yaml:"file" mapstructure:"file" json:"file,omitempty"`               // Log file path (empty = console only)
+	Level      string `yaml:"level" mapstructure:"level" json:"level,omitempty"`             // Log level (debug, info, warn, error)
+	MaxSize    int    `yaml:"max_size" mapstructure:"max_size" json:"max_size,omitempty"`       // Max size in MB before rotation
+	MaxAge     int    `yaml:"max_age" mapstructure:"max_age" json:"max_age,omitempty"`         // Max age in days to keep files
+	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups" json:"max_backups,omitempty"` // Max number of old files to keep
+	Compress   bool   `yaml:"compress" mapstructure:"compress" json:"compress,omitempty"`       // Compress old log files
 }
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled               *bool         `yaml:"enabled" mapstructure:"enabled"`
-	CheckInterval         time.Duration `yaml:"check_interval" mapstructure:"check_interval"`
-	MaxConcurrentJobs     int           `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs"`
-	MaxRetries            int           `yaml:"max_retries" mapstructure:"max_retries"`
-	MaxSegmentConnections int           `yaml:"max_segment_connections" mapstructure:"max_segment_connections"`
-	CheckAllSegments      bool          `yaml:"check_all_segments" mapstructure:"check_all_segments"`
+	Enabled               *bool         `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	CheckInterval         time.Duration `yaml:"check_interval" mapstructure:"check_interval" json:"check_interval,omitempty"`
+	MaxConcurrentJobs     int           `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	MaxRetries            int           `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
+	MaxSegmentConnections int           `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
+	CheckAllSegments      bool          `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -104,50 +104,50 @@ func GenerateProviderID(host string, port int, username string) string {
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	ID               string `yaml:"id" mapstructure:"id"`
-	Host             string `yaml:"host" mapstructure:"host"`
-	Port             int    `yaml:"port" mapstructure:"port"`
-	Username         string `yaml:"username" mapstructure:"username"`
-	Password         string `yaml:"password" mapstructure:"password"`
-	MaxConnections   int    `yaml:"max_connections" mapstructure:"max_connections"`
-	TLS              bool   `yaml:"tls" mapstructure:"tls"`
-	InsecureTLS      bool   `yaml:"insecure_tls" mapstructure:"insecure_tls"`
-	Enabled          *bool  `yaml:"enabled" mapstructure:"enabled"`
-	IsBackupProvider *bool  `yaml:"is_backup_provider" mapstructure:"is_backup_provider"`
+	ID               string `yaml:"id" mapstructure:"id" json:"id"`
+	Host             string `yaml:"host" mapstructure:"host" json:"host"`
+	Port             int    `yaml:"port" mapstructure:"port" json:"port"`
+	Username         string `yaml:"username" mapstructure:"username" json:"username"`
+	Password         string `yaml:"password" mapstructure:"password" json:"-"`
+	MaxConnections   int    `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	TLS              bool   `yaml:"tls" mapstructure:"tls" json:"tls"`
+	InsecureTLS      bool   `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
+	Enabled          *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	IsBackupProvider *bool  `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled    *bool             `yaml:"enabled" mapstructure:"enabled"`
-	MountDir   string            `yaml:"mount_dir" mapstructure:"mount_dir"`
-	Categories []SABnzbdCategory `yaml:"categories" mapstructure:"categories"`
+	Enabled    *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	MountDir   string            `yaml:"mount_dir" mapstructure:"mount_dir" json:"mount_dir"`
+	Categories []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 }
 
 // SABnzbdCategory represents a SABnzbd category configuration
 type SABnzbdCategory struct {
-	Name     string `yaml:"name" mapstructure:"name"`
-	Order    int    `yaml:"order" mapstructure:"order"`
-	Priority int    `yaml:"priority" mapstructure:"priority"`
-	Dir      string `yaml:"dir" mapstructure:"dir"`
+	Name     string `yaml:"name" mapstructure:"name" json:"name"`
+	Order    int    `yaml:"order" mapstructure:"order" json:"order"`
+	Priority int    `yaml:"priority" mapstructure:"priority" json:"priority"`
+	Dir      string `yaml:"dir" mapstructure:"dir" json:"dir"`
 }
 
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
-	Enabled              *bool                   `yaml:"enabled" mapstructure:"enabled"`
-	DefaultIntervalHours int                     `yaml:"default_interval_hours" mapstructure:"default_interval_hours"`
-	MaxWorkers           int                     `yaml:"max_workers" mapstructure:"max_workers"`
-	MountPath            string                  `yaml:"mount_path" mapstructure:"mount_path"`
-	RadarrInstances      []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances"`
-	SonarrInstances      []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances"`
+	Enabled              *bool                   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	DefaultIntervalHours int                     `yaml:"default_interval_hours" mapstructure:"default_interval_hours" json:"default_interval_hours"`
+	MaxWorkers           int                     `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	MountPath            string                  `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	RadarrInstances      []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
+	SonarrInstances      []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
 type ArrsInstanceConfig struct {
-	Name                string `yaml:"name" mapstructure:"name"`
-	URL                 string `yaml:"url" mapstructure:"url"`
-	APIKey              string `yaml:"api_key" mapstructure:"api_key"`
-	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled"`
-	SyncIntervalHours   *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours"`
+	Name                string `yaml:"name" mapstructure:"name" json:"name"`
+	URL                 string `yaml:"url" mapstructure:"url" json:"url"`
+	APIKey              string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	SyncIntervalHours   *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
 }
 
 // DeepCopy returns a deep copy of the configuration

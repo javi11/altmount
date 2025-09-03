@@ -4,8 +4,98 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
+
+// API Response Wrappers for sensitive data masking
+
+// ConfigAPIResponse wraps config.Config with sensitive data handling
+type ConfigAPIResponse struct {
+	*config.Config
+	RClone    RCloneAPIResponse    `json:"rclone"`
+	Providers []ProviderAPIResponse `json:"providers"`
+}
+
+// RCloneAPIResponse sanitizes RClone config for API responses
+type RCloneAPIResponse struct {
+	PasswordSet bool   `json:"password_set"`
+	SaltSet     bool   `json:"salt_set"`
+	VFSEnabled  bool   `json:"vfs_enabled"`
+	VFSURL      string `json:"vfs_url"`
+	VFSUser     string `json:"vfs_user"`
+	VFSPassSet  bool   `json:"vfs_pass_set"`
+}
+
+// ProviderAPIResponse sanitizes Provider config for API responses
+type ProviderAPIResponse struct {
+	ID               string `json:"id"`
+	Host             string `json:"host"`
+	Port             int    `json:"port"`
+	Username         string `json:"username"`
+	MaxConnections   int    `json:"max_connections"`
+	TLS              bool   `json:"tls"`
+	InsecureTLS      bool   `json:"insecure_tls"`
+	PasswordSet      bool   `json:"password_set"`
+	Enabled          bool   `json:"enabled"`
+	IsBackupProvider bool   `json:"is_backup_provider"`
+}
+
+// ImportAPIResponse handles duration serialization for Import config
+type ImportAPIResponse struct {
+	MaxProcessorWorkers     int `json:"max_processor_workers"`
+	QueueProcessingInterval int `json:"queue_processing_interval"` // Interval in seconds
+}
+
+// Helper functions to create API responses from core config types
+
+// ToConfigAPIResponse converts config.Config to ConfigAPIResponse with sensitive data masked
+func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
+	if cfg == nil {
+		return nil
+	}
+
+	// Convert providers with password masking
+	providers := make([]ProviderAPIResponse, len(cfg.Providers))
+	for i, p := range cfg.Providers {
+		providers[i] = ProviderAPIResponse{
+			ID:               p.ID,
+			Host:             p.Host,
+			Port:             p.Port,
+			Username:         p.Username,
+			MaxConnections:   p.MaxConnections,
+			TLS:              p.TLS,
+			InsecureTLS:      p.InsecureTLS,
+			PasswordSet:      p.Password != "",
+			Enabled:          p.Enabled != nil && *p.Enabled,
+			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
+		}
+	}
+
+	// Create RClone response with password status
+	rcloneResp := RCloneAPIResponse{
+		PasswordSet: cfg.RClone.Password != "",
+		SaltSet:     cfg.RClone.Salt != "",
+		VFSEnabled:  cfg.RClone.VFSEnabled != nil && *cfg.RClone.VFSEnabled,
+		VFSURL:      cfg.RClone.VFSUrl,
+		VFSUser:     cfg.RClone.VFSUser,
+		VFSPassSet:  cfg.RClone.VFSPass != "",
+	}
+
+	return &ConfigAPIResponse{
+		Config:    cfg,
+		RClone:    rcloneResp,
+		Providers: providers,
+	}
+}
+
+// ToImportAPIResponse converts config.ImportConfig to ImportAPIResponse with duration as seconds
+func ToImportAPIResponse(cfg *config.ImportConfig) ImportAPIResponse {
+	return ImportAPIResponse{
+		MaxProcessorWorkers:     cfg.MaxProcessorWorkers,
+		QueueProcessingInterval: int(cfg.QueueProcessingInterval.Seconds()),
+	}
+}
 
 // Common API response structures
 
@@ -217,239 +307,7 @@ type SystemRestartResponse struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// Configuration API Types
-
-// ConfigResponse represents the configuration in API responses
-type ConfigResponse struct {
-	WebDAV    WebDAVConfigResponse     `json:"webdav"`
-	API       APIConfigResponse        `json:"api"`
-	Database  DatabaseConfigResponse   `json:"database"`
-	Metadata  MetadataConfigResponse   `json:"metadata"`
-	Streaming StreamingConfigResponse  `json:"streaming"`
-	RClone    RCloneConfigResponse     `json:"rclone"`
-	Import    ImportConfigResponse     `json:"import"`
-	SABnzbd   SABnzbdConfigData        `json:"sabnzbd"`
-	Arrs      ArrsConfigData           `json:"arrs"`
-	Providers []ProviderConfigResponse `json:"providers"`
-	LogLevel  string                   `json:"log_level"`
-}
-
-// WebDAVConfigResponse represents WebDAV server configuration in API responses
-type WebDAVConfigResponse struct {
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-}
-
-// APIConfigResponse represents REST API configuration in API responses
-type APIConfigResponse struct {
-	Prefix string `json:"prefix"`
-}
-
-// DatabaseConfigResponse represents database configuration in API responses
-type DatabaseConfigResponse struct {
-	Path string `json:"path"`
-}
-
-// MetadataConfigResponse represents metadata configuration in API responses
-type MetadataConfigResponse struct {
-	RootPath string `json:"root_path"`
-}
-
-// StreamingConfigResponse represents streaming configuration in API responses
-type StreamingConfigResponse struct {
-	MaxRangeSize       int64 `json:"max_range_size"`
-	StreamingChunkSize int64 `json:"streaming_chunk_size"`
-	MaxDownloadWorkers int   `json:"max_download_workers"`
-}
-
-// RCloneConfigResponse represents rclone configuration in API responses (sanitized)
-type RCloneConfigResponse struct {
-	PasswordSet bool   `json:"password_set"`
-	SaltSet     bool   `json:"salt_set"`
-	VFSEnabled  bool   `json:"vfs_enabled"`
-	VFSURL      string `json:"vfs_url"`
-	VFSUser     string `json:"vfs_user"`
-	VFSPassSet  bool   `json:"vfs_pass_set"`
-}
-
-// ImportConfigResponse represents import configuration in API responses
-type ImportConfigResponse struct {
-	MaxProcessorWorkers     int `json:"max_processor_workers"`
-	QueueProcessingInterval int `json:"queue_processing_interval"` // Interval in seconds for queue processing
-}
-
-// SABnzbdConfigData represents SABnzbd configuration in API responses
-type SABnzbdConfigData struct {
-	Enabled    bool                  `json:"enabled"`
-	MountDir   string                `json:"mount_dir"`
-	Categories []SABnzbdCategoryData `json:"categories"`
-}
-
-// SABnzbdCategoryData represents a SABnzbd category in API responses
-type SABnzbdCategoryData struct {
-	Name     string `json:"name"`
-	Order    int    `json:"order"`
-	Priority int    `json:"priority"`
-	Dir      string `json:"dir"`
-}
-
-// ArrsConfigData represents arrs configuration in API responses
-type ArrsConfigData struct {
-	Enabled              bool                  `json:"enabled"`
-	DefaultIntervalHours int                   `json:"default_interval_hours"`
-	MountPath            string                `json:"mount_path"`
-	RadarrInstances      []ArrsInstanceData `json:"radarr_instances"`
-	SonarrInstances      []ArrsInstanceData `json:"sonarr_instances"`
-}
-
-// ArrsInstanceData represents an arrs instance in API responses
-type ArrsInstanceData struct {
-	Name                string `json:"name"`
-	URL                 string `json:"url"`
-	APIKey              string `json:"api_key"`
-	Enabled             bool   `json:"enabled"`
-	SyncIntervalHours   int    `json:"sync_interval_hours"`
-}
-
-// ProviderConfigResponse represents a single NNTP provider configuration in API responses (sanitized)
-type ProviderConfigResponse struct {
-	ID               string `json:"id"`
-	Host             string `json:"host"`
-	Port             int    `json:"port"`
-	Username         string `json:"username"`
-	MaxConnections   int    `json:"max_connections"`
-	TLS              bool   `json:"tls"`
-	InsecureTLS      bool   `json:"insecure_tls"`
-	PasswordSet      bool   `json:"password_set"`
-	Enabled          bool   `json:"enabled"`
-	IsBackupProvider bool   `json:"is_backup_provider"`
-}
-
-// ConfigUpdateRequest represents a request to update configuration
-type ConfigUpdateRequest struct {
-	WebDAV    *WebDAVConfigRequest     `json:"webdav,omitempty"`
-	API       *APIConfigRequest        `json:"api,omitempty"`
-	Database  *DatabaseConfigRequest   `json:"database,omitempty"`
-	Metadata  *MetadataConfigRequest   `json:"metadata,omitempty"`
-	Streaming *StreamingConfigRequest  `json:"streaming,omitempty"`
-	RClone    *RCloneConfigRequest     `json:"rclone,omitempty"`
-	Import    *ImportConfigRequest     `json:"import,omitempty"`
-	SABnzbd   *SABnzbdConfigUpdate     `json:"sabnzbd,omitempty"`
-	Arrs      *ArrsConfigUpdate        `json:"arrs,omitempty"`
-	Providers *[]ProviderConfigRequest `json:"providers,omitempty"`
-	LogLevel  *string                  `json:"log_level,omitempty"`
-}
-
-// WebDAVConfigRequest represents WebDAV server configuration in update requests
-type WebDAVConfigRequest struct {
-	Port     *int    `json:"port,omitempty"`
-	User     *string `json:"user,omitempty"`
-	Password *string `json:"password,omitempty"`
-	Debug    *bool   `json:"debug,omitempty"`
-}
-
-// APIConfigRequest represents REST API configuration in update requests
-type APIConfigRequest struct {
-	Prefix *string `json:"prefix,omitempty"`
-}
-
-// DatabaseConfigRequest represents database configuration in update requests
-type DatabaseConfigRequest struct {
-	Path *string `json:"path,omitempty"`
-}
-
-// MetadataConfigRequest represents metadata configuration in update requests
-type MetadataConfigRequest struct {
-	RootPath *string `json:"root_path,omitempty"`
-}
-
-// StreamingConfigRequest represents streaming configuration in update requests
-type StreamingConfigRequest struct {
-	MaxRangeSize       *int64 `json:"max_range_size,omitempty"`
-	StreamingChunkSize *int64 `json:"streaming_chunk_size,omitempty"`
-	MaxDownloadWorkers *int   `json:"max_download_workers,omitempty"`
-}
-
-// RCloneConfigRequest represents rclone configuration in update requests
-type RCloneConfigRequest struct {
-	Password   *string `json:"password,omitempty"`
-	Salt       *string `json:"salt,omitempty"`
-	VFSEnabled *bool   `json:"vfs_enabled,omitempty"`
-	VFSURL     *string `json:"vfs_url,omitempty"`
-	VFSUser    *string `json:"vfs_user,omitempty"`
-	VFSPass    *string `json:"vfs_pass,omitempty"`
-}
-
-// ImportConfigRequest represents import configuration in update requests
-type ImportConfigRequest struct {
-	MaxProcessorWorkers     *int `json:"max_processor_workers,omitempty"`
-	QueueProcessingInterval *int `json:"queue_processing_interval,omitempty"` // Interval in seconds for queue processing
-}
-
-// SABnzbdConfigUpdate represents SABnzbd configuration in update requests
-type SABnzbdConfigUpdate struct {
-	Enabled    *bool                    `json:"enabled,omitempty"`
-	MountDir   *string                  `json:"complete_dir,omitempty"`
-	Categories *[]SABnzbdCategoryUpdate `json:"categories,omitempty"`
-}
-
-// SABnzbdCategoryUpdate represents a SABnzbd category in update requests
-type SABnzbdCategoryUpdate struct {
-	Name     *string `json:"name,omitempty"`
-	Order    *int    `json:"order,omitempty"`
-	Priority *int    `json:"priority,omitempty"`
-	Dir      *string `json:"dir,omitempty"`
-}
-
-// ArrsConfigUpdate represents arrs configuration in update requests
-type ArrsConfigUpdate struct {
-	Enabled              *bool                    `json:"enabled,omitempty"`
-	DefaultIntervalHours *int                     `json:"default_interval_hours,omitempty"`
-	MountPath            *string                  `json:"mount_path,omitempty"`
-	RadarrInstances      *[]ArrsInstanceUpdate `json:"radarr_instances,omitempty"`
-	SonarrInstances      *[]ArrsInstanceUpdate `json:"sonarr_instances,omitempty"`
-}
-
-// ArrsInstanceUpdate represents an arrs instance in update requests
-type ArrsInstanceUpdate struct {
-	Name              *string `json:"name,omitempty"`
-	URL               *string `json:"url,omitempty"`
-	APIKey            *string `json:"api_key,omitempty"`
-	Enabled           *bool   `json:"enabled,omitempty"`
-	SyncIntervalHours *int    `json:"sync_interval_hours,omitempty"`
-}
-
-// ProviderConfigRequest represents a single NNTP provider configuration in update requests
-type ProviderConfigRequest struct {
-	ID               *string `json:"id,omitempty"`
-	Host             *string `json:"host,omitempty"`
-	Port             *int    `json:"port,omitempty"`
-	Username         *string `json:"username,omitempty"`
-	Password         *string `json:"password,omitempty"`
-	MaxConnections   *int    `json:"max_connections,omitempty"`
-	TLS              *bool   `json:"tls,omitempty"`
-	InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
-	Enabled          *bool   `json:"enabled,omitempty"`
-	IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
-}
-
-// ConfigValidateRequest represents a request to validate configuration
-type ConfigValidateRequest struct {
-	Config interface{} `json:"config"`
-}
-
-// ConfigValidateResponse represents the result of configuration validation
-type ConfigValidateResponse struct {
-	Valid  bool                    `json:"valid"`
-	Errors []ConfigValidationError `json:"errors,omitempty"`
-}
-
-// ConfigValidationError represents a configuration validation error
-type ConfigValidationError struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
-}
+// Configuration API Types - Now using core config types directly with minimal wrappers above
 
 // Converter functions
 
