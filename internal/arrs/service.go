@@ -481,7 +481,8 @@ func (s *Service) syncRadarrConfig(instance *ConfigInstance, progress *SyncProgr
 			mediaFile := database.MediaFileInput{
 				InstanceName: instance.Name,
 				InstanceType: "radarr",
-				ExternalID:   int64(movie.ID),
+				ExternalID:   int64(movie.ID),     // Movie ID for rescanning
+				FileID:       &movie.MovieFile.ID, // Movie File ID for file operations
 				FilePath:     strippedPath,
 				FileSize:     fileSize,
 			}
@@ -561,7 +562,24 @@ func (s *Service) syncSonarrConfig(instance *ConfigInstance, progress *SyncProgr
 		progress.Progress.ProcessedCount = processedShows
 		progress.Progress.CurrentBatch = fmt.Sprintf("processing show %d/%d: %s", processedShows, totalShows, show.Title)
 
-		// Get all episode files from Sonarr - this gives us the actual files
+		// Get episodes for this series
+		s.logger.Debug("Fetching episodes from Sonarr",
+			"instance", instance.Name,
+			"show", show.Title,
+			"show_id", show.ID)
+
+		episodes, err := client.GetSeriesEpisodes(&sonarr.GetEpisode{
+			SeriesID: show.ID,
+		})
+		if err != nil {
+			s.logger.Error("Failed to get episodes for show",
+				"instance", instance.Name,
+				"show", show.Title,
+				"error", err)
+			continue // Skip this show but continue with others
+		}
+
+		// Get episode files for this series
 		s.logger.Debug("Fetching episode files from Sonarr",
 			"instance", instance.Name,
 			"show", show.Title,
@@ -576,10 +594,19 @@ func (s *Service) syncSonarrConfig(instance *ConfigInstance, progress *SyncProgr
 			continue // Skip this show but continue with others
 		}
 
-		s.logger.Debug("Found episode files for show",
+		s.logger.Debug("Found episodes and episode files for show",
 			"instance", instance.Name,
 			"show", show.Title,
-			"episode_files_count", len(episodeFiles))
+			"episode_count", len(episodes),
+			"episode_file_count", len(episodeFiles))
+
+		// Create a map of episode file ID to episodes for quick lookup
+		episodeFileToEpisodes := make(map[int64][]*sonarr.Episode)
+		for _, episode := range episodes {
+			if episode.EpisodeFileID > 0 {
+				episodeFileToEpisodes[episode.EpisodeFileID] = append(episodeFileToEpisodes[episode.EpisodeFileID], episode)
+			}
+		}
 
 		// Extract file information for this show
 		for _, episodeFile := range episodeFiles {
@@ -602,14 +629,40 @@ func (s *Service) syncSonarrConfig(instance *ConfigInstance, progress *SyncProgr
 					"mount_path", mountPath)
 			}
 
-			mediaFile := database.MediaFileInput{
-				InstanceName: instance.Name,
-				InstanceType: "sonarr",
-				ExternalID:   episodeFile.ID,
-				FilePath:     strippedPath,
-				FileSize:     fileSize,
+			// For Sonarr, we need to get the episode IDs from the episode file
+			// Use the mapping we created earlier to find episodes for this file
+			episodesForFile, hasEpisodes := episodeFileToEpisodes[episodeFile.ID]
+			if !hasEpisodes || len(episodesForFile) == 0 {
+				s.logger.Warn("No episodes found for episode file",
+					"instance", instance.Name,
+					"file_id", episodeFile.ID,
+					"file_path", originalPath)
+				// Fallback: use the file ID as external ID (legacy behavior)
+				mediaFile := database.MediaFileInput{
+					InstanceName: instance.Name,
+					InstanceType: "sonarr",
+					ExternalID:   episodeFile.ID,              // Using file ID as fallback
+					FileID:       &[]int64{episodeFile.ID}[0], // Episode File ID
+					FilePath:     strippedPath,
+					FileSize:     fileSize,
+				}
+				allMediaFiles = append(allMediaFiles, mediaFile)
+				continue
 			}
-			allMediaFiles = append(allMediaFiles, mediaFile)
+
+			// Create a MediaFileInput for each episode in this file
+			// This allows proper rescanning per episode
+			for _, episode := range episodesForFile {
+				mediaFile := database.MediaFileInput{
+					InstanceName: instance.Name,
+					InstanceType: "sonarr",
+					ExternalID:   episode.ID,                  // Episode ID for rescanning
+					FileID:       &[]int64{episodeFile.ID}[0], // Episode File ID for file operations
+					FilePath:     strippedPath,
+					FileSize:     fileSize,
+				}
+				allMediaFiles = append(allMediaFiles, mediaFile)
+			}
 		}
 	}
 
@@ -754,34 +807,25 @@ func (s *Service) triggerSonarrRescan(ctx context.Context, client *sonarr.Sonarr
 	}
 
 	episodeID := mediaFile.ExternalID
+	fileID := mediaFile.FileID
 
 	s.logger.Info("Triggering Sonarr rescan/re-download",
 		"instance", mediaFile.InstanceName,
 		"episode_id", episodeID,
 	)
 
-	// Get the episodes that were using this file
-	episode, err := client.GetEpisodeByIDContext(ctx, episodeID)
-	if err != nil {
-		s.logger.Warn("Failed to get episodes for deleted file, triggering series search",
-			"instance", mediaFile.InstanceName,
-			"episode_id", episodeID)
-
-		return err
-	}
-
-	err = client.DeleteEpisodeFileContext(ctx,
-		episode.EpisodeFileID)
+	err := client.DeleteEpisodeFileContext(ctx,
+		fileID)
 	if err != nil {
 		s.logger.Warn("Failed to delete episode file",
 			"instance", mediaFile.InstanceName,
-			"episode_file_id", episode.EpisodeFileID,
+			"episode_file_id", fileID,
 			"error", err)
 	}
 
 	searchCmd := &sonarr.CommandRequest{
-		Name:      "EpisodeSearch",
-		EpisodeID: episodeID,
+		Name:       "EpisodeSearch",
+		EpisodeIDs: []int64{episodeID},
 	}
 
 	response, err := client.SendCommandContext(ctx, searchCmd)

@@ -29,7 +29,8 @@ func NewMediaRepository(db *sql.DB, logger *slog.Logger) *MediaRepository {
 type MediaFileInput struct {
 	InstanceName string
 	InstanceType string
-	ExternalID   int64
+	ExternalID   int64  // Movie ID or Episode ID
+	FileID       *int64 // Movie File ID or Episode File ID (nullable)
 	FilePath     string
 	FileSize     *int64
 }
@@ -83,9 +84,9 @@ func (r *MediaRepository) SyncMediaFiles(instanceName, instanceType string, file
 				// Update existing record
 				_, err = tx.Exec(`
 					UPDATE media_files 
-					SET file_path = ?, file_size = ?, updated_at = ?
+					SET file_id = ?, file_path = ?, file_size = ?, updated_at = ?
 					WHERE instance_name = ? AND instance_type = ? AND external_id = ?`,
-					file.FilePath, file.FileSize, now,
+					file.FileID, file.FilePath, file.FileSize, now,
 					instanceName, instanceType, file.ExternalID)
 				if err != nil {
 					return nil, fmt.Errorf("failed to update media file: %w", err)
@@ -94,9 +95,9 @@ func (r *MediaRepository) SyncMediaFiles(instanceName, instanceType string, file
 			} else {
 				// Insert new record
 				_, err = tx.Exec(`
-					INSERT INTO media_files (instance_name, instance_type, external_id, file_path, file_size, created_at, updated_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?)`,
-					instanceName, instanceType, file.ExternalID, file.FilePath, file.FileSize, now, now)
+					INSERT INTO media_files (instance_name, instance_type, external_id, file_id, file_path, file_size, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					instanceName, instanceType, file.ExternalID, file.FileID, file.FilePath, file.FileSize, now, now)
 				if err != nil {
 					return nil, fmt.Errorf("failed to insert media file: %w", err)
 				}
@@ -153,7 +154,7 @@ func (r *MediaRepository) SyncMediaFiles(instanceName, instanceType string, file
 // This can be used for health correlation
 func (r *MediaRepository) GetMediaFilesByPath(filePath string) ([]MediaFile, error) {
 	rows, err := r.db.Query(`
-		SELECT id, instance_name, instance_type, external_id, file_path, file_size, created_at, updated_at
+		SELECT id, instance_name, instance_type, external_id, file_id, file_path, file_size, created_at, updated_at
 		FROM media_files 
 		WHERE file_path = ?
 		ORDER BY instance_name, instance_type`,
@@ -171,6 +172,7 @@ func (r *MediaRepository) GetMediaFilesByPath(filePath string) ([]MediaFile, err
 			&file.InstanceName,
 			&file.InstanceType,
 			&file.ExternalID,
+			&file.FileID,
 			&file.FilePath,
 			&file.FileSize,
 			&file.CreatedAt,
@@ -192,7 +194,7 @@ func (r *MediaRepository) GetMediaFilesByPath(filePath string) ([]MediaFile, err
 // GetMediaFilesByInstance returns all media files for a specific instance
 func (r *MediaRepository) GetMediaFilesByInstance(instanceName, instanceType string) ([]MediaFile, error) {
 	rows, err := r.db.Query(`
-		SELECT id, instance_name, instance_type, external_id, file_path, file_size, created_at, updated_at
+		SELECT id, instance_name, instance_type, external_id, file_id, file_path, file_size, created_at, updated_at
 		FROM media_files 
 		WHERE instance_name = ? AND instance_type = ?
 		ORDER BY file_path`,
@@ -210,6 +212,7 @@ func (r *MediaRepository) GetMediaFilesByInstance(instanceName, instanceType str
 			&file.InstanceName,
 			&file.InstanceType,
 			&file.ExternalID,
+			&file.FileID,
 			&file.FilePath,
 			&file.FileSize,
 			&file.CreatedAt,

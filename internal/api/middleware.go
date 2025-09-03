@@ -79,7 +79,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				slog.Error("API panic recovered", "error", err)
+				slog.Error("API panic recovered", "error", err, "path", r.URL.Path)
 				WriteInternalError(w, "An unexpected error occurred", "")
 			}
 		}()
