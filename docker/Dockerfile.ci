@@ -80,7 +80,7 @@ EXPOSE 8080
 VOLUME ["/config", "/metadata"]
 
 # Default command for web mode
-CMD ["/app/altmount", "serve", "/config/config.yaml"]
+CMD ["/app/altmount", "serve", "--config=/config/config.yaml"]
 
 LABEL org.opencontainers.image.source="https://github.com/javi11/altmount"
 LABEL build_version="version: Build-date:- ${VERSION}  ${BUILD_DATE}"

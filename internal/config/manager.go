@@ -771,11 +771,11 @@ func LoadConfig(configFile string) (*Config, error) {
 			if err := SaveToFile(config, targetConfigFile); err != nil {
 				return nil, fmt.Errorf("failed to create default config file %s: %w", targetConfigFile, err)
 			}
-			
+
 			// Log that we created a default config
 			fmt.Printf("Created default configuration file: %s\n", targetConfigFile)
 			fmt.Printf("Please review and modify the configuration as needed.\n")
-			
+
 			// Now try to read the newly created file
 			viper.SetConfigFile(targetConfigFile)
 			if err := viper.ReadInConfig(); err != nil {
