@@ -10,6 +10,10 @@ dist/
 **/*.app
 **/*.zip
 **/*.tar.gz
+**/target/
+**/bin/
+**/__pycache__/
+**/.pytest_cache/
 
 # Documentation
 *.md
@@ -65,6 +69,9 @@ tmp/
 temp/
 .cache/
 .buildx-cache/
+**/.next/
+**/coverage/
+**/.nyc_output/
 
 # Databases and runtime
 altmount.db*

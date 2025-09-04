@@ -70,6 +70,9 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           platforms: linux/amd64,linux/arm64
+          driver-opts: |
+            network=host
+            image=moby/buildkit:latest
 
       # docker login
       - name: Docker login
@@ -92,3 +95,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILDX_NO_DEFAULT_ATTESTATIONS: 1
+          DOCKER_BUILDKIT: 1
+          BUILDKIT_PROGRESS: plain

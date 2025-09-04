@@ -28,6 +28,9 @@ dockers:
       - --cache-to=type=gha,mode=max,scope=docker-amd64
       - --cache-from=type=registry,ref={{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}:buildcache-amd64
       - --cache-to=type=registry,ref={{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}:buildcache-amd64,mode=max
+      - --cache-from=type=registry,ref={{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}:buildcache-frontend
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - --metadata-file=/tmp/metadata-amd64.json
     extra_files:
       - docker
       - go.mod
@@ -47,6 +50,10 @@ dockers:
       - --cache-to=type=gha,mode=max,scope=docker-arm64
       - --cache-from=type=registry,ref={{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}:buildcache-arm64
       - --cache-to=type=registry,ref={{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}:buildcache-arm64,mode=max
+      - --cache-from=type=registry,ref={{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}:buildcache-frontend
+      - --cache-to=type=registry,ref={{ .Env.REGISTRY }}/{{ .Env.IMAGE_NAME }}:buildcache-frontend,mode=max
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - --metadata-file=/tmp/metadata-arm64.json
     extra_files:
       - docker
       - go.mod

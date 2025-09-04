@@ -9,7 +9,6 @@ services:
       - "8081:8081"
     volumes:
       - ./example/config:/config
-      - ./example/watch:/watch
       - ./example/metadata:/metadata
     environment:
       - PORT=8081
