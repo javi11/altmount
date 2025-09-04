@@ -421,6 +421,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Ensure Buildx (required for imagetools)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       # docker login
       - name: Docker login
         uses: docker/login-action@v3
@@ -440,54 +444,34 @@ jobs:
           echo "major=$MAJOR" >> $GITHUB_OUTPUT
           echo "minor=$MINOR" >> $GITHUB_OUTPUT
 
-      # Create and push multi-platform manifests
+      # Create and push multi-platform manifests using buildx imagetools
       - name: Create multi-platform manifest
         run: |
-          # Create and push version-specific manifest (v1.2.3)
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}
+          R="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
-          # Create and push semver version manifest (1.2.3)
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+          # vX.Y.Z and X.Y.Z
+          docker buildx imagetools create \
+            -t "$R:v${{ steps.version.outputs.version }}" \
+            -t "$R:${{ steps.version.outputs.version }}" \
+            "$R:${{ steps.version.outputs.version }}-amd64" \
+            "$R:${{ steps.version.outputs.version }}-arm64"
 
-          # Create and push major version manifest (v1)
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}
+          # vX and X
+          docker buildx imagetools create \
+            -t "$R:v${{ steps.version.outputs.major }}" \
+            -t "$R:${{ steps.version.outputs.major }}" \
+            "$R:${{ steps.version.outputs.version }}-amd64" \
+            "$R:${{ steps.version.outputs.version }}-arm64"
 
-          # Create and push major version manifest (1)
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}
+          # vX.Y and X.Y
+          docker buildx imagetools create \
+            -t "$R:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}" \
+            -t "$R:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}" \
+            "$R:${{ steps.version.outputs.version }}-amd64" \
+            "$R:${{ steps.version.outputs.version }}-arm64"
 
-          # Create and push major.minor version manifest (v1.2)
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
-
-          # Create and push major.minor version manifest (1.2)
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
-
-          # Create and push latest manifest (multi-arch)
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # latest
+          docker buildx imagetools create \
+            -t "$R:latest" \
+            "$R:latest-amd64" \
+            "$R:latest-arm64"
