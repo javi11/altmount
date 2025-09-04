@@ -544,3 +544,37 @@ func (r *HealthRepository) ResetFileAllChecking() error {
 
 	return nil
 }
+
+
+// DeleteHealthRecordsBulk removes multiple health records from the database
+func (r *HealthRepository) DeleteHealthRecordsBulk(filePaths []string) error {
+	if len(filePaths) == 0 {
+		return nil
+	}
+
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(filePaths))
+	args := make([]interface{}, len(filePaths))
+	for i, path := range filePaths {
+		placeholders[i] = "?"
+		args[i] = path
+	}
+
+	query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
+
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete health records: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no health records found to delete")
+	}
+
+	return nil
+}

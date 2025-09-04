@@ -168,6 +168,65 @@ func (s *Server) handleDeleteHealth(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, response, nil)
 }
 
+// handleDeleteHealthBulk handles POST /api/health/bulk/delete
+func (s *Server) handleDeleteHealthBulk(w http.ResponseWriter, r *http.Request) {
+	// Parse request body
+	var req struct {
+		FilePaths []string `json:"file_paths"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteBadRequest(w, "Invalid request body", err.Error())
+		return
+	}
+	
+	// Validate file paths
+	if len(req.FilePaths) == 0 {
+		WriteValidationError(w, "At least one file path is required", "")
+		return
+	}
+	
+	if len(req.FilePaths) > 100 {
+		WriteValidationError(w, "Too many file paths", "Maximum 100 files allowed per bulk operation")
+		return
+	}
+	
+	// Check for any items currently being checked and cancel if needed
+	if s.healthWorker != nil {
+		for _, filePath := range req.FilePaths {
+			// Get the record to check status
+			item, err := s.healthRepo.GetFileHealth(filePath)
+			if err != nil {
+				continue // Skip if we can't get the record, will fail in bulk delete anyway
+			}
+			
+			if item != nil && item.Status == database.HealthStatusChecking {
+				// Check if there's actually an active check to cancel
+				if s.healthWorker.IsCheckActive(filePath) {
+					// Cancel the health check before deletion
+					_ = s.healthWorker.CancelHealthCheck(filePath) // Ignore error, proceed with deletion
+				}
+			}
+		}
+	}
+	
+	// Delete health records in bulk
+	err := s.healthRepo.DeleteHealthRecordsBulk(req.FilePaths)
+	if err != nil {
+		WriteInternalError(w, "Failed to delete health records", err.Error())
+		return
+	}
+	
+	response := map[string]interface{}{
+		"message":        "Health records deleted successfully",
+		"deleted_count":  len(req.FilePaths),
+		"file_paths":     req.FilePaths,
+		"deleted_at":     time.Now().Format(time.RFC3339),
+	}
+	
+	WriteSuccess(w, response, nil)
+}
+
 // handleRepairHealth handles POST /api/health/{id}/repair
 func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
 	// Extract ID from path parameter

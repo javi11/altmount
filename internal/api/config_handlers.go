@@ -35,8 +35,8 @@ func parseLogLevel(level string) slog.Level {
 	}
 }
 
-// applyLogLevel applies the log level to the global logger
-func applyLogLevel(level string) {
+// ApplyLogLevel applies the log level to the global logger
+func ApplyLogLevel(level string) {
 	if level != "" {
 		slog.SetLogLoggerLevel(parseLogLevel(level))
 	}
@@ -180,7 +180,7 @@ func (s *Server) handleValidateConfig(w http.ResponseWriter, r *http.Request) {
 	validationErr := s.configManager.ValidateConfig(&cfg)
 
 	response := struct {
-		Valid  bool   `json:"valid"`
+		Valid  bool `json:"valid"`
 		Errors []struct {
 			Field   string `json:"field"`
 			Message string `json:"message"`
@@ -202,48 +202,6 @@ func (s *Server) handleValidateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteSuccess(w, response, nil)
-}
-
-
-// Converter functions removed - now using core config types directly
-
-// Other utility functions for config handling
-
-// Removed old converter functions - now using core config types directly
-
-// Provider API Functions (preserved from original file)
-
-// handleListProviders returns all configured providers
-func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
-	if s.configManager == nil {
-		WriteInternalError(w, "Configuration management not available", "CONFIG_UNAVAILABLE")
-		return
-	}
-
-	config := s.configManager.GetConfig()
-	if config == nil {
-		WriteInternalError(w, "Configuration not available", "CONFIG_NOT_FOUND")
-		return
-	}
-
-	// Convert providers and sanitize passwords
-	providers := make([]ProviderAPIResponse, len(config.Providers))
-	for i, p := range config.Providers {
-		providers[i] = ProviderAPIResponse{
-			ID:               p.ID,
-			Host:             p.Host,
-			Port:             p.Port,
-			Username:         p.Username,
-			MaxConnections:   p.MaxConnections,
-			TLS:              p.TLS,
-			InsecureTLS:      p.InsecureTLS,
-			PasswordSet:      p.Password != "",
-			Enabled:          p.Enabled != nil && *p.Enabled,
-			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
-		}
-	}
-
-	WriteSuccess(w, providers, nil)
 }
 
 // Provider Management Handlers
@@ -283,9 +241,9 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement actual NNTP connection test
 	// For now, return success for basic validation
 	response := struct {
-		Success    bool   `json:"success"`
-		LatencyMs  int    `json:"latency_ms,omitempty"`
-		ErrorMsg   string `json:"error_message,omitempty"`
+		Success   bool   `json:"success"`
+		LatencyMs int    `json:"latency_ms,omitempty"`
+		ErrorMsg  string `json:"error_message,omitempty"`
 	}{
 		Success:   true,
 		LatencyMs: 150, // Simulated latency
@@ -310,15 +268,15 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 
 	// Decode create request
 	var createReq struct {
-		Host               string `json:"host"`
-		Port               int    `json:"port"`
-		Username           string `json:"username"`
-		Password           string `json:"password"`
-		MaxConnections     int    `json:"max_connections"`
-		TLS                bool   `json:"tls"`
-		InsecureTLS        bool   `json:"insecure_tls"`
-		Enabled            bool   `json:"enabled"`
-		IsBackupProvider   bool   `json:"is_backup_provider"`
+		Host             string `json:"host"`
+		Port             int    `json:"port"`
+		Username         string `json:"username"`
+		Password         string `json:"password"`
+		MaxConnections   int    `json:"max_connections"`
+		TLS              bool   `json:"tls"`
+		InsecureTLS      bool   `json:"insecure_tls"`
+		Enabled          bool   `json:"enabled"`
+		IsBackupProvider bool   `json:"is_backup_provider"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&createReq); err != nil {
@@ -348,16 +306,16 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 
 	// Create new provider
 	newProvider := config.ProviderConfig{
-		ID:                 newID,
-		Host:               createReq.Host,
-		Port:               createReq.Port,
-		Username:           createReq.Username,
-		Password:           createReq.Password,
-		MaxConnections:     createReq.MaxConnections,
-		TLS:                createReq.TLS,
-		InsecureTLS:        createReq.InsecureTLS,
-		Enabled:            &createReq.Enabled,
-		IsBackupProvider:   &createReq.IsBackupProvider,
+		ID:               newID,
+		Host:             createReq.Host,
+		Port:             createReq.Port,
+		Username:         createReq.Username,
+		Password:         createReq.Password,
+		MaxConnections:   createReq.MaxConnections,
+		TLS:              createReq.TLS,
+		InsecureTLS:      createReq.InsecureTLS,
+		Enabled:          &createReq.Enabled,
+		IsBackupProvider: &createReq.IsBackupProvider,
 	}
 
 	// Add to config
@@ -434,15 +392,15 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 
 	// Decode update request (partial update)
 	var updateReq struct {
-		Host               *string `json:"host,omitempty"`
-		Port               *int    `json:"port,omitempty"`
-		Username           *string `json:"username,omitempty"`
-		Password           *string `json:"password,omitempty"`
-		MaxConnections     *int    `json:"max_connections,omitempty"`
-		TLS                *bool   `json:"tls,omitempty"`
-		InsecureTLS        *bool   `json:"insecure_tls,omitempty"`
-		Enabled            *bool   `json:"enabled,omitempty"`
-		IsBackupProvider   *bool   `json:"is_backup_provider,omitempty"`
+		Host             *string `json:"host,omitempty"`
+		Port             *int    `json:"port,omitempty"`
+		Username         *string `json:"username,omitempty"`
+		Password         *string `json:"password,omitempty"`
+		MaxConnections   *int    `json:"max_connections,omitempty"`
+		TLS              *bool   `json:"tls,omitempty"`
+		InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
+		Enabled          *bool   `json:"enabled,omitempty"`
+		IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&updateReq); err != nil {
@@ -569,7 +527,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 
 	// Create new config without the provider
 	newConfig := *currentConfig
-	newConfig.Providers = append(currentConfig.Providers[:providerIndex], 
+	newConfig.Providers = append(currentConfig.Providers[:providerIndex],
 		currentConfig.Providers[providerIndex+1:]...)
 
 	// Validate and save

@@ -32,6 +32,7 @@ require (
 	go.uber.org/mock v0.5.2
 	golang.org/x/crypto v0.41.0
 	golang.org/x/net v0.43.0
+	golang.org/x/text v0.28.0
 	golift.io/starr v1.2.0
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -252,7 +253,6 @@ require (
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/telemetry v0.0.0-20250807160809-1a19826ec488 // indirect
-	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/tools v0.36.0 // indirect
 	golang.org/x/vuln v1.1.4 // indirect
 	honnef.co/go/tools v0.6.1 // indirect

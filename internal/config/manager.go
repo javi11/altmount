@@ -77,12 +77,12 @@ type ImportConfig struct {
 
 // LogConfig represents logging configuration with rotation support
 type LogConfig struct {
-	File       string `yaml:"file" mapstructure:"file" json:"file,omitempty"`               // Log file path (empty = console only)
-	Level      string `yaml:"level" mapstructure:"level" json:"level,omitempty"`             // Log level (debug, info, warn, error)
-	MaxSize    int    `yaml:"max_size" mapstructure:"max_size" json:"max_size,omitempty"`       // Max size in MB before rotation
-	MaxAge     int    `yaml:"max_age" mapstructure:"max_age" json:"max_age,omitempty"`         // Max age in days to keep files
+	File       string `yaml:"file" mapstructure:"file" json:"file,omitempty"`                      // Log file path (empty = console only)
+	Level      string `yaml:"level" mapstructure:"level" json:"level,omitempty"`                   // Log level (debug, info, warn, error)
+	MaxSize    int    `yaml:"max_size" mapstructure:"max_size" json:"max_size,omitempty"`          // Max size in MB before rotation
+	MaxAge     int    `yaml:"max_age" mapstructure:"max_age" json:"max_age,omitempty"`             // Max age in days to keep files
 	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups" json:"max_backups,omitempty"` // Max number of old files to keep
-	Compress   bool   `yaml:"compress" mapstructure:"compress" json:"compress,omitempty"`       // Compress old log files
+	Compress   bool   `yaml:"compress" mapstructure:"compress" json:"compress,omitempty"`          // Compress old log files
 }
 
 // HealthConfig represents health checker configuration
@@ -134,21 +134,21 @@ type SABnzbdCategory struct {
 
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
-	Enabled              *bool                   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	DefaultIntervalHours int                     `yaml:"default_interval_hours" mapstructure:"default_interval_hours" json:"default_interval_hours"`
-	MaxWorkers           int                     `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	MountPath            string                  `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	Enabled              *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	DefaultIntervalHours int                  `yaml:"default_interval_hours" mapstructure:"default_interval_hours" json:"default_interval_hours"`
+	MaxWorkers           int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	MountPath            string               `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	RadarrInstances      []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances      []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
 type ArrsInstanceConfig struct {
-	Name                string `yaml:"name" mapstructure:"name" json:"name"`
-	URL                 string `yaml:"url" mapstructure:"url" json:"url"`
-	APIKey              string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
-	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	SyncIntervalHours   *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
+	Name              string `yaml:"name" mapstructure:"name" json:"name"`
+	URL               string `yaml:"url" mapstructure:"url" json:"url"`
+	APIKey            string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Enabled           *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	SyncIntervalHours *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
 }
 
 // DeepCopy returns a deep copy of the configuration

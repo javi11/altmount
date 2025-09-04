@@ -11,6 +11,7 @@ import (
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/api"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
@@ -18,7 +19,6 @@ import (
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
@@ -254,6 +254,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Info("WebDAV auth credentials updated",
 				"old_user", oldConfig.WebDAV.User,
 				"new_user", newConfig.WebDAV.User)
+		}
+	})
+
+	// Add log level config change handler
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		// Determine old and new log levels (prioritize Log.Level over LogLevel)
+		oldLevel := oldConfig.LogLevel
+		if oldConfig.Log.Level != "" {
+			oldLevel = oldConfig.Log.Level
+		}
+
+		newLevel := newConfig.LogLevel
+		if newConfig.Log.Level != "" {
+			newLevel = newConfig.Log.Level
+		}
+
+		// Apply log level change if it changed
+		if oldLevel != newLevel {
+			api.ApplyLogLevel(newLevel)
+			logger.Info("Log level updated dynamically",
+				"old_level", oldLevel,
+				"new_level", newLevel)
 		}
 	})
 

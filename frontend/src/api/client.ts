@@ -142,6 +142,16 @@ export class APIClient {
 		return this.request<QueueItem>(`/queue/${id}`, { method: "DELETE" });
 	}
 
+	async deleteBulkQueueItems(ids: number[]) {
+		return this.request<{ deleted_count: number; message: string }>("/queue/bulk", {
+			method: "DELETE",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ ids }),
+		});
+	}
+
 	async retryQueueItem(id: number) {
 		return this.request<QueueItem>(`/queue/${id}/retry`, {
 			method: "POST",
@@ -188,6 +198,13 @@ export class APIClient {
 	async deleteHealthItem(id: string) {
 		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`, {
 			method: "DELETE",
+		});
+	}
+
+	async deleteBulkHealthItems(filePaths: string[]) {
+		return this.request<{ message: string; deleted_count: number; file_paths: string[]; deleted_at: string }>("/health/bulk/delete", {
+			method: "POST",
+			body: JSON.stringify({ file_paths: filePaths }),
 		});
 	}
 

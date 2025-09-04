@@ -44,6 +44,17 @@ export const useDeleteQueueItem = () => {
 	});
 };
 
+export const useDeleteBulkQueueItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (ids: number[]) => apiClient.deleteBulkQueueItems(ids),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+		},
+	});
+};
+
 export const useRetryQueueItem = () => {
 	const queryClient = useQueryClient();
 
@@ -119,6 +130,17 @@ export const useDeleteHealthItem = () => {
 
 	return useMutation({
 		mutationFn: (id: string) => apiClient.deleteHealthItem(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
+export const useDeleteBulkHealthItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (filePaths: string[]) => apiClient.deleteBulkHealthItems(filePaths),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},

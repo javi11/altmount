@@ -13,7 +13,7 @@ import (
 // ConfigAPIResponse wraps config.Config with sensitive data handling
 type ConfigAPIResponse struct {
 	*config.Config
-	RClone    RCloneAPIResponse    `json:"rclone"`
+	RClone    RCloneAPIResponse     `json:"rclone"`
 	Providers []ProviderAPIResponse `json:"providers"`
 }
 

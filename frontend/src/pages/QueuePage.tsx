@@ -8,7 +8,7 @@ import {
 	RefreshCw,
 	Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
 import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -19,6 +19,7 @@ import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
 	useClearCompletedQueue,
+	useDeleteBulkQueueItems,
 	useDeleteQueueItem,
 	useQueue,
 	useQueueStats,
@@ -36,6 +37,7 @@ export function QueuePage() {
 	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
 	const [userInteracting, setUserInteracting] = useState(false);
 	const [countdown, setCountdown] = useState(0);
+	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
 
 	const pageSize = 20;
 	const {
@@ -57,6 +59,7 @@ export function QueuePage() {
 
 	const { data: stats } = useQueueStats();
 	const deleteItem = useDeleteQueueItem();
+	const deleteBulk = useDeleteBulkQueueItems();
 	const retryItem = useRetryQueueItem();
 	const clearCompleted = useClearCompletedQueue();
 	const { confirmDelete, confirmAction } = useConfirm();
@@ -96,6 +99,60 @@ export function QueuePage() {
 		setRefreshInterval(interval);
 		setNextRefreshTime(null);
 	};
+
+	// Multi-select handlers
+	const handleSelectItem = (id: number, checked: boolean) => {
+		setSelectedItems(prev => {
+			const newSet = new Set(prev);
+			if (checked) {
+				newSet.add(id);
+			} else {
+				newSet.delete(id);
+			}
+			return newSet;
+		});
+	};
+
+	const handleSelectAll = (checked: boolean) => {
+		if (checked && queueData) {
+			setSelectedItems(new Set(queueData.map(item => item.id)));
+		} else {
+			setSelectedItems(new Set());
+		}
+	};
+
+	const handleBulkDelete = async () => {
+		if (selectedItems.size === 0) return;
+		
+		const confirmed = await confirmAction(
+			"Delete Selected Items",
+			`Are you sure you want to delete ${selectedItems.size} selected queue items? This action cannot be undone.`,
+			{
+				type: "warning",
+				confirmText: "Delete Selected",
+				confirmButtonClass: "btn-error",
+			}
+		);
+		
+		if (confirmed) {
+			try {
+				const itemIds = Array.from(selectedItems);
+				await deleteBulk.mutateAsync(itemIds);
+				setSelectedItems(new Set());
+			} catch (error) {
+				console.error("Failed to delete selected items:", error);
+			}
+		}
+	};
+
+	// Clear selection when page changes or filters change
+	const clearSelection = useCallback(() => {
+		setSelectedItems(new Set());
+	}, []);
+
+	// Helper functions for select all checkbox state
+	const isAllSelected = queueData && queueData.length > 0 && queueData.every(item => selectedItems.has(item.id));
+	const isIndeterminate = queueData && selectedItems.size > 0 && !isAllSelected;
 
 	// Update next refresh time when auto-refresh is enabled
 	useEffect(() => {
@@ -153,6 +210,11 @@ export function QueuePage() {
 	useEffect(() => {
 		setPage(0);
 	}, []);
+
+	// Clear selection when page, search, or filters change
+	useEffect(() => {
+		clearSelection();
+	}, [clearSelection]);
 
 	if (error) {
 		return (
@@ -303,15 +365,61 @@ export function QueuePage() {
 				</div>
 			</div>
 
+			{/* Bulk Actions Toolbar */}
+			{selectedItems.size > 0 && (
+				<div className="card bg-base-100 shadow-lg">
+					<div className="card-body">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-4">
+								<span className="font-semibold text-sm">
+									{selectedItems.size} item{selectedItems.size !== 1 ? 's' : ''} selected
+								</span>
+								<button
+									type="button"
+									className="btn btn-ghost btn-sm"
+									onClick={() => setSelectedItems(new Set())}
+								>
+									Clear Selection
+								</button>
+							</div>
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									className="btn btn-error btn-sm"
+									onClick={handleBulkDelete}
+									disabled={deleteBulk.isPending}
+								>
+									<Trash2 className="h-4 w-4" />
+									{deleteBulk.isPending ? "Deleting..." : "Delete Selected"}
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
 			{/* Queue Table */}
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body p-0">
 					{isLoading ? (
-						<LoadingTable columns={8} />
+						<LoadingTable columns={9} />
 					) : queueData && queueData.length > 0 ? (
 						<table className="table-zebra table">
 							<thead>
 								<tr>
+									<th className="w-12">
+										<label className="cursor-pointer">
+											<input
+												type="checkbox"
+												className="checkbox"
+												checked={isAllSelected}
+												ref={(input) => {
+													if (input) input.indeterminate = Boolean(isIndeterminate);
+												}}
+												onChange={(e) => handleSelectAll(e.target.checked)}
+											/>
+										</label>
+									</th>
 									<th>NZB File</th>
 									<th>Target Path</th>
 									<th>Category</th>
@@ -324,7 +432,20 @@ export function QueuePage() {
 							</thead>
 							<tbody>
 								{queueData.map((item: QueueItem) => (
-									<tr key={item.id} className="hover">
+									<tr 
+										key={item.id} 
+										className={`hover ${selectedItems.has(item.id) ? "bg-base-200" : ""}`}
+									>
+										<td>
+											<label className="cursor-pointer">
+												<input
+													type="checkbox"
+													className="checkbox"
+													checked={selectedItems.has(item.id)}
+													onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+												/>
+											</label>
+										</td>
 										<td>
 											<div className="flex items-center space-x-3">
 												<Download className="h-4 w-4 text-primary" />

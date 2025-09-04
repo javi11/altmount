@@ -37,7 +37,7 @@ func TestDeobfuscator_IsDeobfuscationWorthwhile(t *testing.T) {
 			want:     true,
 		},
 		{
-			name:     "abc.xyz prefix - worthwhile", 
+			name:     "abc.xyz prefix - worthwhile",
 			filename: "abc.xyz.random.string.mkv",
 			allFiles: []nzbparser.NzbFile{},
 			want:     true,
@@ -256,9 +256,9 @@ func TestDeobfuscator_DeobfuscateFilename(t *testing.T) {
 		wantMethod  string
 	}{
 		{
-			name:     "clean filename - no deobfuscation needed",
-			filename: "Movie.Title.2023.mkv",
-			allFiles: []nzbparser.NzbFile{},
+			name:        "clean filename - no deobfuscation needed",
+			filename:    "Movie.Title.2023.mkv",
+			allFiles:    []nzbparser.NzbFile{},
 			wantSuccess: false,
 			wantMethod:  "none",
 		},
@@ -272,16 +272,16 @@ func TestDeobfuscator_DeobfuscateFilename(t *testing.T) {
 			wantMethod:  "par2_extraction",
 		},
 		{
-			name:     "pattern cleanup success",
-			filename: "abc.xyz.movie.title.mkv",
-			allFiles: []nzbparser.NzbFile{},
+			name:        "pattern cleanup success",
+			filename:    "abc.xyz.movie.title.mkv",
+			allFiles:    []nzbparser.NzbFile{},
 			wantSuccess: true,
 			wantMethod:  "pattern_cleanup",
 		},
 		{
-			name:     "bracket removal",
-			filename: "movie[OBFUSCATED]title.mkv",
-			allFiles: []nzbparser.NzbFile{},
+			name:        "bracket removal",
+			filename:    "movie[OBFUSCATED]title.mkv",
+			allFiles:    []nzbparser.NzbFile{},
 			wantSuccess: true,
 			wantMethod:  "pattern_cleanup",
 		},
@@ -390,7 +390,7 @@ func TestDeobfuscator_parsePAR2Header(t *testing.T) {
 				100, 0, 0, 0, 0, 0, 0, 0,
 				// MD5 hash (16 bytes)
 				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-				// Recovery ID (16 bytes) 
+				// Recovery ID (16 bytes)
 				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 				// Type (16 bytes)
 				'P', 'A', 'R', ' ', '2', '.', '0', 0, 'F', 'i', 'l', 'e', 'D', 'e', 's', 'c',
@@ -421,30 +421,30 @@ func TestDeobfuscator_parsePAR2Header(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bytes.NewReader(tt.data)
 			header, err := deobfuscator.parsePAR2Header(r)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("parsePAR2Header() expected error but got none")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("parsePAR2Header() unexpected error: %v", err)
 				return
 			}
-			
+
 			if header == nil {
 				t.Errorf("parsePAR2Header() returned nil header")
 				return
 			}
-			
+
 			// Validate magic signature
 			expectedMagic := [8]byte{'P', 'A', 'R', '2', 0, 'P', 'K', 'T'}
 			if header.Magic != expectedMagic {
 				t.Errorf("parsePAR2Header() magic = %v, want %v", header.Magic, expectedMagic)
 			}
-			
+
 			// Validate length
 			if header.Length != 100 {
 				t.Errorf("parsePAR2Header() length = %d, want 100", header.Length)

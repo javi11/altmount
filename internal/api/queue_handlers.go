@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -251,6 +253,59 @@ func (s *Server) handleClearCompletedQueue(w http.ResponseWriter, r *http.Reques
 	response := map[string]interface{}{
 		"removed_count": count,
 		"older_than":    olderThan.Format(time.RFC3339),
+	}
+
+	WriteSuccess(w, response, nil)
+}
+
+// handleDeleteQueueBulk handles DELETE /api/queue/bulk
+func (s *Server) handleDeleteQueueBulk(w http.ResponseWriter, r *http.Request) {
+	// Parse request body
+	var request struct {
+		IDs []int64 `json:"ids"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		WriteBadRequest(w, "Invalid request body", err.Error())
+		return
+	}
+
+	// Validate IDs
+	if len(request.IDs) == 0 {
+		WriteBadRequest(w, "No IDs provided", "At least one ID is required")
+		return
+	}
+
+	// Check if any items are currently being processed
+	processedCount := 0
+	for _, id := range request.IDs {
+		item, err := s.queueRepo.GetQueueItem(id)
+		if err != nil {
+			WriteInternalError(w, "Failed to check queue item", err.Error())
+			return
+		}
+
+		if item != nil && item.Status == database.QueueStatusProcessing {
+			processedCount++
+		}
+	}
+
+	if processedCount > 0 {
+		WriteConflict(w, "Cannot delete items currently being processed", 
+			fmt.Sprintf("%d items are currently being processed", processedCount))
+		return
+	}
+
+	// Remove from queue in bulk
+	err := s.queueRepo.RemoveFromQueueBulk(request.IDs)
+	if err != nil {
+		WriteInternalError(w, "Failed to delete queue items", err.Error())
+		return
+	}
+
+	response := map[string]interface{}{
+		"deleted_count": len(request.IDs),
+		"message":       fmt.Sprintf("Successfully deleted %d queue items", len(request.IDs)),
 	}
 
 	WriteSuccess(w, response, nil)

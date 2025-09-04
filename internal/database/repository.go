@@ -396,6 +396,39 @@ func (r *Repository) RemoveFromQueue(id int64) error {
 	return nil
 }
 
+// RemoveFromQueueBulk removes multiple items from the queue
+func (r *Repository) RemoveFromQueueBulk(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s)`, strings.Join(placeholders, ","))
+
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to remove items from queue: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no queue items found to delete")
+	}
+
+	return nil
+}
+
 // GetQueueStats retrieves current queue statistics
 func (r *Repository) GetQueueStats() (*QueueStats, error) {
 	// Update stats from actual queue data

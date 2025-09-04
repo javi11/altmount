@@ -11,7 +11,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
@@ -22,6 +22,7 @@ import {
 	useAddHealthCheck,
 	useCancelHealthCheck,
 	useCleanupHealth,
+	useDeleteBulkHealthItems,
 	useDeleteHealthItem,
 	useDirectHealthCheck,
 	useHealth,
@@ -46,6 +47,7 @@ export function HealthPage() {
 	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
 	const [userInteracting, setUserInteracting] = useState(false);
 	const [countdown, setCountdown] = useState(0);
+	const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
 	const pageSize = 20;
 	const {
@@ -63,6 +65,7 @@ export function HealthPage() {
 	const { data: stats } = useHealthStats();
 	const { data: workerStatus } = useHealthWorkerStatus();
 	const deleteItem = useDeleteHealthItem();
+	const deleteBulkItems = useDeleteBulkHealthItems();
 	const cleanupHealth = useCleanupHealth();
 	const addHealthCheck = useAddHealthCheck();
 	const directHealthCheck = useDirectHealthCheck();
@@ -225,6 +228,66 @@ export function HealthPage() {
 		setNextRefreshTime(null);
 	};
 
+	// Multi-select handlers
+	const handleSelectItem = (filePath: string, checked: boolean) => {
+		setSelectedItems(prev => {
+			const newSet = new Set(prev);
+			if (checked) {
+				newSet.add(filePath);
+			} else {
+				newSet.delete(filePath);
+			}
+			return newSet;
+		});
+	};
+
+	const handleSelectAll = (checked: boolean) => {
+		if (checked && data) {
+			setSelectedItems(new Set(data.map(item => item.file_path)));
+		} else {
+			setSelectedItems(new Set());
+		}
+	};
+
+	const handleBulkDelete = async () => {
+		if (selectedItems.size === 0) return;
+		
+		const confirmed = await confirmAction(
+			"Delete Selected Health Records",
+			`Are you sure you want to delete ${selectedItems.size} selected health records? The actual file won´t be deleted.`,
+			{
+				type: "warning",
+				confirmText: "Delete Selected",
+				confirmButtonClass: "btn-error",
+			}
+		);
+		
+		if (confirmed) {
+			try {
+				const filePaths = Array.from(selectedItems);
+				await deleteBulkItems.mutateAsync(filePaths);
+				setSelectedItems(new Set());
+				showToast({
+					title: "Success",
+					message: `Successfully deleted ${filePaths.length} health records`,
+					type: "success"
+				});
+			} catch (error) {
+				console.error("Failed to delete selected health records:", error);
+				showToast({
+					title: "Error",
+					message: "Failed to delete selected health records",
+					type: "error"
+				});
+			}
+		}
+	};
+
+	// Clear selection when page changes or filters change
+	const clearSelection = useCallback(() => {
+		setSelectedItems(new Set());
+	}, []);
+
 	// Pause auto-refresh during user interactions
 	const handleUserInteractionStart = () => {
 		setUserInteracting(true);
@@ -241,6 +304,10 @@ export function HealthPage() {
 
 	const data = healthResponse?.data;
 	const meta = healthResponse?.meta;
+
+	// Helper functions for select all checkbox state
+	const isAllSelected = data && data.length > 0 && data.every(item => selectedItems.has(item.file_path));
+	const isIndeterminate = data && selectedItems.size > 0 && !isAllSelected;
 
 	// Update next refresh time when auto-refresh is enabled
 	useEffect(() => {
@@ -290,6 +357,11 @@ export function HealthPage() {
 			setPage(0);
 		}
 	}, [searchTerm]);
+
+	// Clear selection when page or search changes
+	useEffect(() => {
+		clearSelection();
+	}, [clearSelection]);
 
 	if (error) {
 		return (
@@ -458,16 +530,62 @@ export function HealthPage() {
 				</div>
 			</div>
 
+			{/* Bulk Actions Toolbar */}
+			{selectedItems.size > 0 && (
+				<div className="card bg-base-100 shadow-lg">
+					<div className="card-body">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-4">
+								<span className="font-semibold text-sm">
+									{selectedItems.size} record{selectedItems.size !== 1 ? 's' : ''} selected
+								</span>
+								<button
+									type="button"
+									className="btn btn-ghost btn-sm"
+									onClick={() => setSelectedItems(new Set())}
+								>
+									Clear Selection
+								</button>
+							</div>
+							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									className="btn btn-error btn-sm"
+									onClick={handleBulkDelete}
+									disabled={deleteBulkItems.isPending}
+								>
+									<Trash2 className="h-4 w-4" />
+									Delete Selected
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
 			{/* Health Table */}
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body p-0">
 					{isLoading ? (
-						<LoadingTable columns={6} />
+						<LoadingTable columns={7} />
 					) : data && data.length > 0 ? (
 						<div>
 							<table className="table-zebra table">
 								<thead>
 									<tr>
+										<th className="w-12">
+											<label className="cursor-pointer">
+												<input
+													type="checkbox"
+													className="checkbox"
+													checked={isAllSelected}
+													ref={(input) => {
+														if (input) input.indeterminate = Boolean(isIndeterminate);
+													}}
+													onChange={(e) => handleSelectAll(e.target.checked)}
+												/>
+											</label>
+										</th>
 										<th>File Path</th>
 										<th>Source NZB</th>
 										<th>Status</th>
@@ -478,7 +596,20 @@ export function HealthPage() {
 								</thead>
 								<tbody>
 									{data.map((item: FileHealth) => (
-										<tr key={item.id} className="hover">
+										<tr 
+											key={item.id} 
+											className={`hover ${selectedItems.has(item.file_path) ? "bg-base-200" : ""}`}
+										>
+											<td>
+												<label className="cursor-pointer">
+													<input
+														type="checkbox"
+														className="checkbox"
+														checked={selectedItems.has(item.file_path)}
+														onChange={(e) => handleSelectItem(item.file_path, e.target.checked)}
+													/>
+												</label>
+											</td>
 											<td>
 												<div className="flex items-center space-x-3">
 													<Heart className="h-4 w-4 text-primary" />
