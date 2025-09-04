@@ -10,6 +10,7 @@ export function LoginPage() {
 	const [userCount, setUserCount] = useState<number>(0);
 	const [isLoading, setIsLoading] = useState(true);
 	const [showRegister, setShowRegister] = useState(false);
+	const [hasConnectionError, setHasConnectionError] = useState(false);
 
 	// Check registration status on mount
 	useEffect(() => {
@@ -18,12 +19,16 @@ export function LoginPage() {
 				const status = await checkRegistrationStatus();
 				setRegistrationEnabled(status.registration_enabled);
 				setUserCount(status.user_count);
+				setHasConnectionError(false);
 				// If no users exist, show registration form by default
 				if (status.user_count === 0) {
 					setShowRegister(true);
 				}
 			} catch (error) {
 				console.error("Failed to check registration status:", error);
+				setHasConnectionError(true);
+				// On connection error, default to login form (assume users exist)
+				setShowRegister(false);
 			} finally {
 				setIsLoading(false);
 			}
@@ -56,15 +61,17 @@ export function LoginPage() {
 						{showRegister ? "Create Admin Account" : "Sign in to Altmount"}
 					</h2>
 					<p className="mt-2 text-gray-600 text-sm">
-						{showRegister
-							? "Set up your administrator account to get started"
-							: userCount === 0
-								? "No users found - please create an admin account"
-								: "Enter your credentials to continue"}
+						{hasConnectionError
+							? "Cannot connect to server - please check your connection"
+							: showRegister
+								? "Set up your administrator account to get started"
+								: userCount === 0
+									? "No users found - please create an admin account"
+									: "Enter your credentials to continue"}
 					</p>
 				</div>
 
-				{userCount === 0 || showRegister ? (
+				{!hasConnectionError && (userCount === 0 || showRegister) ? (
 					// Registration form (only for first user)
 					<div>
 						<RegisterForm
@@ -111,11 +118,26 @@ export function LoginPage() {
 				)}
 
 				<div className="text-center text-gray-500 text-xs">
-					<p>By signing in, you agree to use this application responsibly.</p>
-					{userCount === 0 && (
-						<p className="mt-1 text-blue-600">
-							The first user will automatically receive administrator privileges.
-						</p>
+					{hasConnectionError ? (
+						<div className="space-y-2">
+							<p className="text-red-600">Connection to server failed.</p>
+							<button
+								type="button"
+								onClick={() => window.location.reload()}
+								className="text-blue-600 hover:text-blue-500"
+							>
+								Retry connection
+							</button>
+						</div>
+					) : (
+						<>
+							<p>By signing in, you agree to use this application responsibly.</p>
+							{userCount === 0 && (
+								<p className="mt-1 text-blue-600">
+									The first user will automatically receive administrator privileges.
+								</p>
+							)}
+						</>
 					)}
 				</div>
 			</div>

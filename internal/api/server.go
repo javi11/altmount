@@ -203,6 +203,7 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("POST /auth/login", s.handleDirectLogin)
 		apiMux.HandleFunc("POST /auth/register", s.handleRegister)
 		apiMux.HandleFunc("GET /auth/registration-status", s.handleCheckRegistration)
+		apiMux.HandleFunc("POST /auth/generate-initial-api-key", s.handleGenerateInitialAPIKey)
 
 		// Protected API endpoints for user management (require authentication)
 		tokenService := s.authService.TokenService()
