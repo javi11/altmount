@@ -97,6 +97,9 @@ jobs:
             cc: zig cc -target x86_64-windows-gnu
     steps:
       # dependencies
+      - uses: mlugg/setup-zig@v2
+        if: matrix.cc != ''
+
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.5
