@@ -647,6 +647,27 @@ func (m *Manager) SaveConfig() error {
 	return SaveToFile(config, m.configFile)
 }
 
+// isRunningInDocker detects if the application is running inside a Docker container
+func isRunningInDocker() bool {
+	// Check for the presence of /.dockerenv file (most reliable method)
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+
+	// Fallback: check /proc/self/cgroup for container indicators
+	if data, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		content := string(data)
+		// Look for Docker container indicators in cgroup
+		if strings.Contains(content, "/docker/") ||
+			strings.Contains(content, "/docker-") ||
+			strings.Contains(content, ".scope") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // DefaultConfig returns a config with default values
 func DefaultConfig() *Config {
 	healthCheckEnabled := true
@@ -654,6 +675,15 @@ func DefaultConfig() *Config {
 	vfsEnabled := false
 	sabnzbdEnabled := false
 	scrapperEnabled := false
+
+	// Set paths based on whether we're running in Docker
+	dbPath := "./altmount.db"
+	metadataPath := "./metadata"
+
+	if isRunningInDocker() {
+		dbPath = "/config/altmount.db"
+		metadataPath = "/metadata"
+	}
 
 	return &Config{
 		WebDAV: WebDAVConfig{
@@ -665,10 +695,10 @@ func DefaultConfig() *Config {
 			Prefix: "/api",
 		},
 		Database: DatabaseConfig{
-			Path: "altmount.db",
+			Path: dbPath,
 		},
 		Metadata: MetadataConfig{
-			RootPath: "./metadata",
+			RootPath: metadataPath,
 		},
 		Streaming: StreamingConfig{
 			MaxRangeSize:       33554432, // 32MB - Maximum range size for a single request
