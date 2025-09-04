@@ -27,7 +27,7 @@ import (
 
 // For development, serve static files from disk
 // In production, these would be embedded
-var frontendBuildPath = "../../frontend/dist"
+var frontendBuildPath = "./frontend/dist"
 
 // getEffectiveLogLevel returns the effective log level, preferring new config over legacy
 func getEffectiveLogLevel(newLevel, legacyLevel string) string {
@@ -325,7 +325,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := healthWorker.Start(ctx); err != nil {
 			logger.Error("Failed to start health worker", "error", err)
 		} else {
-			logger.Info("Health worker started", "enabled", cfg.Health.Enabled)
+			logger.Info("Health worker started", "enabled", *cfg.Health.Enabled)
 		}
 	} else {
 		logger.Info("Health worker is disabled in configuration")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -751,22 +752,42 @@ func SaveToFile(config *Config, filename string) error {
 func LoadConfig(configFile string) (*Config, error) {
 	config := DefaultConfig()
 
+	var targetConfigFile string
 	if configFile != "" {
 		viper.SetConfigFile(configFile)
+		targetConfigFile = configFile
 	} else {
 		// Look for config file in common locations
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
+		targetConfigFile = "config.yaml"
 	}
 
 	// Read the configuration file
 	if err := viper.ReadInConfig(); err != nil {
-		if configFile != "" {
-			// If a specific config file was provided but couldn't be read, return error
-			return nil, fmt.Errorf("error reading config file %s: %w", configFile, err)
+		// Check if it's a file not found error
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
+			// Create default config file
+			if err := SaveToFile(config, targetConfigFile); err != nil {
+				return nil, fmt.Errorf("failed to create default config file %s: %w", targetConfigFile, err)
+			}
+			
+			// Log that we created a default config
+			fmt.Printf("Created default configuration file: %s\n", targetConfigFile)
+			fmt.Printf("Please review and modify the configuration as needed.\n")
+			
+			// Now try to read the newly created file
+			viper.SetConfigFile(targetConfigFile)
+			if err := viper.ReadInConfig(); err != nil {
+				return nil, fmt.Errorf("error reading newly created config file %s: %w", targetConfigFile, err)
+			}
+		} else {
+			// Other error (permissions, syntax, etc.)
+			if configFile != "" {
+				return nil, fmt.Errorf("error reading config file %s: %w", configFile, err)
+			}
+			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
-		// No config file found - return helpful error
-		return nil, fmt.Errorf("no configuration file found. Please create config.yaml or use --config flag")
 	}
 
 	// Unmarshal the config
