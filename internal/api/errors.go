@@ -63,7 +63,7 @@ func WriteError(w http.ResponseWriter, statusCode int, code, message, details st
 		// Fallback to plain text if JSON encoding fails
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Internal server error"))
+		_, _ = w.Write([]byte("Internal server error"))
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"time"
 
@@ -242,8 +243,7 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		// Refresh cache asynchronously to avoid blocking health checks
 		err := hc.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
 		if err != nil {
-			// Log warning but don't fail the health check
-			// This would need a logger reference, but we'll rely on higher-level logging
+			slog.Error("Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
 		}
 	}()
 }

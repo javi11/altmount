@@ -76,7 +76,6 @@ type TestConnectionRequest struct {
 	APIKey string `json:"api_key"`
 }
 
-
 // handleListArrsInstances returns all arrs instances
 func (s *Server) handleListArrsInstances(w http.ResponseWriter, r *http.Request) {
 	if s.arrsService == nil {
@@ -100,7 +99,7 @@ func (s *Server) handleListArrsInstances(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleGetArrsInstance returns a single arrs instance by type and name
@@ -135,7 +134,7 @@ func (s *Server) handleGetArrsInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleCreateArrsInstance creates a new arrs instance (now deprecated - use config instead)
@@ -181,7 +180,7 @@ func (s *Server) handleTestArrsConnection(w http.ResponseWriter, r *http.Request
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 		return
 	}
 
@@ -190,9 +189,8 @@ func (s *Server) handleTestArrsConnection(w http.ResponseWriter, r *http.Request
 		"message": "Connection successful",
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
-
 
 // handleGetArrsStats returns arrs statistics
 func (s *Server) handleGetArrsStats(w http.ResponseWriter, r *http.Request) {
@@ -207,12 +205,13 @@ func (s *Server) handleGetArrsStats(w http.ResponseWriter, r *http.Request) {
 	// Calculate stats from instances
 	var totalRadarr, enabledRadarr, totalSonarr, enabledSonarr int
 	for _, instance := range instances {
-		if instance.Type == "radarr" {
+		switch instance.Type {
+		case "radarr":
 			totalRadarr++
 			if instance.Enabled {
 				enabledRadarr++
 			}
-		} else if instance.Type == "sonarr" {
+		case "sonarr":
 			totalSonarr++
 			if instance.Enabled {
 				enabledSonarr++
@@ -231,7 +230,7 @@ func (s *Server) handleGetArrsStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleSearchMovies searches for movies (deprecated - no longer stored in database)
@@ -245,4 +244,3 @@ func (s *Server) handleSearchEpisodes(w http.ResponseWriter, r *http.Request) {
 	// Episodes are no longer stored in database with configuration-first approach
 	http.Error(w, "Episode search is no longer supported. Scraped data is not stored in database.", http.StatusMethodNotAllowed)
 }
-

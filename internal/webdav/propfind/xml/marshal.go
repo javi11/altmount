@@ -1030,7 +1030,7 @@ func (p *printer) marshalStruct(tinfo *typeInfo, val reflect.Value) error {
 				return err
 			}
 			k := vf.Kind()
-			if !(k == reflect.String || k == reflect.Slice && vf.Type().Elem().Kind() == reflect.Uint8) {
+			if k != reflect.String && (k != reflect.Slice || vf.Type().Elem().Kind() != reflect.Uint8) {
 				return fmt.Errorf("xml: bad type for comment field of %s", val.Type())
 			}
 			if vf.Len() == 0 {

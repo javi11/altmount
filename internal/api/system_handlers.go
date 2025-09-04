@@ -57,7 +57,7 @@ func (s *Server) handleGetSystemHealth(w http.ResponseWriter, r *http.Request) {
 			Data:    healthCheck,
 		}
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 

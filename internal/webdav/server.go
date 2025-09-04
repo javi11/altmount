@@ -122,14 +122,15 @@ func NewServer(
 		r = r.WithContext(context.WithValue(r.Context(), utils.Origin, r.RequestURI))
 
 		// Log MOVE and COPY operations to understand client behavior
-		if r.Method == "MOVE" {
+		switch r.Method {
+		case "MOVE":
 			destination := r.Header.Get("Destination")
 			slog.InfoContext(r.Context(), "WebDAV MOVE operation",
 				"source", r.RequestURI,
 				"destination", destination,
 				"overwrite", r.Header.Get("Overwrite"),
 				"user_agent", r.Header.Get("User-Agent"))
-		} else if r.Method == "COPY" {
+		case "COPY":
 			destination := r.Header.Get("Destination")
 			slog.InfoContext(r.Context(), "WebDAV COPY operation",
 				"source", r.RequestURI,

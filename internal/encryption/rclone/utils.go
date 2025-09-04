@@ -3,8 +3,6 @@ package rclone
 import (
 	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -45,31 +43,4 @@ func DecryptedSize(size int64) (int64, error) {
 	}
 	decryptedSize += residue
 	return decryptedSize, nil
-}
-
-func getEncryptedFileSize(metadata map[string]string) (int64, error) {
-	size, ok := metadata["cipher_file_size"]
-	if !ok {
-		return 0, ErrMissingEncryptedFileSize
-	}
-
-	return strconv.ParseInt(size, 10, 64)
-}
-
-func getPassword(metadata map[string]string) (string, error) {
-	password, ok := metadata["password"]
-	if !ok {
-		return "", ErrMissingPassword
-	}
-
-	return url.QueryUnescape(password)
-}
-
-func getSalt(metadata map[string]string) (string, error) {
-	salt, ok := metadata["salt"]
-	if !ok {
-		return "", ErrMissingSalt
-	}
-
-	return url.QueryUnescape(salt)
 }

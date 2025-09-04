@@ -121,7 +121,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	} else {
 		logger.Info("Starting server without NNTP providers - configure via API to enable downloads")
 	}
-	defer poolManager.ClearPool()
+	defer func() {
+		_ = poolManager.ClearPool()
+	}()
 
 	// Create rclone client for VFS notifications (if configured)
 	var rcloneClient rclonecli.RcloneRcClient
@@ -155,7 +157,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Error("failed to init NZB system", "err", err)
 		return err
 	}
-	defer nsys.Close()
+	defer func() {
+		_ = nsys.Close()
+	}()
 
 	// Create shared HTTP mux
 	mux := http.NewServeMux()
