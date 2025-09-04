@@ -16,7 +16,6 @@ interface NewInstanceForm {
 	url: string;
 	api_key: string;
 	enabled: boolean;
-	sync_interval_hours: number;
 }
 
 const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
@@ -25,7 +24,6 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 	url: "",
 	api_key: "",
 	enabled: true,
-	sync_interval_hours: 24,
 };
 
 export function ArrsConfigSection({
@@ -40,7 +38,6 @@ export function ArrsConfigSection({
 	const [newInstance, setNewInstance] = useState<NewInstanceForm>(DEFAULT_NEW_INSTANCE);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
-	const [expandedInstances, setExpandedInstances] = useState<Record<string, boolean>>({});
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -53,11 +50,6 @@ export function ArrsConfigSection({
 		const errors: string[] = [];
 
 		if (data.enabled) {
-			// Validate default interval
-			if (data.default_interval_hours <= 0) {
-				errors.push("Default sync interval must be greater than 0 hours");
-			}
-
 			// Validate mount path
 			if (!data.mount_path.trim()) {
 				errors.push("Mount path is required when arrs is enabled");
@@ -103,12 +95,6 @@ export function ArrsConfigSection({
 
 				if (!instance.api_key.trim()) {
 					errors.push(`${instanceType} instance "${instance.name}": API key is required`);
-				}
-
-				if (instance.sync_interval_hours <= 0) {
-					errors.push(
-						`${instanceType} instance "${instance.name}": Sync interval must be greater than 0 hours`,
-					);
 				}
 			});
 		}
@@ -166,7 +152,6 @@ export function ArrsConfigSection({
 				url: newInstance.url,
 				api_key: newInstance.api_key,
 				enabled: newInstance.enabled,
-				sync_interval_hours: newInstance.sync_interval_hours,
 			},
 		];
 
@@ -198,17 +183,10 @@ export function ArrsConfigSection({
 		}));
 	};
 
-	const toggleInstanceExpanded = (instanceKey: string) => {
-		setExpandedInstances((prev) => ({
-			...prev,
-			[instanceKey]: !prev[instanceKey],
-		}));
-	};
 
 	const renderInstance = (instance: ArrsInstanceConfig, type: ArrsType, index: number) => {
 		const instanceId = `${type}-${index}`; // Use index-based key for UI state
 		const isApiKeyVisible = showApiKeys[instanceId] || false;
-		const isExpanded = expandedInstances[instanceId] || false;
 
 		return (
 			<ArrsInstanceCard
@@ -218,9 +196,7 @@ export function ArrsConfigSection({
 				index={index}
 				isReadOnly={isReadOnly}
 				isApiKeyVisible={isApiKeyVisible}
-				isExpanded={isExpanded}
 				onToggleApiKey={() => toggleApiKeyVisibility(instanceId)}
-				onToggleExpanded={() => toggleInstanceExpanded(instanceId)}
 				onRemove={() => removeInstance(type, index)}
 				onInstanceChange={(field, value) => handleInstanceChange(type, index, field, value)}
 			/>
@@ -236,7 +212,7 @@ export function ArrsConfigSection({
 						<div>
 							<h3 className="font-semibold">Enable Arrs Service</h3>
 							<p className="text-base-content/70 text-sm">
-								Enable automatic syncing of Radarr and Sonarr instances for file indexing. This will enable file redownloading feature in case is corrupted.
+								Enable health monitoring and file repair for Radarr and Sonarr instances. This allows automatic detection and repair of corrupted files.
 							</p>
 						</div>
 						<input
@@ -257,25 +233,6 @@ export function ArrsConfigSection({
 						<h3 className="mb-4 font-semibold">Default Settings</h3>
 
 						<div className="space-y-4">
-							<fieldset className="fieldset max-w-md">
-								<legend className="fieldset-legend">Default Sync Interval (hours)</legend>
-								<input
-									type="number"
-									className="input"
-									value={formData.default_interval_hours}
-									onChange={(e) =>
-										handleFormChange(
-											"default_interval_hours",
-											Number.parseInt(e.target.value, 10) || 24,
-										)
-									}
-									min="1"
-									max="168"
-									disabled={isReadOnly}
-								/>
-								<p className="label">Default interval for new instances (1-168 hours)</p>
-							</fieldset>
-
 							<fieldset className="fieldset max-w-md">
 								<legend className="fieldset-legend">WebDAV Mount Path</legend>
 								<input
@@ -404,23 +361,6 @@ export function ArrsConfigSection({
 									value={newInstance.api_key}
 									onChange={(e) => setNewInstance((prev) => ({ ...prev, api_key: e.target.value }))}
 									placeholder="API key from settings"
-								/>
-							</fieldset>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Sync Interval (hours)</legend>
-								<input
-									type="number"
-									className="input"
-									value={newInstance.sync_interval_hours}
-									onChange={(e) =>
-										setNewInstance((prev) => ({
-											...prev,
-											sync_interval_hours: Number.parseInt(e.target.value, 10) || 24,
-										}))
-									}
-									min="1"
-									max="168"
 								/>
 							</fieldset>
 
