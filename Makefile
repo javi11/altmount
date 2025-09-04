@@ -77,3 +77,15 @@ snapshot:
 .PHONY: publish
 publish:
 	goreleaser --rm-dist
+
+.PHONY: docker-build
+docker-build:
+	docker build -f docker/Dockerfile -t altmount:latest .
+
+.PHONY: docker-build-ci
+docker-build-ci: build-frontend
+	docker build -f docker/Dockerfile.ci -t altmount:ci-latest .
+
+.PHONY: build-frontend
+build-frontend:
+	cd frontend && bun install --frozen-lockfile && bun run build
