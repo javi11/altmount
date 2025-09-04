@@ -1,3 +1,5 @@
+//go:build cli
+
 package frontend
 
 import (
@@ -8,7 +10,7 @@ import (
 //go:embed all:dist
 var EmbeddedFS embed.FS
 
-// GetBuildFS returns the embedded build filesystem
+// GetBuildFS returns the embedded build filesystem for CLI builds
 func GetBuildFS() (fs.FS, error) {
-	return fs.Sub(EmbeddedFS, "build")
+	return fs.Sub(EmbeddedFS, "dist")
 }

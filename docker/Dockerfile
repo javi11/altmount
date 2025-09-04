@@ -46,7 +46,7 @@ COPY ./internal ./internal
 COPY ./cmd ./cmd
 
 # Copy built frontend from previous stage
-COPY --from=frontend-builder /app/frontend/build ./frontend/build
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Build web binary with enhanced cache mount for native architecture
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \

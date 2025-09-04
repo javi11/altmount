@@ -27,7 +27,7 @@ import (
 
 // For development, serve static files from disk
 // In production, these would be embedded
-var frontendBuildPath = "../../frontend/build"
+var frontendBuildPath = "../../frontend/dist"
 
 // getEffectiveLogLevel returns the effective log level, preferring new config over legacy
 func getEffectiveLogLevel(newLevel, legacyLevel string) string {
