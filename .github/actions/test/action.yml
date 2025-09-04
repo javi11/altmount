@@ -16,15 +16,24 @@ runs:
       with:
         go-version: '1.24.5' # Pinned version
     
+    - name: Get Go cache paths
+      shell: bash
+      id: go-cache-paths
+      run: |
+        echo "go-build=$(go env GOCACHE)" >> $GITHUB_OUTPUT
+        echo "go-mod=$(go env GOMODCACHE)" >> $GITHUB_OUTPUT
+    
     - name: Cache Go modules
       uses: actions/cache@v4
+      continue-on-error: true
       with:
         path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-        key: go-mod-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}
+          ${{ steps.go-cache-paths.outputs.go-mod }}
+          ${{ steps.go-cache-paths.outputs.go-build }}
+        key: go-cache-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-go1.24.5
         restore-keys: |
-          go-mod-${{ runner.os }}-
+          go-cache-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-
+          go-cache-${{ runner.os }}-
     
     - name: Go info
       shell: bash

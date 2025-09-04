@@ -93,12 +93,8 @@ jobs:
           # Windows builds
           - goos: windows
             goarch: amd64
-            runner: windows-latest
-            cc: ""
-          - goos: windows
-            goarch: arm64
-            runner: windows-latest
-            cc: ""
+            runner: ubuntu-latest
+            cc: zig cc -target x86_64-windows-gnu
     steps:
       # dependencies
       - uses: actions/setup-go@v5

@@ -53,7 +53,7 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/tmp/go-build-cache,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
-    go build -a -ldflags '-linkmode external -extldflags "-static"' -o altmount cmd/web/main.go
+    go build -a -ldflags '-linkmode external -extldflags "-static"' -o altmount cmd/altmount/main.go
 
 # Final stage - use architecture-specific base image with conditional selection
 ARG TARGETARCH
