@@ -168,60 +168,6 @@ func (s *Server) handleDeleteHealth(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, response, nil)
 }
 
-// handleRetryHealth handles POST /api/health/{id}/retry
-func (s *Server) handleRetryHealth(w http.ResponseWriter, r *http.Request) {
-	// Extract ID from path parameter
-	filePath := r.PathValue("id")
-	if filePath == "" {
-		WriteBadRequest(w, "Health record identifier is required", "")
-		return
-	}
-
-	// Parse request body
-	var req HealthRetryRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteBadRequest(w, "Invalid request body", err.Error())
-			return
-		}
-	}
-
-	// Check if item exists
-	item, err := s.healthRepo.GetFileHealth(filePath)
-	if err != nil {
-		WriteInternalError(w, "Failed to check health record", err.Error())
-		return
-	}
-
-	if item == nil {
-		WriteNotFound(w, "Health record not found", "")
-		return
-	}
-
-	// Only allow retry of corrupted or partial files
-	if item.Status != database.HealthStatusCorrupted && item.Status != database.HealthStatusPartial {
-		WriteConflict(w, "Can only retry corrupted or partial files", "Current status: "+string(item.Status))
-		return
-	}
-
-	// Reset the file to healthy status to allow retry
-	err = s.healthRepo.UpdateFileHealth(filePath, database.HealthStatusHealthy, nil, item.SourceNzbPath, nil)
-	if err != nil {
-		WriteInternalError(w, "Failed to reset health record", err.Error())
-		return
-	}
-
-	// Get updated item
-	updatedItem, err := s.healthRepo.GetFileHealth(filePath)
-	if err != nil {
-		WriteInternalError(w, "Failed to retrieve updated health record", err.Error())
-		return
-	}
-
-	response := ToHealthItemResponse(updatedItem)
-	WriteSuccess(w, response, nil)
-}
-
 // handleRepairHealth handles POST /api/health/{id}/repair
 func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
 	// Extract ID from path parameter
@@ -273,7 +219,7 @@ func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
 	// Try to repair using the first available media file
 	// (in practice, a file path should only be associated with one ARR instance)
 	mediaFile := mediaFiles[0]
-	
+
 	// Trigger repair through ARR service
 	ctx := r.Context()
 	err = s.arrsService.TriggerFileRescan(ctx, mediaFile.InstanceType, mediaFile.InstanceName, &mediaFile)

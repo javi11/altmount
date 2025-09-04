@@ -7,13 +7,13 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/altmount/internal/arrs"
 )
 
 // Config represents API server configuration
@@ -130,7 +130,6 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	apiMux.HandleFunc("GET /health", s.handleListHealth)
 	apiMux.HandleFunc("GET /health/{id}", s.handleGetHealth)
 	apiMux.HandleFunc("DELETE /health/{id}", s.handleDeleteHealth)
-	apiMux.HandleFunc("POST /health/{id}/retry", s.handleRetryHealth)
 	apiMux.HandleFunc("POST /health/{id}/repair", s.handleRepairHealth)
 	apiMux.HandleFunc("GET /health/corrupted", s.handleListCorrupted)
 	apiMux.HandleFunc("GET /health/stats", s.handleGetHealthStats)
