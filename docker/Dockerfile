@@ -40,10 +40,11 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     go mod download
 
 # Copy source code in optimal order for caching
-COPY ./frontend/embed.go ./frontend/embed.go
 COPY ./pkg ./pkg
 COPY ./internal ./internal
 COPY ./cmd ./cmd
+COPY ./frontend/embed_cli.go ./frontend/embed_cli.go
+COPY ./frontend/embed_docker.go ./frontend/embed_docker.go
 
 # Copy built frontend from previous stage
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
