@@ -39,6 +39,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Install Bun for frontend build
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      # Cache frontend dependencies
+      - name: Cache frontend dependencies
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: frontend-deps-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}
+          restore-keys: |
+            frontend-deps-${{ runner.os }}-
+
+      # Install frontend dependencies
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      # Build frontend for embedding
+      - name: Build frontend
+        working-directory: frontend
+        run: bun run build
+
       # build CLI
       - name: Build CLI artifacts
         uses: goreleaser/goreleaser-action@v6

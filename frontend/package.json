@@ -22,6 +22,7 @@
 		"react-hook-form": "^7.62.0",
 		"react-router-dom": "^7.8.1",
 		"recharts": "^3.1.2",
+		"webdav": "^5.8.0",
 		"zod": "^4.0.17"
 	},
 	"devDependencies": {
