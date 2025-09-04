@@ -30,10 +30,10 @@ func TestStrmParser_ParseStrmFile(t *testing.T) {
 		},
 		{
 			name:               "valid NXG link without encryption",
-			strmContent:        `nxglnk://?h=TzlIY1lxNVFNQ0MyOXE6NjYyMzow&chunk_size=1048576&file_size=1000000&name=test_file.mkv`,
+			strmContent:        `nxglnk://?h=TzlIY1lxNVFNQ0MyOXE6NjYyMzow&chunk_size=1048576&file_size=6944718848&name=test_file.mkv`,
 			expectError:        false,
 			expectedFilename:   "test_file.mkv",
-			expectedSize:       1000000,
+			expectedSize:       6944718848,
 			expectedEncryption: "none",
 		},
 		{
@@ -80,19 +80,19 @@ func TestStrmParser_ParseStrmFile(t *testing.T) {
 			name: "STRM file with comments and blank lines",
 			strmContent: `# This is a comment
 
-nxglnk://?h=TzlIY1lxNVFNQ0MyOXE6NjYyMzow&chunk_size=1048576&file_size=1000000&name=test_file.mkv
+nxglnk://?h=TzlIY1lxNVFNQ0MyOXE6NjYyMzow&chunk_size=1048576&file_size=6944718848&name=test_file.mkv
 # Another comment`,
 			expectError:        false,
 			expectedFilename:   "test_file.mkv",
-			expectedSize:       1000000,
+			expectedSize:       6944718848,
 			expectedEncryption: "none",
 		},
 		{
 			name:               "RAR file detection",
-			strmContent:        `nxglnk://?h=TzlIY1lxNVFNQ0MyOXE6NjYyMzow&chunk_size=1048576&file_size=1000000&name=test_archive.rar`,
+			strmContent:        `nxglnk://?h=TzlIY1lxNVFNQ0MyOXE6NjYyMzow&chunk_size=1048576&file_size=6944718848&name=test_archive.rar`,
 			expectError:        false,
 			expectedFilename:   "test_archive.rar",
-			expectedSize:       1000000,
+			expectedSize:       6944718848,
 			expectedEncryption: "none",
 		},
 	}

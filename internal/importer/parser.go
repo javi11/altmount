@@ -210,6 +210,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 			SegmentSize: int64(seg.Bytes),
 		}
 	}
+
 	// Calculate total size using the sophisticated logic
 	totalSize, err := p.calculateFileSize(file)
 	if err != nil {
