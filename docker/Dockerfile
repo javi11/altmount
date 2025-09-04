@@ -84,24 +84,13 @@ RUN mkdir -p /config /metadata && \
 # Create the entrypoint script for web mode (optimized for both architectures)
 RUN mkdir -p /etc/services.d/altmount && \
     echo '#!/usr/bin/with-contenv bash\n\
-\n\
-# Ensure proper user/group setup\n\
-if [ ! "$(id -u abc 2>/dev/null)" = "$PUID" ]; then\n\
-    usermod -o -u "$PUID" abc 2>/dev/null || true\n\
-fi\n\
-if [ ! "$(id -g abc 2>/dev/null)" = "$PGID" ]; then\n\
-    groupmod -o -g "$PGID" abc 2>/dev/null || true\n\
-fi\n\
-\n\
-# Ensure directories exist and have proper ownership\n\
-mkdir -p /config /metadata\n\
-chown -R abc:abc /app /config /metadata\n\
-chmod -R 755 /config /metadata\n\
-\n\
-# Set proper permissions on the altmount binary\n\
+set -euo pipefail\n\
+mkdir -p /config /metadata || true\n\
+# Best effort ownership (may already be correct)\n\
+chown -R abc:abc /config /metadata 2>/dev/null || true\n\
+chmod -R 755 /config /metadata 2>/dev/null || true\n\
 chmod +x /app/altmount\n\
-\n\
-# Run the application as the abc user\n\
+echo "[altmount] starting server"\n\
 exec s6-setuidgid abc /app/altmount serve --config=/config/config.yaml\n\
 ' > /etc/services.d/altmount/run && \
     chmod +x /etc/services.d/altmount/run
