@@ -46,7 +46,6 @@ type WorkerStats struct {
 type HealthWorker struct {
 	healthChecker   *HealthChecker
 	healthRepo      *database.HealthRepository
-	mediaRepo       *database.MediaRepository
 	metadataService *metadata.MetadataService
 	arrsService     *arrs.Service
 	configGetter    config.ConfigGetter
@@ -73,7 +72,6 @@ type HealthWorker struct {
 func NewHealthWorker(
 	healthChecker *HealthChecker,
 	healthRepo *database.HealthRepository,
-	mediaRepo *database.MediaRepository,
 	metadataService *metadata.MetadataService,
 	arrsService *arrs.Service,
 	configGetter config.ConfigGetter,
@@ -82,7 +80,6 @@ func NewHealthWorker(
 	return &HealthWorker{
 		healthChecker:   healthChecker,
 		healthRepo:      healthRepo,
-		mediaRepo:       mediaRepo,
 		metadataService: metadataService,
 		arrsService:     arrsService,
 		configGetter:    configGetter,
@@ -537,7 +534,7 @@ func (hw *HealthWorker) processRepairNotification(ctx context.Context, fileHealt
 	hw.logger.Info("Notifying ARRs for repair", "file_path", fileHealth.FilePath, "source_nzb", fileHealth.SourceNzbPath)
 
 	// Use triggerFileRepair to handle the actual ARR notification logic
-	// This will check if the file exists in media_files and trigger repair if available
+	// This will directly query ARR APIs to find which instance manages this file
 	err := hw.triggerFileRepair(ctx, fileHealth.FilePath, nil)
 	if err != nil {
 		// If triggerFileRepair fails, increment repair retry count for later retry
@@ -712,7 +709,7 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 }
 
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file
-// It uses media files to determine the ARR instance and notifies the appropriate service
+// It directly queries ARR APIs to find which instance manages the file and triggers repair
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string) error {
 	// Check if auto-repair is enabled in configuration
 	cfg := hw.configGetter()
@@ -721,62 +718,25 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
 	}
 
-	// Get media file information to determine which ARR instance to notify
-	mediaFiles, err := hw.mediaRepo.GetMediaFilesByPath(filePath)
+	hw.logger.Info("Triggering file repair using direct ARR API approach", "file_path", filePath)
+
+	// Try to trigger rescan through the ARR service
+	// The service will determine which instance manages this file
+	err := hw.arrsService.TriggerFileRescan(ctx, filePath)
 	if err != nil {
-		hw.logger.Warn("Failed to get media files for repair", "file_path", filePath, "error", err)
-		// If we can't find media files, still mark as corrupted for manual investigation
-		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
-	}
-
-	// If no media files found, mark as corrupted for manual handling
-	if len(mediaFiles) == 0 {
-		hw.logger.Info("No media files found, marking as corrupted", "file_path", filePath)
-		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
-	}
-
-	// Try to notify ARR instances for each media file
-	var lastErr error
-	notificationSuccess := false
-
-	for _, mediaFile := range mediaFiles {
-		if mediaFile.InstanceName == "" || mediaFile.InstanceType == "" {
-			hw.logger.Warn("Media file has incomplete instance information",
-				"file_path", filePath,
-				"instance_name", mediaFile.InstanceName,
-				"instance_type", mediaFile.InstanceType)
-			continue
-		}
-
-		// Try to notify this ARR instance using the ARR service
-		err := hw.arrsService.TriggerFileRescan(ctx, mediaFile.InstanceType, mediaFile.InstanceName, &mediaFile)
-		if err != nil {
-			hw.logger.Error("Failed to notify ARR instance",
-				"file_path", filePath,
-				"instance_name", mediaFile.InstanceName,
-				"instance_type", mediaFile.InstanceType,
-				"error", err)
-			lastErr = err
-			continue
-		}
-
-		notificationSuccess = true
-		hw.logger.Info("Successfully notified ARR instance",
+		hw.logger.Error("Failed to trigger ARR rescan",
 			"file_path", filePath,
-			"instance_name", mediaFile.InstanceName,
-			"instance_type", mediaFile.InstanceType)
-	}
+			"error", err)
 
-	// Update database status based on notification success
-	if notificationSuccess {
-		// At least one notification succeeded - set repair triggered
-		return hw.healthRepo.SetRepairTriggered(filePath, errorMsg)
-	} else {
-		// All notifications failed - mark as corrupted for manual investigation
-		if lastErr != nil {
+		// If we can't trigger repair, mark as corrupted for manual investigation
+		if lastErr := err; lastErr != nil {
 			errMsg := lastErr.Error()
 			return hw.healthRepo.SetCorrupted(filePath, &errMsg)
 		}
 		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
 	}
+
+	// ARR rescan was triggered successfully - set repair triggered status
+	hw.logger.Info("Successfully triggered ARR rescan for file repair", "file_path", filePath)
+	return hw.healthRepo.SetRepairTriggered(filePath, errorMsg)
 }

@@ -186,15 +186,9 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		apiMux.HandleFunc("PUT /arrs/instances/{id}", s.handleUpdateArrsInstance)    // Deprecated
 		apiMux.HandleFunc("DELETE /arrs/instances/{id}", s.handleDeleteArrsInstance) // Deprecated
 		apiMux.HandleFunc("POST /arrs/instances/test", s.handleTestArrsConnection)
-		apiMux.HandleFunc("POST /arrs/instances/{type}/{name}/sync", s.handleTriggerSync)
 		apiMux.HandleFunc("GET /arrs/stats", s.handleGetArrsStats)
 		apiMux.HandleFunc("GET /arrs/movies/search", s.handleSearchMovies)     // Deprecated
 		apiMux.HandleFunc("GET /arrs/episodes/search", s.handleSearchEpisodes) // Deprecated
-		// Status and control endpoints
-		apiMux.HandleFunc("GET /arrs/instances/{type}/{name}/status", s.handleGetSyncStatus)
-		apiMux.HandleFunc("GET /arrs/instances/{type}/{name}/result", s.handleGetLastSyncResult)
-		apiMux.HandleFunc("POST /arrs/instances/{type}/{name}/cancel", s.handleCancelSync)
-		apiMux.HandleFunc("GET /arrs/active", s.handleGetAllActiveSyncs)
 	}
 
 	// Authentication endpoints (if auth service is available)

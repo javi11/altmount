@@ -263,25 +263,10 @@ func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get media file information to determine which ARR instance to use for repair
-	mediaFiles, err := s.mediaRepo.GetMediaFilesByPath(filePath)
-	if err != nil {
-		WriteInternalError(w, "Failed to get media file information", err.Error())
-		return
-	}
-
-	if len(mediaFiles) == 0 {
-		WriteBadRequest(w, "Cannot repair file", "File is not tracked in any ARR instance")
-		return
-	}
-
-	// Try to repair using the first available media file
-	// (in practice, a file path should only be associated with one ARR instance)
-	mediaFile := mediaFiles[0]
-
-	// Trigger repair through ARR service
+	// Trigger repair through ARR service using direct file path approach
+	// The service will automatically determine which ARR instance manages this file
 	ctx := r.Context()
-	err = s.arrsService.TriggerFileRescan(ctx, mediaFile.InstanceType, mediaFile.InstanceName, &mediaFile)
+	err = s.arrsService.TriggerFileRescan(ctx, filePath)
 	if err != nil {
 		WriteInternalError(w, "Failed to trigger repair in ARR instance", err.Error())
 		return

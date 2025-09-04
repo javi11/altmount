@@ -194,8 +194,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Create scraper service
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), mediaRepo, logger)
+	// Create arrs service for health monitoring and repair
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), logger)
 
 	// Create API server configuration (hardcoded to /api)
 	apiConfig := &api.Config{
@@ -308,7 +308,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		healthWorker = health.NewHealthWorker(
 			healthChecker,
 			healthRepo,
-			mediaRepo,
 			metadataService,
 			arrsService,
 			configManager.GetConfigGetter(),
@@ -328,13 +327,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Health worker is disabled in configuration")
 	}
 
-	// Start scraper service if enabled
+	// ARRs service is now always ready for health monitoring and repair
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
-		if err := arrsService.Start(); err != nil {
-			logger.Error("Failed to start arrs service", "error", err)
-		} else {
-			logger.Info("Arrs service started")
-		}
+		logger.Info("Arrs service ready for health monitoring and repair")
 	} else {
 		logger.Info("Arrs service is disabled in configuration")
 	}
@@ -364,13 +359,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Stop scraper service if running
+	// ARRs service cleanup (no background processes to stop)
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
-		if err := arrsService.Stop(); err != nil {
-			logger.Error("Failed to stop arrs service", "error", err)
-		} else {
-			logger.Info("Arrs service stopped")
-		}
+		logger.Info("Arrs service cleanup completed")
 	}
 
 	server.Stop()
