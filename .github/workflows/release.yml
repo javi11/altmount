@@ -76,11 +76,11 @@ jobs:
           - goos: linux
             goarch: amd64
             runner: ubuntu-latest
-            cc: ""
+            cc: zig cc -target x86_64-linux-musl
           - goos: linux
             goarch: arm64
             runner: ubuntu-latest
-            cc: ""
+            cc: zig cc -target aarch64-linux-musl
           # macOS builds
           - goos: darwin
             goarch: amd64
