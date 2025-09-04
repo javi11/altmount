@@ -21,18 +21,10 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/test
-  build-cli:
-    runs-on: macos-13
+  build-frontend:
+    runs-on: ubuntu-latest
     needs: test
-    permissions:
-      contents: write
     steps:
-      # dependencies
-      - uses: mlugg/setup-zig@v2
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.0
-
       # checkout
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,27 +56,243 @@ jobs:
         working-directory: frontend
         run: bun run build
 
-      # build CLI
-      - name: Build CLI artifacts
-        uses: goreleaser/goreleaser-action@v6
+      # Upload built frontend as artifact
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
         with:
-          version: latest
-          args: release --clean --config .goreleaser-cli.yml
+          name: frontend-build
+          path: frontend/dist/
+          retention-days: 1
+
+  build-cli:
+    runs-on: ${{ matrix.runner }}
+    needs: [test, build-frontend]
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+            cc: zig cc -target x86_64-linux-musl
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-latest
+            cc: zig cc -target aarch64-linux-musl
+          # macOS builds
+          - goos: darwin
+            goarch: amd64
+            runner: macos-13
+            cc: ""
+          - goos: darwin
+            goarch: arm64
+            runner: macos-13
+            cc: ""
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+            runner: ubuntu-latest
+            cc: zig cc -target x86_64-windows-gnu
+    steps:
+      # dependencies
+      - uses: mlugg/setup-zig@v2
+        if: matrix.cc != ''
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.5
+
+      # checkout
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Download frontend build
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+
+      # Extract version info
+      - name: Extract version info
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          COMMIT=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+      # Build binary
+      - name: Build ${{ matrix.goos }}-${{ matrix.goarch }} binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+          CC: ${{ matrix.cc }}
+        run: |
+          # Set binary extension for Windows
+          EXT=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            EXT=".exe"
+          fi
+          
+          # Build the binary
+          go build \
+            -trimpath \
+            -tags=cli \
+            -ldflags="-s -w -X 'main.Version=${{ steps.version.outputs.version }}' -X 'main.GitCommit=${{ steps.version.outputs.commit }}' -X 'main.Timestamp=${{ steps.version.outputs.timestamp }}'" \
+            -o "altmount-cli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" \
+            ./cmd/altmount/main.go
+
+      # Create archive
+      - name: Create archive
+        run: |
+          # Set binary extension and archive format
+          EXT=""
+          ARCHIVE_EXT="tar.gz"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            EXT=".exe"
+            ARCHIVE_EXT="zip"
+          fi
+          
+          BINARY_NAME="altmount-cli-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
+          ARCHIVE_NAME="altmount-cli_v${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip "${ARCHIVE_NAME}.zip" "$BINARY_NAME"
+          else
+            tar -czf "${ARCHIVE_NAME}.tar.gz" "$BINARY_NAME"
+          fi
+
+      # Upload individual build artifacts
+      - name: Upload ${{ matrix.goos }}-${{ matrix.goarch }} artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            altmount-cli_v${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          retention-days: 1
+
+  create-universal-darwin:
+    runs-on: macos-13
+    needs: build-cli
+    permissions:
+      contents: write
+    steps:
+      # checkout
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Extract version info
+      - name: Extract version info
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # Download darwin binaries
+      - name: Download darwin-amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-darwin-amd64
+          path: ./artifacts/
+
+      - name: Download darwin-arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-darwin-arm64
+          path: ./artifacts/
+
+      # Extract binaries from archives
+      - name: Extract binaries
+        run: |
+          cd artifacts
+          tar -xzf altmount-cli_v${{ steps.version.outputs.version }}_darwin_amd64.tar.gz
+          tar -xzf altmount-cli_v${{ steps.version.outputs.version }}_darwin_arm64.tar.gz
+
+      # Create universal binary
+      - name: Create universal binary
+        run: |
+          lipo -create \
+            artifacts/altmount-cli-darwin-amd64 \
+            artifacts/altmount-cli-darwin-arm64 \
+            -output altmount-cli-darwin-universal
+          
+          # Create universal archive
+          tar -czf "altmount-cli_v${{ steps.version.outputs.version }}_darwin_universal.tar.gz" altmount-cli-darwin-universal
+
+      # Upload universal binary
+      - name: Upload universal darwin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-darwin-universal
+          path: altmount-cli_v${{ steps.version.outputs.version }}_darwin_universal.tar.gz
+          retention-days: 1
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [build-cli, create-universal-darwin]
+    permissions:
+      contents: write
+    steps:
+      # checkout
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Extract version info
+      - name: Extract version info
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # Download all artifacts
+      - name: Download all CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: ./artifacts/
+          merge-multiple: true
+
+      # Create checksums
+      - name: Create checksums
+        run: |
+          cd artifacts
+          sha512sum altmount-cli_v${{ steps.version.outputs.version }}_*.* > checksums-cli.txt
+          cat checksums-cli.txt
+
+      # Create GitHub release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/altmount-cli_v${{ steps.version.outputs.version }}_*.*
+            artifacts/checksums-cli.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-images:
+  build-image-amd64:
     runs-on: ubuntu-latest
     needs: test
     permissions:
       contents: write
       packages: write
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-metadata: ${{ steps.build.outputs.metadata }}
     steps:
-      # dependencies
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.0
-
       # checkout
       - name: Checkout
         uses: actions/checkout@v4
@@ -93,11 +301,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
-          driver-opts: |
-            network=host
-            image=moby/buildkit:latest
 
       # docker login
       - name: Docker login
@@ -111,14 +314,163 @@ jobs:
       - name: Expose GitHub Runtime
         uses: crazy-max/ghaction-github-runtime@v3
 
-      # build server and docker
-      - name: Build Image artifacts
-        uses: goreleaser/goreleaser-action@v6
+      # Extract metadata for tags and labels
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          version: latest
-          args: release --clean --config .goreleaser-docker.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUILDX_NO_DEFAULT_ATTESTATIONS: 1
-          DOCKER_BUILDKIT: 1
-          BUILDKIT_PROGRESS: plain
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=tag,suffix=-amd64
+            type=semver,pattern={{version}},suffix=-amd64
+            type=semver,pattern={{major}},suffix=-amd64
+            type=semver,pattern={{major}}.{{minor}},suffix=-amd64
+
+      # build and push amd64 image
+      - name: Build and push AMD64 image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=gha,scope=docker-amd64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-frontend
+          cache-to: |
+            type=gha,mode=max,scope=docker-amd64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-amd64,mode=max
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+  build-image-arm64:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-metadata: ${{ steps.build.outputs.metadata }}
+    steps:
+      # checkout
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # docker login
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Enable buildx cache optimization
+      - name: Expose GitHub Runtime
+        uses: crazy-max/ghaction-github-runtime@v3
+
+      # Extract metadata for tags and labels
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=tag,suffix=-arm64
+            type=semver,pattern={{version}},suffix=-arm64
+            type=semver,pattern={{major}},suffix=-arm64
+            type=semver,pattern={{major}}.{{minor}},suffix=-arm64
+
+      # build and push arm64 image
+      - name: Build and push ARM64 image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=gha,scope=docker-arm64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-frontend
+          cache-to: |
+            type=gha,mode=max,scope=docker-arm64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-arm64,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-frontend,mode=max
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+  create-manifest:
+    runs-on: ubuntu-latest
+    needs: [build-image-amd64, build-image-arm64]
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      # checkout for version extraction
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # docker login
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract version from tag
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "minor=$MINOR" >> $GITHUB_OUTPUT
+
+      # Create and push multi-platform manifests
+      - name: Create multi-platform manifest
+        run: |
+          # Create and push version-specific manifest
+          docker manifest create \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}
+
+          # Create and push major version manifest
+          docker manifest create \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}
+
+          # Create and push major.minor version manifest
+          docker manifest create \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
+
+          # Create and push latest manifest
+          docker manifest create \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
