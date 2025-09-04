@@ -8,9 +8,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"strings"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -111,102 +108,6 @@ func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 		Path: path,
 		Err:  fs.ErrNotExist,
 	}
-}
-
-// GetRarFiles returns all RAR-related files sorted for proper multi-part reading
-func (ufs *UsenetFileSystem) GetRarFiles() []string {
-	var rarFiles []string
-
-	for _, file := range ufs.files {
-		if file.IsRarArchive {
-			rarFiles = append(rarFiles, file.Filename)
-		}
-	}
-
-	// Sort RAR files to ensure proper order (.rar, .r00, .r01 or .part001.rar, .part002.rar)
-	sort.Slice(rarFiles, func(i, j int) bool {
-		return compareRarFilenames(rarFiles[i], rarFiles[j])
-	})
-
-	return rarFiles
-}
-
-// compareRarFilenames compares RAR filenames for proper sorting
-func compareRarFilenames(a, b string) bool {
-	// Extract base names and extensions
-	aBase, aExt := splitRarFilename(a)
-	bBase, bExt := splitRarFilename(b)
-
-	// If different base names, use lexical order
-	if aBase != bBase {
-		return aBase < bBase
-	}
-
-	// Same base name, sort by extension/part number
-	aNum := extractRarPartNumber(aExt)
-	bNum := extractRarPartNumber(bExt)
-
-	return aNum < bNum
-}
-
-// splitRarFilename splits a RAR filename into base and extension parts
-func splitRarFilename(filename string) (base, ext string) {
-	// Handle patterns like .part001.rar, .part01.rar
-	partPattern := regexp.MustCompile(`^(.+)\.part\d+\.rar$`)
-	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
-		return matches[1], strings.TrimPrefix(filename, matches[1]+".")
-	}
-
-	// Handle patterns like .rar, .r00, .r01
-	if strings.HasSuffix(strings.ToLower(filename), ".rar") {
-		return strings.TrimSuffix(filename, filepath.Ext(filename)), "rar"
-	}
-
-	rPattern := regexp.MustCompile(`^(.+)\.r(\d+)$`)
-	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
-		return matches[1], "r" + matches[2]
-	}
-
-	return filename, ""
-}
-
-// extractRarPartNumber extracts numeric part from RAR extension for sorting
-func extractRarPartNumber(ext string) int {
-	// .rar is always first (part 0)
-	if ext == "rar" {
-		return 0
-	}
-
-	// Extract number from .r00, .r01, etc.
-	rPattern := regexp.MustCompile(`^r(\d+)$`)
-	if matches := rPattern.FindStringSubmatch(ext); len(matches) > 1 {
-		if num := parseInt(matches[1]); num >= 0 {
-			return num + 1 // .r00 becomes 1, .r01 becomes 2, etc.
-		}
-	}
-
-	// Extract number from .part001.rar, .part01.rar, etc.
-	partPattern := regexp.MustCompile(`^part(\d+)\.rar$`)
-	if matches := partPattern.FindStringSubmatch(ext); len(matches) > 1 {
-		if num := parseInt(matches[1]); num >= 0 {
-			return num
-		}
-	}
-
-	return 999999 // Unknown format goes last
-}
-
-// parseInt safely converts string to int
-func parseInt(s string) int {
-	num := 0
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			num = num*10 + int(r-'0')
-		} else {
-			return -1
-		}
-	}
-	return num
 }
 
 // UsenetFile methods implementing fs.File interface
@@ -314,9 +215,9 @@ func (dl dbSegmentLoader) GetSegment(index int) (segment usenet.Segment, groups 
 	seg := dl.segs[index]
 
 	return usenet.Segment{
-		Id:    seg.GetId(),
-		Start: seg.GetStartOffset(),
-		Size:  seg.GetEndOffset() - seg.GetStartOffset() + 1,
+		Id:    seg.Id,
+		Start: seg.StartOffset,
+		Size:  seg.SegmentSize,
 	}, nil, true
 }
 

@@ -939,6 +939,3 @@ func (mrf *MetadataRemoteFile) isValidEmptyDirectory(normalizedPath string) bool
 	// Recursively check if parent could be a valid empty directory
 	return mrf.isValidEmptyDirectory(parentDir)
 }
-
-// Dynamic configuration is now handled through config getters
-// No longer need update methods - values are accessed directly from current config

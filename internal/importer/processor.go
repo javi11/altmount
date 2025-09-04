@@ -286,9 +286,6 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 	// Process RAR archives if any exist
 	if len(rarFiles) > 0 {
-		// Rename RAR files to match the first file's base name that will allow parse rar that have different files name
-		rarFiles = renameRarFilesToMatchFirstFile(rarFiles)
-
 		// Create directory for the single RAR archive content
 		nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
 		rarDirPath := filepath.Join(nzbVirtualDir, nzbBaseName)

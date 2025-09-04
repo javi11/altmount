@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/nntppool"
 	"github.com/javi11/nzbparser"
+	concpool "github.com/sourcegraph/conc/pool"
 )
 
 // NzbType represents the type of NZB content
@@ -63,15 +66,17 @@ var (
 
 // Parser handles NZB file parsing
 type Parser struct {
-	poolManager pool.Manager // Pool manager for dynamic pool access
-	log         *slog.Logger // Logger for debug/error messages
+	poolManager  pool.Manager  // Pool manager for dynamic pool access
+	log          *slog.Logger  // Logger for debug/error messages
+	deobfuscator *Deobfuscator // Filename deobfuscator
 }
 
 // NewParser creates a new NZB parser
 func NewParser(poolManager pool.Manager) *Parser {
 	return &Parser{
-		poolManager: poolManager,
-		log:         slog.Default().With("component", "nzb-parser"),
+		poolManager:  poolManager,
+		log:          slog.Default().With("component", "nzb-parser"),
+		deobfuscator: NewDeobfuscator(poolManager),
 	}
 }
 
@@ -101,25 +106,67 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		}
 	}
 
-	// Process each file in the NZB
+	// Process each file in the NZB in parallel
+	// Filter out PAR2 files first
+	var validFiles []nzbparser.NzbFile
 	for _, file := range n.Files {
-		// Skip PAR2 files
-		if par2Pattern.MatchString(file.Filename) {
-			continue
+		if !par2Pattern.MatchString(file.Filename) {
+			validFiles = append(validFiles, file)
 		}
+	}
 
-		parsedFile, err := p.parseFile(file, n.Meta)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse file %s: %w", file.Subject, err)
+	if len(validFiles) == 0 {
+		return nil, NewNonRetryableError("NZB file contains no valid files (only PAR2)", nil)
+	}
+
+	// Use conc pool for parallel processing with proper error handling
+	type fileResult struct {
+		parsedFile *ParsedFile
+		err        error
+	}
+
+	concPool := concpool.NewWithResults[fileResult]().WithMaxGoroutines(runtime.NumCPU())
+
+	// Process files in parallel using conc pool
+	for _, file := range validFiles {
+		concPool.Go(func() fileResult {
+			parsedFile, err := p.parseFile(file, n.Meta, n.Files)
+			return fileResult{
+				parsedFile: parsedFile,
+				err:        err,
+			}
+		})
+	}
+
+	// Wait for all goroutines to complete and collect results
+	results := concPool.Wait()
+
+	// Check for errors and collect valid results
+	var parsedFiles []*ParsedFile
+	for i, result := range results {
+		if result.err != nil {
+			return nil, fmt.Errorf("failed to parse file %s: %w", validFiles[i].Subject, result.err)
 		}
+		parsedFiles = append(parsedFiles, result.parsedFile)
+	}
 
+	// Aggregate results in the original order
+	for _, parsedFile := range parsedFiles {
 		parsed.Files = append(parsed.Files, *parsedFile)
 		parsed.TotalSize += parsedFile.Size
 		parsed.SegmentsCount += len(parsedFile.Segments)
 
-		if len(file.Segments) > 0 && file.Segments[0].Bytes > int(segSize) {
-			// Fallback to the first segment size encountered
-			segSize = int64(file.Segments[0].Bytes)
+		if len(parsedFile.Segments) > 0 {
+			// Find the corresponding original file to check segment bytes
+			for _, file := range validFiles {
+				if file.Subject == parsedFile.Subject {
+					if len(file.Segments) > 0 && file.Segments[0].Bytes > int(segSize) {
+						// Fallback to the first segment size encountered
+						segSize = int64(file.Segments[0].Bytes)
+					}
+					break
+				}
+			}
 		}
 	}
 
@@ -132,7 +179,8 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 }
 
 // parseFile processes a single file entry from the NZB
-func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*ParsedFile, error) {
+func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile) (*ParsedFile, error) {
+	sort.Sort(file.Segments)
 
 	// Normalize segment sizes using yEnc PartSize headers if needed
 	// This handles cases where NZB segment sizes include yEnc encoding overhead
@@ -211,8 +259,22 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 		}
 	}
 
+	// Attempt deobfuscation if filename appears obfuscated
 	if IsProbablyObfuscated(filename) {
-		p.log.Warn("File appears obfuscated", "filename", filename, "subject", file.Subject)
+		p.log.Debug("Attempting deobfuscation", "filename", filename, "subject", file.Subject)
+
+		// Attempt deobfuscation using all available files in the NZB
+		if result := p.deobfuscator.DeobfuscateFilename(filename, allFiles, file); result.Success {
+			p.log.Info("Successfully deobfuscated filename",
+				"original", filename,
+				"deobfuscated", result.DeobfuscatedFilename,
+				"method", result.Method)
+			filename = result.DeobfuscatedFilename
+		} else {
+			p.log.Warn("Unable to deobfuscate filename",
+				"filename", filename,
+				"subject", file.Subject)
+		}
 	}
 
 	// Check if this is a RAR file
@@ -235,20 +297,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string) (*Par
 
 // calculateFileSize implements the sophisticated size calculation logic
 func (p *Parser) calculateFileSize(file nzbparser.NzbFile) (int64, error) {
-	// No file.Bytes available, need to analyze segments
-	if len(file.Segments) < 2 {
-		// Not enough segments to compare, use segment sum
-		return p.calculateSegmentSum(file), nil
-	}
-
-	firstSegSize := int64(file.Segments[0].Bytes)
-	secondSegSize := int64(file.Segments[1].Bytes)
-
-	// Priority 2: If first and second segments have the same size, use segment sum
-	if firstSegSize == secondSegSize {
-		return p.calculateSegmentSum(file), nil
-	}
-
 	// Priority 3: Different segment sizes - fetch yenc header to get actual file size
 	if p.poolManager != nil && p.poolManager.HasPool() {
 		if actualSize, err := p.fetchActualFileSizeFromYencHeader(file); err == nil {
