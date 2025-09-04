@@ -307,6 +307,11 @@ jobs:
           name: frontend-build
           path: frontend/dist/
 
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -323,7 +328,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
           tags: |
             type=ref,event=tag,suffix=-amd64
             type=semver,pattern={{version}},suffix=-amd64
@@ -368,6 +373,11 @@ jobs:
           name: frontend-build
           path: frontend/dist/
 
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -384,7 +394,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
           tags: |
             type=ref,event=tag,suffix=-arm64
             type=semver,pattern={{version}},suffix=-arm64
@@ -425,6 +435,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       # docker login
       - name: Docker login
         uses: docker/login-action@v3
@@ -447,7 +462,7 @@ jobs:
       # Create and push multi-platform manifests using buildx imagetools
       - name: Create multi-platform manifest
         run: |
-          R="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          R="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}"
 
           # vX.Y.Z and X.Y.Z
           docker buildx imagetools create \
