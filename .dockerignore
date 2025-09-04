@@ -30,11 +30,8 @@ Makefile
 # Frontend development files (keep what's needed for build)
 frontend/node_modules/
 frontend/static/
-frontend/vite.config.ts
-frontend/tsconfig.json
 frontend/README.md
 frontend/package.json.md5
-frontend/index.html
 
 # Keep essential frontend files for Docker build
 !frontend/src/

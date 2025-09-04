@@ -76,11 +76,11 @@ jobs:
           - goos: linux
             goarch: amd64
             runner: ubuntu-latest
-            cc: zig cc -target x86_64-linux-musl
+            cc: ""
           - goos: linux
             goarch: arm64
             runner: ubuntu-latest
-            cc: zig cc -target aarch64-linux-musl
+            cc: ""
           # macOS builds
           - goos: darwin
             goarch: amd64
@@ -93,12 +93,14 @@ jobs:
           # Windows builds
           - goos: windows
             goarch: amd64
-            runner: ubuntu-latest
-            cc: zig cc -target x86_64-windows-gnu
+            runner: windows-latest
+            cc: ""
+          - goos: windows
+            goarch: arm64
+            runner: windows-latest
+            cc: ""
     steps:
       # dependencies
-      - uses: mlugg/setup-zig@v2
-        if: matrix.cc != ''
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.5
