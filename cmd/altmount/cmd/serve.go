@@ -340,8 +340,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service is disabled in configuration")
 	}
 
-	// Add simple health endpoint for Docker liveness checks
-	mux.HandleFunc("/health", handleSimpleHealth)
+	// Add simple liveness endpoint for Docker health checks
+	mux.HandleFunc("/live", handleSimpleHealth)
 
 	mux.Handle("/", getStaticFileHandler())
 
@@ -379,7 +379,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// handleSimpleHealth provides a lightweight health check endpoint for Docker
+// handleSimpleHealth provides a lightweight liveness check endpoint for Docker
 func handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -408,17 +408,78 @@ func signalHandler(ctx context.Context) {
 func getStaticFileHandler() http.Handler {
 	// Check if we should use embedded filesystem or development path
 	if _, err := os.Stat(frontendBuildPath); err == nil {
-		// Development mode - serve from disk
-		return http.StripPrefix("/", http.FileServer(http.Dir(frontendBuildPath)))
+		// Development mode - serve from disk with SPA fallback
+		return createSPAHandler(http.Dir(frontendBuildPath), false)
 	}
 
-	// Production mode - serve from embedded filesystem
+	// Production mode - serve from embedded filesystem with SPA fallback
 	buildFS, err := frontend.GetBuildFS()
 	if err != nil {
 		slog.Info("Failed to get embedded filesystem", "error", err)
 		// Fallback to disk if embedded fails
-		return http.StripPrefix("/", http.FileServer(http.Dir(frontendBuildPath)))
+		return createSPAHandler(http.Dir(frontendBuildPath), false)
 	}
 
-	return http.StripPrefix("/", http.FileServer(http.FS(buildFS)))
+	return createSPAHandler(http.FS(buildFS), true)
+}
+
+// createSPAHandler creates a handler that serves static files with SPA fallback
+func createSPAHandler(fs http.FileSystem, isEmbedded bool) http.Handler {
+	fileServer := http.FileServer(fs)
+	
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Clean the path
+		path := r.URL.Path
+		if path == "/" {
+			path = "/index.html"
+		}
+
+		// Try to open the requested file
+		var file http.File
+		var err error
+		
+		if isEmbedded {
+			// For embedded FS, we need to handle the path differently
+			if embeddedFS, ok := fs.(http.FileSystem); ok {
+				file, err = embeddedFS.Open(path)
+			}
+		} else {
+			file, err = fs.Open(path)
+		}
+
+		// If file exists, serve it normally
+		if err == nil {
+			if stat, err := file.Stat(); err == nil && !stat.IsDir() {
+				file.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			file.Close()
+		}
+
+		// File doesn't exist or is a directory, check if it's a static asset request
+		// Static assets typically have file extensions
+		if hasFileExtension(path) {
+			// This looks like a static asset request that doesn't exist, return 404
+			http.NotFound(w, r)
+			return
+		}
+
+		// No file extension - assume it's a client-side route, serve index.html
+		r.URL.Path = "/index.html"
+		fileServer.ServeHTTP(w, r)
+	})
+}
+
+// hasFileExtension checks if the path appears to be requesting a static asset
+func hasFileExtension(path string) bool {
+	// Common static asset extensions
+	staticExtensions := []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".map", ".json", ".xml", ".txt"}
+	
+	for _, ext := range staticExtensions {
+		if len(path) >= len(ext) && path[len(path)-len(ext):] == ext {
+			return true
+		}
+	}
+	return false
 }

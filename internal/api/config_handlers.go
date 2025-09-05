@@ -66,12 +66,15 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode directly into core config type
-	var newConfig config.Config
-	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+	// Decode into API request structure with proper type handling
+	var configReq ConfigUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&configReq); err != nil {
 		WriteValidationError(w, "Invalid JSON in request body", err.Error())
 		return
 	}
+
+	// Convert from API request format to internal config format
+	newConfig := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
@@ -116,12 +119,15 @@ func (s *Server) handlePatchConfigSection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Create a copy and decode partial updates directly into it
-	newConfig := *currentConfig
-	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+	// Create a copy and decode partial updates using proper type handling
+	configReq := ConfigUpdateRequest{Config: currentConfig}
+	if err := json.NewDecoder(r.Body).Decode(&configReq); err != nil {
 		WriteValidationError(w, "Invalid JSON in request body", err.Error())
 		return
 	}
+
+	// Convert from API request format to internal config format
+	newConfig := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
@@ -169,12 +175,15 @@ func (s *Server) handleValidateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode directly into core config type
-	var cfg config.Config
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	// Decode into API request structure with proper type handling
+	var configReq ConfigUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&configReq); err != nil {
 		WriteValidationError(w, "Invalid JSON in request body", err.Error())
 		return
 	}
+
+	// Convert from API request format to internal config format
+	cfg := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the configuration
 	validationErr := s.configManager.ValidateConfig(&cfg)

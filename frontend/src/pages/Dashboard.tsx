@@ -39,7 +39,7 @@ export function Dashboard() {
 								</h2>
 								{queueStats ? (
 									<div className="font-bold text-2xl">
-										{queueStats.total_processing} / {queueStats.total_queued}
+										{queueStats.total_completed} / {queueStats.total_queued}
 									</div>
 								) : (
 									<LoadingSpinner size="sm" />
@@ -55,7 +55,7 @@ export function Dashboard() {
 								<progress
 									className="progress progress-primary mt-2 w-full"
 									value={queueStats.total_completed}
-									max={queueStats.total_failed}
+									max={queueStats.total_queued}
 								/>
 							</div>
 						)}
