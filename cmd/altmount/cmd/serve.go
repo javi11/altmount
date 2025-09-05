@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/frontend"
@@ -338,6 +340,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service is disabled in configuration")
 	}
 
+	// Add simple health endpoint for Docker liveness checks
+	mux.HandleFunc("/health", handleSimpleHealth)
+
 	mux.Handle("/", getStaticFileHandler())
 
 	// Set up signal handling for graceful shutdown
@@ -372,6 +377,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	logger.Info("AltMount server shutting down gracefully")
 	return nil
+}
+
+// handleSimpleHealth provides a lightweight health check endpoint for Docker
+func handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	
+	response := map[string]interface{}{
+		"status":    "ok",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	
+	json.NewEncoder(w).Encode(response)
 }
 
 func signalHandler(ctx context.Context) {

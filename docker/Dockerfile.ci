@@ -65,6 +65,7 @@ WORKDIR /app
 
 # Copy web binary from builder
 COPY --from=backend-builder /app/altmount /app/altmount
+COPY --from=backend-builder /app/frontend/dist ./frontend/dist
 
 # Install required packages for runtime (mime-support already in custom-base)
 RUN apt-get update && \

@@ -293,6 +293,7 @@ jobs:
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
       image-metadata: ${{ steps.build.outputs.metadata }}
+      registry-image: ${{ steps.meta.outputs.tags }}
     steps:
       # checkout
       - name: Checkout
@@ -351,6 +352,7 @@ jobs:
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
       image-metadata: ${{ steps.build.outputs.metadata }}
+      registry-image: ${{ steps.meta.outputs.tags }}
     steps:
       # checkout
       - name: Checkout
@@ -434,59 +436,61 @@ jobs:
           echo "major=$MAJOR" >> $GITHUB_OUTPUT
           echo "minor=$MINOR" >> $GITHUB_OUTPUT
 
-      # Create and push multi-platform manifests
+      # Create and push multi-platform manifests using digests
       - name: Create multi-platform manifest
         run: |
+          # Get image references with digests from build jobs
+          AMD64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-image-amd64.outputs.image-digest }}"
+          ARM64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-image-arm64.outputs.image-digest }}"
+          
+          echo "AMD64 Image: $AMD64_IMAGE"
+          echo "ARM64 Image: $ARM64_IMAGE"
+
           # Create and push version-specific manifest (v1.2.3)
           docker manifest create \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}
 
           # Create and push semver version manifest (1.2.3)
           docker manifest create \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
 
           # Create and push major version manifest (v1)
           docker manifest create \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}
 
           # Create and push major version manifest (1)
           docker manifest create \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}
 
           # Create and push major.minor version manifest (v1.2)
           docker manifest create \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
 
           # Create and push major.minor version manifest (1.2)
           docker manifest create \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
 
           # Create and push latest manifest (multi-arch)
           docker manifest create \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-          # Clean up temporary platform-specific tags
-          echo "Cleaning up temporary tags..."
-          docker manifest rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64-temp || true
-          docker manifest rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64-temp || true
