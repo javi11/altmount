@@ -76,6 +76,24 @@ type ImportConfig struct {
 	QueueProcessingInterval time.Duration `yaml:"queue_processing_interval" mapstructure:"queue_processing_interval" json:"queue_processing_interval"`
 }
 
+// UnmarshalYAML implements custom YAML unmarshaling for ImportConfig to handle queue_processing_interval as seconds
+func (ic *ImportConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// Define a temporary struct to handle raw parsing with queue_processing_interval as seconds
+	type rawImportConfig struct {
+		MaxProcessorWorkers     int `yaml:"max_processor_workers"`
+		QueueProcessingInterval int `yaml:"queue_processing_interval"` // Parse as seconds, convert to Duration
+	}
+	
+	var raw rawImportConfig
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	
+	ic.MaxProcessorWorkers = raw.MaxProcessorWorkers
+	ic.QueueProcessingInterval = time.Duration(raw.QueueProcessingInterval) * time.Second
+	return nil
+}
+
 // LogConfig represents logging configuration with rotation support
 type LogConfig struct {
 	File       string `yaml:"file" mapstructure:"file" json:"file,omitempty"`                      // Log file path (empty = console only)
