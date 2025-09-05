@@ -509,7 +509,8 @@ export function QueuePage() {
 													<MoreHorizontal className="h-4 w-4" />
 												</button>
 												<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
-													{(item.status === QueueStatus.FAILED ||
+													{(item.status === QueueStatus.PENDING ||
+														item.status === QueueStatus.FAILED ||
 														item.status === QueueStatus.COMPLETED) && (
 														<li>
 															<button
@@ -518,7 +519,7 @@ export function QueuePage() {
 																disabled={retryItem.isPending}
 															>
 																<PlayCircle className="h-4 w-4" />
-																Retry
+																{item.status === QueueStatus.PENDING ? 'Process' : 'Retry'}
 															</button>
 														</li>
 													)}

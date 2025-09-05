@@ -649,10 +649,11 @@ function App() {
 ## Development Workflow
 
 ### Before Committing
-1. **Run linting**: `bun run lint`
-2. **Check types**: `bun run typecheck` (if available)
-3. **Test build**: `bun run build`
-4. **Review changes**: Ensure code follows these standards
+1. **Run code quality checks**: `bun run check` (linting, formatting, and code quality)
+2. **Test build**: `bun run build` (TypeScript compilation + Vite build)
+3. **Review changes**: Ensure code follows these standards
+
+Note: Use `bun run lint` for linting-only checks when needed.
 
 ### Code Review Checklist
 - [ ] Components use TypeScript interfaces
