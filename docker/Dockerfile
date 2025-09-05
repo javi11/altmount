@@ -76,6 +76,7 @@ WORKDIR /app
 
 # Copy web binary from builder
 COPY --from=backend-builder /app/altmount /app/altmount
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Install required packages for runtime
 RUN apt-get update && \
