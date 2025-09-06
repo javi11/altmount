@@ -154,8 +154,7 @@ When auto-repair is enabled and corruption is detected:
 With health monitoring configured:
 
 1. **[Configure ARR Integration](integration.md)** - Set up Radarr/Sonarr integration
-2. **[Monitor Health Dashboard](../usage/health-monitoring.md)** - Learn to use health monitoring features
-3. **[Troubleshooting](../troubleshooting/common-issues.md)** - Resolve health monitoring issues
+2. **[Troubleshooting](../5.%20Troubleshooting/common-issues.md)** - Resolve health monitoring issues
 
 ---
 

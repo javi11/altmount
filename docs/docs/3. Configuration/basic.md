@@ -211,7 +211,7 @@ sabnzbd:
 
 **Critical Configuration**: The `mount_dir` must be set to the path where your ARRs see the WebDAV-mounted files, not the local AltMount path.
 
-See [SABnzbd Integration](sabnzbd.md) for complete setup instructions.
+See [SABnzbd Integration](integration.md) for complete setup instructions.
 
 ### ARR Integration
 
@@ -241,15 +241,11 @@ With basic configuration complete, you can:
 
 1. **[Configure NNTP Providers](providers.md)** - Add your Usenet providers
 2. **[Set up ARR Integration](integration.md)** - Connect Radarr, Sonarr, etc.
-3. **[Configure Advanced Settings](advanced.md)** - Fine-tune performance and features
-4. **[Start Using WebDAV](../usage/webdav-clients.md)** - Connect your media applications
 
 ## Configuration Reference
 
 For complete configuration options, see:
 
 - [NNTP Providers](providers.md) - Usenet provider configuration
-- [WebDAV Settings](webdav.md) - WebDAV server options
 - [Streaming Options](streaming.md) - Performance and streaming settings
 - [ARR Integration](integration.md) - Radarr/Sonarr setup
-- [Advanced Configuration](advanced.md) - All configuration options

@@ -107,7 +107,5 @@ Mount these directories for persistent data:
 
 ## Next Steps
 
-- [Configure NNTP Providers](../configuration/providers.md)
-- [Set up Radarr/Sonarr Integration](../configuration/integration.md)
-- [Configure WebDAV Clients](../usage/webdav-clients.md)
-- [Monitor with Health Checks](../usage/health-monitoring.md)
+- [Configure NNTP Providers](../3. Configuration/providers.md)
+- [Set up Radarr/Sonarr Integration](../3. configuration/integration.md)

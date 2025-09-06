@@ -7,6 +7,7 @@ AltMount provides REST API endpoints for programmatic integration and automation
 All API endpoints require authentication using an API key. The API key can be found in your AltMount system settings.
 
 API keys are provided via query parameter:
+
 ```
 ?apikey=YOUR_API_KEY
 ```
@@ -22,10 +23,12 @@ Manually add a file by filesystem path to the import queue. This is useful for c
 #### Request Format
 
 **Query Parameters**:
+
 - `apikey` (required): Your AltMount API key
 - `relative_path` (optional): Path that will be stripped from the file destination
 
 **Request Body** (JSON):
+
 ```json
 {
   "file_path": "/path/to/your/file.nzb"
@@ -35,6 +38,7 @@ Manually add a file by filesystem path to the import queue. This is useful for c
 #### Response Format
 
 **Success Response** (200 OK):
+
 ```json
 {
   "data": {
@@ -88,6 +92,7 @@ All API endpoints return consistent error responses:
 ```
 
 Common HTTP status codes:
+
 - `200`: Success
 - `400`: Bad Request - Invalid input or request format
 - `401`: Unauthorized - Missing or invalid API key
@@ -97,4 +102,4 @@ Common HTTP status codes:
 
 ---
 
-For integration with ARR applications, see the [ARR Integration Guide](../configuration/integration.md).
+For integration with ARR applications, see the [ARR Integration Guide](../3. Configuration/integration.md).

@@ -90,11 +90,11 @@ const config: Config = {
             },
             {
               label: 'Installation',
-              to: '/docs/installation/cli',
+              to: '/docs/Installation/cli',
             },
             {
               label: 'Configuration',
-              to: '/docs/configuration/basic',
+              to: '/docs/Configuration/basic',
             },
           ],
         },

@@ -117,12 +117,6 @@ When AltMount reports file paths to ARR applications for repair, it must use pat
 
 With ARR integration configured:
 
-1. **[Configure WebDAV Clients](../usage/webdav-clients.md)** - Set up media applications
-2. **[Monitor Health Status](../usage/health-monitoring.md)** - Ensure everything runs smoothly
-3. **[API Integration](../api/endpoints.md)** - Programmatic access to import queue
-4. **[Optimize Performance](streaming.md)** - Fine-tune for your usage patterns
-5. **[Advanced Configuration](advanced.md)** - Explore additional features
+1. **[Optimize Performance](streaming.md)** - Fine-tune for your usage patterns
 
 ---
-
-For advanced ARR integration scenarios, see the [Advanced Configuration](advanced.md) guide.

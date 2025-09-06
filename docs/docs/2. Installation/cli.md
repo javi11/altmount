@@ -150,7 +150,7 @@ Edit the `config.yaml` file with your settings. At minimum, you need to configur
      root_path: "./metadata"
    ```
 
-For detailed configuration options, see the [Configuration Guide](../configuration/basic.md).
+For detailed configuration options, see the [Configuration Guide](../3. Configuration/basic.md).
 
 ## Running AltMount
 
@@ -223,6 +223,5 @@ Verify the installation and rclone mount:
 
 ## Next Steps
 
-- [Configure NNTP Providers](../configuration/providers.md)
-- [Set up Radarr/Sonarr Integration](../configuration/integration.md)
-- [Configure WebDAV Clients](../usage/webdav-clients.md)
+- [Configure NNTP Providers](../3. Configuration/providers.md)
+- [Set up Radarr/Sonarr Integration](../3. Configuration/integration.md)

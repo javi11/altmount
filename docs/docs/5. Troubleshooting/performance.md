@@ -9,8 +9,9 @@ This guide covers performance tuning strategies for AltMount to maximize downloa
 Before optimizing, establish performance baselines:
 
 #### System Performance Test
+
 ```bash
-# Test disk I/O performance  
+# Test disk I/O performance
 dd if=/dev/zero of=/tmp/testfile bs=1G count=1 oflag=direct
 
 # Test network bandwidth to provider
@@ -24,6 +25,7 @@ iotop -o
 ```
 
 #### AltMount Performance Metrics
+
 ```bash
 # Get current performance stats
 curl -u user:pass http://localhost:8080/api/queue/stats
@@ -35,18 +37,18 @@ curl -u user:pass http://localhost:8080/api/health/streaming
 curl -u user:pass http://localhost:8080/api/providers
 ```
 
-*[Screenshot placeholder: Performance monitoring dashboard showing baseline metrics and resource utilization]*
+_[Screenshot placeholder: Performance monitoring dashboard showing baseline metrics and resource utilization]_
 
 ### Performance Goals
 
 Set realistic performance targets based on your environment:
 
-| Environment | Target Download Speed | Target Response Time | Memory Usage |
-|-------------|----------------------|---------------------|--------------|
-| Home Server | 50-100 Mbps | &lt;200ms | &lt;512MB |
-| High-End Server | 200-500 Mbps | &lt;100ms | &lt;1GB |
-| Enterprise | 500+ Mbps | &lt;50ms | &lt;2GB |
-| Constrained | 10-50 Mbps | &lt;500ms | &lt;256MB |
+| Environment     | Target Download Speed | Target Response Time | Memory Usage |
+| --------------- | --------------------- | -------------------- | ------------ |
+| Home Server     | 50-100 Mbps           | &lt;200ms            | &lt;512MB    |
+| High-End Server | 200-500 Mbps          | &lt;100ms            | &lt;1GB      |
+| Enterprise      | 500+ Mbps             | &lt;50ms             | &lt;2GB      |
+| Constrained     | 10-50 Mbps            | &lt;500ms            | &lt;256MB    |
 
 ## System-Level Optimizations
 
@@ -55,17 +57,20 @@ Set realistic performance targets based on your environment:
 #### Storage Configuration
 
 **Metadata Storage** (Critical for performance):
+
 ```yaml
 metadata:
-  root_path: "/ssd/altmount/metadata"    # Use SSD for metadata
+  root_path: "/ssd/altmount/metadata" # Use SSD for metadata
 ```
 
 **Storage Performance Impact**:
+
 - **SSD**: 10-50x faster metadata operations
 - **NVMe**: Additional 2-3x improvement over SATA SSD
 - **Network Storage**: Significant performance penalty
 
 **Recommended Storage Layout**:
+
 ```bash
 # Optimal setup
 /ssd/altmount/metadata/     # Fast SSD for metadata
@@ -73,19 +78,21 @@ metadata:
 /tmp/altmount/temp/         # RAM disk for temporary operations (advanced)
 ```
 
-*[Screenshot placeholder: Storage performance comparison showing SSD vs HDD metadata access times]*
+_[Screenshot placeholder: Storage performance comparison showing SSD vs HDD metadata access times]_
 
 #### Memory Configuration
 
 **System Memory Requirements**:
+
 ```yaml
 streaming:
-  max_range_size: 67108864        # 64MB per range request
-  max_download_workers: 25        # ~25MB per worker
+  max_range_size: 67108864 # 64MB per range request
+  max_download_workers: 25 # ~25MB per worker
   # Total memory estimate: (range_size * active_ranges) + (worker_count * 25MB)
 ```
 
 **Memory Optimization**:
+
 ```bash
 # Linux: Increase network buffers
 echo 'net.core.rmem_max = 16777216' >> /etc/sysctl.conf
@@ -99,6 +106,7 @@ sysctl -p
 #### Network Optimization
 
 **TCP Tuning**:
+
 ```bash
 # Optimize for high bandwidth, high latency
 echo 'net.ipv4.tcp_window_scaling = 1' >> /etc/sysctl.conf
@@ -108,6 +116,7 @@ echo 'net.ipv4.tcp_congestion_control = bbr' >> /etc/sysctl.conf
 ```
 
 **DNS Optimization**:
+
 ```bash
 # Use fast DNS servers
 echo 'nameserver 1.1.1.1' > /etc/resolv.conf
@@ -117,6 +126,7 @@ echo 'nameserver 8.8.8.8' >> /etc/resolv.conf
 ### Operating System Tuning
 
 #### File Descriptor Limits
+
 ```bash
 # Increase file descriptor limits
 echo 'altmount soft nofile 65536' >> /etc/security/limits.conf
@@ -131,6 +141,7 @@ EOF
 ```
 
 #### Process Priority
+
 ```bash
 # Run AltMount with higher priority
 nice -n -10 ./altmount serve --config=config.yaml
@@ -139,60 +150,64 @@ nice -n -10 ./altmount serve --config=config.yaml
 echo 'Nice=-10' >> /etc/systemd/system/altmount.service
 ```
 
-*[Screenshot placeholder: System monitoring showing optimized resource allocation and process priorities]*
+_[Screenshot placeholder: System monitoring showing optimized resource allocation and process priorities]_
 
 ## AltMount Configuration Optimization
 
 ### Streaming Performance Tuning
 
 #### High-Performance Configuration
+
 ```yaml
 streaming:
-  max_range_size: 134217728       # 128MB - Large ranges for high bandwidth
-  streaming_chunk_size: 33554432  # 32MB - Large chunks for throughput
-  max_download_workers: 35        # High worker count for fast systems
+  max_range_size: 134217728 # 128MB - Large ranges for high bandwidth
+  streaming_chunk_size: 33554432 # 32MB - Large chunks for throughput
+  max_download_workers: 35 # High worker count for fast systems
 
 import:
-  max_processor_workers: 4        # Multiple NZB processors
-  queue_processing_interval: 2    # Fast queue processing
+  max_processor_workers: 4 # Multiple NZB processors
+  queue_processing_interval: 2 # Fast queue processing
 ```
 
 #### Balanced Configuration
+
 ```yaml
 streaming:
-  max_range_size: 67108864        # 64MB - Good balance
-  streaming_chunk_size: 16777216  # 16MB - Medium chunks
-  max_download_workers: 25        # Moderate worker count
+  max_range_size: 67108864 # 64MB - Good balance
+  streaming_chunk_size: 16777216 # 16MB - Medium chunks
+  max_download_workers: 25 # Moderate worker count
 
 import:
-  max_processor_workers: 2        # Standard processing
-  queue_processing_interval: 5    # Standard interval
+  max_processor_workers: 2 # Standard processing
+  queue_processing_interval: 5 # Standard interval
 ```
 
 #### Resource-Constrained Configuration
+
 ```yaml
 streaming:
-  max_range_size: 16777216        # 16MB - Smaller ranges
-  streaming_chunk_size: 4194304   # 4MB - Small chunks
-  max_download_workers: 12        # Conservative worker count
+  max_range_size: 16777216 # 16MB - Smaller ranges
+  streaming_chunk_size: 4194304 # 4MB - Small chunks
+  max_download_workers: 12 # Conservative worker count
 
 import:
-  max_processor_workers: 1        # Single processor
-  queue_processing_interval: 10   # Slower processing
+  max_processor_workers: 1 # Single processor
+  queue_processing_interval: 10 # Slower processing
 ```
 
 ### Provider Optimization
 
 #### Connection Optimization
+
 ```yaml
 providers:
   # Primary provider with maximum connections
   - name: "primary-fast"
     host: "fastest-endpoint.provider.com"
     port: 563
-    max_connections: 50           # Maximum allowed by provider
+    max_connections: 50 # Maximum allowed by provider
     tls: true
-    
+
   # Backup provider for load balancing
   - name: "backup-provider"
     host: "backup.provider.com"
@@ -202,29 +217,29 @@ providers:
 ```
 
 #### Multi-Provider Strategy
+
 ```yaml
 providers:
   # Tier 1 provider - highest performance
   - name: "tier1-primary"
     host: "premium.provider.com"
     max_connections: 40
-    
+
   # Tier 2 provider - different backbone
-  - name: "tier2-backup" 
+  - name: "tier2-backup"
     host: "alternative.provider.com"
     max_connections: 30
-    
+
   # Block provider for fill-in
   - name: "block-provider"
     host: "block.provider.com"
     max_connections: 15
 ```
 
-*[Screenshot placeholder: Provider performance comparison showing load distribution and speeds across multiple providers]*
-
 ### Database Optimization
 
 #### SQLite Performance Tuning
+
 ```bash
 # Optimize SQLite database
 sqlite3 altmount.db << EOF
@@ -237,6 +252,7 @@ EOF
 ```
 
 #### Database Maintenance
+
 ```bash
 # Regular database optimization
 sqlite3 altmount.db "VACUUM;"
@@ -251,42 +267,45 @@ echo "0 2 * * 0 sqlite3 /path/to/altmount.db 'VACUUM; ANALYZE;'" | crontab -
 ### 4K Media Streaming
 
 #### Configuration for 4K Content
+
 ```yaml
 streaming:
-  max_range_size: 268435456       # 256MB - Large buffers for 4K
-  streaming_chunk_size: 67108864  # 64MB - Big chunks
-  max_download_workers: 40        # High concurrency
+  max_range_size: 268435456 # 256MB - Large buffers for 4K
+  streaming_chunk_size: 67108864 # 64MB - Big chunks
+  max_download_workers: 40 # High concurrency
 
 webdav:
-  debug: false                    # Disable debug for performance
-  
+  debug: false # Disable debug for performance
+
 metadata:
-  root_path: "/nvme/altmount/metadata"  # NVMe storage
+  root_path: "/nvme/altmount/metadata" # NVMe storage
 
 # High-performance logging
 log:
-  level: "warn"                   # Minimal logging
+  level: "warn" # Minimal logging
   max_size: 200
   compress: true
 ```
 
 **System Requirements for 4K**:
+
 - **CPU**: 8+ cores, 3+ GHz
 - **Memory**: 16+ GB RAM
 - **Storage**: NVMe SSD for metadata
 - **Network**: 200+ Mbps internet, Gigabit LAN
 - **Providers**: Premium Usenet providers with high connection limits
 
-*[Screenshot placeholder: 4K streaming performance dashboard showing high bandwidth utilization and smooth playback metrics]*
+_[Screenshot placeholder: 4K streaming performance dashboard showing high bandwidth utilization and smooth playback metrics]_
 
 ### Multiple Concurrent Users
 
 #### Multi-User Configuration
+
 ```yaml
 streaming:
-  max_range_size: 67108864        # 64MB - Balanced for multiple streams
-  streaming_chunk_size: 16777216  # 16MB - Medium chunks
-  max_download_workers: 60        # High total workers for concurrency
+  max_range_size: 67108864 # 64MB - Balanced for multiple streams
+  streaming_chunk_size: 16777216 # 16MB - Medium chunks
+  max_download_workers: 60 # High total workers for concurrency
 
 webdav:
   port: 8080
@@ -297,33 +316,35 @@ providers:
   - name: "primary"
     max_connections: 50
   - name: "secondary"
-    max_connections: 40  
+    max_connections: 40
   - name: "tertiary"
     max_connections: 30
 ```
 
 **Scaling Guidelines**:
+
 - **2-3 users**: 20-25 workers, 64MB range size
-- **4-6 users**: 35-45 workers, 64MB range size  
+- **4-6 users**: 35-45 workers, 64MB range size
 - **7-10 users**: 50-60 workers, 32MB range size
 - **10+ users**: Consider load balancing multiple instances
 
 ### High-Volume Downloads
 
 #### Bulk Download Optimization
+
 ```yaml
 streaming:
-  max_range_size: 134217728       # 128MB - Large ranges
-  streaming_chunk_size: 33554432  # 32MB - Large chunks  
-  max_download_workers: 50        # Maximum workers
+  max_range_size: 134217728 # 128MB - Large ranges
+  streaming_chunk_size: 33554432 # 32MB - Large chunks
+  max_download_workers: 50 # Maximum workers
 
 import:
-  max_processor_workers: 8        # Fast NZB processing
-  queue_processing_interval: 1    # Very fast queue processing
+  max_processor_workers: 8 # Fast NZB processing
+  queue_processing_interval: 1 # Very fast queue processing
 
 # Optimize for throughput over latency
 log:
-  level: "error"                  # Minimal logging overhead
+  level: "error" # Minimal logging overhead
 ```
 
 ## Monitoring and Benchmarking
@@ -331,6 +352,7 @@ log:
 ### Performance Metrics
 
 #### Key Performance Indicators (KPIs)
+
 ```bash
 # Download speed
 curl -u user:pass http://localhost:8080/api/queue/stats | jq '.performance.avg_speed'
@@ -346,6 +368,7 @@ curl -u user:pass http://localhost:8080/api/providers | jq '.providers[].statist
 ```
 
 #### Continuous Monitoring Script
+
 ```bash
 #!/bin/bash
 # Performance monitoring script
@@ -355,28 +378,29 @@ AUTH="user:pass"
 
 while true; do
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
+
     # Get performance stats
     stats=$(curl -s -u "$AUTH" "$ALTMOUNT_URL/api/queue/stats")
     speed=$(echo "$stats" | jq -r '.performance.avg_speed // "0"')
     workers=$(echo "$stats" | jq -r '.workers.utilization // "0"')
-    
+
     # Get health info
     health=$(curl -s -u "$AUTH" "$ALTMOUNT_URL/api/health")
     status=$(echo "$health" | jq -r '.status // "unknown"')
-    
+
     # Log metrics
     echo "$timestamp,$speed,$workers,$status" >> /var/log/altmount-performance.csv
-    
+
     sleep 30
 done
 ```
 
-*[Screenshot placeholder: Performance monitoring dashboard with real-time graphs showing speed, utilization, and health metrics]*
+_[Screenshot placeholder: Performance monitoring dashboard with real-time graphs showing speed, utilization, and health metrics]_
 
 ### Benchmarking Tools
 
 #### Internal Benchmarks
+
 ```bash
 # Test WebDAV performance
 curl -w "@curl-format.txt" -u user:pass http://localhost:8080/large-file.mkv
@@ -389,6 +413,7 @@ ffmpeg -i http://user:pass@localhost:8080/test-video.mkv -f null -
 ```
 
 #### External Benchmarks
+
 ```bash
 # Test provider direct download speed
 wget --user=provider_user --password=provider_pass \
@@ -405,11 +430,12 @@ curl -u altmount_user:altmount_pass \
 ### Identifying Bottlenecks
 
 #### System Resource Analysis
+
 ```bash
 # CPU bottlenecks
 top -p $(pgrep altmount)
 
-# Memory bottlenecks  
+# Memory bottlenecks
 ps aux | grep altmount | awk '{print $4}'
 
 # Disk I/O bottlenecks
@@ -420,6 +446,7 @@ iftop -i eth0
 ```
 
 #### AltMount-Specific Analysis
+
 ```bash
 # Worker saturation
 curl -u user:pass http://localhost:8080/api/health/streaming | jq '.workers'
@@ -431,13 +458,14 @@ curl -u user:pass http://localhost:8080/api/providers | jq '.providers[].statist
 curl -u user:pass http://localhost:8080/api/queue | jq '.summary'
 ```
 
-*[Screenshot placeholder: System resource monitoring showing bottleneck identification and resource utilization patterns]*
+_[Screenshot placeholder: System resource monitoring showing bottleneck identification and resource utilization patterns]_
 
 ### Common Performance Issues
 
 #### Slow Download Speeds
 
 **Diagnosis**:
+
 ```bash
 # Check worker utilization (should be 80-95%)
 curl -u user:pass http://localhost:8080/api/health/streaming | jq '.workers.utilization'
@@ -450,6 +478,7 @@ curl -u user:pass http://localhost:8080/api/providers/provider-name/test
 ```
 
 **Solutions**:
+
 1. **Increase Workers**: If utilization is low, increase `max_download_workers`
 2. **Add Providers**: Distribute load across more providers
 3. **Optimize Chunks**: Increase chunk sizes for better throughput
@@ -458,6 +487,7 @@ curl -u user:pass http://localhost:8080/api/providers/provider-name/test
 #### High Memory Usage
 
 **Diagnosis**:
+
 ```bash
 # Monitor memory usage over time
 while true; do
@@ -467,6 +497,7 @@ done
 ```
 
 **Solutions**:
+
 1. **Reduce Range Size**: Lower `max_range_size` to use less memory per request
 2. **Limit Workers**: Reduce `max_download_workers` if memory constrained
 3. **Check for Leaks**: Monitor for gradual memory increase over time
@@ -474,6 +505,7 @@ done
 #### Poor Streaming Performance
 
 **Diagnosis**:
+
 ```bash
 # Test streaming latency
 curl -w "@curl-format.txt" -r 0-1048575 -u user:pass \
@@ -487,6 +519,7 @@ done
 ```
 
 **Solutions**:
+
 1. **Optimize for Streaming**: Use smaller chunks for lower latency
 2. **Increase Workers**: Ensure enough workers for concurrent streams
 3. **Provider Selection**: Use fastest providers for streaming content
@@ -496,6 +529,7 @@ done
 ### Caching Strategies
 
 #### Operating System Cache
+
 ```bash
 # Increase system cache for frequently accessed files
 echo 'vm.vfs_cache_pressure = 50' >> /etc/sysctl.conf
@@ -504,11 +538,11 @@ echo 'vm.dirty_background_ratio = 5' >> /etc/sysctl.conf
 ```
 
 #### Application-Level Caching
+
 ```yaml
 # Use fast storage for temporary operations
 metadata:
   root_path: "/ssd/altmount/metadata"
-
 # Consider RAM disk for very high performance (advanced)
 # metadata:
 #   root_path: "/tmpfs/altmount/metadata"
@@ -517,6 +551,7 @@ metadata:
 ### Load Balancing
 
 #### Multiple AltMount Instances
+
 ```yaml
 # Instance 1
 webdav:
@@ -525,7 +560,7 @@ webdav:
 streaming:
   max_download_workers: 20
 
-# Instance 2  
+# Instance 2
 webdav:
   port: 8081
 
@@ -534,6 +569,7 @@ streaming:
 ```
 
 **HAProxy Configuration**:
+
 ```
 backend altmount
     balance roundrobin
@@ -541,33 +577,35 @@ backend altmount
     server altmount2 127.0.0.1:8081 check
 ```
 
-*[Screenshot placeholder: Load balancing dashboard showing traffic distribution across multiple AltMount instances]*
+_[Screenshot placeholder: Load balancing dashboard showing traffic distribution across multiple AltMount instances]_
 
 ### Provider Optimization
 
 #### Connection Pool Management
+
 ```yaml
 providers:
   - name: "optimized-provider"
     host: "provider.com"
     port: 563
-    max_connections: 50           # Optimal based on testing
+    max_connections: 50 # Optimal based on testing
     tls: true
-    
+
     # Advanced: Connection persistence (if supported)
     # keep_alive: true
     # connection_timeout: 30
 ```
 
 #### Geographic Optimization
+
 ```yaml
 providers:
   # Use geographically closer providers when possible
   - name: "us-provider"
     host: "us-news.provider.com"
     max_connections: 30
-    
-  - name: "eu-provider"  
+
+  - name: "eu-provider"
     host: "eu-news.provider.com"
     max_connections: 30
 ```
@@ -577,6 +615,7 @@ providers:
 ### Load Testing
 
 #### Concurrent User Simulation
+
 ```bash
 #!/bin/bash
 # Simulate multiple concurrent users
@@ -594,6 +633,7 @@ echo "All users completed"
 ```
 
 #### Sustained Load Testing
+
 ```bash
 # Test sustained performance over time
 ab -n 1000 -c 50 -t 300 -A user:pass \
@@ -603,6 +643,7 @@ ab -n 1000 -c 50 -t 300 -A user:pass \
 ### Performance Regression Testing
 
 #### Automated Performance Tests
+
 ```bash
 #!/bin/bash
 # Performance regression test script
@@ -654,8 +695,8 @@ fi
 ## Next Steps
 
 With performance optimized:
-1. **[Health Monitoring](../usage/health-monitoring.md)** - Set up performance monitoring
-2. **[Advanced Configuration](../configuration/advanced.md)** - Explore advanced features
-3. **[Common Issues](common-issues.md)** - Troubleshoot any remaining issues
+
+1. **[Health Monitoring](../3. Configuration/health-monitoring.md)** - Set up performance monitoring
+2. **[Common Issues](common-issues.md)** - Troubleshoot any remaining issues
 
 Remember: Performance optimization is an iterative process. Monitor, measure, adjust, and repeat to achieve optimal results for your specific environment.

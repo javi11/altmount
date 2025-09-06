@@ -32,11 +32,9 @@ On higher values you can see the performance improvement but also the memory usa
 
 With streaming optimized:
 
-1. **[Test WebDAV Clients](../usage/webdav-clients.md)** - Verify streaming performance
-2. **[Configure ARR Integration](integration.md)** - Set up automated downloads
-3. **[Set up Health Monitoring](../usage/health-monitoring.md)** - Monitor performance
-4. **[Advanced Configuration](advanced.md)** - Fine-tune additional settings
+1. **[Configure ARR Integration](integration.md)** - Set up automated downloads
+2. **[Set up Health Monitoring](../3. Configuration/health-monitoring.md)** - Monitor performance
 
 ---
 
-For advanced streaming scenarios and troubleshooting, see the [Troubleshooting Guide](../troubleshooting/performance.md).
+For advanced streaming scenarios and troubleshooting, see the [Troubleshooting Guide](../5.%20Troubleshooting/performance.md).

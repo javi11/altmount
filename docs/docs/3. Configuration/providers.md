@@ -199,11 +199,7 @@ ERROR Provider "primary": failed to resolve host
 
 With providers configured:
 
-1. **[Configure WebDAV Settings](webdav.md)** - Set up the WebDAV server
-2. **[Set up ARR Integration](integration.md)** - Connect your media applications
-3. **[Configure Streaming](streaming.md)** - Optimize download performance
-4. **[Test WebDAV Access](../usage/webdav-clients.md)** - Verify everything works
+1. **[Set up ARR Integration](integration.md)** - Connect your media applications
+2. **[Configure Streaming](streaming.md)** - Optimize download performance
 
 ---
-
-For more advanced provider configuration options, see the [Advanced Configuration](advanced.md) guide.
