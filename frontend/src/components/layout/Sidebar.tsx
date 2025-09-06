@@ -1,6 +1,7 @@
 import {
 	Activity,
 	AlertTriangle,
+	Bug,
 	Database,
 	ExternalLink,
 	Folder,
@@ -132,7 +133,7 @@ export function Sidebar() {
 									<span className="text-sm">Queue</span>
 								</div>
 								<div className="text-base-content/70 text-sm">
-									{queueStats.total_processing} / {queueStats.total_queued}
+									{queueStats.total_completed} / {queueStats.total_queued}
 								</div>
 							</div>
 						)}
@@ -153,13 +154,13 @@ export function Sidebar() {
 				<div className="mt-4 border-base-300 border-t pt-4">
 					<div className="space-y-2">
 						<div className="flex items-center justify-between">
-							<span className="text-base-content/70 text-sm">Version</span>
-							<span className="font-mono text-base-content text-sm">
+							<div className="text-base-content/70 text-sm">Version</div>
+							<div className="font-mono text-base-content text-sm">
 								{__APP_VERSION__}
 								{__GIT_COMMIT__ !== "unknown" && (
 									<span className="text-base-content/50"> ({__GIT_COMMIT__.slice(0, 7)})</span>
 								)}
-							</span>
+							</div>
 						</div>
 						<a
 							href={__GITHUB_URL__}
@@ -169,6 +170,15 @@ export function Sidebar() {
 						>
 							<ExternalLink className="h-4 w-4" />
 							<span>GitHub Repository</span>
+						</a>
+						<a
+							href={`${__GITHUB_URL__}/issues`}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center space-x-2 text-base-content/70 text-sm transition-colors hover:text-base-content"
+						>
+							<Bug className="h-4 w-4" />
+							<span>Report Issues</span>
 						</a>
 					</div>
 				</div>

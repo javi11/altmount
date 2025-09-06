@@ -308,7 +308,16 @@ func (s *Service) RegisterUser(username, email, password string) (*database.User
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	s.logger.Info("First user registered", "username", username, "is_admin", true)
+	// Generate API key for the first user (admin)
+	apiKey, err := s.userRepo.RegenerateAPIKey(user.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate API key for first user: %w", err)
+	}
+
+	// Update the user object with the generated API key
+	user.APIKey = &apiKey
+
+	s.logger.Info("First user registered with API key", "username", username, "is_admin", true)
 	return user, nil
 }
 
