@@ -355,7 +355,6 @@ export interface ArrsInstance {
 
 export interface ArrsConfig {
 	enabled: boolean;
-	default_interval_hours: number;
 	max_workers: number;
 	mount_path: string;
 	radarr_instances: ArrsInstanceConfig[];
@@ -392,7 +391,6 @@ export interface SyncResult {
 
 export interface ArrsFormData {
 	enabled: boolean;
-	default_interval_hours: number;
 	max_workers: number;
 	mount_path: string;
 	radarr_instances: ArrsInstanceConfig[];

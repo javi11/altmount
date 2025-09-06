@@ -83,12 +83,12 @@ func (ic *ImportConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxProcessorWorkers     int `yaml:"max_processor_workers"`
 		QueueProcessingInterval int `yaml:"queue_processing_interval"` // Parse as seconds, convert to Duration
 	}
-	
+
 	var raw rawImportConfig
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
-	
+
 	ic.MaxProcessorWorkers = raw.MaxProcessorWorkers
 	ic.QueueProcessingInterval = time.Duration(raw.QueueProcessingInterval) * time.Second
 	return nil
@@ -153,12 +153,11 @@ type SABnzbdCategory struct {
 
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
-	Enabled              *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	DefaultIntervalHours int                  `yaml:"default_interval_hours" mapstructure:"default_interval_hours" json:"default_interval_hours"`
-	MaxWorkers           int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	MountPath            string               `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
-	RadarrInstances      []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
-	SonarrInstances      []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	Enabled         *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	MaxWorkers      int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	MountPath       string               `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	RadarrInstances []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
+	SonarrInstances []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -423,9 +422,6 @@ func (c *Config) Validate() error {
 		}
 		if !filepath.IsAbs(c.Arrs.MountPath) {
 			return fmt.Errorf("scraper mount_path must be an absolute path")
-		}
-		if c.Arrs.DefaultIntervalHours <= 0 {
-			return fmt.Errorf("scraper default_interval_hours must be greater than 0")
 		}
 		if c.Arrs.MaxWorkers <= 0 {
 			return fmt.Errorf("scraper max_workers must be greater than 0")
@@ -760,12 +756,11 @@ func DefaultConfig() *Config {
 		Providers: []ProviderConfig{},
 		LogLevel:  "info",
 		Arrs: ArrsConfig{
-			Enabled:              &scrapperEnabled, // Disabled by default
-			DefaultIntervalHours: 24,               // Default to 24 hours
-			MaxWorkers:           5,                // Default to 5 concurrent workers
-			MountPath:            "",               // Empty by default - required when enabled
-			RadarrInstances:      []ArrsInstanceConfig{},
-			SonarrInstances:      []ArrsInstanceConfig{},
+			Enabled:         &scrapperEnabled, // Disabled by default
+			MaxWorkers:      5,                // Default to 5 concurrent workers
+			MountPath:       "",               // Empty by default - required when enabled
+			RadarrInstances: []ArrsInstanceConfig{},
+			SonarrInstances: []ArrsInstanceConfig{},
 		},
 	}
 }
