@@ -26,7 +26,7 @@ export function RestartRequiredBanner({
 				</div>
 			</div>
 			<div className="flex items-center space-x-2">
-				<div className="flex items-center text-base-content/70 text-sm">
+				<div className="flex items-center text-sm">
 					<RefreshCw className="mr-1 h-4 w-4" />
 					Restart the server to apply changes
 				</div>
