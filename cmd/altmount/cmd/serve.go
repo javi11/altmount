@@ -383,12 +383,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 func handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
+
 	response := map[string]interface{}{
 		"status":    "ok",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -426,7 +426,7 @@ func getStaticFileHandler() http.Handler {
 // createSPAHandler creates a handler that serves static files with SPA fallback
 func createSPAHandler(fs http.FileSystem, isEmbedded bool) http.Handler {
 	fileServer := http.FileServer(fs)
-	
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Clean the path
 		path := r.URL.Path
@@ -437,15 +437,8 @@ func createSPAHandler(fs http.FileSystem, isEmbedded bool) http.Handler {
 		// Try to open the requested file
 		var file http.File
 		var err error
-		
-		if isEmbedded {
-			// For embedded FS, we need to handle the path differently
-			if embeddedFS, ok := fs.(http.FileSystem); ok {
-				file, err = embeddedFS.Open(path)
-			}
-		} else {
-			file, err = fs.Open(path)
-		}
+
+		file, err = fs.Open(path)
 
 		// If file exists, serve it normally
 		if err == nil {
@@ -475,7 +468,7 @@ func createSPAHandler(fs http.FileSystem, isEmbedded bool) http.Handler {
 func hasFileExtension(path string) bool {
 	// Common static asset extensions
 	staticExtensions := []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".map", ".json", ".xml", ".txt"}
-	
+
 	for _, ext := range staticExtensions {
 		if len(path) >= len(ext) && path[len(path)-len(ext):] == ext {
 			return true
