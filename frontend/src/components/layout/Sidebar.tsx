@@ -2,6 +2,7 @@ import {
 	Activity,
 	AlertTriangle,
 	Database,
+	ExternalLink,
 	Folder,
 	Heart,
 	Home,
@@ -145,6 +146,30 @@ export function Sidebar() {
 								<div className="text-error text-sm">{healthStats.corrupted}</div>
 							</div>
 						)}
+					</div>
+				</div>
+
+				{/* Version and GitHub section */}
+				<div className="mt-4 border-base-300 border-t pt-4">
+					<div className="space-y-2">
+						<div className="flex items-center justify-between">
+							<span className="text-base-content/70 text-sm">Version</span>
+							<span className="font-mono text-base-content text-sm">
+								{__APP_VERSION__}
+								{__GIT_COMMIT__ !== "unknown" && (
+									<span className="text-base-content/50"> ({__GIT_COMMIT__.slice(0, 7)})</span>
+								)}
+							</span>
+						</div>
+						<a
+							href={__GITHUB_URL__}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center space-x-2 text-base-content/70 text-sm transition-colors hover:text-base-content"
+						>
+							<ExternalLink className="h-4 w-4" />
+							<span>GitHub Repository</span>
+						</a>
 					</div>
 				</div>
 			</div>

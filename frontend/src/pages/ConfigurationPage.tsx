@@ -13,13 +13,13 @@ import {
 	X,
 } from "lucide-react";
 import { useState } from "react";
+import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
-import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
@@ -35,13 +35,13 @@ import {
 	useUpdateConfigSection,
 } from "../hooks/useConfig";
 import type {
+	ArrsConfig,
 	ConfigSection,
 	HealthConfig,
 	ImportConfig,
 	MetadataConfig,
 	RCloneVFSFormData,
 	SABnzbdConfig,
-	ArrsConfig,
 	StreamingConfig,
 	SystemFormData,
 	WebDAVConfig,

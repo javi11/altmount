@@ -53,7 +53,6 @@ export interface QueueStats {
 	last_updated: string;
 }
 
-
 // Manual Scan types
 export const ScanStatus = {
 	IDLE: "idle",

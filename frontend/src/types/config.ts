@@ -489,7 +489,8 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	},
 	arrs: {
 		title: "Radarr/Sonarr Management",
-		description: "Configure Radarr and Sonarr instances for movie and TV show file synchronization. This will allow to repair broken files by notifying the appropriate service.",
+		description:
+			"Configure Radarr and Sonarr instances for movie and TV show file synchronization. This will allow to repair broken files by notifying the appropriate service.",
 		icon: "Cog",
 		canEdit: true,
 	},

@@ -202,7 +202,12 @@ export class APIClient {
 	}
 
 	async deleteBulkHealthItems(filePaths: string[]) {
-		return this.request<{ message: string; deleted_count: number; file_paths: string[]; deleted_at: string }>("/health/bulk/delete", {
+		return this.request<{
+			message: string;
+			deleted_count: number;
+			file_paths: string[];
+			deleted_at: string;
+		}>("/health/bulk/delete", {
 			method: "POST",
 			body: JSON.stringify({ file_paths: filePaths }),
 		});

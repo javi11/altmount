@@ -51,9 +51,21 @@ jobs:
         working-directory: frontend
         run: bun install --frozen-lockfile
 
+      # Extract version info for frontend
+      - name: Extract version info for frontend
+        id: frontend-version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+
       # Build frontend for embedding
       - name: Build frontend
         working-directory: frontend
+        env:
+          npm_package_version: ${{ steps.frontend-version.outputs.version }}
+          GIT_COMMIT: ${{ steps.frontend-version.outputs.commit }}
         run: bun run build
 
       # Upload built frontend as artifact
