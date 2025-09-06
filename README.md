@@ -16,7 +16,8 @@ Complete setup guides, configuration options, API reference, and troubleshooting
 docker run -d \
   --name altmount \
   -p 8080:8080 \
-  -v ./config:/app/config \
+  -v ./config:/config \
+  -v ./metadata:/metadata \
   javi11/altmount:latest
 ```
 
