@@ -13,6 +13,7 @@ import (
 // ConfigAPIResponse wraps config.Config with sensitive data handling
 type ConfigAPIResponse struct {
 	*config.Config
+	Import    ImportAPIResponse     `json:"import"`
 	RClone    RCloneAPIResponse     `json:"rclone"`
 	Providers []ProviderAPIResponse `json:"providers"`
 }
@@ -45,6 +46,12 @@ type ProviderAPIResponse struct {
 type ImportAPIResponse struct {
 	MaxProcessorWorkers     int `json:"max_processor_workers"`
 	QueueProcessingInterval int `json:"queue_processing_interval"` // Interval in seconds
+}
+
+// ConfigUpdateRequest represents the request structure for config updates with proper type handling
+type ConfigUpdateRequest struct {
+	*config.Config
+	Import ImportAPIResponse `json:"import"`
 }
 
 // Helper functions to create API responses from core config types
@@ -84,6 +91,7 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 
 	return &ConfigAPIResponse{
 		Config:    cfg,
+		Import:    ToImportAPIResponse(&cfg.Import),
 		RClone:    rcloneResp,
 		Providers: providers,
 	}
@@ -95,6 +103,21 @@ func ToImportAPIResponse(cfg *config.ImportConfig) ImportAPIResponse {
 		MaxProcessorWorkers:     cfg.MaxProcessorWorkers,
 		QueueProcessingInterval: int(cfg.QueueProcessingInterval.Seconds()),
 	}
+}
+
+// FromImportAPIResponse converts ImportAPIResponse (with seconds) to config.ImportConfig (with duration)
+func FromImportAPIResponse(apiResp ImportAPIResponse) config.ImportConfig {
+	return config.ImportConfig{
+		MaxProcessorWorkers:     apiResp.MaxProcessorWorkers,
+		QueueProcessingInterval: time.Duration(apiResp.QueueProcessingInterval) * time.Second,
+	}
+}
+
+// ToConfigFromUpdateRequest converts ConfigUpdateRequest to config.Config with proper type conversions
+func ToConfigFromUpdateRequest(req *ConfigUpdateRequest) config.Config {
+	cfg := *req.Config // Copy the embedded config
+	cfg.Import = FromImportAPIResponse(req.Import) // Convert the Import field properly
+	return cfg
 }
 
 // Common API response structures

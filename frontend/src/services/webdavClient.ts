@@ -88,7 +88,7 @@ export class WebDAVClient {
 
 		try {
 			const contents = await this.client.getDirectoryContents(path);
-			
+
 			// Handle empty directories - contents could be empty array or null
 			let files: WebDAVFile[] = [];
 			if (Array.isArray(contents) && contents.length > 0) {

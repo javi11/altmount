@@ -1,6 +1,6 @@
-import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SyncProgress, SyncResult, ArrsInstance } from "../types/config";
+import React from "react";
+import type { ArrsInstance, SyncProgress, SyncResult } from "../types/config";
 
 // API functions for arrs operations
 const arrsAPI = {
@@ -85,9 +85,12 @@ const arrsAPI = {
 export const arrsKeys = {
 	all: ["arrs"] as const,
 	instances: () => [...arrsKeys.all, "instances"] as const,
-	instance: (instanceType: string, instanceName: string) => [...arrsKeys.all, "instance", instanceType, instanceName] as const,
-	status: (instanceType: string, instanceName: string) => [...arrsKeys.all, "status", instanceType, instanceName] as const,
-	result: (instanceType: string, instanceName: string) => [...arrsKeys.all, "result", instanceType, instanceName] as const,
+	instance: (instanceType: string, instanceName: string) =>
+		[...arrsKeys.all, "instance", instanceType, instanceName] as const,
+	status: (instanceType: string, instanceName: string) =>
+		[...arrsKeys.all, "status", instanceType, instanceName] as const,
+	result: (instanceType: string, instanceName: string) =>
+		[...arrsKeys.all, "result", instanceType, instanceName] as const,
 	activeSyncs: () => [...arrsKeys.all, "active"] as const,
 };
 
@@ -101,20 +104,21 @@ export function useSyncStatus(instanceType: string, instanceName: string, enable
 			// Poll every 2 seconds if sync is active
 			// Continue polling for 5 seconds after completion to catch transition
 			const data = query.state.data as SyncProgress | undefined;
-			
+
 			if (data?.status === "running" || data?.status === "cancelling") {
 				return 2000; // Poll every 2 seconds during active sync
 			}
-			
+
 			if (data?.status === "completed" || data?.status === "failed") {
 				// Continue polling for 5 seconds after completion to ensure frontend catches it
 				const completedTime = data.started_at ? new Date(data.started_at).getTime() : 0;
 				const now = Date.now();
-				if (now - completedTime < 5000) { // 5 seconds
+				if (now - completedTime < 5000) {
+					// 5 seconds
 					return 1000; // Poll every second during transition period
 				}
 			}
-			
+
 			return false; // Stop polling
 		},
 		retry: (failureCount, error) => {
@@ -160,13 +164,13 @@ export function useTriggerSync() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ instanceType, instanceName }: { instanceType: string; instanceName: string }) => 
+		mutationFn: ({ instanceType, instanceName }: { instanceType: string; instanceName: string }) =>
 			arrsAPI.triggerSync(instanceType, instanceName),
 		onSuccess: (_, { instanceType, instanceName }) => {
 			// Invalidate status queries to trigger immediate refetch
 			queryClient.invalidateQueries({ queryKey: arrsKeys.status(instanceType, instanceName) });
 			queryClient.invalidateQueries({ queryKey: arrsKeys.activeSyncs() });
-			
+
 			// Start polling immediately by enabling the query
 			queryClient.refetchQueries({ queryKey: arrsKeys.status(instanceType, instanceName) });
 		},
@@ -181,7 +185,7 @@ export function useCancelSync() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ instanceType, instanceName }: { instanceType: string; instanceName: string }) => 
+		mutationFn: ({ instanceType, instanceName }: { instanceType: string; instanceName: string }) =>
 			arrsAPI.cancelSync(instanceType, instanceName),
 		onSuccess: (_, { instanceType, instanceName }) => {
 			// Invalidate status queries to trigger immediate refetch
@@ -189,7 +193,7 @@ export function useCancelSync() {
 			queryClient.invalidateQueries({ queryKey: arrsKeys.activeSyncs() });
 			// Also invalidate the result query as cancellation creates a result
 			queryClient.invalidateQueries({ queryKey: arrsKeys.result(instanceType, instanceName) });
-			
+
 			// Continue polling to catch the cancellation transition
 			queryClient.refetchQueries({ queryKey: arrsKeys.status(instanceType, instanceName) });
 		},
@@ -234,20 +238,23 @@ export function useArrsInstanceInfo(instanceType: string, instanceName: string, 
 
 	// Track previous status to detect completion transitions
 	const prevStatusRef = React.useRef<string | undefined>(undefined);
-	
+
 	// When status changes from running to completed/failed, invalidate result query
 	React.useEffect(() => {
 		const currentStatus = statusQuery.data?.status;
 		const prevStatus = prevStatusRef.current;
-		
+
 		if (prevStatus && currentStatus && prevStatus !== currentStatus) {
 			// If status changed from running to completed/failed, refetch result immediately
-			if (prevStatus === "running" && (currentStatus === "completed" || currentStatus === "failed")) {
+			if (
+				prevStatus === "running" &&
+				(currentStatus === "completed" || currentStatus === "failed")
+			) {
 				// Invalidate and refetch the result query to get the fresh result
 				queryClient.invalidateQueries({ queryKey: arrsKeys.result(instanceType, instanceName) });
 			}
 		}
-		
+
 		prevStatusRef.current = currentStatus;
 	}, [statusQuery.data?.status, instanceType, instanceName, queryClient]);
 
@@ -256,7 +263,8 @@ export function useArrsInstanceInfo(instanceType: string, instanceName: string, 
 		result: resultQuery.data,
 		isStatusLoading: statusQuery.isLoading,
 		isResultLoading: resultQuery.isLoading,
-		hasActiveStatus: statusQuery.data?.status === "running" || statusQuery.data?.status === "cancelling",
+		hasActiveStatus:
+			statusQuery.data?.status === "running" || statusQuery.data?.status === "cancelling",
 		hasResult: !resultQuery.isError,
 		refetchStatus: statusQuery.refetch,
 		refetchResult: resultQuery.refetch,

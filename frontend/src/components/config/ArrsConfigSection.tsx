@@ -1,7 +1,7 @@
 import { AlertTriangle, Plus, Save } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { ArrsConfig, ArrsInstanceConfig, ArrsType, ConfigResponse } from "../../types/config";
 import ArrsInstanceCard from "./ArrsInstanceCard";
-import type { ConfigResponse, ArrsConfig, ArrsInstanceConfig, ArrsType } from "../../types/config";
 
 interface ArrsConfigSectionProps {
 	config: ConfigResponse;
@@ -102,10 +102,7 @@ export function ArrsConfigSection({
 		return errors;
 	};
 
-	const handleFormChange = (
-		field: keyof ArrsConfig,
-		value: ArrsConfig[keyof ArrsConfig],
-	) => {
+	const handleFormChange = (field: keyof ArrsConfig, value: ArrsConfig[keyof ArrsConfig]) => {
 		const newFormData = { ...formData, [field]: value };
 		setFormData(newFormData);
 		setHasChanges(true);
@@ -183,7 +180,6 @@ export function ArrsConfigSection({
 		}));
 	};
 
-
 	const renderInstance = (instance: ArrsInstanceConfig, type: ArrsType, index: number) => {
 		const instanceId = `${type}-${index}`; // Use index-based key for UI state
 		const isApiKeyVisible = showApiKeys[instanceId] || false;
@@ -212,7 +208,8 @@ export function ArrsConfigSection({
 						<div>
 							<h3 className="font-semibold">Enable Arrs Service</h3>
 							<p className="text-base-content/70 text-sm">
-								Enable health monitoring and file repair for Radarr and Sonarr instances. This allows automatic detection and repair of corrupted files.
+								Enable health monitoring and file repair for Radarr and Sonarr instances. This
+								allows automatic detection and repair of corrupted files.
 							</p>
 						</div>
 						<input
@@ -244,7 +241,8 @@ export function ArrsConfigSection({
 									disabled={isReadOnly}
 								/>
 								<p className="label">
-									Absolute path where WebDAV is mounted. In case you have a setup an union in the arrs, add the union instead. Ex: "/mnt/unionfs", "/mnt/altmount"
+									Absolute path where WebDAV is mounted. In case you have a setup an union in the
+									arrs, add the union instead. Ex: "/mnt/unionfs", "/mnt/altmount"
 								</p>
 							</fieldset>
 						</div>
