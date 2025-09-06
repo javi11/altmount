@@ -29,7 +29,7 @@ altmount serve --config config.yaml
 
 ## Links
 
-- 📚 [Documentation](https://javi11.github.io/altmount/)
+- 📚 [Documentation](https://altmount.kipsilabs.top)
 - 🐛 [Issues](https://github.com/javi11/altmount/issues)
 - 💬 [Discussions](https://github.com/javi11/altmount/discussions)
 
