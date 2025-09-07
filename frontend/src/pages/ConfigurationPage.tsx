@@ -12,7 +12,8 @@ import {
 	Shield,
 	X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
@@ -68,7 +69,25 @@ export function ConfigurationPage() {
 	const restartServer = useRestartServer();
 	const updateConfigSection = useUpdateConfigSection();
 	const { confirmAction } = useConfirm();
-	const [activeSection, setActiveSection] = useState<ConfigSection | "system">("webdav");
+	const navigate = useNavigate();
+	const { section } = useParams<{ section: string }>();
+
+	// Get active section from URL parameter, default to webdav
+	const activeSection = (() => {
+		if (!section) return "webdav";
+		const validSections = Object.keys(CONFIG_SECTIONS) as (ConfigSection | "system")[];
+		return validSections.includes(section as ConfigSection | "system")
+			? (section as ConfigSection | "system")
+			: "webdav";
+	})();
+
+	// Redirect to default section if no section is specified
+	useEffect(() => {
+		if (!section) {
+			navigate("/config/webdav", { replace: true });
+		}
+	}, [section, navigate]);
+
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 	const [restartRequiredConfigs, setRestartRequiredConfigs] = useState<string[]>([]);
 	const [isRestartBannerDismissed, setIsRestartBannerDismissed] = useState(() => {
@@ -371,7 +390,7 @@ export function ConfigurationPage() {
 											<button
 												type="button"
 												className={activeSection === key ? "active" : ""}
-												onClick={() => setActiveSection(key)}
+												onClick={() => navigate(`/config/${key}`)}
 											>
 												<IconComponent className="h-5 w-5" />
 												<div className="min-w-0 flex-1">

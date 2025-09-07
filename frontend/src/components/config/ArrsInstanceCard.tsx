@@ -1,5 +1,5 @@
 import { Eye, EyeOff, Trash2, Wifi } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import type { ArrsInstanceConfig, ArrsType } from "../../types/config";
 
 interface ArrsInstanceCardProps {
@@ -28,28 +28,28 @@ export function ArrsInstanceCard({
 }: ArrsInstanceCardProps) {
 	const instanceKey = `${type}-${index}`;
 	const [testResult, setTestResult] = useState<{
-		type: 'success' | 'error' | null;
+		type: "success" | "error" | null;
 		message: string;
-	}>({ type: null, message: '' });
+	}>({ type: null, message: "" });
 	const [isTestingConnection, setIsTestingConnection] = useState(false);
 
 	const testConnection = useCallback(async () => {
 		if (!instance.url || !instance.api_key) {
 			setTestResult({
-				type: 'error',
-				message: 'URL and API key are required',
+				type: "error",
+				message: "URL and API key are required",
 			});
 			return;
 		}
 
 		setIsTestingConnection(true);
-		setTestResult({ type: null, message: '' });
+		setTestResult({ type: null, message: "" });
 
 		try {
-			const response = await fetch('/api/arrs/test', {
-				method: 'POST',
+			const response = await fetch("/api/arrs/test", {
+				method: "POST",
 				headers: {
-					'Content-Type': 'application/json',
+					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
 					type: type,
@@ -62,25 +62,25 @@ export function ArrsInstanceCard({
 
 			if (data.success) {
 				setTestResult({
-					type: 'success',
-					message: data.message || 'Connection successful',
+					type: "success",
+					message: data.message || "Connection successful",
 				});
 			} else {
 				setTestResult({
-					type: 'error',
-					message: data.error || 'Connection failed',
+					type: "error",
+					message: data.error || "Connection failed",
 				});
 			}
 		} catch (error) {
 			setTestResult({
-				type: 'error',
-				message: error instanceof Error ? error.message : 'Connection failed',
+				type: "error",
+				message: error instanceof Error ? error.message : "Connection failed",
 			});
 		} finally {
 			setIsTestingConnection(false);
 			// Clear the result after 5 seconds
 			setTimeout(() => {
-				setTestResult({ type: null, message: '' });
+				setTestResult({ type: null, message: "" });
 			}, 5000);
 		}
 	}, [instance.url, instance.api_key, type]);
@@ -88,12 +88,12 @@ export function ArrsInstanceCard({
 	// Clear test result when connection details change
 	const handleInstanceChange = useCallback(
 		(field: keyof ArrsInstanceConfig, value: ArrsInstanceConfig[keyof ArrsInstanceConfig]) => {
-			if (field === 'url' || field === 'api_key') {
-				setTestResult({ type: null, message: '' });
+			if (field === "url" || field === "api_key") {
+				setTestResult({ type: null, message: "" });
 			}
 			onInstanceChange(field, value);
 		},
-		[onInstanceChange]
+		[onInstanceChange],
 	);
 
 	return (
@@ -164,12 +164,12 @@ export function ArrsInstanceCard({
 								type="button"
 								className={`btn ml-2 ${
 									isTestingConnection
-										? 'btn-disabled loading'
-										: testResult.type === 'success'
-										? 'btn-success'
-										: testResult.type === 'error'
-										? 'btn-error'
-										: 'btn-outline'
+										? "btn-disabled loading"
+										: testResult.type === "success"
+											? "btn-success"
+											: testResult.type === "error"
+												? "btn-error"
+												: "btn-outline"
 								}`}
 								onClick={testConnection}
 								disabled={isReadOnly || isTestingConnection || !instance.url || !instance.api_key}
@@ -185,7 +185,7 @@ export function ArrsInstanceCard({
 						{testResult.type && (
 							<div
 								className={`mt-2 text-sm ${
-									testResult.type === 'success' ? 'text-success' : 'text-error'
+									testResult.type === "success" ? "text-success" : "text-error"
 								}`}
 							>
 								{testResult.message}

@@ -56,7 +56,7 @@ export function Sidebar() {
 	const getBadgeCount = (path: string) => {
 		switch (path) {
 			case "/queue":
-				return queueStats ? queueStats.total_failed : 0;
+				return queueStats ? queueStats.total_processing + queueStats.total_failed : 0;
 			case "/health":
 				return healthStats ? healthStats.corrupted + healthStats.partial : 0;
 			default:
@@ -67,8 +67,13 @@ export function Sidebar() {
 	const getBadgeColor = (path: string, count: number) => {
 		if (count === 0) return "";
 		switch (path) {
-			case "/queue":
-				return "badge-error";
+			case "/queue": {
+				// Show error badge if there are failed items, otherwise warning for processing
+				if (queueStats && queueStats.total_failed > 0) {
+					return "badge-error";
+				}
+				return queueStats && queueStats.total_processing > 0 ? "badge-warning" : "badge-info";
+			}
 			case "/health":
 				return "badge-warning";
 			default:
@@ -133,7 +138,19 @@ export function Sidebar() {
 									<span className="text-sm">Queue</span>
 								</div>
 								<div className="text-base-content/70 text-sm">
-									{queueStats.total_completed} / {queueStats.total_queued}
+									{(() => {
+										const totalItems =
+											queueStats.total_processing +
+											queueStats.total_completed +
+											queueStats.total_failed;
+										const pendingItems = queueStats.total_queued - totalItems;
+										const activeItems = queueStats.total_processing + pendingItems;
+
+										if (activeItems > 0) {
+											return `${activeItems} active`;
+										}
+										return "idle";
+									})()}
 								</div>
 							</div>
 						)}

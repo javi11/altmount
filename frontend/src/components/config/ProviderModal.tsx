@@ -313,8 +313,9 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 						{connectionTestResult && (
 							<div
-								className={`alert ${connectionTestResult.success ? "alert-success" : "alert-error"
-									}`}
+								className={`alert ${
+									connectionTestResult.success ? "alert-success" : "alert-error"
+								}`}
 							>
 								{connectionTestResult.success ? (
 									<Check className="h-5 w-5" />
