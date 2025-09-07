@@ -64,7 +64,7 @@ webdav:
 
 When configuring media clients (Plex, Jellyfin, etc.), use these WebDAV credentials:
 
-- **Server**: `http://altmount-server:8080`
+- **Server**: `http://altmount-server:8080/webdav`
 - **Username**: Your configured WebDAV username
 - **Password**: Your configured WebDAV password
 
@@ -77,7 +77,7 @@ _Metadata storage settings in the system configuration_
 
 **Metadata Storage - Your Portable File Archive:**
 
-The metadata directory is where AltMount stores **all imported files permanently**. This directory contains your actual media files, not just metadata:
+The metadata directory is where AltMount stores **all imported files permanently**. This directory only contains the metadata files, not the actual media files:
 
 ```yaml
 metadata:

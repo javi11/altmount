@@ -29,7 +29,6 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 	const [connectionTestResult, setConnectionTestResult] = useState<{
 		success: boolean;
 		message?: string;
-		latency?: number;
 	} | null>(null);
 	const [canSave, setCanSave] = useState(false);
 
@@ -95,7 +94,6 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 			setConnectionTestResult({
 				success: result.success,
 				message: result.error_message,
-				latency: result.latency_ms,
 			});
 
 			setCanSave(result.success);
@@ -330,9 +328,6 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 									</div>
 									{connectionTestResult.message && (
 										<div className="text-sm">{connectionTestResult.message}</div>
-									)}
-									{connectionTestResult.latency && (
-										<div className="text-sm">Latency: {connectionTestResult.latency}ms</div>
 									)}
 								</div>
 							</div>

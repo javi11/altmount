@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle, Download } from "lucide-react";
+import { useMemo } from "react";
 import { HealthChart, QueueChart } from "../components/charts/QueueChart";
 import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -11,6 +12,35 @@ export function Dashboard() {
 	const { data: healthStats, error: healthError } = useHealthStats();
 
 	const hasError = queueError || healthError;
+
+	// Memoized queue metrics computation
+	const queueMetrics = useMemo(() => {
+		if (!queueStats) return null;
+
+		const totalItems =
+			queueStats.total_processing + queueStats.total_completed + queueStats.total_failed;
+		const pendingItems = queueStats.total_queued - totalItems;
+		const completedAndFailed = queueStats.total_completed + queueStats.total_failed;
+
+		// Build progress text
+		const progressParts: string[] = [];
+		if (pendingItems > 0) progressParts.push(`${pendingItems} pending`);
+		if (queueStats.total_processing > 0)
+			progressParts.push(`${queueStats.total_processing} processing`);
+		if (queueStats.total_failed > 0) progressParts.push(`${queueStats.total_failed} failed`);
+
+		return {
+			totalItems,
+			pendingItems,
+			completedAndFailed,
+			progressText: progressParts.join(", "),
+			progressDisplay: `${completedAndFailed} / ${totalItems}`,
+			hasFailures: queueStats.total_failed > 0,
+			failedCount: queueStats.total_failed,
+			processingCount: queueStats.total_processing,
+			completedCount: queueStats.total_completed,
+		};
+	}, [queueStats]);
 
 	if (hasError) {
 		return (
@@ -37,25 +67,21 @@ export function Dashboard() {
 								<h2 className="card-title font-medium text-base-content/70 text-sm">
 									Queue Status
 								</h2>
-								{queueStats ? (
-									<div className="font-bold text-2xl">
-										{queueStats.total_completed} / {queueStats.total_queued}
-									</div>
+								{queueMetrics ? (
+									<div className="font-bold text-2xl">{queueMetrics.progressDisplay}</div>
 								) : (
 									<LoadingSpinner size="sm" />
 								)}
 							</div>
 							<Download className="h-8 w-8 text-primary" />
 						</div>
-						{queueStats && (
+						{queueMetrics && (
 							<div className="mt-2">
-								<div className="text-base-content/70 text-sm">
-									{queueStats.total_completed} completed, {queueStats.total_failed} failed
-								</div>
+								<div className="text-base-content/70 text-sm">{queueMetrics.progressText}</div>
 								<progress
 									className="progress progress-primary mt-2 w-full"
-									value={queueStats.total_completed}
-									max={queueStats.total_queued}
+									value={queueMetrics.completedAndFailed}
+									max={queueMetrics.totalItems}
 								/>
 							</div>
 						)}
@@ -99,23 +125,23 @@ export function Dashboard() {
 							<Download className="h-5 w-5" />
 							Queue Status
 						</h2>
-						{queueStats ? (
+						{queueMetrics ? (
 							<div className="space-y-3">
 								<div className="flex items-center justify-between">
-									<span>Pending</span>
-									<StatusBadge status={`${queueStats.total_queued} items`} />
+									<span>Queued</span>
+									<StatusBadge status={`${queueMetrics.pendingItems} items`} />
 								</div>
 								<div className="flex items-center justify-between">
 									<span>Processing</span>
-									<StatusBadge status={`${queueStats.total_processing} items`} />
+									<StatusBadge status={`${queueMetrics.processingCount} items`} />
 								</div>
 								<div className="flex items-center justify-between">
 									<span>Completed</span>
-									<StatusBadge status={`${queueStats.total_completed} items`} />
+									<StatusBadge status={`${queueMetrics.completedCount} items`} />
 								</div>
 								<div className="flex items-center justify-between">
 									<span>Failed</span>
-									<StatusBadge status={`${queueStats.total_failed} items`} />
+									<StatusBadge status={`${queueMetrics.failedCount} items`} />
 								</div>
 							</div>
 						) : (
@@ -149,15 +175,13 @@ export function Dashboard() {
 			</div>
 
 			{/* Issues Alert */}
-			{(queueStats && queueStats.total_failed > 0) || (healthStats && healthStats.corrupted > 0) ? (
+			{queueMetrics?.hasFailures || (healthStats && healthStats.corrupted > 0) ? (
 				<div className="alert alert-warning">
 					<AlertTriangle className="h-6 w-6" />
 					<div>
 						<div className="font-bold">Attention Required</div>
 						<div className="text-sm">
-							{queueStats &&
-								queueStats.total_failed > 0 &&
-								`${queueStats.total_failed} failed queue items. `}
+							{queueMetrics?.hasFailures && `${queueMetrics.failedCount} failed queue items. `}
 							{healthStats &&
 								healthStats.corrupted > 0 &&
 								`${healthStats.corrupted} corrupted files detected.`}

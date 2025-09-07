@@ -1,4 +1,5 @@
 import { Eye, EyeOff, Trash2 } from "lucide-react";
+import { useCallback, useState } from "react";
 import type { ArrsInstanceConfig, ArrsType } from "../../types/config";
 
 interface ArrsInstanceCardProps {
@@ -26,6 +27,74 @@ export function ArrsInstanceCard({
 	onInstanceChange,
 }: ArrsInstanceCardProps) {
 	const instanceKey = `${type}-${index}`;
+	const [testResult, setTestResult] = useState<{
+		type: "success" | "error" | null;
+		message: string;
+	}>({ type: null, message: "" });
+	const [isTestingConnection, setIsTestingConnection] = useState(false);
+
+	const testConnection = useCallback(async () => {
+		if (!instance.url || !instance.api_key) {
+			setTestResult({
+				type: "error",
+				message: "URL and API key are required",
+			});
+			return;
+		}
+
+		setIsTestingConnection(true);
+		setTestResult({ type: null, message: "" });
+
+		try {
+			const response = await fetch("/api/arrs/instances/test", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					type: type,
+					url: instance.url,
+					api_key: instance.api_key,
+				}),
+			});
+
+			const data = await response.json();
+
+			if (data.success) {
+				setTestResult({
+					type: "success",
+					message: data.message || "Connection successful",
+				});
+			} else {
+				setTestResult({
+					type: "error",
+					message: data.error || "Connection failed",
+				});
+			}
+		} catch (error) {
+			setTestResult({
+				type: "error",
+				message: error instanceof Error ? error.message : "Connection failed",
+			});
+		} finally {
+			setIsTestingConnection(false);
+			// Clear the result after 5 seconds
+			setTimeout(() => {
+				setTestResult({ type: null, message: "" });
+			}, 5000);
+		}
+	}, [instance.url, instance.api_key, type]);
+
+	// Clear test result when connection details change
+	const handleInstanceChange = useCallback(
+		(field: keyof ArrsInstanceConfig, value: ArrsInstanceConfig[keyof ArrsInstanceConfig]) => {
+			if (field === "url" || field === "api_key") {
+				setTestResult({ type: null, message: "" });
+			}
+			onInstanceChange(field, value);
+		},
+		[onInstanceChange],
+	);
 
 	return (
 		<div key={instanceKey} className="card bg-base-200">
@@ -54,7 +123,7 @@ export function ArrsInstanceCard({
 							type="text"
 							className="input"
 							value={instance.name}
-							onChange={(e) => onInstanceChange("name", e.target.value)}
+							onChange={(e) => handleInstanceChange("name", e.target.value)}
 							placeholder="My Radarr/Sonarr"
 							disabled={isReadOnly}
 						/>
@@ -66,7 +135,7 @@ export function ArrsInstanceCard({
 							type="url"
 							className="input"
 							value={instance.url}
-							onChange={(e) => onInstanceChange("url", e.target.value)}
+							onChange={(e) => handleInstanceChange("url", e.target.value)}
 							placeholder="http://localhost:7878"
 							disabled={isReadOnly}
 						/>
@@ -79,7 +148,7 @@ export function ArrsInstanceCard({
 								type={isApiKeyVisible ? "text" : "password"}
 								className="input flex-1"
 								value={instance.api_key}
-								onChange={(e) => onInstanceChange("api_key", e.target.value)}
+								onChange={(e) => handleInstanceChange("api_key", e.target.value)}
 								placeholder="API key from settings"
 								disabled={isReadOnly}
 							/>
@@ -91,7 +160,37 @@ export function ArrsInstanceCard({
 							>
 								{isApiKeyVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
 							</button>
+							<button
+								type="button"
+								className={`btn ml-2 ${
+									isTestingConnection
+										? "btn-disabled loading"
+										: testResult.type === "success"
+											? "btn-success"
+											: testResult.type === "error"
+												? "btn-error"
+												: "btn-outline"
+								}`}
+								onClick={testConnection}
+								disabled={isReadOnly || isTestingConnection || !instance.url || !instance.api_key}
+								aria-label="Test connection"
+							>
+								{isTestingConnection ? (
+									<div className="loading loading-spinner h-4 w-4" />
+								) : (
+									"Test"
+								)}
+							</button>
 						</div>
+						{testResult.type && (
+							<div
+								className={`mt-2 text-sm ${
+									testResult.type === "success" ? "text-success" : "text-error"
+								}`}
+							>
+								{testResult.message}
+							</div>
+						)}
 					</fieldset>
 				</div>
 
@@ -102,7 +201,7 @@ export function ArrsInstanceCard({
 							type="checkbox"
 							className="checkbox"
 							checked={instance.enabled}
-							onChange={(e) => onInstanceChange("enabled", e.target.checked)}
+							onChange={(e) => handleInstanceChange("enabled", e.target.checked)}
 							disabled={isReadOnly}
 						/>
 					</label>

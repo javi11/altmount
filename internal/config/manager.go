@@ -122,6 +122,77 @@ func GenerateProviderID(host string, port int, username string) string {
 	return fmt.Sprintf("%x", hash)[:8] // First 8 characters for readability
 }
 
+// checkDirectoryWritable checks if a directory exists and is writable
+// If the directory doesn't exist, it attempts to create it
+func checkDirectoryWritable(path string) error {
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+
+	// Convert to absolute path for clearer error messages
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path // fallback to original if abs fails
+	}
+
+	// Check if path exists
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Directory doesn't exist, try to create it
+			if err := os.MkdirAll(absPath, 0755); err != nil {
+				return fmt.Errorf("directory %s does not exist and cannot be created: %w", absPath, err)
+			}
+		} else {
+			return fmt.Errorf("cannot access directory %s: %w", absPath, err)
+		}
+	} else {
+		// Path exists, check if it's a directory
+		if !info.IsDir() {
+			return fmt.Errorf("path %s exists but is not a directory", absPath)
+		}
+	}
+
+	// Test write permissions by creating a temporary file
+	testFile := filepath.Join(absPath, ".altmount-write-test")
+	file, err := os.Create(testFile)
+	if err != nil {
+		return fmt.Errorf("directory %s is not writable: %w", absPath, err)
+	}
+
+	// Write some test data
+	_, writeErr := file.Write([]byte("test"))
+	file.Close()
+
+	// Clean up test file
+	os.Remove(testFile)
+
+	if writeErr != nil {
+		return fmt.Errorf("directory %s is not writable: %w", absPath, writeErr)
+	}
+
+	return nil
+}
+
+// checkFileDirectoryWritable checks if the directory containing a file path is writable
+func checkFileDirectoryWritable(filePath string, fileType string) error {
+	if filePath == "" {
+		return nil // Empty path is valid for some config options (like log file)
+	}
+
+	// Get the directory part of the file path
+	dir := filepath.Dir(filePath)
+	if dir == "" || dir == "." {
+		dir = "./" // current directory
+	}
+
+	if err := checkDirectoryWritable(dir); err != nil {
+		return fmt.Errorf("%s file directory check failed: %w", fileType, err)
+	}
+
+	return nil
+}
+
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
 	ID               string `yaml:"id" mapstructure:"id" json:"id"`
@@ -444,6 +515,41 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ValidateDirectories validates that all configured directories are writable
+// This performs actual filesystem checks and may create directories if needed
+func (c *Config) ValidateDirectories() error {
+	// Check metadata directory
+	if err := checkDirectoryWritable(c.Metadata.RootPath); err != nil {
+		return fmt.Errorf("metadata directory validation failed: %w", err)
+	}
+
+	// Check database directory
+	if err := checkFileDirectoryWritable(c.Database.Path, "database"); err != nil {
+		return err
+	}
+
+	// Check log file directory (only if log file is configured)
+	if err := checkFileDirectoryWritable(c.Log.File, "log"); err != nil {
+		return err
+	}
+
+	// Check SABnzbd mount directory if enabled
+	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
+		if err := checkDirectoryWritable(c.SABnzbd.MountDir); err != nil {
+			return fmt.Errorf("sabnzbd mount directory validation failed: %w", err)
+		}
+	}
+
+	// Check Arrs mount path if enabled
+	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
+		if err := checkDirectoryWritable(c.Arrs.MountPath); err != nil {
+			return fmt.Errorf("arrs mount path validation failed: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // ProvidersEqual compares the providers in this config with another config for equality
 func (c *Config) ProvidersEqual(other *Config) bool {
 	if len(c.Providers) != len(other.Providers) {
@@ -478,8 +584,8 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 			oldProvider.MaxConnections != newProvider.MaxConnections ||
 			oldProvider.TLS != newProvider.TLS ||
 			oldProvider.InsecureTLS != newProvider.InsecureTLS ||
-			oldProvider.Enabled != newProvider.Enabled ||
-			oldProvider.IsBackupProvider != newProvider.IsBackupProvider {
+			*oldProvider.Enabled != *newProvider.Enabled ||
+			*oldProvider.IsBackupProvider != *newProvider.IsBackupProvider {
 			return false // Provider modified
 		}
 	}
@@ -693,10 +799,12 @@ func DefaultConfig() *Config {
 	// Set paths based on whether we're running in Docker
 	dbPath := "./altmount.db"
 	metadataPath := "./metadata"
+	logPath := "./altmount.log"
 
 	if isRunningInDocker() {
 		dbPath = "/config/altmount.db"
 		metadataPath = "/metadata"
+		logPath = "/config/altmount.log"
 	}
 
 	return &Config{
@@ -732,12 +840,12 @@ func DefaultConfig() *Config {
 			QueueProcessingInterval: 5 * time.Second, // Default: check for work every 5 seconds
 		},
 		Log: LogConfig{
-			File:       "",     // Empty = console only
-			Level:      "info", // Default log level
-			MaxSize:    100,    // 100MB max size
-			MaxAge:     30,     // Keep for 30 days
-			MaxBackups: 10,     // Keep 10 old files
-			Compress:   true,   // Compress old files
+			File:       logPath, // Default log file path
+			Level:      "info",  // Default log level
+			MaxSize:    100,     // 100MB max size
+			MaxAge:     30,      // Keep for 30 days
+			MaxBackups: 10,      // Keep 10 old files
+			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
 			Enabled:               &healthCheckEnabled,
@@ -836,6 +944,13 @@ func LoadConfig(configFile string) (*Config, error) {
 	// Unmarshal the config
 	if err := viper.Unmarshal(config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
+	}
+
+	// If log file was not explicitly set in the config file and we have a specific config file path,
+	// derive log file path from config file location
+	if configFile != "" && !viper.IsSet("log.file") {
+		configDir := filepath.Dir(configFile)
+		config.Log.File = filepath.Join(configDir, "altmount.log")
 	}
 
 	// Validate configuration
