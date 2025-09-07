@@ -799,10 +799,12 @@ func DefaultConfig() *Config {
 	// Set paths based on whether we're running in Docker
 	dbPath := "./altmount.db"
 	metadataPath := "./metadata"
+	logPath := "./altmount.log"
 
 	if isRunningInDocker() {
 		dbPath = "/config/altmount.db"
 		metadataPath = "/metadata"
+		logPath = "/config/altmount.log"
 	}
 
 	return &Config{
@@ -838,12 +840,12 @@ func DefaultConfig() *Config {
 			QueueProcessingInterval: 5 * time.Second, // Default: check for work every 5 seconds
 		},
 		Log: LogConfig{
-			File:       "",     // Empty = console only
-			Level:      "info", // Default log level
-			MaxSize:    100,    // 100MB max size
-			MaxAge:     30,     // Keep for 30 days
-			MaxBackups: 10,     // Keep 10 old files
-			Compress:   true,   // Compress old files
+			File:       logPath, // Default log file path
+			Level:      "info",  // Default log level
+			MaxSize:    100,     // 100MB max size
+			MaxAge:     30,      // Keep for 30 days
+			MaxBackups: 10,      // Keep 10 old files
+			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
 			Enabled:               &healthCheckEnabled,
@@ -942,6 +944,13 @@ func LoadConfig(configFile string) (*Config, error) {
 	// Unmarshal the config
 	if err := viper.Unmarshal(config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
+	}
+
+	// If log file was not explicitly set in the config file and we have a specific config file path,
+	// derive log file path from config file location
+	if configFile != "" && !viper.IsSet("log.file") {
+		configDir := filepath.Dir(configFile)
+		config.Log.File = filepath.Join(configDir, "altmount.log")
 	}
 
 	// Validate configuration
