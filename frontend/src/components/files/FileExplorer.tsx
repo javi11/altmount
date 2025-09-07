@@ -261,7 +261,8 @@ export function FileExplorer({
 								</div>
 							) : filteredFiles.length === 0 ? (
 								<div className="text-base-content/70 text-sm">
-									No items match "{searchTerm}" in this directory ({directory.files.length} total items)
+									No items match "{searchTerm}" in this directory ({directory.files.length} total
+									items)
 								</div>
 							) : (
 								<div className="text-base-content/70 text-sm">
@@ -270,7 +271,7 @@ export function FileExplorer({
 							)}
 						</div>
 					)}
-					
+
 					{/* Loading State */}
 					{isLoading && isConnected ? (
 						<LoadingSpinner />
@@ -280,7 +281,9 @@ export function FileExplorer({
 							/* No Search Results State */
 							<div className="flex flex-col items-center justify-center py-12">
 								<Search className="mb-4 h-12 w-12 text-base-content/30" />
-								<h3 className="mb-2 font-semibold text-base-content/70 text-lg">No Search Results</h3>
+								<h3 className="mb-2 font-semibold text-base-content/70 text-lg">
+									No Search Results
+								</h3>
 								<p className="mb-4 text-center text-base-content/50">
 									No files match "{searchTerm}" in this directory
 								</p>

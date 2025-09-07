@@ -230,7 +230,7 @@ export function HealthPage() {
 
 	// Multi-select handlers
 	const handleSelectItem = (filePath: string, checked: boolean) => {
-		setSelectedItems(prev => {
+		setSelectedItems((prev) => {
 			const newSet = new Set(prev);
 			if (checked) {
 				newSet.add(filePath);
@@ -243,7 +243,7 @@ export function HealthPage() {
 
 	const handleSelectAll = (checked: boolean) => {
 		if (checked && data) {
-			setSelectedItems(new Set(data.map(item => item.file_path)));
+			setSelectedItems(new Set(data.map((item) => item.file_path)));
 		} else {
 			setSelectedItems(new Set());
 		}
@@ -251,7 +251,7 @@ export function HealthPage() {
 
 	const handleBulkDelete = async () => {
 		if (selectedItems.size === 0) return;
-		
+
 		const confirmed = await confirmAction(
 			"Delete Selected Health Records",
 			`Are you sure you want to delete ${selectedItems.size} selected health records? The actual file won´t be deleted.`,
@@ -259,9 +259,9 @@ export function HealthPage() {
 				type: "warning",
 				confirmText: "Delete Selected",
 				confirmButtonClass: "btn-error",
-			}
+			},
 		);
-		
+
 		if (confirmed) {
 			try {
 				const filePaths = Array.from(selectedItems);
@@ -270,14 +270,14 @@ export function HealthPage() {
 				showToast({
 					title: "Success",
 					message: `Successfully deleted ${filePaths.length} health records`,
-					type: "success"
+					type: "success",
 				});
 			} catch (error) {
 				console.error("Failed to delete selected health records:", error);
 				showToast({
 					title: "Error",
 					message: "Failed to delete selected health records",
-					type: "error"
+					type: "error",
 				});
 			}
 		}
@@ -306,7 +306,8 @@ export function HealthPage() {
 	const meta = healthResponse?.meta;
 
 	// Helper functions for select all checkbox state
-	const isAllSelected = data && data.length > 0 && data.every(item => selectedItems.has(item.file_path));
+	const isAllSelected =
+		data && data.length > 0 && data.every((item) => selectedItems.has(item.file_path));
 	const isIndeterminate = data && selectedItems.size > 0 && !isAllSelected;
 
 	// Update next refresh time when auto-refresh is enabled
@@ -537,7 +538,7 @@ export function HealthPage() {
 						<div className="flex items-center justify-between">
 							<div className="flex items-center gap-4">
 								<span className="font-semibold text-sm">
-									{selectedItems.size} record{selectedItems.size !== 1 ? 's' : ''} selected
+									{selectedItems.size} record{selectedItems.size !== 1 ? "s" : ""} selected
 								</span>
 								<button
 									type="button"
@@ -596,8 +597,8 @@ export function HealthPage() {
 								</thead>
 								<tbody>
 									{data.map((item: FileHealth) => (
-										<tr 
-											key={item.id} 
+										<tr
+											key={item.id}
 											className={`hover ${selectedItems.has(item.file_path) ? "bg-base-200" : ""}`}
 										>
 											<td>

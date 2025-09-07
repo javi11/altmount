@@ -1,7 +1,9 @@
 import {
 	Activity,
 	AlertTriangle,
+	Bug,
 	Database,
+	ExternalLink,
 	Folder,
 	Heart,
 	Home,
@@ -54,7 +56,7 @@ export function Sidebar() {
 	const getBadgeCount = (path: string) => {
 		switch (path) {
 			case "/queue":
-				return queueStats ? queueStats.total_failed : 0;
+				return queueStats ? queueStats.total_processing + queueStats.total_failed : 0;
 			case "/health":
 				return healthStats ? healthStats.corrupted + healthStats.partial : 0;
 			default:
@@ -65,8 +67,13 @@ export function Sidebar() {
 	const getBadgeColor = (path: string, count: number) => {
 		if (count === 0) return "";
 		switch (path) {
-			case "/queue":
-				return "badge-error";
+			case "/queue": {
+				// Show error badge if there are failed items, otherwise warning for processing
+				if (queueStats && queueStats.total_failed > 0) {
+					return "badge-error";
+				}
+				return queueStats && queueStats.total_processing > 0 ? "badge-warning" : "badge-info";
+			}
 			case "/health":
 				return "badge-warning";
 			default:
@@ -131,7 +138,19 @@ export function Sidebar() {
 									<span className="text-sm">Queue</span>
 								</div>
 								<div className="text-base-content/70 text-sm">
-									{queueStats.total_processing} / {queueStats.total_queued}
+									{(() => {
+										const totalItems =
+											queueStats.total_processing +
+											queueStats.total_completed +
+											queueStats.total_failed;
+										const pendingItems = queueStats.total_queued - totalItems;
+										const activeItems = queueStats.total_processing + pendingItems;
+
+										if (activeItems > 0) {
+											return `${activeItems} active`;
+										}
+										return "idle";
+									})()}
 								</div>
 							</div>
 						)}
@@ -145,6 +164,39 @@ export function Sidebar() {
 								<div className="text-error text-sm">{healthStats.corrupted}</div>
 							</div>
 						)}
+					</div>
+				</div>
+
+				{/* Version and GitHub section */}
+				<div className="mt-4 border-base-300 border-t pt-4">
+					<div className="space-y-2">
+						<div className="flex items-center justify-between">
+							<div className="text-base-content/70 text-sm">Version</div>
+							<div className="font-mono text-base-content text-sm">
+								{__APP_VERSION__}
+								{__GIT_COMMIT__ !== "unknown" && (
+									<span className="text-base-content/50"> ({__GIT_COMMIT__.slice(0, 7)})</span>
+								)}
+							</div>
+						</div>
+						<a
+							href={__GITHUB_URL__}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center space-x-2 text-base-content/70 text-sm transition-colors hover:text-base-content"
+						>
+							<ExternalLink className="h-4 w-4" />
+							<span>GitHub Repository</span>
+						</a>
+						<a
+							href={`${__GITHUB_URL__}/issues`}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center space-x-2 text-base-content/70 text-sm transition-colors hover:text-base-content"
+						>
+							<Bug className="h-4 w-4" />
+							<span>Report Issues</span>
+						</a>
 					</div>
 				</div>
 			</div>

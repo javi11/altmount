@@ -1,4 +1,4 @@
-import { Save, AlertTriangle } from "lucide-react";
+import { AlertTriangle, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, HealthConfig } from "../../types/config";
 
@@ -73,8 +73,9 @@ export function HealthConfigSection({
 					<div className="alert alert-warning mt-2">
 						<AlertTriangle className="h-4 w-4" />
 						<div className="text-sm">
-							<strong>Warning:</strong> When enabled, corrupted files will automatically 
-							trigger re-download through connected ARRs (Radarr/Sonarr), and corrupted files will be automatically DELETED. Disable for manual control.
+							<strong>Warning:</strong> When enabled, corrupted files will automatically trigger
+							re-download through connected ARRs (Radarr/Sonarr), and corrupted files will be
+							automatically DELETED. Disable for manual control.
 						</div>
 					</div>
 				</fieldset>
@@ -96,7 +97,12 @@ export function HealthConfigSection({
 										readOnly={isReadOnly}
 										min={1}
 										max={10}
-										onChange={(e) => handleInputChange("max_concurrent_jobs", Number.parseInt(e.target.value, 10) || 1)}
+										onChange={(e) =>
+											handleInputChange(
+												"max_concurrent_jobs",
+												Number.parseInt(e.target.value, 10) || 1,
+											)
+										}
 									/>
 									<p className="label text-gray-600 text-sm">
 										Maximum number of concurrent health check jobs
@@ -114,7 +120,9 @@ export function HealthConfigSection({
 										readOnly={isReadOnly}
 										min={0}
 										max={5}
-										onChange={(e) => handleInputChange("max_retries", Number.parseInt(e.target.value, 10) || 0)}
+										onChange={(e) =>
+											handleInputChange("max_retries", Number.parseInt(e.target.value, 10) || 0)
+										}
 									/>
 									<p className="label text-gray-600 text-sm">
 										Maximum number of retry attempts for failed checks

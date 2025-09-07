@@ -187,9 +187,9 @@ func (s *Server) handleRetryQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only allow retry of failed or completed items
-	if item.Status != database.QueueStatusFailed && item.Status != database.QueueStatusCompleted {
-		WriteConflict(w, "Can only retry failed or completed items", "Current status: "+string(item.Status))
+	// Only allow retry of pending, failed or completed items
+	if item.Status != database.QueueStatusPending && item.Status != database.QueueStatusFailed && item.Status != database.QueueStatusCompleted {
+		WriteConflict(w, "Can only retry pending, failed or completed items", "Current status: "+string(item.Status))
 		return
 	}
 

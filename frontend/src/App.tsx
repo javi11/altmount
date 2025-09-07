@@ -54,6 +54,14 @@ function App() {
 												</ProtectedRoute>
 											}
 										/>
+										<Route
+											path="config/:section"
+											element={
+												<ProtectedRoute requireAdmin>
+													<ConfigurationPage />
+												</ProtectedRoute>
+											}
+										/>
 									</Route>
 								</Routes>
 							</div>

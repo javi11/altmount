@@ -4,6 +4,16 @@
 # Use buildkit syntax for advanced features
 # syntax=docker/dockerfile:1.11
 
+# Custom base stage with pre-installed packages
+FROM ghcr.io/linuxserver/baseimage-ubuntu:jammy AS custom-base
+
+ARG DEBIAN_FRONTEND="noninteractive"
+
+# Install mime-support and clean up in single layer
+RUN apt-get update && \
+    apt-get install --reinstall mime-support -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # Frontend build stage
 FROM oven/bun:1 AS frontend-builder
 
@@ -57,9 +67,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
     go build -a -ldflags '-linkmode external -extldflags "-static"' -o altmount cmd/altmount/main.go
 
-# Final stage - use architecture-specific base image with conditional selection
+# Final stage - use custom base image with pre-installed packages
 ARG TARGETARCH
-FROM ghcr.io/linuxserver/baseimage-ubuntu:jammy
+FROM custom-base
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ARG BUILD_DATE
@@ -76,13 +86,13 @@ WORKDIR /app
 
 # Copy web binary from builder
 COPY --from=backend-builder /app/altmount /app/altmount
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Install required packages for runtime
+# Install required packages for runtime (mime-support already in custom-base)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         wget \
         ca-certificates && \
-    apt-get install --reinstall mime-support -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Make binary executable
@@ -103,7 +113,7 @@ VOLUME ["/config", "/metadata"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/live || exit 1
 
 # Labels
 LABEL org.opencontainers.image.source="https://github.com/javi11/altmount"

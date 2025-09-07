@@ -13,6 +13,7 @@ import (
 // ConfigAPIResponse wraps config.Config with sensitive data handling
 type ConfigAPIResponse struct {
 	*config.Config
+	Import    ImportAPIResponse     `json:"import"`
 	RClone    RCloneAPIResponse     `json:"rclone"`
 	Providers []ProviderAPIResponse `json:"providers"`
 }
@@ -45,6 +46,12 @@ type ProviderAPIResponse struct {
 type ImportAPIResponse struct {
 	MaxProcessorWorkers     int `json:"max_processor_workers"`
 	QueueProcessingInterval int `json:"queue_processing_interval"` // Interval in seconds
+}
+
+// ConfigUpdateRequest represents the request structure for config updates with proper type handling
+type ConfigUpdateRequest struct {
+	*config.Config
+	Import ImportAPIResponse `json:"import"`
 }
 
 // Helper functions to create API responses from core config types
@@ -84,6 +91,7 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 
 	return &ConfigAPIResponse{
 		Config:    cfg,
+		Import:    ToImportAPIResponse(&cfg.Import),
 		RClone:    rcloneResp,
 		Providers: providers,
 	}
@@ -95,6 +103,21 @@ func ToImportAPIResponse(cfg *config.ImportConfig) ImportAPIResponse {
 		MaxProcessorWorkers:     cfg.MaxProcessorWorkers,
 		QueueProcessingInterval: int(cfg.QueueProcessingInterval.Seconds()),
 	}
+}
+
+// FromImportAPIResponse converts ImportAPIResponse (with seconds) to config.ImportConfig (with duration)
+func FromImportAPIResponse(apiResp ImportAPIResponse) config.ImportConfig {
+	return config.ImportConfig{
+		MaxProcessorWorkers:     apiResp.MaxProcessorWorkers,
+		QueueProcessingInterval: time.Duration(apiResp.QueueProcessingInterval) * time.Second,
+	}
+}
+
+// ToConfigFromUpdateRequest converts ConfigUpdateRequest to config.Config with proper type conversions
+func ToConfigFromUpdateRequest(req *ConfigUpdateRequest) config.Config {
+	cfg := *req.Config                             // Copy the embedded config
+	cfg.Import = FromImportAPIResponse(req.Import) // Convert the Import field properly
+	return cfg
 }
 
 // Common API response structures
@@ -433,7 +456,6 @@ type ProviderTestRequest struct {
 type ProviderTestResponse struct {
 	Success      bool   `json:"success"`
 	ErrorMessage string `json:"error_message,omitempty"`
-	Latency      int64  `json:"latency_ms,omitempty"`
 }
 
 // ProviderCreateRequest represents a request to create a new provider
@@ -507,4 +529,9 @@ type PoolMetricsResponse struct {
 	CommandSuccessRate   float64   `json:"command_success_rate_percent"`
 	AcquireWaitTimeMs    int64     `json:"acquire_wait_time_ms"`
 	LastUpdated          time.Time `json:"last_updated"`
+}
+
+type TestProviderResponse struct {
+	Success      bool   `json:"success"`
+	ErrorMessage string `json:"error_message,omitempty"`
 }

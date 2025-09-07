@@ -102,7 +102,7 @@ export function QueuePage() {
 
 	// Multi-select handlers
 	const handleSelectItem = (id: number, checked: boolean) => {
-		setSelectedItems(prev => {
+		setSelectedItems((prev) => {
 			const newSet = new Set(prev);
 			if (checked) {
 				newSet.add(id);
@@ -115,7 +115,7 @@ export function QueuePage() {
 
 	const handleSelectAll = (checked: boolean) => {
 		if (checked && queueData) {
-			setSelectedItems(new Set(queueData.map(item => item.id)));
+			setSelectedItems(new Set(queueData.map((item) => item.id)));
 		} else {
 			setSelectedItems(new Set());
 		}
@@ -123,7 +123,7 @@ export function QueuePage() {
 
 	const handleBulkDelete = async () => {
 		if (selectedItems.size === 0) return;
-		
+
 		const confirmed = await confirmAction(
 			"Delete Selected Items",
 			`Are you sure you want to delete ${selectedItems.size} selected queue items? This action cannot be undone.`,
@@ -131,9 +131,9 @@ export function QueuePage() {
 				type: "warning",
 				confirmText: "Delete Selected",
 				confirmButtonClass: "btn-error",
-			}
+			},
 		);
-		
+
 		if (confirmed) {
 			try {
 				const itemIds = Array.from(selectedItems);
@@ -151,7 +151,8 @@ export function QueuePage() {
 	}, []);
 
 	// Helper functions for select all checkbox state
-	const isAllSelected = queueData && queueData.length > 0 && queueData.every(item => selectedItems.has(item.id));
+	const isAllSelected =
+		queueData && queueData.length > 0 && queueData.every((item) => selectedItems.has(item.id));
 	const isIndeterminate = queueData && selectedItems.size > 0 && !isAllSelected;
 
 	// Update next refresh time when auto-refresh is enabled
@@ -159,7 +160,7 @@ export function QueuePage() {
 		if (autoRefreshEnabled && !userInteracting) {
 			// Set initial next refresh time
 			setNextRefreshTime(new Date(Date.now() + refreshInterval));
-			
+
 			// Reset the timer every time React Query refetches
 			const interval = setInterval(() => {
 				setNextRefreshTime(new Date(Date.now() + refreshInterval));
@@ -167,7 +168,7 @@ export function QueuePage() {
 
 			return () => clearInterval(interval);
 		}
-			setNextRefreshTime(null);
+		setNextRefreshTime(null);
 	}, [autoRefreshEnabled, refreshInterval, userInteracting]);
 
 	// Pause auto-refresh during user interactions
@@ -190,7 +191,7 @@ export function QueuePage() {
 			const updateCountdown = () => {
 				const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
 				setCountdown(remaining);
-				
+
 				// If countdown reaches 0, reset to the full interval (handles any sync issues)
 				if (remaining === 0) {
 					setNextRefreshTime(new Date(Date.now() + refreshInterval));
@@ -203,7 +204,7 @@ export function QueuePage() {
 
 			return () => clearInterval(timer);
 		}
-			setCountdown(0);
+		setCountdown(0);
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval]);
 
 	// Reset to page 1 when search or status filter changes
@@ -372,7 +373,7 @@ export function QueuePage() {
 						<div className="flex items-center justify-between">
 							<div className="flex items-center gap-4">
 								<span className="font-semibold text-sm">
-									{selectedItems.size} item{selectedItems.size !== 1 ? 's' : ''} selected
+									{selectedItems.size} item{selectedItems.size !== 1 ? "s" : ""} selected
 								</span>
 								<button
 									type="button"
@@ -432,8 +433,8 @@ export function QueuePage() {
 							</thead>
 							<tbody>
 								{queueData.map((item: QueueItem) => (
-									<tr 
-										key={item.id} 
+									<tr
+										key={item.id}
 										className={`hover ${selectedItems.has(item.id) ? "bg-base-200" : ""}`}
 									>
 										<td>
@@ -509,7 +510,8 @@ export function QueuePage() {
 													<MoreHorizontal className="h-4 w-4" />
 												</button>
 												<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
-													{(item.status === QueueStatus.FAILED ||
+													{(item.status === QueueStatus.PENDING ||
+														item.status === QueueStatus.FAILED ||
 														item.status === QueueStatus.COMPLETED) && (
 														<li>
 															<button
@@ -518,7 +520,7 @@ export function QueuePage() {
 																disabled={retryItem.isPending}
 															>
 																<PlayCircle className="h-4 w-4" />
-																Retry
+																{item.status === QueueStatus.PENDING ? "Process" : "Retry"}
 															</button>
 														</li>
 													)}

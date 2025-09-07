@@ -22,6 +22,19 @@ func NewMetadataService(rootPath string) *MetadataService {
 	}
 }
 
+// truncateFilename truncates the filename if it's too long to prevent filesystem issues
+// when creating .meta files. Keeps filename under 250 characters.
+func (ms *MetadataService) truncateFilename(filename string) string {
+	const maxLen = 250 // Leave room for .meta extension
+	
+	if len(filename) <= maxLen {
+		return filename
+	}
+	
+	// Simply truncate to maxLen
+	return filename[:maxLen]
+}
+
 // WriteFileMetadata writes file metadata to disk
 func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metapb.FileMetadata) error {
 	// Ensure the directory exists
@@ -32,7 +45,8 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 
 	// Create metadata file path (filename + .meta extension)
 	filename := filepath.Base(virtualPath)
-	metadataPath := filepath.Join(metadataDir, filename+".meta")
+	truncatedFilename := ms.truncateFilename(filename)
+	metadataPath := filepath.Join(metadataDir, truncatedFilename+".meta")
 
 	// Marshal protobuf data
 	data, err := proto.Marshal(metadata)
@@ -76,8 +90,9 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 // FileExists checks if a metadata file exists for the given virtual path
 func (ms *MetadataService) FileExists(virtualPath string) bool {
 	filename := filepath.Base(virtualPath)
+	truncatedFilename := ms.truncateFilename(filename)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
-	metadataPath := filepath.Join(metadataDir, filename+".meta")
+	metadataPath := filepath.Join(metadataDir, truncatedFilename+".meta")
 
 	_, err := os.Stat(metadataPath)
 	return err == nil

@@ -130,11 +130,7 @@ export function SystemConfigSection({
 						<input
 							type="text"
 							className="input flex-1"
-							value={
-								user?.api_key
-									? `${user.api_key.substring(0, 8)}...${user.api_key.slice(-4)}`
-									: "No API key generated"
-							}
+							value={user?.api_key ? user.api_key : "No API key generated"}
 							readOnly
 							disabled
 						/>

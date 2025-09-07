@@ -125,7 +125,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	response := AuthResponse{
 		User:    s.mapUserToResponse(user),
-		Message: "Registration successful",
+		Message: "Registration successful. API key generated automatically.",
 	}
 	WriteSuccess(w, response, nil)
 }
@@ -251,56 +251,6 @@ func (s *Server) handleUpdateUserAdmin(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, response, nil)
 }
 
-// handleGenerateInitialAPIKey generates API key for the first user (admin) if they don't have one
-func (s *Server) handleGenerateInitialAPIKey(w http.ResponseWriter, r *http.Request) {
-	// Check if there is exactly one user in the system
-	userCount, err := s.userRepo.GetUserCount()
-	if err != nil {
-		WriteInternalError(w, "Failed to check user count", err.Error())
-		return
-	}
-
-	if userCount != 1 {
-		WriteForbidden(w, "Initial API key generation is only available when there is exactly one user", "")
-		return
-	}
-
-	// Get all users (should be just one)
-	users, err := s.userRepo.ListUsers(1, 0)
-	if err != nil || len(users) != 1 {
-		WriteInternalError(w, "Failed to get first user", err.Error())
-		return
-	}
-
-	user := users[0]
-
-	// Check if user is admin
-	if !user.IsAdmin {
-		WriteForbidden(w, "Initial API key generation is only available for admin users", "")
-		return
-	}
-
-	// Check if user already has an API key
-	if user.APIKey != nil && *user.APIKey != "" {
-		WriteConflict(w, "User already has an API key", "")
-		return
-	}
-
-	// Generate API key for the user
-	apiKey, err := s.userRepo.RegenerateAPIKey(user.UserID)
-	if err != nil {
-		WriteInternalError(w, "Failed to generate API key", err.Error())
-		return
-	}
-
-	slog.Info("Initial API key generated for first user", "user_id", user.UserID)
-
-	response := map[string]interface{}{
-		"api_key": apiKey,
-		"message": "Initial API key generated successfully",
-	}
-	WriteSuccess(w, response, nil)
-}
 
 // handleRegenerateAPIKey regenerates API key for the authenticated user
 func (s *Server) handleRegenerateAPIKey(w http.ResponseWriter, r *http.Request) {

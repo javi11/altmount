@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/nntppool"
 )
 
 // ConfigManager interface defines methods for configuration management
@@ -66,12 +67,15 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode directly into core config type
-	var newConfig config.Config
-	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+	// Decode into API request structure with proper type handling
+	var configReq ConfigUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&configReq); err != nil {
 		WriteValidationError(w, "Invalid JSON in request body", err.Error())
 		return
 	}
+
+	// Convert from API request format to internal config format
+	newConfig := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
@@ -116,12 +120,15 @@ func (s *Server) handlePatchConfigSection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Create a copy and decode partial updates directly into it
-	newConfig := *currentConfig
-	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+	// Create a copy and decode partial updates using proper type handling
+	configReq := ConfigUpdateRequest{Config: currentConfig}
+	if err := json.NewDecoder(r.Body).Decode(&configReq); err != nil {
 		WriteValidationError(w, "Invalid JSON in request body", err.Error())
 		return
 	}
+
+	// Convert from API request format to internal config format
+	newConfig := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
@@ -169,12 +176,15 @@ func (s *Server) handleValidateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode directly into core config type
-	var cfg config.Config
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	// Decode into API request structure with proper type handling
+	var configReq ConfigUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&configReq); err != nil {
 		WriteValidationError(w, "Invalid JSON in request body", err.Error())
 		return
 	}
+
+	// Convert from API request format to internal config format
+	cfg := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the configuration
 	validationErr := s.configManager.ValidateConfig(&cfg)
@@ -238,15 +248,26 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err := nntppool.TestProviderConnectivity(r.Context(), nntppool.UsenetProviderConfig{
+		Host:     testReq.Host,
+		Port:     testReq.Port,
+		Username: testReq.Username,
+		Password: testReq.Password,
+		TLS:      testReq.TLS,
+	}, slog.Default(), nil)
+	if err != nil {
+		WriteSuccess(w, TestProviderResponse{
+			Success:      false,
+			ErrorMessage: err.Error(),
+		}, nil)
+		return
+	}
+
 	// TODO: Implement actual NNTP connection test
 	// For now, return success for basic validation
-	response := struct {
-		Success   bool   `json:"success"`
-		LatencyMs int    `json:"latency_ms,omitempty"`
-		ErrorMsg  string `json:"error_message,omitempty"`
-	}{
-		Success:   true,
-		LatencyMs: 150, // Simulated latency
+	response := TestProviderResponse{
+		Success:      true,
+		ErrorMessage: "",
 	}
 
 	WriteSuccess(w, response, nil)
@@ -319,16 +340,16 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add to config
-	newConfig := *currentConfig
+	newConfig := currentConfig.DeepCopy()
 	newConfig.Providers = append(newConfig.Providers, newProvider)
 
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}
@@ -408,9 +429,11 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create updated config
-	newConfig := *currentConfig
-	provider := &newConfig.Providers[providerIndex]
+	// Create updated config with proper deep copy
+	newConfig := currentConfig.DeepCopy()
+	
+	// Get the provider to modify from the deep copy
+	provider := newConfig.Providers[providerIndex]
 
 	// Apply updates
 	if updateReq.Host != nil {
@@ -457,13 +480,16 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		provider.IsBackupProvider = updateReq.IsBackupProvider
 	}
 
+	// Assign the updated provider back to the slice
+	newConfig.Providers[providerIndex] = provider
+
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}
@@ -526,17 +552,17 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create new config without the provider
-	newConfig := *currentConfig
-	newConfig.Providers = append(currentConfig.Providers[:providerIndex],
-		currentConfig.Providers[providerIndex+1:]...)
+	newConfig := currentConfig.DeepCopy()
+	newConfig.Providers = append(newConfig.Providers[:providerIndex],
+		newConfig.Providers[providerIndex+1:]...)
 
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}
@@ -607,16 +633,16 @@ func (s *Server) handleReorderProviders(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create new config with reordered providers
-	newConfig := *currentConfig
+	newConfig := currentConfig.DeepCopy()
 	newConfig.Providers = newProviders
 
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}

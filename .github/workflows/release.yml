@@ -51,9 +51,21 @@ jobs:
         working-directory: frontend
         run: bun install --frozen-lockfile
 
+      # Extract version info for frontend
+      - name: Extract version info for frontend
+        id: frontend-version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+
       # Build frontend for embedding
       - name: Build frontend
         working-directory: frontend
+        env:
+          npm_package_version: ${{ steps.frontend-version.outputs.version }}
+          GIT_COMMIT: ${{ steps.frontend-version.outputs.commit }}
         run: bun run build
 
       # Upload built frontend as artifact
@@ -116,6 +128,7 @@ jobs:
         with:
           name: frontend-build
           path: frontend/dist/
+
 
       # Extract version info
       - name: Extract version info
@@ -290,9 +303,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-    outputs:
-      image-digest: ${{ steps.build.outputs.digest }}
-      image-metadata: ${{ steps.build.outputs.metadata }}
     steps:
       # checkout
       - name: Checkout
@@ -306,6 +316,11 @@ jobs:
         with:
           name: frontend-build
           path: frontend/dist/
+
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -323,13 +338,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
           tags: |
-            type=ref,event=tag,suffix=-amd64
-            type=semver,pattern={{version}},suffix=-amd64
-            type=semver,pattern={{major}},suffix=-amd64
-            type=semver,pattern={{major}}.{{minor}},suffix=-amd64
-            type=raw,value=latest,suffix=-amd64
+            type=ref,event=tag,suffix=-amd64-temp
+            type=semver,pattern={{version}},suffix=-amd64-temp
 
       # build and push amd64 image
       - name: Build and push AMD64 image
@@ -344,6 +356,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=amd64
           cache-to: type=gha,mode=max,scope=amd64
+          provenance: false
+          sbom: false
 
   build-image-arm64:
     runs-on: ubuntu-latest
@@ -351,9 +365,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-    outputs:
-      image-digest: ${{ steps.build.outputs.digest }}
-      image-metadata: ${{ steps.build.outputs.metadata }}
     steps:
       # checkout
       - name: Checkout
@@ -367,6 +378,11 @@ jobs:
         with:
           name: frontend-build
           path: frontend/dist/
+
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -384,13 +400,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
           tags: |
-            type=ref,event=tag,suffix=-arm64
-            type=semver,pattern={{version}},suffix=-arm64
-            type=semver,pattern={{major}},suffix=-arm64
-            type=semver,pattern={{major}}.{{minor}},suffix=-arm64
-            type=raw,value=latest,suffix=-arm64
+            type=ref,event=tag,suffix=-arm64-temp
+            type=semver,pattern={{version}},suffix=-arm64-temp
 
       # build and push arm64 image
       - name: Build and push ARM64 image
@@ -405,6 +418,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=arm64
           cache-to: type=gha,mode=max,scope=arm64
+          provenance: false
+          sbom: false
 
 
 
@@ -420,6 +435,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       # docker login
       - name: Docker login
@@ -440,54 +460,68 @@ jobs:
           echo "major=$MAJOR" >> $GITHUB_OUTPUT
           echo "minor=$MINOR" >> $GITHUB_OUTPUT
 
-      # Create and push multi-platform manifests
+      # Create and push multi-platform manifests using temporary tags
       - name: Create multi-platform manifest
         run: |
+          # Use temporary tagged images instead of digests
+          AMD64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-amd64-temp"
+          ARM64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-arm64-temp"
+          
+          echo "AMD64 Image: $AMD64_IMAGE"
+          echo "ARM64 Image: $ARM64_IMAGE"
+
           # Create and push version-specific manifest (v1.2.3)
           docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }} \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}
 
           # Create and push semver version manifest (1.2.3)
           docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.version.outputs.version }} \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.version.outputs.version }}
 
           # Create and push major version manifest (v1)
           docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.major }} \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.major }}
 
           # Create and push major version manifest (1)
           docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.version.outputs.major }} \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.version.outputs.major }}
 
           # Create and push major.minor version manifest (v1.2)
           docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
 
           # Create and push major.minor version manifest (1.2)
           docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }} \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
 
           # Create and push latest manifest (multi-arch)
           docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:latest \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:latest
+
+      # Clean up temporary tags
+      - name: Clean up temporary tags
+        run: |
+          # Delete temporary platform-specific tags
+          docker manifest rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-amd64-temp || true
+          docker manifest rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:v${{ steps.version.outputs.version }}-arm64-temp || true
