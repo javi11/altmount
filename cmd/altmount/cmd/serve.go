@@ -61,9 +61,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate directory permissions before proceeding
+	if err := cfg.ValidateDirectories(); err != nil {
+		slog.Default().Error("directory validation failed", "err", err)
+		return err
+	}
+
 	// Setup log rotation with the loaded configuration
 	logger := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.LogLevel)
 	slog.SetDefault(logger)
+
+	logger.Info("Directory validation successful",
+		"metadata_path", cfg.Metadata.RootPath,
+		"database_path", cfg.Database.Path,
+		"log_file", cfg.Log.File)
 
 	logger.Info("Starting AltMount server with log rotation configured",
 		"log_file", cfg.Log.File,

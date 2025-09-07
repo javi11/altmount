@@ -122,6 +122,77 @@ func GenerateProviderID(host string, port int, username string) string {
 	return fmt.Sprintf("%x", hash)[:8] // First 8 characters for readability
 }
 
+// checkDirectoryWritable checks if a directory exists and is writable
+// If the directory doesn't exist, it attempts to create it
+func checkDirectoryWritable(path string) error {
+	if path == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+
+	// Convert to absolute path for clearer error messages
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path // fallback to original if abs fails
+	}
+
+	// Check if path exists
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Directory doesn't exist, try to create it
+			if err := os.MkdirAll(absPath, 0755); err != nil {
+				return fmt.Errorf("directory %s does not exist and cannot be created: %w", absPath, err)
+			}
+		} else {
+			return fmt.Errorf("cannot access directory %s: %w", absPath, err)
+		}
+	} else {
+		// Path exists, check if it's a directory
+		if !info.IsDir() {
+			return fmt.Errorf("path %s exists but is not a directory", absPath)
+		}
+	}
+
+	// Test write permissions by creating a temporary file
+	testFile := filepath.Join(absPath, ".altmount-write-test")
+	file, err := os.Create(testFile)
+	if err != nil {
+		return fmt.Errorf("directory %s is not writable: %w", absPath, err)
+	}
+	
+	// Write some test data
+	_, writeErr := file.Write([]byte("test"))
+	file.Close()
+
+	// Clean up test file
+	os.Remove(testFile)
+
+	if writeErr != nil {
+		return fmt.Errorf("directory %s is not writable: %w", absPath, writeErr)
+	}
+
+	return nil
+}
+
+// checkFileDirectoryWritable checks if the directory containing a file path is writable
+func checkFileDirectoryWritable(filePath string, fileType string) error {
+	if filePath == "" {
+		return nil // Empty path is valid for some config options (like log file)
+	}
+
+	// Get the directory part of the file path
+	dir := filepath.Dir(filePath)
+	if dir == "" || dir == "." {
+		dir = "./" // current directory
+	}
+
+	if err := checkDirectoryWritable(dir); err != nil {
+		return fmt.Errorf("%s file directory check failed: %w", fileType, err)
+	}
+
+	return nil
+}
+
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
 	ID               string `yaml:"id" mapstructure:"id" json:"id"`
@@ -438,6 +509,41 @@ func (c *Config) Validate() error {
 		}
 		if provider.MaxConnections <= 0 {
 			return fmt.Errorf("provider %d: max_connections must be greater than 0", i)
+		}
+	}
+
+	return nil
+}
+
+// ValidateDirectories validates that all configured directories are writable
+// This performs actual filesystem checks and may create directories if needed
+func (c *Config) ValidateDirectories() error {
+	// Check metadata directory
+	if err := checkDirectoryWritable(c.Metadata.RootPath); err != nil {
+		return fmt.Errorf("metadata directory validation failed: %w", err)
+	}
+
+	// Check database directory
+	if err := checkFileDirectoryWritable(c.Database.Path, "database"); err != nil {
+		return err
+	}
+
+	// Check log file directory (only if log file is configured)
+	if err := checkFileDirectoryWritable(c.Log.File, "log"); err != nil {
+		return err
+	}
+
+	// Check SABnzbd mount directory if enabled
+	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
+		if err := checkDirectoryWritable(c.SABnzbd.MountDir); err != nil {
+			return fmt.Errorf("SABnzbd mount directory validation failed: %w", err)
+		}
+	}
+
+	// Check Arrs mount path if enabled
+	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
+		if err := checkDirectoryWritable(c.Arrs.MountPath); err != nil {
+			return fmt.Errorf("Arrs mount path validation failed: %w", err)
 		}
 	}
 
