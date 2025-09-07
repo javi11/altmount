@@ -478,8 +478,8 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 			oldProvider.MaxConnections != newProvider.MaxConnections ||
 			oldProvider.TLS != newProvider.TLS ||
 			oldProvider.InsecureTLS != newProvider.InsecureTLS ||
-			oldProvider.Enabled != newProvider.Enabled ||
-			oldProvider.IsBackupProvider != newProvider.IsBackupProvider {
+			*oldProvider.Enabled != *newProvider.Enabled ||
+			*oldProvider.IsBackupProvider != *newProvider.IsBackupProvider {
 			return false // Provider modified
 		}
 	}

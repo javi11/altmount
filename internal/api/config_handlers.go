@@ -340,16 +340,16 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add to config
-	newConfig := *currentConfig
+	newConfig := currentConfig.DeepCopy()
 	newConfig.Providers = append(newConfig.Providers, newProvider)
 
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}
@@ -429,9 +429,11 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create updated config
-	newConfig := *currentConfig
-	provider := &newConfig.Providers[providerIndex]
+	// Create updated config with proper deep copy
+	newConfig := currentConfig.DeepCopy()
+	
+	// Get the provider to modify from the deep copy
+	provider := newConfig.Providers[providerIndex]
 
 	// Apply updates
 	if updateReq.Host != nil {
@@ -478,13 +480,16 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		provider.IsBackupProvider = updateReq.IsBackupProvider
 	}
 
+	// Assign the updated provider back to the slice
+	newConfig.Providers[providerIndex] = provider
+
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}
@@ -547,17 +552,17 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create new config without the provider
-	newConfig := *currentConfig
-	newConfig.Providers = append(currentConfig.Providers[:providerIndex],
-		currentConfig.Providers[providerIndex+1:]...)
+	newConfig := currentConfig.DeepCopy()
+	newConfig.Providers = append(newConfig.Providers[:providerIndex],
+		newConfig.Providers[providerIndex+1:]...)
 
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}
@@ -628,16 +633,16 @@ func (s *Server) handleReorderProviders(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create new config with reordered providers
-	newConfig := *currentConfig
+	newConfig := currentConfig.DeepCopy()
 	newConfig.Providers = newProviders
 
 	// Validate and save
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		WriteValidationError(w, "Configuration validation failed", err.Error())
 		return
 	}
 
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		WriteInternalError(w, "Failed to update configuration", err.Error())
 		return
 	}
