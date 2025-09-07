@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Trash2, Wifi } from "lucide-react";
+import { Eye, EyeOff, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import type { ArrsInstanceConfig, ArrsType } from "../../types/config";
 
@@ -46,7 +46,7 @@ export function ArrsInstanceCard({
 		setTestResult({ type: null, message: "" });
 
 		try {
-			const response = await fetch("/api/arrs/test", {
+			const response = await fetch("/api/arrs/instances/test", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
@@ -178,7 +178,7 @@ export function ArrsInstanceCard({
 								{isTestingConnection ? (
 									<div className="loading loading-spinner h-4 w-4" />
 								) : (
-									<Wifi className="h-4 w-4" />
+									"Test"
 								)}
 							</button>
 						</div>
