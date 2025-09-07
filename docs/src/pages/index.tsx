@@ -23,12 +23,6 @@ function HomepageHeader() {
             to="/docs/intro#getting-started">
             Get Started 🚀
           </Link>
-          <Link
-            className="button button--outline button--secondary button--lg"
-            to="/docs/Installation/docker"
-            style={{ marginLeft: '1rem' }}>
-            Docker Install
-          </Link>
         </div>
       </div>
     </header>
