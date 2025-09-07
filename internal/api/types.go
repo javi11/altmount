@@ -115,7 +115,7 @@ func FromImportAPIResponse(apiResp ImportAPIResponse) config.ImportConfig {
 
 // ToConfigFromUpdateRequest converts ConfigUpdateRequest to config.Config with proper type conversions
 func ToConfigFromUpdateRequest(req *ConfigUpdateRequest) config.Config {
-	cfg := *req.Config // Copy the embedded config
+	cfg := *req.Config                             // Copy the embedded config
 	cfg.Import = FromImportAPIResponse(req.Import) // Convert the Import field properly
 	return cfg
 }
@@ -456,7 +456,6 @@ type ProviderTestRequest struct {
 type ProviderTestResponse struct {
 	Success      bool   `json:"success"`
 	ErrorMessage string `json:"error_message,omitempty"`
-	Latency      int64  `json:"latency_ms,omitempty"`
 }
 
 // ProviderCreateRequest represents a request to create a new provider
@@ -530,4 +529,9 @@ type PoolMetricsResponse struct {
 	CommandSuccessRate   float64   `json:"command_success_rate_percent"`
 	AcquireWaitTimeMs    int64     `json:"acquire_wait_time_ms"`
 	LastUpdated          time.Time `json:"last_updated"`
+}
+
+type TestProviderResponse struct {
+	Success      bool   `json:"success"`
+	ErrorMessage string `json:"error_message,omitempty"`
 }

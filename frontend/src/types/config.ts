@@ -419,7 +419,6 @@ export interface ProviderTestRequest {
 export interface ProviderTestResponse {
 	success: boolean;
 	error_message?: string;
-	latency_ms?: number;
 }
 
 export interface ProviderCreateRequest {

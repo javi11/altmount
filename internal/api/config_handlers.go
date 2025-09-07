@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/nntppool"
 )
 
 // ConfigManager interface defines methods for configuration management
@@ -247,15 +248,26 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err := nntppool.TestProviderConnectivity(r.Context(), nntppool.UsenetProviderConfig{
+		Host:     testReq.Host,
+		Port:     testReq.Port,
+		Username: testReq.Username,
+		Password: testReq.Password,
+		TLS:      testReq.TLS,
+	}, slog.Default(), nil)
+	if err != nil {
+		WriteSuccess(w, TestProviderResponse{
+			Success:      false,
+			ErrorMessage: err.Error(),
+		}, nil)
+		return
+	}
+
 	// TODO: Implement actual NNTP connection test
 	// For now, return success for basic validation
-	response := struct {
-		Success   bool   `json:"success"`
-		LatencyMs int    `json:"latency_ms,omitempty"`
-		ErrorMsg  string `json:"error_message,omitempty"`
-	}{
-		Success:   true,
-		LatencyMs: 150, // Simulated latency
+	response := TestProviderResponse{
+		Success:      true,
+		ErrorMessage: "",
 	}
 
 	WriteSuccess(w, response, nil)
