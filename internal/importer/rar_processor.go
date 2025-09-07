@@ -74,6 +74,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
 
+	// Sort rar files by filename to ensure consistent ordering
+	sort.Slice(rarFiles, func(i, j int) bool {
+		return rarFiles[i].Filename < rarFiles[j].Filename
+	})
+
 	// Rename RAR files to match the first file's base name that will allow parse rar that have different files name
 	sortFiles := renameRarFilesAndSort(rarFiles)
 
