@@ -178,7 +178,7 @@ Once AltMount is running, set up rclone to mount the WebDAV interface:
 
    ```bash
    rclone config create altmount webdav \
-     url=http://localhost:8080 \
+     url=http://localhost:8080/webdav \
      vendor=other \
      user=usenet \
      pass=$(rclone obscure "usenet")
