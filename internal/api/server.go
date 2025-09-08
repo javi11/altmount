@@ -95,27 +95,27 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api := app.Group(s.config.Prefix)
 
 	// Queue endpoints
-	api.Get("/queue", adaptor.HTTPHandlerFunc(s.handleListQueue))
-	api.Get("/queue/{id}", adaptor.HTTPHandlerFunc(s.handleGetQueue))
-	api.Delete("/queue/{id}", adaptor.HTTPHandlerFunc(s.handleDeleteQueue))
-	api.Delete("/queue/bulk", adaptor.HTTPHandlerFunc(s.handleDeleteQueueBulk))
-	api.Post("/queue/{id}/retry", adaptor.HTTPHandlerFunc(s.handleRetryQueue))
-	api.Get("/queue/stats", adaptor.HTTPHandlerFunc(s.handleGetQueueStats))
-	api.Delete("/queue/completed", adaptor.HTTPHandlerFunc(s.handleClearCompletedQueue))
+	api.Get("/queue", s.handleListQueue)
+	api.Get("/queue/stats", s.handleGetQueueStats)
+	api.Delete("/queue/completed", s.handleClearCompletedQueue)
+	api.Get("/queue/:id", s.handleGetQueue)
+	api.Delete("/queue/:id", s.handleDeleteQueue)
+	api.Delete("/queue/bulk", s.handleDeleteQueueBulk)
+	api.Post("/queue/:id/retry", s.handleRetryQueue)
 
 	// Health endpoints
-	api.Get("/health", adaptor.HTTPHandlerFunc(s.handleListHealth))
-	api.Get("/health/{id}", adaptor.HTTPHandlerFunc(s.handleGetHealth))
-	api.Delete("/health/{id}", adaptor.HTTPHandlerFunc(s.handleDeleteHealth))
-	api.Post("/health/bulk/delete", adaptor.HTTPHandlerFunc(s.handleDeleteHealthBulk))
-	api.Post("/health/{id}/repair", adaptor.HTTPHandlerFunc(s.handleRepairHealth))
-	api.Get("/health/corrupted", adaptor.HTTPHandlerFunc(s.handleListCorrupted))
-	api.Get("/health/stats", adaptor.HTTPHandlerFunc(s.handleGetHealthStats))
-	api.Delete("/health/cleanup", adaptor.HTTPHandlerFunc(s.handleCleanupHealth))
-	api.Post("/health/check", adaptor.HTTPHandlerFunc(s.handleAddHealthCheck))
-	api.Get("/health/worker/status", adaptor.HTTPHandlerFunc(s.handleGetHealthWorkerStatus))
-	api.Post("/health/{id}/check-now", adaptor.HTTPHandlerFunc(s.handleDirectHealthCheck))
-	api.Post("/health/{id}/cancel", adaptor.HTTPHandlerFunc(s.handleCancelHealthCheck))
+	api.Get("/health", s.handleListHealth)
+	api.Post("/health/bulk/delete", s.handleDeleteHealthBulk)
+	api.Get("/health/corrupted", s.handleListCorrupted)
+	api.Get("/health/stats", s.handleGetHealthStats)
+	api.Delete("/health/cleanup", s.handleCleanupHealth)
+	api.Post("/health/check", s.handleAddHealthCheck)
+	api.Get("/health/worker/status", s.handleGetHealthWorkerStatus)
+	api.Post("/health/:id/repair", s.handleRepairHealth)
+	api.Post("/health/:id/check-now", s.handleDirectHealthCheck)
+	api.Post("/health/:id/cancel", s.handleCancelHealthCheck)
+	api.Get("/health/:id", s.handleGetHealth)
+	api.Delete("/health/:id", s.handleDeleteHealth)
 
 	// File endpoints (if metadata reader is available)
 	if s.metadataReader != nil {
@@ -141,15 +141,15 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	if s.configManager != nil {
 		api.Get("/config", adaptor.HTTPHandlerFunc(s.handleGetConfig))
 		api.Put("/config", adaptor.HTTPHandlerFunc(s.handleUpdateConfig))
-		api.Patch("/config/{section}", adaptor.HTTPHandlerFunc(s.handlePatchConfigSection))
+		api.Patch("/config/:section", adaptor.HTTPHandlerFunc(s.handlePatchConfigSection))
 		api.Post("/config/reload", adaptor.HTTPHandlerFunc(s.handleReloadConfig))
 		api.Post("/config/validate", adaptor.HTTPHandlerFunc(s.handleValidateConfig))
 
 		// Provider management endpoints
 		api.Post("/providers/test", adaptor.HTTPHandlerFunc(s.handleTestProvider))
 		api.Post("/providers", adaptor.HTTPHandlerFunc(s.handleCreateProvider))
-		api.Put("/providers/{id}", adaptor.HTTPHandlerFunc(s.handleUpdateProvider))
-		api.Delete("/providers/{id}", adaptor.HTTPHandlerFunc(s.handleDeleteProvider))
+		api.Put("/providers/:id", adaptor.HTTPHandlerFunc(s.handleUpdateProvider))
+		api.Delete("/providers/:id", adaptor.HTTPHandlerFunc(s.handleDeleteProvider))
 		api.Put("/providers/reorder", adaptor.HTTPHandlerFunc(s.handleReorderProviders))
 	}
 
@@ -157,10 +157,10 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	if s.arrsService != nil {
 		// Configuration-based instance endpoints
 		api.Get("/arrs/instances", adaptor.HTTPHandlerFunc(s.handleListArrsInstances))
-		api.Get("/arrs/instances/{type}/{name}", adaptor.HTTPHandlerFunc(s.handleGetArrsInstance))
-		api.Post("/arrs/instances", adaptor.HTTPHandlerFunc(s.handleCreateArrsInstance))        // Deprecated
-		api.Put("/arrs/instances/{id}", adaptor.HTTPHandlerFunc(s.handleUpdateArrsInstance))    // Deprecated
-		api.Delete("/arrs/instances/{id}", adaptor.HTTPHandlerFunc(s.handleDeleteArrsInstance)) // Deprecated
+		api.Get("/arrs/instances/:type/:name", adaptor.HTTPHandlerFunc(s.handleGetArrsInstance))
+		api.Post("/arrs/instances", adaptor.HTTPHandlerFunc(s.handleCreateArrsInstance))       // Deprecated
+		api.Put("/arrs/instances/:id", adaptor.HTTPHandlerFunc(s.handleUpdateArrsInstance))    // Deprecated
+		api.Delete("/arrs/instances/:id", adaptor.HTTPHandlerFunc(s.handleDeleteArrsInstance)) // Deprecated
 		api.Post("/arrs/instances/test", adaptor.HTTPHandlerFunc(s.handleTestArrsConnection))
 		api.Get("/arrs/stats", adaptor.HTTPHandlerFunc(s.handleGetArrsStats))
 		api.Get("/arrs/movies/search", adaptor.HTTPHandlerFunc(s.handleSearchMovies))     // Deprecated
@@ -186,7 +186,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			// Admin endpoints (require admin privileges)
 			adminMiddleware := auth.RequireAdmin(tokenService, s.userRepo)
 			api.Get("/users", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleListUsers))))
-			api.Put("/users/{user_id}/admin", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdmin))))
+			api.Put("/users/:user_id/admin", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdmin))))
 		}
 	}
 
