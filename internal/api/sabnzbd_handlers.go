@@ -25,7 +25,7 @@ var defaultCategory = config.SABnzbdCategory{
 	Dir:      "",
 }
 
-const completeDir = "/sabnzbd"
+const completeDir = ""
 
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(w http.ResponseWriter, r *http.Request) {
