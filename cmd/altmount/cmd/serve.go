@@ -414,15 +414,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start Fiber server in goroutine
+	serverErr := make(chan error, 1)
 	go func() {
 		if err := app.Listen(fmt.Sprintf(":%d", cfg.WebDAV.Port)); err != nil {
 			logger.Error("Fiber server error", "error", err)
+			serverErr <- err
 		}
 	}()
 
-	// Wait for shutdown signal or server error
-	signalHandler(ctx)
+	logger.Info("AltMount server started successfully")
 
+	// Wait for shutdown signal or server error
+	select {
+	case sig := <-sigChan:
+		logger.Info("Received shutdown signal", "signal", sig.String())
+		cancel() // Cancel context to signal all services to stop
+	case err := <-serverErr:
+		logger.Error("Server error, shutting down", "error", err)
+		cancel()
+	case <-ctx.Done():
+		logger.Info("Context cancelled, shutting down")
+	}
+
+	// Start graceful shutdown sequence
+	logger.Info("Starting graceful shutdown sequence")
+	
 	// Stop health worker if running
 	if healthWorker != nil {
 		if err := healthWorker.Stop(); err != nil {
@@ -437,12 +453,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service cleanup completed")
 	}
 
-	// Shutdown Fiber app
-	if err := app.Shutdown(); err != nil {
+	// Shutdown Fiber app with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	
+	logger.Info("Shutting down Fiber server...")
+	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 		logger.Error("Error shutting down Fiber app", "error", err)
+		return err
 	}
+	logger.Info("Fiber server shutdown completed")
 
-	logger.Info("AltMount server shutting down gracefully")
+	logger.Info("AltMount server shutdown completed successfully")
 	return nil
 }
 
@@ -455,18 +477,6 @@ func handleFiberHealth(c *fiber.Ctx) error {
 	return c.JSON(response)
 }
 
-func signalHandler(ctx context.Context) {
-	c := make(chan os.Signal, 1)
-	// We'll accept graceful shutdowns when quit via SIGINT (Ctrl+C)
-	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
-	signal.Notify(c, os.Interrupt)
-
-	// Block until we receive our signal.
-	select {
-	case <-ctx.Done():
-	case <-c:
-	}
-}
 
 // setupSPARoutes configures Fiber SPA routing for the frontend
 func setupSPARoutes(app *fiber.App) {
