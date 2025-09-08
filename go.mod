@@ -14,6 +14,7 @@ require (
 	github.com/acomagu/bufpipe v1.0.4
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
+	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/javi11/nntppool v1.5.5
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.1
@@ -115,7 +116,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/go-xmlfmt/xmlfmt v1.1.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/gofiber/fiber/v2 v2.52.9 // indirect
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
