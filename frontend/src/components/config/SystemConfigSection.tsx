@@ -3,11 +3,11 @@ import { useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useAuth, useRegenerateAPIKey } from "../../hooks/useAuth";
-import type { ConfigResponse, SystemFormData } from "../../types/config";
+import type { ConfigResponse, LogFormData } from "../../types/config";
 
 interface SystemConfigSectionProps {
 	config: ConfigResponse;
-	onUpdate?: (section: string, data: SystemFormData) => Promise<void>;
+	onUpdate?: (section: string, data: LogFormData) => Promise<void>;
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
 }
@@ -18,8 +18,13 @@ export function SystemConfigSection({
 	isReadOnly = false,
 	isUpdating = false,
 }: SystemConfigSectionProps) {
-	const [formData, setFormData] = useState<SystemFormData>({
-		log_level: config.log_level,
+	const [formData, setFormData] = useState<LogFormData>({
+		file: config.log.file,
+		level: config.log.level,
+		max_size: config.log.max_size,
+		max_age: config.log.max_age,
+		max_backups: config.log.max_backups,
+		compress: config.log.compress,
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 
@@ -32,24 +37,41 @@ export function SystemConfigSection({
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		const newFormData = {
-			log_level: config.log_level,
+			file: config.log.file,
+			level: config.log.level,
+			max_size: config.log.max_size,
+			max_age: config.log.max_age,
+			max_backups: config.log.max_backups,
+			compress: config.log.compress,
 		};
 		setFormData(newFormData);
 		setHasChanges(false);
-	}, [config.log_level]);
+	}, [
+		config.log.file,
+		config.log.level,
+		config.log.max_size,
+		config.log.max_age,
+		config.log.max_backups,
+		config.log.compress,
+	]);
 
-	const handleInputChange = (field: keyof SystemFormData, value: string) => {
+	const handleInputChange = (field: keyof LogFormData, value: string | number | boolean) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		const configData = {
-			log_level: config.log_level,
+			file: config.log.file,
+			level: config.log.level,
+			max_size: config.log.max_size,
+			max_age: config.log.max_age,
+			max_backups: config.log.max_backups,
+			compress: config.log.compress,
 		};
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(configData));
 	};
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
-			await onUpdate("system", formData);
+			await onUpdate("log", formData);
 			setHasChanges(false);
 		}
 	};
@@ -110,9 +132,9 @@ export function SystemConfigSection({
 				<legend className="fieldset-legend">Log Level</legend>
 				<select
 					className="select"
-					value={formData.log_level}
+					value={formData.level}
 					disabled={isReadOnly}
-					onChange={(e) => handleInputChange("log_level", e.target.value)}
+					onChange={(e) => handleInputChange("level", e.target.value)}
 				>
 					<option value="debug">Debug</option>
 					<option value="info">Info</option>

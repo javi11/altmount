@@ -401,7 +401,8 @@ func (s *Service) workerLoop(workerID int) {
 	log := s.log.With("worker_id", workerID)
 
 	// Get processing interval from configuration
-	processingInterval := s.configGetter().Import.QueueProcessingInterval
+	processingIntervalSeconds := s.configGetter().Import.QueueProcessingIntervalSeconds
+	processingInterval := time.Duration(processingIntervalSeconds) * time.Second
 	log.Info("Queue worker started", "processing_interval", processingInterval)
 
 	ticker := time.NewTicker(processingInterval)

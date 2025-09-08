@@ -38,12 +38,13 @@ rclone:
 # Import processing configuration
 import:
   max_processor_workers: 2 # Number of NZB processor workers
-  queue_processing_interval: 5 # Queue processing interval in seconds
+  queue_processing_interval_seconds: 5 # Queue processing interval in seconds
 
 # Health monitoring configuration
 health:
   enabled: true # Enable health monitoring service
   auto_repair_enabled: false # Enable automatic repair of corrupted files via ARRs (default: false)
+  check_interval_seconds: 300 # Health check interval in seconds (default: 300 = 5 minutes)
 
 # SABnzbd-compatible API configuration
 sabnzbd:

@@ -78,18 +78,15 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		})
 	}
 
-	// Decode into API request structure with proper type handling
-	var configReq ConfigUpdateRequest
-	if err := c.BodyParser(&configReq); err != nil {
+	// Decode directly into config structure
+	var newConfig config.Config
+	if err := c.BodyParser(&newConfig); err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Invalid JSON in request body",
 			"details": err.Error(),
 		})
 	}
-
-	// Convert from API request format to internal config format
-	newConfig := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
@@ -155,18 +152,15 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		})
 	}
 
-	// Create a copy and decode partial updates using proper type handling
-	configReq := ConfigUpdateRequest{Config: currentConfig}
-	if err := c.BodyParser(&configReq); err != nil {
+	// Create a copy and decode partial updates directly 
+	newConfig := *currentConfig // Start with current config
+	if err := c.BodyParser(&newConfig); err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Invalid JSON in request body",
 			"details": err.Error(),
 		})
 	}
-
-	// Convert from API request format to internal config format
-	newConfig := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
@@ -238,18 +232,15 @@ func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 		})
 	}
 
-	// Decode into API request structure with proper type handling
-	var configReq ConfigUpdateRequest
-	if err := c.BodyParser(&configReq); err != nil {
+	// Decode directly into config structure
+	var cfg config.Config
+	if err := c.BodyParser(&cfg); err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Invalid JSON in request body",
 			"details": err.Error(),
 		})
 	}
-
-	// Convert from API request format to internal config format
-	cfg := ToConfigFromUpdateRequest(&configReq)
 
 	// Validate the configuration
 	validationErr := s.configManager.ValidateConfig(&cfg)
@@ -561,7 +552,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 
 	// Create updated config with proper deep copy
 	newConfig := currentConfig.DeepCopy()
-	
+
 	// Get the provider to modify from the deep copy
 	provider := newConfig.Providers[providerIndex]
 

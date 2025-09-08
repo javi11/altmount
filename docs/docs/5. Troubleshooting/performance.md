@@ -166,7 +166,7 @@ streaming:
 
 import:
   max_processor_workers: 4 # Multiple NZB processors
-  queue_processing_interval: 2 # Fast queue processing
+  queue_processing_interval_seconds: 2 # Fast queue processing
 ```
 
 #### Balanced Configuration
@@ -179,7 +179,7 @@ streaming:
 
 import:
   max_processor_workers: 2 # Standard processing
-  queue_processing_interval: 5 # Standard interval
+  queue_processing_interval_seconds: 5 # Standard interval
 ```
 
 #### Resource-Constrained Configuration
@@ -192,7 +192,7 @@ streaming:
 
 import:
   max_processor_workers: 1 # Single processor
-  queue_processing_interval: 10 # Slower processing
+  queue_processing_interval_seconds: 10 # Slower processing
 ```
 
 ### Provider Optimization
@@ -340,7 +340,7 @@ streaming:
 
 import:
   max_processor_workers: 8 # Fast NZB processing
-  queue_processing_interval: 1 # Very fast queue processing
+  queue_processing_interval_seconds: 1 # Very fast queue processing
 
 # Optimize for throughput over latency
 log:

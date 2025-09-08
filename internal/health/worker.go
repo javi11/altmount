@@ -693,11 +693,11 @@ func (hw *HealthWorker) getEnabled() bool {
 }
 
 func (hw *HealthWorker) getCheckInterval() time.Duration {
-	interval := hw.configGetter().Health.CheckInterval
-	if interval <= 0 {
-		return 30 * time.Minute // Default
+	intervalSeconds := hw.configGetter().Health.CheckIntervalSeconds
+	if intervalSeconds <= 0 {
+		return 5 * time.Minute // Default
 	}
-	return interval
+	return time.Duration(intervalSeconds) * time.Second
 }
 
 func (hw *HealthWorker) getMaxConcurrentJobs() int {

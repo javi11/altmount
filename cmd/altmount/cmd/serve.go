@@ -72,7 +72,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Setup log rotation with the loaded configuration
-	logger := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.LogLevel)
+	logger := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.Log.Level)
 	slog.SetDefault(logger)
 
 	logger.Info("Directory validation successful",
@@ -82,7 +82,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Starting AltMount server with log rotation configured",
 		"log_file", cfg.Log.File,
-		"log_level", getEffectiveLogLevel(cfg.Log.Level, cfg.LogLevel),
+		"log_level", getEffectiveLogLevel(cfg.Log.Level, cfg.Log.Level),
 		"max_size_mb", cfg.Log.MaxSize,
 		"max_age_days", cfg.Log.MaxAge,
 		"max_backups", cfg.Log.MaxBackups,
@@ -198,7 +198,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Conditional Fiber request logging - only in debug mode
 	// We use a wrapper to allow dynamic enabling/disabling
 	var debugMode bool
-	effectiveLogLevel := getEffectiveLogLevel(cfg.Log.Level, cfg.LogLevel)
+	effectiveLogLevel := getEffectiveLogLevel(cfg.Log.Level, cfg.Log.Level)
 	debugMode = effectiveLogLevel == "debug"
 
 	// Create the logger middleware but wrap it to check debug mode
@@ -285,7 +285,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Port:   cfg.WebDAV.Port,
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
-		Debug:  cfg.LogLevel == "debug",
+		Debug:  cfg.Log.Level == "debug",
 		Prefix: "/webdav",
 	}, nsys.FileSystem(), tokenService, webdavUserRepo, configManager.GetConfigGetter())
 	if err != nil {
@@ -311,12 +311,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Add log level config change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		// Determine old and new log levels (prioritize Log.Level over LogLevel)
-		oldLevel := oldConfig.LogLevel
+		oldLevel := oldConfig.Log.Level
 		if oldConfig.Log.Level != "" {
 			oldLevel = oldConfig.Log.Level
 		}
 
-		newLevel := newConfig.LogLevel
+		newLevel := newConfig.Log.Level
 		if newConfig.Log.Level != "" {
 			newLevel = newConfig.Log.Level
 		}

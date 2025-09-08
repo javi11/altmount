@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/javi11/nntppool"
 	"github.com/spf13/viper"
@@ -28,7 +27,6 @@ type Config struct {
 	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
-	LogLevel  string           `yaml:"log_level" mapstructure:"log_level" json:"log_level"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -72,26 +70,8 @@ type RCloneConfig struct {
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers     int           `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingInterval time.Duration `yaml:"queue_processing_interval" mapstructure:"queue_processing_interval" json:"queue_processing_interval"`
-}
-
-// UnmarshalYAML implements custom YAML unmarshaling for ImportConfig to handle queue_processing_interval as seconds
-func (ic *ImportConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	// Define a temporary struct to handle raw parsing with queue_processing_interval as seconds
-	type rawImportConfig struct {
-		MaxProcessorWorkers     int `yaml:"max_processor_workers"`
-		QueueProcessingInterval int `yaml:"queue_processing_interval"` // Parse as seconds, convert to Duration
-	}
-
-	var raw rawImportConfig
-	if err := unmarshal(&raw); err != nil {
-		return err
-	}
-
-	ic.MaxProcessorWorkers = raw.MaxProcessorWorkers
-	ic.QueueProcessingInterval = time.Duration(raw.QueueProcessingInterval) * time.Second
-	return nil
+	MaxProcessorWorkers            int `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -106,13 +86,13 @@ type LogConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled               *bool         `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	AutoRepairEnabled     *bool         `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
-	CheckInterval         time.Duration `yaml:"check_interval" mapstructure:"check_interval" json:"check_interval,omitempty"`
-	MaxConcurrentJobs     int           `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	MaxRetries            int           `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
-	MaxSegmentConnections int           `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
-	CheckAllSegments      bool          `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	Enabled               *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	AutoRepairEnabled     *bool `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
+	CheckIntervalSeconds  int   `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConcurrentJobs     int   `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	MaxRetries            int   `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
+	MaxSegmentConnections int   `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
+	CheckAllSegments      bool  `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -377,20 +357,20 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("import max_processor_workers must be greater than 0")
 	}
 
-	if c.Import.QueueProcessingInterval < 1*time.Second {
-		return fmt.Errorf("import queue_processing_interval must be at least 1 second")
+	if c.Import.QueueProcessingIntervalSeconds < 1 {
+		return fmt.Errorf("import queue_processing_interval_seconds must be at least 1 second")
 	}
 
-	if c.Import.QueueProcessingInterval > 5*time.Minute {
-		return fmt.Errorf("import queue_processing_interval must not exceed 5 minutes")
+	if c.Import.QueueProcessingIntervalSeconds > 300 {
+		return fmt.Errorf("import queue_processing_interval_seconds must not exceed 300 seconds")
 	}
 
 	// Validate log level (both old and new config)
-	if c.LogLevel != "" {
+	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
 		isValid := false
 		for _, level := range validLevels {
-			if c.LogLevel == level {
+			if c.Log.Level == level {
 				isValid = true
 				break
 			}
@@ -443,8 +423,8 @@ func (c *Config) Validate() error {
 
 	// Validate health configuration
 	if *c.Health.Enabled {
-		if c.Health.CheckInterval <= 0 {
-			return fmt.Errorf("health check_interval must be greater than 0")
+		if c.Health.CheckIntervalSeconds <= 0 {
+			return fmt.Errorf("health check_interval_seconds must be greater than 0")
 		}
 		if c.Health.MaxConcurrentJobs <= 0 {
 			return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
@@ -822,8 +802,8 @@ func DefaultConfig() *Config {
 			VFSPass:    "",
 		},
 		Import: ImportConfig{
-			MaxProcessorWorkers:     2,               // Default: 2 processor workers
-			QueueProcessingInterval: 5 * time.Second, // Default: check for work every 5 seconds
+			MaxProcessorWorkers:            2, // Default: 2 processor workers
+			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -836,7 +816,7 @@ func DefaultConfig() *Config {
 		Health: HealthConfig{
 			Enabled:               &healthCheckEnabled,
 			AutoRepairEnabled:     &autoRepairEnabled,
-			CheckInterval:         30 * time.Minute,
+			CheckIntervalSeconds:  1800, // 30 minutes in seconds
 			MaxConcurrentJobs:     1,
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,
@@ -848,7 +828,6 @@ func DefaultConfig() *Config {
 			Categories: []SABnzbdCategory{},
 		},
 		Providers: []ProviderConfig{},
-		LogLevel:  "info",
 		Arrs: ArrsConfig{
 			Enabled:         &scrapperEnabled, // Disabled by default
 			MaxWorkers:      5,                // Default to 5 concurrent workers

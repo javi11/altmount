@@ -40,11 +40,11 @@ import type {
 	ConfigSection,
 	HealthConfig,
 	ImportConfig,
+	LogFormData,
 	MetadataConfig,
 	RCloneVFSFormData,
 	SABnzbdConfig,
 	StreamingConfig,
-	SystemFormData,
 	WebDAVConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
@@ -161,7 +161,7 @@ export function ConfigurationPage() {
 			| ImportConfig
 			| MetadataConfig
 			| RCloneVFSFormData
-			| SystemFormData
+			| LogFormData
 			| SABnzbdConfig
 			| ArrsConfig,
 	) => {
@@ -216,13 +216,11 @@ export function ConfigurationPage() {
 					section: "rclone",
 					config: { rclone: data as RCloneVFSFormData },
 				});
-			} else if (section === "system") {
-				const systemData = data as SystemFormData;
+			} else if (section === "log") {
+				const logData = data as LogFormData;
 				await updateConfigSection.mutateAsync({
-					section: "system",
-					config: {
-						log_level: systemData.log_level,
-					},
+					section: "log",
+					config: { log: logData },
 				});
 			} else if (section === "sabnzbd") {
 				await updateConfigSection.mutateAsync({
@@ -471,6 +469,14 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "log" && (
+									<SystemConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{activeSection === "providers" && <ProvidersConfigSection config={config} />}
 
 								{activeSection === "rclone" && (
@@ -512,6 +518,7 @@ export function ConfigurationPage() {
 									"metadata",
 									"streaming",
 									"system",
+									"log",
 									"providers",
 									"rclone",
 									"sabnzbd",
