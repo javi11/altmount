@@ -533,20 +533,6 @@ func (c *Config) ValidateDirectories() error {
 		return err
 	}
 
-	// Check SABnzbd mount directory if enabled
-	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
-		if err := checkDirectoryWritable(c.SABnzbd.MountDir); err != nil {
-			return fmt.Errorf("sabnzbd mount directory validation failed: %w", err)
-		}
-	}
-
-	// Check Arrs mount path if enabled
-	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
-		if err := checkDirectoryWritable(c.Arrs.MountPath); err != nil {
-			return fmt.Errorf("arrs mount path validation failed: %w", err)
-		}
-	}
-
 	return nil
 }
 

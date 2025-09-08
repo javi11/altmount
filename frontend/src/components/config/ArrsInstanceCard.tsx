@@ -175,11 +175,7 @@ export function ArrsInstanceCard({
 								disabled={isReadOnly || isTestingConnection || !instance.url || !instance.api_key}
 								aria-label="Test connection"
 							>
-								{isTestingConnection ? (
-									<div className="loading loading-spinner h-4 w-4" />
-								) : (
-									"Test"
-								)}
+								{isTestingConnection ? <div className="loading loading-spinner h-4 w-4" /> : "Test"}
 							</button>
 						</div>
 						{testResult.type && (

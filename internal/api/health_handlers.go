@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/database"
@@ -268,6 +269,13 @@ func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	err = s.arrsService.TriggerFileRescan(ctx, filePath)
 	if err != nil {
+		// Check if this is a "no ARR instance found" error
+		if strings.Contains(err.Error(), "no ARR instance found") {
+			WriteNotFound(w, "File not managed by any ARR instance", 
+				"This file is not found in any of the configured Radarr or Sonarr instances. Please ensure the file is in your media library and the ARR instances are properly configured.")
+			return
+		}
+		// Handle other errors as internal server errors
 		WriteInternalError(w, "Failed to trigger repair in ARR instance", err.Error())
 		return
 	}

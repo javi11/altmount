@@ -173,6 +173,7 @@ export function HealthPage() {
 				const error = err as {
 					message?: string;
 					response?: {
+						status?: number;
 						data?: {
 							error?: {
 								message?: string;
@@ -182,6 +183,17 @@ export function HealthPage() {
 					};
 				};
 				console.error("Failed to trigger repair:", err);
+
+				// Check for 404 Not Found (file not in ARR)
+				if (error.response?.status === 404) {
+					showToast({
+						title: "File Not Found in ARR",
+						message:
+							"This file is not managed by any configured Radarr or Sonarr instance. Please check your ARR configuration and ensure the file is in your media library.",
+						type: "warning",
+					});
+					return;
+				}
 
 				// Get error message from response or direct error
 				const apiErrorMessage = error.response?.data?.error?.message;

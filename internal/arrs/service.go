@@ -126,7 +126,7 @@ func (s *Service) findInstanceForFilePath(filePath string) (instanceType string,
 	// Add mount path to file path to get full path for ARR APIs
 	fullPath := filePath
 	if mountPath != "" {
-		fullPath = mountPath + strings.TrimPrefix(filePath, "/")
+		fullPath = filepath.Join(mountPath, filePath)
 	}
 
 	// Try each enabled ARR instance to see which one manages this file
