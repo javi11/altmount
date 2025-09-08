@@ -219,8 +219,8 @@ export class APIClient {
 		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`);
 	}
 
-	async deleteHealthItem(id: string) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`, {
+	async deleteHealthItem(id: number) {
+		return this.request<FileHealth>(`/health/${id}`, {
 			method: "DELETE",
 		});
 	}
@@ -244,8 +244,8 @@ export class APIClient {
 		});
 	}
 
-	async repairHealthItem(id: string, resetRepairRetryCount?: boolean) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/repair`, {
+	async repairHealthItem(id: number, resetRepairRetryCount?: boolean) {
+		return this.request<FileHealth>(`/health/${id}/repair`, {
 			method: "POST",
 			body: JSON.stringify({ reset_repair_retry_count: resetRepairRetryCount }),
 		});
@@ -286,28 +286,30 @@ export class APIClient {
 		return this.request<PoolMetrics>("/system/pool/metrics");
 	}
 
-	async directHealthCheck(filePath: string) {
+	async directHealthCheck(id: number) {
 		return this.request<{
 			message: string;
+			id: number;
 			file_path: string;
 			old_status: string;
 			new_status: string;
 			checked_at: string;
 			health_data: FileHealth;
-		}>(`/health/${encodeURIComponent(filePath)}/check-now`, {
+		}>(`/health/${id}/check-now`, {
 			method: "POST",
 		});
 	}
 
-	async cancelHealthCheck(filePath: string) {
+	async cancelHealthCheck(id: number) {
 		return this.request<{
 			message: string;
+			id: number;
 			file_path: string;
 			old_status: string;
 			new_status: string;
 			cancelled_at: string;
 			health_data: FileHealth;
-		}>(`/health/${encodeURIComponent(filePath)}/cancel`, {
+		}>(`/health/${id}/cancel`, {
 			method: "POST",
 		});
 	}

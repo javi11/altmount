@@ -129,7 +129,7 @@ export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (id: string) => apiClient.deleteHealthItem(id),
+		mutationFn: (id: number) => apiClient.deleteHealthItem(id),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},
@@ -163,7 +163,7 @@ export const useRepairHealthItem = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ id, resetRepairRetryCount }: { id: string; resetRepairRetryCount?: boolean }) =>
+		mutationFn: ({ id, resetRepairRetryCount }: { id: number; resetRepairRetryCount?: boolean }) =>
 			apiClient.repairHealthItem(id, resetRepairRetryCount),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -215,7 +215,7 @@ export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePath: string) => apiClient.directHealthCheck(filePath),
+		mutationFn: (id: number) => apiClient.directHealthCheck(id),
 		onSuccess: () => {
 			// Immediately refresh health data to show "checking" status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -228,7 +228,7 @@ export const useCancelHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePath: string) => apiClient.cancelHealthCheck(filePath),
+		mutationFn: (id: number) => apiClient.cancelHealthCheck(id),
 		onSuccess: () => {
 			// Immediately refresh health data to show cancelled status
 			queryClient.invalidateQueries({ queryKey: ["health"] });

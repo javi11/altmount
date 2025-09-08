@@ -3,12 +3,10 @@ package api
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"runtime"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/javi11/altmount/internal/arrs"
@@ -48,7 +46,6 @@ type Server struct {
 	arrsService     *arrs.Service
 	logger          *slog.Logger
 	startTime       time.Time
-	mux             *http.ServeMux
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -139,18 +136,12 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/health/:id", s.handleGetHealth)
 	api.Delete("/health/:id", s.handleDeleteHealth)
 
-	// File endpoints (if metadata reader is available)
-	if s.metadataReader != nil {
-		api.Get("/files/info", s.handleGetFileMetadata)
-	}
+	api.Get("/files/info", s.handleGetFileMetadata)
 
-	// Import endpoints (if importer service is available)
-	if s.importerService != nil {
-		api.Post("/import/scan", s.handleStartManualScan)
-		api.Get("/import/scan/status", s.handleGetScanStatus)
-		api.Delete("/import/scan", s.handleCancelScan)
-		api.Post("/import/file", s.handleManualImportFile)
-	}
+	api.Post("/import/scan", s.handleStartManualScan)
+	api.Get("/import/scan/status", s.handleGetScanStatus)
+	api.Delete("/import/scan", s.handleCancelScan)
+	api.Post("/import/file", s.handleManualImportFile)
 
 	// System endpoints
 	api.Get("/system/stats", s.handleGetSystemStats)
@@ -159,35 +150,29 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)
 
-	// Configuration endpoints (if config manager is available)
-	if s.configManager != nil {
-		api.Get("/config", s.handleGetConfig)
-		api.Put("/config", s.handleUpdateConfig)
-		api.Patch("/config/:section", s.handlePatchConfigSection)
-		api.Post("/config/reload", s.handleReloadConfig)
-		api.Post("/config/validate", s.handleValidateConfig)
+	api.Get("/config", s.handleGetConfig)
+	api.Put("/config", s.handleUpdateConfig)
+	api.Patch("/config/:section", s.handlePatchConfigSection)
+	api.Post("/config/reload", s.handleReloadConfig)
+	api.Post("/config/validate", s.handleValidateConfig)
 
-		// Provider management endpoints
-		api.Post("/providers/test", s.handleTestProvider)
-		api.Post("/providers", s.handleCreateProvider)
-		api.Put("/providers/:id", s.handleUpdateProvider)
-		api.Delete("/providers/:id", s.handleDeleteProvider)
-		api.Put("/providers/reorder", s.handleReorderProviders)
-	}
+	// Provider management endpoints
+	api.Post("/providers/test", s.handleTestProvider)
+	api.Post("/providers", s.handleCreateProvider)
+	api.Put("/providers/:id", s.handleUpdateProvider)
+	api.Delete("/providers/:id", s.handleDeleteProvider)
+	api.Put("/providers/reorder", s.handleReorderProviders)
 
-	// Arrs endpoints (if arrs service is available)
-	if s.arrsService != nil {
-		// Configuration-based instance endpoints
-		api.Get("/arrs/instances", s.handleListArrsInstances)
-		api.Get("/arrs/instances/:type/:name", s.handleGetArrsInstance)
-		api.Post("/arrs/instances", s.handleCreateArrsInstance)       // Deprecated
-		api.Put("/arrs/instances/:id", s.handleUpdateArrsInstance)    // Deprecated
-		api.Delete("/arrs/instances/:id", s.handleDeleteArrsInstance) // Deprecated
-		api.Post("/arrs/instances/test", s.handleTestArrsConnection)
-		api.Get("/arrs/stats", s.handleGetArrsStats)
-		api.Get("/arrs/movies/search", s.handleSearchMovies)     // Deprecated
-		api.Get("/arrs/episodes/search", s.handleSearchEpisodes) // Deprecated
-	}
+	// Configuration-based instance endpoints
+	api.Get("/arrs/instances", s.handleListArrsInstances)
+	api.Get("/arrs/instances/:type/:name", s.handleGetArrsInstance)
+	api.Post("/arrs/instances", s.handleCreateArrsInstance)       // Deprecated
+	api.Put("/arrs/instances/:id", s.handleUpdateArrsInstance)    // Deprecated
+	api.Delete("/arrs/instances/:id", s.handleDeleteArrsInstance) // Deprecated
+	api.Post("/arrs/instances/test", s.handleTestArrsConnection)
+	api.Get("/arrs/stats", s.handleGetArrsStats)
+	api.Get("/arrs/movies/search", s.handleSearchMovies)     // Deprecated
+	api.Get("/arrs/episodes/search", s.handleSearchEpisodes) // Deprecated
 
 	// Direct authentication endpoints (converted to native Fiber)
 	api.Post("/auth/login", s.handleDirectLogin)
@@ -204,25 +189,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/users", s.handleListUsers)
 	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
 
-	// SABnzbd-compatible API endpoints (conditionally enabled)
-	if s.configManager != nil {
-		config := s.configManager.GetConfig()
-		if config.SABnzbd.Enabled != nil && *config.SABnzbd.Enabled {
-			// SABnzbd API uses its own API key authentication (query param)
-			// It's handled internally in the handler for compatibility
-			sabnzbdHandler := adaptor.HTTPHandler(http.HandlerFunc(s.handleSABnzbd))
-			app.Use("/sabnzbd/api", sabnzbdHandler)
-		}
-	}
-}
-
-// ServeHTTP implements http.Handler interface (for backwards compatibility)
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.mux != nil {
-		s.mux.ServeHTTP(w, r)
-	} else {
-		http.Error(w, "API server configured for Fiber-only mode", http.StatusNotFound)
-	}
+	app.Use("/sabnzbd/api", s.handleSABnzbd)
 }
 
 // getSystemInfo returns current system information

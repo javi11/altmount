@@ -104,21 +104,7 @@ func ParseTimeParamFiber(c *fiber.Ctx, param string) (*time.Time, error) {
 }
 
 // validateAPIKey validates the API key using AltMount's authentication system
-func (s *Server) validateAPIKey(r *http.Request, apiKey string) bool {
-	if s.userRepo == nil {
-		return false
-	}
-
-	user, err := s.userRepo.GetUserByAPIKey(apiKey)
-	if err != nil || user == nil {
-		return false
-	}
-
-	return true
-}
-
-// validateAPIKeyFiber validates the API key using AltMount's authentication system (Fiber version)
-func (s *Server) validateAPIKeyFiber(c *fiber.Ctx, apiKey string) bool {
+func (s *Server) validateAPIKey(c *fiber.Ctx, apiKey string) bool {
 	if s.userRepo == nil {
 		return false
 	}

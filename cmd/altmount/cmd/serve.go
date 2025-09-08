@@ -391,7 +391,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	app.Get("/live", handleFiberHealth)
 
 	// Use middleware that bypasses Fiber's method validation
-	app.All("/webdav", adaptor.HTTPHandler(webdavHandler.GetHTTPHandler()))
+	app.All("/webdav*", adaptor.HTTPHandler(webdavHandler.GetHTTPHandler()))
 
 	// Set up Fiber SPA routing
 	setupSPARoutes(app)
@@ -438,7 +438,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Start graceful shutdown sequence
 	logger.Info("Starting graceful shutdown sequence")
-	
+
 	// Stop health worker if running
 	if healthWorker != nil {
 		if err := healthWorker.Stop(); err != nil {
@@ -456,7 +456,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Shutdown Fiber app with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
-	
+
 	logger.Info("Shutting down Fiber server...")
 	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 		logger.Error("Error shutting down Fiber app", "error", err)
@@ -477,7 +477,6 @@ func handleFiberHealth(c *fiber.Ctx) error {
 	return c.JSON(response)
 }
 
-
 // setupSPARoutes configures Fiber SPA routing for the frontend
 func setupSPARoutes(app *fiber.App) {
 	// Determine frontend build path
@@ -492,6 +491,7 @@ func setupSPARoutes(app *fiber.App) {
 	if err != nil {
 		// Docker or development
 		app.Static("/", frontendPath)
+		app.Static("*", frontendPath+"/index.html")
 	} else {
 		// For embedded filesystem, we'll handle it differently below
 		app.All("/*", filesystem.New(filesystem.Config{

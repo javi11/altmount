@@ -124,7 +124,7 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 	}
 
 	// Validate API key using the refactored validation function
-	if !s.validateAPIKeyFiber(c, apiKey) {
+	if !s.validateAPIKey(c, apiKey) {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
 			"message": "Invalid API key",

@@ -74,10 +74,10 @@ export function HealthPage() {
 	const { confirmDelete, confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
-	const handleDelete = async (filePath: string) => {
+	const handleDelete = async (id: number) => {
 		const confirmed = await confirmDelete("health record");
 		if (confirmed) {
-			await deleteItem.mutateAsync(filePath);
+			await deleteItem.mutateAsync(id);
 		}
 	};
 
@@ -121,15 +121,15 @@ export function HealthPage() {
 		}
 	};
 
-	const handleManualCheck = async (filePath: string) => {
+	const handleManualCheck = async (id: number) => {
 		try {
-			await directHealthCheck.mutateAsync(filePath);
+			await directHealthCheck.mutateAsync(id);
 		} catch (err) {
 			console.error("Failed to perform direct health check:", err);
 		}
 	};
 
-	const handleCancelCheck = async (filePath: string) => {
+	const handleCancelCheck = async (id: number) => {
 		const confirmed = await confirmAction(
 			"Cancel Health Check",
 			"Are you sure you want to cancel this health check?",
@@ -141,14 +141,14 @@ export function HealthPage() {
 		);
 		if (confirmed) {
 			try {
-				await cancelHealthCheck.mutateAsync(filePath);
+				await cancelHealthCheck.mutateAsync(id);
 			} catch (err) {
 				console.error("Failed to cancel health check:", err);
 			}
 		}
 	};
 
-	const handleRepair = async (filePath: string) => {
+	const handleRepair = async (id: number) => {
 		const confirmed = await confirmAction(
 			"Trigger Repair",
 			"This will attempt to ask the ARR to redownload the corrupted file from your media library. THIS FILE WILL BE DELETED IF THE REPAIR IS SUCCESSFUL. Are you sure you want to proceed?",
@@ -161,7 +161,7 @@ export function HealthPage() {
 		if (confirmed) {
 			try {
 				await repairHealthItem.mutateAsync({
-					id: filePath,
+					id,
 					resetRepairRetryCount: false,
 				});
 				showToast({
@@ -677,7 +677,7 @@ export function HealthPage() {
 															<li>
 																<button
 																	type="button"
-																	onClick={() => handleCancelCheck(item.file_path)}
+																	onClick={() => handleCancelCheck(item.id)}
 																	disabled={cancelHealthCheck.isPending}
 																	className="text-warning"
 																>
@@ -689,7 +689,7 @@ export function HealthPage() {
 															<li>
 																<button
 																	type="button"
-																	onClick={() => handleManualCheck(item.file_path)}
+																	onClick={() => handleManualCheck(item.id)}
 																	disabled={directHealthCheck.isPending}
 																>
 																	<PlayCircle className="h-4 w-4" />
@@ -700,7 +700,7 @@ export function HealthPage() {
 														<li>
 															<button
 																type="button"
-																onClick={() => handleRepair(item.file_path)}
+																onClick={() => handleRepair(item.id)}
 																disabled={repairHealthItem.isPending}
 																className="text-info"
 															>
@@ -711,7 +711,7 @@ export function HealthPage() {
 														<li>
 															<button
 																type="button"
-																onClick={() => handleDelete(item.file_path)}
+																onClick={() => handleDelete(item.id)}
 																disabled={deleteItem.isPending}
 																className="text-error"
 															>
