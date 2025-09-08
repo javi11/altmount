@@ -3,15 +3,11 @@ package webdav
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
-
-	_ "net/http/pprof"
 
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/internal/config"
@@ -22,33 +18,30 @@ import (
 	"golang.org/x/net/webdav"
 )
 
-type webdavServer struct {
-	srv          *http.Server
+// Handler provides WebDAV functionality as an HTTP handler
+type Handler struct {
+	handler      http.Handler
 	authCreds    *AuthCredentials
 	configGetter config.ConfigGetter
 }
 
-func NewServer(
+// NewHandler creates a new WebDAV handler that can be used with Fiber adaptor
+func NewHandler(
 	config *Config,
 	fs afero.Fs,
-	mux *http.ServeMux, // Optional shared mux - if nil, creates own mux
 	tokenService *token.Service, // Optional token service for JWT auth
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
 	configGetter config.ConfigGetter, // Dynamic config access
-) (*webdavServer, error) {
-	// Create internal mux if none provided (WebDAV runs its own server)
-	if mux == nil {
-		mux = http.NewServeMux()
-	}
-	
+) (*Handler, error) {
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
+	
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
 		fileSystem: aferoToWebdavFS(fs),
 	}
 
-	handler := &webdav.Handler{
+	webdavHandler := &webdav.Handler{
 		FileSystem: errorHandler,
 		LockSystem: webdav.NewMemLS(),
 		Prefix:     config.Prefix,
@@ -59,15 +52,8 @@ func NewServer(
 		},
 	}
 
-	// Add pprof endpoints for profiling only in debug mode
-	if config.Debug {
-		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/profile", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
-	}
-
-	var h http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
+	// Create the main handler with authentication
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Fallback to basic authentication if JWT failed
 		username, password, hasBasicAuth := r.BasicAuth()
 
@@ -145,7 +131,7 @@ func NewServer(
 		}
 
 		if r.Method == "PROPFIND" {
-			status, err := propfind.HandlePropfind(handler.FileSystem, handler.LockSystem, w, r, config.Prefix)
+			status, err := propfind.HandlePropfind(webdavHandler.FileSystem, webdavHandler.LockSystem, w, r, config.Prefix)
 			if status != 0 {
 				w.WriteHeader(status)
 				if status != http.StatusNoContent {
@@ -162,8 +148,11 @@ func NewServer(
 			return
 		}
 
-		handler.ServeHTTP(w, r)
-	}
+		webdavHandler.ServeHTTP(w, r)
+	})
+
+	// Create a mux to handle the WebDAV routing
+	mux := http.NewServeMux()
 
 	// Default to root if not set
 	prefix := strings.TrimSpace(config.Prefix)
@@ -193,82 +182,36 @@ func NewServer(
 		mux.Handle(base+"/", h)
 	}
 
-	addr := fmt.Sprintf(":%v", config.Port)
-
-	srv := &http.Server{
-		Addr: addr,
-		// Good practice to set timeouts to avoid Slowloris attacks.
-		IdleTimeout:  time.Minute * 5,
-		WriteTimeout: time.Minute * 30,
-		Handler:      mux,
+	// Add pprof endpoints for profiling only in debug mode
+	if config.Debug {
+		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/profile", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
 	}
 
-	return &webdavServer{
-		srv:          srv,
+	return &Handler{
+		handler:      mux,
 		authCreds:    authCreds,
 		configGetter: configGetter,
 	}, nil
 }
 
-func (s *webdavServer) Start(ctx context.Context) error {
-	slog.InfoContext(ctx, fmt.Sprintf("WebDav server started at %s/webdav", s.srv.Addr))
-
-	// Start server in goroutine
-	serverErr := make(chan error, 1)
-	go func() {
-		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			serverErr <- err
-		}
-		close(serverErr)
-	}()
-
-	// Wait for context cancellation or server error
-	select {
-	case <-ctx.Done():
-		slog.InfoContext(ctx, "WebDav server received shutdown signal")
-		// Shutdown server gracefully
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := s.srv.Shutdown(shutdownCtx); err != nil {
-			slog.ErrorContext(ctx, "Error during WebDav server shutdown", "err", err)
-			return err
-		}
-		slog.InfoContext(ctx, "WebDav server stopped gracefully")
-		return nil
-	case err := <-serverErr:
-		if err != nil {
-			slog.ErrorContext(ctx, "Failed to start WebDav server", "err", err)
-			return err
-		}
-		return nil
-	}
-}
-
-func (s *webdavServer) Stop() {
-	slog.Info("Stopping WebDav server")
-
-	// Create a deadline to wait for.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
-	defer cancel()
-
-	err := s.srv.Shutdown(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to shutdown WebDav server", "err", err)
-	}
-
-	slog.Info("WebDav server stopped")
+// GetHTTPHandler returns the HTTP handler for use with Fiber adaptor
+func (h *Handler) GetHTTPHandler() http.Handler {
+	return h.handler
 }
 
 // GetAuthCredentials returns the auth credentials for dynamic updates
-func (s *webdavServer) GetAuthCredentials() *AuthCredentials {
-	return s.authCreds
+func (h *Handler) GetAuthCredentials() *AuthCredentials {
+	return h.authCreds
 }
 
 // SyncAuthCredentials updates auth credentials from current config
-func (s *webdavServer) SyncAuthCredentials() {
-	if s.configGetter != nil {
-		currentConfig := s.configGetter()
-		s.authCreds.UpdateCredentials(currentConfig.WebDAV.User, currentConfig.WebDAV.Password)
+func (h *Handler) SyncAuthCredentials() {
+	if h.configGetter != nil {
+		currentConfig := h.configGetter()
+		h.authCreds.UpdateCredentials(currentConfig.WebDAV.User, currentConfig.WebDAV.Password)
 		slog.Debug("WebDAV auth credentials synced from config")
 	}
 }
