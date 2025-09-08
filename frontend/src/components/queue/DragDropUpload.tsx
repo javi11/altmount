@@ -72,10 +72,10 @@ export function DragDropUpload() {
 						prev.map((f) =>
 							f.id === uploadFile.id
 								? {
-										...f,
-										status: "success" as const,
-										queueId: response.id.toString(),
-									}
+									...f,
+									status: "success" as const,
+									queueId: response.data?.id.toString(),
+								}
 								: f,
 						),
 					);
@@ -85,10 +85,10 @@ export function DragDropUpload() {
 						prev.map((f) =>
 							f.id === uploadFile.id
 								? {
-										...f,
-										status: "error" as const,
-										errorMessage: error instanceof Error ? error.message : "Upload failed",
-									}
+									...f,
+									status: "error" as const,
+									errorMessage: error instanceof Error ? error.message : "Upload failed",
+								}
 								: f,
 						),
 					);
@@ -181,11 +181,10 @@ export function DragDropUpload() {
 				{/* Drag and Drop Zone */}
 				{/* biome-ignore lint/a11y/useSemanticElements: drag-drop zone requires div for proper drag events */}
 				<div
-					className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
-						isDragOver
+					className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${isDragOver
 							? "border-primary bg-primary/10"
 							: "border-base-300 hover:border-base-content/30"
-					}`}
+						}`}
 					onDragOver={handleDragOver}
 					onDragLeave={handleDragLeave}
 					onDrop={handleDrop}
