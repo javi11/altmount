@@ -318,7 +318,7 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueS
 }
 
 // ToSABnzbdHistorySlot converts an AltMount ImportQueueItem to SABnzbd history format
-func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, completePath string) SABnzbdHistorySlot {
+func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, completePath string, arrsMountPath string) SABnzbdHistorySlot {
 	if item == nil {
 		return SABnzbdHistorySlot{}
 	}
@@ -369,10 +369,21 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, completePat
 		category = *item.Category
 	}
 
-	storagePath := completePath
-
-	if item.StoragePath != nil {
-		storagePath = filepath.Join(completePath, *item.StoragePath)
+	var storagePath string
+	if arrsMountPath != "" {
+		// If arrsMountPath is configured, use it as the base.
+		// This tells Sonarr/Radarr the file is on the final mount.
+		if item.StoragePath != nil {
+			storagePath = filepath.Join(arrsMountPath, *item.StoragePath)
+		} else {
+			storagePath = arrsMountPath
+		}
+	} else {
+		// Fallback to the original behavior using the WebDAV mount path.
+		storagePath = completePath
+		if item.StoragePath != nil {
+			storagePath = filepath.Join(completePath, *item.StoragePath)
+		}
 	}
 
 	return SABnzbdHistorySlot{

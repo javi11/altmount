@@ -62,7 +62,12 @@ sabnzbd:
 # Radarr/Sonarr arrs configuration
 arrs:
   enabled: false                  # Enable arrs service
-  mount_path: ""                  # WebDAV mount path to strip from file paths (required when enabled)
+  # WebDAV mount path to strip from file paths.
+  # This path is used to report the final location of completed downloads to Sonarr/Radarr.
+  # For a "zero-copy" setup, this should be set to the path that Sonarr/Radarr see as the
+  # root of the filesystem where the media library is located (e.g., your rclone mount path).
+  # This allows Sonarr/Radarr to perform a fast, in-place import.
+  mount_path: ""
   radarr_instances: []            # Radarr instances (configured via UI)
   sonarr_instances: []            # Sonarr instances (configured via UI)
   # Example instance configuration (use the web UI instead):

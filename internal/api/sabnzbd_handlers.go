@@ -25,7 +25,7 @@ var defaultCategory = config.SABnzbdCategory{
 	Dir:      "",
 }
 
-const completeDir = ""
+const completeDir = "/sabnzbd"
 
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(w http.ResponseWriter, r *http.Request) {
@@ -396,12 +396,16 @@ func (s *Server) handleSABnzbdHistory(w http.ResponseWriter, r *http.Request) {
 	// Combine and convert to SABnzbd format
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
+	cfg := s.configManager.GetConfig()
+	arrsMountPath := cfg.Arrs.MountPath
+	sabnzbdMountDir := cfg.SABnzbd.MountDir
+
 	for _, item := range completed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, sabnzbdMountDir, arrsMountPath))
 		index++
 	}
 	for _, item := range failed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, sabnzbdMountDir, arrsMountPath))
 		index++
 	}
 
