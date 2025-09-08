@@ -2,7 +2,10 @@ package api
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -497,6 +500,131 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 	}
 
 	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleUploadToQueue handles POST /api/queue/upload
+func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
+	// Get uploaded file
+	file, err := c.FormFile("file")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "No file provided",
+				"details": "A file must be uploaded",
+			},
+		})
+	}
+
+	// Validate file extension
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".nzb") {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "VALIDATION_ERROR",
+				"message": "Invalid file type",
+				"details": "Only .nzb files are allowed",
+			},
+		})
+	}
+
+	// Validate file size (100MB limit)
+	if file.Size > 100*1024*1024 {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "VALIDATION_ERROR",
+				"message": "File too large",
+				"details": "File size must be less than 100MB",
+			},
+		})
+	}
+
+	// Get optional category from form
+	category := c.FormValue("category")
+	
+	// Get optional priority from form
+	priorityStr := c.FormValue("priority")
+	var priority database.QueuePriority
+	if priorityStr != "" {
+		if p, err := strconv.Atoi(priorityStr); err == nil {
+			priority = database.QueuePriority(p)
+		} else {
+			priority = database.QueuePriorityNormal
+		}
+	} else {
+		priority = database.QueuePriorityNormal
+	}
+
+	// Create temporary directory for upload
+	tempDir := os.TempDir()
+	uploadDir := filepath.Join(tempDir, "altmount-uploads")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to create upload directory",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Save the uploaded file to temporary location
+	tempFile := filepath.Join(uploadDir, file.Filename)
+	if err := c.SaveFile(file, tempFile); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to save file",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Add to queue using importer service
+	if s.importerService == nil {
+		// Clean up temp file
+		os.Remove(tempFile)
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "SERVICE_UNAVAILABLE",
+				"message": "Importer service not available",
+				"details": "The import service is not configured or running",
+			},
+		})
+	}
+
+	// Add the file to the processing queue
+	var categoryPtr *string
+	if category != "" {
+		categoryPtr = &category
+	}
+	
+	item, err := s.importerService.AddToQueue(tempFile, &uploadDir, categoryPtr, &priority)
+	if err != nil {
+		// Clean up temp file on error
+		os.Remove(tempFile)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to add file to queue",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Convert to API response format
+	response := ToQueueItemResponse(item)
+	
+	return c.Status(201).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
 	})

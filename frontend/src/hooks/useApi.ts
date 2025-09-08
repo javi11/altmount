@@ -272,13 +272,28 @@ export const useCancelScan = () => {
 	});
 };
 
-// NZB file upload hook
+// NZB file upload hook (SABnzbd API)
 export const useUploadNzb = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: ({ file, apiKey }: { file: File; apiKey: string }) =>
 			apiClient.uploadNzbFile(file, apiKey),
+		onSuccess: () => {
+			// Invalidate queue data to show newly uploaded files
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
+// Native upload hook (using JWT authentication)
+export const useUploadToQueue = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ file, category, priority }: { file: File; category?: string; priority?: number }) =>
+			apiClient.uploadToQueue(file, category, priority),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
 			queryClient.invalidateQueries({ queryKey: ["queue"] });

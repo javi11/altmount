@@ -503,6 +503,29 @@ export class APIClient {
 
 		return data;
 	}
+
+	// Native upload endpoint using JWT authentication
+	async uploadToQueue(
+		file: File,
+		category?: string,
+		priority?: number,
+	): Promise<APIResponse<QueueItem>> {
+		const formData = new FormData();
+		formData.append("file", file);
+		if (category) {
+			formData.append("category", category);
+		}
+		if (priority !== undefined) {
+			formData.append("priority", priority.toString());
+		}
+
+		return this.request<APIResponse<QueueItem>>("/queue/upload", {
+			method: "POST",
+			body: formData,
+			// Don't set Content-Type header - let browser set it with boundary for multipart/form-data
+			headers: {},
+		});
+	}
 }
 
 // Export a default instance

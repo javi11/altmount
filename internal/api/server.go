@@ -91,7 +91,11 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
+	app.Use("/sabnzbd/api", s.handleSABnzbd)
+
 	api := app.Group(s.config.Prefix)
+	// Import do not need user authentication
+	api.Post("/import/file", s.handleManualImportFile)
 
 	// Apply global middleware
 	api.Use(cors.New())
@@ -121,6 +125,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/queue/:id", s.handleDeleteQueue)
 	api.Delete("/queue/bulk", s.handleDeleteQueueBulk)
 	api.Post("/queue/:id/retry", s.handleRetryQueue)
+	api.Post("/queue/upload", s.handleUploadToQueue)
 
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)
@@ -141,8 +146,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/scan", s.handleStartManualScan)
 	api.Get("/import/scan/status", s.handleGetScanStatus)
 	api.Delete("/import/scan", s.handleCancelScan)
-	api.Post("/import/file", s.handleManualImportFile)
-
 	// System endpoints
 	api.Get("/system/stats", s.handleGetSystemStats)
 	api.Get("/system/health", s.handleGetSystemHealth)
@@ -188,8 +191,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Admin endpoints (admin check is done inside handlers)
 	api.Get("/users", s.handleListUsers)
 	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
-
-	app.Use("/sabnzbd/api", s.handleSABnzbd)
 }
 
 // getSystemInfo returns current system information
