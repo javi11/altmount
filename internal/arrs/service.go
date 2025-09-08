@@ -237,7 +237,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		fullPath = filepath.Join(mountPath, strings.TrimPrefix(filePath, "/"))
 	}
 
-	s.logger.Info("Triggering Radarr rescan/re-download by path",
+	s.logger.DebugContext(ctx, "Checking Radarr for file path",
 		"instance", instanceName,
 		"file_path", filePath,
 		"full_path", fullPath)
@@ -260,6 +260,13 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		return fmt.Errorf("no movie found with file path: %s", fullPath)
 	}
 
+	s.logger.DebugContext(ctx, "Found matching movie for file",
+		"instance", instanceName,
+		"movie_id", targetMovie.ID,
+		"movie_title", targetMovie.Title,
+		"movie_path", targetMovie.Path,
+		"file_path", fullPath)
+
 	// Delete the existing file
 	err = client.DeleteMovieFilesContext(ctx, targetMovie.MovieFile.ID)
 	if err != nil {
@@ -279,7 +286,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		return fmt.Errorf("failed to trigger Radarr rescan for movie ID %d: %w", targetMovie.ID, err)
 	}
 
-	s.logger.Info("Successfully triggered Radarr rescan",
+	s.logger.DebugContext(ctx, "Successfully triggered Radarr rescan",
 		"instance", instanceName,
 		"movie_id", targetMovie.ID,
 		"command_id", response.ID)
@@ -323,7 +330,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		fullPath = filepath.Join(mountPath, strings.TrimPrefix(filePath, "/"))
 	}
 
-	s.logger.Info("Triggering Sonarr rescan/re-download by path",
+	s.logger.DebugContext(ctx, "Triggering Sonarr rescan/re-download by path",
 		"instance", instanceName,
 		"file_path", filePath,
 		"full_path", fullPath)
@@ -420,7 +427,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("failed to trigger episode search: %w", err)
 	}
 
-	s.logger.Info("Successfully triggered episode search for re-download",
+	s.logger.DebugContext(ctx, "Successfully triggered episode search for re-download",
 		"instance", instanceName,
 		"series_title", targetSeries.Title,
 		"episode_ids", episodeIDs,
