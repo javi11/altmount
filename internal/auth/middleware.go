@@ -1,159 +1,204 @@
 package auth
 
 import (
-	"context"
-	"net/http"
+	"strings"
 
 	"github.com/go-pkgz/auth/v2/token"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/javi11/altmount/internal/database"
 )
 
-// UserContextKey is the key used to store user information in request context
 type contextKey string
 
 const UserContextKey contextKey = "user"
 
-// JWTMiddleware provides JWT authentication middleware
-func JWTMiddleware(tokenService *token.Service, userRepo *database.UserRepository) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Check for nil dependencies
-			if tokenService == nil || userRepo == nil {
-				// Continue without user context if dependencies are missing
-				next.ServeHTTP(w, r)
-				return
-			}
+// JWTMiddleware provides JWT authentication middleware for  (soft auth - optional)
+// This middleware adds user to context if valid token exists, but doesn't require it
+func JWTMiddleware(tokenService *token.Service, userRepo *database.UserRepository) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Check for nil dependencies
+		if tokenService == nil || userRepo == nil {
+			// Continue without user context if dependencies are missing
+			return c.Next()
+		}
 
-			// Extract token from request
-			claims, _, err := tokenService.Get(r)
-			if err != nil {
-				// No valid token found, continue without user context
-				next.ServeHTTP(w, r)
-				return
-			}
+		// Convert  request to HTTP request for token service
+		httpReq, err := adaptor.ConvertRequest(c, false)
+		if err != nil {
+			// Continue without user context if conversion fails
+			return c.Next()
+		}
 
-			// Check if claims and user are valid
-			if claims.User == nil {
-				// Invalid claims, continue without user context
-				next.ServeHTTP(w, r)
-				return
-			}
+		// Extract token from request
+		claims, _, err := tokenService.Get(httpReq)
+		if err != nil {
+			// No valid token found, continue without user context
+			return c.Next()
+		}
 
-			// Get user from database
-			userID := claims.User.ID
-			if userID == "" {
-				userID = claims.Subject
-			}
+		// Check if claims and user are valid
+		if claims.User == nil {
+			// Invalid claims, continue without user context
+			return c.Next()
+		}
 
-			if userID == "" {
-				// No user ID available, continue without user context
-				next.ServeHTTP(w, r)
-				return
-			}
+		// Get user from database
+		userID := claims.User.ID
+		if userID == "" {
+			userID = claims.Subject
+		}
 
-			user, err := userRepo.GetUserByID(userID)
-			if err != nil || user == nil {
-				// User not found in database, continue without user context
-				next.ServeHTTP(w, r)
-				return
-			}
+		if userID == "" {
+			// No user ID available, continue without user context
+			return c.Next()
+		}
 
-			// Add user to request context
-			ctx := context.WithValue(r.Context(), UserContextKey, user)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+		user, err := userRepo.GetUserByID(userID)
+		if err != nil || user == nil {
+			// User not found in database, continue without user context
+			return c.Next()
+		}
+
+		// Add user to  context
+		c.Locals(string(UserContextKey), user)
+		return c.Next()
 	}
 }
 
-// RequireAuth middleware requires authentication for protected routes
-func RequireAuth(tokenService *token.Service, userRepo *database.UserRepository) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Check for nil dependencies
-			if tokenService == nil || userRepo == nil {
-				http.Error(w, "Authentication service unavailable", http.StatusInternalServerError)
-				return
-			}
+// RequireAuth middleware requires authentication for protected routes (hard auth - required)
+func RequireAuth(tokenService *token.Service, userRepo *database.UserRepository) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Check for nil dependencies
+		if tokenService == nil || userRepo == nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"success": false,
+				"message": "Authentication service unavailable",
+			})
+		}
 
-			// Extract token from request
-			claims, _, err := tokenService.Get(r)
-			if err != nil {
-				http.Error(w, "Authentication required", http.StatusUnauthorized)
-				return
-			}
+		// Convert  request to HTTP request for token service
+		httpReq, err := adaptor.ConvertRequest(c, false)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"message": "Authentication required",
+			})
+		}
 
-			// Check if claims and user are valid
-			if claims.User == nil {
-				http.Error(w, "Invalid authentication token", http.StatusUnauthorized)
-				return
-			}
+		// Extract token from request
+		claims, _, err := tokenService.Get(httpReq)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"message": "Authentication required",
+			})
+		}
 
-			// Get user from database
-			userID := claims.User.ID
-			if userID == "" {
-				userID = claims.Subject
-			}
+		// Check if claims and user are valid
+		if claims.User == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid authentication token",
+			})
+		}
 
-			if userID == "" {
-				http.Error(w, "Invalid user identifier", http.StatusUnauthorized)
-				return
-			}
+		// Get user from database
+		userID := claims.User.ID
+		if userID == "" {
+			userID = claims.Subject
+		}
 
-			user, err := userRepo.GetUserByID(userID)
-			if err != nil || user == nil {
-				http.Error(w, "User not found", http.StatusUnauthorized)
-				return
-			}
+		if userID == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid user identifier",
+			})
+		}
 
-			// Add user to request context
-			ctx := context.WithValue(r.Context(), UserContextKey, user)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+		user, err := userRepo.GetUserByID(userID)
+		if err != nil || user == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"message": "User not found",
+			})
+		}
+
+		// Add user to  context
+		c.Locals(string(UserContextKey), user)
+		return c.Next()
 	}
 }
 
 // RequireAdmin middleware requires admin privileges for protected routes
-func RequireAdmin(tokenService *token.Service, userRepo *database.UserRepository) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// First apply RequireAuth
-			authMiddleware := RequireAuth(tokenService, userRepo)
-			authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Get user from context
-				user := GetUserFromContext(r.Context())
-				if user == nil {
-					http.Error(w, "Authentication required", http.StatusUnauthorized)
-					return
-				}
+func RequireAdmin(tokenService *token.Service, userRepo *database.UserRepository) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// First apply RequireAuth
+		authMiddleware := RequireAuth(tokenService, userRepo)
+		if err := authMiddleware(c); err != nil {
+			return err
+		}
 
-				// Check admin privileges
-				if !user.IsAdmin {
-					http.Error(w, "Admin privileges required", http.StatusForbidden)
-					return
-				}
+		// Get user from context
+		user := GetUserFromContext(c)
+		if user == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"message": "Authentication required",
+			})
+		}
 
-				next.ServeHTTP(w, r)
-			})).ServeHTTP(w, r)
-		})
+		// Check admin privileges
+		if !user.IsAdmin {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"message": "Admin privileges required",
+			})
+		}
+
+		return c.Next()
 	}
 }
 
-// GetUserFromContext extracts user from request context
-func GetUserFromContext(ctx context.Context) *database.User {
-	user, ok := ctx.Value(UserContextKey).(*database.User)
+// GetUserFromContext extracts user from  context
+func GetUserFromContext(c *fiber.Ctx) *database.User {
+	user, ok := c.Locals(string(UserContextKey)).(*database.User)
 	if !ok {
 		return nil
 	}
 	return user
 }
 
-// IsAuthenticated checks if the request has a valid authenticated user
-func IsAuthenticated(ctx context.Context) bool {
-	return GetUserFromContext(ctx) != nil
+// AuthMiddleware is a flexible auth middleware that can skip certain paths
+func AuthMiddleware(tokenService *token.Service, userRepo *database.UserRepository, skipPaths []string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Check if current path should skip authentication
+		path := c.Path()
+		for _, skipPath := range skipPaths {
+			if strings.HasPrefix(path, skipPath) {
+				// Skip authentication for this path
+				return c.Next()
+			}
+		}
+
+		// Apply JWT middleware for all other paths
+		return JWTMiddleware(tokenService, userRepo)(c)
+	}
 }
 
-// IsAdmin checks if the authenticated user has admin privileges
-func IsAdmin(ctx context.Context) bool {
-	user := GetUserFromContext(ctx)
-	return user != nil && user.IsAdmin
+// RequireAuthWithSkip requires auth but skips certain paths
+func RequireAuthWithSkip(tokenService *token.Service, userRepo *database.UserRepository, skipPaths []string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Check if current path should skip authentication
+		path := c.Path()
+		for _, skipPath := range skipPaths {
+			if strings.HasPrefix(path, skipPath) {
+				// Skip authentication for this path
+				return c.Next()
+			}
+		}
+
+		// Require authentication for all other paths
+		return RequireAuth(tokenService, userRepo)(c)
+	}
 }

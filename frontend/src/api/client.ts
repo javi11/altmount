@@ -31,11 +31,13 @@ import type {
 
 export class APIError extends Error {
 	public status: number;
+	public details: string;
 
-	constructor(status: number, message: string) {
+	constructor(status: number, message: string, details: string) {
 		super(message);
 		this.status = status;
 		this.name = "APIError";
+		this.details = details;
 	}
 }
 
@@ -61,13 +63,19 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
-				throw new APIError(response.status, `HTTP ${response.status}: ${response.statusText}`);
+				const errorData = await response.json();
+				throw new APIError(
+					response.status,
+					errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+					errorData.details || "",
+				);
 			}
 
 			const data: APIResponse<T> = await response.json();
 
 			if (!data.success) {
-				throw new APIError(response.status, data.error || "API request failed");
+				// Handle error in the success=false format
+				throw new APIError(response.status, data.error || "API request failed", "");
 			}
 
 			return data.data as T;
@@ -75,7 +83,7 @@ export class APIClient {
 			if (error instanceof APIError) {
 				throw error;
 			}
-			throw new APIError(0, error instanceof Error ? error.message : "Network error");
+			throw new APIError(0, error instanceof Error ? error.message : "Network error", "");
 		}
 	}
 
@@ -97,13 +105,29 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
-				throw new APIError(response.status, `HTTP ${response.status}: ${response.statusText}`);
+				// Try to parse error response
+				try {
+					const errorData = await response.json();
+					throw new APIError(
+						response.status,
+						errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+						errorData.details || "",
+					);
+				} catch {
+					// If parsing fails, use generic error
+					throw new APIError(
+						response.status,
+						`HTTP ${response.status}: ${response.statusText}`,
+						"",
+					);
+				}
 			}
 
 			const data: APIResponse<T> = await response.json();
 
 			if (!data.success) {
-				throw new APIError(response.status, data.error || "API request failed");
+				// Handle error in the success=false format
+				throw new APIError(response.status, data.error || "API request failed", "");
 			}
 
 			return data;
@@ -111,7 +135,7 @@ export class APIClient {
 			if (error instanceof APIError) {
 				throw error;
 			}
-			throw new APIError(0, error instanceof Error ? error.message : "Network error");
+			throw new APIError(0, error instanceof Error ? error.message : "Network error", "");
 		}
 	}
 
@@ -463,12 +487,13 @@ export class APIClient {
 		});
 
 		if (!response.ok) {
-			throw new APIError(response.status, `Upload failed: ${response.statusText}`);
+			throw new APIError(response.status, `Upload failed: ${response.statusText}`, "");
 		}
 
 		const data = await response.json();
 		if (!data.status) {
-			throw new APIError(response.status, data.error || "Upload failed");
+			const err = data as APIError;
+			throw new APIError(response.status, err.message || "Upload failed", err.details || "");
 		}
 
 		return data;

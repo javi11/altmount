@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -191,7 +190,7 @@ func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 
 // handleAuthUser returns current authenticated user information
 func (s *Server) handleAuthUser(c *fiber.Ctx) error {
-	user := auth.GetUserFromContext(c.Context())
+	user := auth.GetUserFromContext(c)
 	if user == nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
@@ -267,7 +266,8 @@ func (s *Server) handleAuthRefresh(c *fiber.Ctx) error {
 
 // handleListUsers returns a list of users (admin only)
 func (s *Server) handleListUsers(c *fiber.Ctx) error {
-	if !auth.IsAdmin(c.Context()) {
+	user := auth.GetUserFromContext(c)
+	if user == nil || !user.IsAdmin {
 		return c.Status(403).JSON(fiber.Map{
 			"success": false,
 			"message": "Admin privileges required",
@@ -298,7 +298,8 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 
 // handleUpdateUserAdmin updates a user's admin status (admin only)
 func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
-	if !auth.IsAdmin(c.Context()) {
+	user := auth.GetUserFromContext(c)
+	if user == nil || !user.IsAdmin {
 		return c.Status(403).JSON(fiber.Map{
 			"success": false,
 			"message": "Admin privileges required",
@@ -344,10 +345,9 @@ func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 	})
 }
 
-
 // handleRegenerateAPIKey regenerates API key for the authenticated user
 func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
-	user := auth.GetUserFromContext(c.Context())
+	user := auth.GetUserFromContext(c)
 	if user == nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
@@ -428,129 +428,4 @@ func (w *fiberResponseWriter) Write(data []byte) (int, error) {
 
 func (w *fiberResponseWriter) WriteHeader(statusCode int) {
 	w.ctx.Status(statusCode)
-}
-
-// HTTP wrappers for middleware-protected handlers
-// These maintain the HTTP interface for compatibility with existing auth middleware
-
-func (s *Server) handleAuthUserHTTP(w http.ResponseWriter, r *http.Request) {
-	user := auth.GetUserFromContext(r.Context())
-	if user == nil {
-		WriteUnauthorized(w, "Not authenticated", "")
-		return
-	}
-
-	response := s.mapUserToResponse(user)
-	WriteSuccess(w, *response, nil)
-}
-
-func (s *Server) handleAuthRefreshHTTP(w http.ResponseWriter, r *http.Request) {
-	tokenService := s.authService.TokenService()
-
-	// Get current token
-	claims, _, err := tokenService.Get(r)
-	if err != nil {
-		WriteUnauthorized(w, "No valid token found", "")
-		return
-	}
-
-	// Issue new token with same claims
-	_, err = tokenService.Set(w, claims)
-	if err != nil {
-		WriteInternalError(w, "Failed to refresh token", err.Error())
-		return
-	}
-
-	response := AuthResponse{
-		Message: "Token refreshed successfully",
-	}
-	WriteSuccess(w, response, nil)
-}
-
-func (s *Server) handleAuthLogoutHTTP(w http.ResponseWriter, r *http.Request) {
-	// Clear JWT cookie
-	tokenService := s.authService.TokenService()
-	tokenService.Reset(w)
-
-	response := AuthResponse{
-		Message: "Logged out successfully",
-	}
-	WriteSuccess(w, response, nil)
-}
-
-func (s *Server) handleRegenerateAPIKeyHTTP(w http.ResponseWriter, r *http.Request) {
-	user := auth.GetUserFromContext(r.Context())
-	if user == nil {
-		WriteUnauthorized(w, "Not authenticated", "")
-		return
-	}
-
-	// Regenerate API key
-	apiKey, err := s.userRepo.RegenerateAPIKey(user.UserID)
-	if err != nil {
-		WriteInternalError(w, "Failed to regenerate API key", err.Error())
-		return
-	}
-
-	response := map[string]interface{}{
-		"api_key": apiKey,
-		"message": "API key regenerated successfully",
-	}
-	WriteSuccess(w, response, nil)
-}
-
-func (s *Server) handleListUsersHTTP(w http.ResponseWriter, r *http.Request) {
-	if !auth.IsAdmin(r.Context()) {
-		WriteForbidden(w, "Admin privileges required", "")
-		return
-	}
-
-	pagination := ParsePagination(r)
-	users, err := s.userRepo.ListUsers(pagination.Limit, pagination.Offset)
-	if err != nil {
-		WriteInternalError(w, "Failed to list users", err.Error())
-		return
-	}
-
-	// Convert to response format
-	var userResponses []*UserResponse
-	for _, user := range users {
-		userResponses = append(userResponses, s.mapUserToResponse(user))
-	}
-
-	WriteSuccess(w, userResponses, nil)
-}
-
-func (s *Server) handleUpdateUserAdminHTTP(w http.ResponseWriter, r *http.Request) {
-	if !auth.IsAdmin(r.Context()) {
-		WriteForbidden(w, "Admin privileges required", "")
-		return
-	}
-
-	userID := r.PathValue("user_id")
-	if userID == "" {
-		WriteBadRequest(w, "User ID is required", "")
-		return
-	}
-
-	// Parse request body
-	var req struct {
-		IsAdmin bool `json:"is_admin"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteBadRequest(w, "Invalid request body", err.Error())
-		return
-	}
-
-	// Update admin status
-	err := s.userRepo.SetAdminStatus(userID, req.IsAdmin)
-	if err != nil {
-		WriteInternalError(w, "Failed to update user admin status", err.Error())
-		return
-	}
-
-	response := AuthResponse{
-		Message: "User admin status updated successfully",
-	}
-	WriteSuccess(w, response, nil)
 }

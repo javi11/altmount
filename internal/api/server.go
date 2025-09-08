@@ -95,8 +95,26 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
 	api := app.Group(s.config.Prefix)
+
+	// Apply global middleware
 	api.Use(cors.New())
 	api.Use(recover.New())
+
+	// Apply JWT authentication middleware globally except for public auth routes
+	if s.authService != nil && s.userRepo != nil {
+		tokenService := s.authService.TokenService()
+		if tokenService != nil {
+			// Define paths that should skip authentication
+			skipPaths := []string{
+				s.config.Prefix + "/auth/login",
+				s.config.Prefix + "/auth/register",
+				s.config.Prefix + "/auth/registration-status",
+			}
+
+			// Apply authentication middleware with skip paths
+			api.Use(auth.RequireAuthWithSkip(tokenService, s.userRepo, skipPaths))
+		}
+	}
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
@@ -171,35 +189,28 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 		api.Get("/arrs/episodes/search", s.handleSearchEpisodes) // Deprecated
 	}
 
-	// Authentication endpoints (if auth service is available)
-	if s.authService != nil {
-		// Direct authentication endpoints (converted to native Fiber)
-		api.Post("/auth/login", s.handleDirectLogin)
-		api.Post("/auth/register", s.handleRegister)
-		api.Get("/auth/registration-status", s.handleCheckRegistration)
+	// Direct authentication endpoints (converted to native Fiber)
+	api.Post("/auth/login", s.handleDirectLogin)
+	api.Post("/auth/register", s.handleRegister)
+	api.Get("/auth/registration-status", s.handleCheckRegistration)
 
-		// Protected API endpoints for user management (require authentication)
-		// These remain HTTP-based due to middleware dependencies
-		tokenService := s.authService.TokenService()
-		if tokenService != nil {
-			authMiddleware := auth.RequireAuth(tokenService, s.userRepo)
-			api.Get("/user", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthUserHTTP))))
-			api.Post("/user/refresh", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthRefreshHTTP))))
-			api.Post("/user/logout", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthLogoutHTTP))))
-			api.Post("/user/api-key/regenerate", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleRegenerateAPIKeyHTTP))))
+	// Protected API endpoints for user management (authentication already handled globally)
+	api.Get("/user", s.handleAuthUser)
+	api.Post("/user/refresh", s.handleAuthRefresh)
+	api.Post("/user/logout", s.handleAuthLogout)
+	api.Post("/user/api-key/regenerate", s.handleRegenerateAPIKey)
 
-			// Admin endpoints (require admin privileges)
-			adminMiddleware := auth.RequireAdmin(tokenService, s.userRepo)
-			api.Get("/users", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleListUsersHTTP))))
-			api.Put("/users/:user_id/admin", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdminHTTP))))
-		}
-	}
+	// Admin endpoints (admin check is done inside handlers)
+	api.Get("/users", s.handleListUsers)
+	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
 
 	// SABnzbd-compatible API endpoints (conditionally enabled)
 	if s.configManager != nil {
 		config := s.configManager.GetConfig()
 		if config.SABnzbd.Enabled != nil && *config.SABnzbd.Enabled {
-			sabnzbdHandler := adaptor.HTTPHandler(s.applyMiddleware(http.HandlerFunc(s.handleSABnzbd)))
+			// SABnzbd API uses its own API key authentication (query param)
+			// It's handled internally in the handler for compatibility
+			sabnzbdHandler := adaptor.HTTPHandler(http.HandlerFunc(s.handleSABnzbd))
 			app.Use("/sabnzbd/api", sabnzbdHandler)
 		}
 	}
@@ -214,21 +225,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// applyMiddleware applies the middleware chain to the handler
-func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
-	// Apply JWT authentication middleware for user context (optional)
-	if s.authService != nil && s.userRepo != nil {
-		tokenService := s.authService.TokenService()
-		if tokenService != nil {
-			handler = auth.JWTMiddleware(tokenService, s.userRepo)(handler)
-		}
-	}
-
-	// Basic authentication is now handled by OAuth flow only
-
-	return handler
-}
-
 // getSystemInfo returns current system information
 func (s *Server) getSystemInfo() SystemInfoResponse {
 	uptime := time.Since(s.startTime)
@@ -240,7 +236,7 @@ func (s *Server) getSystemInfo() SystemInfoResponse {
 }
 
 // checkSystemHealth performs a basic health check
-func (s *Server) checkSystemHealth(ctx context.Context) SystemHealthResponse {
+func (s *Server) checkSystemHealth(_ context.Context) SystemHealthResponse {
 	components := make(map[string]ComponentHealth)
 	overallStatus := "healthy"
 
