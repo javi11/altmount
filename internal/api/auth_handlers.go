@@ -2,7 +2,7 @@ package api
 
 import (
 	"log/slog"
-	"net/http"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -69,17 +69,26 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 		})
 	}
 
-	// Create JWT token using adaptor for compatibility
+	// Create JWT token
 	tokenService := s.authService.TokenService()
 	claims := auth.CreateClaimsFromUser(user)
-
-	// Create a response writer that can write to Fiber context
-	rw := &fiberResponseWriter{ctx: c}
-	_, err = tokenService.Set(rw, claims)
+	
+	// Generate JWT token string
+	tokenString, err := tokenService.Token(claims)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
-			"message": "Failed to create session",
+			"message": "Failed to create token",
+			"details": err.Error(),
+		})
+	}
+	
+	// Set JWT cookie using Fiber's native API
+	err = s.setJWTCookie(c, tokenString)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to set cookie",
 			"details": err.Error(),
 		})
 	}
@@ -207,10 +216,8 @@ func (s *Server) handleAuthUser(c *fiber.Ctx) error {
 
 // handleAuthLogout logs out the current user
 func (s *Server) handleAuthLogout(c *fiber.Ctx) error {
-	// Clear JWT cookie
-	tokenService := s.authService.TokenService()
-	rw := &fiberResponseWriter{ctx: c}
-	tokenService.Reset(rw)
+	// Clear JWT cookie using Fiber's native API
+	s.clearJWTCookie(c)
 
 	response := AuthResponse{
 		Message: "Logged out successfully",
@@ -244,13 +251,22 @@ func (s *Server) handleAuthRefresh(c *fiber.Ctx) error {
 		})
 	}
 
-	// Issue new token with same claims
-	rw := &fiberResponseWriter{ctx: c}
-	_, err = tokenService.Set(rw, claims)
+	// Generate new token string
+	tokenString, err := tokenService.Token(claims)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
-			"message": "Failed to refresh token",
+			"message": "Failed to create token",
+			"details": err.Error(),
+		})
+	}
+	
+	// Set JWT cookie using Fiber's native API
+	err = s.setJWTCookie(c, tokenString)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to set cookie",
 			"details": err.Error(),
 		})
 	}
@@ -409,23 +425,39 @@ func (s *Server) mapUserToResponse(user *database.User) *UserResponse {
 	return response
 }
 
-// fiberResponseWriter adapts a Fiber context to implement http.ResponseWriter
-type fiberResponseWriter struct {
-	ctx *fiber.Ctx
+// setJWTCookie sets the JWT cookie using Fiber's native cookie handling
+func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
+	config := auth.LoadConfigFromEnv()
+	
+	cookie := &fiber.Cookie{
+		Name:     "JWT", // Default JWT cookie name
+		Value:    tokenString,
+		Path:     "/",
+		Domain:   config.CookieDomain,
+		Expires:  time.Now().Add(config.TokenDuration),
+		Secure:   config.CookieSecure,
+		HTTPOnly: true,
+		SameSite: "Lax", // Use Lax for Safari compatibility
+	}
+	
+	c.Cookie(cookie)
+	return nil
 }
 
-func (w *fiberResponseWriter) Header() http.Header {
-	headers := make(http.Header)
-	w.ctx.Response().Header.VisitAll(func(key, value []byte) {
-		headers.Set(string(key), string(value))
-	})
-	return headers
-}
-
-func (w *fiberResponseWriter) Write(data []byte) (int, error) {
-	return w.ctx.Write(data)
-}
-
-func (w *fiberResponseWriter) WriteHeader(statusCode int) {
-	w.ctx.Status(statusCode)
+// clearJWTCookie clears the JWT cookie using Fiber's native cookie handling
+func (s *Server) clearJWTCookie(c *fiber.Ctx) {
+	config := auth.LoadConfigFromEnv()
+	
+	cookie := &fiber.Cookie{
+		Name:     "JWT",
+		Value:    "",
+		Path:     "/",
+		Domain:   config.CookieDomain,
+		Expires:  time.Now().Add(-time.Hour), // Expire in the past
+		Secure:   config.CookieSecure,
+		HTTPOnly: true,
+		SameSite: "Lax",
+	}
+	
+	c.Cookie(cookie)
 }

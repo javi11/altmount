@@ -257,7 +257,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	if targetMovie == nil {
-		return fmt.Errorf("no movie found with file path: %s", fullPath)
+		return fmt.Errorf("no movie found with file path: %s. Check if the movie has any files", fullPath)
 	}
 
 	s.logger.DebugContext(ctx, "Found matching movie for file",

@@ -52,6 +52,7 @@ export class APIClient {
 		const url = `${this.baseURL}${endpoint}`;
 
 		const config: RequestInit = {
+			credentials: "include", // Include cookies for Safari compatibility
 			headers: {
 				"Content-Type": "application/json",
 				...options.headers,
@@ -94,6 +95,7 @@ export class APIClient {
 		const url = `${this.baseURL}${endpoint}`;
 
 		const config: RequestInit = {
+			credentials: "include", // Include cookies for Safari compatibility
 			headers: {
 				"Content-Type": "application/json",
 				...options.headers,
@@ -486,6 +488,7 @@ export class APIClient {
 		const response = await fetch(url, {
 			method: "POST",
 			body: formData,
+			credentials: "include", // Include cookies for Safari compatibility
 		});
 
 		if (!response.ok) {
