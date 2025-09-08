@@ -471,7 +471,7 @@ func signalHandler(ctx context.Context) {
 // setupSPARoutes configures Fiber SPA routing for the frontend
 func setupSPARoutes(app *fiber.App) {
 	// Determine frontend build path
-	var frontendPath string
+	frontendPath := frontendBuildPath
 	if _, err := os.Stat(frontendBuildPath); err != nil {
 		// Development mode - serve from disk
 		frontendPath = "./frontend/dist"
