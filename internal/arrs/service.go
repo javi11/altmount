@@ -129,6 +129,8 @@ func (s *Service) findInstanceForFilePath(filePath string) (instanceType string,
 		fullPath = filepath.Join(mountPath, filePath)
 	}
 
+	slog.Debug("Finding instance for file path", "file_path", filePath, "full_path", fullPath, "mount_path", mountPath)
+
 	// Try each enabled ARR instance to see which one manages this file
 	for _, instance := range s.getConfigInstances() {
 		if !instance.Enabled {
@@ -201,17 +203,8 @@ func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error 
 
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
 func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool {
-	// Remove WebDAV mount path to get the actual file system path
-	cfg := s.configGetter()
-	mountPath := cfg.Arrs.MountPath
-	actualPath := filePath
-	if mountPath != "" {
-		actualPath = mountPath + strings.TrimPrefix(filePath, "/")
-	}
-
 	s.logger.Debug("Checking Radarr root folders for file ownership",
-		"file_path", filePath,
-		"actual_path", actualPath)
+		"file_path", filePath)
 
 	// Get root folders from Radarr (much faster than GetMovie)
 	rootFolders, err := client.GetRootFolders()
@@ -222,8 +215,8 @@ func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool
 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
-		s.logger.Debug("Checking Radarr root folder", "folder_path", folder.Path, "actual_path", actualPath)
-		if strings.HasPrefix(actualPath, folder.Path) {
+		s.logger.Debug("Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
+		if strings.HasPrefix(filePath, folder.Path) {
 			s.logger.Debug("File matches Radarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -296,17 +289,8 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 
 // sonarrManagesFile checks if Sonarr manages the given file path using root folders (checkrr approach)
 func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool {
-	// Remove WebDAV mount path to get the actual file system path
-	cfg := s.configGetter()
-	mountPath := cfg.Arrs.MountPath
-	actualPath := filePath
-	if mountPath != "" {
-		actualPath = mountPath + strings.TrimPrefix(filePath, "/")
-	}
-
 	s.logger.Debug("Checking Sonarr root folders for file ownership",
-		"file_path", filePath,
-		"actual_path", actualPath)
+		"file_path", filePath)
 
 	// Get root folders from Sonarr (much faster than GetAllSeries)
 	rootFolders, err := client.GetRootFolders()
@@ -317,8 +301,8 @@ func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool
 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
-		s.logger.Debug("Checking Sonarr root folder", "folder_path", folder.Path, "actual_path", actualPath)
-		if strings.HasPrefix(actualPath, folder.Path) {
+		s.logger.Debug("Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
+		if strings.HasPrefix(filePath, folder.Path) {
 			s.logger.Debug("File matches Sonarr root folder", "folder_path", folder.Path)
 			return true
 		}
