@@ -172,20 +172,12 @@ export function HealthPage() {
 			} catch (err: unknown) {
 				const error = err as {
 					message?: string;
-					response?: {
-						status?: number;
-						data?: {
-							error?: {
-								message?: string;
-								details?: string;
-							};
-						};
-					};
+					code?: string;
 				};
 				console.error("Failed to trigger repair:", err);
 
 				// Check for 404 Not Found (file not in ARR)
-				if (error.response?.status === 404) {
+				if (error.code === "NOT_FOUND") {
 					showToast({
 						title: "File Not Found in ARR",
 						message:
@@ -196,36 +188,13 @@ export function HealthPage() {
 				}
 
 				// Get error message from response or direct error
-				const apiErrorMessage = error.response?.data?.error?.message;
-				const apiErrorDetails = error.response?.data?.error?.details;
-				const errorMessage = apiErrorMessage || error.message || "Unknown error";
+				const errorMessage = error.message || "Unknown error";
 
-				// Handle specific error cases
-				if (errorMessage.includes("Repair not available")) {
-					showToast({
-						title: "Repair not available",
-						message: apiErrorDetails || "File not found in media library",
-						type: "error",
-					});
-				} else if (errorMessage.includes("Media library not configured")) {
-					showToast({
-						title: "Configuration Required",
-						message: "Media library must be configured to use repair functionality",
-						type: "error",
-					});
-				} else if (errorMessage.includes("Media library error")) {
-					showToast({
-						title: "Media Library Error",
-						message: "Unable to access media library to verify file availability",
-						type: "error",
-					});
-				} else {
-					showToast({
-						title: "Failed to trigger repair",
-						message: errorMessage,
-						type: "error",
-					});
-				}
+				showToast({
+					title: "Failed to trigger repair",
+					message: errorMessage,
+					type: "error",
+				});
 			}
 		}
 	};
