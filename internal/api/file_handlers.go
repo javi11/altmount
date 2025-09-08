@@ -1,36 +1,47 @@
 package api
 
 import (
-	"net/http"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
 // handleGetFileMetadata handles GET /files/info requests
-func (s *Server) handleGetFileMetadata(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetFileMetadata(c *fiber.Ctx) error {
 	// Get path from query parameters
-	path := r.URL.Query().Get("path")
+	path := c.Query("path")
 	if path == "" {
-		WriteBadRequest(w, "Path parameter is required", "MISSING_PATH")
-		return
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Path parameter is required",
+			"details": "MISSING_PATH",
+		})
 	}
 
 	// Get metadata from the reader
 	metadata, err := s.metadataReader.GetFileMetadata(path)
 	if err != nil {
-		WriteInternalError(w, "Failed to read metadata", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to read metadata",
+			"details": err.Error(),
+		})
 	}
 
 	if metadata == nil {
-		WriteNotFound(w, "File metadata not found", "")
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "File metadata not found",
+		})
 	}
 
 	// Convert protobuf metadata to API response
 	response := s.convertToFileMetadataResponse(metadata)
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // convertToFileMetadataResponse converts protobuf FileMetadata to API response

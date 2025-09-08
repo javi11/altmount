@@ -9,6 +9,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
@@ -93,6 +95,8 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
 	api := app.Group(s.config.Prefix)
+	api.Use(cors.New())
+	api.Use(recover.New())
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
@@ -119,74 +123,75 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	// File endpoints (if metadata reader is available)
 	if s.metadataReader != nil {
-		api.Get("/files/info", adaptor.HTTPHandlerFunc(s.handleGetFileMetadata))
+		api.Get("/files/info", s.handleGetFileMetadata)
 	}
 
 	// Import endpoints (if importer service is available)
 	if s.importerService != nil {
-		api.Post("/import/scan", adaptor.HTTPHandlerFunc(s.handleStartManualScan))
-		api.Get("/import/scan/status", adaptor.HTTPHandlerFunc(s.handleGetScanStatus))
-		api.Delete("/import/scan", adaptor.HTTPHandlerFunc(s.handleCancelScan))
-		api.Post("/import/file", adaptor.HTTPHandlerFunc(s.handleManualImportFile))
+		api.Post("/import/scan", s.handleStartManualScan)
+		api.Get("/import/scan/status", s.handleGetScanStatus)
+		api.Delete("/import/scan", s.handleCancelScan)
+		api.Post("/import/file", s.handleManualImportFile)
 	}
 
 	// System endpoints
-	api.Get("/system/stats", adaptor.HTTPHandlerFunc(s.handleGetSystemStats))
-	api.Get("/system/health", adaptor.HTTPHandlerFunc(s.handleGetSystemHealth))
-	api.Get("/system/pool/metrics", adaptor.HTTPHandlerFunc(s.handleGetPoolMetrics))
-	api.Post("/system/cleanup", adaptor.HTTPHandlerFunc(s.handleSystemCleanup))
-	api.Post("/system/restart", adaptor.HTTPHandlerFunc(s.handleSystemRestart))
+	api.Get("/system/stats", s.handleGetSystemStats)
+	api.Get("/system/health", s.handleGetSystemHealth)
+	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
+	api.Post("/system/cleanup", s.handleSystemCleanup)
+	api.Post("/system/restart", s.handleSystemRestart)
 
 	// Configuration endpoints (if config manager is available)
 	if s.configManager != nil {
-		api.Get("/config", adaptor.HTTPHandlerFunc(s.handleGetConfig))
-		api.Put("/config", adaptor.HTTPHandlerFunc(s.handleUpdateConfig))
-		api.Patch("/config/:section", adaptor.HTTPHandlerFunc(s.handlePatchConfigSection))
-		api.Post("/config/reload", adaptor.HTTPHandlerFunc(s.handleReloadConfig))
-		api.Post("/config/validate", adaptor.HTTPHandlerFunc(s.handleValidateConfig))
+		api.Get("/config", s.handleGetConfig)
+		api.Put("/config", s.handleUpdateConfig)
+		api.Patch("/config/:section", s.handlePatchConfigSection)
+		api.Post("/config/reload", s.handleReloadConfig)
+		api.Post("/config/validate", s.handleValidateConfig)
 
 		// Provider management endpoints
-		api.Post("/providers/test", adaptor.HTTPHandlerFunc(s.handleTestProvider))
-		api.Post("/providers", adaptor.HTTPHandlerFunc(s.handleCreateProvider))
-		api.Put("/providers/:id", adaptor.HTTPHandlerFunc(s.handleUpdateProvider))
-		api.Delete("/providers/:id", adaptor.HTTPHandlerFunc(s.handleDeleteProvider))
-		api.Put("/providers/reorder", adaptor.HTTPHandlerFunc(s.handleReorderProviders))
+		api.Post("/providers/test", s.handleTestProvider)
+		api.Post("/providers", s.handleCreateProvider)
+		api.Put("/providers/:id", s.handleUpdateProvider)
+		api.Delete("/providers/:id", s.handleDeleteProvider)
+		api.Put("/providers/reorder", s.handleReorderProviders)
 	}
 
 	// Arrs endpoints (if arrs service is available)
 	if s.arrsService != nil {
 		// Configuration-based instance endpoints
-		api.Get("/arrs/instances", adaptor.HTTPHandlerFunc(s.handleListArrsInstances))
-		api.Get("/arrs/instances/:type/:name", adaptor.HTTPHandlerFunc(s.handleGetArrsInstance))
-		api.Post("/arrs/instances", adaptor.HTTPHandlerFunc(s.handleCreateArrsInstance))       // Deprecated
-		api.Put("/arrs/instances/:id", adaptor.HTTPHandlerFunc(s.handleUpdateArrsInstance))    // Deprecated
-		api.Delete("/arrs/instances/:id", adaptor.HTTPHandlerFunc(s.handleDeleteArrsInstance)) // Deprecated
-		api.Post("/arrs/instances/test", adaptor.HTTPHandlerFunc(s.handleTestArrsConnection))
-		api.Get("/arrs/stats", adaptor.HTTPHandlerFunc(s.handleGetArrsStats))
-		api.Get("/arrs/movies/search", adaptor.HTTPHandlerFunc(s.handleSearchMovies))     // Deprecated
-		api.Get("/arrs/episodes/search", adaptor.HTTPHandlerFunc(s.handleSearchEpisodes)) // Deprecated
+		api.Get("/arrs/instances", s.handleListArrsInstances)
+		api.Get("/arrs/instances/:type/:name", s.handleGetArrsInstance)
+		api.Post("/arrs/instances", s.handleCreateArrsInstance)       // Deprecated
+		api.Put("/arrs/instances/:id", s.handleUpdateArrsInstance)    // Deprecated
+		api.Delete("/arrs/instances/:id", s.handleDeleteArrsInstance) // Deprecated
+		api.Post("/arrs/instances/test", s.handleTestArrsConnection)
+		api.Get("/arrs/stats", s.handleGetArrsStats)
+		api.Get("/arrs/movies/search", s.handleSearchMovies)     // Deprecated
+		api.Get("/arrs/episodes/search", s.handleSearchEpisodes) // Deprecated
 	}
 
 	// Authentication endpoints (if auth service is available)
 	if s.authService != nil {
-		// Direct authentication endpoints
-		api.Post("/auth/login", adaptor.HTTPHandlerFunc(s.handleDirectLogin))
-		api.Post("/auth/register", adaptor.HTTPHandlerFunc(s.handleRegister))
-		api.Get("/auth/registration-status", adaptor.HTTPHandlerFunc(s.handleCheckRegistration))
+		// Direct authentication endpoints (converted to native Fiber)
+		api.Post("/auth/login", s.handleDirectLogin)
+		api.Post("/auth/register", s.handleRegister)
+		api.Get("/auth/registration-status", s.handleCheckRegistration)
 
 		// Protected API endpoints for user management (require authentication)
+		// These remain HTTP-based due to middleware dependencies
 		tokenService := s.authService.TokenService()
 		if tokenService != nil {
 			authMiddleware := auth.RequireAuth(tokenService, s.userRepo)
-			api.Get("/user", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthUser))))
-			api.Post("/user/refresh", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthRefresh))))
-			api.Post("/user/logout", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthLogout))))
-			api.Post("/user/api-key/regenerate", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleRegenerateAPIKey))))
+			api.Get("/user", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthUserHTTP))))
+			api.Post("/user/refresh", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthRefreshHTTP))))
+			api.Post("/user/logout", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleAuthLogoutHTTP))))
+			api.Post("/user/api-key/regenerate", adaptor.HTTPHandler(authMiddleware(http.HandlerFunc(s.handleRegenerateAPIKeyHTTP))))
 
 			// Admin endpoints (require admin privileges)
 			adminMiddleware := auth.RequireAdmin(tokenService, s.userRepo)
-			api.Get("/users", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleListUsers))))
-			api.Put("/users/:user_id/admin", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdmin))))
+			api.Get("/users", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleListUsersHTTP))))
+			api.Put("/users/:user_id/admin", adaptor.HTTPHandler(adminMiddleware(http.HandlerFunc(s.handleUpdateUserAdminHTTP))))
 		}
 	}
 
@@ -211,12 +216,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // applyMiddleware applies the middleware chain to the handler
 func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
-	// Apply middleware in reverse order (last middleware is applied first)
-	handler = RecoveryMiddleware(handler)
-	handler = LoggingMiddleware(handler)
-	handler = ContentTypeMiddleware(handler)
-	handler = CORSMiddleware(handler)
-
 	// Apply JWT authentication middleware for user context (optional)
 	if s.authService != nil && s.userRepo != nil {
 		tokenService := s.authService.TokenService()

@@ -701,3 +701,5 @@ func (s *Server) writeSABnzbdError(w http.ResponseWriter, message string) {
 		s.logger.Error("Failed to encode SABnzbd error response", "error", err)
 	}
 }
+
+
