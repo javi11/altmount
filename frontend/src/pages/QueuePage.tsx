@@ -23,6 +23,7 @@ import {
 	useDeleteQueueItem,
 	useQueue,
 	useQueueStats,
+	useRestartBulkQueueItems,
 	useRetryQueueItem,
 } from "../hooks/useApi";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
@@ -60,6 +61,7 @@ export function QueuePage() {
 	const { data: stats } = useQueueStats();
 	const deleteItem = useDeleteQueueItem();
 	const deleteBulk = useDeleteBulkQueueItems();
+	const restartBulk = useRestartBulkQueueItems();
 	const retryItem = useRetryQueueItem();
 	const clearCompleted = useClearCompletedQueue();
 	const { confirmDelete, confirmAction } = useConfirm();
@@ -141,6 +143,30 @@ export function QueuePage() {
 				setSelectedItems(new Set());
 			} catch (error) {
 				console.error("Failed to delete selected items:", error);
+			}
+		}
+	};
+
+	const handleBulkRestart = async () => {
+		if (selectedItems.size === 0) return;
+
+		const confirmed = await confirmAction(
+			"Restart Selected Items",
+			`Are you sure you want to restart ${selectedItems.size} selected queue items? This will reset their retry counts and set them back to pending status.`,
+			{
+				type: "info",
+				confirmText: "Restart Selected",
+				confirmButtonClass: "btn-primary",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const itemIds = Array.from(selectedItems);
+				await restartBulk.mutateAsync(itemIds);
+				setSelectedItems(new Set());
+			} catch (error) {
+				console.error("Failed to restart selected items:", error);
 			}
 		}
 	};
@@ -384,6 +410,15 @@ export function QueuePage() {
 								</button>
 							</div>
 							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									className="btn btn-primary btn-sm"
+									onClick={handleBulkRestart}
+									disabled={restartBulk.isPending}
+								>
+									<RefreshCw className="h-4 w-4" />
+									{restartBulk.isPending ? "Restarting..." : "Restart Selected"}
+								</button>
 								<button
 									type="button"
 									className="btn btn-error btn-sm"

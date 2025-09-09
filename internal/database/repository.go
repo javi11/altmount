@@ -429,6 +429,49 @@ func (r *Repository) RemoveFromQueueBulk(ids []int64) error {
 	return nil
 }
 
+// RestartQueueItemsBulk resets multiple queue items to pending status for reprocessing
+func (r *Repository) RestartQueueItemsBulk(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	// Reset items to pending status with cleared retry count and timestamps
+	query := fmt.Sprintf(`
+		UPDATE import_queue 
+		SET status = 'pending',
+		    retry_count = 0,
+		    error_message = NULL,
+		    started_at = NULL,
+		    completed_at = NULL,
+		    updated_at = datetime('now')
+		WHERE id IN (%s)
+	`, strings.Join(placeholders, ","))
+
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to restart queue items: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no queue items found to restart")
+	}
+
+	return nil
+}
+
 // GetQueueStats retrieves current queue statistics
 func (r *Repository) GetQueueStats() (*QueueStats, error) {
 	// Update stats from actual queue data

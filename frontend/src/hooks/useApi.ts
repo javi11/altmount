@@ -55,6 +55,18 @@ export const useDeleteBulkQueueItems = () => {
 	});
 };
 
+export const useRestartBulkQueueItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (ids: number[]) => apiClient.restartBulkQueueItems(ids),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
 export const useRetryQueueItem = () => {
 	const queryClient = useQueryClient();
 
@@ -292,8 +304,15 @@ export const useUploadToQueue = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ file, category, priority }: { file: File; category?: string; priority?: number }) =>
-			apiClient.uploadToQueue(file, category, priority),
+		mutationFn: ({
+			file,
+			category,
+			priority,
+		}: {
+			file: File;
+			category?: string;
+			priority?: number;
+		}) => apiClient.uploadToQueue(file, category, priority),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
 			queryClient.invalidateQueries({ queryKey: ["queue"] });

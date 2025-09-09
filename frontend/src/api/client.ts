@@ -178,6 +178,16 @@ export class APIClient {
 		});
 	}
 
+	async restartBulkQueueItems(ids: number[]) {
+		return this.request<{ restarted_count: number; message: string }>("/queue/bulk/restart", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ ids }),
+		});
+	}
+
 	async retryQueueItem(id: number) {
 		return this.request<QueueItem>(`/queue/${id}/retry`, {
 			method: "POST",

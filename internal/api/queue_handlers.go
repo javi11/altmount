@@ -629,3 +629,105 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 		"data":    response,
 	})
 }
+
+// handleRestartQueueBulk handles POST /api/queue/bulk/restart
+func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
+	// Parse request body
+	var request struct {
+		IDs []int64 `json:"ids"`
+	}
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid request body",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Validate IDs
+	if len(request.IDs) == 0 {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "No IDs provided",
+				"details": "At least one ID is required",
+			},
+		})
+	}
+
+	// Check if any items are currently being processed
+	processedCount := 0
+	notFoundCount := 0
+	for _, id := range request.IDs {
+		item, err := s.queueRepo.GetQueueItem(id)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"success": false,
+				"error": fiber.Map{
+					"code":    "INTERNAL_SERVER_ERROR",
+					"message": "Failed to check queue item",
+					"details": err.Error(),
+				},
+			})
+		}
+
+		if item == nil {
+			notFoundCount++
+			continue
+		}
+
+		if item.Status == database.QueueStatusProcessing {
+			processedCount++
+		}
+	}
+
+	if notFoundCount == len(request.IDs) {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "No queue items found",
+				"details": "None of the provided IDs exist",
+			},
+		})
+	}
+
+	if processedCount > 0 {
+		return c.Status(409).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "CONFLICT",
+				"message": "Cannot restart items currently being processed",
+				"details": fmt.Sprintf("%d items are currently being processed", processedCount),
+			},
+		})
+	}
+
+	// Restart the queue items
+	err := s.queueRepo.RestartQueueItemsBulk(request.IDs)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to restart queue items",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	response := map[string]interface{}{
+		"restarted_count": len(request.IDs) - notFoundCount,
+		"message":         fmt.Sprintf("Successfully restarted %d queue items", len(request.IDs)-notFoundCount),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
