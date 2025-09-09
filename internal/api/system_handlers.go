@@ -69,7 +69,7 @@ func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 			"data":    healthCheck,
 		})
 	}
-	
+
 	// Default case (shouldn't reach here)
 	return c.Status(500).JSON(fiber.Map{
 		"success": false,
@@ -206,7 +206,7 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 
 	// Start restart process in a goroutine to allow response to be sent
 	go s.performRestart()
-	
+
 	return result
 }
 

@@ -72,7 +72,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	// Create JWT token
 	tokenService := s.authService.TokenService()
 	claims := auth.CreateClaimsFromUser(user)
-	
+
 	// Generate JWT token string
 	tokenString, err := tokenService.Token(claims)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
-	
+
 	// Set JWT cookie using Fiber's native API
 	err = s.setJWTCookie(c, tokenString)
 	if err != nil {
@@ -260,7 +260,7 @@ func (s *Server) handleAuthRefresh(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
-	
+
 	// Set JWT cookie using Fiber's native API
 	err = s.setJWTCookie(c, tokenString)
 	if err != nil {
@@ -428,7 +428,7 @@ func (s *Server) mapUserToResponse(user *database.User) *UserResponse {
 // setJWTCookie sets the JWT cookie using Fiber's native cookie handling
 func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 	config := auth.LoadConfigFromEnv()
-	
+
 	cookie := &fiber.Cookie{
 		Name:     "JWT", // Default JWT cookie name
 		Value:    tokenString,
@@ -439,7 +439,7 @@ func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 		HTTPOnly: true,
 		SameSite: "Lax", // Use Lax for Safari compatibility
 	}
-	
+
 	c.Cookie(cookie)
 	return nil
 }
@@ -447,7 +447,7 @@ func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 // clearJWTCookie clears the JWT cookie using Fiber's native cookie handling
 func (s *Server) clearJWTCookie(c *fiber.Ctx) {
 	config := auth.LoadConfigFromEnv()
-	
+
 	cookie := &fiber.Cookie{
 		Name:     "JWT",
 		Value:    "",
@@ -458,6 +458,6 @@ func (s *Server) clearJWTCookie(c *fiber.Ctx) {
 		HTTPOnly: true,
 		SameSite: "Lax",
 	}
-	
+
 	c.Cookie(cookie)
 }

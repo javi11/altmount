@@ -148,33 +148,6 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 	})
 }
 
-// handleCreateArrsInstance creates a new arrs instance (now deprecated - use config instead)
-func (s *Server) handleCreateArrsInstance(c *fiber.Ctx) error {
-	// This endpoint is deprecated in favor of configuration-first approach
-	return c.Status(405).JSON(fiber.Map{
-		"success": false,
-		"message": "Creating instances via API is no longer supported. Please use configuration file.",
-	})
-}
-
-// handleUpdateArrsInstance updates an existing arrs instance (now deprecated - use config instead)
-func (s *Server) handleUpdateArrsInstance(c *fiber.Ctx) error {
-	// This endpoint is deprecated in favor of configuration-first approach
-	return c.Status(405).JSON(fiber.Map{
-		"success": false,
-		"message": "Updating instances via API is no longer supported. Please use configuration file.",
-	})
-}
-
-// handleDeleteArrsInstance deletes an arrs instance (now deprecated - use config instead)
-func (s *Server) handleDeleteArrsInstance(c *fiber.Ctx) error {
-	// This endpoint is deprecated in favor of configuration-first approach
-	return c.Status(405).JSON(fiber.Map{
-		"success": false,
-		"message": "Deleting instances via API is no longer supported. Please use configuration file.",
-	})
-}
-
 // handleTestArrsConnection tests connection to an arrs instance
 func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 	if s.arrsService == nil {
@@ -255,23 +228,5 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
-	})
-}
-
-// handleSearchMovies searches for movies (deprecated - no longer stored in database)
-func (s *Server) handleSearchMovies(c *fiber.Ctx) error {
-	// Movies are no longer stored in database with configuration-first approach
-	return c.Status(405).JSON(fiber.Map{
-		"success": false,
-		"message": "Movie search is no longer supported. Scraped data is not stored in database.",
-	})
-}
-
-// handleSearchEpisodes searches for episodes (deprecated - no longer stored in database)
-func (s *Server) handleSearchEpisodes(c *fiber.Ctx) error {
-	// Episodes are no longer stored in database with configuration-first approach
-	return c.Status(405).JSON(fiber.Map{
-		"success": false,
-		"message": "Episode search is no longer supported. Scraped data is not stored in database.",
 	})
 }

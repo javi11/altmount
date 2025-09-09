@@ -639,7 +639,6 @@ func (r *HealthRepository) ResetFileAllChecking() error {
 	return nil
 }
 
-
 // DeleteHealthRecordsBulk removes multiple health records from the database
 func (r *HealthRepository) DeleteHealthRecordsBulk(filePaths []string) error {
 	if len(filePaths) == 0 {

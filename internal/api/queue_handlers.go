@@ -450,40 +450,21 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check if any items are currently being processed
-	processedCount := 0
-	for _, id := range request.IDs {
-		item, err := s.queueRepo.GetQueueItem(id)
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
+	// Remove from queue in bulk (this will check for processing items)
+	result, err := s.queueRepo.RemoveFromQueueBulk(request.IDs)
+	if err != nil {
+		// Check if the error is about processing items
+		if result != nil && result.ProcessingCount > 0 {
+			return c.Status(409).JSON(fiber.Map{
 				"success": false,
 				"error": fiber.Map{
-					"code":    "INTERNAL_SERVER_ERROR",
-					"message": "Failed to check queue item",
-					"details": err.Error(),
+					"code":    "CONFLICT",
+					"message": "Cannot delete items currently being processed",
+					"details": fmt.Sprintf("%d items are currently being processed", result.ProcessingCount),
 				},
 			})
 		}
 
-		if item != nil && item.Status == database.QueueStatusProcessing {
-			processedCount++
-		}
-	}
-
-	if processedCount > 0 {
-		return c.Status(409).JSON(fiber.Map{
-			"success": false,
-			"error": fiber.Map{
-				"code":    "CONFLICT",
-				"message": "Cannot delete items currently being processed",
-				"details": fmt.Sprintf("%d items are currently being processed", processedCount),
-			},
-		})
-	}
-
-	// Remove from queue in bulk
-	err := s.queueRepo.RemoveFromQueueBulk(request.IDs)
-	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
 			"error": fiber.Map{
@@ -495,8 +476,8 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 	}
 
 	response := map[string]interface{}{
-		"deleted_count": len(request.IDs),
-		"message":       fmt.Sprintf("Successfully deleted %d queue items", len(request.IDs)),
+		"deleted_count": result.DeletedCount,
+		"message":       fmt.Sprintf("Successfully deleted %d queue items", result.DeletedCount),
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -546,7 +527,7 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 
 	// Get optional category from form
 	category := c.FormValue("category")
-	
+
 	// Get optional priority from form
 	priorityStr := c.FormValue("priority")
 	var priority database.QueuePriority
@@ -606,7 +587,7 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	if category != "" {
 		categoryPtr = &category
 	}
-	
+
 	item, err := s.importerService.AddToQueue(tempFile, &uploadDir, categoryPtr, &priority)
 	if err != nil {
 		// Clean up temp file on error
@@ -623,7 +604,7 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 
 	// Convert to API response format
 	response := ToQueueItemResponse(item)
-	
+
 	return c.Status(201).JSON(fiber.Map{
 		"success": true,
 		"data":    response,

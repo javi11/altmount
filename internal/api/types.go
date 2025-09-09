@@ -48,7 +48,6 @@ type ImportAPIResponse struct {
 	QueueProcessingIntervalSeconds int `json:"queue_processing_interval_seconds"` // Interval in seconds
 }
 
-
 // Helper functions to create API responses from core config types
 
 // ToConfigAPIResponse converts config.Config to ConfigAPIResponse with sensitive data masked

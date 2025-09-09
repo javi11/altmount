@@ -396,10 +396,17 @@ func (r *Repository) RemoveFromQueue(id int64) error {
 	return nil
 }
 
-// RemoveFromQueueBulk removes multiple items from the queue
-func (r *Repository) RemoveFromQueueBulk(ids []int64) error {
+// BulkDeleteResult contains the result of a bulk delete operation
+type BulkDeleteResult struct {
+	DeletedCount    int64
+	ProcessingCount int64
+	RequestedCount  int64
+}
+
+// RemoveFromQueueBulk removes multiple items from the queue, excluding those currently being processed
+func (r *Repository) RemoveFromQueueBulk(ids []int64) (*BulkDeleteResult, error) {
 	if len(ids) == 0 {
-		return nil
+		return &BulkDeleteResult{RequestedCount: 0}, nil
 	}
 
 	// Build placeholders for the IN clause
@@ -410,23 +417,44 @@ func (r *Repository) RemoveFromQueueBulk(ids []int64) error {
 		args[i] = id
 	}
 
-	query := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s)`, strings.Join(placeholders, ","))
+	// First, count how many items are currently processing
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM import_queue WHERE id IN (%s) AND status = ?`, strings.Join(placeholders, ","))
+	countArgs := append(args, QueueStatusProcessing)
 
-	result, err := r.db.Exec(query, args...)
+	var processingCount int64
+	err := r.db.QueryRow(countQuery, countArgs...).Scan(&processingCount)
 	if err != nil {
-		return fmt.Errorf("failed to remove items from queue: %w", err)
+		return nil, fmt.Errorf("failed to count processing items: %w", err)
+	}
+
+	// If there are processing items, return error
+	if processingCount > 0 {
+		return &BulkDeleteResult{
+			DeletedCount:    0,
+			ProcessingCount: processingCount,
+			RequestedCount:  int64(len(ids)),
+		}, fmt.Errorf("cannot delete %d items that are currently being processed", processingCount)
+	}
+
+	// Delete items that are not processing
+	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s) AND status != ?`, strings.Join(placeholders, ","))
+	deleteArgs := append(args, QueueStatusProcessing)
+
+	result, err := r.db.Exec(deleteQuery, deleteArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to remove items from queue: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
-	if rowsAffected == 0 {
-		return fmt.Errorf("no queue items found to delete")
-	}
-
-	return nil
+	return &BulkDeleteResult{
+		DeletedCount:    rowsAffected,
+		ProcessingCount: processingCount,
+		RequestedCount:  int64(len(ids)),
+	}, nil
 }
 
 // RestartQueueItemsBulk resets multiple queue items to pending status for reprocessing

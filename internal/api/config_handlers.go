@@ -152,7 +152,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		})
 	}
 
-	// Create a copy and decode partial updates directly 
+	// Create a copy and decode partial updates directly
 	newConfig := *currentConfig // Start with current config
 	if err := c.BodyParser(&newConfig); err != nil {
 		return c.Status(422).JSON(fiber.Map{

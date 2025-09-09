@@ -121,12 +121,12 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/queue", s.handleListQueue)
 	api.Get("/queue/stats", s.handleGetQueueStats)
 	api.Delete("/queue/completed", s.handleClearCompletedQueue)
-	api.Get("/queue/:id", s.handleGetQueue)
-	api.Delete("/queue/:id", s.handleDeleteQueue)
 	api.Delete("/queue/bulk", s.handleDeleteQueueBulk)
 	api.Post("/queue/bulk/restart", s.handleRestartQueueBulk)
-	api.Post("/queue/:id/retry", s.handleRetryQueue)
 	api.Post("/queue/upload", s.handleUploadToQueue)
+	api.Get("/queue/:id", s.handleGetQueue)
+	api.Delete("/queue/:id", s.handleDeleteQueue)
+	api.Post("/queue/:id/retry", s.handleRetryQueue)
 
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)
@@ -163,20 +163,15 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
 	api.Post("/providers", s.handleCreateProvider)
+	api.Put("/providers/reorder", s.handleReorderProviders)
 	api.Put("/providers/:id", s.handleUpdateProvider)
 	api.Delete("/providers/:id", s.handleDeleteProvider)
-	api.Put("/providers/reorder", s.handleReorderProviders)
 
 	// Configuration-based instance endpoints
 	api.Get("/arrs/instances", s.handleListArrsInstances)
 	api.Get("/arrs/instances/:type/:name", s.handleGetArrsInstance)
-	api.Post("/arrs/instances", s.handleCreateArrsInstance)       // Deprecated
-	api.Put("/arrs/instances/:id", s.handleUpdateArrsInstance)    // Deprecated
-	api.Delete("/arrs/instances/:id", s.handleDeleteArrsInstance) // Deprecated
 	api.Post("/arrs/instances/test", s.handleTestArrsConnection)
 	api.Get("/arrs/stats", s.handleGetArrsStats)
-	api.Get("/arrs/movies/search", s.handleSearchMovies)     // Deprecated
-	api.Get("/arrs/episodes/search", s.handleSearchEpisodes) // Deprecated
 
 	// Direct authentication endpoints (converted to native Fiber)
 	api.Post("/auth/login", s.handleDirectLogin)
