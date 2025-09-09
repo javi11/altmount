@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/javi11/nntppool"
 	"github.com/spf13/viper"
@@ -28,7 +27,7 @@ type Config struct {
 	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
-	LogLevel  string           `yaml:"log_level" mapstructure:"log_level" json:"log_level"`
+	MountPath string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -72,26 +71,8 @@ type RCloneConfig struct {
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers     int           `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingInterval time.Duration `yaml:"queue_processing_interval" mapstructure:"queue_processing_interval" json:"queue_processing_interval"`
-}
-
-// UnmarshalYAML implements custom YAML unmarshaling for ImportConfig to handle queue_processing_interval as seconds
-func (ic *ImportConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	// Define a temporary struct to handle raw parsing with queue_processing_interval as seconds
-	type rawImportConfig struct {
-		MaxProcessorWorkers     int `yaml:"max_processor_workers"`
-		QueueProcessingInterval int `yaml:"queue_processing_interval"` // Parse as seconds, convert to Duration
-	}
-
-	var raw rawImportConfig
-	if err := unmarshal(&raw); err != nil {
-		return err
-	}
-
-	ic.MaxProcessorWorkers = raw.MaxProcessorWorkers
-	ic.QueueProcessingInterval = time.Duration(raw.QueueProcessingInterval) * time.Second
-	return nil
+	MaxProcessorWorkers            int `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -106,13 +87,13 @@ type LogConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled               *bool         `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	AutoRepairEnabled     *bool         `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
-	CheckInterval         time.Duration `yaml:"check_interval" mapstructure:"check_interval" json:"check_interval,omitempty"`
-	MaxConcurrentJobs     int           `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	MaxRetries            int           `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
-	MaxSegmentConnections int           `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
-	CheckAllSegments      bool          `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	Enabled               *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	AutoRepairEnabled     *bool `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
+	CheckIntervalSeconds  int   `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConcurrentJobs     int   `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	MaxRetries            int   `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
+	MaxSegmentConnections int   `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
+	CheckAllSegments      bool  `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -209,9 +190,9 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled    *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MountDir   string            `yaml:"mount_dir" mapstructure:"mount_dir" json:"mount_dir"`
-	Categories []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 }
 
 // SABnzbdCategory represents a SABnzbd category configuration
@@ -226,7 +207,6 @@ type SABnzbdCategory struct {
 type ArrsConfig struct {
 	Enabled         *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	MaxWorkers      int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	MountPath       string               `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	RadarrInstances []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 }
@@ -377,20 +357,20 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("import max_processor_workers must be greater than 0")
 	}
 
-	if c.Import.QueueProcessingInterval < 1*time.Second {
-		return fmt.Errorf("import queue_processing_interval must be at least 1 second")
+	if c.Import.QueueProcessingIntervalSeconds < 1 {
+		return fmt.Errorf("import queue_processing_interval_seconds must be at least 1 second")
 	}
 
-	if c.Import.QueueProcessingInterval > 5*time.Minute {
-		return fmt.Errorf("import queue_processing_interval must not exceed 5 minutes")
+	if c.Import.QueueProcessingIntervalSeconds > 300 {
+		return fmt.Errorf("import queue_processing_interval_seconds must not exceed 300 seconds")
 	}
 
 	// Validate log level (both old and new config)
-	if c.LogLevel != "" {
+	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
 		isValid := false
 		for _, level := range validLevels {
-			if c.LogLevel == level {
+			if c.Log.Level == level {
 				isValid = true
 				break
 			}
@@ -443,8 +423,8 @@ func (c *Config) Validate() error {
 
 	// Validate health configuration
 	if *c.Health.Enabled {
-		if c.Health.CheckInterval <= 0 {
-			return fmt.Errorf("health check_interval must be greater than 0")
+		if c.Health.CheckIntervalSeconds <= 0 {
+			return fmt.Errorf("health check_interval_seconds must be greater than 0")
 		}
 		if c.Health.MaxConcurrentJobs <= 0 {
 			return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
@@ -466,11 +446,11 @@ func (c *Config) Validate() error {
 
 	// Validate SABnzbd configuration
 	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
-		if c.SABnzbd.MountDir == "" {
-			return fmt.Errorf("sabnzbd mount_dir cannot be empty when SABnzbd is enabled")
+		if c.SABnzbd.CompleteDir == "" {
+			return fmt.Errorf("sabnzbd complete_dir cannot be empty when SABnzbd is enabled")
 		}
-		if !filepath.IsAbs(c.SABnzbd.MountDir) {
-			return fmt.Errorf("sabnzbd mount_dir must be an absolute path")
+		if !filepath.IsAbs(c.SABnzbd.CompleteDir) {
+			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
 		}
 
 		// Validate categories if provided
@@ -486,13 +466,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Validate mount_path
+	if c.MountPath != "" && !filepath.IsAbs(c.MountPath) {
+		return fmt.Errorf("mount_path must be an absolute path")
+	}
+
 	// Validate scraper configuration
 	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
-		if c.Arrs.MountPath == "" {
-			return fmt.Errorf("scraper mount_path cannot be empty when scraper is enabled")
-		}
-		if !filepath.IsAbs(c.Arrs.MountPath) {
-			return fmt.Errorf("scraper mount_path must be an absolute path")
+		// Mount path is required when ARRs is enabled
+		if c.MountPath == "" {
+			return fmt.Errorf("mount_path is required when arrs is enabled")
 		}
 		if c.Arrs.MaxWorkers <= 0 {
 			return fmt.Errorf("scraper max_workers must be greater than 0")
@@ -531,20 +514,6 @@ func (c *Config) ValidateDirectories() error {
 	// Check log file directory (only if log file is configured)
 	if err := checkFileDirectoryWritable(c.Log.File, "log"); err != nil {
 		return err
-	}
-
-	// Check SABnzbd mount directory if enabled
-	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
-		if err := checkDirectoryWritable(c.SABnzbd.MountDir); err != nil {
-			return fmt.Errorf("sabnzbd mount directory validation failed: %w", err)
-		}
-	}
-
-	// Check Arrs mount path if enabled
-	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
-		if err := checkDirectoryWritable(c.Arrs.MountPath); err != nil {
-			return fmt.Errorf("arrs mount path validation failed: %w", err)
-		}
 	}
 
 	return nil
@@ -789,22 +758,30 @@ func isRunningInDocker() bool {
 }
 
 // DefaultConfig returns a config with default values
-func DefaultConfig() *Config {
+// If configDir is provided, it will be used for database and log file paths
+func DefaultConfig(configDir ...string) *Config {
 	healthCheckEnabled := true
 	autoRepairEnabled := false // Disabled by default for safety
 	vfsEnabled := false
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 
-	// Set paths based on whether we're running in Docker
-	dbPath := "./altmount.db"
-	metadataPath := "./metadata"
-	logPath := "./altmount.log"
+	// Set paths based on whether we're running in Docker or have a specific config directory
+	var dbPath, metadataPath, logPath string
 
-	if isRunningInDocker() {
+	// If a config directory is provided, use it
+	if len(configDir) > 0 && configDir[0] != "" {
+		dbPath = filepath.Join(configDir[0], "altmount.db")
+		metadataPath = filepath.Join(configDir[0], "metadata")
+		logPath = filepath.Join(configDir[0], "altmount.log")
+	} else if isRunningInDocker() {
 		dbPath = "/config/altmount.db"
 		metadataPath = "/metadata"
 		logPath = "/config/altmount.log"
+	} else {
+		dbPath = "./altmount.db"
+		metadataPath = "./metadata"
+		logPath = "./altmount.log"
 	}
 
 	return &Config{
@@ -836,8 +813,8 @@ func DefaultConfig() *Config {
 			VFSPass:    "",
 		},
 		Import: ImportConfig{
-			MaxProcessorWorkers:     2,               // Default: 2 processor workers
-			QueueProcessingInterval: 5 * time.Second, // Default: check for work every 5 seconds
+			MaxProcessorWorkers:            2, // Default: 2 processor workers
+			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -850,26 +827,25 @@ func DefaultConfig() *Config {
 		Health: HealthConfig{
 			Enabled:               &healthCheckEnabled,
 			AutoRepairEnabled:     &autoRepairEnabled,
-			CheckInterval:         30 * time.Minute,
+			CheckIntervalSeconds:  1800, // 30 minutes in seconds
 			MaxConcurrentJobs:     1,
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,
 			CheckAllSegments:      true,
 		},
 		SABnzbd: SABnzbdConfig{
-			Enabled:    &sabnzbdEnabled,
-			MountDir:   "",
-			Categories: []SABnzbdCategory{},
+			Enabled:     &sabnzbdEnabled,
+			CompleteDir: "",
+			Categories:  []SABnzbdCategory{},
 		},
 		Providers: []ProviderConfig{},
-		LogLevel:  "info",
 		Arrs: ArrsConfig{
 			Enabled:         &scrapperEnabled, // Disabled by default
 			MaxWorkers:      5,                // Default to 5 concurrent workers
-			MountPath:       "",               // Empty by default - required when enabled
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
 		},
+		MountPath: "", // Empty by default - required when ARRs is enabled
 	}
 }
 
@@ -918,8 +894,10 @@ func LoadConfig(configFile string) (*Config, error) {
 	if err := viper.ReadInConfig(); err != nil {
 		// Check if it's a file not found error
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
-			// Create default config file
-			if err := SaveToFile(config, targetConfigFile); err != nil {
+			// Create default config file with paths relative to config directory
+			configDir := filepath.Dir(targetConfigFile)
+			configForSave := DefaultConfig(configDir)
+			if err := SaveToFile(configForSave, targetConfigFile); err != nil {
 				return nil, fmt.Errorf("failed to create default config file %s: %w", targetConfigFile, err)
 			}
 

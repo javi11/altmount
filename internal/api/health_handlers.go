@@ -2,42 +2,54 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
 )
 
 // handleListHealth handles GET /api/health
-func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListHealth(c *fiber.Ctx) error {
 	// Parse pagination
-	pagination := ParsePagination(r)
+	pagination := ParsePaginationFiber(c)
 
 	// Parse search parameter
-	search := r.URL.Query().Get("search")
+	search := c.Query("search")
 
 	// Parse status filter
 	var statusFilter *database.HealthStatus
-	if statusStr := r.URL.Query().Get("status"); statusStr != "" {
+	if statusStr := c.Query("status"); statusStr != "" {
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
 		case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 			statusFilter = &status
 		default:
-			WriteValidationError(w, "Invalid status filter", "Valid values: healthy, partial, corrupted, repair_triggered")
-			return
+			return c.Status(400).JSON(fiber.Map{
+				"success": false,
+				"error": fiber.Map{
+					"code":    "VALIDATION_ERROR",
+					"message": "Invalid status filter",
+					"details": "Valid values: healthy, partial, corrupted, repair_triggered",
+				},
+			})
 		}
 	}
 
 	// Parse since filter
 	var sinceFilter *time.Time
-	if since, err := ParseTimeParam(r, "since"); err != nil {
-		WriteValidationError(w, "Invalid since parameter", err.Error())
-		return
+	if since, err := ParseTimeParamFiber(c, "since"); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "VALIDATION_ERROR",
+				"message": "Invalid since parameter",
+				"details": err.Error(),
+			},
+		})
 	} else if since != nil {
 		sinceFilter = since
 	}
@@ -45,15 +57,27 @@ func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 	// Get health items with search support
 	items, err := s.listHealthItems(statusFilter, pagination, sinceFilter, search)
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve health records", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to retrieve health records",
+				"details": err.Error(),
+			},
+		})
 	}
 
 	// Get total count for pagination
 	totalCount, err := s.countHealthItems(statusFilter, sinceFilter, search)
 	if err != nil {
-		WriteInternalError(w, "Failed to count health records", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to count health records",
+				"details": err.Error(),
+			},
+		})
 	}
 
 	// Convert to API response format
@@ -70,7 +94,11 @@ func (s *Server) handleListHealth(w http.ResponseWriter, r *http.Request) {
 		Total:  totalCount,
 	}
 
-	WriteSuccess(w, response, meta)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+		"meta":    meta,
+	})
 }
 
 // listHealthItems is a helper method to list health items with filters
@@ -84,56 +112,100 @@ func (s *Server) countHealthItems(statusFilter *database.HealthStatus, sinceFilt
 }
 
 // handleGetHealth handles GET /api/health/{id}
-func (s *Server) handleGetHealth(w http.ResponseWriter, r *http.Request) {
-	// Extract ID from path parameter - this could be either numeric ID or file path
-	idStr := r.PathValue("id")
-	if idStr == "" {
-		WriteBadRequest(w, "Health record identifier is required", "")
-		return
-	}
-
-	// Try to parse as numeric ID first
-	if _, err := strconv.ParseInt(idStr, 10, 64); err == nil {
-		// Get by ID - we'd need to implement this method in the repository
-		WriteInternalError(w, "Get health by ID not yet implemented", "Use file path instead")
-		return
-	} else {
-		// Treat as file path
-		item, err := s.healthRepo.GetFileHealth(idStr)
-		if err != nil {
-			WriteInternalError(w, "Failed to retrieve health record", err.Error())
-			return
-		}
-
-		if item == nil {
-			WriteNotFound(w, "Health record not found", "")
-			return
-		}
-
-		response := ToHealthItemResponse(item)
-		WriteSuccess(w, response, nil)
-	}
-}
-
-// handleDeleteHealth handles DELETE /api/health/{id}
-func (s *Server) handleDeleteHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
-	filePath := r.PathValue("id")
-	if filePath == "" {
-		WriteBadRequest(w, "Health record identifier is required", "")
-		return
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Health record identifier is required",
+				"details": "",
+			},
+		})
 	}
 
-	// Check if the record exists
-	item, err := s.healthRepo.GetFileHealth(filePath)
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		WriteInternalError(w, "Failed to check health record", err.Error())
-		return
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid health record ID",
+				"details": "ID must be a valid integer",
+			},
+		})
+	}
+
+	// Get by ID
+	item, err := s.healthRepo.GetFileHealthByID(id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to retrieve health record",
+				"details": err.Error(),
+			},
+		})
 	}
 
 	if item == nil {
-		WriteNotFound(w, "Health record not found", "")
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "Health record not found",
+				"details": "",
+			},
+		})
+	}
+
+	response := ToHealthItemResponse(item)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleDeleteHealth handles DELETE /api/health/{id}
+func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record identifier is required",
+		})
+	}
+
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid health record ID",
+			"details": "ID must be a valid integer",
+		})
+	}
+
+	// Check if the record exists
+	item, err := s.healthRepo.GetFileHealthByID(id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to check health record",
+			"details": err.Error(),
+		})
+	}
+
+	if item == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record not found",
+		})
 	}
 
 	// If the item is currently being checked, cancel the check first
@@ -141,56 +213,74 @@ func (s *Server) handleDeleteHealth(w http.ResponseWriter, r *http.Request) {
 		// Check if health worker is available
 		if s.healthWorker != nil {
 			// Check if there's actually an active check to cancel
-			if s.healthWorker.IsCheckActive(filePath) {
+			if s.healthWorker.IsCheckActive(item.FilePath) {
 				// Cancel the health check before deletion
-				err = s.healthWorker.CancelHealthCheck(filePath)
+				err = s.healthWorker.CancelHealthCheck(item.FilePath)
 				if err != nil {
-					WriteInternalError(w, "Failed to cancel health check before deletion", err.Error())
-					return
+					return c.Status(500).JSON(fiber.Map{
+						"success": false,
+						"message": "Failed to cancel health check before deletion",
+						"details": err.Error(),
+					})
 				}
 			}
 		}
 	}
 
-	// Delete the health record from database
-	err = s.healthRepo.DeleteHealthRecord(filePath)
+	// Delete the health record from database using ID
+	err = s.healthRepo.DeleteHealthRecordByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to delete health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to delete health record",
+			"details": err.Error(),
+		})
 	}
 
 	response := map[string]interface{}{
 		"message":    "Health record deleted successfully",
-		"file_path":  filePath,
+		"id":         id,
+		"file_path":  item.FilePath,
 		"deleted_at": time.Now().Format(time.RFC3339),
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleDeleteHealthBulk handles POST /api/health/bulk/delete
-func (s *Server) handleDeleteHealthBulk(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	// Parse request body
 	var req struct {
 		FilePaths []string `json:"file_paths"`
 	}
-	
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteBadRequest(w, "Invalid request body", err.Error())
-		return
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
 	}
-	
+
 	// Validate file paths
 	if len(req.FilePaths) == 0 {
-		WriteValidationError(w, "At least one file path is required", "")
-		return
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "At least one file path is required",
+		})
 	}
-	
+
 	if len(req.FilePaths) > 100 {
-		WriteValidationError(w, "Too many file paths", "Maximum 100 files allowed per bulk operation")
-		return
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "Too many file paths",
+			"details": "Maximum 100 files allowed per bulk operation",
+		})
 	}
-	
+
 	// Check for any items currently being checked and cancel if needed
 	if s.healthWorker != nil {
 		for _, filePath := range req.FilePaths {
@@ -199,7 +289,7 @@ func (s *Server) handleDeleteHealthBulk(w http.ResponseWriter, r *http.Request) 
 			if err != nil {
 				continue // Skip if we can't get the record, will fail in bulk delete anyway
 			}
-			
+
 			if item != nil && item.Status == database.HealthStatusChecking {
 				// Check if there's actually an active check to cancel
 				if s.healthWorker.IsCheckActive(filePath) {
@@ -209,97 +299,141 @@ func (s *Server) handleDeleteHealthBulk(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-	
+
 	// Delete health records in bulk
 	err := s.healthRepo.DeleteHealthRecordsBulk(req.FilePaths)
 	if err != nil {
-		WriteInternalError(w, "Failed to delete health records", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to delete health records",
+			"details": err.Error(),
+		})
 	}
-	
+
 	response := map[string]interface{}{
-		"message":        "Health records deleted successfully",
-		"deleted_count":  len(req.FilePaths),
-		"file_paths":     req.FilePaths,
-		"deleted_at":     time.Now().Format(time.RFC3339),
+		"message":       "Health records deleted successfully",
+		"deleted_count": len(req.FilePaths),
+		"file_paths":    req.FilePaths,
+		"deleted_at":    time.Now().Format(time.RFC3339),
 	}
-	
-	WriteSuccess(w, response, nil)
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleRepairHealth handles POST /api/health/{id}/repair
-func (s *Server) handleRepairHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	// Extract ID from path parameter
-	filePath := r.PathValue("id")
-	if filePath == "" {
-		WriteBadRequest(w, "Health record identifier is required", "")
-		return
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record identifier is required",
+		})
+	}
+
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid health record ID",
+			"details": "ID must be a valid integer",
+		})
 	}
 
 	// Parse request body
 	var req HealthRepairRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteBadRequest(w, "Invalid request body", err.Error())
-			return
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid request body",
+				"details": err.Error(),
+			})
 		}
 	}
 
 	// Check if item exists
-	item, err := s.healthRepo.GetFileHealth(filePath)
+	item, err := s.healthRepo.GetFileHealthByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to check health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to check health record",
+			"details": err.Error(),
+		})
 	}
 
 	if item == nil {
-		WriteNotFound(w, "Health record not found", "")
-		return
-	}
-
-	// Only allow repair of corrupted or partial files
-	if item.Status != database.HealthStatusCorrupted && item.Status != database.HealthStatusPartial {
-		WriteConflict(w, "Can only repair corrupted or partial files", "Current status: "+string(item.Status))
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record not found",
+		})
 	}
 
 	// Trigger repair through ARR service using direct file path approach
 	// The service will automatically determine which ARR instance manages this file
-	ctx := r.Context()
-	err = s.arrsService.TriggerFileRescan(ctx, filePath)
+	ctx := c.Context()
+	err = s.arrsService.TriggerFileRescan(ctx, item.FilePath)
 	if err != nil {
-		WriteInternalError(w, "Failed to trigger repair in ARR instance", err.Error())
-		return
+		// Check if this is a "no ARR instance found" error
+		if strings.Contains(err.Error(), "no ARR instance found") {
+			return c.Status(404).JSON(fiber.Map{
+				"success": false,
+				"message": "File not managed by any ARR instance",
+				"details": "This file is not found in any of the configured Radarr or Sonarr instances. Please ensure the file is in your media library and the ARR instances are properly configured.",
+			})
+		}
+		// Handle other errors as internal server errors
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to trigger repair in ARR instance",
+			"details": err.Error(),
+		})
 	}
 
-	// Set repair triggered status after successful ARR notification
-	err = s.healthRepo.SetRepairTriggered(filePath, nil)
+	// Set repair triggered status after successful ARR notification using ID
+	err = s.healthRepo.SetRepairTriggeredByID(id, nil)
 	if err != nil {
-		WriteInternalError(w, "Failed to update repair status", "ARR repair triggered but failed to update database: "+err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to update repair status",
+			"details": "ARR repair triggered but failed to update database: " + err.Error(),
+		})
 	}
 
 	// Get updated item
-	updatedItem, err := s.healthRepo.GetFileHealth(filePath)
+	updatedItem, err := s.healthRepo.GetFileHealthByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve updated health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve updated health record",
+			"details": err.Error(),
+		})
 	}
 
 	response := ToHealthItemResponse(updatedItem)
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleListCorrupted handles GET /api/health/corrupted
-func (s *Server) handleListCorrupted(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 	// Parse pagination
-	pagination := ParsePagination(r)
+	pagination := ParsePaginationFiber(c)
 
 	// Get corrupted files using GetUnhealthyFiles
 	items, err := s.healthRepo.GetUnhealthyFiles(pagination.Limit)
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve corrupted files", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve corrupted files",
+			"details": err.Error(),
+		})
 	}
 
 	// Filter to only corrupted files (GetUnhealthyFiles returns all unhealthy)
@@ -334,37 +468,53 @@ func (s *Server) handleListCorrupted(w http.ResponseWriter, r *http.Request) {
 		Offset: pagination.Offset,
 	}
 
-	WriteSuccess(w, response, meta)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+		"meta":    meta,
+	})
 }
 
 // handleGetHealthStats handles GET /api/health/stats
-func (s *Server) handleGetHealthStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetHealthStats(c *fiber.Ctx) error {
 	stats, err := s.healthRepo.GetHealthStats()
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve health statistics", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve health statistics",
+			"details": err.Error(),
+		})
 	}
 
 	response := ToHealthStatsResponse(stats)
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleCleanupHealth handles DELETE /api/health/cleanup
-func (s *Server) handleCleanupHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 	// Parse request body
 	var req HealthCleanupRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteBadRequest(w, "Invalid request body", err.Error())
-			return
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid request body",
+				"details": err.Error(),
+			})
 		}
 	}
 
 	// Parse older_than parameter from query if not in body
 	if req.OlderThan == nil {
-		if olderThan, err := ParseTimeParam(r, "older_than"); err != nil {
-			WriteValidationError(w, "Invalid older_than parameter", err.Error())
-			return
+		if olderThan, err := ParseTimeParamFiber(c, "older_than"); err != nil {
+			return c.Status(422).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid older_than parameter",
+				"details": err.Error(),
+			})
 		} else if olderThan != nil {
 			req.OlderThan = olderThan
 		}
@@ -372,14 +522,17 @@ func (s *Server) handleCleanupHealth(w http.ResponseWriter, r *http.Request) {
 
 	// Parse status parameter from query if not in body
 	if req.Status == nil {
-		if statusStr := r.URL.Query().Get("status"); statusStr != "" {
+		if statusStr := c.Query("status"); statusStr != "" {
 			status := database.HealthStatus(statusStr)
 			switch status {
 			case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 				req.Status = &status
 			default:
-				WriteValidationError(w, "Invalid status filter", "Valid values: healthy, partial, corrupted, repair_triggered")
-				return
+				return c.Status(422).JSON(fiber.Map{
+					"success": false,
+					"message": "Invalid status filter",
+					"details": "Valid values: healthy, partial, corrupted, repair_triggered",
+				})
 			}
 		}
 	}
@@ -394,8 +547,11 @@ func (s *Server) handleCleanupHealth(w http.ResponseWriter, r *http.Request) {
 	// We'll need to implement a more sophisticated cleanup method
 	count, err := s.cleanupHealthRecords(*req.OlderThan, req.Status)
 	if err != nil {
-		WriteInternalError(w, "Failed to cleanup health records", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to cleanup health records",
+			"details": err.Error(),
+		})
 	}
 
 	response := map[string]interface{}{
@@ -404,7 +560,10 @@ func (s *Server) handleCleanupHealth(w http.ResponseWriter, r *http.Request) {
 		"status_filter": req.Status,
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // cleanupHealthRecords is a helper method to cleanup health records
@@ -417,26 +576,33 @@ func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *databas
 }
 
 // handleAddHealthCheck handles POST /api/health/check
-func (s *Server) handleAddHealthCheck(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	// Parse request body
 	var req HealthCheckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteBadRequest(w, "Invalid request body", err.Error())
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
 	}
 
 	// Validate required fields
 	if req.FilePath == "" {
-		WriteValidationError(w, "file_path is required", "")
-		return
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "file_path is required",
+		})
 	}
 
 	// Set default max retries if not specified
 	maxRetries := 2 // Default from config
 	if req.MaxRetries != nil {
 		if *req.MaxRetries < 0 {
-			WriteValidationError(w, "max_retries must be non-negative", "")
-			return
+			return c.Status(422).JSON(fiber.Map{
+				"success": false,
+				"message": "max_retries must be non-negative",
+			})
 		}
 		maxRetries = *req.MaxRetries
 	}
@@ -444,26 +610,38 @@ func (s *Server) handleAddHealthCheck(w http.ResponseWriter, r *http.Request) {
 	// Add file to health database
 	err := s.healthRepo.AddFileToHealthCheck(req.FilePath, maxRetries, req.SourceNzb)
 	if err != nil {
-		WriteInternalError(w, "Failed to add file for health check", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to add file for health check",
+			"details": err.Error(),
+		})
 	}
 
 	// Return the health record
 	item, err := s.healthRepo.GetFileHealth(req.FilePath)
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve added health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve added health record",
+			"details": err.Error(),
+		})
 	}
 
 	response := ToHealthItemResponse(item)
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleGetHealthWorkerStatus handles GET /api/health/worker/status
-func (s *Server) handleGetHealthWorkerStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetHealthWorkerStatus(c *fiber.Ctx) error {
 	if s.healthWorker == nil {
-		WriteNotFound(w, "Health worker not available", "Health worker is not configured or not running")
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health worker not available",
+			"details": "Health worker is not configured or not running",
+		})
 	}
 
 	stats := s.healthWorker.GetStats()
@@ -482,80 +660,122 @@ func (s *Server) handleGetHealthWorkerStatus(w http.ResponseWriter, r *http.Requ
 		ErrorCount:             stats.ErrorCount,
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleDirectHealthCheck handles POST /api/health/{id}/check-now
-func (s *Server) handleDirectHealthCheck(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	// Extract ID from path parameter
-	filePath := r.PathValue("id")
-	if filePath == "" {
-		WriteBadRequest(w, "Health record identifier is required", "")
-		return
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record identifier is required",
+		})
+	}
+
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid health record ID",
+			"details": "ID must be a valid integer",
+		})
 	}
 
 	// Check if health worker is available
 	if s.healthWorker == nil {
-		WriteNotFound(w, "Health worker not available", "Health worker is not configured or not running")
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health worker not available",
+			"details": "Health worker is not configured or not running",
+		})
 	}
 
 	// Check if item exists in health database
-	item, err := s.healthRepo.GetFileHealth(filePath)
+	item, err := s.healthRepo.GetFileHealthByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to check health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to check health record",
+			"details": err.Error(),
+		})
 	}
 
 	if item == nil {
-		WriteNotFound(w, "Health record not found", "")
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record not found",
+		})
 	}
 
 	// Prevent starting multiple checks for the same file
 	if item.Status == database.HealthStatusChecking {
-		WriteConflict(w, "Health check already in progress", "This file is currently being checked")
-		return
+		return c.Status(409).JSON(fiber.Map{
+			"success": false,
+			"message": "Health check already in progress",
+			"details": "This file is currently being checked",
+		})
 	}
 
-	// Immediately set status to 'checking'
-	err = s.healthRepo.SetFileChecking(filePath)
+	// Immediately set status to 'checking' using ID
+	err = s.healthRepo.SetFileCheckingByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to set checking status", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to set checking status",
+			"details": err.Error(),
+		})
 	}
 
-	// Start health check in background using worker
-	err = s.healthWorker.PerformBackgroundCheck(context.Background(), filePath)
+	// Start health check in background using worker (still needs file path)
+	err = s.healthWorker.PerformBackgroundCheck(context.Background(), item.FilePath)
 	if err != nil {
-		WriteInternalError(w, "Failed to start background health check", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to start background health check",
+			"details": err.Error(),
+		})
 	}
 
 	// Verify that the file still exists
-	f, err := s.metadataReader.GetFileMetadata(filePath)
+	f, err := s.metadataReader.GetFileMetadata(item.FilePath)
 	if f == nil || err != nil {
-		WriteInternalError(w, "Failed to retrieve file metadata", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve file metadata",
+			"details": err.Error(),
+		})
 	}
 
 	// Get the updated health record with 'checking' status
-	updatedItem, err := s.healthRepo.GetFileHealth(filePath)
+	updatedItem, err := s.healthRepo.GetFileHealthByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve updated health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve updated health record",
+			"details": err.Error(),
+		})
 	}
 
 	response := map[string]interface{}{
 		"message":     "Health check started",
-		"file_path":   filePath,
+		"id":          id,
+		"file_path":   item.FilePath,
 		"old_status":  string(item.Status),
 		"new_status":  string(updatedItem.Status),
 		"checked_at":  updatedItem.LastChecked,
 		"health_data": ToHealthItemResponse(updatedItem),
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // UploadAndCheckRequest represents request to check health of a file by metadata path
@@ -584,60 +804,93 @@ type SegmentsInfo struct {
 }
 
 // handleCancelHealthCheck handles POST /api/health/{id}/cancel
-func (s *Server) handleCancelHealthCheck(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	// Extract ID from path parameter
-	filePath := r.PathValue("id")
-	if filePath == "" {
-		WriteBadRequest(w, "Health record identifier is required", "")
-		return
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record identifier is required",
+		})
+	}
+
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid health record ID",
+			"details": "ID must be a valid integer",
+		})
 	}
 
 	// Check if health worker is available
 	if s.healthWorker == nil {
-		WriteNotFound(w, "Health worker not available", "Health worker is not configured or not running")
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health worker not available",
+			"details": "Health worker is not configured or not running",
+		})
 	}
 
 	// Check if item exists in health database
-	item, err := s.healthRepo.GetFileHealth(filePath)
+	item, err := s.healthRepo.GetFileHealthByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to check health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to check health record",
+			"details": err.Error(),
+		})
 	}
 
 	if item == nil {
-		WriteNotFound(w, "Health record not found", "")
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record not found",
+		})
 	}
 
-	// Check if there's actually an active check to cancel
-	if !s.healthWorker.IsCheckActive(filePath) {
-		WriteConflict(w, "No active health check found", "There is no active health check for this file")
-		return
+	// Check if there's actually an active check to cancel (still needs file path)
+	if !s.healthWorker.IsCheckActive(item.FilePath) {
+		return c.Status(409).JSON(fiber.Map{
+			"success": false,
+			"message": "No active health check found",
+			"details": "There is no active health check for this file",
+		})
 	}
 
-	// Cancel the health check
-	err = s.healthWorker.CancelHealthCheck(filePath)
+	// Cancel the health check (still needs file path)
+	err = s.healthWorker.CancelHealthCheck(item.FilePath)
 	if err != nil {
-		WriteInternalError(w, "Failed to cancel health check", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to cancel health check",
+			"details": err.Error(),
+		})
 	}
 
 	// Get the updated health record
-	updatedItem, err := s.healthRepo.GetFileHealth(filePath)
+	updatedItem, err := s.healthRepo.GetFileHealthByID(id)
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve updated health record", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve updated health record",
+			"details": err.Error(),
+		})
 	}
 
 	response := map[string]interface{}{
 		"message":      "Health check cancelled",
-		"file_path":    filePath,
+		"id":           id,
+		"file_path":    item.FilePath,
 		"old_status":   string(item.Status),
 		"new_status":   string(updatedItem.Status),
 		"cancelled_at": time.Now().Format(time.RFC3339),
 		"health_data":  ToHealthItemResponse(updatedItem),
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }

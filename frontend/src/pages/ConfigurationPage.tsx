@@ -40,11 +40,11 @@ import type {
 	ConfigSection,
 	HealthConfig,
 	ImportConfig,
+	LogFormData,
 	MetadataConfig,
 	RCloneVFSFormData,
 	SABnzbdConfig,
 	StreamingConfig,
-	SystemFormData,
 	WebDAVConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";
@@ -161,9 +161,10 @@ export function ConfigurationPage() {
 			| ImportConfig
 			| MetadataConfig
 			| RCloneVFSFormData
-			| SystemFormData
+			| LogFormData
 			| SABnzbdConfig
-			| ArrsConfig,
+			| ArrsConfig
+			| { mount_path: string },
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -216,13 +217,12 @@ export function ConfigurationPage() {
 					section: "rclone",
 					config: { rclone: data as RCloneVFSFormData },
 				});
-			} else if (section === "system") {
-				const systemData = data as SystemFormData;
+			} else if (section === "mount_path") {
+				// For mount_path, we need to update the system section with mount_path
+				const mountPathData = data as { mount_path: string };
 				await updateConfigSection.mutateAsync({
 					section: "system",
-					config: {
-						log_level: systemData.log_level,
-					},
+					config: mountPathData,
 				});
 			} else if (section === "sabnzbd") {
 				await updateConfigSection.mutateAsync({
@@ -518,10 +518,10 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 								].includes(activeSection) && (
-									<ComingSoonSection
-										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
-									/>
-								)}
+										<ComingSoonSection
+											sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
+										/>
+									)}
 							</div>
 						</div>
 					</div>

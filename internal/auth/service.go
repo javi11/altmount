@@ -47,7 +47,7 @@ func DefaultConfig() *Config {
 		TokenDuration:     24 * time.Hour, // 24 hours
 		CookieDomain:      "localhost",
 		CookieSecure:      false, // true for production
-		CookieSameSite:    http.SameSiteStrictMode,
+		CookieSameSite:    http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
 		DirectAuthEnabled: true,
 		Issuer:            "altmount",
 		Audience:          "altmount-api",

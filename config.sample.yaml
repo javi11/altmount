@@ -4,67 +4,70 @@
 # WebDAV server configuration
 webdav:
   port: 8080
-  user: "usenet"
-  password: "usenet"
+  user: 'usenet'
+  password: 'usenet'
   debug: false
 
-# REST API configuration  
+# REST API configuration
 api:
-  prefix: "/api"                   # API endpoint prefix
+  prefix: '/api' # API endpoint prefix
 
 # Database configuration
 database:
-  path: "altmount.db"  # Database for processing workflows
+  path: 'altmount.db' # Database for processing workflows
 
 # Metadata filesystem configuration
 metadata:
-  root_path: "./metadata"   # Directory to store metadata files (required)
+  root_path: './metadata' # Directory to store metadata files (required)
 
 # Streaming and download configuration
 streaming:
-  max_range_size: 33554432        # 32MB - Maximum range size for a single request
-  streaming_chunk_size: 8388608    # 8MB - Chunk size for streaming when end=-1
-  max_download_workers: 15         # Number of download workers
+  max_range_size: 33554432 # 32MB - Maximum range size for a single request
+  streaming_chunk_size: 8388608 # 8MB - Chunk size for streaming when end=-1
+  max_download_workers: 15 # Number of download workers
 
 # RClone VFS configuration (optional)
 rclone:
-  password: ""                    # Encryption password (optional)
-  salt: ""                        # Encryption salt (optional)
-  vfs_enabled: false              # Enable VFS notifications
-  vfs_url: ""                     # RClone VFS URL (e.g., "http://localhost:5572")
-  vfs_user: ""                    # VFS authentication username (optional)
-  vfs_pass: ""                    # VFS authentication password (optional)
+  password: '' # Encryption password (optional)
+  salt: '' # Encryption salt (optional)
+  vfs_enabled: false # Enable VFS notifications
+  vfs_url: '' # RClone VFS URL (e.g., "http://localhost:5572")
+  vfs_user: '' # VFS authentication username (optional)
+  vfs_pass: '' # VFS authentication password (optional)
 
 # Import processing configuration
 import:
-  max_processor_workers: 2        # Number of NZB processor workers
-  queue_processing_interval: 5    # Queue processing interval in seconds
+  max_processor_workers: 2 # Number of NZB processor workers
+  queue_processing_interval_seconds: 5 # Queue processing interval in seconds
 
 # Health monitoring configuration
 health:
-  enabled: true                   # Enable health monitoring service
-  auto_repair_enabled: false      # Enable automatic repair of corrupted files via ARRs (default: false)
+  enabled: true # Enable health monitoring service
+  auto_repair_enabled: false # Enable automatic repair of corrupted files via ARRs (default: false)
+  check_interval_seconds: 300 # Health check interval in seconds (default: 300 = 5 minutes)
+
+# WebDAV mount path configuration
+mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. Must be an absolute path starting with /
 
 # SABnzbd-compatible API configuration
 sabnzbd:
-  enabled: false                  # Enable SABnzbd-compatible API
-  mount_dir: "/mnt/altmount"      # Directory where WebDAV is mounted
-  categories:                     # Download categories (optional)
-    - name: "movies"
+  enabled: false # Enable SABnzbd-compatible API
+  complete_dir: '/altmount/completed' # The complete directory where the files will be imported.
+  categories: # Download categories (optional)
+    - name: 'movies'
       order: 1
       priority: 0
-      dir: "movies"
-    - name: "tv"
+      dir: 'movies'
+    - name: 'tv'
       order: 2
       priority: 0
-      dir: "tv"
+      dir: 'tv'
 
 # Radarr/Sonarr arrs configuration
 arrs:
-  enabled: false                  # Enable arrs service
-  mount_path: ""                  # WebDAV mount path to strip from file paths (required when enabled)
-  radarr_instances: []            # Radarr instances (configured via UI)
-  sonarr_instances: []            # Sonarr instances (configured via UI)
+  enabled: false # Enable arrs service
+  radarr_instances: [] # Radarr instances (configured via UI)
+  sonarr_instances: [] # Sonarr instances (configured via UI)
   # Example instance configuration (use the web UI instead):
   # radarr_instances:
   #   - name: "radarr-main"
@@ -79,39 +82,39 @@ arrs:
 
 # Logging configuration with rotation support
 log:
-  file: "./logs/altmount.log"   # Log file path (empty = console only, defaults to same directory as config file)
-  level: "info"                 # Log level: debug, info, warn, error
-  max_size: 100                 # Maximum size in MB before rotation
-  max_age: 30                   # Maximum age in days to keep old files
-  max_backups: 10               # Maximum number of old files to keep
-  compress: true                # Compress old log files
+  file: './logs/altmount.log' # Log file path (empty = console only, defaults to same directory as config file)
+  level: 'info' # Log level: debug, info, warn, error
+  max_size: 100 # Maximum size in MB before rotation
+  max_age: 30 # Maximum age in days to keep old files
+  max_backups: 10 # Maximum number of old files to keep
+  compress: true # Compress old log files
 
 # Global log level (legacy - use log.level instead)
-log_level: "info"
-  
+log_level: 'info'
+
 # NNTP Providers Configuration
 # Configure multiple providers for redundancy and load balancing
 providers:
   # Primary provider with SSL
-  - name: "primary-ssl"
-    host: "ssl-news.provider.com"    # Replace with your provider's SSL hostname
+  - name: 'primary-ssl'
+    host: 'ssl-news.provider.com' # Replace with your provider's SSL hostname
     port: 563
-    username: "your_username"        # Replace with your username
-    password: "your_password"        # Replace with your password
+    username: 'your_username' # Replace with your username
+    password: 'your_password' # Replace with your password
     max_connections: 20
     tls: true
     insecure_tls: false
-    
+
   # Backup provider without SSL
-  - name: "backup-standard"
-    host: "news.provider.com"        # Replace with your provider's standard hostname
+  - name: 'backup-standard'
+    host: 'news.provider.com' # Replace with your provider's standard hostname
     port: 119
-    username: "your_username"        # Replace with your username
-    password: "your_password"        # Replace with your password
+    username: 'your_username' # Replace with your username
+    password: 'your_password' # Replace with your password
     max_connections: 10
     tls: false
     insecure_tls: false
-    
+
   # Secondary provider (optional)
   # - name: "secondary-provider"
   #   host: "news.otherprovider.com"
@@ -121,9 +124,8 @@ providers:
   #   max_connections: 15
   #   tls: true
   #   insecure_tls: false
-
 # Configuration Notes:
-# 
+#
 # 1. REST API:
 #    - Provides HTTP endpoints for queue, health, and configuration management
 #    - Available at http://server:port/api/ when enabled
@@ -173,20 +175,26 @@ providers:
 #    - Optional download categories for organization
 #    - Enable for integration with existing download clients
 #
-# 10. Scraper Service:
+# 10. Mount Path:
+#     - Global WebDAV mount path configuration
+#     - Used by ARRs service to strip mount prefix from file paths
+#     - Must be an absolute path when ARRs is enabled
+#     - Example: '/mnt/altmount' or '/mnt/unionfs'
+#
+# 11. Scraper Service:
 #     - Automatically index files from Radarr and Sonarr instances
 #     - Configure multiple instances of each service type
 #     - Customizable scrape intervals (default 24 hours)
 #     - Manage instances through the web interface
 #     - Indexes movie and TV episode file paths for fast searching
 #
-# 11. Paths:
+# 12. Paths:
 #     - Use absolute paths for production deployments
 #     - Relative paths are relative to the working directory
 #     - Ensure the application has read/write access to all paths
 #     - Metadata directory will be created automatically
 #
-# 12. Logging Configuration:
+# 13. Logging Configuration:
 #     - Log file defaults to same directory as config file (e.g., "altmount.log")
 #     - Set 'file' to custom path for different location (e.g., "./logs/altmount.log")
 #     - Leave 'file' empty to log to console only
@@ -194,7 +202,7 @@ providers:
 #     - Old files are automatically compressed when 'compress: true'
 #     - Supports backward compatibility with top-level 'log_level'
 #
-# 13. Security:
+# 14. Security:
 #     - Store credentials securely
 #     - Consider using environment variables for sensitive data
 #     - Use strong passwords for WebDAV authentication

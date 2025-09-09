@@ -34,6 +34,7 @@ export default ({ title }) => { /* ... */ };
 - **Use strict typing** - avoid `any` type
 - **Define return types** for complex functions
 - **Use union types** for state enums and options
+- **Run type checking**: Use `bun run check` for comprehensive TypeScript validation
 
 ```tsx
 // ✅ Good: Strict typing
@@ -547,6 +548,53 @@ function ErrorBoundary({ children }: { children: React.ReactNode }) {
 }
 ```
 
+## Icons and Assets
+
+### Lucide React Icons
+
+Use Lucide React for all icons throughout the application:
+
+```tsx
+// ✅ Good: Use Lucide React icons
+import { Home, Settings, User, ChevronDown, X } from 'lucide-react';
+
+function NavigationMenu() {
+  return (
+    <ul className="menu bg-base-200 rounded-box">
+      <li>
+        <a>
+          <Home className="h-5 w-5" />
+          Home
+        </a>
+      </li>
+      <li>
+        <a>
+          <Settings className="h-5 w-5" />
+          Settings
+        </a>
+      </li>
+    </ul>
+  );
+}
+
+// ✅ Good: Icon sizing with consistent classes
+<button type="button" className="btn btn-ghost">
+  <X className="h-4 w-4" aria-hidden="true" />
+</button>
+
+// ✅ Good: Icons in alerts
+<div className="alert alert-success">
+  <CheckCircle className="h-6 w-6" />
+  <div>Success message here</div>
+</div>
+```
+
+**Icon Guidelines:**
+- **Consistent sizing**: Use `h-4 w-4` for small icons, `h-5 w-5` for medium, `h-6 w-6` for larger
+- **Accessibility**: Add `aria-hidden="true"` for decorative icons
+- **Semantic naming**: Import icons with descriptive names that match their usage
+- **Performance**: Only import the specific icons you need
+
 ## Project-Specific Conventions
 
 ### API Integration Patterns
@@ -649,11 +697,14 @@ function App() {
 ## Development Workflow
 
 ### Before Committing
-1. **Run code quality checks**: `bun run check` (linting, formatting, and code quality)
+1. **Run type checking**: `bun run check` (TypeScript validation, linting, formatting, and code quality)
 2. **Test build**: `bun run build` (TypeScript compilation + Vite build)
 3. **Review changes**: Ensure code follows these standards
 
-Note: Use `bun run lint` for linting-only checks when needed.
+**Command Reference:**
+- `bun run check` - Comprehensive validation (TypeScript + linting + formatting)
+- `bun run lint` - Linting-only checks when needed
+- `bun run build` - Production build validation
 
 ### Code Review Checklist
 - [ ] Components use TypeScript interfaces

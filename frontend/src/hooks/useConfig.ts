@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "../api/client";
+import { type APIError, apiClient } from "../api/client";
+import { useToast } from "../contexts/ToastContext";
 import type { ConfigSection, ConfigUpdateRequest, ConfigValidateRequest } from "../types/config";
 
 // Query keys for React Query
@@ -37,6 +38,7 @@ export function useUpdateConfig() {
 // Hook to update specific configuration section
 export function useUpdateConfigSection() {
 	const queryClient = useQueryClient();
+	const { showToast } = useToast();
 
 	return useMutation({
 		mutationFn: ({ section, config }: { section: ConfigSection; config: ConfigUpdateRequest }) =>
@@ -46,7 +48,14 @@ export function useUpdateConfigSection() {
 			queryClient.setQueryData(configKeys.current(), data);
 		},
 		onError: (error) => {
+			const err = error as APIError;
 			console.error("Failed to update configuration section:", error);
+
+			showToast({
+				type: "error",
+				title: "Update Failed",
+				message: err.details,
+			});
 		},
 	});
 }

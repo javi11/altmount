@@ -14,7 +14,7 @@ export interface ConfigResponse {
 	sabnzbd: SABnzbdConfig;
 	arrs: ArrsConfig;
 	providers: ProviderConfig[];
-	log_level: string;
+	mount_path: string;
 }
 
 // WebDAV server configuration
@@ -50,7 +50,7 @@ export interface StreamingConfig {
 export interface HealthConfig {
 	enabled: boolean;
 	auto_repair_enabled: boolean;
-	check_interval?: number; // Duration in nanoseconds (optional)
+	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_concurrent_jobs?: number;
 	max_retries?: number;
 	max_segment_connections?: number;
@@ -70,7 +70,7 @@ export interface RCloneConfig {
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
-	queue_processing_interval: number; // Interval in seconds for queue processing
+	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 }
 
 // Log configuration
@@ -100,7 +100,7 @@ export interface ProviderConfig {
 // SABnzbd configuration
 export interface SABnzbdConfig {
 	enabled: boolean;
-	mount_dir: string;
+	complete_dir: string;
 	categories: SABnzbdCategory[];
 }
 
@@ -126,7 +126,7 @@ export interface ConfigUpdateRequest {
 	sabnzbd?: SABnzbdUpdateRequest;
 	arrs?: ArrsConfig;
 	providers?: ProviderUpdateRequest[];
-	log_level?: string;
+	mount_path?: string;
 }
 
 // WebDAV update request
@@ -163,7 +163,7 @@ export interface StreamingUpdateRequest {
 export interface HealthUpdateRequest {
 	enabled?: boolean;
 	auto_repair_enabled?: boolean;
-	check_interval?: number; // Duration in nanoseconds (optional)
+	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_concurrent_jobs?: number;
 	max_retries?: number;
 	max_segment_connections?: number;
@@ -183,7 +183,7 @@ export interface RCloneUpdateRequest {
 // Import update request
 export interface ImportUpdateRequest {
 	max_processor_workers?: number;
-	queue_processing_interval?: number; // Interval in seconds for queue processing
+	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
 }
 
 // Log update request
@@ -213,7 +213,7 @@ export interface ProviderUpdateRequest {
 // SABnzbd update request
 export interface SABnzbdUpdateRequest {
 	enabled?: boolean;
-	mount_dir?: string;
+	complete_dir?: string;
 	categories?: SABnzbdCategory[];
 }
 
@@ -260,7 +260,7 @@ export interface APIFormData {
 
 export interface ImportFormData {
 	max_processor_workers: number;
-	queue_processing_interval: number; // Interval in seconds for queue processing
+	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 }
 
 export interface MetadataFormData {
@@ -310,13 +310,9 @@ export interface LogFormData {
 	compress: boolean;
 }
 
-export interface SystemFormData {
-	log_level: string;
-}
-
 export interface SABnzbdFormData {
 	enabled: boolean;
-	mount_dir: string;
+	complete_dir: string;
 	categories: SABnzbdCategory[];
 }
 
@@ -356,7 +352,6 @@ export interface ArrsInstance {
 export interface ArrsConfig {
 	enabled: boolean;
 	max_workers: number;
-	mount_path: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 }

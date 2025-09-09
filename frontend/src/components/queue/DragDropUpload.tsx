@@ -1,7 +1,6 @@
 import { AlertCircle, CheckCircle2, FileIcon, Upload, X } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { useUploadNzb } from "../../hooks/useApi";
+import { useUploadToQueue } from "../../hooks/useApi";
 import { ErrorAlert } from "../ui/ErrorAlert";
 
 interface UploadedFile {
@@ -13,10 +12,9 @@ interface UploadedFile {
 }
 
 export function DragDropUpload() {
-	const { user } = useAuth();
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-	const uploadMutation = useUploadNzb();
+	const uploadMutation = useUploadToQueue();
 
 	const validateFile = useCallback((file: File): string | null => {
 		// Check file extension
@@ -34,11 +32,6 @@ export function DragDropUpload() {
 
 	const handleFiles = useCallback(
 		(files: File[]) => {
-			if (!user?.api_key) {
-				console.error("No API key available");
-				return;
-			}
-
 			const newFiles: UploadedFile[] = files.map((file) => ({
 				file,
 				id: `${file.name}-${Date.now()}-${Math.random()}`,
@@ -72,7 +65,6 @@ export function DragDropUpload() {
 				try {
 					const response = await uploadMutation.mutateAsync({
 						file: uploadFile.file,
-						apiKey: user.api_key || "",
 					});
 
 					// Update status to success
@@ -82,7 +74,7 @@ export function DragDropUpload() {
 								? {
 										...f,
 										status: "success" as const,
-										queueId: response.nzo_ids[0],
+										queueId: response.data?.id.toString(),
 									}
 								: f,
 						),
@@ -103,7 +95,7 @@ export function DragDropUpload() {
 				}
 			});
 		},
-		[user?.api_key, uploadMutation, validateFile],
+		[uploadMutation, validateFile],
 	);
 
 	const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -177,24 +169,6 @@ export function DragDropUpload() {
 				return "Failed";
 		}
 	};
-
-	if (!user?.api_key) {
-		return (
-			<div className="card bg-base-100 shadow-lg">
-				<div className="card-body">
-					<div className="alert alert-warning">
-						<AlertCircle className="h-5 w-5" />
-						<div>
-							<div className="font-bold">API Key Required</div>
-							<div>
-								You need an API key to upload NZB files. Generate one in the System settings.
-							</div>
-						</div>
-					</div>
-				</div>
-			</div>
-		);
-	}
 
 	return (
 		<div className="card bg-base-100 shadow-lg">

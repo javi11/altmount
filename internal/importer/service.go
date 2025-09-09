@@ -401,7 +401,8 @@ func (s *Service) workerLoop(workerID int) {
 	log := s.log.With("worker_id", workerID)
 
 	// Get processing interval from configuration
-	processingInterval := s.configGetter().Import.QueueProcessingInterval
+	processingIntervalSeconds := s.configGetter().Import.QueueProcessingIntervalSeconds
+	processingInterval := time.Duration(processingIntervalSeconds) * time.Second
 	log.Info("Queue worker started", "processing_interval", processingInterval)
 
 	ticker := time.NewTicker(processingInterval)
@@ -427,6 +428,13 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		item, err := s.database.Repository.ClaimNextQueueItem()
 		if err == nil {
+			if item == nil {
+				log.Debug("No item in processing queue")
+				return nil, nil
+			}
+
+			log.Debug("Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
+
 			return item, nil
 		}
 

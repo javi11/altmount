@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +11,10 @@ import (
 	"time"
 
 	"github.com/go-pkgz/auth/v2/token"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	fLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/javi11/altmount/frontend"
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
@@ -68,7 +72,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Setup log rotation with the loaded configuration
-	logger := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.LogLevel)
+	logger := slogutil.SetupLogRotationWithFallback(cfg.Log, cfg.Log.Level)
 	slog.SetDefault(logger)
 
 	logger.Info("Directory validation successful",
@@ -78,7 +82,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Starting AltMount server with log rotation configured",
 		"log_file", cfg.Log.File,
-		"log_level", getEffectiveLogLevel(cfg.Log.Level, cfg.LogLevel),
+		"log_level", getEffectiveLogLevel(cfg.Log.Level, cfg.Log.Level),
 		"max_size_mb", cfg.Log.MaxSize,
 		"max_age_days", cfg.Log.MaxAge,
 		"max_backups", cfg.Log.MaxBackups,
@@ -174,8 +178,37 @@ func runServe(cmd *cobra.Command, args []string) error {
 		_ = nsys.Close()
 	}()
 
-	// Create shared HTTP mux
-	mux := http.NewServeMux()
+	// Create Fiber app
+	app := fiber.New(fiber.Config{
+		RequestMethods: append(
+			fiber.DefaultMethods, "PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
+		),
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			logger.Error("Fiber error", "path", c.Path(), "method", c.Method(), "error", err)
+			return c.Status(code).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		},
+	})
+
+	// Conditional Fiber request logging - only in debug mode
+	// We use a wrapper to allow dynamic enabling/disabling
+	var debugMode bool
+	effectiveLogLevel := getEffectiveLogLevel(cfg.Log.Level, cfg.Log.Level)
+	debugMode = effectiveLogLevel == "debug"
+
+	// Create the logger middleware but wrap it to check debug mode
+	fiberLogger := fLogger.New()
+	app.Use(func(c *fiber.Ctx) error {
+		if debugMode {
+			return fiberLogger(c)
+		}
+		return c.Next()
+	})
 
 	// Declare auth services at function scope so WebDAV can access them
 	var authService *auth.Service
@@ -219,7 +252,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Prefix: "/api",
 	}
 
-	// Create API server with shared mux
+	// Create API server (now using Fiber directly)
 	apiServer := api.NewServer(
 		apiConfig,
 		mainRepo,
@@ -230,14 +263,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		configManager,
 		nsys.MetadataReader(),
 		poolManager,
-		mux,
 		nsys.ImporterService(),
 		arrsService)
-	logger.Info("API server enabled", "prefix", "/api")
+
+	apiServer.SetupRoutes(app)
+	logger.Info("API server enabled with Fiber routes", "prefix", "/api")
 
 	// Register API server for auth updates
 
-	// Create WebDAV server with shared mux
+	// Create WebDAV handler for Fiber integration
 	var tokenService *token.Service
 	var webdavUserRepo *database.UserRepository
 
@@ -247,27 +281,27 @@ func runServe(cmd *cobra.Command, args []string) error {
 		webdavUserRepo = userRepo
 	}
 
-	server, err := webdav.NewServer(&webdav.Config{
+	webdavHandler, err := webdav.NewHandler(&webdav.Config{
 		Port:   cfg.WebDAV.Port,
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
-		Debug:  cfg.LogLevel == "debug",
+		Debug:  cfg.Log.Level == "debug",
 		Prefix: "/webdav",
-	}, nsys.FileSystem(), mux, tokenService, webdavUserRepo, configManager.GetConfigGetter())
+	}, nsys.FileSystem(), tokenService, webdavUserRepo, configManager.GetConfigGetter())
 	if err != nil {
-		logger.Error("failed to start webdav", "err", err)
+		logger.Error("failed to create webdav handler", "err", err)
 		return err
 	}
 
 	// Register WebDAV auth updater with dynamic credentials
 	webdavAuthUpdater := webdav.NewAuthUpdater()
-	webdavAuthUpdater.SetAuthCredentials(server.GetAuthCredentials())
+	webdavAuthUpdater.SetAuthCredentials(webdavHandler.GetAuthCredentials())
 
 	// Add WebDAV-specific config change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		// Sync WebDAV auth credentials if they changed
 		if oldConfig.WebDAV.User != newConfig.WebDAV.User || oldConfig.WebDAV.Password != newConfig.WebDAV.Password {
-			server.SyncAuthCredentials()
+			webdavHandler.SyncAuthCredentials()
 			logger.Info("WebDAV auth credentials updated",
 				"old_user", oldConfig.WebDAV.User,
 				"new_user", newConfig.WebDAV.User)
@@ -277,12 +311,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Add log level config change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		// Determine old and new log levels (prioritize Log.Level over LogLevel)
-		oldLevel := oldConfig.LogLevel
+		oldLevel := oldConfig.Log.Level
 		if oldConfig.Log.Level != "" {
 			oldLevel = oldConfig.Log.Level
 		}
 
-		newLevel := newConfig.LogLevel
+		newLevel := newConfig.Log.Level
 		if newConfig.Log.Level != "" {
 			newLevel = newConfig.Log.Level
 		}
@@ -290,14 +324,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// Apply log level change if it changed
 		if oldLevel != newLevel {
 			api.ApplyLogLevel(newLevel)
+			// Update Fiber logger debug mode
+			debugMode = newLevel == "debug"
 			logger.Info("Log level updated dynamically",
 				"old_level", oldLevel,
-				"new_level", newLevel)
+				"new_level", newLevel,
+				"fiber_logging", debugMode)
 		}
 	})
 
-	logger.Info("Starting AltMount server",
-		"webdav_port", cfg.WebDAV.Port,
+	logger.Info("Initializing AltMount server components",
 		"providers", len(cfg.Providers),
 		"download_workers", cfg.Streaming.MaxDownloadWorkers,
 		"processor_workers", cfg.Import.MaxProcessorWorkers)
@@ -351,24 +387,57 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service is disabled in configuration")
 	}
 
-	// Add simple liveness endpoint for Docker health checks
-	mux.HandleFunc("/live", handleSimpleHealth)
+	// Add simple liveness endpoint for Docker health checks directly to Fiber
+	app.Get("/live", handleFiberHealth)
 
-	mux.Handle("/", getStaticFileHandler())
+	// Use middleware that bypasses Fiber's method validation
+	app.All("/webdav*", adaptor.HTTPHandler(webdavHandler.GetHTTPHandler()))
+
+	// Set up Fiber SPA routing
+	setupSPARoutes(app)
+
+	logger.Info("Starting AltMount server with Fiber",
+		"port", cfg.WebDAV.Port,
+		"webdav_path", "/webdav",
+		"api_path", "/api",
+		"providers", len(cfg.Providers),
+		"download_workers", cfg.Streaming.MaxDownloadWorkers,
+		"processor_workers", cfg.Import.MaxProcessorWorkers)
+
+	routes := app.GetRoutes()
+	for _, route := range routes {
+		logger.Debug("Fiber route", "path", route.Path, "method", route.Method)
+	}
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in goroutine
+	// Start Fiber server in goroutine
+	serverErr := make(chan error, 1)
 	go func() {
-		if err := server.Start(ctx); err != nil {
-			slog.Error("WebDAV server error", "err", err)
+		if err := app.Listen(fmt.Sprintf(":%d", cfg.WebDAV.Port)); err != nil {
+			logger.Error("Fiber server error", "error", err)
+			serverErr <- err
 		}
 	}()
 
+	logger.Info("AltMount server started successfully")
+
 	// Wait for shutdown signal or server error
-	signalHandler(ctx)
+	select {
+	case sig := <-sigChan:
+		logger.Info("Received shutdown signal", "signal", sig.String())
+		cancel() // Cancel context to signal all services to stop
+	case err := <-serverErr:
+		logger.Error("Server error, shutting down", "error", err)
+		cancel()
+	case <-ctx.Done():
+		logger.Info("Context cancelled, shutting down")
+	}
+
+	// Start graceful shutdown sequence
+	logger.Info("Starting graceful shutdown sequence")
 
 	// Stop health worker if running
 	if healthWorker != nil {
@@ -384,106 +453,53 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service cleanup completed")
 	}
 
-	server.Stop()
+	// Shutdown Fiber app with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 
-	logger.Info("AltMount server shutting down gracefully")
+	logger.Info("Shutting down Fiber server...")
+	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
+		logger.Error("Error shutting down Fiber app", "error", err)
+		return err
+	}
+	logger.Info("Fiber server shutdown completed")
+
+	logger.Info("AltMount server shutdown completed successfully")
 	return nil
 }
 
-// handleSimpleHealth provides a lightweight liveness check endpoint for Docker
-func handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	response := map[string]interface{}{
+// handleFiberHealth provides a lightweight liveness check endpoint for Docker using Fiber
+func handleFiberHealth(c *fiber.Ctx) error {
+	response := map[string]any{
 		"status":    "ok",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-
-	json.NewEncoder(w).Encode(response)
+	return c.JSON(response)
 }
 
-func signalHandler(ctx context.Context) {
-	c := make(chan os.Signal, 1)
-	// We'll accept graceful shutdowns when quit via SIGINT (Ctrl+C)
-	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
-	signal.Notify(c, os.Interrupt)
-
-	// Block until we receive our signal.
-	select {
-	case <-ctx.Done():
-	case <-c:
-	}
-}
-
-func getStaticFileHandler() http.Handler {
-	// Check if we should use embedded filesystem or development path
-	if _, err := os.Stat(frontendBuildPath); err == nil {
-		// Development mode - serve from disk with SPA fallback
-		return createSPAHandler(http.Dir(frontendBuildPath), false)
+// setupSPARoutes configures Fiber SPA routing for the frontend
+func setupSPARoutes(app *fiber.App) {
+	// Determine frontend build path
+	frontendPath := frontendBuildPath
+	if _, err := os.Stat(frontendBuildPath); err != nil {
+		// Development mode - serve from disk
+		frontendPath = "./frontend/dist"
 	}
 
-	// Production mode - serve from embedded filesystem with SPA fallback
+	// Cli mode - use embedded filesystem
 	buildFS, err := frontend.GetBuildFS()
 	if err != nil {
-		slog.Info("Failed to get embedded filesystem", "error", err)
-		// Fallback to disk if embedded fails
-		return createSPAHandler(http.Dir(frontendBuildPath), false)
+		// Docker or development
+		app.Static("/", frontendPath)
+		app.Static("*", frontendPath+"/index.html")
+	} else {
+		// For embedded filesystem, we'll handle it differently below
+		app.All("/*", filesystem.New(filesystem.Config{
+			Root:         http.FS(buildFS),
+			NotFoundFile: "index.html",
+			Index:        "index.html",
+		}))
+
+		return
 	}
-
-	return createSPAHandler(http.FS(buildFS), true)
-}
-
-// createSPAHandler creates a handler that serves static files with SPA fallback
-func createSPAHandler(fs http.FileSystem, isEmbedded bool) http.Handler {
-	fileServer := http.FileServer(fs)
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Clean the path
-		path := r.URL.Path
-		if path == "/" {
-			path = "/index.html"
-		}
-
-		// Try to open the requested file
-		var file http.File
-		var err error
-
-		file, err = fs.Open(path)
-
-		// If file exists, serve it normally
-		if err == nil {
-			if stat, err := file.Stat(); err == nil && !stat.IsDir() {
-				file.Close()
-				fileServer.ServeHTTP(w, r)
-				return
-			}
-			file.Close()
-		}
-
-		// File doesn't exist or is a directory, check if it's a static asset request
-		// Static assets typically have file extensions
-		if hasFileExtension(path) {
-			// This looks like a static asset request that doesn't exist, return 404
-			http.NotFound(w, r)
-			return
-		}
-
-		// No file extension - assume it's a client-side route, serve index.html
-		r.URL.Path = "/index.html"
-		fileServer.ServeHTTP(w, r)
-	})
-}
-
-// hasFileExtension checks if the path appears to be requesting a static asset
-func hasFileExtension(path string) bool {
-	// Common static asset extensions
-	staticExtensions := []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".map", ".json", ".xml", ".txt"}
-
-	for _, ext := range staticExtensions {
-		if len(path) >= len(ext) && path[len(path)-len(ext):] == ext {
-			return true
-		}
-	}
-	return false
 }

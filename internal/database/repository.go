@@ -396,8 +396,69 @@ func (r *Repository) RemoveFromQueue(id int64) error {
 	return nil
 }
 
-// RemoveFromQueueBulk removes multiple items from the queue
-func (r *Repository) RemoveFromQueueBulk(ids []int64) error {
+// BulkDeleteResult contains the result of a bulk delete operation
+type BulkDeleteResult struct {
+	DeletedCount    int64
+	ProcessingCount int64
+	RequestedCount  int64
+}
+
+// RemoveFromQueueBulk removes multiple items from the queue, excluding those currently being processed
+func (r *Repository) RemoveFromQueueBulk(ids []int64) (*BulkDeleteResult, error) {
+	if len(ids) == 0 {
+		return &BulkDeleteResult{RequestedCount: 0}, nil
+	}
+
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	// First, count how many items are currently processing
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM import_queue WHERE id IN (%s) AND status = ?`, strings.Join(placeholders, ","))
+	countArgs := append(args, QueueStatusProcessing)
+
+	var processingCount int64
+	err := r.db.QueryRow(countQuery, countArgs...).Scan(&processingCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count processing items: %w", err)
+	}
+
+	// If there are processing items, return error
+	if processingCount > 0 {
+		return &BulkDeleteResult{
+			DeletedCount:    0,
+			ProcessingCount: processingCount,
+			RequestedCount:  int64(len(ids)),
+		}, fmt.Errorf("cannot delete %d items that are currently being processed", processingCount)
+	}
+
+	// Delete items that are not processing
+	deleteQuery := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s) AND status != ?`, strings.Join(placeholders, ","))
+	deleteArgs := append(args, QueueStatusProcessing)
+
+	result, err := r.db.Exec(deleteQuery, deleteArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to remove items from queue: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return &BulkDeleteResult{
+		DeletedCount:    rowsAffected,
+		ProcessingCount: processingCount,
+		RequestedCount:  int64(len(ids)),
+	}, nil
+}
+
+// RestartQueueItemsBulk resets multiple queue items to pending status for reprocessing
+func (r *Repository) RestartQueueItemsBulk(ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -410,11 +471,21 @@ func (r *Repository) RemoveFromQueueBulk(ids []int64) error {
 		args[i] = id
 	}
 
-	query := fmt.Sprintf(`DELETE FROM import_queue WHERE id IN (%s)`, strings.Join(placeholders, ","))
+	// Reset items to pending status with cleared retry count and timestamps
+	query := fmt.Sprintf(`
+		UPDATE import_queue 
+		SET status = 'pending',
+		    retry_count = 0,
+		    error_message = NULL,
+		    started_at = NULL,
+		    completed_at = NULL,
+		    updated_at = datetime('now')
+		WHERE id IN (%s)
+	`, strings.Join(placeholders, ","))
 
 	result, err := r.db.Exec(query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to remove items from queue: %w", err)
+		return fmt.Errorf("failed to restart queue items: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -423,7 +494,7 @@ func (r *Repository) RemoveFromQueueBulk(ids []int64) error {
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("no queue items found to delete")
+		return fmt.Errorf("no queue items found to restart")
 	}
 
 	return nil
@@ -632,6 +703,26 @@ func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) 
 	result, err := r.db.Exec(query, olderThan)
 	if err != nil {
 		return 0, fmt.Errorf("failed to clear completed queue items: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}
+
+// ClearFailedQueueItems removes failed items from the queue
+func (r *Repository) ClearFailedQueueItems(olderThan time.Time) (int, error) {
+	query := `
+		DELETE FROM import_queue 
+		WHERE status = 'failed' AND updated_at < ?
+	`
+
+	result, err := r.db.Exec(query, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("failed to clear failed queue items: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()

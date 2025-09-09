@@ -31,11 +31,13 @@ import type {
 
 export class APIError extends Error {
 	public status: number;
+	public details: string;
 
-	constructor(status: number, message: string) {
+	constructor(status: number, message: string, details: string) {
 		super(message);
 		this.status = status;
 		this.name = "APIError";
+		this.details = details;
 	}
 }
 
@@ -50,6 +52,7 @@ export class APIClient {
 		const url = `${this.baseURL}${endpoint}`;
 
 		const config: RequestInit = {
+			credentials: "include", // Include cookies for Safari compatibility
 			headers: {
 				"Content-Type": "application/json",
 				...options.headers,
@@ -61,13 +64,19 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
-				throw new APIError(response.status, `HTTP ${response.status}: ${response.statusText}`);
+				const errorData = await response.json();
+				throw new APIError(
+					response.status,
+					errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+					errorData.details || "",
+				);
 			}
 
 			const data: APIResponse<T> = await response.json();
 
 			if (!data.success) {
-				throw new APIError(response.status, data.error || "API request failed");
+				// Handle error in the success=false format
+				throw new APIError(response.status, data.error || "API request failed", "");
 			}
 
 			return data.data as T;
@@ -75,7 +84,7 @@ export class APIClient {
 			if (error instanceof APIError) {
 				throw error;
 			}
-			throw new APIError(0, error instanceof Error ? error.message : "Network error");
+			throw new APIError(0, error instanceof Error ? error.message : "Network error", "");
 		}
 	}
 
@@ -86,6 +95,7 @@ export class APIClient {
 		const url = `${this.baseURL}${endpoint}`;
 
 		const config: RequestInit = {
+			credentials: "include", // Include cookies for Safari compatibility
 			headers: {
 				"Content-Type": "application/json",
 				...options.headers,
@@ -97,13 +107,29 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
-				throw new APIError(response.status, `HTTP ${response.status}: ${response.statusText}`);
+				// Try to parse error response
+				try {
+					const errorData = await response.json();
+					throw new APIError(
+						response.status,
+						errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+						errorData.details || "",
+					);
+				} catch {
+					// If parsing fails, use generic error
+					throw new APIError(
+						response.status,
+						`HTTP ${response.status}: ${response.statusText}`,
+						"",
+					);
+				}
 			}
 
 			const data: APIResponse<T> = await response.json();
 
 			if (!data.success) {
-				throw new APIError(response.status, data.error || "API request failed");
+				// Handle error in the success=false format
+				throw new APIError(response.status, data.error || "API request failed", "");
 			}
 
 			return data;
@@ -111,7 +137,7 @@ export class APIClient {
 			if (error instanceof APIError) {
 				throw error;
 			}
-			throw new APIError(0, error instanceof Error ? error.message : "Network error");
+			throw new APIError(0, error instanceof Error ? error.message : "Network error", "");
 		}
 	}
 
@@ -152,6 +178,16 @@ export class APIClient {
 		});
 	}
 
+	async restartBulkQueueItems(ids: number[]) {
+		return this.request<{ restarted_count: number; message: string }>("/queue/bulk/restart", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ ids }),
+		});
+	}
+
 	async retryQueueItem(id: number) {
 		return this.request<QueueItem>(`/queue/${id}/retry`, {
 			method: "POST",
@@ -168,6 +204,16 @@ export class APIClient {
 
 		const query = searchParams.toString();
 		return this.request<QueueStats>(`/queue/completed${query ? `?${query}` : ""}`, {
+			method: "DELETE",
+		});
+	}
+
+	async clearFailedQueue(olderThan?: string) {
+		const searchParams = new URLSearchParams();
+		if (olderThan) searchParams.set("older_than", olderThan);
+
+		const query = searchParams.toString();
+		return this.request<QueueStats>(`/queue/failed${query ? `?${query}` : ""}`, {
 			method: "DELETE",
 		});
 	}
@@ -195,8 +241,8 @@ export class APIClient {
 		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`);
 	}
 
-	async deleteHealthItem(id: string) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}`, {
+	async deleteHealthItem(id: number) {
+		return this.request<FileHealth>(`/health/${id}`, {
 			method: "DELETE",
 		});
 	}
@@ -220,8 +266,8 @@ export class APIClient {
 		});
 	}
 
-	async repairHealthItem(id: string, resetRepairRetryCount?: boolean) {
-		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/repair`, {
+	async repairHealthItem(id: number, resetRepairRetryCount?: boolean) {
+		return this.request<FileHealth>(`/health/${id}/repair`, {
 			method: "POST",
 			body: JSON.stringify({ reset_repair_retry_count: resetRepairRetryCount }),
 		});
@@ -262,28 +308,30 @@ export class APIClient {
 		return this.request<PoolMetrics>("/system/pool/metrics");
 	}
 
-	async directHealthCheck(filePath: string) {
+	async directHealthCheck(id: number) {
 		return this.request<{
 			message: string;
+			id: number;
 			file_path: string;
 			old_status: string;
 			new_status: string;
 			checked_at: string;
 			health_data: FileHealth;
-		}>(`/health/${encodeURIComponent(filePath)}/check-now`, {
+		}>(`/health/${id}/check-now`, {
 			method: "POST",
 		});
 	}
 
-	async cancelHealthCheck(filePath: string) {
+	async cancelHealthCheck(id: number) {
 		return this.request<{
 			message: string;
+			id: number;
 			file_path: string;
 			old_status: string;
 			new_status: string;
 			cancelled_at: string;
 			health_data: FileHealth;
-		}>(`/health/${encodeURIComponent(filePath)}/cancel`, {
+		}>(`/health/${id}/cancel`, {
 			method: "POST",
 		});
 	}
@@ -460,18 +508,43 @@ export class APIClient {
 		const response = await fetch(url, {
 			method: "POST",
 			body: formData,
+			credentials: "include", // Include cookies for Safari compatibility
 		});
 
 		if (!response.ok) {
-			throw new APIError(response.status, `Upload failed: ${response.statusText}`);
+			throw new APIError(response.status, `Upload failed: ${response.statusText}`, "");
 		}
 
 		const data = await response.json();
 		if (!data.status) {
-			throw new APIError(response.status, data.error || "Upload failed");
+			const err = data as APIError;
+			throw new APIError(response.status, err.message || "Upload failed", err.details || "");
 		}
 
 		return data;
+	}
+
+	// Native upload endpoint using JWT authentication
+	async uploadToQueue(
+		file: File,
+		category?: string,
+		priority?: number,
+	): Promise<APIResponse<QueueItem>> {
+		const formData = new FormData();
+		formData.append("file", file);
+		if (category) {
+			formData.append("category", category);
+		}
+		if (priority !== undefined) {
+			formData.append("priority", priority.toString());
+		}
+
+		return this.request<APIResponse<QueueItem>>("/queue/upload", {
+			method: "POST",
+			body: formData,
+			// Don't set Content-Type header - let browser set it with boundary for multipart/form-data
+			headers: {},
+		});
 	}
 }
 

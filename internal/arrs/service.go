@@ -121,13 +121,15 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 // findInstanceForFilePath finds which ARR instance manages the given file path
 func (s *Service) findInstanceForFilePath(filePath string) (instanceType string, instanceName string, err error) {
 	cfg := s.configGetter()
-	mountPath := cfg.Arrs.MountPath
+	mountPath := cfg.MountPath
 
 	// Add mount path to file path to get full path for ARR APIs
 	fullPath := filePath
 	if mountPath != "" {
-		fullPath = mountPath + strings.TrimPrefix(filePath, "/")
+		fullPath = filepath.Join(mountPath, filePath)
 	}
+
+	slog.Debug("Finding instance for file path", "file_path", filePath, "full_path", fullPath, "mount_path", mountPath)
 
 	// Try each enabled ARR instance to see which one manages this file
 	for _, instance := range s.getConfigInstances() {
@@ -201,17 +203,8 @@ func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error 
 
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
 func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool {
-	// Remove WebDAV mount path to get the actual file system path
-	cfg := s.configGetter()
-	mountPath := cfg.Arrs.MountPath
-	actualPath := filePath
-	if mountPath != "" {
-		actualPath = mountPath + strings.TrimPrefix(filePath, "/")
-	}
-
 	s.logger.Debug("Checking Radarr root folders for file ownership",
-		"file_path", filePath,
-		"actual_path", actualPath)
+		"file_path", filePath)
 
 	// Get root folders from Radarr (much faster than GetMovie)
 	rootFolders, err := client.GetRootFolders()
@@ -222,8 +215,8 @@ func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool
 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
-		s.logger.Debug("Checking Radarr root folder", "folder_path", folder.Path, "actual_path", actualPath)
-		if strings.HasPrefix(actualPath, folder.Path) {
+		s.logger.Debug("Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
+		if strings.HasPrefix(filePath, folder.Path) {
 			s.logger.Debug("File matches Radarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -236,7 +229,7 @@ func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool
 // triggerRadarrRescanByPath triggers a rescan in Radarr for the given file path
 func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, instanceName string) error {
 	cfg := s.configGetter()
-	mountPath := cfg.Arrs.MountPath
+	mountPath := cfg.MountPath
 
 	// Add mount path to get full path for Radarr API
 	fullPath := filePath
@@ -244,7 +237,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		fullPath = filepath.Join(mountPath, strings.TrimPrefix(filePath, "/"))
 	}
 
-	s.logger.Info("Triggering Radarr rescan/re-download by path",
+	s.logger.DebugContext(ctx, "Checking Radarr for file path",
 		"instance", instanceName,
 		"file_path", filePath,
 		"full_path", fullPath)
@@ -264,8 +257,15 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	if targetMovie == nil {
-		return fmt.Errorf("no movie found with file path: %s", fullPath)
+		return fmt.Errorf("no movie found with file path: %s. Check if the movie has any files", fullPath)
 	}
+
+	s.logger.DebugContext(ctx, "Found matching movie for file",
+		"instance", instanceName,
+		"movie_id", targetMovie.ID,
+		"movie_title", targetMovie.Title,
+		"movie_path", targetMovie.Path,
+		"file_path", fullPath)
 
 	// Delete the existing file
 	err = client.DeleteMovieFilesContext(ctx, targetMovie.MovieFile.ID)
@@ -286,7 +286,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		return fmt.Errorf("failed to trigger Radarr rescan for movie ID %d: %w", targetMovie.ID, err)
 	}
 
-	s.logger.Info("Successfully triggered Radarr rescan",
+	s.logger.DebugContext(ctx, "Successfully triggered Radarr rescan",
 		"instance", instanceName,
 		"movie_id", targetMovie.ID,
 		"command_id", response.ID)
@@ -296,17 +296,8 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 
 // sonarrManagesFile checks if Sonarr manages the given file path using root folders (checkrr approach)
 func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool {
-	// Remove WebDAV mount path to get the actual file system path
-	cfg := s.configGetter()
-	mountPath := cfg.Arrs.MountPath
-	actualPath := filePath
-	if mountPath != "" {
-		actualPath = mountPath + strings.TrimPrefix(filePath, "/")
-	}
-
 	s.logger.Debug("Checking Sonarr root folders for file ownership",
-		"file_path", filePath,
-		"actual_path", actualPath)
+		"file_path", filePath)
 
 	// Get root folders from Sonarr (much faster than GetAllSeries)
 	rootFolders, err := client.GetRootFolders()
@@ -317,8 +308,8 @@ func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool
 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
-		s.logger.Debug("Checking Sonarr root folder", "folder_path", folder.Path, "actual_path", actualPath)
-		if strings.HasPrefix(actualPath, folder.Path) {
+		s.logger.Debug("Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
+		if strings.HasPrefix(filePath, folder.Path) {
 			s.logger.Debug("File matches Sonarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -331,7 +322,7 @@ func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool
 // triggerSonarrRescanByPath triggers a rescan in Sonarr for the given file path
 func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.Sonarr, filePath, instanceName string) error {
 	cfg := s.configGetter()
-	mountPath := cfg.Arrs.MountPath
+	mountPath := cfg.MountPath
 
 	// Add mount path to get full path for Sonarr API
 	fullPath := filePath
@@ -339,7 +330,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		fullPath = filepath.Join(mountPath, strings.TrimPrefix(filePath, "/"))
 	}
 
-	s.logger.Info("Triggering Sonarr rescan/re-download by path",
+	s.logger.DebugContext(ctx, "Triggering Sonarr rescan/re-download by path",
 		"instance", instanceName,
 		"file_path", filePath,
 		"full_path", fullPath)
@@ -436,7 +427,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("failed to trigger episode search: %w", err)
 	}
 
-	s.logger.Info("Successfully triggered episode search for re-download",
+	s.logger.DebugContext(ctx, "Successfully triggered episode search for re-download",
 		"instance", instanceName,
 		"series_title", targetSeries.Title,
 		"episode_ids", episodeIDs,

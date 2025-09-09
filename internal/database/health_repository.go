@@ -78,6 +78,34 @@ func (r *HealthRepository) GetFileHealth(filePath string) (*FileHealth, error) {
 	return &health, nil
 }
 
+// GetFileHealthByID retrieves health record for a specific file by ID
+func (r *HealthRepository) GetFileHealthByID(id int64) (*FileHealth, error) {
+	query := `
+		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       error_details, created_at, updated_at
+		FROM file_health
+		WHERE id = ?
+	`
+
+	var health FileHealth
+	err := r.db.QueryRow(query, id).Scan(
+		&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
+		&health.LastError, &health.RetryCount, &health.MaxRetries,
+		&health.RepairRetryCount, &health.MaxRepairRetries,
+		&health.NextRetryAt, &health.SourceNzbPath, &health.ErrorDetails,
+		&health.CreatedAt, &health.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get file health by ID: %w", err)
+	}
+
+	return &health, nil
+}
+
 // GetUnhealthyFiles returns files that need health checks (excluding repair_triggered files)
 func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 	query := `
@@ -338,6 +366,72 @@ func (r *HealthRepository) GetHealthStats() (map[HealthStatus]int, error) {
 	return stats, nil
 }
 
+// SetRepairTriggeredByID sets a file's status to repair_triggered by ID
+func (r *HealthRepository) SetRepairTriggeredByID(id int64, errorMessage *string) error {
+	query := `
+		UPDATE file_health 
+		SET status = 'repair_triggered',
+		    last_error = ?,
+		    next_retry_at = NULL,
+		    updated_at = datetime('now')
+		WHERE id = ?
+	`
+
+	result, err := r.db.Exec(query, errorMessage, id)
+	if err != nil {
+		return fmt.Errorf("failed to update file status to repair_triggered by ID: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no file found to update status with ID: %d", id)
+	}
+
+	return nil
+}
+
+// SetFileCheckingByID sets a file's status to 'checking' by ID
+func (r *HealthRepository) SetFileCheckingByID(id int64) error {
+	query := `
+		UPDATE file_health 
+		SET status = ?,
+		    updated_at = datetime('now')
+		WHERE id = ?
+	`
+
+	_, err := r.db.Exec(query, HealthStatusChecking, id)
+	if err != nil {
+		return fmt.Errorf("failed to set file status to checking by ID: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteHealthRecordByID removes a specific health record from the database by ID
+func (r *HealthRepository) DeleteHealthRecordByID(id int64) error {
+	query := `DELETE FROM file_health WHERE id = ?`
+
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete health record by ID: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no health record found to delete with ID: %d", id)
+	}
+
+	return nil
+}
+
 // DeleteHealthRecord removes a specific health record from the database
 func (r *HealthRepository) DeleteHealthRecord(filePath string) error {
 	query := `DELETE FROM file_health WHERE file_path = ?`
@@ -544,7 +638,6 @@ func (r *HealthRepository) ResetFileAllChecking() error {
 
 	return nil
 }
-
 
 // DeleteHealthRecordsBulk removes multiple health records from the database
 func (r *HealthRepository) DeleteHealthRecordsBulk(filePaths []string) error {

@@ -55,6 +55,18 @@ export const useDeleteBulkQueueItems = () => {
 	});
 };
 
+export const useRestartBulkQueueItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (ids: number[]) => apiClient.restartBulkQueueItems(ids),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
 export const useRetryQueueItem = () => {
 	const queryClient = useQueryClient();
 
@@ -71,6 +83,17 @@ export const useClearCompletedQueue = () => {
 
 	return useMutation({
 		mutationFn: (olderThan?: string) => apiClient.clearCompletedQueue(olderThan),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+		},
+	});
+};
+
+export const useClearFailedQueue = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (olderThan?: string) => apiClient.clearFailedQueue(olderThan),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["queue"] });
 		},
@@ -129,7 +152,7 @@ export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (id: string) => apiClient.deleteHealthItem(id),
+		mutationFn: (id: number) => apiClient.deleteHealthItem(id),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},
@@ -163,7 +186,7 @@ export const useRepairHealthItem = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ id, resetRepairRetryCount }: { id: string; resetRepairRetryCount?: boolean }) =>
+		mutationFn: ({ id, resetRepairRetryCount }: { id: number; resetRepairRetryCount?: boolean }) =>
 			apiClient.repairHealthItem(id, resetRepairRetryCount),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -215,7 +238,7 @@ export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePath: string) => apiClient.directHealthCheck(filePath),
+		mutationFn: (id: number) => apiClient.directHealthCheck(id),
 		onSuccess: () => {
 			// Immediately refresh health data to show "checking" status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -228,7 +251,7 @@ export const useCancelHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (filePath: string) => apiClient.cancelHealthCheck(filePath),
+		mutationFn: (id: number) => apiClient.cancelHealthCheck(id),
 		onSuccess: () => {
 			// Immediately refresh health data to show cancelled status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -272,13 +295,35 @@ export const useCancelScan = () => {
 	});
 };
 
-// NZB file upload hook
+// NZB file upload hook (SABnzbd API)
 export const useUploadNzb = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: ({ file, apiKey }: { file: File; apiKey: string }) =>
 			apiClient.uploadNzbFile(file, apiKey),
+		onSuccess: () => {
+			// Invalidate queue data to show newly uploaded files
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
+// Native upload hook (using JWT authentication)
+export const useUploadToQueue = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({
+			file,
+			category,
+			priority,
+		}: {
+			file: File;
+			category?: string;
+			priority?: number;
+		}) => apiClient.uploadToQueue(file, category, priority),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
 			queryClient.invalidateQueries({ queryKey: ["queue"] });

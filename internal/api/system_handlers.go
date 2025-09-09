@@ -1,28 +1,34 @@
 package api
 
 import (
-	"encoding/json"
-	"net/http"
 	"os"
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 // handleGetSystemStats handles GET /api/system/stats
-func (s *Server) handleGetSystemStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	// Get queue statistics
 	queueStats, err := s.queueRepo.GetQueueStats()
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve queue statistics", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve queue statistics",
+			"details": err.Error(),
+		})
 	}
 
 	// Get health statistics
 	healthStatsMap, err := s.healthRepo.GetHealthStats()
 	if err != nil {
-		WriteInternalError(w, "Failed to retrieve health statistics", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve health statistics",
+			"details": err.Error(),
+		})
 	}
 
 	// Convert to response format
@@ -32,67 +38,86 @@ func (s *Server) handleGetSystemStats(w http.ResponseWriter, r *http.Request) {
 		System: s.getSystemInfo(),
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleGetSystemHealth handles GET /api/system/health
-func (s *Server) handleGetSystemHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 	// Perform health checks
-	healthCheck := s.checkSystemHealth(r.Context())
+	healthCheck := s.checkSystemHealth(c.Context())
 
 	// Set appropriate HTTP status code based on health
 	switch healthCheck.Status {
 	case "healthy":
-		WriteSuccess(w, healthCheck, nil)
+		return c.Status(200).JSON(fiber.Map{
+			"success": true,
+			"data":    healthCheck,
+		})
 	case "degraded":
 		// Return 200 but indicate degraded status
-		WriteSuccess(w, healthCheck, nil)
+		return c.Status(200).JSON(fiber.Map{
+			"success": true,
+			"data":    healthCheck,
+		})
 	case "unhealthy":
 		// Return 503 Service Unavailable for unhealthy status
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-
-		response := &APIResponse{
-			Success: false,
-			Data:    healthCheck,
-		}
-
-		_ = json.NewEncoder(w).Encode(response)
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"data":    healthCheck,
+		})
 	}
+
+	// Default case (shouldn't reach here)
+	return c.Status(500).JSON(fiber.Map{
+		"success": false,
+		"message": "Unknown health status",
+	})
 }
 
 // handleSystemCleanup handles POST /api/system/cleanup
-func (s *Server) handleSystemCleanup(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 	// Parse request body
 	var req SystemCleanupRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteBadRequest(w, "Invalid request body", err.Error())
-			return
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid request body",
+				"details": err.Error(),
+			})
 		}
 	}
 
 	// Parse parameters from query string if not in body
 	if req.QueueOlderThan == nil {
-		if queueOlderThan, err := ParseTimeParam(r, "queue_older_than"); err != nil {
-			WriteValidationError(w, "Invalid queue_older_than parameter", err.Error())
-			return
+		if queueOlderThan, err := ParseTimeParamFiber(c, "queue_older_than"); err != nil {
+			return c.Status(422).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid queue_older_than parameter",
+				"details": err.Error(),
+			})
 		} else if queueOlderThan != nil {
 			req.QueueOlderThan = queueOlderThan
 		}
 	}
 
 	if req.HealthOlderThan == nil {
-		if healthOlderThan, err := ParseTimeParam(r, "health_older_than"); err != nil {
-			WriteValidationError(w, "Invalid health_older_than parameter", err.Error())
-			return
+		if healthOlderThan, err := ParseTimeParamFiber(c, "health_older_than"); err != nil {
+			return c.Status(422).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid health_older_than parameter",
+				"details": err.Error(),
+			})
 		} else if healthOlderThan != nil {
 			req.HealthOlderThan = healthOlderThan
 		}
 	}
 
 	// Parse dry_run parameter
-	if dryRunStr := r.URL.Query().Get("dry_run"); dryRunStr != "" {
+	if dryRunStr := c.Query("dry_run"); dryRunStr != "" {
 		req.DryRun = dryRunStr == "true"
 	}
 
@@ -117,8 +142,11 @@ func (s *Server) handleSystemCleanup(w http.ResponseWriter, r *http.Request) {
 	if !req.DryRun {
 		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(*req.QueueOlderThan)
 		if err != nil {
-			WriteInternalError(w, "Failed to cleanup queue items", err.Error())
-			return
+			return c.Status(500).JSON(fiber.Map{
+				"success": false,
+				"message": "Failed to cleanup queue items",
+				"details": err.Error(),
+			})
 		}
 	} else {
 		// For dry run, we could count what would be removed
@@ -142,21 +170,27 @@ func (s *Server) handleSystemCleanup(w http.ResponseWriter, r *http.Request) {
 		DryRun:               req.DryRun,
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleSystemRestart handles POST /api/system/restart
-func (s *Server) handleSystemRestart(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	// Parse request body if present
 	var req SystemRestartRequest
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			WriteBadRequest(w, "Invalid request body", err.Error())
-			return
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"success": false,
+				"message": "Invalid request body",
+				"details": err.Error(),
+			})
 		}
 	}
 
-	s.logger.Info("System restart requested", "force", req.Force, "user_agent", r.UserAgent())
+	s.logger.Info("System restart requested", "force", req.Force, "user_agent", c.Get("User-Agent"))
 
 	// Prepare response
 	response := SystemRestartResponse{
@@ -165,10 +199,15 @@ func (s *Server) handleSystemRestart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send response immediately before restart
-	WriteSuccess(w, response, nil)
+	result := c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 
 	// Start restart process in a goroutine to allow response to be sent
 	go s.performRestart()
+
+	return result
 }
 
 // performRestart performs the actual server restart
@@ -210,11 +249,14 @@ func (s *Server) performRestart() {
 }
 
 // handleGetPoolMetrics handles GET /api/system/pool/metrics
-func (s *Server) handleGetPoolMetrics(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Check if pool manager is available
 	if s.poolManager == nil {
-		WriteInternalError(w, "Pool manager not available", "NNTP pool manager not configured")
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Pool manager not available",
+			"details": "NNTP pool manager not configured",
+		})
 	}
 
 	// Check if pool is available
@@ -230,15 +272,20 @@ func (s *Server) handleGetPoolMetrics(w http.ResponseWriter, r *http.Request) {
 			AcquireWaitTimeMs:    0,
 			LastUpdated:          time.Now(),
 		}
-		WriteSuccess(w, response, nil)
-		return
+		return c.Status(200).JSON(fiber.Map{
+			"success": true,
+			"data":    response,
+		})
 	}
 
 	// Get the pool
 	pool, err := s.poolManager.GetPool()
 	if err != nil {
-		WriteInternalError(w, "Failed to get NNTP pool", err.Error())
-		return
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to get NNTP pool",
+			"details": err.Error(),
+		})
 	}
 
 	// Get metrics snapshot from the pool
@@ -257,5 +304,8 @@ func (s *Server) handleGetPoolMetrics(w http.ResponseWriter, r *http.Request) {
 		LastUpdated:          time.Now(),
 	}
 
-	WriteSuccess(w, response, nil)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }

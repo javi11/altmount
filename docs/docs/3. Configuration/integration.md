@@ -37,7 +37,7 @@ _SABnzbd-compatible API configuration in the AltMount web interface_
 **Configuration Steps:**
 
 1. **Enable SABnzbd API**: Check the enabled checkbox to activate the API
-2. **Mount Directory**: Set where WebDAV will be mounted (use `/mnt/unionfs` if using unionfs)
+2. **Complete Directory**: Set where WebDAV will be mounted (use `/mnt/unionfs/altmount/completed` if using unionfs)
 3. **Categories**: Configure download categories for different media types:
    - **movies**: For movie downloads (order: 1, priority: 0)
    - **tv**: For TV show downloads (order: 2, priority: 0)

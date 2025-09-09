@@ -42,16 +42,10 @@ type ProviderAPIResponse struct {
 	IsBackupProvider bool   `json:"is_backup_provider"`
 }
 
-// ImportAPIResponse handles duration serialization for Import config
+// ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers     int `json:"max_processor_workers"`
-	QueueProcessingInterval int `json:"queue_processing_interval"` // Interval in seconds
-}
-
-// ConfigUpdateRequest represents the request structure for config updates with proper type handling
-type ConfigUpdateRequest struct {
-	*config.Config
-	Import ImportAPIResponse `json:"import"`
+	MaxProcessorWorkers            int `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int `json:"queue_processing_interval_seconds"` // Interval in seconds
 }
 
 // Helper functions to create API responses from core config types
@@ -91,33 +85,10 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 
 	return &ConfigAPIResponse{
 		Config:    cfg,
-		Import:    ToImportAPIResponse(&cfg.Import),
+		Import:    ImportAPIResponse(cfg.Import),
 		RClone:    rcloneResp,
 		Providers: providers,
 	}
-}
-
-// ToImportAPIResponse converts config.ImportConfig to ImportAPIResponse with duration as seconds
-func ToImportAPIResponse(cfg *config.ImportConfig) ImportAPIResponse {
-	return ImportAPIResponse{
-		MaxProcessorWorkers:     cfg.MaxProcessorWorkers,
-		QueueProcessingInterval: int(cfg.QueueProcessingInterval.Seconds()),
-	}
-}
-
-// FromImportAPIResponse converts ImportAPIResponse (with seconds) to config.ImportConfig (with duration)
-func FromImportAPIResponse(apiResp ImportAPIResponse) config.ImportConfig {
-	return config.ImportConfig{
-		MaxProcessorWorkers:     apiResp.MaxProcessorWorkers,
-		QueueProcessingInterval: time.Duration(apiResp.QueueProcessingInterval) * time.Second,
-	}
-}
-
-// ToConfigFromUpdateRequest converts ConfigUpdateRequest to config.Config with proper type conversions
-func ToConfigFromUpdateRequest(req *ConfigUpdateRequest) config.Config {
-	cfg := *req.Config                             // Copy the embedded config
-	cfg.Import = FromImportAPIResponse(req.Import) // Convert the Import field properly
-	return cfg
 }
 
 // Common API response structures
@@ -509,7 +480,8 @@ type ScanStatusResponse struct {
 
 // ManualImportRequest represents a request to manually import a file by path
 type ManualImportRequest struct {
-	FilePath string `json:"file_path"`
+	FilePath     string  `json:"file_path"`
+	RelativePath *string `json:"relative_path,omitempty"`
 }
 
 // ManualImportResponse represents the response from manually importing a file

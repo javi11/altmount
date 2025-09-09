@@ -50,12 +50,7 @@ export function ArrsConfigSection({
 		const errors: string[] = [];
 
 		if (data.enabled) {
-			// Validate mount path
-			if (!data.mount_path.trim()) {
-				errors.push("Mount path is required when arrs is enabled");
-			} else if (!data.mount_path.startsWith("/")) {
-				errors.push("Mount path must be an absolute path (start with /)");
-			}
+			// Note: mount_path validation is now handled at the root config level
 
 			// Validate instances
 			const allInstanceNames = [
@@ -222,33 +217,6 @@ export function ArrsConfigSection({
 					</div>
 				</div>
 			</div>
-
-			{/* Default Settings */}
-			{formData.enabled && (
-				<div className="card bg-base-200">
-					<div className="card-body">
-						<h3 className="mb-4 font-semibold">Default Settings</h3>
-
-						<div className="space-y-4">
-							<fieldset className="fieldset max-w-md">
-								<legend className="fieldset-legend">WebDAV Mount Path</legend>
-								<input
-									type="text"
-									className="input"
-									value={formData.mount_path}
-									onChange={(e) => handleFormChange("mount_path", e.target.value)}
-									placeholder="/mnt/altmount"
-									disabled={isReadOnly}
-								/>
-								<p className="label">
-									Absolute path where WebDAV is mounted. In case you have a setup an union in the
-									arrs, add the union instead. Ex: "/mnt/unionfs", "/mnt/altmount"
-								</p>
-							</fieldset>
-						</div>
-					</div>
-				</div>
-			)}
 
 			{/* Radarr Instances */}
 			{formData.enabled && (

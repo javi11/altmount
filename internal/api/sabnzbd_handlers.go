@@ -1,19 +1,18 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
@@ -25,148 +24,114 @@ var defaultCategory = config.SABnzbdCategory{
 	Dir:      "",
 }
 
-const completeDir = "/sabnzbd"
-
 // handleSABnzbd is the main handler for SABnzbd API endpoints
-func (s *Server) handleSABnzbd(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	// Check if SABnzbd API is enabled
 	if s.configManager != nil {
 		config := s.configManager.GetConfig()
 		if config.SABnzbd.Enabled == nil || !*config.SABnzbd.Enabled {
-			http.NotFound(w, r)
-			return
+			return c.Status(404).SendString("Not Found")
 		}
 	}
 
-	// Parse query parameters
-	query := r.URL.Query()
-
 	// Check for API key authentication
-	apiKey := query.Get("apikey")
+	apiKey := c.Query("apikey")
 	if apiKey == "" {
-		s.writeSABnzbdError(w, "API key required")
-		return
+		return s.writeSABnzbdErrorFiber(c, "API key required")
 	}
 
 	// Validate API key using existing authentication system
-	if !s.validateAPIKey(r, apiKey) {
-		s.writeSABnzbdError(w, "Invalid API key")
-		return
+	if !s.validateAPIKey(c, apiKey) {
+		return s.writeSABnzbdErrorFiber(c, "Invalid API key")
 	}
 
 	// Get mode parameter to determine which API method to call
-	mode := query.Get("mode")
+	mode := c.Query("mode")
 	switch mode {
 	case "addfile":
-		s.handleSABnzbdAddFile(w, r)
+		return s.handleSABnzbdAddFile(c)
 	case "addurl":
-		s.handleSABnzbdAddUrl(w, r)
+		return s.handleSABnzbdAddUrl(c)
 	case "queue":
-		s.handleSABnzbdQueue(w, r)
+		return s.handleSABnzbdQueue(c)
 	case "history":
-		s.handleSABnzbdHistory(w, r)
+		return s.handleSABnzbdHistory(c)
 	case "status":
-		s.handleSABnzbdStatus(w, r)
+		return s.handleSABnzbdStatus(c)
 	case "get_config":
-		s.handleSABnzbdGetConfig(w, r)
+		return s.handleSABnzbdGetConfig(c)
 	case "version":
-		s.handleSABnzbdVersion(w, r)
+		return s.handleSABnzbdVersion(c)
 	default:
-		s.writeSABnzbdError(w, fmt.Sprintf("Unknown mode: %s", mode))
+		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Unknown mode: %s", mode))
 	}
 }
 
 // handleSABnzbdAddFile handles file upload for NZB files
-func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeSABnzbdError(w, "Method not allowed")
-		return
-	}
-
-	// Parse multipart form
-	err := r.ParseMultipartForm(10 << 20) // 10MB max
-	if err != nil {
-		s.writeSABnzbdError(w, "Failed to parse form data")
-		return
+func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
+	if c.Method() != "POST" {
+		return s.writeSABnzbdErrorFiber(c, "Method not allowed")
 	}
 
 	// Get uploaded file
-	file, header, err := r.FormFile("nzbfile")
+	file, err := c.FormFile("nzbfile")
 	if err != nil {
 		// Try alternative field name
-		file, header, err = r.FormFile("name")
+		file, err = c.FormFile("name")
 		if err != nil {
-			s.writeSABnzbdError(w, "No NZB file provided")
-			return
+			return s.writeSABnzbdErrorFiber(c, "No NZB file provided")
 		}
 	}
-	defer file.Close()
 
 	// Validate file extension
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".nzb") {
-		s.writeSABnzbdError(w, "Invalid file type, must be .nzb")
-		return
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".nzb") {
+		return s.writeSABnzbdErrorFiber(c, "Invalid file type, must be .nzb")
 	}
 
 	// Get and validate category from form first
-	category := r.FormValue("cat")
+	category := c.FormValue("cat")
 	validatedCategory, err := s.validateSABnzbdCategory(category)
 	if err != nil {
-		s.writeSABnzbdError(w, err.Error())
-		return
+		return s.writeSABnzbdErrorFiber(c, err.Error())
 	}
 
 	// Build category path and create temporary file with category subdirectory
 	tempDir := os.TempDir()
+	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, header.Filename)
+		tempFile = filepath.Join(tempDir, completeDir, categoryPath, file.Filename)
 		// Ensure category directory exists
 		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
-			s.writeSABnzbdError(w, "Failed to create category directory")
-			return
+			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
 		}
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, header.Filename)
+		tempFile = filepath.Join(tempDir, completeDir, file.Filename)
 
 		// Ensure base directory exists
 		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
-			s.writeSABnzbdError(w, "Failed to create base directory")
-			return
+			return s.writeSABnzbdErrorFiber(c, "Failed to create base directory")
 		}
 	}
 
-	outFile, err := os.Create(tempFile)
-	if err != nil {
-		s.writeSABnzbdError(w, "Failed to create temporary file")
-		return
-	}
-	defer outFile.Close()
-
-	// Copy uploaded file to temporary location
-	_, err = io.Copy(outFile, file)
-	if err != nil {
-		s.writeSABnzbdError(w, "Failed to save file")
-		return
+	// Save the uploaded file to temporary location
+	if err := c.SaveFile(file, tempFile); err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Failed to save file")
 	}
 
 	// Add to queue using importer service
 	if s.importerService == nil {
-		s.writeSABnzbdError(w, "Importer service not available")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
-	// Category validation was moved above file creation
-
 	// Add the file to the processing queue using centralized method
-	priority := s.parseSABnzbdPriority(r.FormValue("priority"))
+	priority := s.parseSABnzbdPriority(c.FormValue("priority"))
 	item, err := s.importerService.AddToQueue(tempFile, &tempDir, &validatedCategory, &priority)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to add to queue")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
 
 	// Return success response
@@ -175,38 +140,33 @@ func (s *Server) handleSABnzbdAddFile(w http.ResponseWriter, r *http.Request) {
 		NzoIds: []string{fmt.Sprintf("%d", item.ID)},
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdAddUrl handles adding NZB from URL
-func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	nzbUrl := query.Get("name")
+func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
+	nzbUrl := c.Query("name")
 
 	if nzbUrl == "" {
-		s.writeSABnzbdError(w, "URL parameter 'name' required")
-		return
+		return s.writeSABnzbdErrorFiber(c, "URL parameter 'name' required")
 	}
 
 	// Download NZB file from URL
 	resp, err := http.Get(nzbUrl)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to download NZB from URL")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to download NZB from URL")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		s.writeSABnzbdError(w, fmt.Sprintf("Failed to download NZB: HTTP %d", resp.StatusCode))
-		return
+		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to download NZB: HTTP %d", resp.StatusCode))
 	}
 
 	// Get and validate category from query parameters first
-	category := query.Get("cat")
+	category := c.Query("cat")
 	validatedCategory, err := s.validateSABnzbdCategory(category)
 	if err != nil {
-		s.writeSABnzbdError(w, err.Error())
-		return
+		return s.writeSABnzbdErrorFiber(c, err.Error())
 	}
 
 	// Create temporary file with category path
@@ -229,51 +189,43 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, filename)
+		tempFile = filepath.Join(tempDir, categoryPath, filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
+		categoryDir := filepath.Join(tempDir, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
-			s.writeSABnzbdError(w, "Failed to create category directory")
-			return
+			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
 		}
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, filename)
+		tempFile = filepath.Join(tempDir, filename)
 
 		// Ensure base directory exists
-		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
-			s.writeSABnzbdError(w, "Failed to create base directory")
-			return
+		if err := os.MkdirAll(filepath.Join(tempDir), 0755); err != nil {
+			return s.writeSABnzbdErrorFiber(c, "Failed to create base directory")
 		}
 	}
 
 	outFile, err := os.Create(tempFile)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to create temporary file")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to create temporary file")
 	}
 	defer outFile.Close()
 
 	// Copy downloaded content to file
 	_, err = io.Copy(outFile, resp.Body)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to save downloaded file")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to save downloaded file")
 	}
 
 	// Add to queue
 	if s.importerService == nil {
-		s.writeSABnzbdError(w, "Importer service not available")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
-	// Category validation was moved above file creation
-
 	// Add the file to the processing queue using centralized method
-	priority := s.parseSABnzbdPriority(query.Get("priority"))
+	priority := s.parseSABnzbdPriority(c.Query("priority"))
 	item, err := s.importerService.AddToQueue(tempFile, &tempDir, &validatedCategory, &priority)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to add to queue")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
 
 	// Return success response
@@ -282,30 +234,25 @@ func (s *Server) handleSABnzbdAddUrl(w http.ResponseWriter, r *http.Request) {
 		NzoIds: []string{fmt.Sprintf("%d", item.ID)},
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdQueue handles queue operations
-func (s *Server) handleSABnzbdQueue(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-
+func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	// Check for delete operation
-	if query.Get("name") == "delete" {
-		s.handleSABnzbdQueueDelete(w, r)
-		return
+	if c.Query("name") == "delete" {
+		return s.handleSABnzbdQueueDelete(c)
 	}
 
 	// Get queue items
 	if s.importerService == nil {
-		s.writeSABnzbdError(w, "Importer service not available")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
 	// Get pending and processing items
 	items, err := s.queueRepo.ListQueueItems(nil, "", 100, 0)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to get queue")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to get queue")
 	}
 
 	// Convert to SABnzbd format
@@ -322,86 +269,75 @@ func (s *Server) handleSABnzbdQueue(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdQueueDelete handles deleting items from queue
-func (s *Server) handleSABnzbdQueueDelete(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	nzoID := query.Get("value")
+func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
+	nzoID := c.Query("value")
 
 	if nzoID == "" {
-		s.writeSABnzbdError(w, "Missing nzo_id parameter")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Missing nzo_id parameter")
 	}
 
 	// Convert nzo_id to database ID
 	id, err := strconv.ParseInt(nzoID, 10, 64)
 	if err != nil {
-		s.writeSABnzbdError(w, "Invalid nzo_id")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Invalid nzo_id")
 	}
 
 	if s.importerService == nil {
-		s.writeSABnzbdError(w, "Importer service not available")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
 	// Delete from queue
 	err = s.queueRepo.RemoveFromQueue(id)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to delete queue item")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to delete queue item")
 	}
 
 	response := SABnzbdDeleteResponse{
 		Status: true,
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdHistory handles history operations
-func (s *Server) handleSABnzbdHistory(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-
+func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Check for delete operation
-	if query.Get("name") == "delete" {
-		s.handleSABnzbdHistoryDelete(w, r)
-		return
+	if c.Query("name") == "delete" {
+		return s.handleSABnzbdHistoryDelete(c)
 	}
 
 	// Get completed and failed items
 	if s.importerService == nil {
-		s.writeSABnzbdError(w, "Importer service not available")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
 	// Get completed items
 	completedStatus := database.QueueStatusCompleted
 	completed, err := s.queueRepo.ListQueueItems(&completedStatus, "", 50, 0)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to get completed items")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items")
 	}
 
 	// Get failed items
 	failedStatus := database.QueueStatusFailed
 	failed, err := s.queueRepo.ListQueueItems(&failedStatus, "", 50, 0)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to get failed items")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
 	}
 
 	// Combine and convert to SABnzbd format
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
 	for _, item := range completed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().MountPath))
 		index++
 	}
 	for _, item := range failed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().MountPath))
 		index++
 	}
 
@@ -417,47 +353,42 @@ func (s *Server) handleSABnzbdHistory(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdHistoryDelete handles deleting items from history
-func (s *Server) handleSABnzbdHistoryDelete(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	nzoID := query.Get("value")
+func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
+	nzoID := c.Query("value")
 
 	if nzoID == "" {
-		s.writeSABnzbdError(w, "Missing nzo_id parameter")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Missing nzo_id parameter")
 	}
 
 	// Convert nzo_id to database ID
 	id, err := strconv.ParseInt(nzoID, 10, 64)
 	if err != nil {
-		s.writeSABnzbdError(w, "Invalid nzo_id")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Invalid nzo_id")
 	}
 
 	if s.importerService == nil {
-		s.writeSABnzbdError(w, "Importer service not available")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
 	// Delete from queue (history items are still queue items with completed/failed status)
 	err = s.queueRepo.RemoveFromQueue(id)
 	if err != nil {
-		s.writeSABnzbdError(w, "Failed to delete history item")
-		return
+		return s.writeSABnzbdErrorFiber(c, "Failed to delete history item")
 	}
 
 	response := SABnzbdDeleteResponse{
 		Status: true,
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdStatus handles full status request
-func (s *Server) handleSABnzbdStatus(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	// Get queue information
 	var slots []SABnzbdQueueSlot
 	if s.queueRepo != nil {
@@ -503,21 +434,19 @@ func (s *Server) handleSABnzbdStatus(w http.ResponseWriter, r *http.Request) {
 		Slots:   slots,
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdGetConfig handles configuration request
-func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 	var config SABnzbdConfig
 
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 
-		completeDirPath := path.Join(cfg.SABnzbd.MountDir, completeDir)
-
 		// Build misc configuration
 		config.Misc = SABnzbdMiscConfig{
-			CompleteDir:            completeDirPath,
+			CompleteDir:            cfg.SABnzbd.CompleteDir,
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",
@@ -586,17 +515,17 @@ func (s *Server) handleSABnzbdGetConfig(w http.ResponseWriter, r *http.Request) 
 		Config:  config,
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // handleSABnzbdVersion handles version request
-func (s *Server) handleSABnzbdVersion(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSABnzbdVersion(c *fiber.Ctx) error {
 	response := SABnzbdVersionResponse{
 		Status:  true,
 		Version: "4.5.0",
 	}
 
-	s.writeSABnzbdResponse(w, response)
+	return s.writeSABnzbdResponseFiber(c, response)
 }
 
 // parseSABnzbdPriority converts SABnzbd priority string to AltMount priority
@@ -677,27 +606,16 @@ func (s *Server) validateSABnzbdCategory(category string) (string, error) {
 	return "", fmt.Errorf("invalid category '%s' - not found in configuration", category)
 }
 
-// writeSABnzbdResponse writes a successful SABnzbd-compatible response
-func (s *Server) writeSABnzbdResponse(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		s.logger.Error("Failed to encode SABnzbd response", "error", err)
-	}
+// writeSABnzbdResponseFiber writes a successful SABnzbd-compatible response (Fiber version)
+func (s *Server) writeSABnzbdResponseFiber(c *fiber.Ctx, data interface{}) error {
+	return c.Status(200).JSON(data)
 }
 
-// writeSABnzbdError writes a SABnzbd-compatible error response
-func (s *Server) writeSABnzbdError(w http.ResponseWriter, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK) // SABnzbd returns 200 even for errors
-
+// writeSABnzbdErrorFiber writes a SABnzbd-compatible error response (Fiber version)
+func (s *Server) writeSABnzbdErrorFiber(c *fiber.Ctx, message string) error {
 	response := SABnzbdResponse{
 		Status: false,
 		Error:  &message,
 	}
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		s.logger.Error("Failed to encode SABnzbd error response", "error", err)
-	}
+	return c.Status(200).JSON(response) // SABnzbd returns 200 even for errors
 }

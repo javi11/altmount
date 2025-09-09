@@ -6,7 +6,7 @@ services:
       dockerfile: docker/Dockerfile
     image: altmount:latest
     ports:
-      - "8081:8081"
+      - "8080:8080"
     volumes:
       - ./example/config:/config
       - ./example/metadata:/metadata
@@ -29,4 +29,4 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 5s

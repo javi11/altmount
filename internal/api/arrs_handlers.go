@@ -1,8 +1,7 @@
 package api
 
 import (
-	"encoding/json"
-	"net/http"
+	"github.com/gofiber/fiber/v2"
 )
 
 // ArrsInstanceRequest represents a request to create/update an arrs instance
@@ -77,11 +76,13 @@ type TestConnectionRequest struct {
 }
 
 // handleListArrsInstances returns all arrs instances
-func (s *Server) handleListArrsInstances(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		s.logger.Error("Arrs service is not available")
-		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
-		return
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
 	}
 
 	s.logger.Debug("Listing arrs instances")
@@ -98,32 +99,40 @@ func (s *Server) handleListArrsInstances(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleGetArrsInstance returns a single arrs instance by type and name
-func (s *Server) handleGetArrsInstance(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		s.logger.Error("Arrs service is not available")
-		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
-		return
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
 	}
 
-	instanceType := r.PathValue("type")
-	instanceName := r.PathValue("name")
+	instanceType := c.Params("type")
+	instanceName := c.Params("name")
 
 	if instanceType == "" || instanceName == "" {
-		http.Error(w, "Instance type and name are required", http.StatusBadRequest)
-		return
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Instance type and name are required",
+		})
 	}
 
 	s.logger.Debug("Getting arrs instance", "type", instanceType, "name", instanceName)
 	instance := s.arrsService.GetInstance(instanceType, instanceName)
 	if instance == nil {
 		s.logger.Debug("Arrs instance not found", "type", instanceType, "name", instanceName)
-		http.Error(w, "Instance not found", http.StatusNotFound)
-		return
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Instance not found",
+		})
 	}
 
 	response := &ArrsInstanceResponse{
@@ -133,70 +142,57 @@ func (s *Server) handleGetArrsInstance(w http.ResponseWriter, r *http.Request) {
 		Enabled: instance.Enabled,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
-}
-
-// handleCreateArrsInstance creates a new arrs instance (now deprecated - use config instead)
-func (s *Server) handleCreateArrsInstance(w http.ResponseWriter, r *http.Request) {
-	// This endpoint is deprecated in favor of configuration-first approach
-	http.Error(w, "Creating instances via API is no longer supported. Please use configuration file.", http.StatusMethodNotAllowed)
-}
-
-// handleUpdateArrsInstance updates an existing arrs instance (now deprecated - use config instead)
-func (s *Server) handleUpdateArrsInstance(w http.ResponseWriter, r *http.Request) {
-	// This endpoint is deprecated in favor of configuration-first approach
-	http.Error(w, "Updating instances via API is no longer supported. Please use configuration file.", http.StatusMethodNotAllowed)
-}
-
-// handleDeleteArrsInstance deletes an arrs instance (now deprecated - use config instead)
-func (s *Server) handleDeleteArrsInstance(w http.ResponseWriter, r *http.Request) {
-	// This endpoint is deprecated in favor of configuration-first approach
-	http.Error(w, "Deleting instances via API is no longer supported. Please use configuration file.", http.StatusMethodNotAllowed)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }
 
 // handleTestArrsConnection tests connection to an arrs instance
-func (s *Server) handleTestArrsConnection(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
-		return
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
 	}
 
 	var req TestConnectionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
 	}
 
 	if req.URL == "" || req.APIKey == "" {
-		http.Error(w, "URL and API key are required", http.StatusBadRequest)
-		return
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "URL and API key are required",
+		})
 	}
 
 	if err := s.arrsService.TestConnection(string(req.Type), req.URL, req.APIKey); err != nil {
-		response := map[string]interface{}{
+		return c.Status(400).JSON(fiber.Map{
 			"success": false,
 			"error":   err.Error(),
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(response)
-		return
+		})
 	}
 
-	response := map[string]interface{}{
+	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"message": "Connection successful",
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	})
 }
 
 // handleGetArrsStats returns arrs statistics
-func (s *Server) handleGetArrsStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		http.Error(w, "Arrs not available", http.StatusServiceUnavailable)
-		return
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
 	}
 
 	// Get all instances from configuration
@@ -229,18 +225,8 @@ func (s *Server) handleGetArrsStats(w http.ResponseWriter, r *http.Request) {
 		DueForSync:       0, // Not applicable with config-first approach
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
-}
-
-// handleSearchMovies searches for movies (deprecated - no longer stored in database)
-func (s *Server) handleSearchMovies(w http.ResponseWriter, r *http.Request) {
-	// Movies are no longer stored in database with configuration-first approach
-	http.Error(w, "Movie search is no longer supported. Scraped data is not stored in database.", http.StatusMethodNotAllowed)
-}
-
-// handleSearchEpisodes searches for episodes (deprecated - no longer stored in database)
-func (s *Server) handleSearchEpisodes(w http.ResponseWriter, r *http.Request) {
-	// Episodes are no longer stored in database with configuration-first approach
-	http.Error(w, "Episode search is no longer supported. Scraped data is not stored in database.", http.StatusMethodNotAllowed)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
 }

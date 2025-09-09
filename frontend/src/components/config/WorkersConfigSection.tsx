@@ -58,17 +58,17 @@ export function ImportConfigSection({
 				</fieldset>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Queue Processing Interval</legend>
+					<legend className="fieldset-legend">Queue Processing Interval (Seconds)</legend>
 					<input
 						type="number"
 						className="input"
-						value={formData.queue_processing_interval}
+						value={formData.queue_processing_interval_seconds}
 						readOnly={isReadOnly}
 						min={1}
 						max={300}
 						onChange={(e) =>
 							handleInputChange(
-								"queue_processing_interval",
+								"queue_processing_interval_seconds",
 								Number.parseInt(e.target.value, 10) || 5,
 							)
 						}
