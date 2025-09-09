@@ -68,19 +68,22 @@ func parseLevel(level string) slog.Leveler {
 
 // SetupLogRotation configures slog with log rotation using lumberjack
 // If logConfig.File is empty, it logs to console only
+// If logConfig.File is configured, it logs to both console and file
 // Returns the configured logger
 func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
 	var writer io.Writer = os.Stdout
 
-	// If log file is configured, set up rotation
+	// If log file is configured, set up dual logging (console + file with rotation)
 	if logConfig.File != "" {
-		writer = &lumberjack.Logger{
+		fileWriter := &lumberjack.Logger{
 			Filename:   logConfig.File,
 			MaxSize:    logConfig.MaxSize,    // MB
 			MaxBackups: logConfig.MaxBackups, // number of old files
 			MaxAge:     logConfig.MaxAge,     // days
 			Compress:   logConfig.Compress,   // compress old files
 		}
+		// Use io.MultiWriter to write to both console and file
+		writer = io.MultiWriter(os.Stdout, fileWriter)
 	}
 
 	// Determine log level (prefer new config.Log.Level over old config.LogLevel)

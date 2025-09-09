@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,6 +56,40 @@ func init() {
 	}
 
 	rootCmd.AddCommand(serveCmd)
+}
+
+// createCustomListener creates a custom HTTP server that routes between WebDAV and Fiber handlers
+func createListener(app *fiber.App, webdavHandler *webdav.Handler, port int) *http.Server {
+	// Mount WebDAV handler directly (no Fiber adapter needed)
+	webdavHTTPHandler := webdavHandler.GetHTTPHandler()
+
+	// Convert Fiber app to HTTP handler for all other routes
+	fiberHTTPHandler := adaptor.FiberApp(app)
+
+	// Create a handler that routes between WebDAV and Fiber
+	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Route WebDAV requests directly to WebDAV handler
+		if strings.HasPrefix(path, "/webdav") {
+			webdavHTTPHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// Route all other requests to Fiber handler
+		fiberHTTPHandler.ServeHTTP(w, r)
+	})
+
+	// Create and configure the HTTP server
+	server := &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      mainHandler,
+		IdleTimeout:  time.Minute * 5,
+		WriteTimeout: time.Minute * 30,
+		ReadTimeout:  time.Minute * 5,
+	}
+
+	return server
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -390,13 +425,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Add simple liveness endpoint for Docker health checks directly to Fiber
 	app.Get("/live", handleFiberHealth)
 
-	// Use middleware that bypasses Fiber's method validation
-	app.All("/webdav*", adaptor.HTTPHandler(webdavHandler.GetHTTPHandler()))
-
 	// Set up Fiber SPA routing
 	setupSPARoutes(app)
 
-	logger.Info("Starting AltMount server with Fiber",
+	// Create HTTP server with WebDAV and Fiber integration
+	customServer := createListener(app, webdavHandler, cfg.WebDAV.Port)
+
+	logger.Info("AltMount server started",
 		"port", cfg.WebDAV.Port,
 		"webdav_path", "/webdav",
 		"api_path", "/api",
@@ -413,11 +448,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start Fiber server in goroutine
+	// Start custom server in goroutine
 	serverErr := make(chan error, 1)
 	go func() {
-		if err := app.Listen(fmt.Sprintf(":%d", cfg.WebDAV.Port)); err != nil {
-			logger.Error("Fiber server error", "error", err)
+		if err := customServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Custom server error", "error", err)
 			serverErr <- err
 		}
 	}()
@@ -453,16 +488,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service cleanup completed")
 	}
 
-	// Shutdown Fiber app with timeout
+	// Shutdown custom server with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	logger.Info("Shutting down Fiber server...")
-	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
-		logger.Error("Error shutting down Fiber app", "error", err)
+	logger.Info("Shutting down server...")
+	if err := customServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("Error shutting down server", "error", err)
 		return err
 	}
-	logger.Info("Fiber server shutdown completed")
+	logger.Info("Server shutdown completed")
 
 	logger.Info("AltMount server shutdown completed successfully")
 	return nil
