@@ -97,21 +97,22 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 
 	// Build category path and create temporary file with category subdirectory
 	tempDir := os.TempDir()
+	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, categoryPath, file.Filename)
+		tempFile = filepath.Join(tempDir, completeDir, categoryPath, file.Filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, categoryPath)
+		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
 			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
 		}
 	} else {
-		tempFile = filepath.Join(tempDir, file.Filename)
+		tempFile = filepath.Join(tempDir, completeDir, file.Filename)
 
 		// Ensure base directory exists
-		if err := os.MkdirAll(filepath.Join(tempDir), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
 			return s.writeSABnzbdErrorFiber(c, "Failed to create base directory")
 		}
 	}
@@ -332,11 +333,11 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
 	for _, item := range completed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.CompleteDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().MountPath))
 		index++
 	}
 	for _, item := range failed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.CompleteDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().MountPath))
 		index++
 	}
 
