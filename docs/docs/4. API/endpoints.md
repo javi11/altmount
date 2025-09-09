@@ -25,15 +25,20 @@ Manually add a file by filesystem path to the import queue. This is useful for c
 **Query Parameters**:
 
 - `apikey` (required): Your AltMount API key
-- `relative_path` (optional): Path that will be stripped from the file destination
 
 **Request Body** (JSON):
 
 ```json
 {
-  "file_path": "/path/to/your/file.nzb"
+  "file_path": "/path/to/your/file.nzb",
+  "relative_path": "/path/to/strip"
 }
 ```
+
+**Request Body Fields**:
+
+- `file_path` (required): Full path to the file to import
+- `relative_path` (optional): Path that will be stripped from the file destination
 
 #### Response Format
 
@@ -66,9 +71,9 @@ curl -X POST "http://localhost:8080/api/import/file?apikey=YOUR_API_KEY" \
   -d '{"file_path": "/downloads/movie.nzb"}'
 
 # Import with relative path
-curl -X POST "http://localhost:8080/api/import/file?apikey=YOUR_API_KEY&relative_path=/downloads" \
+curl -X POST "http://localhost:8080/api/import/file?apikey=YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"file_path": "/downloads/subfolder/tvshow.nzb"}'
+  -d '{"file_path": "/downloads/subfolder/tvshow.nzb", "relative_path": "/downloads"}'
 ```
 
 #### File Requirements

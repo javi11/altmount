@@ -183,8 +183,6 @@ func (b *usenetReader) downloadManager(
 			return
 		}
 
-		slog.DebugContext(ctx, "Download worker started")
-
 		downloadWorkers := b.maxDownloadWorkers
 		if downloadWorkers == 0 {
 			downloadWorkers = defaultDownloadWorkers
@@ -239,9 +237,6 @@ func (b *usenetReader) downloadManager(
 
 			return
 		}
-
-		slog.DebugContext(ctx, "Download worker finished")
-
 	case <-ctx.Done():
 		return
 	}

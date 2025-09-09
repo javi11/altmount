@@ -480,7 +480,8 @@ type ScanStatusResponse struct {
 
 // ManualImportRequest represents a request to manually import a file by path
 type ManualImportRequest struct {
-	FilePath string `json:"file_path"`
+	FilePath     string  `json:"file_path"`
+	RelativePath *string `json:"relative_path,omitempty"`
 }
 
 // ManualImportResponse represents the response from manually importing a file

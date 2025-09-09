@@ -116,13 +116,6 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		})
 	}
 
-	var relativePath *string
-
-	// Path that will be stripped from the file destination
-	rp := c.Query("relative_path")
-	if rp != "" {
-		relativePath = &rp
-	}
 
 	// Validate API key using the refactored validation function
 	if !s.validateAPIKey(c, apiKey) {
@@ -212,10 +205,10 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		RetryCount:   0,
 		MaxRetries:   3,
 		CreatedAt:    time.Now(),
-		RelativePath: relativePath,
+		RelativePath: req.RelativePath,
 	}
 
-	slog.Debug("Adding file to queue", "file", req.FilePath, "relative_path", relativePath)
+	slog.Debug("Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath)
 
 	err = s.queueRepo.AddToQueue(item)
 	if err != nil {
