@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -214,6 +215,8 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		RelativePath: relativePath,
 	}
 
+	slog.Debug("Adding file to queue", "file", req.FilePath, "relative_path", relativePath)
+
 	err = s.queueRepo.AddToQueue(item)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -222,6 +225,8 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
+
+	slog.Debug("File added to queue", "file", req.FilePath, "queue_id", item.ID)
 
 	// Return success response
 	response := ManualImportResponse{
