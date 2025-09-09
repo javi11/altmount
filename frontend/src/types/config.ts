@@ -14,6 +14,7 @@ export interface ConfigResponse {
 	sabnzbd: SABnzbdConfig;
 	arrs: ArrsConfig;
 	providers: ProviderConfig[];
+	mount_path: string;
 }
 
 // WebDAV server configuration
@@ -99,7 +100,7 @@ export interface ProviderConfig {
 // SABnzbd configuration
 export interface SABnzbdConfig {
 	enabled: boolean;
-	mount_dir: string;
+	complete_dir: string;
 	categories: SABnzbdCategory[];
 }
 
@@ -125,6 +126,7 @@ export interface ConfigUpdateRequest {
 	sabnzbd?: SABnzbdUpdateRequest;
 	arrs?: ArrsConfig;
 	providers?: ProviderUpdateRequest[];
+	mount_path?: string;
 }
 
 // WebDAV update request
@@ -211,7 +213,7 @@ export interface ProviderUpdateRequest {
 // SABnzbd update request
 export interface SABnzbdUpdateRequest {
 	enabled?: boolean;
-	mount_dir?: string;
+	complete_dir?: string;
 	categories?: SABnzbdCategory[];
 }
 
@@ -311,7 +313,7 @@ export interface LogFormData {
 
 export interface SABnzbdFormData {
 	enabled: boolean;
-	mount_dir: string;
+	complete_dir: string;
 	categories: SABnzbdCategory[];
 }
 
@@ -351,7 +353,6 @@ export interface ArrsInstance {
 export interface ArrsConfig {
 	enabled: boolean;
 	max_workers: number;
-	mount_path: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 }

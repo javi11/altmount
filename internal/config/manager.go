@@ -27,6 +27,7 @@ type Config struct {
 	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
+	MountPath string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -189,9 +190,9 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled    *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MountDir   string            `yaml:"mount_dir" mapstructure:"mount_dir" json:"mount_dir"`
-	Categories []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 }
 
 // SABnzbdCategory represents a SABnzbd category configuration
@@ -206,7 +207,6 @@ type SABnzbdCategory struct {
 type ArrsConfig struct {
 	Enabled         *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	MaxWorkers      int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	MountPath       string               `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
 	RadarrInstances []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 }
@@ -446,11 +446,11 @@ func (c *Config) Validate() error {
 
 	// Validate SABnzbd configuration
 	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
-		if c.SABnzbd.MountDir == "" {
-			return fmt.Errorf("sabnzbd mount_dir cannot be empty when SABnzbd is enabled")
+		if c.SABnzbd.CompleteDir == "" {
+			return fmt.Errorf("sabnzbd complete_dir cannot be empty when SABnzbd is enabled")
 		}
-		if !filepath.IsAbs(c.SABnzbd.MountDir) {
-			return fmt.Errorf("sabnzbd mount_dir must be an absolute path")
+		if !filepath.IsAbs(c.SABnzbd.CompleteDir) {
+			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
 		}
 
 		// Validate categories if provided
@@ -466,13 +466,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Validate mount_path
+	if c.MountPath != "" && !filepath.IsAbs(c.MountPath) {
+		return fmt.Errorf("mount_path must be an absolute path")
+	}
+
 	// Validate scraper configuration
 	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
-		if c.Arrs.MountPath == "" {
-			return fmt.Errorf("scraper mount_path cannot be empty when scraper is enabled")
-		}
-		if !filepath.IsAbs(c.Arrs.MountPath) {
-			return fmt.Errorf("scraper mount_path must be an absolute path")
+		// Mount path is required when ARRs is enabled
+		if c.MountPath == "" {
+			return fmt.Errorf("mount_path is required when arrs is enabled")
 		}
 		if c.Arrs.MaxWorkers <= 0 {
 			return fmt.Errorf("scraper max_workers must be greater than 0")
@@ -755,22 +758,30 @@ func isRunningInDocker() bool {
 }
 
 // DefaultConfig returns a config with default values
-func DefaultConfig() *Config {
+// If configDir is provided, it will be used for database and log file paths
+func DefaultConfig(configDir ...string) *Config {
 	healthCheckEnabled := true
 	autoRepairEnabled := false // Disabled by default for safety
 	vfsEnabled := false
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 
-	// Set paths based on whether we're running in Docker
-	dbPath := "./altmount.db"
-	metadataPath := "./metadata"
-	logPath := "./altmount.log"
+	// Set paths based on whether we're running in Docker or have a specific config directory
+	var dbPath, metadataPath, logPath string
 
-	if isRunningInDocker() {
+	// If a config directory is provided, use it
+	if len(configDir) > 0 && configDir[0] != "" {
+		dbPath = filepath.Join(configDir[0], "altmount.db")
+		metadataPath = filepath.Join(configDir[0], "metadata")
+		logPath = filepath.Join(configDir[0], "altmount.log")
+	} else if isRunningInDocker() {
 		dbPath = "/config/altmount.db"
 		metadataPath = "/metadata"
 		logPath = "/config/altmount.log"
+	} else {
+		dbPath = "./altmount.db"
+		metadataPath = "./metadata"
+		logPath = "./altmount.log"
 	}
 
 	return &Config{
@@ -823,18 +834,18 @@ func DefaultConfig() *Config {
 			CheckAllSegments:      true,
 		},
 		SABnzbd: SABnzbdConfig{
-			Enabled:    &sabnzbdEnabled,
-			MountDir:   "",
-			Categories: []SABnzbdCategory{},
+			Enabled:     &sabnzbdEnabled,
+			CompleteDir: "",
+			Categories:  []SABnzbdCategory{},
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
 			Enabled:         &scrapperEnabled, // Disabled by default
 			MaxWorkers:      5,                // Default to 5 concurrent workers
-			MountPath:       "",               // Empty by default - required when enabled
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
 		},
+		MountPath: "", // Empty by default - required when ARRs is enabled
 	}
 }
 
@@ -883,8 +894,10 @@ func LoadConfig(configFile string) (*Config, error) {
 	if err := viper.ReadInConfig(); err != nil {
 		// Check if it's a file not found error
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file") {
-			// Create default config file
-			if err := SaveToFile(config, targetConfigFile); err != nil {
+			// Create default config file with paths relative to config directory
+			configDir := filepath.Dir(targetConfigFile)
+			configForSave := DefaultConfig(configDir)
+			if err := SaveToFile(configForSave, targetConfigFile); err != nil {
 				return nil, fmt.Errorf("failed to create default config file %s: %w", targetConfigFile, err)
 			}
 

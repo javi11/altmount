@@ -46,10 +46,13 @@ health:
   auto_repair_enabled: false # Enable automatic repair of corrupted files via ARRs (default: false)
   check_interval_seconds: 300 # Health check interval in seconds (default: 300 = 5 minutes)
 
+# WebDAV mount path configuration
+mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. Must be an absolute path starting with /
+
 # SABnzbd-compatible API configuration
 sabnzbd:
   enabled: false # Enable SABnzbd-compatible API
-  mount_dir: '/mnt/altmount' # Directory where WebDAV is mounted
+  complete_dir: '/altmount/completed' # The complete directory where the files will be imported.
   categories: # Download categories (optional)
     - name: 'movies'
       order: 1
@@ -63,7 +66,6 @@ sabnzbd:
 # Radarr/Sonarr arrs configuration
 arrs:
   enabled: false # Enable arrs service
-  mount_path: '' # WebDAV mount path to strip from file paths (required when enabled)
   radarr_instances: [] # Radarr instances (configured via UI)
   sonarr_instances: [] # Sonarr instances (configured via UI)
   # Example instance configuration (use the web UI instead):
@@ -173,20 +175,26 @@ providers:
 #    - Optional download categories for organization
 #    - Enable for integration with existing download clients
 #
-# 10. Scraper Service:
+# 10. Mount Path:
+#     - Global WebDAV mount path configuration
+#     - Used by ARRs service to strip mount prefix from file paths
+#     - Must be an absolute path when ARRs is enabled
+#     - Example: '/mnt/altmount' or '/mnt/unionfs'
+#
+# 11. Scraper Service:
 #     - Automatically index files from Radarr and Sonarr instances
 #     - Configure multiple instances of each service type
 #     - Customizable scrape intervals (default 24 hours)
 #     - Manage instances through the web interface
 #     - Indexes movie and TV episode file paths for fast searching
 #
-# 11. Paths:
+# 12. Paths:
 #     - Use absolute paths for production deployments
 #     - Relative paths are relative to the working directory
 #     - Ensure the application has read/write access to all paths
 #     - Metadata directory will be created automatically
 #
-# 12. Logging Configuration:
+# 13. Logging Configuration:
 #     - Log file defaults to same directory as config file (e.g., "altmount.log")
 #     - Set 'file' to custom path for different location (e.g., "./logs/altmount.log")
 #     - Leave 'file' empty to log to console only
@@ -194,7 +202,7 @@ providers:
 #     - Old files are automatically compressed when 'compress: true'
 #     - Supports backward compatibility with top-level 'log_level'
 #
-# 13. Security:
+# 14. Security:
 #     - Store credentials securely
 #     - Consider using environment variables for sensitive data
 #     - Use strong passwords for WebDAV authentication

@@ -332,11 +332,11 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
 	for _, item := range completed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.CompleteDir))
 		index++
 	}
 	for _, item := range failed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.MountDir))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().SABnzbd.CompleteDir))
 		index++
 	}
 
@@ -445,7 +445,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 
 		// Build misc configuration
 		config.Misc = SABnzbdMiscConfig{
-			CompleteDir:            cfg.SABnzbd.MountDir,
+			CompleteDir:            cfg.SABnzbd.CompleteDir,
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",

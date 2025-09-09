@@ -163,7 +163,8 @@ export function ConfigurationPage() {
 			| RCloneVFSFormData
 			| LogFormData
 			| SABnzbdConfig
-			| ArrsConfig,
+			| ArrsConfig
+			| { mount_path: string },
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -221,6 +222,13 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "log",
 					config: { log: logData },
+				});
+			} else if (section === "mount_path") {
+				// For mount_path, we need to update the system section with mount_path
+				const mountPathData = data as { mount_path: string };
+				await updateConfigSection.mutateAsync({
+					section: "system",
+					config: mountPathData,
 				});
 			} else if (section === "sabnzbd") {
 				await updateConfigSection.mutateAsync({

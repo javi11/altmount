@@ -46,11 +46,11 @@ export function SABnzbdConfigSection({
 		const errors: string[] = [];
 
 		if (data.enabled) {
-			// Validate mount_dir is required and absolute
-			if (!data.mount_dir.trim()) {
-				errors.push("Mount directory is required when SABnzbd API is enabled");
-			} else if (!data.mount_dir.startsWith("/")) {
-				errors.push("Mount directory must be an absolute path (starting with /)");
+			// Validate complete_dir is required and absolute
+			if (!data.complete_dir?.trim()) {
+				errors.push("Complete directory is required when SABnzbd API is enabled");
+			} else if (!data.complete_dir.startsWith("/")) {
+				errors.push("Complete directory must be an absolute path (starting with /)");
 			}
 
 			// Validate category names are unique
@@ -84,8 +84,8 @@ export function SABnzbdConfigSection({
 		updateFormData({ enabled });
 	};
 
-	const handleMountDirChange = (mount_dir: string) => {
-		updateFormData({ mount_dir });
+	const handleCompleteDirChange = (complete_dir: string) => {
+		updateFormData({ complete_dir });
 	};
 
 	const handleCategoryUpdate = (index: number, updates: Partial<SABnzbdCategory>) => {
@@ -176,10 +176,10 @@ export function SABnzbdConfigSection({
 						<input
 							type="text"
 							className="input"
-							value={formData.mount_dir}
+							value={formData.complete_dir}
 							readOnly={isReadOnly}
 							placeholder="/mnt/altmount/complete"
-							onChange={(e) => handleMountDirChange(e.target.value)}
+							onChange={(e) => handleCompleteDirChange(e.target.value)}
 						/>
 						<p className="label">
 							Absolute path to the directory where the complete imports will be placed. FROM THE

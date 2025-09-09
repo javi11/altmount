@@ -199,7 +199,7 @@ AltMount can act as a drop-in replacement for SABnzbd:
 ```yaml
 sabnzbd:
   enabled: false # Enable SABnzbd-compatible API
-  mount_dir: "/mnt/altmount" # Directory where WebDAV is mounted
+  complete_dir: "/mnt/altmount/completed" # The complete directory where the files will be imported from the WebDAV mount POINT OF VIEW
 ```
 
 **Integration Workflow:**
@@ -207,9 +207,9 @@ sabnzbd:
 1. **ARR Configuration**: Add AltMount as SABnzbd downloader in your ARRs
 2. **NZB Reception**: AltMount receives NZB from ARR, imports it
 3. **Completion Notification**: ARR picks up the completed download
-4. **Mount Directory**: Must be configured from the mounted directory point of view (where ARRs see the files)
+4. **Complete Directory**: Must be configured from the mounted directory point of view (where ARRs see the files)
 
-**Critical Configuration**: The `mount_dir` must be set to the path where your ARRs see the WebDAV-mounted files, not the local AltMount path.
+**Critical Configuration**: The `complete_dir` must be set to the path where your ARRs see the WebDAV-mounted files, not the local AltMount path.
 
 See [SABnzbd Integration](integration.md) for complete setup instructions.
 
