@@ -245,7 +245,6 @@ export type ConfigSection =
 	| "rclone"
 	| "sabnzbd"
 	| "arrs"
-	| "log"
 	| "system";
 
 // Form data interfaces for UI components
