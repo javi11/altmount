@@ -428,6 +428,8 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		item, err := s.database.Repository.ClaimNextQueueItem()
 		if err == nil {
+			log.Debug("Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
+
 			return item, nil
 		}
 
