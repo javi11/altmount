@@ -19,6 +19,7 @@ import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
 	useClearCompletedQueue,
+	useClearFailedQueue,
 	useDeleteBulkQueueItems,
 	useDeleteQueueItem,
 	useQueue,
@@ -64,6 +65,7 @@ export function QueuePage() {
 	const restartBulk = useRestartBulkQueueItems();
 	const retryItem = useRetryQueueItem();
 	const clearCompleted = useClearCompletedQueue();
+	const clearFailed = useClearFailedQueue();
 	const { confirmDelete, confirmAction } = useConfirm();
 
 	const handleDelete = async (id: number) => {
@@ -89,6 +91,21 @@ export function QueuePage() {
 		);
 		if (confirmed) {
 			await clearCompleted.mutateAsync("");
+		}
+	};
+
+	const handleClearFailed = async () => {
+		const confirmed = await confirmAction(
+			"Clear Failed Items",
+			"Are you sure you want to clear all failed items? This action cannot be undone.",
+			{
+				type: "warning",
+				confirmText: "Clear All",
+				confirmButtonClass: "btn-error",
+			},
+		);
+		if (confirmed) {
+			await clearFailed.mutateAsync("");
 		}
 	};
 
@@ -315,6 +332,17 @@ export function QueuePage() {
 						>
 							<Trash2 className="h-4 w-4" />
 							Clear Completed
+						</button>
+					)}
+					{stats && stats.total_failed > 0 && (
+						<button
+							type="button"
+							className="btn btn-error"
+							onClick={handleClearFailed}
+							disabled={clearFailed.isPending}
+						>
+							<Trash2 className="h-4 w-4" />
+							Clear Failed
 						</button>
 					)}
 				</div>

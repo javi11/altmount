@@ -208,6 +208,16 @@ export class APIClient {
 		});
 	}
 
+	async clearFailedQueue(olderThan?: string) {
+		const searchParams = new URLSearchParams();
+		if (olderThan) searchParams.set("older_than", olderThan);
+
+		const query = searchParams.toString();
+		return this.request<QueueStats>(`/queue/failed${query ? `?${query}` : ""}`, {
+			method: "DELETE",
+		});
+	}
+
 	// Health endpoints
 	async getHealth(params?: {
 		limit?: number;

@@ -420,6 +420,51 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 	})
 }
 
+// handleClearFailedQueue handles DELETE /api/queue/failed
+func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
+	// Parse older_than parameter
+	olderThan, err := ParseTimeParamFiber(c, "older_than")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "VALIDATION_ERROR",
+				"message": "Invalid older_than parameter",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Default to 24 hours ago if not specified
+	if olderThan == nil {
+		defaultTime := time.Now().Add(-24 * time.Hour)
+		olderThan = &defaultTime
+	}
+
+	// Clear failed items
+	count, err := s.queueRepo.ClearFailedQueueItems(*olderThan)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to clear failed queue items",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	response := map[string]interface{}{
+		"removed_count": count,
+		"older_than":    olderThan.Format(time.RFC3339),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
 // handleDeleteQueueBulk handles DELETE /api/queue/bulk
 func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 	// Parse request body

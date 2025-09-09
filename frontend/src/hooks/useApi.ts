@@ -89,6 +89,17 @@ export const useClearCompletedQueue = () => {
 	});
 };
 
+export const useClearFailedQueue = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (olderThan?: string) => apiClient.clearFailedQueue(olderThan),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+		},
+	});
+};
+
 // Health hooks
 export const useHealth = (params?: {
 	limit?: number;

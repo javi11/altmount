@@ -121,6 +121,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/queue", s.handleListQueue)
 	api.Get("/queue/stats", s.handleGetQueueStats)
 	api.Delete("/queue/completed", s.handleClearCompletedQueue)
+	api.Delete("/queue/failed", s.handleClearFailedQueue)
 	api.Delete("/queue/bulk", s.handleDeleteQueueBulk)
 	api.Post("/queue/bulk/restart", s.handleRestartQueueBulk)
 	api.Post("/queue/upload", s.handleUploadToQueue)

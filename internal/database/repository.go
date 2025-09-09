@@ -713,6 +713,26 @@ func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) 
 	return int(rowsAffected), nil
 }
 
+// ClearFailedQueueItems removes failed items from the queue
+func (r *Repository) ClearFailedQueueItems(olderThan time.Time) (int, error) {
+	query := `
+		DELETE FROM import_queue 
+		WHERE status = 'failed' AND updated_at < ?
+	`
+
+	result, err := r.db.Exec(query, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("failed to clear failed queue items: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}
+
 // IsFileInQueue checks if a file is already in the queue (pending, retrying, or processing)
 func (r *Repository) IsFileInQueue(filePath string) (bool, error) {
 	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'retrying', 'processing') LIMIT 1`
