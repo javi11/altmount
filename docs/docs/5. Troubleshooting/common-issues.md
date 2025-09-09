@@ -569,6 +569,67 @@ SQLITE_BUSY: database is locked
 
 _[Screenshot placeholder: Database diagnostic commands showing successful integrity check and repair]_
 
+### Database Read-Only Errors
+
+#### Symptoms
+
+```
+Error: failed to start NZB service: failed to reset stale queue items: failed to reset stale queue items: attempt to write a readonly database
+```
+
+or
+
+```
+SQLITE_READONLY: attempt to write a readonly database
+```
+
+**Solutions:**
+
+1. **Fix Database Permissions**:
+
+   ```bash
+   # Make database writable
+   chmod +w altmount.db
+
+   # Verify permissions
+   ls -la altmount.db
+   # Should show: -rw-rw-rw- or similar with write permissions
+   ```
+
+2. **Check Directory Permissions**:
+
+   ```bash
+   # Ensure the directory containing the database is writable
+   chmod +w /path/to/altmount/directory
+
+   # Check directory permissions
+   ls -ld /path/to/altmount/directory
+   ```
+
+3. **Docker Permission Issues**:
+
+   ```bash
+   # If running in Docker, fix ownership
+   sudo chown -R 1000:1000 ./altmount.db
+
+   # Or ensure proper PUID/PGID in docker-compose.yml
+   environment:
+     - PUID=1000
+     - PGID=1000
+   ```
+
+4. **File System Mount Issues**:
+
+   ```bash
+   # Check if database is on a read-only filesystem
+   mount | grep $(dirname $(realpath altmount.db))
+
+   # If mounted read-only, remount as read-write
+   sudo mount -o remount,rw /path/to/mount/point
+   ```
+
+_[Screenshot placeholder: Terminal showing database permission fix and successful AltMount startup]_
+
 ## Logging and Debugging
 
 ### Enable Debug Logging
