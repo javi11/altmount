@@ -217,12 +217,6 @@ export function ConfigurationPage() {
 					section: "rclone",
 					config: { rclone: data as RCloneVFSFormData },
 				});
-			} else if (section === "log") {
-				const logData = data as LogFormData;
-				await updateConfigSection.mutateAsync({
-					section: "log",
-					config: { log: logData },
-				});
 			} else if (section === "mount_path") {
 				// For mount_path, we need to update the system section with mount_path
 				const mountPathData = data as { mount_path: string };
@@ -477,14 +471,6 @@ export function ConfigurationPage() {
 									/>
 								)}
 
-								{activeSection === "log" && (
-									<SystemConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-
 								{activeSection === "providers" && <ProvidersConfigSection config={config} />}
 
 								{activeSection === "rclone" && (
@@ -526,17 +512,16 @@ export function ConfigurationPage() {
 									"metadata",
 									"streaming",
 									"system",
-									"log",
 									"providers",
 									"rclone",
 									"sabnzbd",
 									"arrs",
 									"health",
 								].includes(activeSection) && (
-									<ComingSoonSection
-										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
-									/>
-								)}
+										<ComingSoonSection
+											sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
+										/>
+									)}
 							</div>
 						</div>
 					</div>

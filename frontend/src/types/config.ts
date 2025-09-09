@@ -489,12 +489,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "Cog",
 		canEdit: true,
 	},
-	log: {
-		title: "Logging",
-		description: "Log configuration and settings",
-		icon: "HardDrive",
-		canEdit: true,
-	},
 	system: {
 		title: "System",
 		description: "System settings",
