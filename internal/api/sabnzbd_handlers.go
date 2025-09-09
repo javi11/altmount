@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -24,8 +23,6 @@ var defaultCategory = config.SABnzbdCategory{
 	Priority: -100,
 	Dir:      "",
 }
-
-const completeDir = "/sabnzbd"
 
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
@@ -104,17 +101,17 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, file.Filename)
+		tempFile = filepath.Join(tempDir, categoryPath, file.Filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
+		categoryDir := filepath.Join(tempDir, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
 			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
 		}
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, file.Filename)
+		tempFile = filepath.Join(tempDir, file.Filename)
 
 		// Ensure base directory exists
-		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tempDir), 0755); err != nil {
 			return s.writeSABnzbdErrorFiber(c, "Failed to create base directory")
 		}
 	}
@@ -191,17 +188,17 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, filename)
+		tempFile = filepath.Join(tempDir, categoryPath, filename)
 		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
+		categoryDir := filepath.Join(tempDir, categoryPath)
 		if err := os.MkdirAll(categoryDir, 0755); err != nil {
 			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
 		}
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, filename)
+		tempFile = filepath.Join(tempDir, filename)
 
 		// Ensure base directory exists
-		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(tempDir), 0755); err != nil {
 			return s.writeSABnzbdErrorFiber(c, "Failed to create base directory")
 		}
 	}
@@ -446,11 +443,9 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 
-		completeDirPath := path.Join(cfg.SABnzbd.MountDir, completeDir)
-
 		// Build misc configuration
 		config.Misc = SABnzbdMiscConfig{
-			CompleteDir:            completeDirPath,
+			CompleteDir:            cfg.SABnzbd.MountDir,
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",
