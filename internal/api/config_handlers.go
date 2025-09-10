@@ -3,10 +3,13 @@ package api
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nntppool"
 )
 
@@ -868,5 +871,79 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    providers,
+	})
+}
+
+// handleTestRCloneConnection tests the RClone RC connection
+func (s *Server) handleTestRCloneConnection(c *fiber.Ctx) error {
+	// Decode test request
+	var testReq struct {
+		VFSEnabled bool   `json:"vfs_enabled"`
+		VFSURL     string `json:"vfs_url"`
+		VFSUser    string `json:"vfs_user"`
+		VFSPass    string `json:"vfs_pass"`
+	}
+
+	if err := c.BodyParser(&testReq); err != nil {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid JSON in request body",
+			"details": err.Error(),
+		})
+	}
+
+	// Validate that VFS is enabled
+	if !testReq.VFSEnabled {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "VFS must be enabled to test connection",
+			"details": "VFS_NOT_ENABLED",
+		})
+	}
+
+	// Validate URL is provided
+	if testReq.VFSURL == "" {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "VFS URL is required",
+			"details": "MISSING_VFS_URL",
+		})
+	}
+
+	// Create a temporary RClone client with the test configuration
+	testConfig := &rclonecli.Config{
+		VFSEnabled: testReq.VFSEnabled,
+		VFSUrl:     testReq.VFSURL,
+		VFSUser:    testReq.VFSUser,
+		VFSPass:    testReq.VFSPass,
+	}
+
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	testClient := rclonecli.NewRcloneRcClient(testConfig, httpClient)
+
+	// Test the connection by attempting to refresh the root directory
+	ctx := c.Context()
+	err := testClient.RefreshCache(ctx, "/", true, false) // async=true, recursive=false
+
+	if err != nil {
+		// Return success:true but with test result as failed
+		return c.Status(200).JSON(fiber.Map{
+			"success": true,
+			"data": fiber.Map{
+				"success":       false,
+				"error_message": err.Error(),
+			},
+		})
+	}
+
+	// Connection successful
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"success":       true,
+			"error_message": "",
+		},
 	})
 }

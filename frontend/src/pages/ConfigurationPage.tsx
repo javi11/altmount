@@ -518,10 +518,10 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 								].includes(activeSection) && (
-										<ComingSoonSection
-											sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
-										/>
-									)}
+									<ComingSoonSection
+										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
+									/>
+								)}
 							</div>
 						</div>
 					</div>

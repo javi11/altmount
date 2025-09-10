@@ -78,48 +78,33 @@ export function WebDAVConfigSection({
 					placeholder="/mnt/altmount"
 				/>
 				<p className="label">
-					Absolute path where WebDAV is mounted. Required when ARRs is enabled.
-					This path will be stripped from file paths when communicating with Radarr/Sonarr.
+					Absolute path where WebDAV is mounted. Required when ARRs is enabled. This path will be
+					stripped from file paths when communicating with Radarr/Sonarr.
 				</p>
 
 				{/* Rclone Mount Instructions */}
-				<div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-					<h4 className="font-medium text-sm mb-2">How to create the mount using rclone:</h4>
-					<div className="text-sm text-gray-600 dark:text-gray-400 space-y-2">
+				<div className="mt-4 rounded-lg bg-gray-50 p-4 dark:bg-gray-800">
+					<h4 className="mb-2 font-medium text-sm">How to create the mount using rclone:</h4>
+					<div className="space-y-2 text-gray-600 text-sm dark:text-gray-400">
 						<p>1. Install rclone if not already installed</p>
 						<p>2. Create the mount directory:</p>
-						<code className="block bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs font-mono">
+						<code className="block rounded bg-gray-100 p-2 font-mono text-xs dark:bg-gray-700">
 							sudo mkdir -p {formData.mount_path || "/mnt/altmount"}
 						</code>
 						<p>3. Mount the WebDAV server:</p>
-						<code className="block bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs font-mono whitespace-pre-wrap">
+						<code className="block whitespace-pre-wrap rounded bg-gray-100 p-2 font-mono text-xs dark:bg-gray-700">
 							rclone mount webdav: {formData.mount_path || "/mnt/altmount"} \
-							--webdav-url=http://localhost:{formData.port || "8080"}/webdav \
-							--webdav-user={formData.user || "username"} \
-							--webdav-pass={formData.password || "password"} \
-							--async-read=true \
-							--allow-non-empty \
-							--allow-other \
-							--rc \
-							--rc-no-auth \
-							--rc-addr=0.0.0.0:5573 \
-							--vfs-read-ahead=128M \
-							--vfs-read-chunk-size=32M \
-							--vfs-read-chunk-size-limit=2G \
-							--vfs-cache-mode=full \
-							--vfs-cache-max-age=504h \
-							--vfs-cache-max-size=50G \
-							--vfs-cache-poll-interval=30s \
-							--buffer-size=32M \
-							--dir-cache-time=10m \
-							--timeout=10m \
-							--umask=002 \
-							--syslog \
-							--daemon
+							--webdav-url=http://localhost:{formData.port || "8080"}/webdav \ --webdav-user=
+							{formData.user || "username"} \ --webdav-pass={formData.password || "password"} \
+							--async-read=true \ --allow-non-empty \ --allow-other \ --rc \ --rc-no-auth \
+							--rc-addr=0.0.0.0:5573 \ --vfs-read-ahead=128M \ --vfs-read-chunk-size=32M \
+							--vfs-read-chunk-size-limit=2G \ --vfs-cache-mode=full \ --vfs-cache-max-age=504h \
+							--vfs-cache-max-size=50G \ --vfs-cache-poll-interval=30s \ --buffer-size=32M \
+							--dir-cache-time=10m \ --timeout=10m \ --umask=002 \ --syslog \ --daemon
 						</code>
-						<p className="text-xs text-gray-500 dark:text-gray-500">
-							Note: Replace the placeholder values with your actual WebDAV configuration.
-							The <code>--allow-other</code> flag requires additional system configuration.
+						<p className="text-gray-500 text-xs dark:text-gray-500">
+							Note: Replace the placeholder values with your actual WebDAV configuration. The{" "}
+							<code>--allow-other</code> flag requires additional system configuration.
 						</p>
 					</div>
 				</div>

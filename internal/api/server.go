@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
 // Config represents API server configuration
@@ -44,6 +45,7 @@ type Server struct {
 	importerService *importer.Service
 	poolManager     pool.Manager
 	arrsService     *arrs.Service
+	rcloneClient    rclonecli.RcloneRcClient
 	logger          *slog.Logger
 	startTime       time.Time
 }
@@ -87,6 +89,11 @@ func NewServer(
 // SetHealthWorker sets the health worker reference for the server
 func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 	s.healthWorker = healthWorker
+}
+
+// SetRcloneClient sets the rclone client reference for the server
+func (s *Server) SetRcloneClient(rcloneClient rclonecli.RcloneRcClient) {
+	s.rcloneClient = rcloneClient
 }
 
 // SetupFiberRoutes configures API routes directly on the Fiber app
@@ -160,6 +167,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/config/:section", s.handlePatchConfigSection)
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
+	api.Post("/config/rclone/test", s.handleTestRCloneConnection)
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
