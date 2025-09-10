@@ -1,5 +1,7 @@
 # AltMount
 
+<a href="https://www.buymeacoffee.com/qbt52hh7sjd"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=qbt52hh7sjd&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+
 A WebDAV server backed by NZB/Usenet that provides seamless access to Usenet content through standard WebDAV protocols.
 
 ## 📖 Documentation
@@ -13,12 +15,24 @@ Complete setup guides, configuration options, API reference, and troubleshooting
 ### Docker (Recommended)
 
 ```bash
-docker run -d \
-  --name altmount \
-  -p 8080:8080 \
-  -v ./config:/config \
-  -v ./metadata:/metadata \
-  javi11/altmount:latest
+services:
+  altmount:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    image: ghcr.io/javi11/altmount:latest
+    container_name: altmount
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - PORT=8080
+      - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
+    volumes:
+      - ./config:/config
+      - ./metadata:/metadata
+      - ./mnt:/mnt
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
 ```
 
 ### CLI Installation
