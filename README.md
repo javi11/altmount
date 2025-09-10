@@ -1,8 +1,12 @@
 # AltMount
 
-<a href="https://www.buymeacoffee.com/qbt52hh7sjd"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=qbt52hh7sjd&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+<p align="center">
+  <img src="./docs/static/img/logo.png" alt="AltMount Logo" width="150" height="150" />
+</p>
 
 A WebDAV server backed by NZB/Usenet that provides seamless access to Usenet content through standard WebDAV protocols.
+
+<a href="https://www.buymeacoffee.com/qbt52hh7sjd"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=qbt52hh7sjd&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
 
 ## 📖 Documentation
 
