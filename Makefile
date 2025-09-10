@@ -66,18 +66,6 @@ git-hooks:
 	@echo '#!/bin/sh\nmake' > .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
 
-.PHONY: release
-release:
-	goreleaser --skip-validate --skip-publish --rm-dist
-
-.PHONY: snapshot
-snapshot:
-	goreleaser --skip-docker --snapshot --skip-publish --rm-dist 
-
-.PHONY: publish
-publish:
-	goreleaser --rm-dist
-
 .PHONY: docker-build
 docker-build:
 	docker build -f docker/Dockerfile -t altmount:latest .

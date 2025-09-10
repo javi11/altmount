@@ -25,7 +25,6 @@ CONTRIBUTING.md
 config-example.yaml
 docker-compose.yml
 Makefile
-.goreleaser*
 
 # Frontend development files (keep what's needed for build)
 frontend/node_modules/

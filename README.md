@@ -6,7 +6,7 @@
 
 A WebDAV server backed by NZB/Usenet that provides seamless access to Usenet content through standard WebDAV protocols.
 
-<a href="https://www.buymeacoffee.com/qbt52hh7sjd"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=qbt52hh7sjd&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/qbt52hh7sjd)
 
 ## 📖 Documentation
 
@@ -54,7 +54,7 @@ altmount serve --config config.yaml
 
 ## Contributing
 
-See the [Development Guide](https://javi11.github.io/altmount/docs/development/setup) for information on setting up a development environment and contributing to the project.
+See the [Development Guide](https://javi11.github.io/altmount/docs/6. Development/setup) for information on setting up a development environment and contributing to the project.
 
 ## License
 
