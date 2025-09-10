@@ -54,7 +54,7 @@ altmount serve --config config.yaml
 
 ## Contributing
 
-See the [Development Guide](https://javi11.github.io/altmount/docs/6. Development/setup) for information on setting up a development environment and contributing to the project.
+See the [Development Guide](https://altmount.kipsilabs.top/docs/Development/setup). Development/setup for information on setting up a development environment and contributing to the project.
 
 ## License
 
