@@ -404,6 +404,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 		// Set health worker reference in API server
 		apiServer.SetHealthWorker(healthWorker)
+		// Set rclone client reference in API server
+		if rcloneClient != nil {
+			apiServer.SetRcloneClient(rcloneClient)
+		}
 
 		// Start health worker with the main context
 		if err := healthWorker.Start(ctx); err != nil {

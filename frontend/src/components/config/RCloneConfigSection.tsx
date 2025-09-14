@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Save } from "lucide-react";
+import { Eye, EyeOff, Save, TestTube } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, RCloneVFSFormData } from "../../types/config";
 
@@ -23,6 +23,11 @@ export function RCloneConfigSection({
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 	const [showVFSPassword, setShowVFSPassword] = useState(false);
+	const [isTestingConnection, setIsTestingConnection] = useState(false);
+	const [testResult, setTestResult] = useState<{
+		success: boolean;
+		message: string;
+	} | null>(null);
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -70,6 +75,54 @@ export function RCloneConfigSection({
 
 			await onUpdate("rclone", updateData);
 			setHasChanges(false);
+		}
+	};
+
+	const handleTestConnection = async () => {
+		setIsTestingConnection(true);
+		setTestResult(null);
+
+		try {
+			const response = await fetch("/api/config/rclone/test", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					vfs_enabled: formData.vfs_enabled,
+					vfs_url: formData.vfs_url,
+					vfs_user: formData.vfs_user,
+					vfs_pass: formData.vfs_pass,
+				}),
+			});
+
+			const result = await response.json();
+
+			if (result.success && result.data) {
+				if (result.data.success) {
+					setTestResult({
+						success: true,
+						message: "Connection successful! RClone RC is accessible.",
+					});
+				} else {
+					setTestResult({
+						success: false,
+						message: result.data.error_message || "Connection failed",
+					});
+				}
+			} else {
+				setTestResult({
+					success: false,
+					message: result.message || "Test failed",
+				});
+			}
+		} catch (error) {
+			setTestResult({
+				success: false,
+				message: error instanceof Error ? error.message : "Network error occurred",
+			});
+		} finally {
+			setIsTestingConnection(false);
 		}
 	};
 
@@ -158,9 +211,33 @@ export function RCloneConfigSection({
 				)}
 			</div>
 
-			{/* Save Button */}
+			{/* Test Result Alert */}
+			{testResult && (
+				<div className={`alert ${testResult.success ? "alert-success" : "alert-error"} mt-4`}>
+					<div>
+						<span>{testResult.message}</span>
+					</div>
+				</div>
+			)}
+
+			{/* Action Buttons */}
 			{!isReadOnly && (
-				<div className="flex justify-end">
+				<div className="flex justify-end gap-2">
+					{formData.vfs_enabled && (
+						<button
+							type="button"
+							className="btn btn-outline"
+							onClick={handleTestConnection}
+							disabled={isTestingConnection || !formData.vfs_url}
+						>
+							{isTestingConnection ? (
+								<span className="loading loading-spinner loading-sm" />
+							) : (
+								<TestTube className="h-4 w-4" />
+							)}
+							{isTestingConnection ? "Testing..." : "Test Connection"}
+						</button>
+					)}
 					<button
 						type="button"
 						className="btn btn-primary"
