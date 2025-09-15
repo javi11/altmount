@@ -32,8 +32,7 @@ services:
       - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
     volumes:
       - ./config:/config
-      - ./metadata:/metadata
-      - ./mnt:/mnt
+      - /mnt:/mnt
     ports:
       - "8080:8080"
     restart: unless-stopped
