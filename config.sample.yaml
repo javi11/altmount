@@ -14,11 +14,11 @@ api:
 
 # Database configuration
 database:
-  path: 'altmount.db' # Database for processing workflows
+  path: '/config/altmount.db' # Database for processing workflows
 
 # Metadata filesystem configuration
 metadata:
-  root_path: './metadata' # Directory to store metadata files (required)
+  root_path: '/config/metadata' # Directory to store metadata files (required)
 
 # Streaming and download configuration
 streaming:
@@ -52,7 +52,7 @@ mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. 
 # SABnzbd-compatible API configuration
 sabnzbd:
   enabled: false # Enable SABnzbd-compatible API
-  complete_dir: '/altmount/completed' # The complete directory where the files will be imported.
+  complete_dir: '/altmount/completed' # The complete directory where the files will be "downloaded".
   categories: # Download categories (optional)
     - name: 'movies'
       order: 1
@@ -82,7 +82,7 @@ arrs:
 
 # Logging configuration with rotation support
 log:
-  file: './logs/altmount.log' # Log file path (empty = console only, defaults to same directory as config file)
+  file: '/config/altmount.log' # Log file path (empty = console only, defaults to same directory as config file)
   level: 'info' # Log level: debug, info, warn, error
   max_size: 100 # Maximum size in MB before rotation
   max_age: 30 # Maximum age in days to keep old files
