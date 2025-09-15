@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 type RcloneRcClient interface {
@@ -46,9 +47,9 @@ func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, re
 		"recursive": fmt.Sprintf("%t", recursive),
 	}
 
-	baseUrl := c.config.VFSUrl
-	if c.config.VFSUser != "" && c.config.VFSPass != "" {
-		baseUrl = fmt.Sprintf("http://%s:%s@%s", c.config.VFSUser, c.config.VFSPass, c.config.VFSUrl)
+	baseUrl, err := c.buildVFSUrl()
+	if err != nil {
+		return fmt.Errorf("invalid VFS URL configuration: %w", err)
 	}
 
 	if dir != "" {
@@ -79,4 +80,51 @@ func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, re
 	}
 
 	return nil
+}
+
+// buildVFSUrl constructs the VFS URL with proper protocol and authentication handling
+func (c *rcloneRcClient) buildVFSUrl() (string, error) {
+	rawUrl := c.config.VFSUrl
+	if rawUrl == "" {
+		return "", fmt.Errorf("VFS URL is not configured")
+	}
+
+	// Parse the URL to handle all cases properly
+	parsedUrl, err := url.Parse(rawUrl)
+	if err != nil {
+		// If parsing fails, return the error immediately
+		return "", fmt.Errorf("failed to parse VFS URL %q: %w", c.config.VFSUrl, err)
+	}
+
+	// If no scheme is present, or if it looks like hostname:port was parsed as scheme:opaque
+	// (which happens with URLs like "example.com:8080"), add http:// and re-parse
+	needsScheme := parsedUrl.Scheme == "" ||
+		(parsedUrl.Host == "" && parsedUrl.Opaque != "" &&
+		 parsedUrl.Scheme != "http" && parsedUrl.Scheme != "https")
+
+	if needsScheme {
+		rawUrl = "http://" + c.config.VFSUrl
+		parsedUrl, err = url.Parse(rawUrl)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse VFS URL %q after adding http prefix: %w", c.config.VFSUrl, err)
+		}
+	}
+
+	// Validate scheme
+	if parsedUrl.Scheme != "http" && parsedUrl.Scheme != "https" {
+		return "", fmt.Errorf("unsupported URL scheme %q, only http and https are supported", parsedUrl.Scheme)
+	}
+
+	// Handle authentication
+	if c.config.VFSUser != "" && c.config.VFSPass != "" {
+		// Set authentication, this will override any existing userinfo
+		parsedUrl.User = url.UserPassword(c.config.VFSUser, c.config.VFSPass)
+	}
+
+	// Ensure host is present
+	if parsedUrl.Host == "" {
+		return "", fmt.Errorf("VFS URL must contain a valid host")
+	}
+
+	return parsedUrl.String(), nil
 }
