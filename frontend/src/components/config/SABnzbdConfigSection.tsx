@@ -182,8 +182,7 @@ export function SABnzbdConfigSection({
 							onChange={(e) => handleCompleteDirChange(e.target.value)}
 						/>
 						<p className="label">
-							Absolute path to the directory where the complete imports will be placed. FROM THE
-							MOUNTED FOLDER POINT OF VIEW.
+							Absolute path to the directory where the full imports will be stored, relative to the mounted folder.
 						</p>
 					</fieldset>
 
