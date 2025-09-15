@@ -65,28 +65,16 @@ func (mrf *MetadataRemoteFile) getMaxDownloadWorkers() int {
 	return mrf.configGetter().Streaming.MaxDownloadWorkers
 }
 
+func (mrf *MetadataRemoteFile) getMaxCacheSizeMB() int {
+	return mrf.configGetter().Streaming.MaxCacheSizeMB
+}
+
 func (mrf *MetadataRemoteFile) getGlobalPassword() string {
 	return mrf.configGetter().RClone.Password
 }
 
 func (mrf *MetadataRemoteFile) getGlobalSalt() string {
 	return mrf.configGetter().RClone.Salt
-}
-
-func (mrf *MetadataRemoteFile) getMaxRangeSize() int64 {
-	size := mrf.configGetter().Streaming.MaxRangeSize
-	if size <= 0 {
-		return 33554432 // Default 32MB
-	}
-	return size
-}
-
-func (mrf *MetadataRemoteFile) getStreamingChunkSize() int64 {
-	size := mrf.configGetter().Streaming.StreamingChunkSize
-	if size <= 0 {
-		return 8388608 // Default 8MB
-	}
-	return size
 }
 
 // OpenFile opens a virtual file backed by metadata
@@ -151,11 +139,10 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		poolManager:        mrf.poolManager,
 		ctx:                ctx,
 		maxWorkers:         mrf.getMaxDownloadWorkers(),
+		maxCacheSizeMB:     mrf.getMaxCacheSizeMB(),
 		rcloneCipher:       mrf.rcloneCipher,
 		globalPassword:     mrf.getGlobalPassword(),
 		globalSalt:         mrf.getGlobalSalt(),
-		maxRangeSize:       mrf.getMaxRangeSize(),
-		streamingChunkSize: mrf.getStreamingChunkSize(),
 	}
 
 	return true, virtualFile, nil
@@ -456,6 +443,7 @@ type MetadataVirtualFile struct {
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
 	maxWorkers       int
+	maxCacheSizeMB   int // Maximum cache size in MB for ahead downloads
 	rcloneCipher     encryption.Cipher
 	globalPassword   string
 	globalSalt       string
@@ -468,9 +456,6 @@ type MetadataVirtualFile struct {
 	currentRangeEnd   int64 // End of current reader's range
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
 
-	// Configurable range settings
-	maxRangeSize       int64 // Maximum range size for a single request
-	streamingChunkSize int64 // Chunk size for streaming when end=-1
 
 	mu sync.Mutex
 }
@@ -735,11 +720,11 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		rangeHeader, err := mvf.args.Range()
 		if err == nil && rangeHeader != nil {
 			mvf.originalRangeEnd = rangeHeader.End
-			return mvf.calculateIntelligentRange(rangeHeader.Start, rangeHeader.End)
+			return rangeHeader.Start, rangeHeader.End
 		} else {
 			// No range header, set unbounded
 			mvf.originalRangeEnd = -1
-			return mvf.calculateIntelligentRange(mvf.position, -1)
+			return 0, -1
 		}
 	}
 
@@ -753,60 +738,9 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		targetEnd = mvf.originalRangeEnd
 	}
 
-	return mvf.calculateIntelligentRange(mvf.position, targetEnd)
+	return 0, targetEnd
 }
 
-// calculateIntelligentRange applies intelligent range limiting to prevent excessive memory usage
-// Only applies limiting when end=-1 or when the requested range exceeds safe memory limits
-func (mvf *MetadataVirtualFile) calculateIntelligentRange(start, end int64) (int64, int64) {
-	fileSize := mvf.fileMeta.FileSize
-
-	// Handle empty files - return invalid range that will result in no segments
-	if fileSize == 0 {
-		return 0, -1 // Invalid range for empty file
-	}
-
-	// Ensure start is within bounds
-	if start < 0 {
-		start = 0
-	}
-	if start >= fileSize {
-		start = fileSize - 1
-	}
-
-	// Handle end = -1 (to end of file) with intelligent limiting
-	if end == -1 {
-		// Calculate a reasonable chunk size based on remaining file size
-		remaining := fileSize - start
-
-		// If remaining size is smaller than configured streaming chunk size, use all remaining
-		if remaining <= mvf.streamingChunkSize {
-			end = fileSize - 1
-		} else {
-			// Limit to configured streaming chunk size to prevent excessive memory usage
-			end = start + mvf.streamingChunkSize - 1
-		}
-	} else {
-		// Ensure end is within file bounds
-		if end >= fileSize {
-			end = fileSize - 1
-		}
-
-		// Only apply maximum range size limit if the requested range is excessively large
-		// This preserves the original range request for reasonable sizes
-		rangeSize := end - start + 1
-		if rangeSize > mvf.maxRangeSize {
-			end = start + mvf.maxRangeSize - 1
-			// Ensure we don't exceed file size
-			if end >= fileSize {
-				end = fileSize - 1
-			}
-		}
-		// If rangeSize <= maxRangeSize, preserve the original range as-is
-	}
-
-	return start, end
-}
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
 func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
@@ -822,7 +756,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers)
+	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

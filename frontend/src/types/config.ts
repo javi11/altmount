@@ -41,9 +41,8 @@ export interface MetadataConfig {
 
 // Streaming configuration
 export interface StreamingConfig {
-	max_range_size: number;
-	streaming_chunk_size: number;
 	max_download_workers: number;
+	max_cache_size_mb: number;
 }
 
 // Health configuration
@@ -154,9 +153,8 @@ export interface MetadataUpdateRequest {
 
 // Streaming update request
 export interface StreamingUpdateRequest {
-	max_range_size?: number;
-	streaming_chunk_size?: number;
 	max_download_workers?: number;
+	max_cache_size_mb?: number;
 }
 
 // Health update request
@@ -268,9 +266,8 @@ export interface MetadataFormData {
 }
 
 export interface StreamingFormData {
-	max_range_size: number;
-	streaming_chunk_size: number;
 	max_download_workers: number;
+	max_cache_size_mb: number;
 }
 
 export interface RCloneFormData {

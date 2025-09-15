@@ -54,9 +54,8 @@ type MetadataConfig struct {
 
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxRangeSize       int64 `yaml:"max_range_size" mapstructure:"max_range_size" json:"max_range_size"`
-	StreamingChunkSize int64 `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size" json:"streaming_chunk_size"`
-	MaxDownloadWorkers int   `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
+	MaxDownloadWorkers int `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
+	MaxCacheSizeMB     int `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -353,6 +352,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("streaming max_download_workers must be greater than 0")
 	}
 
+	if c.Streaming.MaxCacheSizeMB <= 0 {
+		c.Streaming.MaxCacheSizeMB = 64 // Default to 64MB if not set
+	}
+
 	if c.Import.MaxProcessorWorkers <= 0 {
 		return fmt.Errorf("import max_processor_workers must be greater than 0")
 	}
@@ -413,13 +416,6 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate streaming configuration
-	if c.Streaming.MaxRangeSize < 0 {
-		return fmt.Errorf("streaming max_range_size must be non-negative")
-	}
-
-	if c.Streaming.StreamingChunkSize < 0 {
-		return fmt.Errorf("streaming streaming_chunk_size must be non-negative")
-	}
 
 	// Validate health configuration
 	if *c.Health.Enabled {
@@ -800,9 +796,8 @@ func DefaultConfig(configDir ...string) *Config {
 			RootPath: metadataPath,
 		},
 		Streaming: StreamingConfig{
-			MaxRangeSize:       33554432, // 32MB - Maximum range size for a single request
-			StreamingChunkSize: 8388608,  // 8MB - Chunk size for streaming when end=-1
-			MaxDownloadWorkers: 15,       // Default: 15 download workers
+			MaxDownloadWorkers: 15, // Default: 15 download workers
+			MaxCacheSizeMB:     64, // Default: 64MB cache for ahead downloads
 		},
 		RClone: RCloneConfig{
 			Password:   "",

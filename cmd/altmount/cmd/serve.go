@@ -198,8 +198,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
 		QueueDatabasePath:   cfg.Database.Path,
 		MetadataRootPath:    cfg.Metadata.RootPath,
-		MaxRangeSize:        cfg.Streaming.MaxRangeSize,
-		StreamingChunkSize:  cfg.Streaming.StreamingChunkSize,
 		Password:            cfg.RClone.Password,
 		Salt:                cfg.RClone.Salt,
 		MaxDownloadWorkers:  cfg.Streaming.MaxDownloadWorkers,

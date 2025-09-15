@@ -40,41 +40,23 @@ export function StreamingConfigSection({
 	return (
 		<div className="space-y-4">
 			<h3 className="font-semibold text-lg">Streaming & Download Configuration</h3>
-			<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Max Range Size</legend>
+					<legend className="fieldset-legend">Max Cache Size</legend>
 					<input
 						type="number"
 						className="input"
-						value={formData.max_range_size}
+						value={formData.max_cache_size_mb}
 						readOnly={isReadOnly}
-						min={0}
-						step={1048576} // 1MB steps
+						min={1}
+						max={1024} // 1GB max
+						step={1} // 1MB steps
 						onChange={(e) =>
-							handleInputChange("max_range_size", Number.parseInt(e.target.value, 10) || 0)
+							handleInputChange("max_cache_size_mb", Number.parseInt(e.target.value, 10) || 1)
 						}
 					/>
-					<p className="label">Higher of this range the streaming will be chunked.</p>
-					<BytesDisplay bytes={formData.max_range_size} mode="badge" />
-				</fieldset>
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Streaming Chunk Size</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.streaming_chunk_size}
-						readOnly={isReadOnly}
-						min={0}
-						step={1048576} // 1MB steps
-						onChange={(e) =>
-							handleInputChange("streaming_chunk_size", Number.parseInt(e.target.value, 10) || 0)
-						}
-					/>
-					<p className="label">
-						The limit of memory to be used for each streaming operation (Range of articles to
-						download ahead)
-					</p>
-					<BytesDisplay bytes={formData.streaming_chunk_size} mode="badge" />
+					<p className="label">Maximum cache size in MB for ahead download chunks</p>
+					<BytesDisplay bytes={formData.max_cache_size_mb * 1024 * 1024} mode="badge" />
 				</fieldset>
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Download Workers</legend>
@@ -96,10 +78,9 @@ export function StreamingConfigSection({
 				<div>
 					<div className="font-bold">Note</div>
 					<div className="text-sm">
-						These settings control how files are streamed and chunked during download. Higher values
-						may improve performance but use more memory. Download workers control the number of
-						concurrent downloads from NNTP servers. If you don't understand these settings, it's
-						recommended to keep the default values.
+						Cache size controls memory usage for ahead downloading of segments. Download workers
+						control the number of concurrent downloads from NNTP servers. If you don't understand
+						these settings, it's recommended to keep the default values.
 					</div>
 				</div>
 			</div>
@@ -118,7 +99,7 @@ export function StreamingConfigSection({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						{isUpdating ? "Saving..." : "Save Changes"}
+						Save Changes
 					</button>
 				</div>
 			)}

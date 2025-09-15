@@ -35,7 +35,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		parser:          NewParser(poolManager),
 		strmParser:      NewStrmParser(),
 		metadataService: metadataService,
-		rarProcessor:    NewRarProcessor(poolManager, 10), // 10 max workers for RAR analysis
+		rarProcessor:    NewRarProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for RAR analysis
 		poolManager:     poolManager,
 		log:             slog.Default().With("component", "nzb-processor"),
 

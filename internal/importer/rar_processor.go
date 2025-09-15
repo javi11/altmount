@@ -35,17 +35,19 @@ type rarContent struct {
 
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
-	log         *slog.Logger
-	poolManager pool.Manager
-	maxWorkers  int
+	log            *slog.Logger
+	poolManager    pool.Manager
+	maxWorkers     int
+	maxCacheSizeMB int
 }
 
 // NewRarProcessor creates a new RAR processor
-func NewRarProcessor(poolManager pool.Manager, maxWorkers int) RarProcessor {
+func NewRarProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) RarProcessor {
 	return &rarProcessor{
-		log:         slog.Default().With("component", "rar-processor"),
-		poolManager: poolManager,
-		maxWorkers:  maxWorkers,
+		log:            slog.Default().With("component", "rar-processor"),
+		poolManager:    poolManager,
+		maxWorkers:     maxWorkers,
+		maxCacheSizeMB: maxCacheSizeMB,
 	}
 }
 
@@ -84,7 +86,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers)
+	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortFiles))
