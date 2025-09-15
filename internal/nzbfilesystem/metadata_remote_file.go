@@ -511,6 +511,8 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				} else if newErr == nil {
 					err = nil // Clear EOF if we successfully read more
 				}
+			} else if totalRead == len(p) {
+				err = nil
 			}
 		}
 
