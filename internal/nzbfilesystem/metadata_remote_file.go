@@ -752,6 +752,10 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, fmt.Errorf("failed to get connection pool: %w", err)
 	}
 
+	if end == -1 {
+		end = mvf.fileMeta.FileSize - 1
+	}
+
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
 	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
