@@ -446,7 +446,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 
 		// Build misc configuration
 		config.Misc = SABnzbdMiscConfig{
-			CompleteDir:            cfg.SABnzbd.CompleteDir,
+			CompleteDir:            filepath.Join(cfg.MountPath, cfg.SABnzbd.CompleteDir),
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",

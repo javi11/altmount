@@ -1,4 +1,4 @@
-import { Download, Eye, Info, MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, Eye, FileDown, Info, MoreHorizontal, Trash2 } from "lucide-react";
 import { useConfirm } from "../../contexts/ModalContext";
 import type { WebDAVFile } from "../../types/webdav";
 import { getFileTypeInfo } from "../../utils/fileUtils";
@@ -9,9 +9,11 @@ interface FileActionsProps {
 	onDownload: (path: string, filename: string) => void;
 	onDelete: (path: string) => void;
 	onInfo: (path: string) => void;
+	onExportNZB?: (path: string, filename: string) => void;
 	onPreview?: (file: WebDAVFile, currentPath: string) => void;
 	isDownloading?: boolean;
 	isDeleting?: boolean;
+	isExportingNZB?: boolean;
 }
 
 export function FileActions({
@@ -20,9 +22,11 @@ export function FileActions({
 	onDownload,
 	onDelete,
 	onInfo,
+	onExportNZB,
 	onPreview,
 	isDownloading = false,
 	isDeleting = false,
+	isExportingNZB = false,
 }: FileActionsProps) {
 	const filePath = `${currentPath}/${file.basename}`.replace(/\/+/g, "/");
 	const { confirmDelete } = useConfirm();
@@ -42,6 +46,12 @@ export function FileActions({
 
 	const handleInfo = () => {
 		onInfo(filePath);
+	};
+
+	const handleExportNZB = () => {
+		if (file.type === "file" && onExportNZB) {
+			onExportNZB(filePath, file.basename);
+		}
 	};
 
 	const handlePreview = () => {
@@ -83,6 +93,14 @@ export function FileActions({
 						<button type="button" onClick={handleDownload} disabled={isDownloading}>
 							<Download className="h-4 w-4" />
 							{isDownloading ? "Downloading..." : "Download"}
+						</button>
+					</li>
+				)}
+				{file.type === "file" && onExportNZB && (
+					<li>
+						<button type="button" onClick={handleExportNZB} disabled={isExportingNZB}>
+							<FileDown className="h-4 w-4" />
+							{isExportingNZB ? "Exporting..." : "Export as NZB"}
 						</button>
 					</li>
 				)}

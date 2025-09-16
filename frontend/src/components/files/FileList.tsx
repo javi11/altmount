@@ -12,9 +12,11 @@ interface FileListProps {
 	onDownload: (path: string, filename: string) => void;
 	onDelete: (path: string) => void;
 	onInfo: (path: string) => void;
+	onExportNZB?: (path: string, filename: string) => void;
 	onPreview?: (file: WebDAVFile, currentPath: string) => void;
 	isDownloading?: boolean;
 	isDeleting?: boolean;
+	isExportingNZB?: boolean;
 }
 
 // Virtual scrolling constants
@@ -34,9 +36,11 @@ export function FileList({
 	onDownload,
 	onDelete,
 	onInfo,
+	onExportNZB,
 	onPreview,
 	isDownloading = false,
 	isDeleting = false,
+	isExportingNZB = false,
 }: FileListProps) {
 	const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
 	const [scrollTop, setScrollTop] = useState(0);
@@ -175,6 +179,8 @@ export function FileList({
 						getFileIcon={getFileIcon}
 						formatFileSize={formatFileSize}
 						handleItemClick={handleItemClick}
+						onExportNZB={onExportNZB}
+						isExportingNZB={isExportingNZB}
 					/>
 				))}
 			</div>
@@ -240,6 +246,8 @@ interface FileCardProps {
 	getFileIcon: (file: WebDAVFile) => React.JSX.Element;
 	formatFileSize: (bytes: number) => string;
 	handleItemClick: (file: WebDAVFile) => void;
+	onExportNZB?: (path: string, filename: string) => void;
+	isExportingNZB?: boolean;
 }
 
 function FileCard({
@@ -254,6 +262,8 @@ function FileCard({
 	getFileIcon,
 	formatFileSize,
 	handleItemClick,
+	onExportNZB,
+	isExportingNZB,
 }: FileCardProps) {
 	return (
 		<div
@@ -286,9 +296,11 @@ function FileCard({
 						onDownload={onDownload}
 						onDelete={onDelete}
 						onInfo={onInfo}
+						onExportNZB={onExportNZB}
 						onPreview={onPreview}
 						isDownloading={isDownloading}
 						isDeleting={isDeleting}
+						isExportingNZB={isExportingNZB}
 					/>
 				</div>
 

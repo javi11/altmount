@@ -97,7 +97,10 @@ func SetupLogRotation(logConfig config.LogConfig) *slog.Logger {
 		Level: parseLevel(level),
 	})
 
-	return slog.New(handler)
+	// Wrap handler to support context data extraction
+	wrappedHandler := WrapHandler(handler)
+
+	return slog.New(wrappedHandler)
 }
 
 // SetupLogRotationWithFallback sets up log rotation with backward compatibility

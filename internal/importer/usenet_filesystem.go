@@ -25,24 +25,26 @@ var (
 // UsenetFileSystem implements fs.FS for reading RAR archives from Usenet
 // This allows rardecode.OpenReader to access multi-part RAR files without downloading them entirely
 type UsenetFileSystem struct {
-	ctx        context.Context
-	cp         nntppool.UsenetConnectionPool
-	files      []ParsedFile
-	maxWorkers int
+	ctx            context.Context
+	cp             nntppool.UsenetConnectionPool
+	files          []ParsedFile
+	maxWorkers     int
+	maxCacheSizeMB int
 }
 
 // UsenetFile implements fs.File and io.Seeker for reading individual RAR parts from Usenet
 // The Seeker interface allows rardecode.OpenReader to efficiently seek within RAR parts
 type UsenetFile struct {
-	name       string
-	file       *ParsedFile
-	cp         nntppool.UsenetConnectionPool
-	ctx        context.Context
-	maxWorkers int
-	size       int64
-	reader     io.ReadCloser
-	position   int64
-	closed     bool
+	name           string
+	file           *ParsedFile
+	cp             nntppool.UsenetConnectionPool
+	ctx            context.Context
+	maxWorkers     int
+	maxCacheSizeMB int
+	size           int64
+	reader         io.ReadCloser
+	position       int64
+	closed         bool
 }
 
 // UsenetFileInfo implements fs.FileInfo for RAR part files
@@ -52,12 +54,13 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, files []ParsedFile, maxWorkers int) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, files []ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
 	return &UsenetFileSystem{
-		ctx:        ctx,
-		cp:         cp,
-		files:      files,
-		maxWorkers: maxWorkers,
+		ctx:            ctx,
+		cp:             cp,
+		files:          files,
+		maxWorkers:     maxWorkers,
+		maxCacheSizeMB: maxCacheSizeMB,
 	}
 }
 
@@ -69,14 +72,15 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	for _, file := range ufs.files {
 		if file.Filename == name || path.Base(file.Filename) == name {
 			return &UsenetFile{
-				name:       name,
-				file:       &file,
-				cp:         ufs.cp,
-				ctx:        ufs.ctx,
-				maxWorkers: ufs.maxWorkers,
-				size:       file.Size,
-				position:   0,
-				closed:     false,
+				name:           name,
+				file:           &file,
+				cp:             ufs.cp,
+				ctx:            ufs.ctx,
+				maxWorkers:     ufs.maxWorkers,
+				maxCacheSizeMB: ufs.maxCacheSizeMB,
+				size:           file.Size,
+				position:       0,
+				closed:         false,
 			}, nil
 		}
 	}
@@ -196,7 +200,7 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 	loader := dbSegmentLoader{segs: uf.file.Segments}
 
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, uf.cp, rg, uf.maxWorkers)
+	return usenet.NewUsenetReader(ctx, uf.cp, rg, uf.maxWorkers, uf.maxCacheSizeMB)
 }
 
 // dbSegmentLoader implements the segment loader interface for database segments

@@ -20,8 +20,6 @@ import (
 type NzbConfig struct {
 	QueueDatabasePath   string
 	MetadataRootPath    string // Path to metadata root directory
-	MaxRangeSize        int64  // Maximum range size for a single request
-	StreamingChunkSize  int64  // Chunk size for streaming when end=-1
 	Password            string // Global password for .bin files
 	Salt                string // Global salt for .bin files
 	MaxProcessorWorkers int    // Number of queue workers (default: 2)

@@ -151,6 +151,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/health/:id", s.handleDeleteHealth)
 
 	api.Get("/files/info", s.handleGetFileMetadata)
+	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
 
 	api.Post("/import/scan", s.handleStartManualScan)
 	api.Get("/import/scan/status", s.handleGetScanStatus)
