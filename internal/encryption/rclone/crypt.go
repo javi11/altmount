@@ -151,9 +151,6 @@ type reader struct {
 func (r *reader) Read(p []byte) (n int, err error) {
 	r.once.Do(func() {
 		r.rd, err = r.initReader()
-		if err != nil && !errors.Is(err, context.Canceled) {
-			slog.ErrorContext(r.ctx, "Failed to to read rclone crypt file", "err", err)
-		}
 	})
 
 	if err != nil {

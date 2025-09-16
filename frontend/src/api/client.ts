@@ -341,6 +341,28 @@ export class APIClient {
 		return this.request<FileMetadata>(`/files/info?path=${encodeURIComponent(path)}`);
 	}
 
+	async exportMetadataToNZB(path: string): Promise<Blob> {
+		const url = `${this.baseURL}/files/export-nzb?path=${encodeURIComponent(path)}`;
+
+		const response = await fetch(url, {
+			credentials: "include",
+			headers: {
+				Accept: "application/x-nzb",
+			},
+		});
+
+		if (!response.ok) {
+			const errorData = await response.json();
+			throw new APIError(
+				response.status,
+				errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+				errorData.details || "",
+			);
+		}
+
+		return response.blob();
+	}
+
 	// Authentication endpoints
 	async getCurrentUser() {
 		return this.request<User>("/user");

@@ -39,12 +39,15 @@ export function FileExplorer({
 		downloadFile,
 		deleteFile,
 		getFileMetadata,
+		exportNZB,
 		isDownloading,
 		isDeleting,
 		isGettingMetadata,
+		isExportingNZB,
 		downloadError,
 		deleteError,
 		metadataError,
+		exportNZBError,
 		metadataData,
 	} = useWebDAVFileOperations();
 
@@ -85,6 +88,10 @@ export function FileExplorer({
 
 	const handleDelete = (path: string) => {
 		deleteFile(path);
+	};
+
+	const handleExportNZB = (path: string, filename: string) => {
+		exportNZB({ path, filename });
 	};
 
 	const handleFileInfo = (path: string) => {
@@ -239,12 +246,14 @@ export function FileExplorer({
 			</div>
 
 			{/* Error Messages */}
-			{(downloadError || deleteError) && (
+			{(downloadError || deleteError || exportNZBError) && (
 				<div className="alert alert-error">
 					<AlertTriangle className="h-6 w-6" />
 					<div>
 						<div className="font-bold">Operation Failed</div>
-						<div className="text-sm">{downloadError?.message || deleteError?.message}</div>
+						<div className="text-sm">
+							{downloadError?.message || deleteError?.message || exportNZBError?.message}
+						</div>
 					</div>
 				</div>
 			)}
@@ -305,9 +314,11 @@ export function FileExplorer({
 								onDownload={handleDownload}
 								onDelete={handleDelete}
 								onInfo={handleFileInfo}
+								onExportNZB={handleExportNZB}
 								onPreview={preview.openPreview}
 								isDownloading={isDownloading}
 								isDeleting={isDeleting}
+								isExportingNZB={isExportingNZB}
 							/>
 						)
 					) : null}
