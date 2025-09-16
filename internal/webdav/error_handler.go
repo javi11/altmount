@@ -44,7 +44,7 @@ func (c *customErrorHandler) OpenFile(ctx context.Context, name string, flag int
 
 	ctx = slogutil.With(
 		ctx,
-		"path", name,
+		"file_name", name,
 	)
 
 	// Wrap the file to handle read errors

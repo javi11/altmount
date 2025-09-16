@@ -96,13 +96,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Load configuration first (using default logger for config loading errors)
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		slog.Default().Error("failed to load config", "err", err)
+		slog.Error("failed to load config", "err", err)
 		return err
 	}
 
 	// Validate directory permissions before proceeding
 	if err := cfg.ValidateDirectories(); err != nil {
-		slog.Default().Error("directory validation failed", "err", err)
+		slog.Error("directory validation failed", "err", err)
 		return err
 	}
 
@@ -127,7 +127,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	configManager := config.NewManager(cfg, configFile)
 
 	// Create pool manager for dynamic NNTP connection management
-	poolManager := pool.NewManager(logger)
+	poolManager := pool.NewManager()
 
 	// Register configuration change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
