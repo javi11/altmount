@@ -205,7 +205,7 @@ func (d *Deobfuscator) extractFromYencHeaders(file nzbparser.NzbFile) string {
 
 	// Try first segment for yEnc headers
 	firstSegment := file.Segments[0]
-	r, err := cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+	r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
 	if err != nil {
 		d.log.Debug("Failed to get body reader for yEnc extraction", "error", err)
 		return ""

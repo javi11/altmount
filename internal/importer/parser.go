@@ -341,7 +341,7 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 	defer cancel()
 
 	// Get a connection from the pool
-	r, err := cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+	r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get body reader: %w", err)
 	}
@@ -400,15 +400,6 @@ func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string
 func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment) error {
 	if len(segments) < 2 {
 		// Not enough segments to determine if normalization is needed
-		return nil
-	}
-
-	firstSegSize := segments[0].Bytes
-	secondSegSize := segments[1].Bytes
-
-	// If first and second segments have the same size, assume no yEnc overhead
-	if firstSegSize == secondSegSize {
-		p.log.Debug("Segments have consistent sizes, skipping yEnc normalization")
 		return nil
 	}
 
