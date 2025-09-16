@@ -148,7 +148,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 	return true, virtualFile, nil
 }
 
-// RemoveFile removes a virtual file from the metadata
+// RemoveFile removes a virtual file or directory from the metadata
 func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) (bool, error) {
 	// Normalize the path to handle trailing slashes consistently
 	normalizedName := normalizePath(fileName)
@@ -158,14 +158,20 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		return false, ErrCannotRemoveRoot
 	}
 
-	// Check if this path exists in our metadata
+	// Check if this is a directory
+	if mrf.metadataService.DirectoryExists(normalizedName) {
+		// Use MetadataService's directory delete operation
+		return true, mrf.metadataService.DeleteDirectory(normalizedName)
+	}
+
+	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
-		// File not found in metadata
+		// Neither file nor directory found in metadata
 		return false, nil
 	}
 
-	// Use MetadataService's delete operation
+	// Use MetadataService's file delete operation
 	return true, mrf.metadataService.DeleteFileMetadata(normalizedName)
 }
 

@@ -36,11 +36,6 @@ func NewServer(
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
 	configGetter config.ConfigGetter, // Dynamic config access
 ) (*webdavServer, error) {
-	// Create internal mux if none provided (WebDAV runs its own server)
-	if mux == nil {
-		mux = http.NewServeMux()
-	}
-	
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
 	// Create custom error handler that maps our errors to proper HTTP status codes
