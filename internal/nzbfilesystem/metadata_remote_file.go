@@ -175,15 +175,29 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 	return true, mrf.metadataService.DeleteFileMetadata(normalizedName)
 }
 
-// RenameFile renames a virtual file in the metadata
+// RenameFile renames a virtual file or directory in the metadata
 func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName string) (bool, error) {
 	// Normalize paths
 	normalizedOld := normalizePath(oldName)
 	normalizedNew := normalizePath(newName)
 
-	// Check if old path exists
+	// Check if old path is a directory
+	if mrf.metadataService.DirectoryExists(normalizedOld) {
+		// Get the filesystem paths for the directories
+		oldDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedOld)
+		newDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedNew)
+
+		// Rename the entire directory
+		if err := os.Rename(oldDirPath, newDirPath); err != nil {
+			return false, fmt.Errorf("failed to rename directory: %w", err)
+		}
+		return true, nil
+	}
+
+	// Check if old path exists as a file
 	exists := mrf.metadataService.FileExists(normalizedOld)
 	if !exists {
+		// Neither file nor directory found
 		return false, nil
 	}
 
