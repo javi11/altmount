@@ -13,7 +13,10 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
-const defaultDownloadWorkers = 15
+const (
+	defaultMaxCacheSize    = 32 * 1024 * 1024 // Default to 32MB
+	defaultDownloadWorkers = 15
+)
 
 var (
 	_ io.ReadCloser = &usenetReader{}
@@ -64,7 +67,7 @@ func NewUsenetReader(
 	// Convert MB to bytes
 	maxCacheSize := int64(maxCacheSizeMB) * 1024 * 1024
 	if maxCacheSize <= 0 {
-		maxCacheSize = 64 * 1024 * 1024 // Default to 64MB
+		maxCacheSize = defaultMaxCacheSize
 	}
 
 	ur := &usenetReader{

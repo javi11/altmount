@@ -353,7 +353,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Streaming.MaxCacheSizeMB <= 0 {
-		c.Streaming.MaxCacheSizeMB = 64 // Default to 64MB if not set
+		c.Streaming.MaxCacheSizeMB = 32 // Default to 32MB if not set
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
@@ -797,7 +797,7 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Streaming: StreamingConfig{
 			MaxDownloadWorkers: 15, // Default: 15 download workers
-			MaxCacheSizeMB:     64, // Default: 64MB cache for ahead downloads
+			MaxCacheSizeMB:     32, // Default: 32MB cache for ahead downloads
 		},
 		RClone: RCloneConfig{
 			Password:   "",

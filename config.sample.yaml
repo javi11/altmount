@@ -23,7 +23,7 @@ metadata:
 # Streaming and download configuration
 streaming:
   max_download_workers: 15 # Number of download workers
-  max_cache_size_mb: 64 # Maximum cache size in MB for ahead download chunks (default: 64MB)
+  max_cache_size_mb: 32 # Maximum cache size in MB for ahead download chunks (default: 32MB)
 
 # RClone VFS configuration (optional)
 rclone:
