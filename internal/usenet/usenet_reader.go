@@ -214,6 +214,12 @@ func (b *usenetReader) downloadManager(
 			downloadWorkers = defaultDownloadWorkers
 		}
 
+		if len(b.rg.segments) == 0 {
+			b.log.Debug("No segments to download")
+
+			return
+		}
+
 		// Calculate max segments to download ahead based on cache size
 		avgSegmentSize := b.rg.segments[0].SegmentSize
 		maxSegmentsAhead := int(b.maxCacheSize / avgSegmentSize)
@@ -228,12 +234,6 @@ func (b *usenetReader) downloadManager(
 		if downloadWorkers > maxSegmentsAhead {
 			downloadWorkers = maxSegmentsAhead
 		}
-
-		b.log.Debug("Download manager configuration",
-			"max_cache_size_mb", b.maxCacheSize/(1024*1024),
-			"max_segments_ahead", maxSegmentsAhead,
-			"download_workers", downloadWorkers,
-			"total_segments", len(b.rg.segments))
 
 		pool := pool.New().
 			WithMaxGoroutines(downloadWorkers).

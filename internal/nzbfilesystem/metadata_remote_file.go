@@ -131,18 +131,18 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
-		name:               name,
-		fileMeta:           fileMeta,
-		metadataService:    mrf.metadataService,
-		healthRepository:   mrf.healthRepository,
-		args:               r,
-		poolManager:        mrf.poolManager,
-		ctx:                ctx,
-		maxWorkers:         mrf.getMaxDownloadWorkers(),
-		maxCacheSizeMB:     mrf.getMaxCacheSizeMB(),
-		rcloneCipher:       mrf.rcloneCipher,
-		globalPassword:     mrf.getGlobalPassword(),
-		globalSalt:         mrf.getGlobalSalt(),
+		name:             name,
+		fileMeta:         fileMeta,
+		metadataService:  mrf.metadataService,
+		healthRepository: mrf.healthRepository,
+		args:             r,
+		poolManager:      mrf.poolManager,
+		ctx:              ctx,
+		maxWorkers:       mrf.getMaxDownloadWorkers(),
+		maxCacheSizeMB:   mrf.getMaxCacheSizeMB(),
+		rcloneCipher:     mrf.rcloneCipher,
+		globalPassword:   mrf.getGlobalPassword(),
+		globalSalt:       mrf.getGlobalSalt(),
 	}
 
 	return true, virtualFile, nil
@@ -456,7 +456,6 @@ type MetadataVirtualFile struct {
 	currentRangeEnd   int64 // End of current reader's range
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
 
-
 	mu sync.Mutex
 }
 
@@ -740,7 +739,6 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 
 	return 0, targetEnd
 }
-
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
 func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
