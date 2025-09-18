@@ -429,7 +429,6 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 		item, err := s.database.Repository.ClaimNextQueueItem()
 		if err == nil {
 			if item == nil {
-				log.Debug("No item in processing queue")
 				return nil, nil
 			}
 

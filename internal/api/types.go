@@ -20,12 +20,45 @@ type ConfigAPIResponse struct {
 
 // RCloneAPIResponse sanitizes RClone config for API responses
 type RCloneAPIResponse struct {
-	PasswordSet bool   `json:"password_set"`
-	SaltSet     bool   `json:"salt_set"`
-	VFSEnabled  bool   `json:"vfs_enabled"`
-	VFSURL      string `json:"vfs_url"`
-	VFSUser     string `json:"vfs_user"`
-	VFSPassSet  bool   `json:"vfs_pass_set"`
+	PasswordSet  bool              `json:"password_set"`
+	SaltSet      bool              `json:"salt_set"`
+	VFSEnabled   bool              `json:"vfs_enabled"`
+	VFSURL       string            `json:"vfs_url"`
+	VFSUser      string            `json:"vfs_user"`
+	VFSPassSet   bool              `json:"vfs_pass_set"`
+	MountEnabled bool              `json:"mount_enabled"`
+	MountOptions map[string]string `json:"mount_options"`
+
+	// Mount Configuration
+	RCPort      int    `json:"rc_port"`
+	LogLevel    string `json:"log_level"`
+	UID         int    `json:"uid"`
+	GID         int    `json:"gid"`
+	Umask       string `json:"umask"`
+	BufferSize  string `json:"buffer_size"`
+	AttrTimeout string `json:"attr_timeout"`
+	Transfers   int    `json:"transfers"`
+
+	// VFS Cache Settings
+	CacheDir            string `json:"cache_dir"`
+	VFSCacheMode        string `json:"vfs_cache_mode"`
+	VFSCacheMaxSize     string `json:"vfs_cache_max_size"`
+	VFSCacheMaxAge      string `json:"vfs_cache_max_age"`
+	ReadChunkSize       string `json:"read_chunk_size"`
+	ReadChunkSizeLimit  string `json:"read_chunk_size_limit"`
+	VFSReadAhead       string `json:"vfs_read_ahead"`
+	DirCacheTime        string `json:"dir_cache_time"`
+	VFSCachePollInterval string `json:"vfs_cache_poll_interval"`
+	VFSCacheMinFreeSpace string `json:"vfs_cache_min_free_space"`
+	VFSDiskSpaceTotal   string `json:"vfs_disk_space_total"`
+	VFSReadChunkStreams int    `json:"vfs_read_chunk_streams"`
+
+	// Advanced Settings
+	NoModTime         bool `json:"no_mod_time"`
+	NoChecksum        bool `json:"no_checksum"`
+	AsyncRead         bool `json:"async_read"`
+	VFSFastFingerprint bool `json:"vfs_fast_fingerprint"`
+	UseMmap           bool `json:"use_mmap"`
 }
 
 // ProviderAPIResponse sanitizes Provider config for API responses
@@ -75,12 +108,42 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 
 	// Create RClone response with password status
 	rcloneResp := RCloneAPIResponse{
-		PasswordSet: cfg.RClone.Password != "",
-		SaltSet:     cfg.RClone.Salt != "",
-		VFSEnabled:  cfg.RClone.VFSEnabled != nil && *cfg.RClone.VFSEnabled,
-		VFSURL:      cfg.RClone.VFSUrl,
-		VFSUser:     cfg.RClone.VFSUser,
-		VFSPassSet:  cfg.RClone.VFSPass != "",
+		PasswordSet:  cfg.RClone.Password != "",
+		SaltSet:      cfg.RClone.Salt != "",
+		VFSEnabled:   cfg.RClone.VFSEnabled != nil && *cfg.RClone.VFSEnabled,
+		VFSURL:       cfg.RClone.VFSUrl,
+		VFSUser:      cfg.RClone.VFSUser,
+		VFSPassSet:   cfg.RClone.VFSPass != "",
+		MountEnabled: cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled,
+		MountOptions: cfg.RClone.MountOptions,
+		// Mount Configuration
+		RCPort:      cfg.RClone.RCPort,
+		LogLevel:    cfg.RClone.LogLevel,
+		UID:         cfg.RClone.UID,
+		GID:         cfg.RClone.GID,
+		Umask:       cfg.RClone.Umask,
+		BufferSize:  cfg.RClone.BufferSize,
+		AttrTimeout: cfg.RClone.AttrTimeout,
+		Transfers:   cfg.RClone.Transfers,
+		// VFS Cache Settings
+		CacheDir:            cfg.RClone.CacheDir,
+		VFSCacheMode:        cfg.RClone.VFSCacheMode,
+		VFSCacheMaxSize:     cfg.RClone.VFSCacheMaxSize,
+		VFSCacheMaxAge:      cfg.RClone.VFSCacheMaxAge,
+		ReadChunkSize:       cfg.RClone.ReadChunkSize,
+		ReadChunkSizeLimit:  cfg.RClone.ReadChunkSizeLimit,
+		VFSReadAhead:       cfg.RClone.VFSReadAhead,
+		DirCacheTime:        cfg.RClone.DirCacheTime,
+		VFSCachePollInterval: cfg.RClone.VFSCachePollInterval,
+		VFSCacheMinFreeSpace: cfg.RClone.VFSCacheMinFreeSpace,
+		VFSDiskSpaceTotal:   cfg.RClone.VFSDiskSpaceTotal,
+		VFSReadChunkStreams: cfg.RClone.VFSReadChunkStreams,
+		// Advanced Settings
+		NoModTime:         cfg.RClone.NoModTime,
+		NoChecksum:        cfg.RClone.NoChecksum,
+		AsyncRead:         cfg.RClone.AsyncRead,
+		VFSFastFingerprint: cfg.RClone.VFSFastFingerprint,
+		UseMmap:           cfg.RClone.UseMmap,
 	}
 
 	return &ConfigAPIResponse{

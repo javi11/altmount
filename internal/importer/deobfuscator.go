@@ -539,7 +539,6 @@ func IsProbablyObfuscated(input string) bool {
 		logger.Debug("obfuscation check: empty basename -> default obfuscated", "input", input)
 		return true
 	}
-	logger.Debug("obfuscation check: analyzing", "basename", filebasename)
 
 	// Compile (or reuse) regexes (precompiled at first call via package-level vars could optimize; kept inline for clarity)
 	if matched, _ := regexp.MatchString(`^[a-f0-9]{32}$`, filebasename); matched {

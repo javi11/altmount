@@ -64,6 +64,39 @@ export interface RCloneConfig {
 	vfs_url: string;
 	vfs_user: string;
 	vfs_pass_set: boolean;
+	mount_enabled: boolean;
+	mount_options: Record<string, string>;
+
+	// Mount Configuration
+	rc_port: number;
+	log_level: string;
+	uid: number;
+	gid: number;
+	umask: string;
+	buffer_size: string;
+	attr_timeout: string;
+	transfers: number;
+
+	// VFS Cache Settings
+	cache_dir: string;
+	vfs_cache_mode: string;
+	vfs_cache_max_size: string;
+	vfs_cache_max_age: string;
+	read_chunk_size: string;
+	read_chunk_size_limit: string;
+	vfs_read_ahead: string;
+	dir_cache_time: string;
+	vfs_cache_poll_interval: string;
+	vfs_cache_min_free_space: string;
+	vfs_disk_space_total: string;
+	vfs_read_chunk_streams: number;
+
+	// Advanced Settings
+	no_mod_time: boolean;
+	no_checksum: boolean;
+	async_read: boolean;
+	vfs_fast_fingerprint: boolean;
+	use_mmap: boolean;
 }
 
 // Import configuration
@@ -176,6 +209,39 @@ export interface RCloneUpdateRequest {
 	vfs_url?: string;
 	vfs_user?: string;
 	vfs_pass?: string;
+	mount_enabled?: boolean;
+	mount_options?: Record<string, string>;
+
+	// Mount Configuration
+	rc_port?: number;
+	log_level?: string;
+	uid?: number;
+	gid?: number;
+	umask?: string;
+	buffer_size?: string;
+	attr_timeout?: string;
+	transfers?: number;
+
+	// VFS Cache Settings
+	cache_dir?: string;
+	vfs_cache_mode?: string;
+	vfs_cache_max_size?: string;
+	vfs_cache_max_age?: string;
+	read_chunk_size?: string;
+	read_chunk_size_limit?: string;
+	vfs_read_ahead?: string;
+	dir_cache_time?: string;
+	vfs_cache_poll_interval?: string;
+	vfs_cache_min_free_space?: string;
+	vfs_disk_space_total?: string;
+	vfs_read_chunk_streams?: number;
+
+	// Advanced Settings
+	no_mod_time?: boolean;
+	no_checksum?: boolean;
+	async_read?: boolean;
+	vfs_fast_fingerprint?: boolean;
+	use_mmap?: boolean;
 }
 
 // Import update request
@@ -286,6 +352,49 @@ export interface RCloneVFSFormData {
 	vfs_pass: string;
 }
 
+export interface RCloneMountFormData {
+	mount_enabled: boolean;
+	mount_options: Record<string, string>;
+
+	// Mount Configuration
+	rc_port: number;
+	log_level: string;
+	uid: number;
+	gid: number;
+	umask: string;
+	buffer_size: string;
+	attr_timeout: string;
+	transfers: number;
+
+	// VFS Cache Settings
+	cache_dir: string;
+	vfs_cache_mode: string;
+	vfs_cache_max_size: string;
+	vfs_cache_max_age: string;
+	read_chunk_size: string;
+	read_chunk_size_limit: string;
+	vfs_read_ahead: string;
+	dir_cache_time: string;
+	vfs_cache_poll_interval: string;
+	vfs_cache_min_free_space: string;
+	vfs_disk_space_total: string;
+	vfs_read_chunk_streams: number;
+
+	// Advanced Settings
+	no_mod_time: boolean;
+	no_checksum: boolean;
+	async_read: boolean;
+	vfs_fast_fingerprint: boolean;
+	use_mmap: boolean;
+}
+
+export interface MountStatus {
+	mounted: boolean;
+	mount_point: string;
+	error?: string;
+	started_at?: string;
+}
+
 export interface ProviderFormData {
 	host: string;
 	port: number;
@@ -384,7 +493,6 @@ export interface SyncResult {
 export interface ArrsFormData {
 	enabled: boolean;
 	max_workers: number;
-	mount_path: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 }

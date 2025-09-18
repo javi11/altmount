@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
@@ -280,6 +281,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create arrs service for health monitoring and repair
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), logger)
 
+	// Create RClone mount service
+	mountService := rclone.NewMountService(configManager.GetConfigGetter())
+
 	// Create API server configuration (hardcoded to /api)
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -301,6 +305,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	apiServer.SetupRoutes(app)
 	logger.Info("API server enabled with Fiber routes", "prefix", "/api")
+
+	// Register RClone handlers
+	rcloneHandlers := api.NewRCloneHandlers(mountService, configManager.GetConfigGetter())
+	api.RegisterRCloneRoutes(app.Group("/api"), rcloneHandlers)
 
 	// Register API server for auth updates
 
@@ -424,6 +432,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service is disabled in configuration")
 	}
 
+	// Start RClone mount service if enabled
+	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
+		if err := mountService.Start(ctx); err != nil {
+			logger.Error("Failed to start mount service", "error", err)
+		} else {
+			logger.Info("RClone mount service started", "mount_point", cfg.MountPath)
+		}
+	} else {
+		logger.Info("RClone mount service is disabled in configuration")
+	}
+
 	// Add simple liveness endpoint for Docker health checks directly to Fiber
 	app.Get("/live", handleFiberHealth)
 
@@ -488,6 +507,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// ARRs service cleanup (no background processes to stop)
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
 		logger.Info("Arrs service cleanup completed")
+	}
+
+	// Stop RClone mount service if running
+	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
+		if err := mountService.Stop(); err != nil {
+			logger.Error("Failed to stop mount service", "error", err)
+		} else {
+			logger.Info("RClone mount service stopped")
+		}
 	}
 
 	// Shutdown custom server with timeout

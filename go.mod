@@ -18,7 +18,7 @@ require (
 	github.com/javi11/nntppool v1.5.5
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.1
-	github.com/javi11/rarlist v1.1.0
+	github.com/javi11/rarlist v1.1.3
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pressly/goose/v3 v3.24.3

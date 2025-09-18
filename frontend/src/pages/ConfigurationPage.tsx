@@ -42,6 +42,7 @@ import type {
 	ImportConfig,
 	LogFormData,
 	MetadataConfig,
+	RCloneMountFormData,
 	RCloneVFSFormData,
 	SABnzbdConfig,
 	StreamingConfig,
@@ -161,6 +162,7 @@ export function ConfigurationPage() {
 			| ImportConfig
 			| MetadataConfig
 			| RCloneVFSFormData
+			| RCloneMountFormData
 			| LogFormData
 			| SABnzbdConfig
 			| ArrsConfig

@@ -308,7 +308,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			proc.log.Error("Failed to analyze RAR archive content",
 				"archive", nzbBaseName,
 				"error", err)
-			// Fallback to simplified mode if RAR analysis fails
+
 			return "", err
 		}
 

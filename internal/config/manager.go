@@ -60,12 +60,45 @@ type StreamingConfig struct {
 
 // RCloneConfig represents rclone configuration
 type RCloneConfig struct {
-	Password   string `yaml:"password" mapstructure:"password" json:"-"`
-	Salt       string `yaml:"salt" mapstructure:"salt" json:"-"`
-	VFSEnabled *bool  `yaml:"vfs_enabled" mapstructure:"vfs_enabled" json:"vfs_enabled"`
-	VFSUrl     string `yaml:"vfs_url" mapstructure:"vfs_url" json:"vfs_url"`
-	VFSUser    string `yaml:"vfs_user" mapstructure:"vfs_user" json:"vfs_user"`
-	VFSPass    string `yaml:"vfs_pass" mapstructure:"vfs_pass" json:"-"`
+	Password     string            `yaml:"password" mapstructure:"password" json:"-"`
+	Salt         string            `yaml:"salt" mapstructure:"salt" json:"-"`
+	VFSEnabled   *bool             `yaml:"vfs_enabled" mapstructure:"vfs_enabled" json:"vfs_enabled"`
+	VFSUrl       string            `yaml:"vfs_url" mapstructure:"vfs_url" json:"vfs_url"`
+	VFSUser      string            `yaml:"vfs_user" mapstructure:"vfs_user" json:"vfs_user"`
+	VFSPass      string            `yaml:"vfs_pass" mapstructure:"vfs_pass" json:"-"`
+	MountEnabled *bool             `yaml:"mount_enabled" mapstructure:"mount_enabled" json:"mount_enabled"`
+	MountOptions map[string]string `yaml:"mount_options" mapstructure:"mount_options" json:"mount_options"`
+
+	// Mount Configuration
+	RCPort      int    `yaml:"rc_port" mapstructure:"rc_port" json:"rc_port"`
+	LogLevel    string `yaml:"log_level" mapstructure:"log_level" json:"log_level"`
+	UID         int    `yaml:"uid" mapstructure:"uid" json:"uid"`
+	GID         int    `yaml:"gid" mapstructure:"gid" json:"gid"`
+	Umask       string `yaml:"umask" mapstructure:"umask" json:"umask"`
+	BufferSize  string `yaml:"buffer_size" mapstructure:"buffer_size" json:"buffer_size"`
+	AttrTimeout string `yaml:"attr_timeout" mapstructure:"attr_timeout" json:"attr_timeout"`
+	Transfers   int    `yaml:"transfers" mapstructure:"transfers" json:"transfers"`
+
+	// VFS Cache Settings
+	CacheDir             string `yaml:"cache_dir" mapstructure:"cache_dir" json:"cache_dir"`
+	VFSCacheMode         string `yaml:"vfs_cache_mode" mapstructure:"vfs_cache_mode" json:"vfs_cache_mode"`
+	VFSCacheMaxSize      string `yaml:"vfs_cache_max_size" mapstructure:"vfs_cache_max_size" json:"vfs_cache_max_size"`
+	VFSCacheMaxAge       string `yaml:"vfs_cache_max_age" mapstructure:"vfs_cache_max_age" json:"vfs_cache_max_age"`
+	ReadChunkSize        string `yaml:"read_chunk_size" mapstructure:"read_chunk_size" json:"read_chunk_size"`
+	ReadChunkSizeLimit   string `yaml:"read_chunk_size_limit" mapstructure:"read_chunk_size_limit" json:"read_chunk_size_limit"`
+	VFSReadAhead         string `yaml:"vfs_read_ahead" mapstructure:"vfs_read_ahead" json:"vfs_read_ahead"`
+	DirCacheTime         string `yaml:"dir_cache_time" mapstructure:"dir_cache_time" json:"dir_cache_time"`
+	VFSCachePollInterval string `yaml:"vfs_cache_poll_interval" mapstructure:"vfs_cache_poll_interval" json:"vfs_cache_poll_interval"`
+	VFSCacheMinFreeSpace string `yaml:"vfs_cache_min_free_space" mapstructure:"vfs_cache_min_free_space" json:"vfs_cache_min_free_space"`
+	VFSDiskSpaceTotal    string `yaml:"vfs_disk_space_total" mapstructure:"vfs_disk_space_total" json:"vfs_disk_space_total"`
+	VFSReadChunkStreams  int    `yaml:"vfs_read_chunk_streams" mapstructure:"vfs_read_chunk_streams" json:"vfs_read_chunk_streams"`
+
+	// Advanced Settings
+	NoModTime          bool `yaml:"no_mod_time" mapstructure:"no_mod_time" json:"no_mod_time"`
+	NoChecksum         bool `yaml:"no_checksum" mapstructure:"no_checksum" json:"no_checksum"`
+	AsyncRead          bool `yaml:"async_read" mapstructure:"async_read" json:"async_read"`
+	VFSFastFingerprint bool `yaml:"vfs_fast_fingerprint" mapstructure:"vfs_fast_fingerprint" json:"vfs_fast_fingerprint"`
+	UseMmap            bool `yaml:"use_mmap" mapstructure:"use_mmap" json:"use_mmap"`
 }
 
 // ImportConfig represents import processing configuration
@@ -242,6 +275,24 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.RClone.VFSEnabled = &v
 	} else {
 		copyCfg.RClone.VFSEnabled = nil
+	}
+
+	// Deep copy RClone.MountEnabled pointer
+	if c.RClone.MountEnabled != nil {
+		v := *c.RClone.MountEnabled
+		copyCfg.RClone.MountEnabled = &v
+	} else {
+		copyCfg.RClone.MountEnabled = nil
+	}
+
+	// Deep copy RClone.MountOptions map
+	if c.RClone.MountOptions != nil {
+		copyCfg.RClone.MountOptions = make(map[string]string, len(c.RClone.MountOptions))
+		for k, v := range c.RClone.MountOptions {
+			copyCfg.RClone.MountOptions[k] = v
+		}
+	} else {
+		copyCfg.RClone.MountOptions = nil
 	}
 
 	// Deep copy Providers slice and their pointer fields
@@ -437,6 +488,16 @@ func (c *Config) Validate() error {
 	if c.RClone.VFSEnabled != nil && *c.RClone.VFSEnabled {
 		if c.RClone.VFSUrl == "" {
 			return fmt.Errorf("rclone vfs_url cannot be empty when VFS is enabled")
+		}
+	}
+
+	// Validate RClone Mount configuration
+	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
+		if c.MountPath == "" {
+			return fmt.Errorf("rclone mount_path cannot be empty when mount is enabled")
+		}
+		if !filepath.IsAbs(c.MountPath) {
+			return fmt.Errorf("rclone mount_path must be an absolute path")
 		}
 	}
 
@@ -759,6 +820,7 @@ func DefaultConfig(configDir ...string) *Config {
 	healthCheckEnabled := true
 	autoRepairEnabled := false // Disabled by default for safety
 	vfsEnabled := false
+	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 
@@ -800,12 +862,51 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxCacheSizeMB:     32, // Default: 32MB cache for ahead downloads
 		},
 		RClone: RCloneConfig{
-			Password:   "",
-			Salt:       "",
-			VFSEnabled: &vfsEnabled,
-			VFSUrl:     "",
-			VFSUser:    "",
-			VFSPass:    "",
+			Password:     "",
+			Salt:         "",
+			VFSEnabled:   &vfsEnabled,
+			VFSUrl:       "",
+			VFSUser:      "",
+			VFSPass:      "",
+			MountEnabled: &mountEnabled,
+			MountOptions: map[string]string{
+				"vfs-cache-mode":            "full",
+				"vfs-cache-max-age":         "168h",
+				"vfs-cache-max-size":        "100G",
+				"vfs-read-chunk-size":       "128M",
+				"vfs-read-chunk-size-limit": "2G",
+				"buffer-size":               "16M",
+				"dir-cache-time":            "5m",
+				"poll-interval":             "1m",
+			},
+			// Mount Configuration defaults
+			RCPort:      5572,
+			LogLevel:    "INFO",
+			UID:         1000,
+			GID:         1000,
+			Umask:       "0022",
+			BufferSize:  "10M",
+			AttrTimeout: "1s",
+			Transfers:   4,
+			// VFS Cache Settings defaults
+			CacheDir:             "/mnt/Data/CloneCache",
+			VFSCacheMode:         "full",
+			VFSCacheMaxSize:      "100G",
+			VFSCacheMaxAge:       "100h",
+			ReadChunkSize:        "128M",
+			ReadChunkSizeLimit:   "off",
+			VFSReadAhead:         "128k",
+			DirCacheTime:         "5m",
+			VFSCachePollInterval: "1m",
+			VFSCacheMinFreeSpace: "1G",
+			VFSDiskSpaceTotal:    "1G",
+			VFSReadChunkStreams:  4,
+			// Advanced Settings defaults
+			NoModTime:          false,
+			NoChecksum:         false,
+			AsyncRead:          true,
+			VFSFastFingerprint: false,
+			UseMmap:            false,
 		},
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
