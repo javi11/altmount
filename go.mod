@@ -15,10 +15,11 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
+	github.com/javi11/nntpcli v1.1.1
 	github.com/javi11/nntppool v1.5.5
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.1
-	github.com/javi11/rarlist v1.1.3
+	github.com/javi11/rarlist v1.1.4
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pressly/goose/v3 v3.24.3
@@ -144,7 +145,6 @@ require (
 	github.com/hexops/gotextdiff v1.0.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/javi11/nntpcli v1.1.1 // indirect
 	github.com/jgautheron/goconst v1.8.2 // indirect
 	github.com/jingyugao/rowserrcheck v1.1.1 // indirect
 	github.com/jjti/go-spancheck v0.6.5 // indirect

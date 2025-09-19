@@ -474,9 +474,9 @@ func getPartSuffix(originalFileName string) string {
 	if matches := partPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
 		return fmt.Sprintf(".part%s.rar", stripLeadingZeros(matches[1]))
 	} else if matches := rPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		return fmt.Sprintf(".r%s", stripLeadingZeros(matches[1]))
+		return fmt.Sprintf(".r%s", matches[1])
 	} else if matches := numericPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		return fmt.Sprintf(".%s", stripLeadingZeros(matches[1]))
+		return fmt.Sprintf(".%s", matches[1])
 	}
 
 	return filepath.Ext(originalFileName)

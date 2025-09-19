@@ -230,7 +230,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 	var totalSize int64
 	if yencFileSize > 0 {
 		totalSize = yencFileSize
-		p.log.Debug("Using file size from yEnc headers", "size", yencFileSize)
 	} else {
 		var err error
 		totalSize, err = p.calculateFileSize(file)

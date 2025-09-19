@@ -536,18 +536,15 @@ func IsProbablyObfuscated(input string) bool {
 	ext := filepath.Ext(filename)
 	filebasename := strings.TrimSuffix(filename, ext)
 	if filebasename == "" { // empty name -> treat as obfuscated default
-		logger.Debug("obfuscation check: empty basename -> default obfuscated", "input", input)
 		return true
 	}
 
 	// Compile (or reuse) regexes (precompiled at first call via package-level vars could optimize; kept inline for clarity)
 	if matched, _ := regexp.MatchString(`^[a-f0-9]{32}$`, filebasename); matched {
-		logger.Debug("obfuscation check: exactly 32 hex digits -> obfuscated", "basename", filebasename)
 		return true
 	}
 
 	if matched, _ := regexp.MatchString(`^[a-f0-9.]{40,}$`, filebasename); matched {
-		logger.Debug("obfuscation check: 40+ hex/dot chars -> obfuscated", "basename", filebasename)
 		return true
 	}
 
@@ -555,12 +552,10 @@ func IsProbablyObfuscated(input string) bool {
 	has30Hex, _ := regexp.MatchString(`[a-f0-9]{30}`, filebasename)
 	bracketWords := regexp.MustCompile(`\[\w+\]`).FindAllString(filebasename, -1)
 	if has30Hex && len(bracketWords) >= 2 {
-		logger.Debug("obfuscation check: 30+ hex plus 2+ [Word] -> obfuscated", "basename", filebasename)
 		return true
 	}
 
 	if strings.HasPrefix(filebasename, "abc.xyz") { // ^abc\.xyz
-		logger.Debug("obfuscation check: starts with abc.xyz -> obfuscated", "basename", filebasename)
 		return true
 	}
 
@@ -582,21 +577,17 @@ func IsProbablyObfuscated(input string) bool {
 
 	// Not obfuscated heuristics
 	if uppers >= 2 && lowers >= 2 && spacesDots >= 1 {
-		logger.Debug("obfuscation check: pattern (>=2 upper, >=2 lower, >=1 space/dot/underscore) -> NOT obfuscated", "basename", filebasename)
 		return false
 	}
 	if spacesDots >= 3 {
-		logger.Debug("obfuscation check: pattern (spaces/dots/underscores >=3) -> NOT obfuscated", "basename", filebasename)
 		return false
 	}
 	if (uppers+lowers) >= 4 && digits >= 4 && spacesDots >= 1 {
-		logger.Debug("obfuscation check: pattern (letters>=4, digits>=4, space-like>=1) -> NOT obfuscated", "basename", filebasename)
 		return false
 	}
 	// Starts with capital, mostly lowercase
 	firstRune, _ := utf8.DecodeRuneInString(filebasename)
 	if unicode.IsUpper(firstRune) && lowers > 2 && (lowers > 0) && float64(uppers)/float64(lowers) <= 0.25 {
-		logger.Debug("obfuscation check: pattern (Capital start, mostly lowercase) -> NOT obfuscated", "basename", filebasename)
 		return false
 	}
 
