@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -398,28 +399,54 @@ func (p *Parser) fetchYencHeaders(segment nzbparser.NzbSegment, groups []string)
 		return nntpcli.YencHeaders{}, NewNonRetryableError("no connection pool available", err)
 	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
+	var result nntpcli.YencHeaders
+	err = retry.Do(
+		func() error {
+			// Create context with timeout for each retry attempt
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+			defer cancel()
 
-	// Get a connection from the pool
-	r, err := cp.BodyReader(ctx, segment.ID, groups)
+			// Get a connection from the pool
+			r, err := cp.BodyReader(ctx, segment.ID, groups)
+			if err != nil {
+				return fmt.Errorf("failed to get body reader: %w", err)
+			}
+			defer r.Close()
+
+			if r == nil {
+				return fmt.Errorf("no connection pool available")
+			}
+
+			// Get yenc headers
+			h, err := r.GetYencHeaders()
+			if err != nil {
+				return fmt.Errorf("failed to get yenc headers: %w", err)
+			}
+
+			result = h
+			return nil
+		},
+		retry.Attempts(3),
+		retry.Delay(1*time.Second),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(5*time.Second),
+		retry.OnRetry(func(n uint, err error) {
+			p.log.Warn("Retrying fetchYencHeaders",
+				"attempt", n+1,
+				"segment_id", segment.ID,
+				"error", err)
+		}),
+	)
+
+	if result.PartSize <= 0 {
+		return nntpcli.YencHeaders{}, fmt.Errorf("invalid part size from yenc header: %d", result.PartSize)
+	}
+
 	if err != nil {
-		return nntpcli.YencHeaders{}, fmt.Errorf("failed to get body reader: %w", err)
-	}
-	defer r.Close()
-
-	// Get yenc headers
-	h, err := r.GetYencHeaders()
-	if err != nil {
-		return nntpcli.YencHeaders{}, fmt.Errorf("failed to get yenc headers: %w", err)
+		return nntpcli.YencHeaders{}, err
 	}
 
-	if h.PartSize <= 0 {
-		return nntpcli.YencHeaders{}, fmt.Errorf("invalid part size from yenc header: %d", h.PartSize)
-	}
-
-	return h, nil
+	return result, nil
 }
 
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
