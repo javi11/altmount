@@ -150,7 +150,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		segmentsToCheck = []*metapb.SegmentData{fileMeta.SegmentData[0]}
 	}
 
-	slog.Info("Checking segments", "file_path", filePath, "segments_to_check", segmentsToCheck)
+	slog.Info("Checking segments", "file_path", filePath, "segments_to_check", len(segmentsToCheck))
 
 	// Check segments with configurable concurrency
 	checkErr := hc.checkSegments(ctx, segmentsToCheck)
