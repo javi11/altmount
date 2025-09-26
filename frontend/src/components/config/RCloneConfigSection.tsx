@@ -4,14 +4,14 @@ import type {
 	ConfigResponse,
 	MountStatus,
 	RCloneMountFormData,
-	RCloneVFSFormData,
+	RCloneRCFormData,
 } from "../../types/config";
 
 interface RCloneConfigSectionProps {
 	config: ConfigResponse;
 	onUpdate?: (
 		section: string,
-		data: RCloneVFSFormData | RCloneMountFormData | { mount_path: string },
+		data: RCloneRCFormData | RCloneMountFormData | { mount_path: string },
 	) => Promise<void>;
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
@@ -23,38 +23,48 @@ export function RCloneConfigSection({
 	isReadOnly = false,
 	isUpdating = false,
 }: RCloneConfigSectionProps) {
-	const [formData, setFormData] = useState<RCloneVFSFormData>({
-		vfs_enabled: config.rclone.vfs_enabled,
-		vfs_url: config.rclone.vfs_url,
-		vfs_user: config.rclone.vfs_user,
-		vfs_pass: "",
+	const [formData, setFormData] = useState<RCloneRCFormData>({
+		rc_enabled: config.rclone.rc_enabled,
+		rc_url: config.rclone.rc_url,
+		rc_port: config.rclone.rc_port,
+		rc_user: config.rclone.rc_user,
+		rc_pass: "",
+		rc_options: config.rclone.rc_options,
 	});
 
 	const [mountFormData, setMountFormData] = useState<RCloneMountFormData>({
 		mount_enabled: config.rclone.mount_enabled || false,
 		mount_options: config.rclone.mount_options || {},
-		// Mount Configuration
-		rc_port: config.rclone.rc_port || 5572,
+
+		// Mount-Specific Settings
+		allow_other: config.rclone.allow_other || true,
+		allow_non_empty: config.rclone.allow_non_empty || true,
+		read_only: config.rclone.read_only || false,
+		timeout: config.rclone.timeout || "10m",
+		syslog: config.rclone.syslog || true,
+
+		// System and filesystem options
 		log_level: config.rclone.log_level || "INFO",
 		uid: config.rclone.uid || 1000,
 		gid: config.rclone.gid || 1000,
-		umask: config.rclone.umask || "0022",
-		buffer_size: config.rclone.buffer_size || "10M",
+		umask: config.rclone.umask || "002",
+		buffer_size: config.rclone.buffer_size || "32M",
 		attr_timeout: config.rclone.attr_timeout || "1s",
 		transfers: config.rclone.transfers || 4,
+
 		// VFS Cache Settings
-		cache_dir: config.rclone.cache_dir || "/mnt/Data/CloneCache",
+		cache_dir: config.rclone.cache_dir || "",
 		vfs_cache_mode: config.rclone.vfs_cache_mode || "full",
-		vfs_cache_max_size: config.rclone.vfs_cache_max_size || "100G",
-		vfs_cache_max_age: config.rclone.vfs_cache_max_age || "100h",
-		read_chunk_size: config.rclone.read_chunk_size || "128M",
-		read_chunk_size_limit: config.rclone.read_chunk_size_limit || "off",
-		vfs_read_ahead: config.rclone.vfs_read_ahead || "128k",
-		dir_cache_time: config.rclone.dir_cache_time || "5m",
-		vfs_cache_poll_interval: config.rclone.vfs_cache_poll_interval || "1m",
+		vfs_cache_max_size: config.rclone.vfs_cache_max_size || "50G",
+		vfs_cache_max_age: config.rclone.vfs_cache_max_age || "504h",
+		read_chunk_size: config.rclone.read_chunk_size || "32M",
+		read_chunk_size_limit: config.rclone.read_chunk_size_limit || "2G",
+		vfs_read_ahead: config.rclone.vfs_read_ahead || "128M",
+		dir_cache_time: config.rclone.dir_cache_time || "10m",
 		vfs_cache_min_free_space: config.rclone.vfs_cache_min_free_space || "1G",
 		vfs_disk_space_total: config.rclone.vfs_disk_space_total || "1G",
 		vfs_read_chunk_streams: config.rclone.vfs_read_chunk_streams || 4,
+
 		// Advanced Settings
 		no_mod_time: config.rclone.no_mod_time || false,
 		no_checksum: config.rclone.no_checksum || false,
@@ -70,26 +80,22 @@ export function RCloneConfigSection({
 	const [hasChanges, setHasChanges] = useState(false);
 	const [hasMountChanges, setHasMountChanges] = useState(false);
 	const [hasMountPathChanges, setHasMountPathChanges] = useState(false);
-	const [showVFSPassword, setShowVFSPassword] = useState(false);
+	const [showRCPassword, setShowRCPassword] = useState(false);
 	const [isTestingConnection, setIsTestingConnection] = useState(false);
-	const [isTestingMount, setIsTestingMount] = useState(false);
 	const [testResult, setTestResult] = useState<{
 		success: boolean;
 		message: string;
 	} | null>(null);
 
-	// Collapsible sections state
-	const [showMountConfig, setShowMountConfig] = useState(true);
-	const [showVFSCache, setShowVFSCache] = useState(false);
-	const [showAdvanced, setShowAdvanced] = useState(false);
-
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		const newFormData = {
-			vfs_enabled: config.rclone.vfs_enabled,
-			vfs_url: config.rclone.vfs_url,
-			vfs_user: config.rclone.vfs_user,
-			vfs_pass: "",
+			rc_enabled: config.rclone.rc_enabled,
+			rc_url: config.rclone.rc_url,
+			rc_port: config.rclone.rc_port,
+			rc_user: config.rclone.rc_user,
+			rc_pass: "",
+			rc_options: config.rclone.rc_options,
 		};
 		setFormData(newFormData);
 		setHasChanges(false);
@@ -97,28 +103,36 @@ export function RCloneConfigSection({
 		const newMountFormData = {
 			mount_enabled: config.rclone.mount_enabled || false,
 			mount_options: config.rclone.mount_options || {},
-			// Mount Configuration
-			rc_port: config.rclone.rc_port || 5572,
+
+			// Mount-Specific Settings
+			allow_other: config.rclone.allow_other || true,
+			allow_non_empty: config.rclone.allow_non_empty || true,
+			read_only: config.rclone.read_only || false,
+			timeout: config.rclone.timeout || "10m",
+			syslog: config.rclone.syslog || true,
+
+			// System and filesystem options
 			log_level: config.rclone.log_level || "INFO",
 			uid: config.rclone.uid || 1000,
 			gid: config.rclone.gid || 1000,
-			umask: config.rclone.umask || "0022",
-			buffer_size: config.rclone.buffer_size || "10M",
+			umask: config.rclone.umask || "002",
+			buffer_size: config.rclone.buffer_size || "32M",
 			attr_timeout: config.rclone.attr_timeout || "1s",
 			transfers: config.rclone.transfers || 4,
+
 			// VFS Cache Settings
-			cache_dir: config.rclone.cache_dir || "/mnt/Data/CloneCache",
+			cache_dir: config.rclone.cache_dir || "",
 			vfs_cache_mode: config.rclone.vfs_cache_mode || "full",
-			vfs_cache_max_size: config.rclone.vfs_cache_max_size || "100G",
-			vfs_cache_max_age: config.rclone.vfs_cache_max_age || "100h",
-			read_chunk_size: config.rclone.read_chunk_size || "128M",
-			read_chunk_size_limit: config.rclone.read_chunk_size_limit || "off",
-			vfs_read_ahead: config.rclone.vfs_read_ahead || "128k",
-			dir_cache_time: config.rclone.dir_cache_time || "5m",
-			vfs_cache_poll_interval: config.rclone.vfs_cache_poll_interval || "1m",
+			vfs_cache_max_size: config.rclone.vfs_cache_max_size || "50G",
+			vfs_cache_max_age: config.rclone.vfs_cache_max_age || "504h",
+			read_chunk_size: config.rclone.read_chunk_size || "32M",
+			read_chunk_size_limit: config.rclone.read_chunk_size_limit || "2G",
+			vfs_read_ahead: config.rclone.vfs_read_ahead || "128M",
+			dir_cache_time: config.rclone.dir_cache_time || "10m",
 			vfs_cache_min_free_space: config.rclone.vfs_cache_min_free_space || "1G",
 			vfs_disk_space_total: config.rclone.vfs_disk_space_total || "1G",
 			vfs_read_chunk_streams: config.rclone.vfs_read_chunk_streams || 4,
+
 			// Advanced Settings
 			no_mod_time: config.rclone.no_mod_time || false,
 			no_checksum: config.rclone.no_checksum || false,
@@ -153,26 +167,33 @@ export function RCloneConfigSection({
 		}
 	}, [config.rclone.mount_enabled, fetchMountStatus]);
 
-	const handleInputChange = (field: keyof RCloneVFSFormData, value: string | boolean) => {
+	const handleInputChange = (
+		field: keyof RCloneRCFormData,
+		value: string | boolean | number | Record<string, string>,
+	) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 
 		// Check for changes by comparing against original config
 		const configData = {
-			vfs_enabled: config.rclone.vfs_enabled,
-			vfs_url: config.rclone.vfs_url,
-			vfs_user: config.rclone.vfs_user,
-			vfs_pass: "",
+			rc_enabled: config.rclone.rc_enabled,
+			rc_url: config.rclone.rc_url,
+			rc_port: config.rclone.rc_port,
+			rc_user: config.rclone.rc_user,
+			rc_pass: "",
+			rc_options: config.rclone.rc_options,
 		};
 
-		// Always consider changes if VFS password is entered
-		const vfsPasswordChanged = newData.vfs_pass !== "";
+		// Always consider changes if RC password is entered
+		const rcPasswordChanged = newData.rc_pass !== "";
 		const otherFieldsChanged =
-			newData.vfs_enabled !== configData.vfs_enabled ||
-			newData.vfs_url !== configData.vfs_url ||
-			newData.vfs_user !== configData.vfs_user;
+			newData.rc_enabled !== configData.rc_enabled ||
+			newData.rc_url !== configData.rc_url ||
+			newData.rc_port !== configData.rc_port ||
+			newData.rc_user !== configData.rc_user ||
+			JSON.stringify(newData.rc_options) !== JSON.stringify(configData.rc_options);
 
-		setHasChanges(vfsPasswordChanged || otherFieldsChanged);
+		setHasChanges(rcPasswordChanged || otherFieldsChanged);
 	};
 
 	const handleMountInputChange = (
@@ -184,6 +205,13 @@ export function RCloneConfigSection({
 
 		// Always mark as changed when any field is modified
 		setHasMountChanges(true);
+
+		// Auto-enable RC when mount is enabled (mount requires RC to function)
+		if (field === "mount_enabled" && value === true && !formData.rc_enabled) {
+			const newRCData = { ...formData, rc_enabled: true };
+			setFormData(newRCData);
+			setHasChanges(true);
+		}
 	};
 
 	const handleMountPathChange = (value: string) => {
@@ -193,12 +221,14 @@ export function RCloneConfigSection({
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
-			// Only send non-empty values for VFS password
-			const updateData: RCloneVFSFormData = {
-				vfs_enabled: formData.vfs_enabled ?? false,
-				vfs_url: formData.vfs_url || "",
-				vfs_user: formData.vfs_user || "",
-				vfs_pass: formData.vfs_pass.trim() !== "" ? formData.vfs_pass : "",
+			// Only send non-empty values for RC password
+			const updateData: RCloneRCFormData = {
+				rc_enabled: formData.rc_enabled ?? false,
+				rc_url: formData.rc_url || "",
+				rc_port: formData.rc_port || 5572,
+				rc_user: formData.rc_user || "",
+				rc_pass: formData.rc_pass.trim() !== "" ? formData.rc_pass : "",
+				rc_options: formData.rc_options || {},
 			};
 
 			await onUpdate("rclone", updateData);
@@ -259,38 +289,6 @@ export function RCloneConfigSection({
 		}
 	};
 
-	const handleTestMount = async () => {
-		setIsTestingMount(true);
-		setTestResult(null);
-
-		try {
-			const response = await fetch("/api/rclone/mount/test", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					mount_point: mountPath,
-					mount_options: mountFormData.mount_options,
-				}),
-			});
-
-			const result = await response.json();
-			setTestResult({
-				success: result.success,
-				message:
-					result.message || (result.success ? "Mount configuration is valid" : "Mount test failed"),
-			});
-		} catch (error) {
-			setTestResult({
-				success: false,
-				message: error instanceof Error ? error.message : "Network error occurred",
-			});
-		} finally {
-			setIsTestingMount(false);
-		}
-	};
-
 	const handleTestConnection = async () => {
 		setIsTestingConnection(true);
 		setTestResult(null);
@@ -302,10 +300,14 @@ export function RCloneConfigSection({
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
-					vfs_enabled: formData.vfs_enabled,
-					vfs_url: formData.vfs_url,
-					vfs_user: formData.vfs_user,
-					vfs_pass: formData.vfs_pass,
+					rc_enabled: formData.rc_enabled,
+					rc_url: formData.rc_url,
+					rc_port: formData.rc_port,
+					rc_user: formData.rc_user,
+					rc_pass: formData.rc_pass,
+					rc_options: formData.rc_options,
+					mount_enabled: mountFormData.mount_enabled,
+					mount_options: mountFormData.mount_options,
 				}),
 			});
 
@@ -343,81 +345,109 @@ export function RCloneConfigSection({
 		<div className="space-y-4">
 			<h3 className="font-semibold text-lg">RClone Configuration</h3>
 
-			{/* VFS Notification Settings */}
+			{/* RC Configuration Settings */}
 			<div className="space-y-4">
-				<h4 className="font-medium text-base">VFS Notification Settings</h4>
+				<h4 className="font-medium text-base">RC (Remote Control) Settings</h4>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Enable VFS Notifications</legend>
+					<legend className="fieldset-legend">Enable RC Connection</legend>
 					<label className="label cursor-pointer">
-						<span className="label-text">Enable RClone VFS cache refresh notifications</span>
+						<span className="label-text">
+							Enable RClone Remote Control for cache notifications
+							{mountFormData.mount_enabled && formData.rc_enabled && (
+								<span className="badge badge-info badge-sm ml-2">Auto-enabled</span>
+							)}
+						</span>
 						<input
 							type="checkbox"
 							className="checkbox"
-							checked={formData.vfs_enabled}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("vfs_enabled", e.target.checked)}
+							checked={formData.rc_enabled}
+							disabled={isReadOnly || (mountFormData.mount_enabled && formData.rc_enabled)}
+							onChange={(e) => handleInputChange("rc_enabled", e.target.checked)}
 						/>
 					</label>
 					<p className="label">
-						Automatically notify RClone VFS when new files are imported to refresh the cache
+						Enable connection to RClone RC server for cache refresh notifications and mount
+						operations
 					</p>
+					{mountFormData.mount_enabled && formData.rc_enabled && (
+						<span className="mt-1 block text-info text-sm">
+							RC is automatically enabled because mounting requires remote control
+						</span>
+					)}
 				</fieldset>
 
-				{formData.vfs_enabled && (
+				{formData.rc_enabled && (
 					<>
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend">VFS URL</legend>
+							<legend className="fieldset-legend">RC URL</legend>
 							<input
 								type="text"
 								className="input"
-								value={formData.vfs_url}
+								value={formData.rc_url}
 								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("vfs_url", e.target.value)}
-								placeholder="http://localhost:5572"
+								onChange={(e) => handleInputChange("rc_url", e.target.value)}
+								placeholder="http://localhost:5572 (leave empty to start internal RC server)"
 							/>
-							<p className="label">RClone RC API URL (e.g., http://localhost:5572)</p>
+							<p className="label">
+								External RClone RC server URL (leave empty to use internal RC server)
+							</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend">VFS Username</legend>
+							<legend className="fieldset-legend">RC Port</legend>
+							<input
+								type="number"
+								className="input"
+								value={formData.rc_port}
+								disabled={isReadOnly}
+								onChange={(e) =>
+									handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
+								}
+								placeholder="5572"
+							/>
+							<p className="label">
+								Port for RC server (used for internal server or connecting to external)
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">RC Username</legend>
 							<input
 								type="text"
 								className="input"
-								value={formData.vfs_user}
+								value={formData.rc_user}
 								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("vfs_user", e.target.value)}
-								placeholder="Enter VFS username (optional)"
+								onChange={(e) => handleInputChange("rc_user", e.target.value)}
+								placeholder="admin"
 							/>
-							<p className="label">Username for RClone RC API authentication (optional)</p>
+							<p className="label">Username for RClone RC API authentication</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend">VFS Password</legend>
+							<legend className="fieldset-legend">RC Password</legend>
 							<div className="relative">
 								<input
-									type={showVFSPassword ? "text" : "password"}
+									type={showRCPassword ? "text" : "password"}
 									className="input pr-10"
-									value={formData.vfs_pass}
+									value={formData.rc_pass}
 									disabled={isReadOnly}
-									onChange={(e) => handleInputChange("vfs_pass", e.target.value)}
+									onChange={(e) => handleInputChange("rc_pass", e.target.value)}
 									placeholder={
-										config.rclone.vfs_pass_set
-											? "VFS password is set (enter new to change)"
-											: "Enter VFS password (optional)"
+										config.rclone.rc_pass_set ? "RC password is set (enter new to change)" : "admin"
 									}
 								/>
 								<button
 									type="button"
 									className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
-									onClick={() => setShowVFSPassword(!showVFSPassword)}
+									onClick={() => setShowRCPassword(!showRCPassword)}
 								>
-									{showVFSPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+									{showRCPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
 								</button>
 							</div>
 							<p className="label">
-								Password for RClone RC API authentication (optional)
-								{config.rclone.vfs_pass_set && " (currently set)"}
+								Password for RClone RC API authentication
+								{config.rclone.rc_pass_set && " (currently set)"}
 							</p>
 						</fieldset>
 
@@ -427,7 +457,7 @@ export function RCloneConfigSection({
 									type="button"
 									className="btn btn-outline"
 									onClick={handleTestConnection}
-									disabled={isTestingConnection || !formData.vfs_url}
+									disabled={isTestingConnection || (!formData.rc_url && !formData.rc_enabled)}
 								>
 									{isTestingConnection ? (
 										<span className="loading loading-spinner loading-sm" />
@@ -447,7 +477,7 @@ export function RCloneConfigSection({
 									) : (
 										<Save className="h-4 w-4" />
 									)}
-									{isUpdating ? "Saving..." : "Save VFS Changes"}
+									{isUpdating ? "Saving..." : "Save RC Changes"}
 								</button>
 							</div>
 						)}
@@ -455,14 +485,14 @@ export function RCloneConfigSection({
 				)}
 			</div>
 
-			{/* Mount Enable Section */}
+			{/* Mount Configuration Section */}
 			<div className="mt-8 space-y-4">
-				<h4 className="font-medium text-base">Internal Mount Configuration</h4>
+				<h4 className="font-medium text-base">Mount Configuration</h4>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Enable Internal Mount</legend>
+					<legend className="fieldset-legend">Enable RClone Mount</legend>
 					<label className="label cursor-pointer">
-						<span className="label-text">Enable internal RClone mount for WebDAV</span>
+						<span className="label-text">Enable RClone mount for WebDAV</span>
 						<input
 							type="checkbox"
 							className="checkbox"
@@ -472,8 +502,8 @@ export function RCloneConfigSection({
 						/>
 					</label>
 					<p className="label">
-						Mount the AltMount WebDAV as a local filesystem using internal RClone (requires rclone
-						binary)
+						Mount the AltMount WebDAV as a local filesystem using RClone (requires RC enabled and
+						rclone binary)
 					</p>
 				</fieldset>
 
@@ -489,456 +519,322 @@ export function RCloneConfigSection({
 								onChange={(e) => handleMountPathChange(e.target.value)}
 								placeholder="/mnt/altmount"
 							/>
-							<p className="label">
-								Local filesystem path where WebDAV will be mounted (also editable from WebDAV
-								section)
-							</p>
+							<p className="label">Local filesystem path where WebDAV will be mounted</p>
 						</fieldset>
 
-						{/* Mount Configuration Section - Collapsible */}
-						<div className="collapse-arrow collapse bg-base-200">
-							<input
-								type="checkbox"
-								checked={showMountConfig}
-								onChange={() => setShowMountConfig(!showMountConfig)}
-							/>
-							<div className="collapse-title flex items-center gap-2 font-medium text-base">
-								<HardDrive className="h-5 w-5" />
-								Mount Configuration
+						{/* Basic Mount Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">Basic Mount Settings</h5>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Allow Other Users</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Allow other users to access mount</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.allow_other}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("allow_other", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --allow-other for FUSE mount</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Allow Non-Empty</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Allow mounting over non-empty directories</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.allow_non_empty}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("allow_non_empty", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --allow-non-empty for mounting</p>
+								</fieldset>
 							</div>
-							<div className="collapse-content">
-								<div className="space-y-4 pt-4">
-									{/* First Row */}
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">RC Port</legend>
-											<input
-												type="number"
-												className="input"
-												value={mountFormData.rc_port}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange(
-														"rc_port",
-														Number.parseInt(e.target.value, 10) || 5572,
-													)
-												}
-											/>
-											<p className="label">RClone RC port</p>
-										</fieldset>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Log Level</legend>
-											<select
-												className="select"
-												value={mountFormData.log_level}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("log_level", e.target.value)}
-											>
-												<option value="DEBUG">DEBUG</option>
-												<option value="INFO">INFO</option>
-												<option value="NOTICE">NOTICE</option>
-												<option value="ERROR">ERROR</option>
-											</select>
-											<p className="label">Log verbosity level</p>
-										</fieldset>
-									</div>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Read Only</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Mount as read-only</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.read_only}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("read_only", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Prevents write operations to the mount</p>
+								</fieldset>
 
-									{/* Second Row */}
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">User ID (PUID)</legend>
-											<input
-												type="number"
-												className="input"
-												value={mountFormData.uid}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("uid", Number.parseInt(e.target.value, 10) || 1000)
-												}
-											/>
-											<p className="label">User ID for mounted files (0 = current user)</p>
-										</fieldset>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Enable Syslog</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Log to syslog</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.syslog}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("syslog", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --syslog for system logging</p>
+								</fieldset>
+							</div>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Group ID (PGID)</legend>
-											<input
-												type="number"
-												className="input"
-												value={mountFormData.gid}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("gid", Number.parseInt(e.target.value, 10) || 1000)
-												}
-											/>
-											<p className="label">Group ID for mounted files (0 = current group)</p>
-										</fieldset>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Timeout</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.timeout}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("timeout", e.target.value)}
+										placeholder="10m"
+									/>
+									<p className="label text-xs">I/O timeout for mount operations (e.g., 10m, 30s)</p>
+								</fieldset>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">UMASK</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.umask}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("umask", e.target.value)}
-												placeholder="0022"
-											/>
-											<p className="label">Umask</p>
-										</fieldset>
-									</div>
-
-									{/* Third Row */}
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Buffer Size</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.buffer_size}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("buffer_size", e.target.value)}
-												placeholder="10M"
-											/>
-											<p className="label">Buffer size (This caches to memory, be wary!)</p>
-										</fieldset>
-
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Attribute Caching Timeout</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.attr_timeout}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("attr_timeout", e.target.value)}
-												placeholder="1s"
-											/>
-											<p className="label">
-												How long the kernel caches file attributes (size, modification time, etc.)
-											</p>
-										</fieldset>
-
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Transfers</legend>
-											<input
-												type="number"
-												className="input"
-												value={mountFormData.transfers}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange(
-														"transfers",
-														Number.parseInt(e.target.value, 10) || 4,
-													)
-												}
-											/>
-											<p className="label">Number of file transfers to run in parallel</p>
-										</fieldset>
-									</div>
-								</div>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Log Level</legend>
+									<select
+										className="select"
+										value={mountFormData.log_level}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("log_level", e.target.value)}
+									>
+										<option value="DEBUG">DEBUG</option>
+										<option value="INFO">INFO</option>
+										<option value="WARN">WARN</option>
+										<option value="ERROR">ERROR</option>
+									</select>
+									<p className="label text-xs">Log level for rclone operations</p>
+								</fieldset>
 							</div>
 						</div>
 
-						{/* VFS Cache Settings Section - Collapsible */}
-						<div className="collapse-arrow collapse bg-base-200">
-							<input
-								type="checkbox"
-								checked={showVFSCache}
-								onChange={() => setShowVFSCache(!showVFSCache)}
-							/>
-							<div className="collapse-title flex items-center gap-2 font-medium text-base">
-								<HardDrive className="h-5 w-5" />
-								VFS Cache Settings
+						{/* VFS Cache Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">VFS Cache Settings</h5>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Cache Mode</legend>
+									<select
+										className="select"
+										value={mountFormData.vfs_cache_mode}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("vfs_cache_mode", e.target.value)}
+									>
+										<option value="off">Off</option>
+										<option value="minimal">Minimal</option>
+										<option value="writes">Writes</option>
+										<option value="full">Full</option>
+									</select>
+									<p className="label text-xs">
+										VFS cache mode: full recommended for best performance
+									</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Cache Max Size</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.vfs_cache_max_size}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("vfs_cache_max_size", e.target.value)}
+										placeholder="50G"
+									/>
+									<p className="label text-xs">Maximum cache size (e.g., 50G, 1T)</p>
+								</fieldset>
 							</div>
-							<div className="collapse-content">
-								<div className="space-y-4 pt-4">
-									{/* First Row */}
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Cache Directory</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.cache_dir}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("cache_dir", e.target.value)}
-												placeholder="/mnt/Data/CloneCache"
-											/>
-											<p className="label">
-												Directory for rclone cache files (leave empty for system default)
-											</p>
-										</fieldset>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Cache Mode</legend>
-											<select
-												className="select"
-												value={mountFormData.vfs_cache_mode}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("vfs_cache_mode", e.target.value)}
-											>
-												<option value="off">Off</option>
-												<option value="minimal">Minimal - Minimal caching</option>
-												<option value="writes">Writes - Cache writes only</option>
-												<option value="full">Full - Cache reads and writes</option>
-											</select>
-											<p className="label">VFS caching mode for performance optimization</p>
-										</fieldset>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Cache Max Age</legend>
+								<input
+									type="text"
+									className="input"
+									value={mountFormData.vfs_cache_max_age}
+									disabled={isReadOnly}
+									onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
+									placeholder="504h"
+								/>
+								<p className="label text-xs">Maximum cache age (e.g., 504h, 7d)</p>
+							</fieldset>
+						</div>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Cache Max Size</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.vfs_cache_max_size}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("vfs_cache_max_size", e.target.value)
-												}
-												placeholder="100G"
-											/>
-											<p className="label">
-												Maximum cache size (e.g., 1G, 500M, leave empty for unlimited)
-											</p>
-										</fieldset>
-									</div>
+						{/* Performance Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">Performance Settings</h5>
 
-									{/* Second Row */}
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Cache Max Age</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.vfs_cache_max_age}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("vfs_cache_max_age", e.target.value)
-												}
-												placeholder="100h"
-											/>
-											<p className="label">Maximum age of cache entries (e.g., 1h, 30m)</p>
-										</fieldset>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Buffer Size</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.buffer_size}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("buffer_size", e.target.value)}
+										placeholder="32M"
+									/>
+									<p className="label text-xs">Buffer size for file operations (e.g., 32M, 64M)</p>
+								</fieldset>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Read Chunk Size</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.read_chunk_size}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("read_chunk_size", e.target.value)}
-												placeholder="128M"
-											/>
-											<p className="label">Size of data chunks to read (e.g., 128M, 64M)</p>
-										</fieldset>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">VFS Read Ahead</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.vfs_read_ahead}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("vfs_read_ahead", e.target.value)}
+										placeholder="128M"
+									/>
+									<p className="label text-xs">VFS read-ahead size (e.g., 128M, 256M)</p>
+								</fieldset>
+							</div>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Read Chunk Size Limit</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.read_chunk_size_limit}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("read_chunk_size_limit", e.target.value)
-												}
-												placeholder="off"
-											/>
-											<p className="label">Limit Read Chunk Size</p>
-										</fieldset>
-									</div>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Read Chunk Size</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.read_chunk_size}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("read_chunk_size", e.target.value)}
+										placeholder="32M"
+									/>
+									<p className="label text-xs">VFS read chunk size (e.g., 32M, 64M)</p>
+								</fieldset>
 
-									{/* Third Row */}
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Read Ahead</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.vfs_read_ahead}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("vfs_read_ahead", e.target.value)}
-												placeholder="128k"
-											/>
-											<p className="label">Read ahead buffer size (e.g., 128k, 256k)</p>
-										</fieldset>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Read Chunk Size Limit</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.read_chunk_size_limit}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleMountInputChange("read_chunk_size_limit", e.target.value)
+										}
+										placeholder="2G"
+									/>
+									<p className="label text-xs">Maximum read chunk size (e.g., 2G, 4G)</p>
+								</fieldset>
+							</div>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Directory Cache Time</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.dir_cache_time}
-												disabled={isReadOnly}
-												onChange={(e) => handleMountInputChange("dir_cache_time", e.target.value)}
-												placeholder="5m"
-											/>
-											<p className="label">How long to cache directory listings (e.g., 5m, 10m)</p>
-										</fieldset>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Directory Cache Time</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.dir_cache_time}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("dir_cache_time", e.target.value)}
+										placeholder="10m"
+									/>
+									<p className="label text-xs">Directory cache time (e.g., 10m, 1h)</p>
+								</fieldset>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Cache Poll Interval</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.vfs_cache_poll_interval}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("vfs_cache_poll_interval", e.target.value)
-												}
-												placeholder="1m"
-											/>
-											<p className="label">How often VFS cache dir gets cleaned</p>
-										</fieldset>
-									</div>
-
-									{/* Fourth Row */}
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Cache Min Free Space</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.vfs_cache_min_free_space}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("vfs_cache_min_free_space", e.target.value)
-												}
-												placeholder="1G"
-											/>
-											<p className="label">
-												Target minimum free space on the disk containing the cache
-											</p>
-										</fieldset>
-
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Disk Space Total</legend>
-											<input
-												type="text"
-												className="input"
-												value={mountFormData.vfs_disk_space_total}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange("vfs_disk_space_total", e.target.value)
-												}
-												placeholder="1G"
-											/>
-											<p className="label">Specify the total space of disk</p>
-										</fieldset>
-
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Read Chunk Streams</legend>
-											<input
-												type="number"
-												className="input"
-												value={mountFormData.vfs_read_chunk_streams}
-												disabled={isReadOnly}
-												onChange={(e) =>
-													handleMountInputChange(
-														"vfs_read_chunk_streams",
-														Number.parseInt(e.target.value, 10) || 4,
-													)
-												}
-											/>
-											<p className="label">The number of parallel streams to read at once</p>
-										</fieldset>
-									</div>
-								</div>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Transfers</legend>
+									<input
+										type="number"
+										className="input"
+										value={mountFormData.transfers}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleMountInputChange("transfers", Number.parseInt(e.target.value, 10) || 4)
+										}
+										min="1"
+										max="32"
+									/>
+									<p className="label text-xs">Number of parallel transfers (1-32)</p>
+								</fieldset>
 							</div>
 						</div>
 
-						{/* Advanced Settings Section - Collapsible */}
-						<div className="collapse-arrow collapse bg-base-200">
-							<input
-								type="checkbox"
-								checked={showAdvanced}
-								onChange={() => setShowAdvanced(!showAdvanced)}
-							/>
-							<div className="collapse-title flex items-center gap-2 font-medium text-base">
-								<HardDrive className="h-5 w-5" />
-								Advanced Settings
+						{/* Advanced Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">Advanced Settings</h5>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Async Read</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Enable async read operations</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.async_read}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("async_read", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --async-read for better performance</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">No Checksum</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Skip checksum verification</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.no_checksum}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("no_checksum", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Disable checksum verification for speed</p>
+								</fieldset>
 							</div>
-							<div className="collapse-content">
-								<div className="space-y-4 pt-4">
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">No Modification Time</legend>
-											<label className="label cursor-pointer">
-												<span className="label-text">Don't read/write modification times</span>
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={mountFormData.no_mod_time}
-													disabled={isReadOnly}
-													onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)}
-												/>
-											</label>
-										</fieldset>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">No Checksum</legend>
-											<label className="label cursor-pointer">
-												<span className="label-text">Don't checksum files on upload</span>
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={mountFormData.no_checksum}
-													disabled={isReadOnly}
-													onChange={(e) => handleMountInputChange("no_checksum", e.target.checked)}
-												/>
-											</label>
-										</fieldset>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">No Mod Time</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Don't read/write modification time</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.no_mod_time}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Skip modification time operations</p>
+								</fieldset>
 
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Async Read</legend>
-											<label className="label cursor-pointer">
-												<span className="label-text">Use asynchronous reads</span>
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={mountFormData.async_read}
-													disabled={isReadOnly}
-													onChange={(e) => handleMountInputChange("async_read", e.target.checked)}
-												/>
-											</label>
-										</fieldset>
-
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">VFS Fast Fingerprint</legend>
-											<label className="label cursor-pointer">
-												<span className="label-text">
-													Use fast (less accurate) fingerprints for change detection
-												</span>
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={mountFormData.vfs_fast_fingerprint}
-													disabled={isReadOnly}
-													onChange={(e) =>
-														handleMountInputChange("vfs_fast_fingerprint", e.target.checked)
-													}
-												/>
-											</label>
-										</fieldset>
-
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Use Mmap</legend>
-											<label className="label cursor-pointer">
-												<span className="label-text">
-													Use memory-mapped I/O for better performance
-												</span>
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={mountFormData.use_mmap}
-													disabled={isReadOnly}
-													onChange={(e) => handleMountInputChange("use_mmap", e.target.checked)}
-												/>
-											</label>
-										</fieldset>
-									</div>
-								</div>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">VFS Fast Fingerprint</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Use fast fingerprinting</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.vfs_fast_fingerprint}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleMountInputChange("vfs_fast_fingerprint", e.target.checked)
+											}
+										/>
+									</label>
+									<p className="label text-xs">Enable fast VFS fingerprinting</p>
+								</fieldset>
 							</div>
 						</div>
 
@@ -951,9 +847,7 @@ export function RCloneConfigSection({
 									{mountStatus.mounted && mountStatus.mount_point && (
 										<div className="text-sm">Mount point: {mountStatus.mount_point}</div>
 									)}
-									{mountStatus.error && (
-										<div className="text-error text-sm">{mountStatus.error}</div>
-									)}
+									{mountStatus.error && <div className="text-sm">{mountStatus.error}</div>}
 								</div>
 								{mountStatus.mounted ? (
 									<button
@@ -978,6 +872,25 @@ export function RCloneConfigSection({
 								)}
 							</div>
 						)}
+
+						{/* Action Buttons */}
+						{!isReadOnly && (
+							<div className="flex justify-end gap-2">
+								<button
+									type="button"
+									className="btn btn-primary"
+									onClick={handleSaveMount}
+									disabled={(!hasMountChanges && !hasMountPathChanges) || isUpdating}
+								>
+									{isUpdating ? (
+										<span className="loading loading-spinner loading-sm" />
+									) : (
+										<Save className="h-4 w-4" />
+									)}
+									{isUpdating ? "Saving..." : "Save Mount Changes"}
+								</button>
+							</div>
+						)}
 					</>
 				)}
 			</div>
@@ -988,38 +901,6 @@ export function RCloneConfigSection({
 					<div>
 						<span>{testResult.message}</span>
 					</div>
-				</div>
-			)}
-
-			{/* Action Buttons */}
-			{!isReadOnly && mountFormData.mount_enabled && (
-				<div className="flex justify-end gap-2">
-					<button
-						type="button"
-						className="btn btn-outline"
-						onClick={handleTestMount}
-						disabled={isTestingMount || !mountPath}
-					>
-						{isTestingMount ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<TestTube className="h-4 w-4" />
-						)}
-						{isTestingMount ? "Testing..." : "Test Mount"}
-					</button>
-					<button
-						type="button"
-						className="btn btn-primary"
-						onClick={handleSaveMount}
-						disabled={(!hasMountChanges && !hasMountPathChanges) || isUpdating}
-					>
-						{isUpdating ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Save className="h-4 w-4" />
-						)}
-						{isUpdating ? "Saving..." : "Save Mount Changes"}
-					</button>
 				</div>
 			)}
 		</div>

@@ -58,17 +58,30 @@ export interface HealthConfig {
 
 // RClone configuration (sanitized)
 export interface RCloneConfig {
+	// Encryption
 	password_set: boolean;
 	salt_set: boolean;
-	vfs_enabled: boolean;
-	vfs_url: string;
-	vfs_user: string;
-	vfs_pass_set: boolean;
+
+	// RC (Remote Control) Configuration
+	rc_enabled: boolean;
+	rc_url: string;
+	rc_port: number;
+	rc_user: string;
+	rc_pass_set: boolean;
+	rc_options: Record<string, string>;
+
+	// Mount Configuration
 	mount_enabled: boolean;
 	mount_options: Record<string, string>;
 
-	// Mount Configuration
-	rc_port: number;
+	// Mount-Specific Settings
+	allow_other: boolean;
+	allow_non_empty: boolean;
+	read_only: boolean;
+	timeout: string;
+	syslog: boolean;
+
+	// System and filesystem options
 	log_level: string;
 	uid: number;
 	gid: number;
@@ -86,7 +99,6 @@ export interface RCloneConfig {
 	read_chunk_size_limit: string;
 	vfs_read_ahead: string;
 	dir_cache_time: string;
-	vfs_cache_poll_interval: string;
 	vfs_cache_min_free_space: string;
 	vfs_disk_space_total: string;
 	vfs_read_chunk_streams: number;
@@ -205,15 +217,23 @@ export interface HealthUpdateRequest {
 export interface RCloneUpdateRequest {
 	password?: string;
 	salt?: string;
-	vfs_enabled?: boolean;
-	vfs_url?: string;
-	vfs_user?: string;
-	vfs_pass?: string;
+	rc_enabled?: boolean;
+	rc_url?: string;
+	rc_port?: number;
+	rc_user?: string;
+	rc_pass?: string;
+	rc_options?: Record<string, string>;
 	mount_enabled?: boolean;
 	mount_options?: Record<string, string>;
 
-	// Mount Configuration
-	rc_port?: number;
+	// Mount-Specific Settings
+	allow_other?: boolean;
+	allow_non_empty?: boolean;
+	read_only?: boolean;
+	timeout?: string;
+	syslog?: boolean;
+
+	// System and filesystem options
 	log_level?: string;
 	uid?: number;
 	gid?: number;
@@ -231,7 +251,6 @@ export interface RCloneUpdateRequest {
 	read_chunk_size_limit?: string;
 	vfs_read_ahead?: string;
 	dir_cache_time?: string;
-	vfs_cache_poll_interval?: string;
 	vfs_cache_min_free_space?: string;
 	vfs_disk_space_total?: string;
 	vfs_read_chunk_streams?: number;
@@ -339,25 +358,23 @@ export interface StreamingFormData {
 export interface RCloneFormData {
 	password: string;
 	salt: string;
-	vfs_enabled: boolean;
-	vfs_url: string;
-	vfs_user: string;
-	vfs_pass: string;
-}
-
-export interface RCloneVFSFormData {
-	vfs_enabled: boolean;
-	vfs_url: string;
-	vfs_user: string;
-	vfs_pass: string;
-}
-
-export interface RCloneMountFormData {
+	rc_enabled: boolean;
+	rc_url: string;
+	rc_port: number;
+	rc_user: string;
+	rc_pass: string;
+	rc_options: Record<string, string>;
 	mount_enabled: boolean;
 	mount_options: Record<string, string>;
 
-	// Mount Configuration
-	rc_port: number;
+	// Mount-Specific Settings
+	allow_other: boolean;
+	allow_non_empty: boolean;
+	read_only: boolean;
+	timeout: string;
+	syslog: boolean;
+
+	// System and filesystem options
 	log_level: string;
 	uid: number;
 	gid: number;
@@ -375,7 +392,56 @@ export interface RCloneMountFormData {
 	read_chunk_size_limit: string;
 	vfs_read_ahead: string;
 	dir_cache_time: string;
-	vfs_cache_poll_interval: string;
+	vfs_cache_min_free_space: string;
+	vfs_disk_space_total: string;
+	vfs_read_chunk_streams: number;
+
+	// Advanced Settings
+	no_mod_time: boolean;
+	no_checksum: boolean;
+	async_read: boolean;
+	vfs_fast_fingerprint: boolean;
+	use_mmap: boolean;
+}
+
+export interface RCloneRCFormData {
+	rc_enabled: boolean;
+	rc_url: string;
+	rc_port: number;
+	rc_user: string;
+	rc_pass: string;
+	rc_options: Record<string, string>;
+}
+
+export interface RCloneMountFormData {
+	mount_enabled: boolean;
+	mount_options: Record<string, string>;
+
+	// Mount-Specific Settings
+	allow_other: boolean;
+	allow_non_empty: boolean;
+	read_only: boolean;
+	timeout: string;
+	syslog: boolean;
+
+	// System and filesystem options
+	log_level: string;
+	uid: number;
+	gid: number;
+	umask: string;
+	buffer_size: string;
+	attr_timeout: string;
+	transfers: number;
+
+	// VFS Cache Settings
+	cache_dir: string;
+	vfs_cache_mode: string;
+	vfs_cache_max_size: string;
+	vfs_cache_max_age: string;
+	read_chunk_size: string;
+	read_chunk_size_limit: string;
+	vfs_read_ahead: string;
+	dir_cache_time: string;
 	vfs_cache_min_free_space: string;
 	vfs_disk_space_total: string;
 	vfs_read_chunk_streams: number;
@@ -575,8 +641,8 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	rclone: {
-		title: "RClone VFS",
-		description: "RClone VFS notification settings for external mounts",
+		title: "RClone",
+		description: "RClone mount and VFS settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},

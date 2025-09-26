@@ -200,14 +200,15 @@ export function FileList({
 						style={{
 							transform: `translateY(${virtualScrolling.offsetY}px)`,
 						}}
-						className={`grid gap-4 ${itemsPerRow === 1
+						className={`grid gap-4 ${
+							itemsPerRow === 1
 								? "grid-cols-1"
 								: itemsPerRow === 2
 									? "grid-cols-2"
 									: itemsPerRow === 3
 										? "grid-cols-3"
 										: "grid-cols-4"
-							}`}
+						}`}
 					>
 						{visibleFiles.map((file) => (
 							<FileCard
@@ -279,10 +280,11 @@ function FileCard({
 						{getFileIcon(file)}
 						<div className="min-w-0 flex-1">
 							<h3
-								className={`truncate font-medium ${file.type === "directory"
+								className={`truncate font-medium ${
+									file.type === "directory"
 										? "text-primary hover:text-primary-focus"
 										: "text-base-content"
-									}`}
+								}`}
 							>
 								{file.basename}
 							</h3>

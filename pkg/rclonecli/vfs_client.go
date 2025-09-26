@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/javi11/altmount/internal/config"
 )
 
 type RcloneRcClient interface {
@@ -17,12 +19,12 @@ type RcloneRcClient interface {
 }
 
 type rcloneRcClient struct {
-	config     *Config
+	config     *config.Manager
 	httpClient *http.Client
 }
 
 func NewRcloneRcClient(
-	config *Config,
+	config *config.Manager,
 	httpClient *http.Client,
 ) RcloneRcClient {
 	return &rcloneRcClient{
@@ -31,15 +33,62 @@ func NewRcloneRcClient(
 	}
 }
 
-func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, recursive bool) error {
-	// Check if VFS notifications are enabled
-	if !c.config.VFSEnabled {
-		return nil // Silently skip if VFS is not enabled
+func TestConnection(
+	ctx context.Context,
+	rcUrl string,
+	rcUser string,
+	rcPass string,
+	httpClient *http.Client,
+) error {
+	if rcUrl == "" {
+		return fmt.Errorf("RC URL is not configured")
 	}
 
-	// Check if VFS URL is configured
-	if c.config.VFSUrl == "" {
-		return fmt.Errorf("VFS URL is not configured")
+	baseUrl, err := buildRCUrl(rcUrl, rcUser, rcPass)
+	if err != nil {
+		return fmt.Errorf("invalid RC URL configuration: %w", err)
+	}
+
+	data := map[string]string{}
+
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/rc/noop", bytes.NewBuffer(payload))
+	if err != nil {
+		return err
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, recursive bool) error {
+	cfg := c.config.GetConfig()
+
+	if *cfg.RClone.RCEnabled {
+		return nil // Silently skip if RC is not enabled
+	}
+
+	// Check if RC notifications are enabled
+	if !*cfg.RClone.RCEnabled {
+		return nil // Silently skip if RC is not enabled
+	}
+
+	// Check if RC URL is configured
+	if cfg.RClone.RCUrl == "" {
+		return fmt.Errorf("RC URL is not configured")
 	}
 
 	data := map[string]string{
@@ -47,9 +96,9 @@ func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, re
 		"recursive": fmt.Sprintf("%t", recursive),
 	}
 
-	baseUrl, err := c.buildVFSUrl()
+	baseUrl, err := buildRCUrl(cfg.RClone.RCUrl, cfg.RClone.RCUser, cfg.RClone.RCPass)
 	if err != nil {
-		return fmt.Errorf("invalid VFS URL configuration: %w", err)
+		return fmt.Errorf("invalid RC URL configuration: %w", err)
 	}
 
 	if dir != "" {
@@ -60,6 +109,7 @@ func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, re
 	if err != nil {
 		return err
 	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/refresh", bytes.NewBuffer(payload))
 	if err != nil {
 		return err
@@ -82,48 +132,53 @@ func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, re
 	return nil
 }
 
-// buildVFSUrl constructs the VFS URL with proper protocol and authentication handling
-func (c *rcloneRcClient) buildVFSUrl() (string, error) {
-	rawUrl := c.config.VFSUrl
+// buildRCUrl constructs the RC URL with proper protocol and authentication handling
+func buildRCUrl(
+	rcUrl string,
+	rcUser string,
+	rcPass string,
+) (string, error) {
+
+	rawUrl := rcUrl
 	if rawUrl == "" {
-		return "", fmt.Errorf("VFS URL is not configured")
+		return "", fmt.Errorf("RC URL is not configured")
 	}
 
 	// Parse the URL to handle all cases properly
 	parsedUrl, err := url.Parse(rawUrl)
 	if err != nil {
 		// If parsing fails, return the error immediately
-		return "", fmt.Errorf("failed to parse VFS URL %q: %w", c.config.VFSUrl, err)
+		return "", fmt.Errorf("failed to parse RC URL %q: %w", rcUrl, err)
 	}
 
 	// If no scheme is present, or if it looks like hostname:port was parsed as scheme:opaque
 	// (which happens with URLs like "example.com:8080"), add http:// and re-parse
 	needsScheme := parsedUrl.Scheme == "" ||
 		(parsedUrl.Host == "" && parsedUrl.Opaque != "" &&
-		 parsedUrl.Scheme != "http" && parsedUrl.Scheme != "https")
+			parsedUrl.Scheme != "http" && parsedUrl.Scheme != "https")
 
 	if needsScheme {
-		rawUrl = "http://" + c.config.VFSUrl
+		rawUrl = "http://" + rcUrl
 		parsedUrl, err = url.Parse(rawUrl)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse VFS URL %q after adding http prefix: %w", c.config.VFSUrl, err)
+			return "", fmt.Errorf("failed to parse RC URL %q after adding http prefix: %w", rcUrl, err)
 		}
 	}
 
 	// Validate scheme
 	if parsedUrl.Scheme != "http" && parsedUrl.Scheme != "https" {
-		return "", fmt.Errorf("unsupported URL scheme %q, only http and https are supported", parsedUrl.Scheme)
+		return "", fmt.Errorf("unsupported RC URL scheme %q, only http and https are supported", parsedUrl.Scheme)
 	}
 
 	// Handle authentication
-	if c.config.VFSUser != "" && c.config.VFSPass != "" {
+	if rcUser != "" && rcPass != "" {
 		// Set authentication, this will override any existing userinfo
-		parsedUrl.User = url.UserPassword(c.config.VFSUser, c.config.VFSPass)
+		parsedUrl.User = url.UserPassword(rcUser, rcPass)
 	}
 
 	// Ensure host is present
 	if parsedUrl.Host == "" {
-		return "", fmt.Errorf("VFS URL must contain a valid host")
+		return "", fmt.Errorf("RC URL must contain a valid host")
 	}
 
 	return parsedUrl.String(), nil

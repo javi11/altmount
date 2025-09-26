@@ -178,21 +178,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 		_ = poolManager.ClearPool()
 	}()
 
-	// Create rclone client for VFS notifications (if configured)
-	var rcloneClient rclonecli.RcloneRcClient
-	if cfg.RClone.VFSEnabled != nil && *cfg.RClone.VFSEnabled && cfg.RClone.VFSUrl != "" {
-		rcloneConfig := &rclonecli.Config{
-			VFSEnabled: *cfg.RClone.VFSEnabled,
-			VFSUrl:     cfg.RClone.VFSUrl,
-			VFSUser:    cfg.RClone.VFSUser,
-			VFSPass:    cfg.RClone.VFSPass,
-		}
-
+	// Create rclone client for cache refresh notifications (if configured)
+	var rcloneRCClient rclonecli.RcloneRcClient
+	if cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled {
 		httpClient := &http.Client{}
-		rcloneClient = rclonecli.NewRcloneRcClient(rcloneConfig, httpClient)
-		logger.Info("RClone VFS client initialized", "vfs_url", cfg.RClone.VFSUrl)
+		rcloneRCClient = rclonecli.NewRcloneRcClient(configManager, httpClient)
+
+		if cfg.RClone.RCUrl != "" {
+			logger.Info("RClone RC client initialized for external server",
+				"rc_url", cfg.RClone.RCUrl)
+		} else {
+			logger.Info("RClone RC client initialized for internal server",
+				"rc_port", cfg.RClone.RCPort)
+		}
 	} else {
-		logger.Info("RClone VFS notifications disabled")
+		logger.Info("RClone RC notifications disabled")
 	}
 
 	// Create NZB system with metadata + queue
@@ -203,7 +203,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Salt:                cfg.RClone.Salt,
 		MaxDownloadWorkers:  cfg.Streaming.MaxDownloadWorkers,
 		MaxProcessorWorkers: cfg.Import.MaxProcessorWorkers,
-	}, poolManager, configManager.GetConfigGetter(), rcloneClient)
+	}, poolManager, configManager.GetConfigGetter(), rcloneRCClient)
 	if err != nil {
 		logger.Error("failed to init NZB system", "err", err)
 		return err
@@ -282,7 +282,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), logger)
 
 	// Create RClone mount service
-	mountService := rclone.NewMountService(configManager.GetConfigGetter())
+	mountService := rclone.NewMountService(configManager)
 
 	// Create API server configuration (hardcoded to /api)
 	apiConfig := &api.Config{
@@ -395,8 +395,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 			metadataService,
 			poolManager,
 			configManager.GetConfigGetter(),
-			rcloneClient, // Pass rclone client for VFS notifications
-			nil,          // No event handler for now
+			rcloneRCClient, // Pass rclone client for VFS notifications
+			nil,            // No event handler for now
 		)
 
 		healthWorker = health.NewHealthWorker(
@@ -410,10 +410,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 		// Set health worker reference in API server
 		apiServer.SetHealthWorker(healthWorker)
-		// Set rclone client reference in API server
-		if rcloneClient != nil {
-			apiServer.SetRcloneClient(rcloneClient)
-		}
 
 		// Start health worker with the main context
 		if err := healthWorker.Start(ctx); err != nil {

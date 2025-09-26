@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -322,7 +323,10 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		})
 	}
 
-	err := nntppool.TestProviderConnectivity(c.Context(), nntppool.UsenetProviderConfig{
+	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+	defer cancel()
+
+	err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
 		Host:     testReq.Host,
 		Port:     testReq.Port,
 		Username: testReq.Username,
@@ -339,8 +343,6 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: Implement actual NNTP connection test
-	// For now, return success for basic validation
 	response := TestProviderResponse{
 		Success:      true,
 		ErrorMessage: "",
@@ -878,10 +880,9 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 func (s *Server) handleTestRCloneConnection(c *fiber.Ctx) error {
 	// Decode test request
 	var testReq struct {
-		VFSEnabled bool   `json:"vfs_enabled"`
-		VFSURL     string `json:"vfs_url"`
-		VFSUser    string `json:"vfs_user"`
-		VFSPass    string `json:"vfs_pass"`
+		RCUrl  string `json:"rc_url"`
+		RCUser string `json:"rc_user"`
+		RCPass string `json:"rc_pass"`
 	}
 
 	if err := c.BodyParser(&testReq); err != nil {
@@ -892,48 +893,26 @@ func (s *Server) handleTestRCloneConnection(c *fiber.Ctx) error {
 		})
 	}
 
-	// Validate that VFS is enabled
-	if !testReq.VFSEnabled {
+	if testReq.RCUrl != "" {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
-			"message": "VFS must be enabled to test connection",
-			"details": "VFS_NOT_ENABLED",
+			"message": "RC URL is required",
+			"details": "MISSING_RC_URL",
 		})
 	}
 
-	// Validate URL is provided
-	if testReq.VFSURL == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "VFS URL is required",
-			"details": "MISSING_VFS_URL",
-		})
-	}
+	// Try to connect with timeout
+	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	defer cancel()
 
-	// Create a temporary RClone client with the test configuration
-	testConfig := &rclonecli.Config{
-		VFSEnabled: testReq.VFSEnabled,
-		VFSUrl:     testReq.VFSURL,
-		VFSUser:    testReq.VFSUser,
-		VFSPass:    testReq.VFSPass,
-	}
-
-	httpClient := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	testClient := rclonecli.NewRcloneRcClient(testConfig, httpClient)
-
-	// Test the connection by attempting to refresh the root directory
-	ctx := c.Context()
-	err := testClient.RefreshCache(ctx, "/", true, false) // async=true, recursive=false
-
+	// Test external RC server connection
+	err := rclonecli.TestConnection(ctx, testReq.RCUrl, testReq.RCUser, testReq.RCPass, http.DefaultClient)
 	if err != nil {
-		// Return success:true but with test result as failed
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,
 			"data": fiber.Map{
 				"success":       false,
-				"error_message": err.Error(),
+				"error_message": fmt.Sprintf("Failed to connect to external RC server: %v", err),
 			},
 		})
 	}
@@ -944,6 +923,7 @@ func (s *Server) handleTestRCloneConnection(c *fiber.Ctx) error {
 		"data": fiber.Map{
 			"success":       true,
 			"error_message": "",
+			"message":       fmt.Sprintf("Connected to external RC server at %s", testReq.RCUrl),
 		},
 	})
 }

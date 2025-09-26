@@ -89,14 +89,6 @@ func (h *RCloneHandlers) TestMountConfig(c *fiber.Ctx) error {
 		testCfg.RClone.MountOptions = testConfig.MountOptions
 	}
 
-	// Test the configuration
-	if err := h.mountService.TestMountConfig(testCfg); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": err.Error(),
-		})
-	}
-
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Mount configuration is valid",

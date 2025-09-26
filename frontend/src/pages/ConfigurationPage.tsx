@@ -43,7 +43,7 @@ import type {
 	LogFormData,
 	MetadataConfig,
 	RCloneMountFormData,
-	RCloneVFSFormData,
+	RCloneRCFormData,
 	SABnzbdConfig,
 	StreamingConfig,
 	WebDAVConfig,
@@ -161,7 +161,7 @@ export function ConfigurationPage() {
 			| HealthConfig
 			| ImportConfig
 			| MetadataConfig
-			| RCloneVFSFormData
+			| RCloneRCFormData
 			| RCloneMountFormData
 			| LogFormData
 			| SABnzbdConfig
@@ -217,7 +217,7 @@ export function ConfigurationPage() {
 			} else if (section === "rclone") {
 				await updateConfigSection.mutateAsync({
 					section: "rclone",
-					config: { rclone: data as RCloneVFSFormData },
+					config: { rclone: data as RCloneMountFormData },
 				});
 			} else if (section === "mount_path") {
 				// For mount_path, we need to update the system section with mount_path
