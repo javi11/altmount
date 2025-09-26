@@ -150,6 +150,8 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		segmentsToCheck = []*metapb.SegmentData{fileMeta.SegmentData[0]}
 	}
 
+	slog.Info("Checking segments", "file_path", filePath, "segments_to_check", segmentsToCheck)
+
 	// Check segments with configurable concurrency
 	checkErr := hc.checkSegments(ctx, segmentsToCheck)
 
@@ -198,6 +200,9 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 
 // checkSingleSegment checks if a single segment exists
 func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	// Get current pool from manager
 	usenetPool, err := hc.poolManager.GetPool()
 	if err != nil {

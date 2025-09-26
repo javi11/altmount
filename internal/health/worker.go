@@ -411,8 +411,6 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		}
 	})
 
-	hw.logger.Info("Direct health check completed", "file_path", filePath, "status", event.Status, "type", event.Type)
-
 	return nil
 }
 
