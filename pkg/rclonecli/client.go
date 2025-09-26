@@ -3,6 +3,7 @@ package rclonecli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,7 +65,7 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 	if exists && !existingMount.Mounted {
 		err := m.forceUnmountPath(mountPath)
 		if err != nil {
-			return err
+			slog.ErrorContext(ctx, "Failed to force unmount path", "err", err, "provider", provider, "path", mountPath)
 		}
 	}
 
@@ -243,7 +244,7 @@ func (m *Manager) UnmountAll(ctx context.Context) error {
 	for _, provider := range providers {
 		if err := m.unmount(ctx, provider); err != nil {
 			lastError = err
-			m.logger.ErrorContext(ctx, "Failed to unmount", "err", err, "provider", provider)
+			m.logger.DebugContext(ctx, "Failed to unmount", "err", err, "provider", provider)
 		}
 	}
 

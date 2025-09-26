@@ -1,5 +1,7 @@
 import { Eye, EyeOff, HardDrive, Play, Save, Square, TestTube } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useConfirm } from "../../contexts/ModalContext";
+import { useToast } from "../../contexts/ToastContext";
 import type {
 	ConfigResponse,
 	MountStatus,
@@ -86,6 +88,11 @@ export function RCloneConfigSection({
 		success: boolean;
 		message: string;
 	} | null>(null);
+	const [isMountLoading, setIsMountLoading] = useState(false);
+	const [isMountToggleSaving, setIsMountToggleSaving] = useState(false);
+	const [isRCToggleSaving, setIsRCToggleSaving] = useState(false);
+	const { showToast } = useToast();
+	const { confirmAction } = useConfirm();
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -206,12 +213,8 @@ export function RCloneConfigSection({
 		// Always mark as changed when any field is modified
 		setHasMountChanges(true);
 
-		// Auto-enable RC when mount is enabled (mount requires RC to function)
-		if (field === "mount_enabled" && value === true && !formData.rc_enabled) {
-			const newRCData = { ...formData, rc_enabled: true };
-			setFormData(newRCData);
-			setHasChanges(true);
-		}
+		// Note: RC is automatically managed by the backend when mount is enabled
+		// No need to manually enable RC here
 	};
 
 	const handleMountPathChange = (value: string) => {
@@ -236,6 +239,52 @@ export function RCloneConfigSection({
 		}
 	};
 
+	// Handle RC enabled toggle with auto-save
+	const handleRCEnabledChange = async (enabled: boolean) => {
+		// Don't allow changes if mount is enabled (RC is managed by mount)
+		if (mountFormData.mount_enabled) return;
+
+		// Update local state immediately for UI responsiveness
+		setFormData((prev) => ({ ...prev, rc_enabled: enabled }));
+
+		if (!onUpdate) return;
+
+		setIsRCToggleSaving(true);
+		try {
+			// Save the RC enabled state immediately
+			const updateData: RCloneRCFormData = {
+				rc_enabled: enabled,
+				rc_url: formData.rc_url || "",
+				rc_port: formData.rc_port || 5572,
+				rc_user: formData.rc_user || "",
+				rc_pass: "", // Don't send password on toggle
+				rc_options: formData.rc_options || {},
+			};
+
+			await onUpdate("rclone", updateData);
+
+			// Clear the hasChanges flag since we just saved
+			setHasChanges(false);
+
+			showToast({
+				type: "success",
+				title: enabled ? "RC enabled" : "RC disabled",
+				message: `RClone Remote Control has been ${enabled ? "enabled" : "disabled"} successfully`,
+			});
+		} catch (error) {
+			// Revert the state on error
+			setFormData((prev) => ({ ...prev, rc_enabled: !enabled }));
+
+			showToast({
+				type: "error",
+				title: `Failed to ${enabled ? "enable" : "disable"} RC`,
+				message: error instanceof Error ? error.message : "Unknown error occurred",
+			});
+		} finally {
+			setIsRCToggleSaving(false);
+		}
+	};
+
 	const handleSaveMount = async () => {
 		if (onUpdate) {
 			// Save mount configuration changes
@@ -257,7 +306,98 @@ export function RCloneConfigSection({
 		}
 	};
 
+	// Handle mount enabled toggle with auto-save
+	const handleMountEnabledChange = async (enabled: boolean) => {
+		// If disabling mount and there's an active mount, show confirmation dialog
+		if (!enabled && mountStatus?.mounted) {
+			const confirmed = await confirmAction(
+				"Disable Mount",
+				`The mount is currently active". Disabling the mount will stop the active mount and unmount the filesystem. Do you want to continue?`,
+				{
+					type: "warning",
+					confirmText: "Disable & Unmount",
+					confirmButtonClass: "btn-warning",
+				},
+			);
+
+			if (!confirmed) {
+				// User cancelled - revert the checkbox state
+				return;
+			}
+		}
+
+		// Update local state immediately for UI responsiveness
+		setMountFormData((prev) => ({ ...prev, mount_enabled: enabled }));
+
+		if (!onUpdate) return;
+
+		setIsMountToggleSaving(true);
+		try {
+			// If disabling and mount is active, stop the mount first
+			if (!enabled && mountStatus?.mounted) {
+				try {
+					const response = await fetch("/api/rclone/mount/stop", {
+						method: "POST",
+					});
+					const result = await response.json();
+
+					if (!result.success) {
+						throw new Error(result.message || "Failed to stop mount");
+					}
+
+					// Update mount status to reflect stopped state
+					setMountStatus({ mounted: false, mount_point: "" });
+
+					showToast({
+						type: "success",
+						title: "Mount stopped",
+						message: "Active mount has been stopped successfully",
+					});
+				} catch (stopError) {
+					// Revert state and show error
+					setMountFormData((prev) => ({ ...prev, mount_enabled: true }));
+
+					showToast({
+						type: "error",
+						title: "Failed to stop mount",
+						message: stopError instanceof Error ? stopError.message : "Unknown error occurred",
+					});
+					return;
+				}
+			}
+
+			// Save the mount enabled state
+			await onUpdate("rclone", { ...mountFormData, mount_enabled: enabled });
+
+			// Clear the hasMountChanges flag since we just saved
+			setHasMountChanges(false);
+
+			showToast({
+				type: "success",
+				title: enabled ? "Mount enabled" : "Mount disabled",
+				message: `RClone mount has been ${enabled ? "enabled" : "disabled"} successfully`,
+			});
+
+			// Refresh mount status if enabled
+			if (enabled) {
+				fetchMountStatus();
+			}
+		} catch (error) {
+			// Revert the state on error
+			setMountFormData((prev) => ({ ...prev, mount_enabled: !enabled }));
+
+			showToast({
+				type: "error",
+				title: `Failed to ${enabled ? "enable" : "disable"} mount`,
+				message: error instanceof Error ? error.message : "Unknown error occurred",
+			});
+		} finally {
+			setIsMountToggleSaving(false);
+		}
+	};
+
 	const handleStartMount = async () => {
+		setIsMountLoading(true);
 		try {
 			const response = await fetch("/api/rclone/mount/start", {
 				method: "POST",
@@ -265,15 +405,31 @@ export function RCloneConfigSection({
 			const result = await response.json();
 			if (result.success) {
 				setMountStatus(result.data);
+				showToast({
+					type: "success",
+					title: "Mount started",
+					message: "RClone mount has been started successfully",
+				});
 			} else {
-				alert(`Failed to start mount: ${result.message}`);
+				showToast({
+					type: "error",
+					title: "Failed to start mount",
+					message: result.message || "Unknown error occurred",
+				});
 			}
 		} catch (error) {
-			alert(`Error starting mount: ${error}`);
+			showToast({
+				type: "error",
+				title: "Error starting mount",
+				message: error instanceof Error ? error.message : "Unknown error occurred",
+			});
+		} finally {
+			setIsMountLoading(false);
 		}
 	};
 
 	const handleStopMount = async () => {
+		setIsMountLoading(true);
 		try {
 			const response = await fetch("/api/rclone/mount/stop", {
 				method: "POST",
@@ -281,11 +437,26 @@ export function RCloneConfigSection({
 			const result = await response.json();
 			if (result.success) {
 				setMountStatus({ mounted: false, mount_point: "" });
+				showToast({
+					type: "success",
+					title: "Mount stopped",
+					message: "RClone mount has been stopped successfully",
+				});
 			} else {
-				alert(`Failed to stop mount: ${result.message}`);
+				showToast({
+					type: "error",
+					title: "Failed to stop mount",
+					message: result.message || "Unknown error occurred",
+				});
 			}
 		} catch (error) {
-			alert(`Error stopping mount: ${error}`);
+			showToast({
+				type: "error",
+				title: "Error stopping mount",
+				message: error instanceof Error ? error.message : "Unknown error occurred",
+			});
+		} finally {
+			setIsMountLoading(false);
 		}
 	};
 
@@ -294,7 +465,7 @@ export function RCloneConfigSection({
 		setTestResult(null);
 
 		try {
-			const response = await fetch("/api/config/rclone/test", {
+			const response = await fetch("/api/rclone/test", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
@@ -354,43 +525,60 @@ export function RCloneConfigSection({
 					<label className="label cursor-pointer">
 						<span className="label-text">
 							Enable RClone Remote Control for cache notifications
-							{mountFormData.mount_enabled && formData.rc_enabled && (
-								<span className="badge badge-info badge-sm ml-2">Auto-enabled</span>
+							{mountFormData.mount_enabled && (
+								<span className="badge badge-info badge-sm ml-2">Auto-configured by mount</span>
+							)}
+							{isRCToggleSaving && !mountFormData.mount_enabled && (
+								<span className="loading loading-spinner loading-xs ml-2" />
 							)}
 						</span>
 						<input
 							type="checkbox"
 							className="checkbox"
-							checked={formData.rc_enabled}
-							disabled={isReadOnly || (mountFormData.mount_enabled && formData.rc_enabled)}
-							onChange={(e) => handleInputChange("rc_enabled", e.target.checked)}
+							checked={mountFormData.mount_enabled || formData.rc_enabled}
+							disabled={isReadOnly || mountFormData.mount_enabled || isRCToggleSaving}
+							onChange={(e) => handleRCEnabledChange(e.target.checked)}
 						/>
 					</label>
 					<p className="label">
-						Enable connection to RClone RC server for cache refresh notifications and mount
-						operations
+						{mountFormData.mount_enabled
+							? "RC server is automatically managed by the mount service"
+							: isRCToggleSaving
+								? "Saving..."
+								: "Enable connection to RClone RC server for cache refresh notifications"}
 					</p>
-					{mountFormData.mount_enabled && formData.rc_enabled && (
-						<span className="mt-1 block text-info text-sm">
-							RC is automatically enabled because mounting requires remote control
-						</span>
+					{mountFormData.mount_enabled && (
+						<div className="mt-2 space-y-1">
+							<span className="block text-info text-sm">
+								Mount service automatically starts and manages the RC server on port 5572
+							</span>
+							<span className="block text-base-content/70 text-xs">
+								RC configuration below is read-only when mount is enabled
+							</span>
+						</div>
 					)}
 				</fieldset>
 
-				{formData.rc_enabled && (
+				{(formData.rc_enabled || mountFormData.mount_enabled) && (
 					<>
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend">RC URL</legend>
 							<input
 								type="text"
 								className="input"
-								value={formData.rc_url}
-								disabled={isReadOnly}
+								value={mountFormData.mount_enabled ? "" : formData.rc_url}
+								disabled={isReadOnly || mountFormData.mount_enabled}
 								onChange={(e) => handleInputChange("rc_url", e.target.value)}
-								placeholder="http://localhost:5572 (leave empty to start internal RC server)"
+								placeholder={
+									mountFormData.mount_enabled
+										? "Internal server (managed by mount)"
+										: "http://localhost:5572 (leave empty to start internal RC server)"
+								}
 							/>
 							<p className="label">
-								External RClone RC server URL (leave empty to use internal RC server)
+								{mountFormData.mount_enabled
+									? "Using internal RC server managed by mount service"
+									: "External RClone RC server URL (leave empty to use internal RC server)"}
 							</p>
 						</fieldset>
 
@@ -399,86 +587,102 @@ export function RCloneConfigSection({
 							<input
 								type="number"
 								className="input"
-								value={formData.rc_port}
-								disabled={isReadOnly}
+								value={mountFormData.mount_enabled ? 5572 : formData.rc_port}
+								disabled={isReadOnly || mountFormData.mount_enabled}
 								onChange={(e) =>
 									handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
 								}
 								placeholder="5572"
 							/>
 							<p className="label">
-								Port for RC server (used for internal server or connecting to external)
+								{mountFormData.mount_enabled
+									? "Fixed port used by mount's internal RC server"
+									: "Port for RC server (used for internal server or connecting to external)"}
 							</p>
 						</fieldset>
 
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">RC Username</legend>
-							<input
-								type="text"
-								className="input"
-								value={formData.rc_user}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("rc_user", e.target.value)}
-								placeholder="admin"
-							/>
-							<p className="label">Username for RClone RC API authentication</p>
-						</fieldset>
+						{!mountFormData.mount_enabled && (
+							<>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">RC Username</legend>
+									<input
+										type="text"
+										className="input"
+										value={formData.rc_user}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("rc_user", e.target.value)}
+										placeholder="admin"
+									/>
+									<p className="label">Username for RClone RC API authentication</p>
+								</fieldset>
 
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">RC Password</legend>
-							<div className="relative">
-								<input
-									type={showRCPassword ? "text" : "password"}
-									className="input pr-10"
-									value={formData.rc_pass}
-									disabled={isReadOnly}
-									onChange={(e) => handleInputChange("rc_pass", e.target.value)}
-									placeholder={
-										config.rclone.rc_pass_set ? "RC password is set (enter new to change)" : "admin"
-									}
-								/>
-								<button
-									type="button"
-									className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
-									onClick={() => setShowRCPassword(!showRCPassword)}
-								>
-									{showRCPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-								</button>
-							</div>
-							<p className="label">
-								Password for RClone RC API authentication
-								{config.rclone.rc_pass_set && " (currently set)"}
-							</p>
-						</fieldset>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">RC Password</legend>
+									<div className="relative">
+										<input
+											type={showRCPassword ? "text" : "password"}
+											className="input pr-10"
+											value={formData.rc_pass}
+											disabled={isReadOnly}
+											onChange={(e) => handleInputChange("rc_pass", e.target.value)}
+											placeholder={
+												config.rclone.rc_pass_set
+													? "RC password is set (enter new to change)"
+													: "admin"
+											}
+										/>
+										<button
+											type="button"
+											className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
+											onClick={() => setShowRCPassword(!showRCPassword)}
+										>
+											{showRCPassword ? (
+												<EyeOff className="h-4 w-4" />
+											) : (
+												<Eye className="h-4 w-4" />
+											)}
+										</button>
+									</div>
+									<p className="label">
+										Password for RClone RC API authentication
+										{config.rclone.rc_pass_set && " (currently set)"}
+									</p>
+								</fieldset>
+							</>
+						)}
 
 						{!isReadOnly && (
 							<div className="flex gap-2">
-								<button
-									type="button"
-									className="btn btn-outline"
-									onClick={handleTestConnection}
-									disabled={isTestingConnection || (!formData.rc_url && !formData.rc_enabled)}
-								>
-									{isTestingConnection ? (
-										<span className="loading loading-spinner loading-sm" />
-									) : (
-										<TestTube className="h-4 w-4" />
-									)}
-									{isTestingConnection ? "Testing..." : "Test Connection"}
-								</button>
-								<button
-									type="button"
-									className="btn btn-primary"
-									onClick={handleSave}
-									disabled={!hasChanges || isUpdating}
-								>
-									{isUpdating ? (
-										<span className="loading loading-spinner loading-sm" />
-									) : (
-										<Save className="h-4 w-4" />
-									)}
-									{isUpdating ? "Saving..." : "Save RC Changes"}
-								</button>
+								{!mountFormData.mount_enabled && (
+									<>
+										<button
+											type="button"
+											className="btn btn-outline"
+											onClick={handleTestConnection}
+											disabled={isTestingConnection || (!formData.rc_url && !formData.rc_enabled)}
+										>
+											{isTestingConnection ? (
+												<span className="loading loading-spinner loading-sm" />
+											) : (
+												<TestTube className="h-4 w-4" />
+											)}
+											{isTestingConnection ? "Testing..." : "Test Connection"}
+										</button>
+										<button
+											type="button"
+											className="btn btn-primary"
+											onClick={handleSave}
+											disabled={!hasChanges || isUpdating}
+										>
+											{isUpdating ? (
+												<span className="loading loading-spinner loading-sm" />
+											) : (
+												<Save className="h-4 w-4" />
+											)}
+											{isUpdating ? "Saving..." : "Save RC Changes"}
+										</button>
+									</>
+								)}
 							</div>
 						)}
 					</>
@@ -492,19 +696,34 @@ export function RCloneConfigSection({
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Enable RClone Mount</legend>
 					<label className="label cursor-pointer">
-						<span className="label-text">Enable RClone mount for WebDAV</span>
+						<span className="label-text">
+							Enable RClone mount for WebDAV
+							{isMountToggleSaving && <span className="loading loading-spinner loading-xs ml-2" />}
+						</span>
 						<input
 							type="checkbox"
 							className="checkbox"
 							checked={mountFormData.mount_enabled}
-							disabled={isReadOnly}
-							onChange={(e) => handleMountInputChange("mount_enabled", e.target.checked)}
+							disabled={isReadOnly || isMountToggleSaving}
+							onChange={(e) => handleMountEnabledChange(e.target.checked)}
 						/>
 					</label>
 					<p className="label">
-						Mount the AltMount WebDAV as a local filesystem using RClone (requires RC enabled and
-						rclone binary)
+						Mount the AltMount WebDAV as a local filesystem using RClone
+						{isMountToggleSaving && " (Saving...)"}
 					</p>
+					{mountFormData.mount_enabled && (
+						<div className="alert alert-info mt-2">
+							<div className="text-sm">
+								<div className="font-semibold">Mount service will automatically:</div>
+								<ul className="mt-1 ml-4 list-disc">
+									<li>Start and manage the RC server on port 5572</li>
+									<li>Configure all necessary RC settings</li>
+									<li>Handle mount operations and cache management</li>
+								</ul>
+							</div>
+						</div>
+					)}
 				</fieldset>
 
 				{mountFormData.mount_enabled && (
@@ -854,20 +1073,28 @@ export function RCloneConfigSection({
 										type="button"
 										className="btn btn-sm btn-outline"
 										onClick={handleStopMount}
-										disabled={isReadOnly}
+										disabled={isReadOnly || isMountLoading}
 									>
-										<Square className="h-4 w-4" />
-										Stop Mount
+										{isMountLoading ? (
+											<span className="loading loading-spinner loading-xs" />
+										) : (
+											<Square className="h-4 w-4" />
+										)}
+										{isMountLoading ? "Stopping..." : "Stop Mount"}
 									</button>
 								) : (
 									<button
 										type="button"
 										className="btn btn-sm btn-primary"
 										onClick={handleStartMount}
-										disabled={isReadOnly || !mountPath}
+										disabled={isReadOnly || !mountPath || isMountLoading}
 									>
-										<Play className="h-4 w-4" />
-										Start Mount
+										{isMountLoading ? (
+											<span className="loading loading-spinner loading-xs" />
+										) : (
+											<Play className="h-4 w-4" />
+										)}
+										{isMountLoading ? "Starting..." : "Start Mount"}
 									</button>
 								)}
 							</div>

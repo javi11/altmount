@@ -65,7 +65,11 @@ func (s *MountService) Mount(ctx context.Context) error {
 	webdavURL := fmt.Sprintf("http://localhost:%d", cfg.WebDAV.Port)
 
 	// Create mount instance
-	s.mount = rclonecli.NewMount(MountProvider, cfg.MountPath, webdavURL, s.manager)
+	if s.mount != nil {
+		s.mount.Unmount(ctx)
+	} else {
+		s.mount = rclonecli.NewMount(MountProvider, cfg.MountPath, webdavURL, s.manager)
+	}
 
 	if err := s.mount.Mount(ctx); err != nil {
 		return fmt.Errorf("failed to mount: %w", err)

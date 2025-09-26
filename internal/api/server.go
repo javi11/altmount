@@ -168,7 +168,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/config/:section", s.handlePatchConfigSection)
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
-	api.Post("/config/rclone/test", s.handleTestRCloneConnection)
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)

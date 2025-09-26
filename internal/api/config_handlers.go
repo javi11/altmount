@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nntppool"
 )
 
@@ -876,54 +874,3 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	})
 }
 
-// handleTestRCloneConnection tests the RClone RC connection
-func (s *Server) handleTestRCloneConnection(c *fiber.Ctx) error {
-	// Decode test request
-	var testReq struct {
-		RCUrl  string `json:"rc_url"`
-		RCUser string `json:"rc_user"`
-		RCPass string `json:"rc_pass"`
-	}
-
-	if err := c.BodyParser(&testReq); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
-	}
-
-	if testReq.RCUrl != "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "RC URL is required",
-			"details": "MISSING_RC_URL",
-		})
-	}
-
-	// Try to connect with timeout
-	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
-	defer cancel()
-
-	// Test external RC server connection
-	err := rclonecli.TestConnection(ctx, testReq.RCUrl, testReq.RCUser, testReq.RCPass, http.DefaultClient)
-	if err != nil {
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data": fiber.Map{
-				"success":       false,
-				"error_message": fmt.Sprintf("Failed to connect to external RC server: %v", err),
-			},
-		})
-	}
-
-	// Connection successful
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": fiber.Map{
-			"success":       true,
-			"error_message": "",
-			"message":       fmt.Sprintf("Connected to external RC server at %s", testReq.RCUrl),
-		},
-	})
-}

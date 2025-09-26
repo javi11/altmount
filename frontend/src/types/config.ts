@@ -610,6 +610,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "Globe",
 		canEdit: true,
 	},
+	rclone: {
+		title: "Mount & RClone",
+		description: "RClone mount and VFS settings",
+		icon: "HardDrive",
+		canEdit: true,
+	},
 	metadata: {
 		title: "Metadata",
 		description: "File metadata storage settings",
@@ -638,12 +644,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "NNTP Providers",
 		description: "Usenet provider configuration for downloads",
 		icon: "Radio",
-		canEdit: true,
-	},
-	rclone: {
-		title: "RClone",
-		description: "RClone mount and VFS settings",
-		icon: "HardDrive",
 		canEdit: true,
 	},
 	sabnzbd: {

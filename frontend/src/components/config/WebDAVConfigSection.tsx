@@ -1,5 +1,6 @@
 import { Save } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import type { ConfigResponse, WebDAVConfig } from "../../types/config";
 
 interface WebDAVFormData extends WebDAVConfig {
@@ -82,30 +83,30 @@ export function WebDAVConfigSection({
 					stripped from file paths when communicating with Radarr/Sonarr.
 				</p>
 
-				{/* Rclone Mount Instructions */}
-				<div className="mt-4 rounded-lg bg-gray-50 p-4 dark:bg-gray-800">
-					<h4 className="mb-2 font-medium text-sm">How to create the mount using rclone:</h4>
-					<div className="space-y-2 text-gray-600 text-sm dark:text-gray-400">
-						<p>1. Install rclone if not already installed</p>
-						<p>2. Create the mount directory:</p>
-						<code className="block rounded bg-gray-100 p-2 font-mono text-xs dark:bg-gray-700">
-							sudo mkdir -p {formData.mount_path || "/mnt/altmount"}
-						</code>
-						<p>3. Mount the WebDAV server:</p>
-						<code className="block whitespace-pre-wrap rounded bg-gray-100 p-2 font-mono text-xs dark:bg-gray-700">
-							rclone mount webdav: {formData.mount_path || "/mnt/altmount"} \
-							--webdav-url=http://localhost:{formData.port || "8080"}/webdav \ --webdav-user=
-							{formData.user || "username"} \ --webdav-pass={formData.password || "password"} \
-							--async-read=true \ --allow-non-empty \ --allow-other \ --rc \ --rc-no-auth \
-							--rc-addr=0.0.0.0:5573 \ --vfs-read-ahead=128M \ --vfs-read-chunk-size=32M \
-							--vfs-read-chunk-size-limit=2G \ --vfs-cache-mode=full \ --vfs-cache-max-age=504h \
-							--vfs-cache-max-size=50G \ --vfs-cache-poll-interval=30s \ --buffer-size=32M \
-							--dir-cache-time=10m \ --timeout=10m \ --umask=002 \ --syslog \ --daemon
-						</code>
-						<p className="text-gray-500 text-xs dark:text-gray-500">
-							Note: Replace the placeholder values with your actual WebDAV configuration. The{" "}
-							<code>--allow-other</code> flag requires additional system configuration.
+				{/* Automated RClone Mount */}
+				<div className="mt-4 rounded-lg border border-info/20 bg-info/5 p-4">
+					<h4 className="mb-3 font-medium text-info text-sm">🔧 Automated RClone Mount</h4>
+					<div className="space-y-3 text-base-content/80 text-sm">
+						<p>
+							You can now mount this WebDAV server automatically using our integrated RClone
+							configuration. No manual command-line setup required!
 						</p>
+
+						<div className="flex items-center gap-3">
+							<Link to="/config/rclone" className="btn btn-info btn-sm">
+								Configure RClone Mount
+							</Link>
+						</div>
+
+						<div className="space-y-1 text-xs">
+							<div className="font-medium text-base-content/70">Benefits:</div>
+							<ul className="ml-4 list-disc space-y-0.5 text-base-content/60">
+								<li>No manual command-line setup</li>
+								<li>Automatic configuration management</li>
+								<li>Built-in mount status monitoring</li>
+								<li>Easy enable/disable toggle</li>
+							</ul>
+						</div>
 					</div>
 				</div>
 			</fieldset>

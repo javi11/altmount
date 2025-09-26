@@ -30,7 +30,7 @@ import {
 	useHealthWorkerStatus,
 	useRepairHealthItem,
 } from "../hooks/useApi";
-import { formatRelativeTime, truncateText } from "../lib/utils";
+import { formatFutureTime, formatRelativeTime, truncateText } from "../lib/utils";
 import type { FileHealth } from "../types/api";
 
 export function HealthPage() {
@@ -549,7 +549,7 @@ export function HealthPage() {
 			<div className="card bg-base-100 shadow-lg">
 				<div className="card-body p-0">
 					{isLoading ? (
-						<LoadingTable columns={7} />
+						<LoadingTable columns={8} />
 					) : data && data.length > 0 ? (
 						<div>
 							<table className="table-zebra table">
@@ -573,6 +573,7 @@ export function HealthPage() {
 										<th>Status</th>
 										<th>Retries (H/R)</th>
 										<th>Last Check</th>
+										<th>Next Retry</th>
 										<th>Actions</th>
 									</tr>
 								</thead>
@@ -665,6 +666,11 @@ export function HealthPage() {
 											<td>
 												<span className="text-base-content/70 text-sm">
 													{item.last_checked ? formatRelativeTime(item.last_checked) : "Never"}
+												</span>
+											</td>
+											<td>
+												<span className="text-base-content/70 text-sm">
+													{formatFutureTime(item.next_retry_at)}
 												</span>
 											</td>
 											<td>
