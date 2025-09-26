@@ -10,6 +10,8 @@ import (
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
+const MountProvider = "usenet"
+
 // MountService handles rclone mount operations using RC server
 type MountService struct {
 	cfm     *config.Manager
@@ -60,10 +62,10 @@ func (s *MountService) Mount(ctx context.Context) error {
 	}
 
 	// Create WebDAV URL
-	webdavURL := fmt.Sprintf("http://localhost:%d/webdav", cfg.WebDAV.Port)
+	webdavURL := fmt.Sprintf("http://localhost:%d", cfg.WebDAV.Port)
 
 	// Create mount instance
-	s.mount = rclonecli.NewMount("webdav", cfg.MountPath, webdavURL, s.manager)
+	s.mount = rclonecli.NewMount(MountProvider, cfg.MountPath, webdavURL, s.manager)
 
 	if err := s.mount.Mount(ctx); err != nil {
 		return fmt.Errorf("failed to mount: %w", err)
@@ -75,7 +77,7 @@ func (s *MountService) Mount(ctx context.Context) error {
 }
 
 // Unmount stops the rclone mount
-func (s *MountService) Unmount() error {
+func (s *MountService) Unmount(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -85,14 +87,14 @@ func (s *MountService) Unmount() error {
 
 	// Unmount
 	if s.mount != nil {
-		if err := s.mount.Unmount(); err != nil {
-			slog.Error("Failed to unmount", "error", err)
+		if err := s.mount.Unmount(ctx); err != nil {
+			slog.ErrorContext(ctx, "Failed to unmount", "error", err)
 		}
 	}
 
 	s.mount = nil
 
-	slog.Info("RClone mount stopped")
+	slog.InfoContext(ctx, "RClone mount stopped")
 	return nil
 }
 
@@ -118,8 +120,8 @@ func (s *MountService) GetStatus() rclonecli.MountInfo {
 }
 
 // Stop gracefully stops the mount service
-func (s *MountService) Stop() error {
-	err := s.Unmount()
+func (s *MountService) Stop(ctx context.Context) error {
+	err := s.Unmount(ctx)
 	if err != nil {
 		return err
 	}

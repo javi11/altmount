@@ -96,7 +96,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	cfg := m.cfg.GetConfig()
 	if !*cfg.RClone.RCEnabled {
-		m.logger.Info("Rclone is disabled, skipping RC server startup")
+		m.logger.InfoContext(ctx, "Rclone is disabled, skipping RC server startup")
 		return nil
 	}
 
@@ -143,7 +143,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.cmd.Stderr = &stderr
 
 	if err := m.cmd.Start(); err != nil {
-		m.logger.Error("Failed to start rclone RC server", "stderr", stderr.String(), "stdout", stdout.String(), "err", err)
+		m.logger.ErrorContext(ctx, "Failed to start rclone RC server", "stderr", stderr.String(), "stdout", stdout.String(), "err", err)
 		return fmt.Errorf("failed to start rclone RC server: %w", err)
 	}
 	m.serverStarted = true
@@ -152,7 +152,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				m.logger.Error("Panic in rclone RC server monitor", "panic", r)
+				m.logger.ErrorContext(m.ctx, "Panic in rclone RC server monitor", "panic", r)
 			}
 		}()
 
@@ -163,7 +163,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					m.logger.Error("Panic in mount monitor", "panic", r)
+					m.logger.ErrorContext(m.ctx, "Panic in mount monitor", "panic", r)
 				}
 			}()
 			m.MonitorMounts(ctx)
@@ -173,19 +173,19 @@ func (m *Manager) Start(ctx context.Context) error {
 		err := m.cmd.Wait()
 		switch {
 		case err == nil:
-			m.logger.Info("Rclone RC server exited normally")
+			m.logger.InfoContext(m.ctx, "Rclone RC server exited normally")
 
 		case errors.Is(err, context.Canceled):
-			m.logger.Info("Rclone RC server terminated: context canceled")
+			m.logger.InfoContext(m.ctx, "Rclone RC server terminated: context canceled")
 
 		case WasHardTerminated(err): // SIGKILL on *nix; non-zero exit on Windows
-			m.logger.Info("Rclone RC server hard-terminated")
+			m.logger.InfoContext(m.ctx, "Rclone RC server hard-terminated")
 
 		default:
 			if code, ok := ExitCode(err); ok {
-				m.logger.Debug("Rclone RC server error", "exit_code", code, "err", err, "stderr", stderr.String(), "stdout", stdout.String())
+				m.logger.DebugContext(m.ctx, "Rclone RC server error", "exit_code", code, "err", err, "stderr", stderr.String(), "stdout", stdout.String())
 			} else {
-				m.logger.Debug("Rclone RC server error (no exit code)", "err", err, "stderr", stderr.String(), "stdout", stdout.String())
+				m.logger.DebugContext(m.ctx, "Rclone RC server error (no exit code)", "err", err, "stderr", stderr.String(), "stdout", stdout.String())
 			}
 		}
 	}()
@@ -201,7 +201,7 @@ func (m *Manager) Stop() error {
 		return nil
 	}
 
-	m.logger.Info("Stopping rclone RC server")
+	m.logger.InfoContext(m.ctx, "Stopping rclone RC server")
 
 	// Unmount all mounts first
 	m.mountsMutex.RLock()
@@ -219,8 +219,8 @@ func (m *Manager) Stop() error {
 		wg.Add(1)
 		go func(mount *MountInfo) {
 			defer wg.Done()
-			if err := m.unmount(mount.Provider); err != nil {
-				m.logger.Error("Failed to unmount during shutdown", "err", err, "provider", mount.Provider)
+			if err := m.unmount(m.ctx, mount.Provider); err != nil {
+				m.logger.ErrorContext(m.ctx, "Failed to unmount during shutdown", "err", err, "provider", mount.Provider)
 			}
 		}(mount)
 	}
@@ -234,9 +234,9 @@ func (m *Manager) Stop() error {
 
 	select {
 	case <-done:
-		m.logger.Info("All mounts unmounted successfully")
+		m.logger.InfoContext(m.ctx, "All mounts unmounted successfully")
 	case <-time.After(30 * time.Second):
-		m.logger.Warn("Timeout waiting for mounts to unmount, proceeding with shutdown")
+		m.logger.WarnContext(m.ctx, "Timeout waiting for mounts to unmount, proceeding with shutdown")
 	}
 
 	// Cancel context and stop process
@@ -245,9 +245,9 @@ func (m *Manager) Stop() error {
 	if m.cmd != nil && m.cmd.Process != nil {
 		// Try graceful shutdown first
 		if err := m.cmd.Process.Signal(os.Interrupt); err != nil {
-			m.logger.Warn("Failed to send interrupt signal, using kill", "err", err)
+			m.logger.WarnContext(m.ctx, "Failed to send interrupt signal, using kill", "err", err)
 			if killErr := m.cmd.Process.Kill(); killErr != nil {
-				m.logger.Error("Failed to kill rclone process", "err", killErr)
+				m.logger.ErrorContext(m.ctx, "Failed to kill rclone process", "err", killErr)
 				return killErr
 			}
 		}
@@ -261,20 +261,20 @@ func (m *Manager) Stop() error {
 		select {
 		case err := <-done:
 			if err != nil && !errors.Is(err, context.Canceled) && !WasHardTerminated(err) {
-				m.logger.Warn("Rclone process exited with error", "err", err)
+				m.logger.WarnContext(m.ctx, "Rclone process exited with error", "err", err)
 			}
 		case <-time.After(10 * time.Second):
-			m.logger.Warn("Timeout waiting for rclone to exit, force killing")
+			m.logger.WarnContext(m.ctx, "Timeout waiting for rclone to exit, force killing")
 			if err := m.cmd.Process.Kill(); err != nil {
-				m.logger.Error("Failed to force kill rclone process", "err", err)
+				m.logger.ErrorContext(m.ctx, "Failed to force kill rclone process", "err", err)
 				return err
 			}
 			// Wait a bit more for the kill to take effect
 			select {
 			case <-done:
-				m.logger.Info("Rclone process killed successfully")
+				m.logger.InfoContext(m.ctx, "Rclone process killed successfully")
 			case <-time.After(5 * time.Second):
-				m.logger.Error("Process may still be running after kill")
+				m.logger.ErrorContext(m.ctx, "Process may still be running after kill")
 			}
 		}
 	}
@@ -286,7 +286,7 @@ func (m *Manager) Stop() error {
 	}
 
 	m.serverStarted = false
-	m.logger.Info("Rclone RC server stopped")
+	m.logger.InfoContext(m.ctx, "Rclone RC server stopped")
 	return nil
 }
 
@@ -299,7 +299,7 @@ func (m *Manager) cleanupMountDirectories(_ string) {
 		if mount.LocalPath != "" {
 			// Try to remove the directory if it's empty
 			if err := os.Remove(mount.LocalPath); err == nil {
-				m.logger.Debug("Removed empty mount directory", "path", mount.LocalPath)
+				m.logger.DebugContext(m.ctx, "Removed empty mount directory", "path", mount.LocalPath)
 			}
 			// Don't log errors here as the directory might not be empty, which is fine
 		}
@@ -315,14 +315,14 @@ func (m *Manager) waitForServer() {
 		}
 
 		if m.pingServer() {
-			m.logger.Info("Rclone RC server is ready")
+			m.logger.InfoContext(m.ctx, "Rclone RC server is ready")
 			return
 		}
 
 		time.Sleep(time.Second)
 	}
 
-	m.logger.Error("Rclone RC server not responding - mount operations will be disabled")
+	m.logger.ErrorContext(m.ctx, "Rclone RC server not responding - mount operations will be disabled")
 }
 
 // pingServer checks if the RC server is responding
@@ -368,7 +368,7 @@ func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error)
 	if close {
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
-				m.logger.Debug("Failed to close response body", "err", err)
+				m.logger.DebugContext(m.ctx, "Failed to close response body", "err", err)
 			}
 		}()
 	}

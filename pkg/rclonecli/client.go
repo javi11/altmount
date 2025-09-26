@@ -10,12 +10,12 @@ import (
 )
 
 // Mount creates a mount using the rclone RC API with retry logic
-func (m *Manager) Mount(provider, webdavURL string) error {
-	return m.mountWithRetry(provider, webdavURL, 3)
+func (m *Manager) Mount(ctx context.Context, provider, webdavURL string) error {
+	return m.mountWithRetry(ctx, provider, webdavURL, 3)
 }
 
 // mountWithRetry attempts to mount with retry logic
-func (m *Manager) mountWithRetry(provider, webdavURL string, maxRetries int) error {
+func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string, maxRetries int) error {
 	if !m.IsReady() {
 		if err := m.WaitForReady(30 * time.Second); err != nil {
 			return fmt.Errorf("rclone RC server not ready: %w", err)
@@ -26,12 +26,12 @@ func (m *Manager) mountWithRetry(provider, webdavURL string, maxRetries int) err
 		if attempt > 0 {
 			// Wait before retry
 			wait := time.Duration(attempt*2) * time.Second
-			m.logger.Debug("Retrying mount operation", "attempt", attempt, "provider", provider)
+			m.logger.DebugContext(ctx, "Retrying mount operation", "attempt", attempt, "provider", provider)
 			time.Sleep(wait)
 		}
 
-		if err := m.performMount(provider, webdavURL); err != nil {
-			m.logger.Error("Mount attempt failed", "err", err, "provider", provider, "attempt", attempt+1)
+		if err := m.performMount(ctx, provider, webdavURL); err != nil {
+			m.logger.ErrorContext(ctx, "Mount attempt failed", "err", err, "provider", provider, "attempt", attempt+1)
 			continue
 		}
 
@@ -41,9 +41,9 @@ func (m *Manager) mountWithRetry(provider, webdavURL string, maxRetries int) err
 }
 
 // performMount performs a single mount attempt
-func (m *Manager) performMount(provider, webdavURL string) error {
+func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) error {
 	cfg := m.cfg.GetConfig()
-	mountPath := filepath.Join(cfg.MountPath, provider)
+	mountPath := filepath.Join(cfg.MountPath, "webdav")
 
 	// Create mount directory
 	if err := os.MkdirAll(mountPath, 0755); err != nil {
@@ -56,7 +56,7 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 	m.mountsMutex.RUnlock()
 
 	if exists && existingMount.Mounted {
-		m.logger.Info("Already mounted", "provider", provider, "path", mountPath)
+		m.logger.InfoContext(ctx, "Already mounted", "provider", provider, "path", mountPath)
 		return nil
 	}
 
@@ -69,7 +69,7 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 	}
 
 	// Create rclone config for this provider
-	if err := m.createConfig(provider, webdavURL); err != nil {
+	if err := m.createConfig(provider, webdavURL, cfg.WebDAV.User, cfg.WebDAV.Password); err != nil {
 		return fmt.Errorf("failed to create rclone config: %w", err)
 	}
 
@@ -82,8 +82,8 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		"AllowNonEmpty": true,
 		"AllowOther":    true,
 		"DebugFUSE":     false,
-		"DeviceName":    fmt.Sprintf("decypharr-%s", provider),
-		"VolumeName":    fmt.Sprintf("decypharr-%s", provider),
+		"DeviceName":    provider,
+		"VolumeName":    provider,
 	}
 
 	configOpts := make(map[string]interface{})
@@ -103,9 +103,10 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 
 	// Add VFS options if caching is enabled
 	if cfg.RClone.VFSCacheMode != "off" {
-
 		if cfg.RClone.VFSCacheMaxAge != "" {
-			vfsOpt["CacheMaxAge"] = cfg.RClone.VFSCacheMaxAge
+			if attrTimeout, e := time.ParseDuration(cfg.RClone.VFSCacheMaxAge); e == nil {
+				vfsOpt["CacheMaxAge"] = attrTimeout.Nanoseconds()
+			}
 		}
 		if cfg.RClone.VFSCacheMaxSize != "" {
 			vfsOpt["CacheMaxSize"] = cfg.RClone.VFSCacheMaxSize
@@ -135,8 +136,8 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		mountOpt["GID"] = cfg.RClone.GID
 	}
 	if cfg.RClone.AttrTimeout != "" {
-		if attrTimeout, err := time.ParseDuration(cfg.RClone.AttrTimeout); err == nil {
-			mountOpt["AttrTimeout"] = attrTimeout.String()
+		if attrTimeout, e := time.ParseDuration(cfg.RClone.AttrTimeout); e == nil {
+			mountOpt["AttrTimeout"] = attrTimeout.Nanoseconds()
 		}
 	}
 
@@ -173,22 +174,22 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 }
 
 // Unmount unmounts a specific provider
-func (m *Manager) Unmount(provider string) error {
-	return m.unmount(provider)
+func (m *Manager) Unmount(ctx context.Context, provider string) error {
+	return m.unmount(ctx, provider)
 }
 
 // unmount is the internal unmount function
-func (m *Manager) unmount(provider string) error {
+func (m *Manager) unmount(ctx context.Context, provider string) error {
 	m.mountsMutex.RLock()
 	mountInfo, exists := m.mounts[provider]
 	m.mountsMutex.RUnlock()
 
 	if !exists || !mountInfo.Mounted {
-		m.logger.Info("Mount not found or already unmounted", "provider", provider)
+		m.logger.InfoContext(ctx, "Mount not found or already unmounted", "provider", provider)
 		return nil
 	}
 
-	m.logger.Info("Unmounting", "provider", provider, "path", mountInfo.LocalPath)
+	m.logger.InfoContext(ctx, "Unmounting", "provider", provider, "path", mountInfo.LocalPath)
 
 	// Try RC unmount first
 	req := RCRequest{
@@ -205,9 +206,9 @@ func (m *Manager) unmount(provider string) error {
 
 	// If RC unmount fails or server is not ready, try force unmount
 	if rcErr != nil {
-		m.logger.Warn("RC unmount failed, trying force unmount", "err", rcErr, "provider", provider)
+		m.logger.WarnContext(ctx, "RC unmount failed, trying force unmount", "err", rcErr, "provider", provider)
 		if err := m.forceUnmountPath(mountInfo.LocalPath); err != nil {
-			m.logger.Error("Force unmount failed", "err", err, "provider", provider)
+			m.logger.ErrorContext(ctx, "Force unmount failed", "err", err, "provider", provider)
 			// Don't return error here, update the state anyway
 		}
 	}
@@ -223,12 +224,12 @@ func (m *Manager) unmount(provider string) error {
 	}
 	m.mountsMutex.Unlock()
 
-	m.logger.Info("Unmount completed", "provider", provider)
+	m.logger.InfoContext(ctx, "Unmount completed", "provider", provider)
 	return nil
 }
 
 // UnmountAll unmounts all mounts
-func (m *Manager) UnmountAll() error {
+func (m *Manager) UnmountAll(ctx context.Context) error {
 	m.mountsMutex.RLock()
 	providers := make([]string, 0, len(m.mounts))
 	for provider, mount := range m.mounts {
@@ -240,9 +241,9 @@ func (m *Manager) UnmountAll() error {
 
 	var lastError error
 	for _, provider := range providers {
-		if err := m.unmount(provider); err != nil {
+		if err := m.unmount(ctx, provider); err != nil {
 			lastError = err
-			m.logger.Error("Failed to unmount", "err", err, "provider", provider)
+			m.logger.ErrorContext(ctx, "Failed to unmount", "err", err, "provider", provider)
 		}
 	}
 
@@ -319,7 +320,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 
 	_, err := m.makeRequest(req, true)
 	if err != nil {
-		m.logger.Error("Failed to refresh directory", "err", err, "provider", provider)
+		m.logger.ErrorContext(ctx, "Failed to refresh directory", "err", err, "provider", provider)
 		return fmt.Errorf("failed to refresh directory %s for provider %s: %w", dirs, provider, err)
 	}
 
@@ -330,14 +331,14 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 
 	_, err = m.makeRequest(req, true)
 	if err != nil {
-		m.logger.Error("Failed to refresh directory", "err", err, "provider", provider)
+		m.logger.ErrorContext(ctx, "Failed to refresh directory", "err", err, "provider", provider)
 		return fmt.Errorf("failed to refresh directory %s for provider %s: %w", dirs, provider, err)
 	}
 	return nil
 }
 
 // createConfig creates an rclone config entry for the provider
-func (m *Manager) createConfig(configName, webdavURL string) error {
+func (m *Manager) createConfig(configName, webdavURL string, user, pass string) error {
 	req := RCRequest{
 		Command: "config/create",
 		Args: map[string]interface{}{
@@ -347,6 +348,8 @@ func (m *Manager) createConfig(configName, webdavURL string) error {
 				"url":             webdavURL,
 				"vendor":          "other",
 				"pacer_min_sleep": "0",
+				"user":            user,
+				"pass":            pass,
 			},
 		},
 	}
@@ -369,7 +372,7 @@ func (m *Manager) forceUnmountPath(mountPath string) error {
 
 	for _, method := range methods {
 		if err := m.tryUnmountCommand(method...); err == nil {
-			m.logger.Info("Successfully unmounted using system command", "command", method, "path", mountPath)
+			m.logger.InfoContext(m.ctx, "Successfully unmounted using system command", "command", method, "path", mountPath)
 			return nil
 		}
 	}

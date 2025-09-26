@@ -1,6 +1,7 @@
 package rclonecli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -59,23 +60,23 @@ type Stats struct {
 }
 
 // GetStats retrieves statistics from the rclone RC server
-func (m *Manager) GetStats() (*Stats, error) {
+func (m *Manager) GetStats(ctx context.Context) (*Stats, error) {
 	stats := &Stats{}
 	stats.Ready = m.IsReady()
 	stats.Enabled = true
 
-	coreStats, err := m.GetCoreStats()
+	coreStats, err := m.GetCoreStats(ctx)
 	if err == nil {
 		stats.Core = *coreStats
 	}
 
 	// Get memory usage
-	memStats, err := m.GetMemoryUsage()
+	memStats, err := m.GetMemoryUsage(ctx)
 	if err == nil {
 		stats.Memory = *memStats
 	}
 	// Get bandwidth stats
-	bwStats, err := m.GetBandwidthStats()
+	bwStats, err := m.GetBandwidthStats(ctx)
 	if err == nil && bwStats != nil {
 		stats.Bandwidth = *bwStats
 	} else {
@@ -83,7 +84,7 @@ func (m *Manager) GetStats() (*Stats, error) {
 	}
 
 	// Get version info
-	versionResp, err := m.GetVersion()
+	versionResp, err := m.GetVersion(ctx)
 	if err == nil {
 		stats.Version = *versionResp
 	}
@@ -93,7 +94,7 @@ func (m *Manager) GetStats() (*Stats, error) {
 	return stats, nil
 }
 
-func (m *Manager) GetCoreStats() (*CoreStatsResponse, error) {
+func (m *Manager) GetCoreStats(ctx context.Context) (*CoreStatsResponse, error) {
 	if !m.IsReady() {
 		return nil, fmt.Errorf("rclone RC server not ready")
 	}
@@ -116,7 +117,7 @@ func (m *Manager) GetCoreStats() (*CoreStatsResponse, error) {
 }
 
 // GetMemoryUsage returns memory usage statistics
-func (m *Manager) GetMemoryUsage() (*MemoryStats, error) {
+func (m *Manager) GetMemoryUsage(ctx context.Context) (*MemoryStats, error) {
 	if !m.IsReady() {
 		return nil, fmt.Errorf("rclone RC server not ready")
 	}
@@ -139,7 +140,7 @@ func (m *Manager) GetMemoryUsage() (*MemoryStats, error) {
 }
 
 // GetBandwidthStats returns bandwidth usage for all transfers
-func (m *Manager) GetBandwidthStats() (*BandwidthStats, error) {
+func (m *Manager) GetBandwidthStats(ctx context.Context) (*BandwidthStats, error) {
 	if !m.IsReady() {
 		return nil, fmt.Errorf("rclone RC server not ready")
 	}
@@ -162,7 +163,7 @@ func (m *Manager) GetBandwidthStats() (*BandwidthStats, error) {
 }
 
 // GetVersion returns rclone version information
-func (m *Manager) GetVersion() (*VersionResponse, error) {
+func (m *Manager) GetVersion(ctx context.Context) (*VersionResponse, error) {
 	if !m.IsReady() {
 		return nil, fmt.Errorf("rclone RC server not ready")
 	}

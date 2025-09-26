@@ -7,7 +7,7 @@ import (
 )
 
 // HealthCheck performs comprehensive health checks on the rclone system
-func (m *Manager) HealthCheck() error {
+func (m *Manager) HealthCheck(ctx context.Context) error {
 	if !m.serverStarted {
 		return fmt.Errorf("rclone RC server is not started")
 	}
@@ -54,7 +54,7 @@ func (m *Manager) checkMountHealth(provider string) bool {
 }
 
 // RecoverMount attempts to recover a failed mount
-func (m *Manager) RecoverMount(provider string) error {
+func (m *Manager) RecoverMount(ctx context.Context, provider string) error {
 	m.mountsMutex.RLock()
 	mountInfo, exists := m.mounts[provider]
 	m.mountsMutex.RUnlock()
@@ -63,22 +63,22 @@ func (m *Manager) RecoverMount(provider string) error {
 		return fmt.Errorf("mount for provider %s does not exist", provider)
 	}
 
-	m.logger.Warn("Attempting to recover mount", "provider", provider)
+	m.logger.WarnContext(ctx, "Attempting to recover mount", "provider", provider)
 
 	// First try to unmount cleanly
-	if err := m.unmount(provider); err != nil {
-		m.logger.Error("Failed to unmount during recovery", "err", err, "provider", provider)
+	if err := m.unmount(ctx, provider); err != nil {
+		m.logger.ErrorContext(ctx, "Failed to unmount during recovery", "err", err, "provider", provider)
 	}
 
 	// Wait a moment
 	time.Sleep(1 * time.Second)
 
 	// Try to remount
-	if err := m.Mount(provider, mountInfo.WebDAVURL); err != nil {
+	if err := m.Mount(ctx, provider, mountInfo.WebDAVURL); err != nil {
 		return fmt.Errorf("failed to recover mount for %s: %w", provider, err)
 	}
 
-	m.logger.Info("Successfully recovered mount", "provider", provider)
+	m.logger.InfoContext(ctx, "Successfully recovered mount", "provider", provider)
 	return nil
 }
 
@@ -94,7 +94,7 @@ func (m *Manager) MonitorMounts(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			m.logger.Debug("Mount monitoring stopped")
+			m.logger.DebugContext(ctx, "Mount monitoring stopped")
 			return
 		case <-ticker.C:
 			m.performMountHealthCheck()
@@ -119,7 +119,7 @@ func (m *Manager) performMountHealthCheck() {
 
 	for _, provider := range providers {
 		if !m.checkMountHealth(provider) {
-			m.logger.Warn("Mount health check failed, attempting recovery", "provider", provider)
+			m.logger.WarnContext(m.ctx, "Mount health check failed, attempting recovery", "provider", provider)
 
 			// Mark mount as unhealthy
 			m.mountsMutex.Lock()
@@ -131,8 +131,8 @@ func (m *Manager) performMountHealthCheck() {
 
 			// Attempt recovery
 			go func(provider string) {
-				if err := m.RecoverMount(provider); err != nil {
-					m.logger.Error("Failed to recover mount", "err", err, "provider", provider)
+				if err := m.RecoverMount(m.ctx, provider); err != nil {
+					m.logger.ErrorContext(m.ctx, "Failed to recover mount", "err", err, "provider", provider)
 				}
 			}(provider)
 		}

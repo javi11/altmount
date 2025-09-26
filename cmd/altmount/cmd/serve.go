@@ -507,7 +507,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Stop RClone mount service if running
 	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
-		if err := mountService.Stop(); err != nil {
+		if err := mountService.Stop(ctx); err != nil {
 			logger.Error("Failed to stop mount service", "error", err)
 		} else {
 			logger.Info("RClone mount service stopped")

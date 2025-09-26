@@ -49,7 +49,7 @@ func (h *RCloneHandlers) StartMount(c *fiber.Ctx) error {
 
 // StopMount stops the rclone mount
 func (h *RCloneHandlers) StopMount(c *fiber.Ctx) error {
-	if err := h.mountService.Unmount(); err != nil {
+	if err := h.mountService.Unmount(c.Context()); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
 			"message": err.Error(),

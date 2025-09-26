@@ -28,9 +28,9 @@ func NewMount(provider, customRcloneMount, webdavURL string, rcManager *Manager)
 		mountPath = filepath.Join(cfg.MountPath, provider)
 	}
 
-	_url, err := url.JoinPath(webdavURL, provider)
+	_url, err := url.JoinPath(webdavURL, "webdav")
 	if err != nil {
-		_url = fmt.Sprintf("%s/%s", webdavURL, provider)
+		_url = fmt.Sprintf("%s/%s", webdavURL, "webdav")
 	}
 
 	if !strings.HasSuffix(_url, "/") {
@@ -54,40 +54,40 @@ func (m *Mount) Mount(ctx context.Context) error {
 
 	// Check if already mounted
 	if m.rcManager.IsMounted(m.Provider) {
-		m.logger.Info("Mount is already mounted", "provider", m.Provider, "path", m.LocalPath)
+		m.logger.InfoContext(ctx, "Mount is already mounted", "provider", m.Provider, "path", m.LocalPath)
 		return nil
 	}
 
-	m.logger.Info("Creating mount via RC", "provider", m.Provider, "webdav_url", m.WebDAVURL, "mount_path", m.LocalPath)
+	m.logger.InfoContext(ctx, "Creating mount via RC", "provider", m.Provider, "webdav_url", m.WebDAVURL, "mount_path", m.LocalPath)
 
-	if err := m.rcManager.Mount(m.Provider, m.WebDAVURL); err != nil {
-		m.logger.Error("Mount operation failed", "provider", m.Provider)
+	if err := m.rcManager.Mount(ctx, m.Provider, m.WebDAVURL); err != nil {
+		m.logger.ErrorContext(ctx, "Mount operation failed", "provider", m.Provider)
 		return fmt.Errorf("mount failed for %s", m.Provider)
 	}
 
-	m.logger.Info("Successfully mounted WebDAV via RC", "provider", m.Provider, "path", m.LocalPath)
+	m.logger.InfoContext(ctx, "Successfully mounted WebDAV via RC", "provider", m.Provider, "path", m.LocalPath)
 	return nil
 }
 
 // Unmount removes the mount using rclone RC
-func (m *Mount) Unmount() error {
+func (m *Mount) Unmount(ctx context.Context) error {
 	if m.rcManager == nil {
-		m.logger.Warn("Rclone manager is not available, skipping unmount")
+		m.logger.WarnContext(ctx, "Rclone manager is not available, skipping unmount")
 		return nil
 	}
 
 	if !m.rcManager.IsMounted(m.Provider) {
-		m.logger.Info("Mount is not mounted, skipping unmount", "provider", m.Provider)
+		m.logger.InfoContext(ctx, "Mount is not mounted, skipping unmount", "provider", m.Provider)
 		return nil
 	}
 
-	m.logger.Info("Unmounting via RC", "provider", m.Provider)
+	m.logger.InfoContext(ctx, "Unmounting via RC", "provider", m.Provider)
 
-	if err := m.rcManager.Unmount(m.Provider); err != nil {
+	if err := m.rcManager.Unmount(ctx, m.Provider); err != nil {
 		return fmt.Errorf("failed to unmount %s via RC: %w", m.Provider, err)
 	}
 
-	m.logger.Info("Successfully unmounted", "provider", m.Provider)
+	m.logger.InfoContext(ctx, "Successfully unmounted", "provider", m.Provider)
 	return nil
 }
 
