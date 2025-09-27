@@ -13,6 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const MountProvider = "altmount"
+
 // Config represents the complete application configuration
 type Config struct {
 	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
@@ -675,6 +677,11 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 	return providers
 }
 
+// GetActualMountPath returns the actual mount path used by rclone, which includes the provider subdirectory
+func (c *Config) GetActualMountPath(provider string) string {
+	return filepath.Join(c.MountPath, provider)
+}
+
 // ChangeCallback represents a function called when configuration changes
 type ChangeCallback func(oldConfig, newConfig *Config)
 
@@ -948,7 +955,7 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:     &sabnzbdEnabled,
-			CompleteDir: "",
+			CompleteDir: "/complete",
 			Categories:  []SABnzbdCategory{},
 		},
 		Providers: []ProviderConfig{},

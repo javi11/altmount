@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"path/filepath"
-	"strings"
 )
 
 // Mount represents a mount using the rclone RC client
@@ -28,19 +26,10 @@ func NewMount(provider, customRcloneMount, webdavURL string, rcManager *Manager)
 		mountPath = filepath.Join(cfg.MountPath, provider)
 	}
 
-	_url, err := url.JoinPath(webdavURL, "webdav")
-	if err != nil {
-		_url = fmt.Sprintf("%s/%s", webdavURL, "webdav")
-	}
-
-	if !strings.HasSuffix(_url, "/") {
-		_url += "/"
-	}
-
 	return &Mount{
 		Provider:  provider,
 		LocalPath: mountPath,
-		WebDAVURL: _url,
+		WebDAVURL: webdavURL,
 		rcManager: rcManager,
 		logger:    rcManager.GetLogger(),
 	}

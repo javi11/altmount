@@ -433,7 +433,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := mountService.Start(ctx); err != nil {
 			logger.Error("Failed to start mount service", "error", err)
 		} else {
-			logger.Info("RClone mount service started", "mount_point", cfg.MountPath)
+			actualMountPath := cfg.GetActualMountPath(config.MountProvider)
+			logger.Info("RClone mount service started", "mount_point", actualMountPath)
 		}
 	} else {
 		logger.Info("RClone mount service is disabled in configuration")
@@ -463,7 +464,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 
 	// Start custom server in goroutine
 	serverErr := make(chan error, 1)

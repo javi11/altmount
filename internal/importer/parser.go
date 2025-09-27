@@ -133,6 +133,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	for _, file := range validFiles {
 		concPool.Go(func() fileResult {
 			parsedFile, err := p.parseFile(file, n.Meta, n.Files)
+
 			return fileResult{
 				parsedFile: parsedFile,
 				err:        err,
@@ -437,13 +438,12 @@ func (p *Parser) fetchYencHeaders(segment nzbparser.NzbSegment, groups []string)
 				"error", err)
 		}),
 	)
+	if err != nil {
+		return nntpcli.YencHeaders{}, err
+	}
 
 	if result.PartSize <= 0 {
 		return nntpcli.YencHeaders{}, fmt.Errorf("invalid part size from yenc header: %d", result.PartSize)
-	}
-
-	if err != nil {
-		return nntpcli.YencHeaders{}, err
 	}
 
 	return result, nil

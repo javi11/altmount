@@ -121,7 +121,7 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 // findInstanceForFilePath finds which ARR instance manages the given file path
 func (s *Service) findInstanceForFilePath(filePath string) (instanceType string, instanceName string, err error) {
 	cfg := s.configGetter()
-	mountPath := cfg.MountPath
+	mountPath := cfg.GetActualMountPath(config.MountProvider)
 
 	// Add mount path to file path to get full path for ARR APIs
 	fullPath := filePath
@@ -229,7 +229,7 @@ func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool
 // triggerRadarrRescanByPath triggers a rescan in Radarr for the given file path
 func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, instanceName string) error {
 	cfg := s.configGetter()
-	mountPath := cfg.MountPath
+	mountPath := cfg.GetActualMountPath(config.MountProvider)
 
 	// Add mount path to get full path for Radarr API
 	fullPath := filePath
@@ -322,7 +322,7 @@ func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool
 // triggerSonarrRescanByPath triggers a rescan in Sonarr for the given file path
 func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.Sonarr, filePath, instanceName string) error {
 	cfg := s.configGetter()
-	mountPath := cfg.MountPath
+	mountPath := cfg.GetActualMountPath(config.MountProvider)
 
 	// Add mount path to get full path for Sonarr API
 	fullPath := filePath

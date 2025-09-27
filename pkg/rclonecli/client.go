@@ -44,7 +44,7 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string
 // performMount performs a single mount attempt
 func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) error {
 	cfg := m.cfg.GetConfig()
-	mountPath := filepath.Join(cfg.MountPath, "webdav")
+	mountPath := filepath.Join(cfg.MountPath, provider)
 
 	// Create mount directory
 	if err := os.MkdirAll(mountPath, 0755); err != nil {

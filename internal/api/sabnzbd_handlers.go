@@ -240,8 +240,11 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
+	// Get category filter from query parameter
+	categoryFilter := c.Query("category", "")
+
 	// Get pending and processing items
-	items, err := s.queueRepo.ListQueueItems(nil, "", 100, 0)
+	items, err := s.queueRepo.ListQueueItems(nil, "", categoryFilter, 100, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get queue")
 	}
@@ -306,16 +309,19 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
 	}
 
+	// Get category filter from query parameter
+	categoryFilter := c.Query("category", "")
+
 	// Get completed items
 	completedStatus := database.QueueStatusCompleted
-	completed, err := s.queueRepo.ListQueueItems(&completedStatus, "", 50, 0)
+	completed, err := s.queueRepo.ListQueueItems(&completedStatus, "", categoryFilter, 50, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items")
 	}
 
 	// Get failed items
 	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(&failedStatus, "", 50, 0)
+	failed, err := s.queueRepo.ListQueueItems(&failedStatus, "", categoryFilter, 50, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
 	}
@@ -324,11 +330,13 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
 	for _, item := range completed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().MountPath))
+		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
 		index++
 	}
 	for _, item := range failed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, s.configManager.GetConfig().MountPath))
+		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
 		index++
 	}
 
@@ -383,7 +391,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	// Get queue information
 	var slots []SABnzbdQueueSlot
 	if s.queueRepo != nil {
-		items, err := s.queueRepo.ListQueueItems(nil, "", 50, 0)
+		items, err := s.queueRepo.ListQueueItems(nil, "", "", 50, 0)
 		if err == nil {
 			for i, item := range items {
 				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing || item.Status == database.QueueStatusRetrying {
@@ -430,14 +438,14 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 
 // handleSABnzbdGetConfig handles configuration request
 func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
-	var config SABnzbdConfig
+	var sabnzbdConfig SABnzbdConfig
 
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
 
 		// Build misc configuration
-		config.Misc = SABnzbdMiscConfig{
-			CompleteDir:            filepath.Join(cfg.MountPath, cfg.SABnzbd.CompleteDir),
+		sabnzbdConfig.Misc = SABnzbdMiscConfig{
+			CompleteDir:            filepath.Join(cfg.GetActualMountPath(config.MountProvider), cfg.SABnzbd.CompleteDir),
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",
@@ -448,7 +456,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 		if len(cfg.SABnzbd.Categories) > 0 {
 			// Use configured categories
 			for _, category := range cfg.SABnzbd.Categories {
-				config.Categories = append(config.Categories, SABnzbdCategory{
+				sabnzbdConfig.Categories = append(sabnzbdConfig.Categories, SABnzbdCategory{
 					Name:     category.Name,
 					Order:    category.Order,
 					PP:       "3", // Default post-processing
@@ -460,7 +468,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 			}
 		} else {
 			// Use default category when none configured
-			config.Categories = []SABnzbdCategory{
+			sabnzbdConfig.Categories = []SABnzbdCategory{
 				{
 					Name:     "default",
 					Order:    0,
@@ -474,10 +482,10 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 		}
 
 		// Empty servers array (not exposing actual server configuration)
-		config.Servers = []SABnzbdServer{}
+		sabnzbdConfig.Servers = []SABnzbdServer{}
 	} else {
 		// Fallback configuration when no config manager
-		config = SABnzbdConfig{
+		sabnzbdConfig = SABnzbdConfig{
 			Misc: SABnzbdMiscConfig{
 				CompleteDir:            "",
 				PreCheck:               0,
@@ -503,7 +511,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 	response := SABnzbdConfigResponse{
 		Status:  true,
 		Version: "4.5.0",
-		Config:  config,
+		Config:  sabnzbdConfig,
 	}
 
 	return s.writeSABnzbdResponseFiber(c, response)

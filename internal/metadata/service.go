@@ -26,11 +26,11 @@ func NewMetadataService(rootPath string) *MetadataService {
 // when creating .meta files. Keeps filename under 250 characters.
 func (ms *MetadataService) truncateFilename(filename string) string {
 	const maxLen = 250 // Leave room for .meta extension
-	
+
 	if len(filename) <= maxLen {
 		return filename
 	}
-	
+
 	// Simply truncate to maxLen
 	return filename[:maxLen]
 }

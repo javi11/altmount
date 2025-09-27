@@ -10,8 +10,6 @@ import (
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
-const MountProvider = "usenet"
-
 // MountService handles rclone mount operations using RC server
 type MountService struct {
 	cfm     *config.Manager
@@ -52,30 +50,32 @@ func (s *MountService) Mount(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.mount != nil && s.mount.IsMounted() {
-		return fmt.Errorf("already mounted at %s", s.mount.LocalPath)
-	}
-
 	cfg := s.cfm.GetConfig()
+
+	if s.mount != nil && s.mount.IsMounted() {
+		actualMountPath := cfg.GetActualMountPath(config.MountProvider)
+		return fmt.Errorf("already mounted at %s", actualMountPath)
+	}
 	if cfg.MountPath == "" {
 		return fmt.Errorf("mount point not configured")
 	}
 
 	// Create WebDAV URL
-	webdavURL := fmt.Sprintf("http://localhost:%d", cfg.WebDAV.Port)
+	webdavURL := fmt.Sprintf("http://localhost:%d/webdav", cfg.WebDAV.Port)
 
 	// Create mount instance
 	if s.mount != nil {
 		s.mount.Unmount(ctx)
 	} else {
-		s.mount = rclonecli.NewMount(MountProvider, cfg.MountPath, webdavURL, s.manager)
+		s.mount = rclonecli.NewMount(config.MountProvider, "", webdavURL, s.manager)
 	}
 
 	if err := s.mount.Mount(ctx); err != nil {
 		return fmt.Errorf("failed to mount: %w", err)
 	}
 
-	slog.InfoContext(ctx, "RClone mount started", "mount_point", cfg.MountPath)
+	actualMountPath := cfg.GetActualMountPath(config.MountProvider)
+	slog.InfoContext(ctx, "RClone mount started", "mount_point", actualMountPath)
 
 	return nil
 }

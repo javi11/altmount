@@ -25,12 +25,12 @@ type RCloneAPIResponse struct {
 	SaltSet     bool `json:"salt_set"`
 
 	// RC (Remote Control) Configuration
-	RCEnabled    bool              `json:"rc_enabled"`
-	RCUrl        string            `json:"rc_url"`
-	RCPort       int               `json:"rc_port"`
-	RCUser       string            `json:"rc_user"`
-	RCPassSet    bool              `json:"rc_pass_set"`
-	RCOptions    map[string]string `json:"rc_options"`
+	RCEnabled bool              `json:"rc_enabled"`
+	RCUrl     string            `json:"rc_url"`
+	RCPort    int               `json:"rc_port"`
+	RCUser    string            `json:"rc_user"`
+	RCPassSet bool              `json:"rc_pass_set"`
+	RCOptions map[string]string `json:"rc_options"`
 
 	// Mount Configuration
 	MountEnabled bool              `json:"mount_enabled"`
@@ -402,6 +402,9 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		targetPath = targetPath[:len(targetPath)-4]
 	}
 
+	// Transform error message for better user understanding
+	errorMessage := transformQueueError(item.ErrorMessage)
+
 	return &QueueItemResponse{
 		ID:           item.ID,
 		NzbPath:      item.NzbPath,
@@ -415,7 +418,7 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		CompletedAt:  item.CompletedAt,
 		RetryCount:   item.RetryCount,
 		MaxRetries:   item.MaxRetries,
-		ErrorMessage: item.ErrorMessage,
+		ErrorMessage: &errorMessage,
 		BatchID:      item.BatchID,
 		Metadata:     item.Metadata,
 		FileSize:     item.FileSize,
