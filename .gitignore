@@ -36,3 +36,4 @@ example/
 *.db*
 *node_modules*
 .git
+*debug*

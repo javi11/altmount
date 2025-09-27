@@ -95,6 +95,11 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, err.Error())
 	}
 
+	// Ensure category directories exist in both temp and mount paths
+	if err := s.ensureCategoryDirectories(validatedCategory); err != nil {
+		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to create category directories: %v", err))
+	}
+
 	// Build category path and create temporary file with category subdirectory
 	tempDir := os.TempDir()
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
@@ -103,18 +108,8 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	var tempFile string
 	if categoryPath != "" {
 		tempFile = filepath.Join(tempDir, completeDir, categoryPath, file.Filename)
-		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, completeDir, categoryPath)
-		if err := os.MkdirAll(categoryDir, 0755); err != nil {
-			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
-		}
 	} else {
 		tempFile = filepath.Join(tempDir, completeDir, file.Filename)
-
-		// Ensure base directory exists
-		if err := os.MkdirAll(filepath.Join(tempDir, completeDir), 0755); err != nil {
-			return s.writeSABnzbdErrorFiber(c, "Failed to create base directory")
-		}
 	}
 
 	// Save the uploaded file to temporary location
@@ -169,8 +164,14 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, err.Error())
 	}
 
+	// Ensure category directories exist in both temp and mount paths
+	if err := s.ensureCategoryDirectories(validatedCategory); err != nil {
+		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to create category directories: %v", err))
+	}
+
 	// Create temporary file with category path
 	tempDir := os.TempDir()
+	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 
 	// Extract filename from URL or use default
 	filename := "downloaded.nzb"
@@ -189,19 +190,9 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, categoryPath, filename)
-		// Ensure category directory exists
-		categoryDir := filepath.Join(tempDir, categoryPath)
-		if err := os.MkdirAll(categoryDir, 0755); err != nil {
-			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
-		}
+		tempFile = filepath.Join(tempDir, completeDir, categoryPath, filename)
 	} else {
-		tempFile = filepath.Join(tempDir, filename)
-
-		// Ensure base directory exists
-		if err := os.MkdirAll(filepath.Join(tempDir), 0755); err != nil {
-			return s.writeSABnzbdErrorFiber(c, "Failed to create base directory")
-		}
+		tempFile = filepath.Join(tempDir, completeDir, filename)
 	}
 
 	outFile, err := os.Create(tempFile)
@@ -618,4 +609,33 @@ func (s *Server) writeSABnzbdErrorFiber(c *fiber.Ctx, message string) error {
 		Error:  &message,
 	}
 	return c.Status(200).JSON(response) // SABnzbd returns 200 even for errors
+}
+
+// ensureCategoryDirectories creates directories for a category in both temp and mount paths
+func (s *Server) ensureCategoryDirectories(category string) error {
+	if s.configManager == nil {
+		return fmt.Errorf("config manager not available")
+	}
+
+	config := s.configManager.GetConfig()
+	categoryPath := s.buildCategoryPath(category)
+
+	// Don't create directory for default category (empty path)
+	if categoryPath == "" {
+		return nil
+	}
+
+	// Create in mount path
+	mountDir := filepath.Join(config.Metadata.RootPath, config.SABnzbd.CompleteDir, categoryPath)
+	if err := os.MkdirAll(mountDir, 0755); err != nil {
+		return fmt.Errorf("failed to create mount directory: %w", err)
+	}
+
+	// Create in temp path
+	tempDir := filepath.Join(os.TempDir(), config.SABnzbd.CompleteDir, categoryPath)
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	return nil
 }

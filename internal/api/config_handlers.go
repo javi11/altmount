@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -108,6 +110,12 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		})
 	}
 
+	// Ensure SABnzbd category directories exist
+	if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
+		// Log the error but don't fail the update
+		slog.Warn("Failed to create SABnzbd category directories", "error", err)
+	}
+
 	// Save to file
 	if err := s.configManager.SaveConfig(); err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -180,6 +188,14 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 			"message": "Failed to update configuration",
 			"details": err.Error(),
 		})
+	}
+
+	// Ensure SABnzbd category directories exist if SABnzbd section was updated
+	if section == "sabnzbd" || section == "" {
+		if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
+			// Log the error but don't fail the update
+			slog.Warn("Failed to create SABnzbd category directories", "error", err)
+		}
 	}
 
 	// Save to file
@@ -874,3 +890,28 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	})
 }
 
+// ensureSABnzbdCategoryDirectories creates directories for all SABnzbd categories in the mount path
+func (s *Server) ensureSABnzbdCategoryDirectories(cfg *config.Config) error {
+	// Only process if SABnzbd is enabled
+	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
+		return nil
+	}
+
+	// Create base SABnzbd complete directory
+	baseDir := filepath.Join(cfg.Metadata.RootPath, cfg.SABnzbd.CompleteDir)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create SABnzbd base directory: %w", err)
+	}
+
+	// Create directories for each category
+	for _, category := range cfg.SABnzbd.Categories {
+		if category.Dir != "" {
+			categoryDir := filepath.Join(baseDir, category.Dir)
+			if err := os.MkdirAll(categoryDir, 0755); err != nil {
+				return fmt.Errorf("failed to create category directory %s: %w", category.Name, err)
+			}
+		}
+	}
+
+	return nil
+}
