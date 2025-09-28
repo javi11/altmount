@@ -473,7 +473,7 @@ func (d *Deobfuscator) streamParsePAR2(r io.Reader, targetFilename string) strin
 			if fileDesc.Filename != "" &&
 				fileDesc.Filename != targetFilename &&
 				!IsProbablyObfuscated(fileDesc.Filename) {
-				d.log.Info("Found better filename in PAR2",
+				d.log.Debug("Found better filename in PAR2",
 					"original", targetFilename,
 					"par2_filename", fileDesc.Filename)
 				return fileDesc.Filename

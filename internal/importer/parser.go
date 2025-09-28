@@ -189,7 +189,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 	var yencFilename string
 	var yencFileSize int64
 	if p.poolManager != nil && p.poolManager.HasPool() && len(file.Segments) > 0 {
-		firstPartHeaders, err := p.fetchYencHeaders(file.Segments[0], file.Groups)
+		firstPartHeaders, err := p.fetchYencHeaders(file.Segments[0], nil)
 		if err != nil {
 			// If we can't fetch yEnc headers, log and continue with original sizes
 			return nil, fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
@@ -259,7 +259,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 
 	// Start with yEnc filename if available, otherwise use NZB filename
 	filename := yencFilename
-	if filename == "" {
+	if filename == "" || IsProbablyObfuscated(filename) {
 		filename = file.Filename
 	}
 
