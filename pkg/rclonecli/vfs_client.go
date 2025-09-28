@@ -15,7 +15,7 @@ import (
 )
 
 type RcloneRcClient interface {
-	RefreshCache(ctx context.Context, dir string, async, recursive bool) error
+	RefreshDir(ctx context.Context, provider string, dirs []string) error
 }
 
 type rcloneRcClient struct {
@@ -74,15 +74,11 @@ func TestConnection(
 	return nil
 }
 
-func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, recursive bool) error {
+func (c *rcloneRcClient) RefreshDir(ctx context.Context, provider string, dirs []string) error {
 	cfg := c.config.GetConfig()
 
-	if *cfg.RClone.RCEnabled {
-		return nil // Silently skip if RC is not enabled
-	}
-
 	// Check if RC notifications are enabled
-	if !*cfg.RClone.RCEnabled {
+	if cfg.RClone.RCEnabled == nil || !*cfg.RClone.RCEnabled {
 		return nil // Silently skip if RC is not enabled
 	}
 
@@ -91,9 +87,9 @@ func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, re
 		return fmt.Errorf("RC URL is not configured")
 	}
 
-	data := map[string]string{
-		"_async":    fmt.Sprintf("%t", async),
-		"recursive": fmt.Sprintf("%t", recursive),
+	// If no specific directories provided, refresh root
+	if len(dirs) == 0 {
+		dirs = []string{"/"}
 	}
 
 	baseUrl, err := buildRCUrl(cfg.RClone.RCUrl, cfg.RClone.RCUser, cfg.RClone.RCPass)
@@ -101,11 +97,29 @@ func (c *rcloneRcClient) RefreshCache(ctx context.Context, dir string, async, re
 		return fmt.Errorf("invalid RC URL configuration: %w", err)
 	}
 
-	if dir != "" {
-		data["dir"] = dir
+	// Use similar logic to Manager's RefreshDir but with vfs/refresh endpoint
+	args := map[string]interface{}{
+		"_async":    "true",  // Use async refresh
+		"recursive": "false", // Non-recursive by default
 	}
 
-	payload, err := json.Marshal(data)
+	// Add filesystem specification if provider is provided
+	if provider != "" {
+		args["fs"] = fmt.Sprintf("%s:", provider)
+	}
+
+	// Add directories to refresh
+	for i, dir := range dirs {
+		if dir != "" {
+			if i == 0 {
+				args["dir"] = dir
+			} else {
+				args[fmt.Sprintf("dir%d", i+1)] = dir
+			}
+		}
+	}
+
+	payload, err := json.Marshal(args)
 	if err != nil {
 		return err
 	}
@@ -138,7 +152,6 @@ func buildRCUrl(
 	rcUser string,
 	rcPass string,
 ) (string, error) {
-
 	rawUrl := rcUrl
 	if rawUrl == "" {
 		return "", fmt.Errorf("RC URL is not configured")

@@ -48,6 +48,26 @@ func getEffectiveLogLevel(newLevel, legacyLevel string) string {
 	return "info"
 }
 
+// createRCloneClientIfEnabled creates an RClone client if RClone RC is enabled
+func createRCloneClientIfEnabled(cfg *config.Config, configManager *config.Manager, logger *slog.Logger) rclonecli.RcloneRcClient {
+	if cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled {
+		httpClient := &http.Client{}
+		rcloneClient := rclonecli.NewRcloneRcClient(configManager, httpClient)
+
+		if cfg.RClone.RCUrl != "" {
+			logger.Info("RClone RC client initialized for external server",
+				"rc_url", cfg.RClone.RCUrl)
+		} else {
+			logger.Info("RClone RC client initialized for internal server",
+				"rc_port", cfg.RClone.RCPort)
+		}
+		return rcloneClient
+	} else {
+		logger.Info("RClone RC notifications disabled")
+		return nil
+	}
+}
+
 func init() {
 	serveCmd := &cobra.Command{
 		Use:   "serve",
@@ -178,21 +198,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		_ = poolManager.ClearPool()
 	}()
 
-	// Create rclone client for cache refresh notifications (if configured)
-	var rcloneRCClient rclonecli.RcloneRcClient
-	if cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled {
-		httpClient := &http.Client{}
-		rcloneRCClient = rclonecli.NewRcloneRcClient(configManager, httpClient)
+	// Create RClone mount service
+	mountService := rclone.NewMountService(configManager)
 
-		if cfg.RClone.RCUrl != "" {
-			logger.Info("RClone RC client initialized for external server",
-				"rc_url", cfg.RClone.RCUrl)
-		} else {
-			logger.Info("RClone RC client initialized for internal server",
-				"rc_port", cfg.RClone.RCPort)
-		}
+	var rcloneRCClient rclonecli.RcloneRcClient
+	if cfg.RClone.MountEnabled == nil || !*cfg.RClone.MountEnabled {
+		rcloneRCClient = createRCloneClientIfEnabled(cfg, configManager, logger)
 	} else {
-		logger.Info("RClone RC notifications disabled")
+		rcloneRCClient = mountService.GetManager()
 	}
 
 	// Create NZB system with metadata + queue
@@ -281,9 +294,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create arrs service for health monitoring and repair
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), logger)
 
-	// Create RClone mount service
-	mountService := rclone.NewMountService(configManager)
-
 	// Create API server configuration (hardcoded to /api)
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -301,7 +311,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		nsys.MetadataReader(),
 		poolManager,
 		nsys.ImporterService(),
-		arrsService)
+		arrsService,
+		mountService)
 
 	apiServer.SetupRoutes(app)
 	logger.Info("API server enabled with Fiber routes", "prefix", "/api")

@@ -37,3 +37,4 @@ example/
 *node_modules*
 .git
 *debug*
+rclone.conf

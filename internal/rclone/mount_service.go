@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/pkg/rclonecli"
@@ -140,4 +141,43 @@ func (s *MountService) RefreshPath(ctx context.Context, path string) error {
 	}
 
 	return s.mount.RefreshDir(ctx, []string{path})
+}
+
+// StartRCServer starts the RC server if RClone is enabled but doesn't create a mount
+func (s *MountService) StartRCServer(ctx context.Context) error {
+	cfg := s.cfm.GetConfig()
+
+	// Check if RClone RC is enabled
+	if cfg.RClone.RCEnabled == nil || !*cfg.RClone.RCEnabled {
+		slog.DebugContext(ctx, "RClone RC is disabled, skipping RC server startup")
+		return nil
+	}
+
+	// Check if RC server is already running and ready
+	if s.manager.IsReady() {
+		slog.DebugContext(ctx, "RClone RC server is already running and ready")
+		return nil
+	}
+
+	slog.InfoContext(ctx, "RClone is enabled but RC server is not running, starting RC server")
+
+	// Start the RC server
+	if err := s.manager.Start(ctx); err != nil {
+		slog.ErrorContext(ctx, "Failed to start RClone RC server", "error", err)
+		return fmt.Errorf("failed to start RClone RC server: %w", err)
+	}
+
+	// Wait for the server to be ready with timeout
+	if err := s.manager.WaitForReady(30*time.Second); err != nil {
+		slog.WarnContext(ctx, "RClone RC server started but not ready within timeout", "error", err)
+		return fmt.Errorf("RClone RC server not ready: %w", err)
+	}
+
+	slog.InfoContext(ctx, "RClone RC server started successfully")
+	return nil
+}
+
+// GetManager returns the underlying rclone manager for RC operations
+func (s *MountService) GetManager() *rclonecli.Manager {
+	return s.manager
 }

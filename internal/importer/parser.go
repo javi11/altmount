@@ -295,10 +295,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 
 		// Attempt deobfuscation using all available files in the NZB
 		if result := p.deobfuscator.DeobfuscateFilename(filename, allFiles, file); result.Success {
-			p.log.Info("Successfully deobfuscated filename",
-				"original", filename,
-				"deobfuscated", result.DeobfuscatedFilename,
-				"method", result.Method)
 			filename = result.DeobfuscatedFilename
 		} else {
 			p.log.Warn("Unable to deobfuscate filename",

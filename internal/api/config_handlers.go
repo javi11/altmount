@@ -125,6 +125,9 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		})
 	}
 
+	// Try to start RC server if RClone is enabled but RC is not running
+	s.startRCServerIfNeeded(c.Context())
+
 	response := ToConfigAPIResponse(&newConfig)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
@@ -205,6 +208,11 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 			"message": "Failed to save configuration",
 			"details": err.Error(),
 		})
+	}
+
+	// Try to start RC server if RClone section was updated or full config update
+	if section == "rclone" || section == "" {
+		s.startRCServerIfNeeded(c.Context())
 	}
 
 	response := ToConfigAPIResponse(&newConfig)
@@ -888,6 +896,29 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 		"success": true,
 		"data":    providers,
 	})
+}
+
+// startRCServerIfNeeded starts the RC server if RClone is enabled and RC is not running
+func (s *Server) startRCServerIfNeeded(ctx context.Context) {
+	// Check if we have a mount service to work with
+	if s.mountService == nil {
+		slog.WarnContext(ctx, "Mount service not available, cannot start RC server")
+		return
+	}
+
+	// Use the mount service to start the RC server (non-blocking for config save)
+	go func() {
+		if err := s.mountService.StartRCServer(ctx); err != nil {
+			slog.ErrorContext(ctx, "Failed to start RClone RC server via mount service", "error", err)
+			return
+		}
+
+		// Now that RC server is ready, initialize RClone client in importer service if available
+		if s.importerService != nil {
+			s.importerService.SetRcloneClient(s.mountService.GetManager())
+			slog.InfoContext(ctx, "RClone client initialized in importer service")
+		}
+	}()
 }
 
 // ensureSABnzbdCategoryDirectories creates directories for all SABnzbd categories in the mount path

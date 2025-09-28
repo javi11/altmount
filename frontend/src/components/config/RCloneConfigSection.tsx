@@ -13,7 +13,11 @@ interface RCloneConfigSectionProps {
 	config: ConfigResponse;
 	onUpdate?: (
 		section: string,
-		data: RCloneRCFormData | RCloneMountFormData | { mount_path: string },
+		data:
+			| RCloneRCFormData
+			| RCloneMountFormData
+			| { mount_path: string }
+			| { rclone: RCloneMountFormData; mount_path: string },
 	) => Promise<void>;
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
@@ -287,21 +291,38 @@ export function RCloneConfigSection({
 
 	const handleSaveMount = async () => {
 		if (onUpdate) {
-			// Save mount configuration changes
-			if (hasMountChanges) {
-				await onUpdate("rclone", mountFormData);
+			// When mount is enabled and we have any changes, send them together to avoid validation errors
+			if (mountFormData.mount_enabled && (hasMountChanges || hasMountPathChanges)) {
+				// Create a combined payload for the parent to handle
+				// This ensures both mount settings and path are validated together
+				await onUpdate("rclone_with_path", {
+					rclone: mountFormData,
+					mount_path: mountPath,
+				});
 				setHasMountChanges(false);
-			}
-
-			// Save mount path changes
-			if (hasMountPathChanges) {
-				await onUpdate("mount_path", { mount_path: mountPath });
 				setHasMountPathChanges(false);
+			} else {
+				// Handle separate updates when mount is disabled
+				if (hasMountChanges) {
+					await onUpdate("rclone", mountFormData);
+					setHasMountChanges(false);
+				}
+
+				if (hasMountPathChanges) {
+					await onUpdate("mount_path", { mount_path: mountPath });
+					setHasMountPathChanges(false);
+				}
 			}
 
 			// Refresh mount status after saving
 			if (mountFormData.mount_enabled) {
-				fetchMountStatus();
+				// Set loading state while refreshing mount status
+				setIsMountLoading(true);
+				try {
+					await fetchMountStatus();
+				} finally {
+					setIsMountLoading(false);
+				}
 			}
 		}
 	};
@@ -326,12 +347,33 @@ export function RCloneConfigSection({
 			}
 		}
 
+		// Set loading state for both enabling and disabling
+		setIsMountToggleSaving(true);
+
 		// Update local state immediately for UI responsiveness
 		setMountFormData((prev) => ({ ...prev, mount_enabled: enabled }));
 
-		if (!onUpdate) return;
+		// When enabling mount, don't auto-save - let user configure path first
+		if (enabled) {
+			// Mark that there are unsaved mount changes
+			setHasMountChanges(true);
 
-		setIsMountToggleSaving(true);
+			showToast({
+				type: "info",
+				title: "Mount enabled",
+				message: "Please configure the mount path and save your changes",
+			});
+
+			// Clear loading state after showing message
+			setIsMountToggleSaving(false);
+			return;
+		}
+
+		// Only auto-save when disabling the mount
+		if (!onUpdate) {
+			setIsMountToggleSaving(false);
+			return;
+		}
 		try {
 			// If disabling and mount is active, stop the mount first
 			if (!enabled && mountStatus?.mounted) {
@@ -366,29 +408,24 @@ export function RCloneConfigSection({
 				}
 			}
 
-			// Save the mount enabled state
-			await onUpdate("rclone", { ...mountFormData, mount_enabled: enabled });
+			// Save the mount disabled state
+			await onUpdate("rclone", { ...mountFormData, mount_enabled: false });
 
 			// Clear the hasMountChanges flag since we just saved
 			setHasMountChanges(false);
 
 			showToast({
 				type: "success",
-				title: enabled ? "Mount enabled" : "Mount disabled",
-				message: `RClone mount has been ${enabled ? "enabled" : "disabled"} successfully`,
+				title: "Mount disabled",
+				message: "RClone mount has been disabled successfully",
 			});
-
-			// Refresh mount status if enabled
-			if (enabled) {
-				fetchMountStatus();
-			}
 		} catch (error) {
 			// Revert the state on error
-			setMountFormData((prev) => ({ ...prev, mount_enabled: !enabled }));
+			setMountFormData((prev) => ({ ...prev, mount_enabled: true }));
 
 			showToast({
 				type: "error",
-				title: `Failed to ${enabled ? "enable" : "disable"} mount`,
+				title: "Failed to disable mount",
 				message: error instanceof Error ? error.message : "Unknown error occurred",
 			});
 		} finally {
@@ -712,6 +749,17 @@ export function RCloneConfigSection({
 						Mount the AltMount WebDAV as a local filesystem using RClone
 						{isMountToggleSaving && " (Saving...)"}
 					</p>
+					{mountFormData.mount_enabled && hasMountChanges && (
+						<div className="alert alert-warning mt-2">
+							<div className="text-sm">
+								<div className="font-semibold">Configuration not saved!</div>
+								<p className="mt-1">
+									Please configure the mount path below and click "Save Mount Changes" to apply your
+									settings.
+								</p>
+							</div>
+						</div>
+					)}
 					{mountFormData.mount_enabled && (
 						<div className="alert alert-info mt-2">
 							<div className="text-sm">
@@ -1105,16 +1153,22 @@ export function RCloneConfigSection({
 							<div className="flex justify-end gap-2">
 								<button
 									type="button"
-									className="btn btn-primary"
+									className={`btn btn-primary ${hasMountChanges || hasMountPathChanges ? "animate-pulse" : ""}`}
 									onClick={handleSaveMount}
-									disabled={(!hasMountChanges && !hasMountPathChanges) || isUpdating}
+									disabled={
+										(!hasMountChanges && !hasMountPathChanges) || isUpdating || isMountLoading
+									}
 								>
-									{isUpdating ? (
+									{isUpdating || isMountLoading ? (
 										<span className="loading loading-spinner loading-sm" />
 									) : (
 										<Save className="h-4 w-4" />
 									)}
-									{isUpdating ? "Saving..." : "Save Mount Changes"}
+									{isUpdating
+										? "Saving..."
+										: isMountLoading
+											? "Checking Mount..."
+											: "Save Mount Changes"}
 								</button>
 							</div>
 						)}

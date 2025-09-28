@@ -166,7 +166,8 @@ export function ConfigurationPage() {
 			| LogFormData
 			| SABnzbdConfig
 			| ArrsConfig
-			| { mount_path: string },
+			| { mount_path: string }
+			| { rclone: RCloneMountFormData; mount_path: string },
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -218,6 +219,16 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "rclone",
 					config: { rclone: data as RCloneMountFormData },
+				});
+			} else if (section === "rclone_with_path") {
+				// Handle combined RClone settings + mount path to avoid validation errors
+				const combinedData = data as { rclone: RCloneMountFormData; mount_path: string };
+				await updateConfigSection.mutateAsync({
+					section: "rclone",
+					config: {
+						rclone: combinedData.rclone,
+						mount_path: combinedData.mount_path,
+					},
 				});
 			} else if (section === "mount_path") {
 				// For mount_path, we need to update the system section with mount_path

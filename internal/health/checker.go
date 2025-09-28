@@ -246,7 +246,7 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		defer cancel()
 
 		// Refresh cache asynchronously to avoid blocking health checks
-		err := hc.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
+		err := hc.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
 		if err != nil {
 			slog.Error("Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
 		}

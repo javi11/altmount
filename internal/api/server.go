@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
@@ -46,6 +47,7 @@ type Server struct {
 	poolManager     pool.Manager
 	arrsService     *arrs.Service
 	rcloneClient    rclonecli.RcloneRcClient
+	mountService    *rclone.MountService
 	logger          *slog.Logger
 	startTime       time.Time
 }
@@ -62,7 +64,8 @@ func NewServer(
 	metadataReader *metadata.MetadataReader,
 	poolManager pool.Manager,
 	importService *importer.Service,
-	arrsService *arrs.Service) *Server {
+	arrsService *arrs.Service,
+	mountService *rclone.MountService) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -79,6 +82,7 @@ func NewServer(
 		importerService: importService, // Will be set later via SetImporterService
 		poolManager:     poolManager,
 		arrsService:     arrsService,
+		mountService:    mountService,
 		logger:          slog.Default(),
 		startTime:       time.Now(),
 	}

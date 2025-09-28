@@ -71,9 +71,6 @@ func (d *Deobfuscator) DeobfuscateFilename(filename string, allFiles []nzbparser
 		result.DeobfuscatedFilename = par2Name
 		result.Method = "par2_extraction"
 		result.Success = true
-		d.log.Info("Deobfuscated filename using PAR2",
-			"original", filename,
-			"deobfuscated", par2Name)
 		return result
 	}
 
@@ -83,9 +80,7 @@ func (d *Deobfuscator) DeobfuscateFilename(filename string, allFiles []nzbparser
 			result.DeobfuscatedFilename = yencName
 			result.Method = "yenc_headers"
 			result.Success = true
-			d.log.Info("Deobfuscated filename using yEnc headers",
-				"original", filename,
-				"deobfuscated", yencName)
+
 			return result
 		}
 	}
@@ -95,9 +90,7 @@ func (d *Deobfuscator) DeobfuscateFilename(filename string, allFiles []nzbparser
 		result.DeobfuscatedFilename = cleanName
 		result.Method = "pattern_cleanup"
 		result.Success = true
-		d.log.Info("Deobfuscated filename using pattern cleanup",
-			"original", filename,
-			"deobfuscated", cleanName)
+
 		return result
 	}
 

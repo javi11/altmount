@@ -176,6 +176,18 @@ func (s *Service) IsRunning() bool {
 	return s.running
 }
 
+// SetRcloneClient sets or updates the RClone client for VFS notifications
+func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rcloneClient = client
+	if client != nil {
+		s.log.Info("RClone client updated for VFS notifications")
+	} else {
+		s.log.Info("RClone client disabled")
+	}
+}
+
 // Database returns the database instance for processing
 func (s *Service) Database() *database.DB {
 	return s.database
@@ -613,7 +625,7 @@ func (s *Service) GetWorkerCount() int {
 // notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
 func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logger) {
 	if s.rcloneClient == nil {
-		return // No rclone client configured
+		return // No rclone client configured or RClone RC is disabled
 	}
 
 	// Calculate the virtual directory path for VFS notification
@@ -631,7 +643,7 @@ func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logg
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
 		defer cancel()
 
-		err := s.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
+		err := s.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
 		if err != nil {
 			log.Warn("Failed to notify rclone VFS about new import",
 				"queue_id", item.ID,
@@ -639,7 +651,7 @@ func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logg
 				"virtual_dir", virtualDir,
 				"error", err)
 		} else {
-			log.Debug("Successfully notified rclone VFS about new import",
+			log.Info("Successfully notified rclone VFS about new import",
 				"queue_id", item.ID,
 				"virtual_dir", virtualDir)
 		}
