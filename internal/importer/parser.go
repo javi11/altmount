@@ -132,7 +132,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	// Process files in parallel using conc pool
 	for _, file := range validFiles {
 		concPool.Go(func() fileResult {
-			parsedFile, err := p.parseFile(file, n.Meta, n.Files)
+			parsedFile, err := p.parseFile(file, n.Meta, n.Files, parsed.Filename)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -182,7 +182,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 }
 
 // parseFile processes a single file entry from the NZB
-func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile) (*ParsedFile, error) {
+func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile, nzbFilename string) (*ParsedFile, error) {
 	sort.Sort(file.Segments)
 
 	// Fetch yEnc headers from the first segment to get correct filename and file size, some nzbs have wrong filename in the segments
@@ -266,6 +266,11 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 	// Check metadata for overrides
 	if meta != nil {
 		if metaFilename, ok := meta["file_name"]; ok && metaFilename != "" {
+			if _, ok := meta["file_size"]; ok {
+				// This is a usenet-drive nzb with one file
+				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+			}
+
 			// This will add support for rclone encrypted files
 			if strings.HasSuffix(strings.ToLower(metaFilename), rclone.EncFileExtension) {
 				filename = metaFilename[:len(metaFilename)-4]
