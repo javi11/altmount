@@ -13,3 +13,8 @@
 		dracula;
 }
 @plugin "@tailwindcss/typography";
+
+/* Fix for DaisyUI menu active state on buttons */
+.menu li > button.active {
+	@apply bg-primary text-primary-content;
+}

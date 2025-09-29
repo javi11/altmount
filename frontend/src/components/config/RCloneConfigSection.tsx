@@ -1003,8 +1003,6 @@ export function RCloneConfigSection({
 				)}
 			</div>
 
-
-
 			{/* RC Configuration Settings */}
 			<div className="space-y-4">
 				<h4 className="font-medium text-base">RC (Remote Control) Settings</h4>
