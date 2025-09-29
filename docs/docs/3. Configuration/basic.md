@@ -168,27 +168,107 @@ health:
 
 See [Health Monitoring Configuration](health-monitoring.md) for complete setup details.
 
-### RClone VFS Integration
+### RClone Built-in Mount
 
-![Health Monitoring](../../static/img/rclone_vfs.png)
+AltMount includes a built-in rclone mount feature that mounts the WebDAV interface as a local filesystem:
 
-RClone VFS integration helps notify RClone when files change, preventing import failures:
+![RClone Mount Configuration](../../static/img/rclone_mount_config.png)
+_RClone mount configuration interface showing all mount settings_
+
+**RClone Mount Configuration:**
 
 ```yaml
 rclone:
-  vfs_enabled: false # Enable VFS notifications
-  vfs_url: "http://localhost:5572" # RClone VFS URL
-  vfs_user: "" # VFS authentication (optional)
-  vfs_pass: "" # VFS authentication (optional)
+  # Mount Configuration
+  mount_enabled: true           # Enable/disable the built-in rclone mount
+  path: "/mnt/altmount"        # Mount path (where WebDAV will be mounted)
+
+  # Remote Control (RC) Configuration
+  rc_enabled: true              # Enable rclone RC server for cache management
+  rc_url: ""                    # RC server URL (auto-configured if empty)
+  rc_port: 5572                 # RC server port
+  rc_user: "admin"              # RC authentication username
+  rc_pass: "admin"              # RC authentication password
+
+  # VFS Cache Settings
+  cache_dir: "/cache"           # Cache directory location
+  vfs_cache_mode: "full"        # Cache mode: off, minimal, writes, full
+  vfs_cache_max_size: "50G"     # Maximum cache size
+  vfs_cache_max_age: "300m"     # Maximum cache age (5 hours)
+  vfs_read_chunk_size: "32M"    # Chunk size for reading
+  vfs_read_ahead: "128k"        # Read-ahead buffer size
+  dir_cache_time: "5m"          # Directory cache time
+
+  # Performance Settings
+  buffer_size: "10M"            # Buffer size for operations
+  transfers: 4                  # Number of parallel transfers
+  async_read: true              # Enable async reading
+
+  # Mount-Specific Settings
+  allow_other: true             # Allow other users to access mount
+  allow_non_empty: true         # Allow mounting over non-empty directory
+  read_only: false              # Mount as read-only
+  timeout: "10m"                # I/O operation timeout
+  syslog: true                  # Send logs to syslog
+
+  # Advanced Settings
+  no_mod_time: false            # Disable modification time updates
+  no_checksum: false            # Disable checksum verification
+  vfs_fast_fingerprint: false   # Use fast fingerprinting
+  use_mmap: false               # Use memory-mapped I/O
 ```
 
-**When to Enable RClone VFS:**
+**Key Configuration Options:**
 
-- **Cache Enabled**: If you have RClone cache enabled, AltMount can notify RClone of file changes
-- **ARR Import Issues**: If Sonarr/Radarr imports fail due to cache staleness
-- **Mounted Storage**: When AltMount metadata directory is on RClone-mounted storage
+- **mount_enabled**: Toggle to enable/disable the built-in mount
+- **path**: Where the WebDAV interface will be mounted on the filesystem
+- **vfs_cache_mode**:
+  - `off`: No caching
+  - `minimal`: Cache file structure only
+  - `writes`: Cache writes, stream reads
+  - `full`: Cache everything (recommended for media streaming)
+- **vfs_cache_max_size**: Limit cache size to prevent disk space issues
+- **rc_enabled**: Enable remote control server for cache management and operations
 
-Without VFS notification, ARR imports may fail if RClone cache hasn't refreshed to show newly imported files.
+**When to Use Built-in RClone Mount:**
+
+- **ARR Integration**: Required for ARR applications to access imported files via filesystem
+- **Direct File Access**: Provides filesystem access to WebDAV content
+- **Cache Management**: RC server enables cache notifications and management
+- **Performance**: Full cache mode provides best streaming performance
+
+### WebDAV Mount Path
+
+The mount path tells AltMount where ARR applications access the WebDAV-mounted content:
+
+```yaml
+mount_path: "/mnt/altmount" # Path where ARRs see the WebDAV mount
+```
+
+**Critical Configuration:**
+
+This is the **most important setting for ARR integration**. It must match exactly where your ARR applications access the WebDAV mount:
+
+- **Not the metadata path**: Don't use AltMount's internal metadata directory
+- **Not the docker volume path**: Don't use the Docker internal path
+- **ARR's perspective**: Use the actual filesystem path where ARRs see the mount
+
+**Deployment Examples:**
+
+| Deployment | mount_path Value | ARR Library Path | Notes |
+|------------|------------------|------------------|-------|
+| Docker Compose | `/downloads` | `/downloads/movies/` | Shared volume mount between containers |
+| Linux + rclone | `/mnt/altmount` | `/mnt/altmount/movies/` | Direct rclone WebDAV mount |
+| Built-in Mount | `/mnt/altmount` | `/mnt/altmount/movies/` | Using AltMount's built-in rclone mount |
+
+**Why Mount Path Matters:**
+
+When health monitoring detects corrupted files, AltMount reports file paths to ARR applications for repair. If the mount path is wrong, ARRs cannot locate the files:
+
+```
+❌ Wrong: mount_path="/config/metadata" (AltMount internal path)
+✅ Correct: mount_path="/mnt/altmount" (ARR's WebDAV mount path)
+```
 
 ### SABnzbd Compatibility
 
@@ -215,25 +295,51 @@ See [SABnzbd Integration](integration.md) for complete setup instructions.
 
 ### ARR Integration
 
-Configure ARR instances for automatic repair and integration:
+Configure ARR instances for automatic repair and health monitoring integration:
 
-**ARR Instance Requirements:**
+![ARR Integration Configuration](../../static/img/arr_config.png)
+_ARR integration settings showing Radarr and Sonarr instance configuration_
 
-- **Mount Path**: The path where ARRs see the WebDAV mount - must match across all ARR instances
-- **API Credentials**: Valid API keys for each ARR instance
-- **Network Access**: ARRs must be able to reach AltMount WebDAV server
-
-![Health Monitoring](../../static/img/arr_config.png)
+**ARR Configuration:**
 
 ```yaml
 arrs:
-  enabled: false # Enable ARRs service
-  mount_path: "/mnt/altmount" # WebDAV mount path (from ARR perspective)
+  enabled: true                # Enable ARR integration
+  max_workers: 5               # Max concurrent repair operations
+
+  radarr_instances:
+    - name: "radarr-main"      # Descriptive name
+      url: "http://localhost:7878"
+      api_key: "your-api-key"
+      enabled: true
+      sync_interval_hours: 24  # Optional: hours between syncs (null = disabled)
+
+  sonarr_instances:
+    - name: "sonarr-main"
+      url: "http://localhost:8989"
+      api_key: "your-api-key"
+      enabled: true
+      sync_interval_hours: null # Null disables periodic sync
 ```
 
-**Mount Path Configuration**: This is the most critical setting - it must be the same path your ARRs use to access the WebDAV-mounted AltMount content.
+**Configuration Options:**
 
-See [ARR Integration](integration.md) for detailed configuration and mount path setup.
+- **enabled**: Master toggle for ARR integration
+- **max_workers**: Number of concurrent health check/repair operations
+- **radarr_instances/sonarr_instances**: List of ARR instances to integrate
+  - **name**: Descriptive identifier for the instance
+  - **url**: Full URL to the ARR application
+  - **api_key**: API key from ARR Settings → General
+  - **enabled**: Toggle to enable/disable specific instance
+  - **sync_interval_hours**: Hours between automatic syncs (null = disabled)
+
+**Requirements:**
+
+- **API Access**: Valid API keys for each ARR instance
+- **Network Connectivity**: ARRs must be able to reach AltMount server
+- **Mount Path**: Root-level `mount_path` must be configured (see WebDAV Mount Path section)
+
+See [ARR Integration](integration.md) for detailed configuration and troubleshooting.
 
 ## Next Steps
 

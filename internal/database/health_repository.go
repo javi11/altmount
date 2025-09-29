@@ -503,19 +503,38 @@ func (r *HealthRepository) AddFileToHealthCheck(filePath string, maxRetries int,
 	return nil
 }
 
-// ListHealthItems returns all health records with optional filtering and pagination
-func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time, search string) ([]*FileHealth, error) {
-	query := `
+// ListHealthItems returns all health records with optional filtering, sorting and pagination
+func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time, search string, sortBy string, sortOrder string) ([]*FileHealth, error) {
+	// Validate and prepare ORDER BY clause
+	orderClause := "created_at DESC"
+	if sortBy != "" {
+		// Whitelist of allowed sort fields to prevent SQL injection
+		allowedFields := map[string]string{
+			"file_path":  "file_path",
+			"created_at": "created_at",
+			"status":     "status",
+		}
+
+		if field, ok := allowedFields[sortBy]; ok {
+			orderDirection := "ASC"
+			if sortOrder == "desc" || sortOrder == "DESC" {
+				orderDirection = "DESC"
+			}
+			orderClause = fmt.Sprintf("%s %s", field, orderDirection)
+		}
+	}
+
+	query := fmt.Sprintf(`
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
-		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path,
 		       error_details, created_at, updated_at
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
 		  AND (? = '' OR file_path LIKE ? OR (source_nzb_path IS NOT NULL AND source_nzb_path LIKE ?))
-		ORDER BY created_at DESC
+		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`
+	`, orderClause)
 
 	// Prepare arguments for the query
 	var statusParam interface{} = nil

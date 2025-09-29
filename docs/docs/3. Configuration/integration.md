@@ -88,30 +88,44 @@ _Configuring AltMount as download client in ARR applications_
 
 ### Mount Path Configuration - Critical for Success
 
-The mount path is the most critical setting for ARR integration. It must be set to the exact path where your ARR applications see the WebDAV-mounted AltMount files:
+The mount path is the most critical setting for ARR integration. It must be set at the **root config level** to the exact path where your ARR applications see the WebDAV-mounted AltMount files:
 
 ```yaml
+# Root-level configuration (not under arrs)
+mount_path: "/mnt/altmount" # Path where ARRs see WebDAV files
+
 arrs:
   enabled: true
-  mount_path: "/mnt/altmount" # Path where ARRs see WebDAV files
+  max_workers: 5
+  radarr_instances:
+    - name: "radarr-main"
+      url: "http://localhost:7878"
+      api_key: "your-api-key"
+      enabled: true
 ```
 
 **Mount Path Examples:**
 
-| Deployment Method  | ARR Mount Path  | ARR Library Path        | Notes               |
-| ------------------ | --------------- | ----------------------- | ------------------- |
-| **Docker Compose** | `/downloads`    | `/downloads/movies/`    | Shared volume mount |
-| **Linux rclone**   | `/mnt/altmount` | `/mnt/altmount/movies/` | rclone WebDAV mount |
-| **UnionFS**        | `/mnt/unionfs`  | `/mnt/unionfs/movies/`  | UnionFS with WebDAV |
+| Deployment Method  | mount_path Value | ARR Library Path        | Notes               |
+| ------------------ | ---------------- | ----------------------- | ------------------- |
+| **Docker Compose** | `/downloads`     | `/downloads/movies/`    | Shared volume mount |
+| **Linux rclone**   | `/mnt/altmount`  | `/mnt/altmount/movies/` | rclone WebDAV mount |
+| **Built-in Mount** | `/mnt/altmount`  | `/mnt/altmount/movies/` | AltMount rclone mount |
+| **UnionFS**        | `/mnt/unionfs`   | `/mnt/unionfs/movies/`  | UnionFS with WebDAV |
 
 **Why Mount Path Matters:**
 
 When AltMount reports file paths to ARR applications for repair, it must use paths that ARRs can access. If the mount path is wrong, ARRs cannot find files to repair:
 
 ```
-❌ Wrong: mount_path="/metadata" (AltMount local path)
-✅ Correct: mount_path="/mnt/altmount" (ARR WebDAV mount path)
+❌ Wrong: mount_path="/metadata" (AltMount local metadata path)
+❌ Wrong: mount_path="/config/metadata" (Docker internal path)
+✅ Correct: mount_path="/mnt/altmount" (ARR's WebDAV mount path)
 ```
+
+**Configuration Location:**
+
+The `mount_path` is at the **root level** of the config file, **not inside the arrs section**. This is because the mount path is a system-wide setting used across multiple components.
 
 ## Next Steps
 

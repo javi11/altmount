@@ -1,5 +1,7 @@
 import {
 	AlertTriangle,
+	ChevronDown,
+	ChevronUp,
 	Heart,
 	MoreHorizontal,
 	Pause,
@@ -30,12 +32,13 @@ import {
 	useHealthWorkerStatus,
 	useRepairHealthItem,
 } from "../hooks/useApi";
-import { formatFutureTime, formatRelativeTime, truncateText } from "../lib/utils";
+import { formatRelativeTime, truncateText } from "../lib/utils";
 import type { FileHealth } from "../types/api";
 
 export function HealthPage() {
 	const [page, setPage] = useState(0);
 	const [searchTerm, setSearchTerm] = useState("");
+	const [statusFilter, setStatusFilter] = useState("");
 	const [showAddHealthModal, setShowAddHealthModal] = useState(false);
 	const [healthCheckForm, setHealthCheckForm] = useState({
 		file_path: "",
@@ -48,6 +51,8 @@ export function HealthPage() {
 	const [userInteracting, setUserInteracting] = useState(false);
 	const [countdown, setCountdown] = useState(0);
 	const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+	const [sortBy, setSortBy] = useState<"file_path" | "created_at" | "status">("created_at");
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
 	const pageSize = 20;
 	const {
@@ -59,6 +64,9 @@ export function HealthPage() {
 		limit: pageSize,
 		offset: page * pageSize,
 		search: searchTerm,
+		status: statusFilter || undefined,
+		sort_by: sortBy,
+		sort_order: sortOrder,
 		refetchInterval: autoRefreshEnabled && !userInteracting ? refreshInterval : undefined,
 	});
 
@@ -269,6 +277,20 @@ export function HealthPage() {
 		setSelectedItems(new Set());
 	}, []);
 
+	// Handle sorting
+	const handleSort = (column: "file_path" | "created_at" | "status") => {
+		if (sortBy === column) {
+			// Toggle sort order
+			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+		} else {
+			// New column, default to ascending for file_path and status, descending for created_at
+			setSortBy(column);
+			setSortOrder(column === "created_at" ? "desc" : "asc");
+		}
+		setPage(0); // Reset to first page when sorting changes
+		clearSelection(); // Clear selection when sorting changes
+	};
+
 	// Pause auto-refresh during user interactions
 	const handleUserInteractionStart = () => {
 		setUserInteracting(true);
@@ -333,17 +355,18 @@ export function HealthPage() {
 		return () => clearInterval(timer);
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval]);
 
-	// Reset page when search term changes
+	// Reset page when search term or status filter changes
 	useEffect(() => {
-		if (searchTerm !== "") {
+		if (searchTerm !== "" || statusFilter !== "") {
 			setPage(0);
 		}
-	}, [searchTerm]);
+	}, [searchTerm, statusFilter]);
 
-	// Clear selection when page or search changes
+	// Clear selection when page, search, or filter changes
+	// biome-ignore lint/correctness/useExhaustiveDependencies: needs to be cleared when status filter changes
 	useEffect(() => {
 		clearSelection();
-	}, [clearSelection]);
+	}, [clearSelection, statusFilter]);
 
 	if (error) {
 		return (
@@ -508,6 +531,25 @@ export function HealthPage() {
 								onBlur={handleUserInteractionEnd}
 							/>
 						</fieldset>
+
+						{/* Status Filter */}
+						<fieldset className="fieldset sm:w-48">
+							<legend className="fieldset-legend">Status</legend>
+							<select
+								className="select"
+								value={statusFilter}
+								onChange={(e) => setStatusFilter(e.target.value)}
+								onFocus={handleUserInteractionStart}
+								onBlur={handleUserInteractionEnd}
+							>
+								<option value="">All Statuses</option>
+								<option value="pending">Pending</option>
+								<option value="healthy">Healthy</option>
+								<option value="partial">Partial</option>
+								<option value="corrupted">Corrupted</option>
+								<option value="repair_triggered">Repair Triggered</option>
+							</select>
+						</fieldset>
 					</div>
 				</div>
 			</div>
@@ -568,12 +610,54 @@ export function HealthPage() {
 												/>
 											</label>
 										</th>
-										<th>File Path</th>
+										<th>
+											<button
+												type="button"
+												className="flex items-center gap-1 hover:text-primary"
+												onClick={() => handleSort("file_path")}
+											>
+												File Path
+												{sortBy === "file_path" &&
+													(sortOrder === "asc" ? (
+														<ChevronUp className="h-4 w-4" />
+													) : (
+														<ChevronDown className="h-4 w-4" />
+													))}
+											</button>
+										</th>
 										<th>Source NZB</th>
-										<th>Status</th>
+										<th>
+											<button
+												type="button"
+												className="flex items-center gap-1 hover:text-primary"
+												onClick={() => handleSort("status")}
+											>
+												Status
+												{sortBy === "status" &&
+													(sortOrder === "asc" ? (
+														<ChevronUp className="h-4 w-4" />
+													) : (
+														<ChevronDown className="h-4 w-4" />
+													))}
+											</button>
+										</th>
 										<th>Retries (H/R)</th>
 										<th>Last Check</th>
-										<th>Next Retry</th>
+										<th>
+											<button
+												type="button"
+												className="flex items-center gap-1 hover:text-primary"
+												onClick={() => handleSort("created_at")}
+											>
+												Created At
+												{sortBy === "created_at" &&
+													(sortOrder === "asc" ? (
+														<ChevronUp className="h-4 w-4" />
+													) : (
+														<ChevronDown className="h-4 w-4" />
+													))}
+											</button>
+										</th>
 										<th>Actions</th>
 									</tr>
 								</thead>
@@ -670,7 +754,7 @@ export function HealthPage() {
 											</td>
 											<td>
 												<span className="text-base-content/70 text-sm">
-													{formatFutureTime(item.next_retry_at)}
+													{formatRelativeTime(item.created_at)}
 												</span>
 											</td>
 											<td>
@@ -740,7 +824,7 @@ export function HealthPage() {
 								No health records found
 							</h3>
 							<p className="text-base-content/50">
-								{searchTerm
+								{searchTerm || statusFilter
 									? "Try adjusting your filters"
 									: "No files are currently being health checked"}
 							</p>

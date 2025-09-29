@@ -947,7 +947,7 @@ func DefaultConfig(configDir ...string) *Config {
 		Health: HealthConfig{
 			Enabled:               &healthCheckEnabled,
 			AutoRepairEnabled:     &autoRepairEnabled,
-			CheckIntervalSeconds:  1800, // 30 minutes in seconds
+			CheckIntervalSeconds:  5,
 			MaxConcurrentJobs:     1,
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,

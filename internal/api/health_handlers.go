@@ -19,13 +19,31 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 	// Parse search parameter
 	search := c.Query("search")
 
+	// Parse sort parameters
+	sortBy := c.Query("sort_by", "created_at")
+	sortOrder := c.Query("sort_order", "desc")
+
+	// Validate sort parameters
+	validSortFields := map[string]bool{
+		"file_path":  true,
+		"created_at": true,
+		"status":     true,
+	}
+	if !validSortFields[sortBy] {
+		sortBy = "created_at"
+	}
+
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+
 	// Parse status filter
 	var statusFilter *database.HealthStatus
 	if statusStr := c.Query("status"); statusStr != "" {
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+		case database.HealthStatusPending, database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 			statusFilter = &status
 		default:
 			return c.Status(400).JSON(fiber.Map{
@@ -33,7 +51,7 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 				"error": fiber.Map{
 					"code":    "VALIDATION_ERROR",
 					"message": "Invalid status filter",
-					"details": "Valid values: healthy, partial, corrupted, repair_triggered",
+					"details": "Valid values: pending, healthy, partial, corrupted, repair_triggered",
 				},
 			})
 		}
@@ -54,8 +72,8 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 		sinceFilter = since
 	}
 
-	// Get health items with search support
-	items, err := s.listHealthItems(statusFilter, pagination, sinceFilter, search)
+	// Get health items with search and sort support
+	items, err := s.listHealthItems(statusFilter, pagination, sinceFilter, search, sortBy, sortOrder)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -102,8 +120,8 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 }
 
 // listHealthItems is a helper method to list health items with filters
-func (s *Server) listHealthItems(statusFilter *database.HealthStatus, pagination Pagination, sinceFilter *time.Time, search string) ([]*database.FileHealth, error) {
-	return s.healthRepo.ListHealthItems(statusFilter, pagination.Limit, pagination.Offset, sinceFilter, search)
+func (s *Server) listHealthItems(statusFilter *database.HealthStatus, pagination Pagination, sinceFilter *time.Time, search string, sortBy string, sortOrder string) ([]*database.FileHealth, error) {
+	return s.healthRepo.ListHealthItems(statusFilter, pagination.Limit, pagination.Offset, sinceFilter, search, sortBy, sortOrder)
 }
 
 // countHealthItems is a helper method to count health items with filters
@@ -525,13 +543,13 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 		if statusStr := c.Query("status"); statusStr != "" {
 			status := database.HealthStatus(statusStr)
 			switch status {
-			case database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+			case database.HealthStatusPending, database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 				req.Status = &status
 			default:
 				return c.Status(422).JSON(fiber.Map{
 					"success": false,
 					"message": "Invalid status filter",
-					"details": "Valid values: healthy, partial, corrupted, repair_triggered",
+					"details": "Valid values: pending, healthy, partial, corrupted, repair_triggered",
 				})
 			}
 		}

@@ -553,179 +553,6 @@ export function RCloneConfigSection({
 		<div className="space-y-4">
 			<h3 className="font-semibold text-lg">RClone Configuration</h3>
 
-			{/* RC Configuration Settings */}
-			<div className="space-y-4">
-				<h4 className="font-medium text-base">RC (Remote Control) Settings</h4>
-
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Enable RC Connection</legend>
-					<label className="label cursor-pointer">
-						<span className="label-text">
-							Enable RClone Remote Control for cache notifications
-							{mountFormData.mount_enabled && (
-								<span className="badge badge-info badge-sm ml-2">Auto-configured by mount</span>
-							)}
-							{isRCToggleSaving && !mountFormData.mount_enabled && (
-								<span className="loading loading-spinner loading-xs ml-2" />
-							)}
-						</span>
-						<input
-							type="checkbox"
-							className="checkbox"
-							checked={mountFormData.mount_enabled || formData.rc_enabled}
-							disabled={isReadOnly || mountFormData.mount_enabled || isRCToggleSaving}
-							onChange={(e) => handleRCEnabledChange(e.target.checked)}
-						/>
-					</label>
-					<p className="label">
-						{mountFormData.mount_enabled
-							? "RC server is automatically managed by the mount service"
-							: isRCToggleSaving
-								? "Saving..."
-								: "Enable connection to RClone RC server for cache refresh notifications"}
-					</p>
-					{mountFormData.mount_enabled && (
-						<div className="mt-2 space-y-1">
-							<span className="block text-info text-sm">
-								Mount service automatically starts and manages the RC server on port 5572
-							</span>
-							<span className="block text-base-content/70 text-xs">
-								RC configuration below is read-only when mount is enabled
-							</span>
-						</div>
-					)}
-				</fieldset>
-
-				{(formData.rc_enabled || mountFormData.mount_enabled) && (
-					<>
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">RC URL</legend>
-							<input
-								type="text"
-								className="input"
-								value={mountFormData.mount_enabled ? "" : formData.rc_url}
-								disabled={isReadOnly || mountFormData.mount_enabled}
-								onChange={(e) => handleInputChange("rc_url", e.target.value)}
-								placeholder={
-									mountFormData.mount_enabled
-										? "Internal server (managed by mount)"
-										: "http://localhost:5572 (leave empty to start internal RC server)"
-								}
-							/>
-							<p className="label">
-								{mountFormData.mount_enabled
-									? "Using internal RC server managed by mount service"
-									: "External RClone RC server URL (leave empty to use internal RC server)"}
-							</p>
-						</fieldset>
-
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">RC Port</legend>
-							<input
-								type="number"
-								className="input"
-								value={mountFormData.mount_enabled ? 5572 : formData.rc_port}
-								disabled={isReadOnly || mountFormData.mount_enabled}
-								onChange={(e) =>
-									handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
-								}
-								placeholder="5572"
-							/>
-							<p className="label">
-								{mountFormData.mount_enabled
-									? "Fixed port used by mount's internal RC server"
-									: "Port for RC server (used for internal server or connecting to external)"}
-							</p>
-						</fieldset>
-
-						{!mountFormData.mount_enabled && (
-							<>
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">RC Username</legend>
-									<input
-										type="text"
-										className="input"
-										value={formData.rc_user}
-										disabled={isReadOnly}
-										onChange={(e) => handleInputChange("rc_user", e.target.value)}
-										placeholder="admin"
-									/>
-									<p className="label">Username for RClone RC API authentication</p>
-								</fieldset>
-
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">RC Password</legend>
-									<div className="relative">
-										<input
-											type={showRCPassword ? "text" : "password"}
-											className="input pr-10"
-											value={formData.rc_pass}
-											disabled={isReadOnly}
-											onChange={(e) => handleInputChange("rc_pass", e.target.value)}
-											placeholder={
-												config.rclone.rc_pass_set
-													? "RC password is set (enter new to change)"
-													: "admin"
-											}
-										/>
-										<button
-											type="button"
-											className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
-											onClick={() => setShowRCPassword(!showRCPassword)}
-										>
-											{showRCPassword ? (
-												<EyeOff className="h-4 w-4" />
-											) : (
-												<Eye className="h-4 w-4" />
-											)}
-										</button>
-									</div>
-									<p className="label">
-										Password for RClone RC API authentication
-										{config.rclone.rc_pass_set && " (currently set)"}
-									</p>
-								</fieldset>
-							</>
-						)}
-
-						{!isReadOnly && (
-							<div className="flex gap-2">
-								{!mountFormData.mount_enabled && (
-									<>
-										<button
-											type="button"
-											className="btn btn-outline"
-											onClick={handleTestConnection}
-											disabled={isTestingConnection || (!formData.rc_url && !formData.rc_enabled)}
-										>
-											{isTestingConnection ? (
-												<span className="loading loading-spinner loading-sm" />
-											) : (
-												<TestTube className="h-4 w-4" />
-											)}
-											{isTestingConnection ? "Testing..." : "Test Connection"}
-										</button>
-										<button
-											type="button"
-											className="btn btn-primary"
-											onClick={handleSave}
-											disabled={!hasChanges || isUpdating}
-										>
-											{isUpdating ? (
-												<span className="loading loading-spinner loading-sm" />
-											) : (
-												<Save className="h-4 w-4" />
-											)}
-											{isUpdating ? "Saving..." : "Save RC Changes"}
-										</button>
-									</>
-								)}
-							</div>
-						)}
-					</>
-				)}
-			</div>
-
 			{/* Mount Configuration Section */}
 			<div className="mt-8 space-y-4">
 				<h4 className="font-medium text-base">Mount Configuration</h4>
@@ -1170,6 +997,181 @@ export function RCloneConfigSection({
 											? "Checking Mount..."
 											: "Save Mount Changes"}
 								</button>
+							</div>
+						)}
+					</>
+				)}
+			</div>
+
+
+
+			{/* RC Configuration Settings */}
+			<div className="space-y-4">
+				<h4 className="font-medium text-base">RC (Remote Control) Settings</h4>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Enable RC Connection</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">
+							Enable RClone Remote Control for cache notifications
+							{mountFormData.mount_enabled && (
+								<span className="badge badge-info badge-sm ml-2">Auto-configured by mount</span>
+							)}
+							{isRCToggleSaving && !mountFormData.mount_enabled && (
+								<span className="loading loading-spinner loading-xs ml-2" />
+							)}
+						</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={mountFormData.mount_enabled || formData.rc_enabled}
+							disabled={isReadOnly || mountFormData.mount_enabled || isRCToggleSaving}
+							onChange={(e) => handleRCEnabledChange(e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						{mountFormData.mount_enabled
+							? "RC server is automatically managed by the mount service"
+							: isRCToggleSaving
+								? "Saving..."
+								: "Enable connection to RClone RC server for cache refresh notifications"}
+					</p>
+					{mountFormData.mount_enabled && (
+						<div className="mt-2 space-y-1">
+							<span className="block text-info text-sm">
+								Mount service automatically starts and manages the RC server on port 5572
+							</span>
+							<span className="block text-base-content/70 text-xs">
+								RC configuration below is read-only when mount is enabled
+							</span>
+						</div>
+					)}
+				</fieldset>
+
+				{(formData.rc_enabled || mountFormData.mount_enabled) && (
+					<>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">RC URL</legend>
+							<input
+								type="text"
+								className="input"
+								value={mountFormData.mount_enabled ? "" : formData.rc_url}
+								disabled={isReadOnly || mountFormData.mount_enabled}
+								onChange={(e) => handleInputChange("rc_url", e.target.value)}
+								placeholder={
+									mountFormData.mount_enabled
+										? "Internal server (managed by mount)"
+										: "http://localhost:5572 (leave empty to start internal RC server)"
+								}
+							/>
+							<p className="label">
+								{mountFormData.mount_enabled
+									? "Using internal RC server managed by mount service"
+									: "External RClone RC server URL (leave empty to use internal RC server)"}
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">RC Port</legend>
+							<input
+								type="number"
+								className="input"
+								value={mountFormData.mount_enabled ? 5572 : formData.rc_port}
+								disabled={isReadOnly || mountFormData.mount_enabled}
+								onChange={(e) =>
+									handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
+								}
+								placeholder="5572"
+							/>
+							<p className="label">
+								{mountFormData.mount_enabled
+									? "Fixed port used by mount's internal RC server"
+									: "Port for RC server (used for internal server or connecting to external)"}
+							</p>
+						</fieldset>
+
+						{!mountFormData.mount_enabled && (
+							<>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">RC Username</legend>
+									<input
+										type="text"
+										className="input"
+										value={formData.rc_user}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("rc_user", e.target.value)}
+										placeholder="admin"
+									/>
+									<p className="label">Username for RClone RC API authentication</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">RC Password</legend>
+									<div className="relative">
+										<input
+											type={showRCPassword ? "text" : "password"}
+											className="input pr-10"
+											value={formData.rc_pass}
+											disabled={isReadOnly}
+											onChange={(e) => handleInputChange("rc_pass", e.target.value)}
+											placeholder={
+												config.rclone.rc_pass_set
+													? "RC password is set (enter new to change)"
+													: "admin"
+											}
+										/>
+										<button
+											type="button"
+											className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
+											onClick={() => setShowRCPassword(!showRCPassword)}
+										>
+											{showRCPassword ? (
+												<EyeOff className="h-4 w-4" />
+											) : (
+												<Eye className="h-4 w-4" />
+											)}
+										</button>
+									</div>
+									<p className="label">
+										Password for RClone RC API authentication
+										{config.rclone.rc_pass_set && " (currently set)"}
+									</p>
+								</fieldset>
+							</>
+						)}
+
+						{!isReadOnly && (
+							<div className="flex gap-2">
+								{!mountFormData.mount_enabled && (
+									<>
+										<button
+											type="button"
+											className="btn btn-outline"
+											onClick={handleTestConnection}
+											disabled={isTestingConnection || (!formData.rc_url && !formData.rc_enabled)}
+										>
+											{isTestingConnection ? (
+												<span className="loading loading-spinner loading-sm" />
+											) : (
+												<TestTube className="h-4 w-4" />
+											)}
+											{isTestingConnection ? "Testing..." : "Test Connection"}
+										</button>
+										<button
+											type="button"
+											className="btn btn-primary"
+											onClick={handleSave}
+											disabled={!hasChanges || isUpdating}
+										>
+											{isUpdating ? (
+												<span className="loading loading-spinner loading-sm" />
+											) : (
+												<Save className="h-4 w-4" />
+											)}
+											{isUpdating ? "Saving..." : "Save RC Changes"}
+										</button>
+									</>
+								)}
 							</div>
 						)}
 					</>

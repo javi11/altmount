@@ -107,6 +107,8 @@ export const useHealth = (params?: {
 	status?: string;
 	since?: string;
 	search?: string;
+	sort_by?: string;
+	sort_order?: "asc" | "desc";
 	refetchInterval?: number;
 }) => {
 	return useQuery({
