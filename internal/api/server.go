@@ -113,7 +113,14 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Use(recover.New())
 
 	// Apply JWT authentication middleware globally except for public auth routes
-	if s.authService != nil && s.userRepo != nil {
+	// Only apply if login is required (default: true)
+	cfg := s.configManager.GetConfig()
+	loginRequired := true // Default to true if not set
+	if cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+
+	if loginRequired && s.authService != nil && s.userRepo != nil {
 		tokenService := s.authService.TokenService()
 		if tokenService != nil {
 			// Define paths that should skip authentication
@@ -121,6 +128,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 				s.config.Prefix + "/auth/login",
 				s.config.Prefix + "/auth/register",
 				s.config.Prefix + "/auth/registration-status",
+				s.config.Prefix + "/auth/config",
 			}
 
 			// Apply authentication middleware with skip paths
@@ -190,6 +198,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/auth/login", s.handleDirectLogin)
 	api.Post("/auth/register", s.handleRegister)
 	api.Get("/auth/registration-status", s.handleCheckRegistration)
+	api.Get("/auth/config", s.handleGetAuthConfig)
 
 	// Protected API endpoints for user management (authentication already handled globally)
 	api.Get("/user", s.handleAuthUser)

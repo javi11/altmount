@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
+import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
@@ -37,6 +38,7 @@ import {
 } from "../hooks/useConfig";
 import type {
 	ArrsConfig,
+	AuthConfig,
 	ConfigSection,
 	HealthConfig,
 	ImportConfig,
@@ -157,6 +159,7 @@ export function ConfigurationPage() {
 		section: string,
 		data:
 			| WebDAVConfig
+			| AuthConfig
 			| StreamingConfig
 			| HealthConfig
 			| ImportConfig
@@ -183,6 +186,11 @@ export function ConfigurationPage() {
 				if (portChanged) {
 					addRestartRequiredConfig("WebDAV Port");
 				}
+			} else if (section === "auth") {
+				await updateConfigSection.mutateAsync({
+					section: "auth",
+					config: { auth: data as AuthConfig },
+				});
 			} else if (section === "streaming") {
 				await updateConfigSection.mutateAsync({
 					section: "streaming",
@@ -452,6 +460,14 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "auth" && (
+									<AuthConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{activeSection === "import" && (
 									<ImportConfigSection
 										config={config}
@@ -521,6 +537,7 @@ export function ConfigurationPage() {
 								{/* Placeholder for other sections */}
 								{![
 									"webdav",
+									"auth",
 									"import",
 									"metadata",
 									"streaming",

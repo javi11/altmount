@@ -8,6 +8,7 @@ interface AuthState {
 	user: User | null;
 	isLoading: boolean;
 	isAuthenticated: boolean;
+	loginRequired: boolean | null; // null = not yet loaded
 	error: string | null;
 }
 
@@ -17,13 +18,15 @@ type AuthAction =
 	| { type: "AUTH_SUCCESS"; payload: User }
 	| { type: "AUTH_ERROR"; payload: string }
 	| { type: "AUTH_LOGOUT" }
-	| { type: "AUTH_CLEAR_ERROR" };
+	| { type: "AUTH_CLEAR_ERROR" }
+	| { type: "SET_LOGIN_REQUIRED"; payload: boolean };
 
 // Initial state
 const initialState: AuthState = {
 	user: null,
 	isLoading: false,
 	isAuthenticated: false,
+	loginRequired: null, // Not yet loaded
 	error: null,
 };
 
@@ -65,6 +68,11 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 				...state,
 				error: null,
 			};
+		case "SET_LOGIN_REQUIRED":
+			return {
+				...state,
+				loginRequired: action.payload,
+			};
 		default:
 			return state;
 	}
@@ -99,6 +107,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	useEffect(() => {
 		const checkAuth = async () => {
 			try {
+				// First check if login is required
+				const authConfig = await apiClient.getAuthConfig();
+				dispatch({ type: "SET_LOGIN_REQUIRED", payload: authConfig.login_required });
+
+				// If login is not required, skip authentication
+				if (!authConfig.login_required) {
+					// Set authenticated state without user
+					dispatch({ type: "AUTH_LOGOUT" });
+					return;
+				}
+
+				// If login is required, check for existing authentication
 				dispatch({ type: "AUTH_START" });
 				const user = await apiClient.getCurrentUser();
 				dispatch({ type: "AUTH_SUCCESS", payload: user });

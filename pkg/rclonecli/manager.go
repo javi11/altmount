@@ -22,8 +22,6 @@ import (
 type Manager struct {
 	cmd           *exec.Cmd
 	rcPort        string
-	rcUser        string
-	rcPass        string
 	rcloneDir     string
 	mounts        map[string]*MountInfo
 	mountsMutex   sync.RWMutex

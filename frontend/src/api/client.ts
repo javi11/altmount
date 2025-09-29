@@ -431,6 +431,10 @@ export class APIClient {
 		);
 	}
 
+	async getAuthConfig() {
+		return this.request<{ login_required: boolean }>("/auth/config");
+	}
+
 	// Configuration endpoints
 	async getConfig() {
 		return this.request<ConfigResponse>("/config");

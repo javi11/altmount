@@ -4,6 +4,7 @@
 export interface ConfigResponse {
 	webdav: WebDAVConfig;
 	api: APIConfig;
+	auth: AuthConfig;
 	database: DatabaseConfig;
 	metadata: MetadataConfig;
 	streaming: StreamingConfig;
@@ -27,6 +28,11 @@ export interface WebDAVConfig {
 // API server configuration
 export interface APIConfig {
 	prefix: string;
+}
+
+// Authentication configuration
+export interface AuthConfig {
+	login_required: boolean;
 }
 
 // Database configuration
@@ -160,6 +166,7 @@ export interface SABnzbdCategory {
 export interface ConfigUpdateRequest {
 	webdav?: WebDAVUpdateRequest;
 	api?: APIUpdateRequest;
+	auth?: AuthUpdateRequest;
 	database?: DatabaseUpdateRequest;
 	metadata?: MetadataUpdateRequest;
 	streaming?: StreamingUpdateRequest;
@@ -184,6 +191,11 @@ export interface WebDAVUpdateRequest {
 // API update request
 export interface APIUpdateRequest {
 	prefix?: string;
+}
+
+// Auth update request
+export interface AuthUpdateRequest {
+	login_required?: boolean;
 }
 
 // Database update request
@@ -320,6 +332,7 @@ export interface ConfigValidationError {
 // Configuration section names for PATCH requests
 export type ConfigSection =
 	| "webdav"
+	| "auth"
 	| "metadata"
 	| "streaming"
 	| "health"
@@ -608,6 +621,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "WebDAV Server",
 		description: "WebDAV server settings for file access",
 		icon: "Globe",
+		canEdit: true,
+	},
+	auth: {
+		title: "Authentication",
+		description: "User authentication and login settings",
+		icon: "Shield",
 		canEdit: true,
 	},
 	rclone: {

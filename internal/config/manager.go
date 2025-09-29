@@ -19,6 +19,7 @@ const MountProvider = "altmount"
 type Config struct {
 	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
 	API       APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
+	Auth      AuthConfig       `yaml:"auth" mapstructure:"auth" json:"auth"`
 	Database  DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
 	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
 	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
@@ -42,6 +43,11 @@ type WebDAVConfig struct {
 // APIConfig represents REST API configuration
 type APIConfig struct {
 	Prefix string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
+}
+
+// AuthConfig represents authentication configuration
+type AuthConfig struct {
+	LoginRequired *bool `yaml:"login_required" mapstructure:"login_required" json:"login_required"`
 }
 
 // DatabaseConfig represents database configuration
@@ -277,6 +283,14 @@ func (c *Config) DeepCopy() *Config {
 	// Start with a shallow copy of value fields
 	copyCfg := *c
 
+	// Deep copy Auth.LoginRequired pointer
+	if c.Auth.LoginRequired != nil {
+		v := *c.Auth.LoginRequired
+		copyCfg.Auth.LoginRequired = &v
+	} else {
+		copyCfg.Auth.LoginRequired = nil
+	}
+
 	// Deep copy Health.Enabled pointer
 	if c.Health.Enabled != nil {
 		v := *c.Health.Enabled
@@ -507,12 +521,6 @@ func (c *Config) Validate() error {
 			enabled := true
 			c.RClone.RCEnabled = &enabled
 		}
-	}
-
-	// Validate RClone RC configuration
-	if c.RClone.RCEnabled != nil && *c.RClone.RCEnabled {
-		// External RC URL is optional - if not provided, will start internal server
-		// No validation needed here
 	}
 
 	// Validate RClone Mount configuration
@@ -852,6 +860,7 @@ func DefaultConfig(configDir ...string) *Config {
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
+	loginRequired := true // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath string
@@ -879,6 +888,9 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		API: APIConfig{
 			Prefix: "/api",
+		},
+		Auth: AuthConfig{
+			LoginRequired: &loginRequired,
 		},
 		Database: DatabaseConfig{
 			Path: dbPath,

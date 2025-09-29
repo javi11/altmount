@@ -243,11 +243,7 @@ func (b *usenetReader) downloadManager(
 			WithContext(ctx)
 
 		// Start continuous download monitoring
-		for {
-			if ctx.Err() != nil {
-				break
-			}
-
+		for ctx.Err() == nil {
 			// Get current reading position
 			currentIndex := b.rg.GetCurrentIndex()
 

@@ -44,13 +44,14 @@ const navigation = [
 ];
 
 export function Sidebar() {
-	const { user } = useAuth();
+	const { user, loginRequired } = useAuth();
 	const { data: queueStats } = useQueueStats();
 	const { data: healthStats } = useHealthStats();
 
 	// Filter navigation items based on admin status
+	// If login is not required, show all items including admin-only
 	const visibleNavigation = navigation.filter(
-		(item) => !item.adminOnly || (user?.is_admin ?? false),
+		(item) => !item.adminOnly || !loginRequired || (user?.is_admin ?? false),
 	);
 
 	const getBadgeCount = (path: string) => {
