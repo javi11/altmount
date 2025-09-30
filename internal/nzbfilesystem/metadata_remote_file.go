@@ -381,7 +381,7 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 	for _, fileName := range fileNames {
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
 		fileMeta, err := mvd.metadataService.ReadFileMetadata(virtualFilePath)
-		if err != nil || fileMeta == nil {
+		if err != nil || fileMeta == nil || fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
 			continue
 		}
 
