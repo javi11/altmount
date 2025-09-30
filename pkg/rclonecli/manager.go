@@ -310,7 +310,7 @@ func (m *Manager) cleanupMountDirectories(_ string) {
 // waitForServer waits for the RC server to become available
 func (m *Manager) waitForServer() {
 	maxAttempts := 30
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		if m.ctx.Err() != nil {
 			return
 		}
