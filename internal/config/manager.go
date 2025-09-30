@@ -863,21 +863,27 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
-	var dbPath, metadataPath, logPath string
+	var dbPath, metadataPath, logPath, rclonePath, cachePath string
 
 	// If a config directory is provided, use it
 	if len(configDir) > 0 && configDir[0] != "" {
 		dbPath = filepath.Join(configDir[0], "altmount.db")
 		metadataPath = filepath.Join(configDir[0], "metadata")
 		logPath = filepath.Join(configDir[0], "altmount.log")
+		rclonePath = configDir[0]
+		cachePath = filepath.Join(configDir[0], "cache")
 	} else if isRunningInDocker() {
 		dbPath = "/config/altmount.db"
 		metadataPath = "/metadata"
 		logPath = "/config/altmount.log"
+		rclonePath = "/config"
+		cachePath = "/config/cache"
 	} else {
 		dbPath = "./altmount.db"
 		metadataPath = "./metadata"
 		logPath = "./altmount.log"
+		rclonePath = "."
+		cachePath = "./cache"
 	}
 
 	return &Config{
@@ -903,6 +909,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxCacheSizeMB:     32, // Default: 32MB cache for ahead downloads
 		},
 		RClone: RCloneConfig{
+			Path:         rclonePath,
 			Password:     "",
 			Salt:         "",
 			RCEnabled:    &vfsEnabled, // Using vfsEnabled var for backward compatibility
@@ -930,8 +937,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Syslog:        true,  // --syslog
 
 			// VFS Cache Settings - matching your command
-			CacheDir:           "",     // Let rclone decide default location
-			VFSCacheMode:       "full", // --vfs-cache-mode=full
+			CacheDir:           cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
+			VFSCacheMode:       "full",    // --vfs-cache-mode=full
 			VFSCacheMaxSize:    "50G",  // --vfs-cache-max-size=50G (changed from 100G)
 			VFSCacheMaxAge:     "504h", // --vfs-cache-max-age=504h (changed from 100h)
 			ReadChunkSize:      "32M",  // --vfs-read-chunk-size=32M (changed from 128M)
@@ -1061,6 +1068,12 @@ func LoadConfig(configFile string) (*Config, error) {
 	if configFile != "" && !viper.IsSet("log.file") {
 		configDir := filepath.Dir(configFile)
 		config.Log.File = filepath.Join(configDir, "altmount.log")
+	}
+
+	// If cache_dir was not explicitly set or is empty, derive it from config file location
+	if configFile != "" && (!viper.IsSet("rclone.cache_dir") || config.RClone.CacheDir == "") {
+		configDir := filepath.Dir(configFile)
+		config.RClone.CacheDir = filepath.Join(configDir, "cache")
 	}
 
 	// Validate configuration

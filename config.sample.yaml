@@ -27,6 +27,11 @@ streaming:
 
 # RClone configuration (optional)
 rclone:
+  # Base path for rclone configuration directory
+  # The rclone config file will be stored at <path>/rclone/rclone.conf
+  # If empty, defaults to the same directory as this config file
+  path: '' # RClone base path (defaults to config directory)
+
   # Encryption settings (optional for WebDAV backends)
   password: '' # Encryption password (optional)
   salt: '' # Encryption salt (optional)
@@ -65,7 +70,7 @@ rclone:
   transfers: 4 # Number of parallel transfers
 
   # VFS Cache Settings - production-optimized for performance and reliability
-  cache_dir: '' # VFS cache directory (empty = rclone default location)
+  cache_dir: '' # VFS cache directory (empty = defaults to <rclone_path>/cache, e.g., /config/cache)
   vfs_cache_mode: 'full' # VFS cache mode: off|minimal|writes|full (--vfs-cache-mode=full)
   vfs_cache_max_size: '50G' # Maximum cache size (--vfs-cache-max-size=50G)
   vfs_cache_max_age: '504h' # Maximum cache age (--vfs-cache-max-age=504h, 21 days)

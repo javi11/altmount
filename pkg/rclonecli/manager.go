@@ -133,6 +133,9 @@ func (m *Manager) Start(ctx context.Context) error {
 			args = append(args, "--cache-dir", cfg.RClone.CacheDir)
 		}
 	}
+
+	m.logger.InfoContext(ctx, "Starting rclone RC server", "args", args)
+
 	m.cmd = exec.CommandContext(ctx, "rclone", args...)
 
 	// Capture output for debugging

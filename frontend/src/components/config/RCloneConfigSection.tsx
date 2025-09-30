@@ -720,6 +720,21 @@ export function RCloneConfigSection({
 						<div className="space-y-4">
 							<h5 className="font-medium text-base-content/70 text-sm">VFS Cache Settings</h5>
 
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Cache Directory</legend>
+								<input
+									type="text"
+									className="input"
+									value={mountFormData.cache_dir}
+									disabled={isReadOnly}
+									onChange={(e) => handleMountInputChange("cache_dir", e.target.value)}
+									placeholder="Defaults to <rclone_path>/cache (e.g., /config/cache)"
+								/>
+								<p className="label text-xs">
+									Directory for VFS cache storage (leave empty to use default location)
+								</p>
+							</fieldset>
+
 							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend">Cache Mode</legend>
