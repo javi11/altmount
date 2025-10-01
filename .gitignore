@@ -38,3 +38,4 @@ example/
 .git
 *debug*
 rclone.conf
+docker-compose-dev.yml

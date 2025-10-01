@@ -12,7 +12,6 @@ services:
     volumes:
       - ./config:/config
       - /mnt:/mnt:rshared
-      - /metadata:/metadata # This is optional you can still use /mnt
     ports:
       - "8080:8080"
     restart: unless-stopped
