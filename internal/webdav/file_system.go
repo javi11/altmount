@@ -46,6 +46,11 @@ func (fs *fileSystem) OpenFile(ctx context.Context, name string, flag int, perm 
 		pa.SetOrigin(origin)
 	}
 
+	showCorrupted := ctx.Value(utils.ShowCorrupted).(bool)
+	if showCorrupted {
+		pa.SetShowCorrupted()
+	}
+
 	return fs.Fs.OpenFile(pa.String(), flag, perm)
 }
 

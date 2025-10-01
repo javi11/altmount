@@ -87,6 +87,9 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 	// Normalize the path to handle trailing slashes consistently
 	normalizedName := normalizePath(name)
 
+	// Extract showCorrupted flag from args
+	showCorrupted := r.ShowCorrupted()
+
 	// Check if this is a directory first
 	if mrf.metadataService.DirectoryExists(normalizedName) {
 		// Create a directory handle
@@ -94,6 +97,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 			name:            name,
 			normalizedPath:  normalizedName,
 			metadataService: mrf.metadataService,
+			showCorrupted:   showCorrupted,
 		}
 		return true, virtualDir, nil
 	}
@@ -108,6 +112,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 				name:            name,
 				normalizedPath:  normalizedName,
 				metadataService: mrf.metadataService,
+				showCorrupted:   showCorrupted,
 			}
 			return true, virtualDir, nil
 		}
@@ -322,6 +327,7 @@ type MetadataVirtualDirectory struct {
 	name            string
 	normalizedPath  string
 	metadataService *metadata.MetadataService
+	showCorrupted   bool
 }
 
 // Read implements afero.File.Read (not supported for directories)
@@ -381,7 +387,12 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 	for _, fileName := range fileNames {
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
 		fileMeta, err := mvd.metadataService.ReadFileMetadata(virtualFilePath)
-		if err != nil || fileMeta == nil || fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
+		if err != nil || fileMeta == nil {
+			continue
+		}
+
+		// Skip corrupted files unless showCorrupted flag is set
+		if !mvd.showCorrupted && fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
 			continue
 		}
 

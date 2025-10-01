@@ -27,13 +27,14 @@ export function FileExplorer({
 }: FileExplorerProps) {
 	const [currentPath, setCurrentPath] = useState("/");
 	const [searchTerm, setSearchTerm] = useState("");
+	const [showCorrupted, setShowCorrupted] = useState(false);
 
 	const {
 		data: directory,
 		isLoading,
 		error,
 		refetch,
-	} = useWebDAVDirectory(currentPath, isConnected, hasConnectionFailed);
+	} = useWebDAVDirectory(currentPath, isConnected, hasConnectionFailed, showCorrupted);
 
 	const {
 		downloadFile,
@@ -213,27 +214,41 @@ export function FileExplorer({
 			{/* Search Bar */}
 			<div className="card bg-base-100 shadow-md">
 				<div className="card-body p-4">
-					<div className="relative">
-						<div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-							<Search className="h-4 w-4 text-base-content/50" />
+					<div className="space-y-3">
+						<div className="relative">
+							<div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+								<Search className="h-4 w-4 text-base-content/50" />
+							</div>
+							<input
+								type="text"
+								placeholder="Search in current directory..."
+								className="input input-bordered w-full pr-10 pl-10"
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+							/>
+							{searchTerm && (
+								<button
+									type="button"
+									className="absolute inset-y-0 right-0 flex items-center pr-3 hover:text-base-content/70"
+									onClick={handleClearSearch}
+									aria-label="Clear search"
+								>
+									<X className="h-4 w-4 text-base-content/50" />
+								</button>
+							)}
 						</div>
-						<input
-							type="text"
-							placeholder="Search in current directory..."
-							className="input input-bordered w-full pr-10 pl-10"
-							value={searchTerm}
-							onChange={(e) => setSearchTerm(e.target.value)}
-						/>
-						{searchTerm && (
-							<button
-								type="button"
-								className="absolute inset-y-0 right-0 flex items-center pr-3 hover:text-base-content/70"
-								onClick={handleClearSearch}
-								aria-label="Clear search"
-							>
-								<X className="h-4 w-4 text-base-content/50" />
-							</button>
-						)}
+						<label className="label cursor-pointer justify-start gap-2">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-sm"
+								checked={showCorrupted}
+								onChange={(e) => setShowCorrupted(e.target.checked)}
+							/>
+							<span className="label-text flex items-center gap-2">
+								<AlertTriangle className="h-4 w-4" />
+								Show corrupted files
+							</span>
+						</label>
 					</div>
 				</div>
 			</div>

@@ -40,11 +40,16 @@ export function useWebDAVConnection() {
 	};
 }
 
-export function useWebDAVDirectory(path: string, isConnected = true, hasConnectionFailed = false) {
+export function useWebDAVDirectory(
+	path: string,
+	isConnected = true,
+	hasConnectionFailed = false,
+	showCorrupted = false,
+) {
 	return useQuery<WebDAVDirectory>({
-		queryKey: ["webdav", "directory", path],
+		queryKey: ["webdav", "directory", path, showCorrupted],
 		queryFn: async () => {
-			const result = await webdavClient.listDirectory(path);
+			const result = await webdavClient.listDirectory(path, showCorrupted);
 
 			// Log successful empty directory access for debugging
 			if (result.files.length === 0) {

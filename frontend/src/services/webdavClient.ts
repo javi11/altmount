@@ -81,13 +81,22 @@ export class WebDAVClient {
 		return this.client !== null;
 	}
 
-	async listDirectory(path = "/"): Promise<WebDAVDirectory> {
+	async listDirectory(path = "/", showCorrupted = false): Promise<WebDAVDirectory> {
 		if (!this.client) {
 			throw new Error("WebDAV client not connected");
 		}
 
 		try {
-			const contents = await this.client.getDirectoryContents(path);
+			// Add custom header to show corrupted files if requested
+			const options = showCorrupted
+				? {
+						headers: {
+							"X-Show-Corrupted": "true",
+						},
+					}
+				: {};
+
+			const contents = await this.client.getDirectoryContents(path, options);
 
 			// Handle empty directories - contents could be empty array or null
 			let files: WebDAVFile[] = [];

@@ -111,6 +111,7 @@ func NewHandler(
 		r = r.WithContext(context.WithValue(r.Context(), utils.RangeKey, r.Header.Get("Range")))
 		r = r.WithContext(context.WithValue(r.Context(), utils.IsCopy, r.Method == "COPY"))
 		r = r.WithContext(context.WithValue(r.Context(), utils.Origin, r.RequestURI))
+		r = r.WithContext(context.WithValue(r.Context(), utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true"))
 
 		// Log MOVE and COPY operations to understand client behavior
 		switch r.Method {
