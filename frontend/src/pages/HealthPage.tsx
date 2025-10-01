@@ -31,6 +31,7 @@ import {
 	useHealthStats,
 	useHealthWorkerStatus,
 	useRepairHealthItem,
+	useRestartBulkHealthItems,
 } from "../hooks/useApi";
 import { formatRelativeTime, truncateText } from "../lib/utils";
 import type { FileHealth } from "../types/api";
@@ -74,6 +75,7 @@ export function HealthPage() {
 	const { data: workerStatus } = useHealthWorkerStatus();
 	const deleteItem = useDeleteHealthItem();
 	const deleteBulkItems = useDeleteBulkHealthItems();
+	const restartBulkItems = useRestartBulkHealthItems();
 	const cleanupHealth = useCleanupHealth();
 	const addHealthCheck = useAddHealthCheck();
 	const directHealthCheck = useDirectHealthCheck();
@@ -266,6 +268,40 @@ export function HealthPage() {
 				showToast({
 					title: "Error",
 					message: "Failed to delete selected health records",
+					type: "error",
+				});
+			}
+		}
+	};
+
+	const handleBulkRestart = async () => {
+		if (selectedItems.size === 0) return;
+
+		const confirmed = await confirmAction(
+			"Restart Selected Health Checks",
+			`Are you sure you want to restart ${selectedItems.size} selected health records? They will be reset to pending status and rechecked.`,
+			{
+				type: "info",
+				confirmText: "Restart Checks",
+				confirmButtonClass: "btn-info",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const filePaths = Array.from(selectedItems);
+				await restartBulkItems.mutateAsync(filePaths);
+				setSelectedItems(new Set());
+				showToast({
+					title: "Success",
+					message: `Successfully restarted ${filePaths.length} health checks`,
+					type: "success",
+				});
+			} catch (error) {
+				console.error("Failed to restart selected health checks:", error);
+				showToast({
+					title: "Error",
+					message: "Failed to restart selected health checks",
 					type: "error",
 				});
 			}
@@ -572,6 +608,15 @@ export function HealthPage() {
 								</button>
 							</div>
 							<div className="flex items-center gap-2">
+								<button
+									type="button"
+									className="btn btn-info btn-sm"
+									onClick={handleBulkRestart}
+									disabled={restartBulkItems.isPending}
+								>
+									<RefreshCw className="h-4 w-4" />
+									Restart Checks
+								</button>
 								<button
 									type="button"
 									className="btn btn-error btn-sm"

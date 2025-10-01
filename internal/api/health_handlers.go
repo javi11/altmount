@@ -821,6 +821,78 @@ type SegmentsInfo struct {
 	CheckedAll      bool `json:"checked_all"`
 }
 
+// handleRestartHealthChecksBulk handles POST /api/health/bulk/restart
+func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
+	// Parse request body
+	var req struct {
+		FilePaths []string `json:"file_paths"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
+	}
+
+	// Validate file paths
+	if len(req.FilePaths) == 0 {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "At least one file path is required",
+		})
+	}
+
+	if len(req.FilePaths) > 100 {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "Too many file paths",
+			"details": "Maximum 100 files allowed per bulk operation",
+		})
+	}
+
+	// Cancel any active checks for these files
+	if s.healthWorker != nil {
+		for _, filePath := range req.FilePaths {
+			// Check if there's an active check to cancel
+			if s.healthWorker.IsCheckActive(filePath) {
+				// Cancel the health check
+				_ = s.healthWorker.CancelHealthCheck(filePath) // Ignore error, proceed with restart
+			}
+		}
+	}
+
+	// Reset all items to pending status using bulk method
+	restartedCount, err := s.healthRepo.ResetHealthChecksBulk(req.FilePaths)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to restart health checks",
+			"details": err.Error(),
+		})
+	}
+
+	if restartedCount == 0 {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "No health records found to restart",
+		})
+	}
+
+	response := map[string]interface{}{
+		"message":         "Health checks restarted successfully",
+		"restarted_count": restartedCount,
+		"file_paths":      req.FilePaths,
+		"restarted_at":    time.Now().Format(time.RFC3339),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
 // handleCancelHealthCheck handles POST /api/health/{id}/cancel
 func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	// Extract ID from path parameter

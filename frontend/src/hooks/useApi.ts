@@ -172,6 +172,17 @@ export const useDeleteBulkHealthItems = () => {
 	});
 };
 
+export const useRestartBulkHealthItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (filePaths: string[]) => apiClient.restartBulkHealthItems(filePaths),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
 export const useRetryHealthItem = () => {
 	const queryClient = useQueryClient();
 

@@ -690,3 +690,42 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(filePaths []string) error {
 
 	return nil
 }
+
+// ResetHealthChecksBulk resets multiple health records to pending status
+func (r *HealthRepository) ResetHealthChecksBulk(filePaths []string) (int, error) {
+	if len(filePaths) == 0 {
+		return 0, nil
+	}
+
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(filePaths))
+	args := make([]interface{}, len(filePaths))
+	for i, path := range filePaths {
+		placeholders[i] = "?"
+		args[i] = path
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE file_health
+		SET status = '%s',
+		    retry_count = 0,
+		    repair_retry_count = 0,
+		    next_retry_at = NULL,
+		    last_error = NULL,
+		    error_details = NULL,
+		    updated_at = datetime('now')
+		WHERE file_path IN (%s)
+	`, HealthStatusPending, strings.Join(placeholders, ","))
+
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to reset health records: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}

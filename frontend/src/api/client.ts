@@ -263,6 +263,18 @@ export class APIClient {
 		});
 	}
 
+	async restartBulkHealthItems(filePaths: string[]) {
+		return this.request<{
+			message: string;
+			restarted_count: number;
+			file_paths: string[];
+			restarted_at: string;
+		}>("/health/bulk/restart", {
+			method: "POST",
+			body: JSON.stringify({ file_paths: filePaths }),
+		});
+	}
+
 	async retryHealthItem(id: string, resetStatus?: boolean) {
 		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/retry`, {
 			method: "POST",

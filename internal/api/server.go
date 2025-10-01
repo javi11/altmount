@@ -151,6 +151,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)
 	api.Post("/health/bulk/delete", s.handleDeleteHealthBulk)
+	api.Post("/health/bulk/restart", s.handleRestartHealthChecksBulk)
 	api.Get("/health/corrupted", s.handleListCorrupted)
 	api.Get("/health/stats", s.handleGetHealthStats)
 	api.Delete("/health/cleanup", s.handleCleanupHealth)
