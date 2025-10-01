@@ -1089,18 +1089,14 @@ export function RCloneConfigSection({
 							<input
 								type="number"
 								className="input"
-								value={mountFormData.mount_enabled ? 5572 : formData.rc_port}
-								disabled={isReadOnly || mountFormData.mount_enabled}
+								value={formData.rc_port}
+								disabled={isReadOnly}
 								onChange={(e) =>
 									handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
 								}
 								placeholder="5572"
 							/>
-							<p className="label">
-								{mountFormData.mount_enabled
-									? "Fixed port used by mount's internal RC server"
-									: "Port for RC server (used for internal server or connecting to external)"}
-							</p>
+							<p className="label">Port for RC server (default: 5572)</p>
 						</fieldset>
 
 						{!mountFormData.mount_enabled && (

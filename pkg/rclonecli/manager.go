@@ -59,7 +59,7 @@ type RCResponse struct {
 func NewManager(cfm *config.Manager) *Manager {
 	cfg := cfm.GetConfig()
 
-	rcPort := "5572"
+	rcPort := fmt.Sprintf("%d", cfg.RClone.RCPort)
 	rcloneDir := filepath.Join(cfg.RClone.Path, "rclone")
 
 	// Ensure config directory exists
