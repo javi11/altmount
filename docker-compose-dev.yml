@@ -12,9 +12,8 @@ services:
       - PORT=8080
       - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
     volumes:
-      - /Users/javi/mio/altmount/example/config:/config
-      - /Users/javi/mio/test-mount/:/mnt:rshared
-      - /Users/javi/mio/altmount/example/metadata:/metadata # This is optional you can still use /mnt
+      - ./config:/config
+      - ./mnt:/mnt:rshared
     ports:
       - "8080:8080"
     restart: unless-stopped
