@@ -15,6 +15,7 @@ type ConfigAPIResponse struct {
 	*config.Config
 	Import    ImportAPIResponse     `json:"import"`
 	RClone    RCloneAPIResponse     `json:"rclone"`
+	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers []ProviderAPIResponse `json:"providers"`
 }
 
@@ -93,6 +94,16 @@ type ImportAPIResponse struct {
 	QueueProcessingIntervalSeconds int `json:"queue_processing_interval_seconds"` // Interval in seconds
 }
 
+// SABnzbdAPIResponse sanitizes SABnzbd config for API responses
+type SABnzbdAPIResponse struct {
+	Enabled           bool                    `json:"enabled"`
+	CompleteDir       string                  `json:"complete_dir"`
+	Categories        []config.SABnzbdCategory `json:"categories"`
+	FallbackHost      string                  `json:"fallback_host"`
+	FallbackAPIKey    string                  `json:"fallback_api_key"`     // Obfuscated if set
+	FallbackAPIKeySet bool                    `json:"fallback_api_key_set"` // Indicates if API key is set
+}
+
 // Helper functions to create API responses from core config types
 
 // ToConfigAPIResponse converts config.Config to ConfigAPIResponse with sensitive data masked
@@ -168,10 +179,26 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 		UseMmap:            cfg.RClone.UseMmap,
 	}
 
+	// Create SABnzbd response with API key obfuscated
+	fallbackAPIKey := ""
+	if cfg.SABnzbd.FallbackAPIKey != "" {
+		fallbackAPIKey = "********" // Obfuscate the actual key
+	}
+
+	sabnzbdResp := SABnzbdAPIResponse{
+		Enabled:           cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled,
+		CompleteDir:       cfg.SABnzbd.CompleteDir,
+		Categories:        cfg.SABnzbd.Categories,
+		FallbackHost:      cfg.SABnzbd.FallbackHost,
+		FallbackAPIKey:    fallbackAPIKey,
+		FallbackAPIKeySet: cfg.SABnzbd.FallbackAPIKey != "",
+	}
+
 	return &ConfigAPIResponse{
 		Config:    cfg,
 		Import:    ImportAPIResponse(cfg.Import),
 		RClone:    rcloneResp,
+		SABnzbd:   sabnzbdResp,
 		Providers: providers,
 	}
 }

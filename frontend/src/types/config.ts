@@ -152,6 +152,9 @@ export interface SABnzbdConfig {
 	enabled: boolean;
 	complete_dir: string;
 	categories: SABnzbdCategory[];
+	fallback_host?: string;
+	fallback_api_key?: string; // Obfuscated when returned from API
+	fallback_api_key_set?: boolean; // For display purposes only
 }
 
 // SABnzbd category configuration
@@ -310,6 +313,8 @@ export interface SABnzbdUpdateRequest {
 	enabled?: boolean;
 	complete_dir?: string;
 	categories?: SABnzbdCategory[];
+	fallback_host?: string;
+	fallback_api_key?: string;
 }
 
 // Configuration validation request
@@ -499,6 +504,8 @@ export interface SABnzbdFormData {
 	enabled: boolean;
 	complete_dir: string;
 	categories: SABnzbdCategory[];
+	fallback_host: string;
+	fallback_api_key: string;
 }
 
 // Arrs configuration types

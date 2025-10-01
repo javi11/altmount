@@ -247,6 +247,9 @@ type SABnzbdConfig struct {
 	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
 	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	// Fallback configuration for sending failed imports to external SABnzbd
+	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
+	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
 }
 
 // SABnzbdCategory represents a SABnzbd category configuration
@@ -364,6 +367,10 @@ func (c *Config) DeepCopy() *Config {
 	} else {
 		copyCfg.SABnzbd.Categories = nil
 	}
+
+	// Copy SABnzbd fallback settings
+	copyCfg.SABnzbd.FallbackHost = c.SABnzbd.FallbackHost
+	copyCfg.SABnzbd.FallbackAPIKey = c.SABnzbd.FallbackAPIKey
 
 	// Deep copy Arrs.Enabled pointer
 	if c.Arrs.Enabled != nil {
@@ -565,6 +572,18 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
 			}
 			categoryNames[category.Name] = true
+		}
+
+		// Validate fallback configuration if host is provided
+		if c.SABnzbd.FallbackHost != "" {
+			// Basic URL validation
+			if !strings.HasPrefix(c.SABnzbd.FallbackHost, "http://") && !strings.HasPrefix(c.SABnzbd.FallbackHost, "https://") {
+				return fmt.Errorf("sabnzbd fallback_host must start with http:// or https://")
+			}
+			// Warn if API key is missing (but don't fail validation)
+			if c.SABnzbd.FallbackAPIKey == "" {
+				fmt.Printf("Warning: SABnzbd fallback_host is set but fallback_api_key is empty\n")
+			}
 		}
 	}
 
@@ -986,9 +1005,11 @@ func DefaultConfig(configDir ...string) *Config {
 			CheckAllSegments:      true,
 		},
 		SABnzbd: SABnzbdConfig{
-			Enabled:     &sabnzbdEnabled,
-			CompleteDir: "/complete",
-			Categories:  []SABnzbdCategory{},
+			Enabled:        &sabnzbdEnabled,
+			CompleteDir:    "/complete",
+			Categories:     []SABnzbdCategory{},
+			FallbackHost:   "",
+			FallbackAPIKey: "",
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
