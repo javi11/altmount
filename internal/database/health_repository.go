@@ -503,19 +503,38 @@ func (r *HealthRepository) AddFileToHealthCheck(filePath string, maxRetries int,
 	return nil
 }
 
-// ListHealthItems returns all health records with optional filtering and pagination
-func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time, search string) ([]*FileHealth, error) {
-	query := `
+// ListHealthItems returns all health records with optional filtering, sorting and pagination
+func (r *HealthRepository) ListHealthItems(statusFilter *HealthStatus, limit, offset int, sinceFilter *time.Time, search string, sortBy string, sortOrder string) ([]*FileHealth, error) {
+	// Validate and prepare ORDER BY clause
+	orderClause := "created_at DESC"
+	if sortBy != "" {
+		// Whitelist of allowed sort fields to prevent SQL injection
+		allowedFields := map[string]string{
+			"file_path":  "file_path",
+			"created_at": "created_at",
+			"status":     "status",
+		}
+
+		if field, ok := allowedFields[sortBy]; ok {
+			orderDirection := "ASC"
+			if sortOrder == "desc" || sortOrder == "DESC" {
+				orderDirection = "DESC"
+			}
+			orderClause = fmt.Sprintf("%s %s", field, orderDirection)
+		}
+	}
+
+	query := fmt.Sprintf(`
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
-		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path,
 		       error_details, created_at, updated_at
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
 		  AND (? = '' OR file_path LIKE ? OR (source_nzb_path IS NOT NULL AND source_nzb_path LIKE ?))
-		ORDER BY created_at DESC
+		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`
+	`, orderClause)
 
 	// Prepare arguments for the query
 	var statusParam interface{} = nil
@@ -670,4 +689,43 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(filePaths []string) error {
 	}
 
 	return nil
+}
+
+// ResetHealthChecksBulk resets multiple health records to pending status
+func (r *HealthRepository) ResetHealthChecksBulk(filePaths []string) (int, error) {
+	if len(filePaths) == 0 {
+		return 0, nil
+	}
+
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(filePaths))
+	args := make([]interface{}, len(filePaths))
+	for i, path := range filePaths {
+		placeholders[i] = "?"
+		args[i] = path
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE file_health
+		SET status = '%s',
+		    retry_count = 0,
+		    repair_retry_count = 0,
+		    next_retry_at = NULL,
+		    last_error = NULL,
+		    error_details = NULL,
+		    updated_at = datetime('now')
+		WHERE file_path IN (%s)
+	`, HealthStatusPending, strings.Join(placeholders, ","))
+
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to reset health records: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
 }

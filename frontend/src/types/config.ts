@@ -4,6 +4,7 @@
 export interface ConfigResponse {
 	webdav: WebDAVConfig;
 	api: APIConfig;
+	auth: AuthConfig;
 	database: DatabaseConfig;
 	metadata: MetadataConfig;
 	streaming: StreamingConfig;
@@ -29,6 +30,11 @@ export interface APIConfig {
 	prefix: string;
 }
 
+// Authentication configuration
+export interface AuthConfig {
+	login_required: boolean;
+}
+
 // Database configuration
 export interface DatabaseConfig {
 	path: string;
@@ -41,9 +47,8 @@ export interface MetadataConfig {
 
 // Streaming configuration
 export interface StreamingConfig {
-	max_range_size: number;
-	streaming_chunk_size: number;
 	max_download_workers: number;
+	max_cache_size_mb: number;
 }
 
 // Health configuration
@@ -59,12 +64,57 @@ export interface HealthConfig {
 
 // RClone configuration (sanitized)
 export interface RCloneConfig {
+	// Encryption
 	password_set: boolean;
 	salt_set: boolean;
-	vfs_enabled: boolean;
-	vfs_url: string;
-	vfs_user: string;
-	vfs_pass_set: boolean;
+
+	// RC (Remote Control) Configuration
+	rc_enabled: boolean;
+	rc_url: string;
+	rc_port: number;
+	rc_user: string;
+	rc_pass_set: boolean;
+	rc_options: Record<string, string>;
+
+	// Mount Configuration
+	mount_enabled: boolean;
+	mount_options: Record<string, string>;
+
+	// Mount-Specific Settings
+	allow_other: boolean;
+	allow_non_empty: boolean;
+	read_only: boolean;
+	timeout: string;
+	syslog: boolean;
+
+	// System and filesystem options
+	log_level: string;
+	uid: number;
+	gid: number;
+	umask: string;
+	buffer_size: string;
+	attr_timeout: string;
+	transfers: number;
+
+	// VFS Cache Settings
+	cache_dir: string;
+	vfs_cache_mode: string;
+	vfs_cache_max_size: string;
+	vfs_cache_max_age: string;
+	read_chunk_size: string;
+	read_chunk_size_limit: string;
+	vfs_read_ahead: string;
+	dir_cache_time: string;
+	vfs_cache_min_free_space: string;
+	vfs_disk_space_total: string;
+	vfs_read_chunk_streams: number;
+
+	// Advanced Settings
+	no_mod_time: boolean;
+	no_checksum: boolean;
+	async_read: boolean;
+	vfs_fast_fingerprint: boolean;
+	use_mmap: boolean;
 }
 
 // Import configuration
@@ -102,6 +152,9 @@ export interface SABnzbdConfig {
 	enabled: boolean;
 	complete_dir: string;
 	categories: SABnzbdCategory[];
+	fallback_host?: string;
+	fallback_api_key?: string; // Obfuscated when returned from API
+	fallback_api_key_set?: boolean; // For display purposes only
 }
 
 // SABnzbd category configuration
@@ -116,6 +169,7 @@ export interface SABnzbdCategory {
 export interface ConfigUpdateRequest {
 	webdav?: WebDAVUpdateRequest;
 	api?: APIUpdateRequest;
+	auth?: AuthUpdateRequest;
 	database?: DatabaseUpdateRequest;
 	metadata?: MetadataUpdateRequest;
 	streaming?: StreamingUpdateRequest;
@@ -142,6 +196,11 @@ export interface APIUpdateRequest {
 	prefix?: string;
 }
 
+// Auth update request
+export interface AuthUpdateRequest {
+	login_required?: boolean;
+}
+
 // Database update request
 export interface DatabaseUpdateRequest {
 	path?: string;
@@ -154,9 +213,8 @@ export interface MetadataUpdateRequest {
 
 // Streaming update request
 export interface StreamingUpdateRequest {
-	max_range_size?: number;
-	streaming_chunk_size?: number;
 	max_download_workers?: number;
+	max_cache_size_mb?: number;
 }
 
 // Health update request
@@ -174,10 +232,50 @@ export interface HealthUpdateRequest {
 export interface RCloneUpdateRequest {
 	password?: string;
 	salt?: string;
-	vfs_enabled?: boolean;
-	vfs_url?: string;
-	vfs_user?: string;
-	vfs_pass?: string;
+	rc_enabled?: boolean;
+	rc_url?: string;
+	rc_port?: number;
+	rc_user?: string;
+	rc_pass?: string;
+	rc_options?: Record<string, string>;
+	mount_enabled?: boolean;
+	mount_options?: Record<string, string>;
+
+	// Mount-Specific Settings
+	allow_other?: boolean;
+	allow_non_empty?: boolean;
+	read_only?: boolean;
+	timeout?: string;
+	syslog?: boolean;
+
+	// System and filesystem options
+	log_level?: string;
+	uid?: number;
+	gid?: number;
+	umask?: string;
+	buffer_size?: string;
+	attr_timeout?: string;
+	transfers?: number;
+
+	// VFS Cache Settings
+	cache_dir?: string;
+	vfs_cache_mode?: string;
+	vfs_cache_max_size?: string;
+	vfs_cache_max_age?: string;
+	read_chunk_size?: string;
+	read_chunk_size_limit?: string;
+	vfs_read_ahead?: string;
+	dir_cache_time?: string;
+	vfs_cache_min_free_space?: string;
+	vfs_disk_space_total?: string;
+	vfs_read_chunk_streams?: number;
+
+	// Advanced Settings
+	no_mod_time?: boolean;
+	no_checksum?: boolean;
+	async_read?: boolean;
+	vfs_fast_fingerprint?: boolean;
+	use_mmap?: boolean;
 }
 
 // Import update request
@@ -215,6 +313,8 @@ export interface SABnzbdUpdateRequest {
 	enabled?: boolean;
 	complete_dir?: string;
 	categories?: SABnzbdCategory[];
+	fallback_host?: string;
+	fallback_api_key?: string;
 }
 
 // Configuration validation request
@@ -237,6 +337,7 @@ export interface ConfigValidationError {
 // Configuration section names for PATCH requests
 export type ConfigSection =
 	| "webdav"
+	| "auth"
 	| "metadata"
 	| "streaming"
 	| "health"
@@ -268,25 +369,114 @@ export interface MetadataFormData {
 }
 
 export interface StreamingFormData {
-	max_range_size: number;
-	streaming_chunk_size: number;
 	max_download_workers: number;
+	max_cache_size_mb: number;
 }
 
 export interface RCloneFormData {
 	password: string;
 	salt: string;
-	vfs_enabled: boolean;
-	vfs_url: string;
-	vfs_user: string;
-	vfs_pass: string;
+	rc_enabled: boolean;
+	rc_url: string;
+	rc_port: number;
+	rc_user: string;
+	rc_pass: string;
+	rc_options: Record<string, string>;
+	mount_enabled: boolean;
+	mount_options: Record<string, string>;
+
+	// Mount-Specific Settings
+	allow_other: boolean;
+	allow_non_empty: boolean;
+	read_only: boolean;
+	timeout: string;
+	syslog: boolean;
+
+	// System and filesystem options
+	log_level: string;
+	uid: number;
+	gid: number;
+	umask: string;
+	buffer_size: string;
+	attr_timeout: string;
+	transfers: number;
+
+	// VFS Cache Settings
+	cache_dir: string;
+	vfs_cache_mode: string;
+	vfs_cache_max_size: string;
+	vfs_cache_max_age: string;
+	read_chunk_size: string;
+	read_chunk_size_limit: string;
+	vfs_read_ahead: string;
+	dir_cache_time: string;
+	vfs_cache_min_free_space: string;
+	vfs_disk_space_total: string;
+	vfs_read_chunk_streams: number;
+
+	// Advanced Settings
+	no_mod_time: boolean;
+	no_checksum: boolean;
+	async_read: boolean;
+	vfs_fast_fingerprint: boolean;
+	use_mmap: boolean;
 }
 
-export interface RCloneVFSFormData {
-	vfs_enabled: boolean;
-	vfs_url: string;
-	vfs_user: string;
-	vfs_pass: string;
+export interface RCloneRCFormData {
+	rc_enabled: boolean;
+	rc_url: string;
+	rc_port: number;
+	rc_user: string;
+	rc_pass: string;
+	rc_options: Record<string, string>;
+}
+
+export interface RCloneMountFormData {
+	mount_enabled: boolean;
+	mount_options: Record<string, string>;
+
+	// Mount-Specific Settings
+	allow_other: boolean;
+	allow_non_empty: boolean;
+	read_only: boolean;
+	timeout: string;
+	syslog: boolean;
+
+	// System and filesystem options
+	log_level: string;
+	uid: number;
+	gid: number;
+	umask: string;
+	buffer_size: string;
+	attr_timeout: string;
+	transfers: number;
+
+	// VFS Cache Settings
+	cache_dir: string;
+	vfs_cache_mode: string;
+	vfs_cache_max_size: string;
+	vfs_cache_max_age: string;
+	read_chunk_size: string;
+	read_chunk_size_limit: string;
+	vfs_read_ahead: string;
+	dir_cache_time: string;
+	vfs_cache_min_free_space: string;
+	vfs_disk_space_total: string;
+	vfs_read_chunk_streams: number;
+
+	// Advanced Settings
+	no_mod_time: boolean;
+	no_checksum: boolean;
+	async_read: boolean;
+	vfs_fast_fingerprint: boolean;
+	use_mmap: boolean;
+}
+
+export interface MountStatus {
+	mounted: boolean;
+	mount_point: string;
+	error?: string;
+	started_at?: string;
 }
 
 export interface ProviderFormData {
@@ -314,6 +504,8 @@ export interface SABnzbdFormData {
 	enabled: boolean;
 	complete_dir: string;
 	categories: SABnzbdCategory[];
+	fallback_host: string;
+	fallback_api_key: string;
 }
 
 // Arrs configuration types
@@ -333,6 +525,7 @@ export interface ArrsInstanceConfig {
 	api_key: string;
 	enabled: boolean;
 	sync_interval_hours: number;
+	root_folder?: string;
 }
 
 // Database-backed arrs instance (includes real ID from database)
@@ -387,7 +580,6 @@ export interface SyncResult {
 export interface ArrsFormData {
 	enabled: boolean;
 	max_workers: number;
-	mount_path: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 }
@@ -439,6 +631,18 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "Globe",
 		canEdit: true,
 	},
+	auth: {
+		title: "Authentication",
+		description: "User authentication and login settings",
+		icon: "Shield",
+		canEdit: true,
+	},
+	rclone: {
+		title: "Mount & RClone",
+		description: "RClone mount and VFS settings",
+		icon: "HardDrive",
+		canEdit: true,
+	},
 	metadata: {
 		title: "Metadata",
 		description: "File metadata storage settings",
@@ -467,12 +671,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		title: "NNTP Providers",
 		description: "Usenet provider configuration for downloads",
 		icon: "Radio",
-		canEdit: true,
-	},
-	rclone: {
-		title: "RClone VFS",
-		description: "RClone VFS notification settings for external mounts",
-		icon: "HardDrive",
 		canEdit: true,
 	},
 	sabnzbd: {

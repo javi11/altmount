@@ -27,24 +27,28 @@ export function FileExplorer({
 }: FileExplorerProps) {
 	const [currentPath, setCurrentPath] = useState("/");
 	const [searchTerm, setSearchTerm] = useState("");
+	const [showCorrupted, setShowCorrupted] = useState(false);
 
 	const {
 		data: directory,
 		isLoading,
 		error,
 		refetch,
-	} = useWebDAVDirectory(currentPath, isConnected, hasConnectionFailed);
+	} = useWebDAVDirectory(currentPath, isConnected, hasConnectionFailed, showCorrupted);
 
 	const {
 		downloadFile,
 		deleteFile,
 		getFileMetadata,
+		exportNZB,
 		isDownloading,
 		isDeleting,
 		isGettingMetadata,
+		isExportingNZB,
 		downloadError,
 		deleteError,
 		metadataError,
+		exportNZBError,
 		metadataData,
 	} = useWebDAVFileOperations();
 
@@ -85,6 +89,10 @@ export function FileExplorer({
 
 	const handleDelete = (path: string) => {
 		deleteFile(path);
+	};
+
+	const handleExportNZB = (path: string, filename: string) => {
+		exportNZB({ path, filename });
 	};
 
 	const handleFileInfo = (path: string) => {
@@ -206,27 +214,41 @@ export function FileExplorer({
 			{/* Search Bar */}
 			<div className="card bg-base-100 shadow-md">
 				<div className="card-body p-4">
-					<div className="relative">
-						<div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-							<Search className="h-4 w-4 text-base-content/50" />
+					<div className="space-y-3">
+						<div className="relative">
+							<div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+								<Search className="h-4 w-4 text-base-content/50" />
+							</div>
+							<input
+								type="text"
+								placeholder="Search in current directory..."
+								className="input input-bordered w-full pr-10 pl-10"
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+							/>
+							{searchTerm && (
+								<button
+									type="button"
+									className="absolute inset-y-0 right-0 flex items-center pr-3 hover:text-base-content/70"
+									onClick={handleClearSearch}
+									aria-label="Clear search"
+								>
+									<X className="h-4 w-4 text-base-content/50" />
+								</button>
+							)}
 						</div>
-						<input
-							type="text"
-							placeholder="Search in current directory..."
-							className="input input-bordered w-full pr-10 pl-10"
-							value={searchTerm}
-							onChange={(e) => setSearchTerm(e.target.value)}
-						/>
-						{searchTerm && (
-							<button
-								type="button"
-								className="absolute inset-y-0 right-0 flex items-center pr-3 hover:text-base-content/70"
-								onClick={handleClearSearch}
-								aria-label="Clear search"
-							>
-								<X className="h-4 w-4 text-base-content/50" />
-							</button>
-						)}
+						<label className="label cursor-pointer justify-start gap-2">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-sm"
+								checked={showCorrupted}
+								onChange={(e) => setShowCorrupted(e.target.checked)}
+							/>
+							<span className="label-text flex items-center gap-2">
+								<AlertTriangle className="h-4 w-4" />
+								Show corrupted files
+							</span>
+						</label>
 					</div>
 				</div>
 			</div>
@@ -239,12 +261,14 @@ export function FileExplorer({
 			</div>
 
 			{/* Error Messages */}
-			{(downloadError || deleteError) && (
+			{(downloadError || deleteError || exportNZBError) && (
 				<div className="alert alert-error">
 					<AlertTriangle className="h-6 w-6" />
 					<div>
 						<div className="font-bold">Operation Failed</div>
-						<div className="text-sm">{downloadError?.message || deleteError?.message}</div>
+						<div className="text-sm">
+							{downloadError?.message || deleteError?.message || exportNZBError?.message}
+						</div>
 					</div>
 				</div>
 			)}
@@ -305,9 +329,11 @@ export function FileExplorer({
 								onDownload={handleDownload}
 								onDelete={handleDelete}
 								onInfo={handleFileInfo}
+								onExportNZB={handleExportNZB}
 								onPreview={preview.openPreview}
 								isDownloading={isDownloading}
 								isDeleting={isDeleting}
+								isExportingNZB={isExportingNZB}
 							/>
 						)
 					) : null}

@@ -26,6 +26,11 @@ type segmentRange struct {
 	current  int
 }
 
+// GetCurrentIndex returns the current segment index being read
+func (r *segmentRange) GetCurrentIndex() int {
+	return r.current
+}
+
 func (r segmentRange) Get() (*segment, error) {
 	if r.current >= len(r.segments) {
 		return nil, ErrSegmentLimit

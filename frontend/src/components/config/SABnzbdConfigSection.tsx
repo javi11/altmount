@@ -34,12 +34,14 @@ export function SABnzbdConfigSection({
 	const [showAddCategory, setShowAddCategory] = useState(false);
 	const [newCategory, setNewCategory] = useState<NewCategoryForm>(DEFAULT_NEW_CATEGORY);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
+	const [fallbackApiKey, setFallbackApiKey] = useState<string>("");
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		setFormData(config.sabnzbd);
 		setHasChanges(false);
 		setValidationErrors([]);
+		setFallbackApiKey(""); // Reset API key field on config reload
 	}, [config.sabnzbd]);
 
 	const validateForm = (data: SABnzbdConfig): string[] => {
@@ -88,6 +90,15 @@ export function SABnzbdConfigSection({
 		updateFormData({ complete_dir });
 	};
 
+	const handleFallbackHostChange = (fallback_host: string) => {
+		updateFormData({ fallback_host });
+	};
+
+	const handleFallbackApiKeyChange = (value: string) => {
+		setFallbackApiKey(value);
+		setHasChanges(true);
+	};
+
 	const handleCategoryUpdate = (index: number, updates: Partial<SABnzbdCategory>) => {
 		const categories = [...formData.categories];
 		categories[index] = { ...categories[index], ...updates };
@@ -121,8 +132,15 @@ export function SABnzbdConfigSection({
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges && validationErrors.length === 0) {
-			await onUpdate("sabnzbd", formData);
+			// Include fallback_api_key in the update if it was changed
+			const updateData: SABnzbdConfig & { fallback_api_key?: string } = { ...formData };
+			// Only include API key if user entered a new value (not empty and not obfuscated placeholder)
+			if (fallbackApiKey && fallbackApiKey !== "********") {
+				updateData.fallback_api_key = fallbackApiKey;
+			}
+			await onUpdate("sabnzbd", updateData);
 			setHasChanges(false);
+			setFallbackApiKey(""); // Clear the password field after save
 		}
 	};
 
@@ -185,6 +203,64 @@ export function SABnzbdConfigSection({
 							Absolute path to the directory where the full imports will be stored, relative to the mounted folder.
 						</p>
 					</fieldset>
+
+					{/* Fallback SABnzbd Configuration */}
+					<div className="space-y-4">
+						<div>
+							<h4 className="font-medium">Fallback to External SABnzbd (Optional)</h4>
+							<p className="text-base-content/70 text-sm">
+								Configure an external SABnzbd instance to automatically receive failed imports after
+								max retries. This provides a fallback when internal processing fails.
+							</p>
+						</div>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Fallback SABnzbd Host</legend>
+							<input
+								type="text"
+								className="input"
+								value={formData.fallback_host || ""}
+								readOnly={isReadOnly}
+								placeholder="http://localhost:8080 or https://sabnzbd.example.com"
+								onChange={(e) => handleFallbackHostChange(e.target.value)}
+							/>
+							<p className="label">
+								URL of the external SABnzbd instance (including http:// or https://)
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Fallback SABnzbd API Key</legend>
+							<input
+								type="password"
+								className="input"
+								value={fallbackApiKey}
+								readOnly={isReadOnly}
+								placeholder={
+									formData.fallback_host && config.sabnzbd.fallback_api_key_set
+										? "••••••••••••••••"
+										: "Enter API key"
+								}
+								onChange={(e) => handleFallbackApiKeyChange(e.target.value)}
+							/>
+							<p className="label">
+								API key for the external SABnzbd instance. Leave empty to keep existing key.
+								{config.sabnzbd.fallback_api_key_set && " (Currently set)"}
+							</p>
+						</fieldset>
+
+						{formData.fallback_host && (
+							<div className="alert alert-info">
+								<div>
+									<div className="font-bold">Fallback Enabled</div>
+									<div className="text-sm">
+										Failed imports will be automatically sent to{" "}
+										<code>{formData.fallback_host}</code> after max retries are exceeded.
+									</div>
+								</div>
+							</div>
+						)}
+					</div>
 
 					{/* Categories Section */}
 					<div className="space-y-4">

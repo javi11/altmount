@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
@@ -46,6 +47,7 @@ type Server struct {
 	poolManager     pool.Manager
 	arrsService     *arrs.Service
 	rcloneClient    rclonecli.RcloneRcClient
+	mountService    *rclone.MountService
 	logger          *slog.Logger
 	startTime       time.Time
 }
@@ -62,7 +64,8 @@ func NewServer(
 	metadataReader *metadata.MetadataReader,
 	poolManager pool.Manager,
 	importService *importer.Service,
-	arrsService *arrs.Service) *Server {
+	arrsService *arrs.Service,
+	mountService *rclone.MountService) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -79,6 +82,7 @@ func NewServer(
 		importerService: importService, // Will be set later via SetImporterService
 		poolManager:     poolManager,
 		arrsService:     arrsService,
+		mountService:    mountService,
 		logger:          slog.Default(),
 		startTime:       time.Now(),
 	}
@@ -109,7 +113,14 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Use(recover.New())
 
 	// Apply JWT authentication middleware globally except for public auth routes
-	if s.authService != nil && s.userRepo != nil {
+	// Only apply if login is required (default: true)
+	cfg := s.configManager.GetConfig()
+	loginRequired := true // Default to true if not set
+	if cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+
+	if loginRequired && s.authService != nil && s.userRepo != nil {
 		tokenService := s.authService.TokenService()
 		if tokenService != nil {
 			// Define paths that should skip authentication
@@ -117,6 +128,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 				s.config.Prefix + "/auth/login",
 				s.config.Prefix + "/auth/register",
 				s.config.Prefix + "/auth/registration-status",
+				s.config.Prefix + "/auth/config",
 			}
 
 			// Apply authentication middleware with skip paths
@@ -139,6 +151,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)
 	api.Post("/health/bulk/delete", s.handleDeleteHealthBulk)
+	api.Post("/health/bulk/restart", s.handleRestartHealthChecksBulk)
 	api.Get("/health/corrupted", s.handleListCorrupted)
 	api.Get("/health/stats", s.handleGetHealthStats)
 	api.Delete("/health/cleanup", s.handleCleanupHealth)
@@ -151,6 +164,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/health/:id", s.handleDeleteHealth)
 
 	api.Get("/files/info", s.handleGetFileMetadata)
+	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
 
 	api.Post("/import/scan", s.handleStartManualScan)
 	api.Get("/import/scan/status", s.handleGetScanStatus)
@@ -167,7 +181,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/config/:section", s.handlePatchConfigSection)
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
-	api.Post("/config/rclone/test", s.handleTestRCloneConnection)
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
@@ -186,6 +199,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/auth/login", s.handleDirectLogin)
 	api.Post("/auth/register", s.handleRegister)
 	api.Get("/auth/registration-status", s.handleCheckRegistration)
+	api.Get("/auth/config", s.handleGetAuthConfig)
 
 	// Protected API endpoints for user management (authentication already handled globally)
 	api.Get("/user", s.handleAuthUser)

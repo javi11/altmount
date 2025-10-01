@@ -1,7 +1,7 @@
 services:
   altmount:
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
     image: ghcr.io/javi11/altmount:latest
     container_name: altmount
     environment:
@@ -11,7 +11,13 @@ services:
       - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
     volumes:
       - ./config:/config
-      - /mnt:/mnt
+      - /mnt:/mnt:rshared
     ports:
       - "8080:8080"
     restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined

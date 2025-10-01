@@ -12,6 +12,21 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
+// transformQueueError transforms specific errors to user-friendly messages
+func transformQueueError(err *string) string {
+	if err == nil {
+		return ""
+	}
+
+	// Check if it's the article not found error
+	if strings.Contains(*err, "article is not found") {
+		return "The file is incomplete or missing parts. Some segments of this file could not be found on any of the configured Usenet providers. This often happens with older or less popular files."
+	}
+
+	// Return the original error message for other errors
+	return *err
+}
+
 // handleListQueue handles GET /api/queue
 func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	// Parse pagination
@@ -58,7 +73,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	}
 
 	// Get total count for pagination
-	totalCount, err := s.queueRepo.CountQueueItems(statusFilter, searchFilter)
+	totalCount, err := s.queueRepo.CountQueueItems(statusFilter, searchFilter, "")
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -71,7 +86,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	}
 
 	// Get queue items from repository
-	items, err := s.queueRepo.ListQueueItems(statusFilter, searchFilter, pagination.Limit, pagination.Offset)
+	items, err := s.queueRepo.ListQueueItems(statusFilter, searchFilter, "", pagination.Limit, pagination.Offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

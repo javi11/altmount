@@ -1,0 +1,25 @@
+services:
+  altmount:
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: altmount
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - PORT=8080
+      - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
+    volumes:
+      - ./config:/config
+      - ./mnt:/mnt:rshared
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined

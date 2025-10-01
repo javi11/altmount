@@ -130,6 +130,30 @@ export function HealthConfigSection({
 								</fieldset>
 							)}
 
+							{formData.check_interval_seconds !== undefined && (
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Check Interval (seconds)</legend>
+									<input
+										type="number"
+										className="input"
+										value={formData.check_interval_seconds}
+										readOnly={isReadOnly}
+										min={5}
+										max={86400}
+										step={1}
+										onChange={(e) =>
+											handleInputChange(
+												"check_interval_seconds",
+												Number.parseInt(e.target.value, 10) || 5,
+											)
+										}
+									/>
+									<p className="label text-gray-600 text-sm">
+										Time between automatic health checks (default: 5 seconds)
+									</p>
+								</fieldset>
+							)}
+
 							{formData.check_all_segments !== undefined && (
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend">Check All Segments</legend>

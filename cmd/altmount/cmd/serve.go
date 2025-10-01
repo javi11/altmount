@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/integration"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
@@ -45,6 +46,26 @@ func getEffectiveLogLevel(newLevel, legacyLevel string) string {
 		return legacyLevel
 	}
 	return "info"
+}
+
+// createRCloneClientIfEnabled creates an RClone client if RClone RC is enabled
+func createRCloneClientIfEnabled(cfg *config.Config, configManager *config.Manager, logger *slog.Logger) rclonecli.RcloneRcClient {
+	if cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled {
+		httpClient := &http.Client{}
+		rcloneClient := rclonecli.NewRcloneRcClient(configManager, httpClient)
+
+		if cfg.RClone.RCUrl != "" {
+			logger.Info("RClone RC client initialized for external server",
+				"rc_url", cfg.RClone.RCUrl)
+		} else {
+			logger.Info("RClone RC client initialized for internal server",
+				"rc_port", cfg.RClone.RCPort)
+		}
+		return rcloneClient
+	} else {
+		logger.Info("RClone RC notifications disabled")
+		return nil
+	}
 }
 
 func init() {
@@ -96,13 +117,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Load configuration first (using default logger for config loading errors)
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		slog.Default().Error("failed to load config", "err", err)
+		slog.Error("failed to load config", "err", err)
 		return err
 	}
 
 	// Validate directory permissions before proceeding
 	if err := cfg.ValidateDirectories(); err != nil {
-		slog.Default().Error("directory validation failed", "err", err)
+		slog.Error("directory validation failed", "err", err)
 		return err
 	}
 
@@ -127,7 +148,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	configManager := config.NewManager(cfg, configFile)
 
 	// Create pool manager for dynamic NNTP connection management
-	poolManager := pool.NewManager(logger)
+	poolManager := pool.NewManager()
 
 	// Register configuration change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
@@ -177,34 +198,25 @@ func runServe(cmd *cobra.Command, args []string) error {
 		_ = poolManager.ClearPool()
 	}()
 
-	// Create rclone client for VFS notifications (if configured)
-	var rcloneClient rclonecli.RcloneRcClient
-	if cfg.RClone.VFSEnabled != nil && *cfg.RClone.VFSEnabled && cfg.RClone.VFSUrl != "" {
-		rcloneConfig := &rclonecli.Config{
-			VFSEnabled: *cfg.RClone.VFSEnabled,
-			VFSUrl:     cfg.RClone.VFSUrl,
-			VFSUser:    cfg.RClone.VFSUser,
-			VFSPass:    cfg.RClone.VFSPass,
-		}
+	// Create RClone mount service
+	mountService := rclone.NewMountService(configManager)
 
-		httpClient := &http.Client{}
-		rcloneClient = rclonecli.NewRcloneRcClient(rcloneConfig, httpClient)
-		logger.Info("RClone VFS client initialized", "vfs_url", cfg.RClone.VFSUrl)
+	var rcloneRCClient rclonecli.RcloneRcClient
+	if cfg.RClone.MountEnabled == nil || !*cfg.RClone.MountEnabled {
+		rcloneRCClient = createRCloneClientIfEnabled(cfg, configManager, logger)
 	} else {
-		logger.Info("RClone VFS notifications disabled")
+		rcloneRCClient = mountService.GetManager()
 	}
 
 	// Create NZB system with metadata + queue
 	nsys, err := integration.NewNzbSystem(integration.NzbConfig{
 		QueueDatabasePath:   cfg.Database.Path,
 		MetadataRootPath:    cfg.Metadata.RootPath,
-		MaxRangeSize:        cfg.Streaming.MaxRangeSize,
-		StreamingChunkSize:  cfg.Streaming.StreamingChunkSize,
 		Password:            cfg.RClone.Password,
 		Salt:                cfg.RClone.Salt,
 		MaxDownloadWorkers:  cfg.Streaming.MaxDownloadWorkers,
 		MaxProcessorWorkers: cfg.Import.MaxProcessorWorkers,
-	}, poolManager, configManager.GetConfigGetter(), rcloneClient)
+	}, poolManager, configManager.GetConfigGetter(), rcloneRCClient)
 	if err != nil {
 		logger.Error("failed to init NZB system", "err", err)
 		return err
@@ -299,10 +311,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		nsys.MetadataReader(),
 		poolManager,
 		nsys.ImporterService(),
-		arrsService)
+		arrsService,
+		mountService)
 
 	apiServer.SetupRoutes(app)
 	logger.Info("API server enabled with Fiber routes", "prefix", "/api")
+
+	// Register RClone handlers
+	rcloneHandlers := api.NewRCloneHandlers(mountService, configManager.GetConfigGetter())
+	api.RegisterRCloneRoutes(app.Group("/api"), rcloneHandlers)
 
 	// Register API server for auth updates
 
@@ -389,8 +406,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 			metadataService,
 			poolManager,
 			configManager.GetConfigGetter(),
-			rcloneClient, // Pass rclone client for VFS notifications
-			nil,          // No event handler for now
+			rcloneRCClient, // Pass rclone client for VFS notifications
+			nil,            // No event handler for now
 		)
 
 		healthWorker = health.NewHealthWorker(
@@ -404,10 +421,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 		// Set health worker reference in API server
 		apiServer.SetHealthWorker(healthWorker)
-		// Set rclone client reference in API server
-		if rcloneClient != nil {
-			apiServer.SetRcloneClient(rcloneClient)
-		}
 
 		// Start health worker with the main context
 		if err := healthWorker.Start(ctx); err != nil {
@@ -424,6 +437,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service ready for health monitoring and repair")
 	} else {
 		logger.Info("Arrs service is disabled in configuration")
+	}
+
+	// Start RClone mount service if enabled
+	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
+		if err := mountService.Start(ctx); err != nil {
+			logger.Error("Failed to start mount service", "error", err)
+		} else {
+			actualMountPath := cfg.GetActualMountPath(config.MountProvider)
+			logger.Info("RClone mount service started", "mount_point", actualMountPath)
+		}
+	} else {
+		logger.Info("RClone mount service is disabled in configuration")
 	}
 
 	// Add simple liveness endpoint for Docker health checks directly to Fiber
@@ -450,7 +475,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 
 	// Start custom server in goroutine
 	serverErr := make(chan error, 1)
@@ -490,6 +515,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// ARRs service cleanup (no background processes to stop)
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
 		logger.Info("Arrs service cleanup completed")
+	}
+
+	// Stop RClone mount service if running
+	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
+		if err := mountService.Stop(ctx); err != nil {
+			logger.Error("Failed to stop mount service", "error", err)
+		} else {
+			logger.Info("RClone mount service stopped")
+		}
 	}
 
 	// Shutdown custom server with timeout

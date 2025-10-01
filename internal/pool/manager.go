@@ -26,20 +26,13 @@ type Manager interface {
 
 // manager implements the Manager interface
 type manager struct {
-	mu     sync.RWMutex
-	pool   nntppool.UsenetConnectionPool
-	logger *slog.Logger
+	mu   sync.RWMutex
+	pool nntppool.UsenetConnectionPool
 }
 
 // NewManager creates a new pool manager
-func NewManager(logger *slog.Logger) Manager {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	return &manager{
-		logger: logger,
-	}
+func NewManager() Manager {
+	return &manager{}
 }
 
 // GetPool returns the current connection pool or error if not available
@@ -61,22 +54,22 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 
 	// Shut down existing pool if present
 	if m.pool != nil {
-		m.logger.Info("Shutting down existing NNTP connection pool")
+		slog.Info("Shutting down existing NNTP connection pool")
 		m.pool.Quit()
 		m.pool = nil
 	}
 
 	// Return early if no providers (clear pool scenario)
 	if len(providers) == 0 {
-		m.logger.Info("No NNTP providers configured - pool cleared")
+		slog.Info("No NNTP providers configured - pool cleared")
 		return nil
 	}
 
 	// Create new pool with providers
-	m.logger.Info("Creating NNTP connection pool", "provider_count", len(providers))
+	slog.Info("Creating NNTP connection pool", "provider_count", len(providers))
 	pool, err := nntppool.NewConnectionPool(nntppool.Config{
 		Providers:  providers,
-		Logger:     m.logger,
+		Logger:     slog.Default(),
 		DelayType:  nntppool.DelayTypeFixed,
 		RetryDelay: 10 * time.Millisecond,
 	})
@@ -85,7 +78,7 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 	}
 
 	m.pool = pool
-	m.logger.Info("NNTP connection pool created successfully")
+	slog.Info("NNTP connection pool created successfully")
 	return nil
 }
 
@@ -95,7 +88,7 @@ func (m *manager) ClearPool() error {
 	defer m.mu.Unlock()
 
 	if m.pool != nil {
-		m.logger.Info("Clearing NNTP connection pool")
+		slog.Info("Clearing NNTP connection pool")
 		m.pool.Quit()
 		m.pool = nil
 	}

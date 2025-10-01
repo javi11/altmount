@@ -411,8 +411,6 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 		}
 	})
 
-	hw.logger.Info("Direct health check completed", "file_path", filePath, "status", event.Status, "type", event.Type)
-
 	return nil
 }
 
@@ -695,7 +693,7 @@ func (hw *HealthWorker) getEnabled() bool {
 func (hw *HealthWorker) getCheckInterval() time.Duration {
 	intervalSeconds := hw.configGetter().Health.CheckIntervalSeconds
 	if intervalSeconds <= 0 {
-		return 5 * time.Minute // Default
+		return 5 * time.Second // Default
 	}
 	return time.Duration(intervalSeconds) * time.Second
 }

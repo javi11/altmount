@@ -95,6 +95,28 @@ RUN apt-get update && \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# Install rclone and FUSE support for internal mount functionality
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        fuse3 \
+        curl \
+        unzip && \
+    echo "user_allow_other" >> /etc/fuse.conf && \
+    case "$(uname -m)" in \
+        x86_64) ARCH=amd64 ;; \
+        aarch64) ARCH=arm64 ;; \
+        armv7l) ARCH=arm ;; \
+        *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
+    esac && \
+    curl -O "https://downloads.rclone.org/rclone-current-linux-${ARCH}.zip" && \
+    unzip "rclone-current-linux-${ARCH}.zip" && \
+    cp rclone-*/rclone /usr/local/bin/ && \
+    chmod +x /usr/local/bin/rclone && \
+    rm -rf rclone-* && \
+    apt-get remove -y curl unzip && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # Make binary executable
 RUN chmod +x /app/altmount
 

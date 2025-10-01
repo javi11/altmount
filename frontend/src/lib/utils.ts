@@ -52,6 +52,32 @@ export function formatRelativeTime(date: string | Date) {
 	return target.toLocaleDateString();
 }
 
+export function formatFutureTime(date: string | Date | null | undefined): string {
+	if (!date) return "Never";
+
+	const now = new Date();
+	const target = new Date(date);
+	const diffInSeconds = Math.floor((target.getTime() - now.getTime()) / 1000);
+
+	// If the date is in the past, return "Now"
+	if (diffInSeconds <= 0) return "Now";
+
+	if (diffInSeconds < 60) return "in <1m";
+	if (diffInSeconds < 3600) return `in ${Math.floor(diffInSeconds / 60)}m`;
+	if (diffInSeconds < 86400) {
+		const hours = Math.floor(diffInSeconds / 3600);
+		const minutes = Math.floor((diffInSeconds % 3600) / 60);
+		return minutes > 0 ? `in ${hours}h ${minutes}m` : `in ${hours}h`;
+	}
+	if (diffInSeconds < 2592000) {
+		const days = Math.floor(diffInSeconds / 86400);
+		const hours = Math.floor((diffInSeconds % 86400) / 3600);
+		return hours > 0 ? `in ${days}d ${hours}h` : `in ${days}d`;
+	}
+
+	return `on ${target.toLocaleDateString()}`;
+}
+
 export function getStatusColor(status: string): string {
 	switch (status.toLowerCase()) {
 		case "healthy":

@@ -13,10 +13,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const MountProvider = "altmount"
+
 // Config represents the complete application configuration
 type Config struct {
 	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
 	API       APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
+	Auth      AuthConfig       `yaml:"auth" mapstructure:"auth" json:"auth"`
 	Database  DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
 	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
 	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
@@ -42,6 +45,11 @@ type APIConfig struct {
 	Prefix string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
 }
 
+// AuthConfig represents authentication configuration
+type AuthConfig struct {
+	LoginRequired *bool `yaml:"login_required" mapstructure:"login_required" json:"login_required"`
+}
+
 // DatabaseConfig represents database configuration
 type DatabaseConfig struct {
 	Path string `yaml:"path" mapstructure:"path" json:"path"`
@@ -54,19 +62,65 @@ type MetadataConfig struct {
 
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxRangeSize       int64 `yaml:"max_range_size" mapstructure:"max_range_size" json:"max_range_size"`
-	StreamingChunkSize int64 `yaml:"streaming_chunk_size" mapstructure:"streaming_chunk_size" json:"streaming_chunk_size"`
-	MaxDownloadWorkers int   `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
+	MaxDownloadWorkers int `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
+	MaxCacheSizeMB     int `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 }
 
 // RCloneConfig represents rclone configuration
 type RCloneConfig struct {
-	Password   string `yaml:"password" mapstructure:"password" json:"-"`
-	Salt       string `yaml:"salt" mapstructure:"salt" json:"-"`
-	VFSEnabled *bool  `yaml:"vfs_enabled" mapstructure:"vfs_enabled" json:"vfs_enabled"`
-	VFSUrl     string `yaml:"vfs_url" mapstructure:"vfs_url" json:"vfs_url"`
-	VFSUser    string `yaml:"vfs_user" mapstructure:"vfs_user" json:"vfs_user"`
-	VFSPass    string `yaml:"vfs_pass" mapstructure:"vfs_pass" json:"-"`
+	// RClone Path
+	Path string `yaml:"path" mapstructure:"path" json:"path"`
+	// Encryption
+	Password string `yaml:"password" mapstructure:"password" json:"-"`
+	Salt     string `yaml:"salt" mapstructure:"salt" json:"-"`
+
+	// RC (Remote Control) Configuration
+	RCEnabled *bool             `yaml:"rc_enabled" mapstructure:"rc_enabled" json:"rc_enabled"`
+	RCUrl     string            `yaml:"rc_url" mapstructure:"rc_url" json:"rc_url"`
+	RCPort    int               `yaml:"rc_port" mapstructure:"rc_port" json:"rc_port"`
+	RCUser    string            `yaml:"rc_user" mapstructure:"rc_user" json:"rc_user"`
+	RCPass    string            `yaml:"rc_pass" mapstructure:"rc_pass" json:"-"`
+	RCOptions map[string]string `yaml:"rc_options" mapstructure:"rc_options" json:"rc_options"`
+
+	// Mount Configuration
+	MountEnabled *bool             `yaml:"mount_enabled" mapstructure:"mount_enabled" json:"mount_enabled"`
+	MountOptions map[string]string `yaml:"mount_options" mapstructure:"mount_options" json:"mount_options"`
+	LogLevel     string            `yaml:"log_level" mapstructure:"log_level" json:"log_level"`
+	UID          int               `yaml:"uid" mapstructure:"uid" json:"uid"`
+	GID          int               `yaml:"gid" mapstructure:"gid" json:"gid"`
+	Umask        string            `yaml:"umask" mapstructure:"umask" json:"umask"`
+	BufferSize   string            `yaml:"buffer_size" mapstructure:"buffer_size" json:"buffer_size"`
+	AttrTimeout  string            `yaml:"attr_timeout" mapstructure:"attr_timeout" json:"attr_timeout"`
+	Transfers    int               `yaml:"transfers" mapstructure:"transfers" json:"transfers"`
+
+	// VFS Cache Settings
+	CacheDir             string `yaml:"cache_dir" mapstructure:"cache_dir" json:"cache_dir"`
+	VFSCacheMode         string `yaml:"vfs_cache_mode" mapstructure:"vfs_cache_mode" json:"vfs_cache_mode"`
+	VFSCachePollInterval string `yaml:"vfs_cache_poll_interval" mapstructure:"vfs_cache_poll_interval" json:"vfs_cache_poll_interval"`
+	VFSReadChunkSize     string `yaml:"vfs_read_chunk_size" mapstructure:"vfs_read_chunk_size" json:"vfs_read_chunk_size"`
+	VFSCacheMaxSize      string `yaml:"vfs_cache_max_size" mapstructure:"vfs_cache_max_size" json:"vfs_cache_max_size"`
+	VFSCacheMaxAge       string `yaml:"vfs_cache_max_age" mapstructure:"vfs_cache_max_age" json:"vfs_cache_max_age"`
+	ReadChunkSize        string `yaml:"read_chunk_size" mapstructure:"read_chunk_size" json:"read_chunk_size"`
+	ReadChunkSizeLimit   string `yaml:"read_chunk_size_limit" mapstructure:"read_chunk_size_limit" json:"read_chunk_size_limit"`
+	VFSReadAhead         string `yaml:"vfs_read_ahead" mapstructure:"vfs_read_ahead" json:"vfs_read_ahead"`
+	DirCacheTime         string `yaml:"dir_cache_time" mapstructure:"dir_cache_time" json:"dir_cache_time"`
+	VFSCacheMinFreeSpace string `yaml:"vfs_cache_min_free_space" mapstructure:"vfs_cache_min_free_space" json:"vfs_cache_min_free_space"`
+	VFSDiskSpaceTotal    string `yaml:"vfs_disk_space_total" mapstructure:"vfs_disk_space_total" json:"vfs_disk_space_total"`
+	VFSReadChunkStreams  int    `yaml:"vfs_read_chunk_streams" mapstructure:"vfs_read_chunk_streams" json:"vfs_read_chunk_streams"`
+
+	// Mount-Specific Settings
+	AllowOther    bool   `yaml:"allow_other" mapstructure:"allow_other" json:"allow_other"`
+	AllowNonEmpty bool   `yaml:"allow_non_empty" mapstructure:"allow_non_empty" json:"allow_non_empty"`
+	ReadOnly      bool   `yaml:"read_only" mapstructure:"read_only" json:"read_only"`
+	Timeout       string `yaml:"timeout" mapstructure:"timeout" json:"timeout"`
+	Syslog        bool   `yaml:"syslog" mapstructure:"syslog" json:"syslog"`
+
+	// Advanced Settings
+	NoModTime          bool `yaml:"no_mod_time" mapstructure:"no_mod_time" json:"no_mod_time"`
+	NoChecksum         bool `yaml:"no_checksum" mapstructure:"no_checksum" json:"no_checksum"`
+	AsyncRead          bool `yaml:"async_read" mapstructure:"async_read" json:"async_read"`
+	VFSFastFingerprint bool `yaml:"vfs_fast_fingerprint" mapstructure:"vfs_fast_fingerprint" json:"vfs_fast_fingerprint"`
+	UseMmap            bool `yaml:"use_mmap" mapstructure:"use_mmap" json:"use_mmap"`
 }
 
 // ImportConfig represents import processing configuration
@@ -193,6 +247,9 @@ type SABnzbdConfig struct {
 	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
 	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	// Fallback configuration for sending failed imports to external SABnzbd
+	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
+	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
 }
 
 // SABnzbdCategory represents a SABnzbd category configuration
@@ -213,11 +270,12 @@ type ArrsConfig struct {
 
 // ArrsInstanceConfig represents a single arrs instance configuration
 type ArrsInstanceConfig struct {
-	Name              string `yaml:"name" mapstructure:"name" json:"name"`
-	URL               string `yaml:"url" mapstructure:"url" json:"url"`
-	APIKey            string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
-	Enabled           *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	SyncIntervalHours *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
+	Name              string  `yaml:"name" mapstructure:"name" json:"name"`
+	URL               string  `yaml:"url" mapstructure:"url" json:"url"`
+	APIKey            string  `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Enabled           *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	SyncIntervalHours *int    `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
+	RootFolder        *string `yaml:"root_folder" mapstructure:"root_folder" json:"root_folder,omitempty"`
 }
 
 // DeepCopy returns a deep copy of the configuration
@@ -229,6 +287,14 @@ func (c *Config) DeepCopy() *Config {
 	// Start with a shallow copy of value fields
 	copyCfg := *c
 
+	// Deep copy Auth.LoginRequired pointer
+	if c.Auth.LoginRequired != nil {
+		v := *c.Auth.LoginRequired
+		copyCfg.Auth.LoginRequired = &v
+	} else {
+		copyCfg.Auth.LoginRequired = nil
+	}
+
 	// Deep copy Health.Enabled pointer
 	if c.Health.Enabled != nil {
 		v := *c.Health.Enabled
@@ -237,12 +303,30 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.Enabled = nil
 	}
 
-	// Deep copy RClone.VFSEnabled pointer
-	if c.RClone.VFSEnabled != nil {
-		v := *c.RClone.VFSEnabled
-		copyCfg.RClone.VFSEnabled = &v
+	// Deep copy RClone.RCEnabled pointer
+	if c.RClone.RCEnabled != nil {
+		v := *c.RClone.RCEnabled
+		copyCfg.RClone.RCEnabled = &v
 	} else {
-		copyCfg.RClone.VFSEnabled = nil
+		copyCfg.RClone.RCEnabled = nil
+	}
+
+	// Deep copy RClone.MountEnabled pointer
+	if c.RClone.MountEnabled != nil {
+		v := *c.RClone.MountEnabled
+		copyCfg.RClone.MountEnabled = &v
+	} else {
+		copyCfg.RClone.MountEnabled = nil
+	}
+
+	// Deep copy RClone.MountOptions map
+	if c.RClone.MountOptions != nil {
+		copyCfg.RClone.MountOptions = make(map[string]string, len(c.RClone.MountOptions))
+		for k, v := range c.RClone.MountOptions {
+			copyCfg.RClone.MountOptions[k] = v
+		}
+	} else {
+		copyCfg.RClone.MountOptions = nil
 	}
 
 	// Deep copy Providers slice and their pointer fields
@@ -284,6 +368,10 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.SABnzbd.Categories = nil
 	}
 
+	// Copy SABnzbd fallback settings
+	copyCfg.SABnzbd.FallbackHost = c.SABnzbd.FallbackHost
+	copyCfg.SABnzbd.FallbackAPIKey = c.SABnzbd.FallbackAPIKey
+
 	// Deep copy Arrs.Enabled pointer
 	if c.Arrs.Enabled != nil {
 		v := *c.Arrs.Enabled
@@ -309,6 +397,12 @@ func (c *Config) DeepCopy() *Config {
 			} else {
 				ic.SyncIntervalHours = nil
 			}
+			if inst.RootFolder != nil {
+				rf := *inst.RootFolder
+				ic.RootFolder = &rf
+			} else {
+				ic.RootFolder = nil
+			}
 
 			copyCfg.Arrs.RadarrInstances[i] = ic
 		}
@@ -333,6 +427,12 @@ func (c *Config) DeepCopy() *Config {
 			} else {
 				ic.SyncIntervalHours = nil
 			}
+			if inst.RootFolder != nil {
+				rf := *inst.RootFolder
+				ic.RootFolder = &rf
+			} else {
+				ic.RootFolder = nil
+			}
 
 			copyCfg.Arrs.SonarrInstances[i] = ic
 		}
@@ -351,6 +451,10 @@ func (c *Config) Validate() error {
 
 	if c.Streaming.MaxDownloadWorkers <= 0 {
 		return fmt.Errorf("streaming max_download_workers must be greater than 0")
+	}
+
+	if c.Streaming.MaxCacheSizeMB <= 0 {
+		c.Streaming.MaxCacheSizeMB = 32 // Default to 32MB if not set
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
@@ -413,13 +517,6 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate streaming configuration
-	if c.Streaming.MaxRangeSize < 0 {
-		return fmt.Errorf("streaming max_range_size must be non-negative")
-	}
-
-	if c.Streaming.StreamingChunkSize < 0 {
-		return fmt.Errorf("streaming streaming_chunk_size must be non-negative")
-	}
 
 	// Validate health configuration
 	if *c.Health.Enabled {
@@ -437,10 +534,22 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate RClone VFS configuration
-	if c.RClone.VFSEnabled != nil && *c.RClone.VFSEnabled {
-		if c.RClone.VFSUrl == "" {
-			return fmt.Errorf("rclone vfs_url cannot be empty when VFS is enabled")
+	// Auto-enable RC when mount is enabled (mount requires RC to function)
+	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
+		if c.RClone.RCEnabled == nil || !*c.RClone.RCEnabled {
+			// Auto-enable RC since mount requires it
+			enabled := true
+			c.RClone.RCEnabled = &enabled
+		}
+	}
+
+	// Validate RClone Mount configuration
+	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
+		if c.MountPath == "" {
+			return fmt.Errorf("rclone mount_path cannot be empty when mount is enabled")
+		}
+		if !filepath.IsAbs(c.MountPath) {
+			return fmt.Errorf("rclone mount_path must be an absolute path")
 		}
 	}
 
@@ -463,6 +572,18 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("sabnzbd category %d: duplicate category name '%s'", i, category.Name)
 			}
 			categoryNames[category.Name] = true
+		}
+
+		// Validate fallback configuration if host is provided
+		if c.SABnzbd.FallbackHost != "" {
+			// Basic URL validation
+			if !strings.HasPrefix(c.SABnzbd.FallbackHost, "http://") && !strings.HasPrefix(c.SABnzbd.FallbackHost, "https://") {
+				return fmt.Errorf("sabnzbd fallback_host must start with http:// or https://")
+			}
+			// Warn if API key is missing (but don't fail validation)
+			if c.SABnzbd.FallbackAPIKey == "" {
+				fmt.Printf("Warning: SABnzbd fallback_host is set but fallback_api_key is empty\n")
+			}
 		}
 	}
 
@@ -594,6 +715,11 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 		}
 	}
 	return providers
+}
+
+// GetActualMountPath returns the actual mount path used by rclone, which includes the provider subdirectory
+func (c *Config) GetActualMountPath(provider string) string {
+	return filepath.Join(c.MountPath, provider)
 }
 
 // ChangeCallback represents a function called when configuration changes
@@ -763,25 +889,33 @@ func DefaultConfig(configDir ...string) *Config {
 	healthCheckEnabled := true
 	autoRepairEnabled := false // Disabled by default for safety
 	vfsEnabled := false
+	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
+	loginRequired := true // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
-	var dbPath, metadataPath, logPath string
+	var dbPath, metadataPath, logPath, rclonePath, cachePath string
 
 	// If a config directory is provided, use it
 	if len(configDir) > 0 && configDir[0] != "" {
 		dbPath = filepath.Join(configDir[0], "altmount.db")
 		metadataPath = filepath.Join(configDir[0], "metadata")
 		logPath = filepath.Join(configDir[0], "altmount.log")
+		rclonePath = configDir[0]
+		cachePath = filepath.Join(configDir[0], "cache")
 	} else if isRunningInDocker() {
 		dbPath = "/config/altmount.db"
 		metadataPath = "/metadata"
 		logPath = "/config/altmount.log"
+		rclonePath = "/config"
+		cachePath = "/config/cache"
 	} else {
 		dbPath = "./altmount.db"
 		metadataPath = "./metadata"
 		logPath = "./altmount.log"
+		rclonePath = "."
+		cachePath = "./cache"
 	}
 
 	return &Config{
@@ -793,6 +927,9 @@ func DefaultConfig(configDir ...string) *Config {
 		API: APIConfig{
 			Prefix: "/api",
 		},
+		Auth: AuthConfig{
+			LoginRequired: &loginRequired,
+		},
 		Database: DatabaseConfig{
 			Path: dbPath,
 		},
@@ -800,17 +937,51 @@ func DefaultConfig(configDir ...string) *Config {
 			RootPath: metadataPath,
 		},
 		Streaming: StreamingConfig{
-			MaxRangeSize:       33554432, // 32MB - Maximum range size for a single request
-			StreamingChunkSize: 8388608,  // 8MB - Chunk size for streaming when end=-1
-			MaxDownloadWorkers: 15,       // Default: 15 download workers
+			MaxDownloadWorkers: 15, // Default: 15 download workers
+			MaxCacheSizeMB:     32, // Default: 32MB cache for ahead downloads
 		},
 		RClone: RCloneConfig{
-			Password:   "",
-			Salt:       "",
-			VFSEnabled: &vfsEnabled,
-			VFSUrl:     "",
-			VFSUser:    "",
-			VFSPass:    "",
+			Path:         rclonePath,
+			Password:     "",
+			Salt:         "",
+			RCEnabled:    &vfsEnabled, // Using vfsEnabled var for backward compatibility
+			RCUrl:        "",
+			RCUser:       "admin",
+			RCPass:       "admin",
+			RCPort:       5573, // Changed from 5572 to match your command
+			MountEnabled: &mountEnabled,
+			MountOptions: map[string]string{},
+
+			// Mount Configuration defaults - matching your command
+			LogLevel:    "INFO",
+			UID:         1000,
+			GID:         1000,
+			Umask:       "002", // Changed from 0022 to match --umask=002
+			BufferSize:  "32M", // Changed from 10M to match --buffer-size=32M
+			AttrTimeout: "1s",
+			Transfers:   4,
+			Timeout:     "10m", // New field matching --timeout=10m
+
+			// Mount-Specific Settings - matching your command
+			AllowOther:    true,  // --allow-other
+			AllowNonEmpty: true,  // --allow-non-empty
+			ReadOnly:      false, // Not specified in your command, so false
+			Syslog:        true,  // --syslog
+
+			// VFS Cache Settings - matching your command
+			CacheDir:           cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
+			VFSCacheMode:       "full",    // --vfs-cache-mode=full
+			VFSCacheMaxSize:    "50G",  // --vfs-cache-max-size=50G (changed from 100G)
+			VFSCacheMaxAge:     "504h", // --vfs-cache-max-age=504h (changed from 100h)
+			ReadChunkSize:      "32M",  // --vfs-read-chunk-size=32M (changed from 128M)
+			ReadChunkSizeLimit: "2G",   // --vfs-read-chunk-size-limit=2G
+			VFSReadAhead:       "128M", // --vfs-read-ahead=128M (changed from 128k)
+			DirCacheTime:       "10m",  // --dir-cache-time=10m (changed from 5m)
+
+			// Additional VFS Settings (not specified in your command, using sensible defaults)
+			VFSCacheMinFreeSpace: "1G",
+			VFSDiskSpaceTotal:    "1G",
+			VFSReadChunkStreams:  4,
 		},
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
@@ -827,16 +998,18 @@ func DefaultConfig(configDir ...string) *Config {
 		Health: HealthConfig{
 			Enabled:               &healthCheckEnabled,
 			AutoRepairEnabled:     &autoRepairEnabled,
-			CheckIntervalSeconds:  1800, // 30 minutes in seconds
+			CheckIntervalSeconds:  5,
 			MaxConcurrentJobs:     1,
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,
 			CheckAllSegments:      true,
 		},
 		SABnzbd: SABnzbdConfig{
-			Enabled:     &sabnzbdEnabled,
-			CompleteDir: "",
-			Categories:  []SABnzbdCategory{},
+			Enabled:        &sabnzbdEnabled,
+			CompleteDir:    "/complete",
+			Categories:     []SABnzbdCategory{},
+			FallbackHost:   "",
+			FallbackAPIKey: "",
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
@@ -929,6 +1102,12 @@ func LoadConfig(configFile string) (*Config, error) {
 	if configFile != "" && !viper.IsSet("log.file") {
 		configDir := filepath.Dir(configFile)
 		config.Log.File = filepath.Join(configDir, "altmount.log")
+	}
+
+	// If cache_dir was not explicitly set or is empty, derive it from config file location
+	if configFile != "" && (!viper.IsSet("rclone.cache_dir") || config.RClone.CacheDir == "") {
+		configDir := filepath.Dir(configFile)
+		config.RClone.CacheDir = filepath.Join(configDir, "cache")
 	}
 
 	// Validate configuration

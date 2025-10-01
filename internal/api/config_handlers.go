@@ -1,15 +1,16 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nntppool"
 )
 
@@ -109,6 +110,12 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		})
 	}
 
+	// Ensure SABnzbd category directories exist
+	if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
+		// Log the error but don't fail the update
+		slog.Warn("Failed to create SABnzbd category directories", "error", err)
+	}
+
 	// Save to file
 	if err := s.configManager.SaveConfig(); err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -117,6 +124,9 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
+
+	// Try to start RC server if RClone is enabled but RC is not running
+	s.startRCServerIfNeeded(c.Context())
 
 	response := ToConfigAPIResponse(&newConfig)
 	return c.Status(200).JSON(fiber.Map{
@@ -183,6 +193,14 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		})
 	}
 
+	// Ensure SABnzbd category directories exist if SABnzbd section was updated
+	if section == "sabnzbd" || section == "" {
+		if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
+			// Log the error but don't fail the update
+			slog.Warn("Failed to create SABnzbd category directories", "error", err)
+		}
+	}
+
 	// Save to file
 	if err := s.configManager.SaveConfig(); err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -190,6 +208,11 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 			"message": "Failed to save configuration",
 			"details": err.Error(),
 		})
+	}
+
+	// Try to start RC server if RClone section was updated or full config update
+	if section == "rclone" || section == "" {
+		s.startRCServerIfNeeded(c.Context())
 	}
 
 	response := ToConfigAPIResponse(&newConfig)
@@ -322,7 +345,10 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		})
 	}
 
-	err := nntppool.TestProviderConnectivity(c.Context(), nntppool.UsenetProviderConfig{
+	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+	defer cancel()
+
+	err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
 		Host:     testReq.Host,
 		Port:     testReq.Port,
 		Username: testReq.Username,
@@ -339,8 +365,6 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: Implement actual NNTP connection test
-	// For now, return success for basic validation
 	response := TestProviderResponse{
 		Success:      true,
 		ErrorMessage: "",
@@ -874,76 +898,51 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	})
 }
 
-// handleTestRCloneConnection tests the RClone RC connection
-func (s *Server) handleTestRCloneConnection(c *fiber.Ctx) error {
-	// Decode test request
-	var testReq struct {
-		VFSEnabled bool   `json:"vfs_enabled"`
-		VFSURL     string `json:"vfs_url"`
-		VFSUser    string `json:"vfs_user"`
-		VFSPass    string `json:"vfs_pass"`
+// startRCServerIfNeeded starts the RC server if RClone is enabled and RC is not running
+func (s *Server) startRCServerIfNeeded(ctx context.Context) {
+	// Check if we have a mount service to work with
+	if s.mountService == nil {
+		slog.WarnContext(ctx, "Mount service not available, cannot start RC server")
+		return
 	}
 
-	if err := c.BodyParser(&testReq); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+	// Use the mount service to start the RC server (non-blocking for config save)
+	go func() {
+		if err := s.mountService.StartRCServer(ctx); err != nil {
+			slog.ErrorContext(ctx, "Failed to start RClone RC server via mount service", "error", err)
+			return
+		}
+
+		// Now that RC server is ready, initialize RClone client in importer service if available
+		if s.importerService != nil {
+			s.importerService.SetRcloneClient(s.mountService.GetManager())
+			slog.InfoContext(ctx, "RClone client initialized in importer service")
+		}
+	}()
+}
+
+// ensureSABnzbdCategoryDirectories creates directories for all SABnzbd categories in the mount path
+func (s *Server) ensureSABnzbdCategoryDirectories(cfg *config.Config) error {
+	// Only process if SABnzbd is enabled
+	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
+		return nil
 	}
 
-	// Validate that VFS is enabled
-	if !testReq.VFSEnabled {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "VFS must be enabled to test connection",
-			"details": "VFS_NOT_ENABLED",
-		})
+	// Create base SABnzbd complete directory
+	baseDir := filepath.Join(cfg.Metadata.RootPath, cfg.SABnzbd.CompleteDir)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create SABnzbd base directory: %w", err)
 	}
 
-	// Validate URL is provided
-	if testReq.VFSURL == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "VFS URL is required",
-			"details": "MISSING_VFS_URL",
-		})
+	// Create directories for each category
+	for _, category := range cfg.SABnzbd.Categories {
+		if category.Dir != "" {
+			categoryDir := filepath.Join(baseDir, category.Dir)
+			if err := os.MkdirAll(categoryDir, 0755); err != nil {
+				return fmt.Errorf("failed to create category directory %s: %w", category.Name, err)
+			}
+		}
 	}
 
-	// Create a temporary RClone client with the test configuration
-	testConfig := &rclonecli.Config{
-		VFSEnabled: testReq.VFSEnabled,
-		VFSUrl:     testReq.VFSURL,
-		VFSUser:    testReq.VFSUser,
-		VFSPass:    testReq.VFSPass,
-	}
-
-	httpClient := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	testClient := rclonecli.NewRcloneRcClient(testConfig, httpClient)
-
-	// Test the connection by attempting to refresh the root directory
-	ctx := c.Context()
-	err := testClient.RefreshCache(ctx, "/", true, false) // async=true, recursive=false
-
-	if err != nil {
-		// Return success:true but with test result as failed
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data": fiber.Map{
-				"success":       false,
-				"error_message": err.Error(),
-			},
-		})
-	}
-
-	// Connection successful
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": fiber.Map{
-			"success":       true,
-			"error_message": "",
-		},
-	})
+	return nil
 }

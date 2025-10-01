@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
@@ -55,8 +56,9 @@ type Service struct {
 	database        *database.DB              // Database for processing queue
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
-	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
-	configGetter    config.ConfigGetter      // Config getter for dynamic configuration access
+	rcloneClient    rclonecli.RcloneRcClient  // Optional rclone client for VFS notifications
+	configGetter    config.ConfigGetter       // Config getter for dynamic configuration access
+	sabnzbdClient   *sabnzbd.SABnzbdClient    // SABnzbd client for fallback
 	log             *slog.Logger
 
 	// Runtime state
@@ -91,6 +93,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		processor:       processor,
 		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
+		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -174,6 +177,18 @@ func (s *Service) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
+}
+
+// SetRcloneClient sets or updates the RClone client for VFS notifications
+func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rcloneClient = client
+	if client != nil {
+		s.log.Info("RClone client updated for VFS notifications")
+	} else {
+		s.log.Info("RClone client disabled")
+	}
 }
 
 // Database returns the database instance for processing
@@ -429,7 +444,6 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 		item, err := s.database.Repository.ClaimNextQueueItem()
 		if err == nil {
 			if item == nil {
-				log.Debug("No item in processing queue")
 				return nil, nil
 			}
 
@@ -554,7 +568,73 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 				"file", item.NzbPath,
 				"retry_count", item.RetryCount)
 		}
+
+		// Attempt SABnzbd fallback if configured
+		s.attemptSABnzbdFallback(item, log)
 	}
+}
+
+// attemptSABnzbdFallback attempts to send a failed import to an external SABnzbd instance
+func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *slog.Logger) {
+	// Get current configuration
+	cfg := s.configGetter()
+
+	// Check if SABnzbd is enabled and fallback is configured
+	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
+		log.Debug("SABnzbd fallback not attempted - SABnzbd API not enabled", "queue_id", item.ID)
+		return
+	}
+
+	if cfg.SABnzbd.FallbackHost == "" {
+		log.Debug("SABnzbd fallback not attempted - no fallback host configured", "queue_id", item.ID)
+		return
+	}
+
+	if cfg.SABnzbd.FallbackAPIKey == "" {
+		log.Warn("SABnzbd fallback not attempted - no API key configured", "queue_id", item.ID)
+		return
+	}
+
+	// Check if the NZB file still exists
+	if _, err := os.Stat(item.NzbPath); err != nil {
+		log.Warn("SABnzbd fallback not attempted - NZB file not found",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"error", err)
+		return
+	}
+
+	log.Info("Attempting to send failed import to external SABnzbd",
+		"queue_id", item.ID,
+		"file", item.NzbPath,
+		"fallback_host", cfg.SABnzbd.FallbackHost)
+
+	// Convert priority to SABnzbd format
+	priority := s.convertPriorityToSABnzbd(item.Priority)
+
+	// Send to external SABnzbd
+	nzoID, err := s.sabnzbdClient.SendNZBFile(
+		cfg.SABnzbd.FallbackHost,
+		cfg.SABnzbd.FallbackAPIKey,
+		item.NzbPath,
+		item.Category,
+		&priority,
+	)
+
+	if err != nil {
+		log.Error("Failed to send to external SABnzbd",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"fallback_host", cfg.SABnzbd.FallbackHost,
+			"error", err)
+		return
+	}
+
+	log.Info("Successfully sent failed import to external SABnzbd",
+		"queue_id", item.ID,
+		"file", item.NzbPath,
+		"fallback_host", cfg.SABnzbd.FallbackHost,
+		"sabnzbd_nzo_id", nzoID)
 }
 
 // ServiceStats holds statistics about the service
@@ -614,7 +694,7 @@ func (s *Service) GetWorkerCount() int {
 // notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
 func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logger) {
 	if s.rcloneClient == nil {
-		return // No rclone client configured
+		return // No rclone client configured or RClone RC is disabled
 	}
 
 	// Calculate the virtual directory path for VFS notification
@@ -632,7 +712,7 @@ func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logg
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
 		defer cancel()
 
-		err := s.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
+		err := s.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
 		if err != nil {
 			log.Warn("Failed to notify rclone VFS about new import",
 				"queue_id", item.ID,
@@ -640,7 +720,7 @@ func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logg
 				"virtual_dir", virtualDir,
 				"error", err)
 		} else {
-			log.Debug("Successfully notified rclone VFS about new import",
+			log.Info("Successfully notified rclone VFS about new import",
 				"queue_id", item.ID,
 				"virtual_dir", virtualDir)
 		}
@@ -811,4 +891,16 @@ func (s *Service) calculateStrmFileSize(r io.Reader) (int64, error) {
 	}
 
 	return 0, NewNonRetryableError("no valid NXG link found in STRM file", nil)
+}
+
+// convertPriorityToSABnzbd converts AltMount queue priority to SABnzbd priority format
+func (s *Service) convertPriorityToSABnzbd(priority database.QueuePriority) string {
+	switch priority {
+	case database.QueuePriorityHigh:
+		return "2" // High
+	case database.QueuePriorityLow:
+		return "0" // Low
+	default:
+		return "1" // Normal
+	}
 }

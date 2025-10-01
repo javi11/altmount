@@ -150,6 +150,8 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		segmentsToCheck = []*metapb.SegmentData{fileMeta.SegmentData[0]}
 	}
 
+	slog.Info("Checking segments", "file_path", filePath, "segments_to_check", len(segmentsToCheck))
+
 	// Check segments with configurable concurrency
 	checkErr := hc.checkSegments(ctx, segmentsToCheck)
 
@@ -198,6 +200,9 @@ func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.S
 
 // checkSingleSegment checks if a single segment exists
 func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	// Get current pool from manager
 	usenetPool, err := hc.poolManager.GetPool()
 	if err != nil {
@@ -241,7 +246,7 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		defer cancel()
 
 		// Refresh cache asynchronously to avoid blocking health checks
-		err := hc.rcloneClient.RefreshCache(ctx, virtualDir, true, false) // async=true, recursive=false
+		err := hc.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
 		if err != nil {
 			slog.Error("Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
 		}

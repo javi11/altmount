@@ -107,6 +107,8 @@ export const useHealth = (params?: {
 	status?: string;
 	since?: string;
 	search?: string;
+	sort_by?: string;
+	sort_order?: "asc" | "desc";
 	refetchInterval?: number;
 }) => {
 	return useQuery({
@@ -164,6 +166,17 @@ export const useDeleteBulkHealthItems = () => {
 
 	return useMutation({
 		mutationFn: (filePaths: string[]) => apiClient.deleteBulkHealthItems(filePaths),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
+export const useRestartBulkHealthItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (filePaths: string[]) => apiClient.restartBulkHealthItems(filePaths),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},

@@ -6,13 +6,17 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool"
 	"github.com/sourcegraph/conc/pool"
 )
 
-const defaultDownloadWorkers = 15
+const (
+	defaultMaxCacheSize    = 32 * 1024 * 1024 // Default to 32MB
+	defaultDownloadWorkers = 15
+)
 
 var (
 	_ io.ReadCloser = &usenetReader{}
@@ -37,10 +41,17 @@ type usenetReader struct {
 	cancel             context.CancelFunc
 	rg                 segmentRange
 	maxDownloadWorkers int
+	maxCacheSize       int64 // Maximum cache size in bytes
 	init               chan any
 	initDownload       sync.Once
 	totalBytesRead     int64
-	mu                 sync.Mutex
+
+	// Dynamic download tracking
+	nextToDownload      int          // Index of next segment to download
+	downloadingSegments map[int]bool // Track which segments are being downloaded
+	downloadCond        *sync.Cond   // Condition variable for download coordination
+
+	mu sync.Mutex
 }
 
 func NewUsenetReader(
@@ -48,16 +59,28 @@ func NewUsenetReader(
 	cp nntppool.UsenetConnectionPool,
 	rg segmentRange,
 	maxDownloadWorkers int,
+	maxCacheSizeMB int,
 ) (io.ReadCloser, error) {
 	log := slog.Default()
 	ctx, cancel := context.WithCancel(ctx)
-	ur := &usenetReader{
-		log:                log,
-		cancel:             cancel,
-		rg:                 rg,
-		init:               make(chan any, 1),
-		maxDownloadWorkers: maxDownloadWorkers,
+
+	// Convert MB to bytes
+	maxCacheSize := int64(maxCacheSizeMB) * 1024 * 1024
+	if maxCacheSize <= 0 {
+		maxCacheSize = defaultMaxCacheSize
 	}
+
+	ur := &usenetReader{
+		log:                 log,
+		cancel:              cancel,
+		rg:                  rg,
+		init:                make(chan any, 1),
+		maxDownloadWorkers:  maxDownloadWorkers,
+		maxCacheSize:        maxCacheSize,
+		nextToDownload:      0,
+		downloadingSegments: make(map[int]bool),
+	}
+	ur.downloadCond = sync.NewCond(&ur.mu)
 
 	// Will start go routine pool with max download workers that will fill the cache
 
@@ -135,6 +158,12 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 			if errors.Is(err, io.EOF) {
 				// Segment is fully read, remove it from the cache
 				s, err = b.rg.Next()
+
+				// Signal that we've moved to the next segment (triggers more downloads)
+				b.mu.Lock()
+				b.downloadCond.Signal()
+				b.mu.Unlock()
+
 				if err != nil {
 					if n > 0 {
 						return n, nil
@@ -188,53 +217,123 @@ func (b *usenetReader) downloadManager(
 			downloadWorkers = defaultDownloadWorkers
 		}
 
+		if len(b.rg.segments) == 0 {
+			b.log.Debug("No segments to download")
+
+			return
+		}
+
+		// Calculate max segments to download ahead based on cache size
+		avgSegmentSize := b.rg.segments[0].SegmentSize
+		maxSegmentsAhead := int(b.maxCacheSize / avgSegmentSize)
+		if maxSegmentsAhead < 1 {
+			maxSegmentsAhead = 1 // Always allow at least 1 segment
+		}
+		if maxSegmentsAhead > len(b.rg.segments) {
+			maxSegmentsAhead = len(b.rg.segments)
+		}
+
+		// Limit concurrent downloads to prevent cache overflow
+		if downloadWorkers > maxSegmentsAhead {
+			downloadWorkers = maxSegmentsAhead
+		}
+
 		pool := pool.New().
 			WithMaxGoroutines(downloadWorkers).
 			WithContext(ctx)
 
-		for _, s := range b.rg.segments {
-			if ctx.Err() != nil {
-				break
+		// Start continuous download monitoring
+		for ctx.Err() == nil {
+			// Get current reading position
+			currentIndex := b.rg.GetCurrentIndex()
+
+			// Calculate how many segments we should have downloaded
+			targetDownload := currentIndex + maxSegmentsAhead
+			if targetDownload > len(b.rg.segments) {
+				targetDownload = len(b.rg.segments)
 			}
 
-			pool.Go(func(c context.Context) error {
-				w := s.writer
+			// Download segments that are not yet downloaded or downloading
+			b.mu.Lock()
+			segmentsToQueue := []int{}
+			for i := b.nextToDownload; i < targetDownload; i++ {
+				if !b.downloadingSegments[i] {
+					b.downloadingSegments[i] = true
+					segmentsToQueue = append(segmentsToQueue, i)
+				}
+			}
+			b.mu.Unlock()
 
-				// Set the item ready to read
-				ctx = slogutil.With(ctx, "segment_id", s.Id)
-				_, err := cp.Body(ctx, s.Id, s.Writer(), s.groups)
-				if !errors.Is(err, context.Canceled) {
-					cErr := w.CloseWithError(err)
-					if cErr != nil {
-						b.log.ErrorContext(ctx, "Error closing segment buffer:", "error", cErr)
+			// Queue downloads for new segments
+			for _, idx := range segmentsToQueue {
+				if ctx.Err() != nil {
+					break
+				}
+
+				segmentIdx := idx // Capture for closure
+				s := b.rg.segments[segmentIdx]
+
+				pool.Go(func(c context.Context) error {
+					w := s.writer
+
+					// Set the item ready to read
+					ctx = slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
+					_, err := cp.Body(ctx, s.Id, s.Writer(), s.groups)
+
+					// Mark download complete
+					b.mu.Lock()
+					if segmentIdx >= b.nextToDownload {
+						b.nextToDownload = segmentIdx + 1
+					}
+					delete(b.downloadingSegments, segmentIdx)
+					b.downloadCond.Signal()
+					b.mu.Unlock()
+
+					if !errors.Is(err, context.Canceled) {
+						cErr := w.CloseWithError(err)
+						if cErr != nil {
+							b.log.ErrorContext(ctx, "Error closing segment buffer:", "error", cErr)
+						}
+
+						if err != nil && !errors.Is(err, context.Canceled) {
+							b.log.DebugContext(ctx, "Error downloading segment:", "error", err)
+							return err
+						}
+
+						return nil
 					}
 
-					w = nil
-					s = nil
-
-					if err != nil && !errors.Is(err, context.Canceled) {
-						b.log.DebugContext(ctx, "Error downloading segment:", "error", err)
-						return err
+					err = w.Close()
+					if err != nil {
+						b.log.ErrorContext(ctx, "Error closing segment writer:", "error", err)
 					}
 
 					return nil
-				}
+				})
+			}
 
-				err = w.Close()
-				if err != nil {
-					b.log.ErrorContext(ctx, "Error closing segment writer:", "error", err)
-				}
+			// Check if all segments are downloaded
+			b.mu.Lock()
+			allDownloaded := b.nextToDownload >= len(b.rg.segments)
+			b.mu.Unlock()
 
-				w = nil
-				s = nil
+			if allDownloaded {
+				break
+			}
 
-				return nil
-			})
+			// Wait a bit before checking again to avoid busy-waiting
+			select {
+			case <-time.After(100 * time.Millisecond):
+				continue
+			case <-ctx.Done():
+				// Context is done, next iteration will break the loop
+				continue
+			}
 		}
 
+		// Wait for all downloads to complete
 		if err := pool.Wait(); err != nil {
 			b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
-
 			return
 		}
 	case <-ctx.Done():

@@ -35,17 +35,19 @@ type rarContent struct {
 
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
-	log         *slog.Logger
-	poolManager pool.Manager
-	maxWorkers  int
+	log            *slog.Logger
+	poolManager    pool.Manager
+	maxWorkers     int
+	maxCacheSizeMB int
 }
 
 // NewRarProcessor creates a new RAR processor
-func NewRarProcessor(poolManager pool.Manager, maxWorkers int) RarProcessor {
+func NewRarProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) RarProcessor {
 	return &rarProcessor{
-		log:         slog.Default().With("component", "rar-processor"),
-		poolManager: poolManager,
-		maxWorkers:  maxWorkers,
+		log:            slog.Default().With("component", "rar-processor"),
+		poolManager:    poolManager,
+		maxWorkers:     maxWorkers,
+		maxCacheSizeMB: maxCacheSizeMB,
 	}
 }
 
@@ -84,7 +86,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers)
+	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortFiles))
@@ -403,10 +405,49 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 	return out, covered, nil
 }
 
+// extractBaseFilename extracts the base filename without the part suffix
+// This works with the original patterns (including leading zeros) to properly extract the base
+func extractBaseFilename(filename string) string {
+	// Try each pattern and extract the base name (group 1)
+	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
+		return matches[1]
+	}
+	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 1 {
+		return matches[1]
+	}
+	if matches := numericPattern.FindStringSubmatch(filename); len(matches) > 1 {
+		return matches[1]
+	}
+
+	// If no pattern matches, return the filename without extension
+	return strings.TrimSuffix(filename, filepath.Ext(filename))
+}
+
+// stripLeadingZeros removes leading zeros from a numeric string while preserving at least one digit
+func stripLeadingZeros(s string) string {
+	if s == "" {
+		return "0"
+	}
+
+	// Find first non-zero digit
+	i := 0
+	for i < len(s) && s[i] == '0' {
+		i++
+	}
+
+	// If all digits are zero, return "0"
+	if i == len(s) {
+		return "0"
+	}
+
+	// Return string starting from first non-zero digit
+	return s[i:]
+}
+
 func renameRarFilesAndSort(rarFiles []ParsedFile) []ParsedFile {
 	// Get the base name of the first RAR file (without extension)
-	firstPartSuffix := getPartSuffix(rarFiles[0].Filename)
-	firstFileBase := strings.TrimSuffix(rarFiles[0].Filename, firstPartSuffix)
+	// We need to use the original suffix (with leading zeros) to properly extract the base name
+	firstFileBase := extractBaseFilename(rarFiles[0].Filename)
 
 	// Rename all RAR files to match the base name of the first file while preserving original part naming
 	for i := range rarFiles {
@@ -431,7 +472,7 @@ func renameRarFilesAndSort(rarFiles []ParsedFile) []ParsedFile {
 
 func getPartSuffix(originalFileName string) string {
 	if matches := partPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		return fmt.Sprintf(".part%s.rar", matches[1])
+		return fmt.Sprintf(".part%s.rar", stripLeadingZeros(matches[1]))
 	} else if matches := rPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
 		return fmt.Sprintf(".r%s", matches[1])
 	} else if matches := numericPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {

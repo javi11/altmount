@@ -53,8 +53,6 @@ func (o *rcloneCrypt) Open(
 	salt string,
 	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error),
 ) (rc io.ReadCloser, err error) {
-	log := slog.Default()
-
 	encryptedFileSize := o.EncryptedSize(fileSize)
 
 	var offset, limit int64 = 0, -1
@@ -67,7 +65,7 @@ func (o *rcloneCrypt) Open(
 	}
 
 	if password == "" && !o.hasGlobalPassword {
-		log.WarnContext(ctx, "No password provided for rclone crypt.")
+		slog.WarnContext(ctx, "No password provided for rclone crypt.")
 
 		return nil, ErrMissingPassword
 	}
@@ -122,8 +120,8 @@ func (o *rcloneCrypt) Open(
 	}
 
 	return &reader{
+		ctx:        ctx,
 		initReader: initReader,
-		logger:     log,
 	}, nil
 }
 
@@ -146,16 +144,13 @@ func (o *rcloneCrypt) Name() encryption.CipherType {
 type reader struct {
 	once       sync.Once
 	rd         io.ReadCloser
+	ctx        context.Context
 	initReader func() (io.ReadCloser, error)
-	logger     *slog.Logger
 }
 
 func (r *reader) Read(p []byte) (n int, err error) {
 	r.once.Do(func() {
 		r.rd, err = r.initReader()
-		if err != nil && !errors.Is(err, context.Canceled) {
-			r.logger.Error("Failed to to read rclone crypt file", "err", err)
-		}
 	})
 
 	if err != nil {

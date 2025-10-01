@@ -40,11 +40,16 @@ export function useWebDAVConnection() {
 	};
 }
 
-export function useWebDAVDirectory(path: string, isConnected = true, hasConnectionFailed = false) {
+export function useWebDAVDirectory(
+	path: string,
+	isConnected = true,
+	hasConnectionFailed = false,
+	showCorrupted = false,
+) {
 	return useQuery<WebDAVDirectory>({
-		queryKey: ["webdav", "directory", path],
+		queryKey: ["webdav", "directory", path, showCorrupted],
 		queryFn: async () => {
-			const result = await webdavClient.listDirectory(path);
+			const result = await webdavClient.listDirectory(path, showCorrupted);
 
 			// Log successful empty directory access for debugging
 			if (result.files.length === 0) {
@@ -184,16 +189,54 @@ export function useWebDAVFileOperations() {
 		},
 	});
 
+	const exportNZB = useMutation({
+		mutationFn: async ({ path, filename }: { path: string; filename: string }) => {
+			const blob = await apiClient.exportMetadataToNZB(path);
+
+			// Create blob URL and trigger download
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			// Remove extension and add .nzb
+			const nameWithoutExt =
+				filename.lastIndexOf(".") > 0 ? filename.substring(0, filename.lastIndexOf(".")) : filename;
+			a.download = `${nameWithoutExt}.nzb`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+
+			return { filename: `${nameWithoutExt}.nzb` };
+		},
+		onSuccess: ({ filename }) => {
+			showToast({
+				type: "success",
+				title: "NZB Exported",
+				message: `Successfully exported "${filename}"`,
+			});
+		},
+		onError: (error, { filename }) => {
+			showToast({
+				type: "error",
+				title: "Export Failed",
+				message: `Failed to export NZB for "${filename}": ${error.message}`,
+			});
+		},
+	});
+
 	return {
 		downloadFile: downloadFile.mutate,
 		deleteFile: deleteFile.mutate,
 		getFileMetadata: getFileMetadata.mutate,
+		exportNZB: exportNZB.mutate,
 		isDownloading: downloadFile.isPending,
 		isDeleting: deleteFile.isPending,
 		isGettingMetadata: getFileMetadata.isPending,
+		isExportingNZB: exportNZB.isPending,
 		downloadError: downloadFile.error,
 		deleteError: deleteFile.error,
 		metadataError: getFileMetadata.error,
+		exportNZBError: exportNZB.error,
 		metadataData: getFileMetadata.data,
 	};
 }

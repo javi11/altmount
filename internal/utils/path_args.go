@@ -18,6 +18,7 @@ const ContentLengthKey = contextKey("contentLength")
 const RangeKey = contextKey("rangeKey")
 const IsCopy = contextKey("isCopy")
 const Origin = contextKey("origin")
+const ShowCorrupted = contextKey("showCorrupted")
 
 type PathWithArgs struct {
 	Path string
@@ -72,6 +73,14 @@ func (p PathWithArgs) SetFileSize(s string) {
 
 func (p PathWithArgs) SetIsCopy() {
 	p.args.Set(IsCopy.String(), "true")
+}
+
+func (p PathWithArgs) ShowCorrupted() bool {
+	return p.args.Get(ShowCorrupted.String()) == "true"
+}
+
+func (p PathWithArgs) SetShowCorrupted() {
+	p.args.Set(ShowCorrupted.String(), "true")
 }
 
 func NewPathWithArgsFromString(s string) (PathWithArgs, error) {

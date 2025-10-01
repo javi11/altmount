@@ -65,28 +65,16 @@ func (mrf *MetadataRemoteFile) getMaxDownloadWorkers() int {
 	return mrf.configGetter().Streaming.MaxDownloadWorkers
 }
 
+func (mrf *MetadataRemoteFile) getMaxCacheSizeMB() int {
+	return mrf.configGetter().Streaming.MaxCacheSizeMB
+}
+
 func (mrf *MetadataRemoteFile) getGlobalPassword() string {
 	return mrf.configGetter().RClone.Password
 }
 
 func (mrf *MetadataRemoteFile) getGlobalSalt() string {
 	return mrf.configGetter().RClone.Salt
-}
-
-func (mrf *MetadataRemoteFile) getMaxRangeSize() int64 {
-	size := mrf.configGetter().Streaming.MaxRangeSize
-	if size <= 0 {
-		return 33554432 // Default 32MB
-	}
-	return size
-}
-
-func (mrf *MetadataRemoteFile) getStreamingChunkSize() int64 {
-	size := mrf.configGetter().Streaming.StreamingChunkSize
-	if size <= 0 {
-		return 8388608 // Default 8MB
-	}
-	return size
 }
 
 // OpenFile opens a virtual file backed by metadata
@@ -99,6 +87,9 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 	// Normalize the path to handle trailing slashes consistently
 	normalizedName := normalizePath(name)
 
+	// Extract showCorrupted flag from args
+	showCorrupted := r.ShowCorrupted()
+
 	// Check if this is a directory first
 	if mrf.metadataService.DirectoryExists(normalizedName) {
 		// Create a directory handle
@@ -106,6 +97,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 			name:            name,
 			normalizedPath:  normalizedName,
 			metadataService: mrf.metadataService,
+			showCorrupted:   showCorrupted,
 		}
 		return true, virtualDir, nil
 	}
@@ -120,6 +112,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 				name:            name,
 				normalizedPath:  normalizedName,
 				metadataService: mrf.metadataService,
+				showCorrupted:   showCorrupted,
 			}
 			return true, virtualDir, nil
 		}
@@ -143,25 +136,24 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
-		name:               name,
-		fileMeta:           fileMeta,
-		metadataService:    mrf.metadataService,
-		healthRepository:   mrf.healthRepository,
-		args:               r,
-		poolManager:        mrf.poolManager,
-		ctx:                ctx,
-		maxWorkers:         mrf.getMaxDownloadWorkers(),
-		rcloneCipher:       mrf.rcloneCipher,
-		globalPassword:     mrf.getGlobalPassword(),
-		globalSalt:         mrf.getGlobalSalt(),
-		maxRangeSize:       mrf.getMaxRangeSize(),
-		streamingChunkSize: mrf.getStreamingChunkSize(),
+		name:             name,
+		fileMeta:         fileMeta,
+		metadataService:  mrf.metadataService,
+		healthRepository: mrf.healthRepository,
+		args:             r,
+		poolManager:      mrf.poolManager,
+		ctx:              ctx,
+		maxWorkers:       mrf.getMaxDownloadWorkers(),
+		maxCacheSizeMB:   mrf.getMaxCacheSizeMB(),
+		rcloneCipher:     mrf.rcloneCipher,
+		globalPassword:   mrf.getGlobalPassword(),
+		globalSalt:       mrf.getGlobalSalt(),
 	}
 
 	return true, virtualFile, nil
 }
 
-// RemoveFile removes a virtual file from the metadata
+// RemoveFile removes a virtual file or directory from the metadata
 func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) (bool, error) {
 	// Normalize the path to handle trailing slashes consistently
 	normalizedName := normalizePath(fileName)
@@ -171,26 +163,46 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		return false, ErrCannotRemoveRoot
 	}
 
-	// Check if this path exists in our metadata
+	// Check if this is a directory
+	if mrf.metadataService.DirectoryExists(normalizedName) {
+		// Use MetadataService's directory delete operation
+		return true, mrf.metadataService.DeleteDirectory(normalizedName)
+	}
+
+	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
-		// File not found in metadata
+		// Neither file nor directory found in metadata
 		return false, nil
 	}
 
-	// Use MetadataService's delete operation
+	// Use MetadataService's file delete operation
 	return true, mrf.metadataService.DeleteFileMetadata(normalizedName)
 }
 
-// RenameFile renames a virtual file in the metadata
+// RenameFile renames a virtual file or directory in the metadata
 func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName string) (bool, error) {
 	// Normalize paths
 	normalizedOld := normalizePath(oldName)
 	normalizedNew := normalizePath(newName)
 
-	// Check if old path exists
+	// Check if old path is a directory
+	if mrf.metadataService.DirectoryExists(normalizedOld) {
+		// Get the filesystem paths for the directories
+		oldDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedOld)
+		newDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedNew)
+
+		// Rename the entire directory
+		if err := os.Rename(oldDirPath, newDirPath); err != nil {
+			return false, fmt.Errorf("failed to rename directory: %w", err)
+		}
+		return true, nil
+	}
+
+	// Check if old path exists as a file
 	exists := mrf.metadataService.FileExists(normalizedOld)
 	if !exists {
+		// Neither file nor directory found
 		return false, nil
 	}
 
@@ -315,6 +327,7 @@ type MetadataVirtualDirectory struct {
 	name            string
 	normalizedPath  string
 	metadataService *metadata.MetadataService
+	showCorrupted   bool
 }
 
 // Read implements afero.File.Read (not supported for directories)
@@ -375,6 +388,11 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
 		fileMeta, err := mvd.metadataService.ReadFileMetadata(virtualFilePath)
 		if err != nil || fileMeta == nil {
+			continue
+		}
+
+		// Skip corrupted files unless showCorrupted flag is set
+		if !mvd.showCorrupted && fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
 			continue
 		}
 
@@ -456,6 +474,7 @@ type MetadataVirtualFile struct {
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
 	maxWorkers       int
+	maxCacheSizeMB   int // Maximum cache size in MB for ahead downloads
 	rcloneCipher     encryption.Cipher
 	globalPassword   string
 	globalSalt       string
@@ -467,10 +486,6 @@ type MetadataVirtualFile struct {
 	currentRangeStart int64 // Start of current reader's range
 	currentRangeEnd   int64 // End of current reader's range
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
-
-	// Configurable range settings
-	maxRangeSize       int64 // Maximum range size for a single request
-	streamingChunkSize int64 // Chunk size for streaming when end=-1
 
 	mu sync.Mutex
 }
@@ -511,6 +526,8 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				} else if newErr == nil {
 					err = nil // Clear EOF if we successfully read more
 				}
+			} else if totalRead == len(p) {
+				err = nil
 			}
 		}
 
@@ -733,11 +750,11 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		rangeHeader, err := mvf.args.Range()
 		if err == nil && rangeHeader != nil {
 			mvf.originalRangeEnd = rangeHeader.End
-			return mvf.calculateIntelligentRange(rangeHeader.Start, rangeHeader.End)
+			return rangeHeader.Start, rangeHeader.End
 		} else {
 			// No range header, set unbounded
 			mvf.originalRangeEnd = -1
-			return mvf.calculateIntelligentRange(mvf.position, -1)
+			return 0, -1
 		}
 	}
 
@@ -751,59 +768,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		targetEnd = mvf.originalRangeEnd
 	}
 
-	return mvf.calculateIntelligentRange(mvf.position, targetEnd)
-}
-
-// calculateIntelligentRange applies intelligent range limiting to prevent excessive memory usage
-// Only applies limiting when end=-1 or when the requested range exceeds safe memory limits
-func (mvf *MetadataVirtualFile) calculateIntelligentRange(start, end int64) (int64, int64) {
-	fileSize := mvf.fileMeta.FileSize
-
-	// Handle empty files - return invalid range that will result in no segments
-	if fileSize == 0 {
-		return 0, -1 // Invalid range for empty file
-	}
-
-	// Ensure start is within bounds
-	if start < 0 {
-		start = 0
-	}
-	if start >= fileSize {
-		start = fileSize - 1
-	}
-
-	// Handle end = -1 (to end of file) with intelligent limiting
-	if end == -1 {
-		// Calculate a reasonable chunk size based on remaining file size
-		remaining := fileSize - start
-
-		// If remaining size is smaller than configured streaming chunk size, use all remaining
-		if remaining <= mvf.streamingChunkSize {
-			end = fileSize - 1
-		} else {
-			// Limit to configured streaming chunk size to prevent excessive memory usage
-			end = start + mvf.streamingChunkSize - 1
-		}
-	} else {
-		// Ensure end is within file bounds
-		if end >= fileSize {
-			end = fileSize - 1
-		}
-
-		// Only apply maximum range size limit if the requested range is excessively large
-		// This preserves the original range request for reasonable sizes
-		rangeSize := end - start + 1
-		if rangeSize > mvf.maxRangeSize {
-			end = start + mvf.maxRangeSize - 1
-			// Ensure we don't exceed file size
-			if end >= fileSize {
-				end = fileSize - 1
-			}
-		}
-		// If rangeSize <= maxRangeSize, preserve the original range as-is
-	}
-
-	return start, end
+	return 0, targetEnd
 }
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
@@ -818,9 +783,13 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, fmt.Errorf("failed to get connection pool: %w", err)
 	}
 
+	if end == -1 {
+		end = mvf.fileMeta.FileSize - 1
+	}
+
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers)
+	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

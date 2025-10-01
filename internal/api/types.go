@@ -15,17 +15,63 @@ type ConfigAPIResponse struct {
 	*config.Config
 	Import    ImportAPIResponse     `json:"import"`
 	RClone    RCloneAPIResponse     `json:"rclone"`
+	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers []ProviderAPIResponse `json:"providers"`
 }
 
 // RCloneAPIResponse sanitizes RClone config for API responses
 type RCloneAPIResponse struct {
-	PasswordSet bool   `json:"password_set"`
-	SaltSet     bool   `json:"salt_set"`
-	VFSEnabled  bool   `json:"vfs_enabled"`
-	VFSURL      string `json:"vfs_url"`
-	VFSUser     string `json:"vfs_user"`
-	VFSPassSet  bool   `json:"vfs_pass_set"`
+	// Encryption
+	PasswordSet bool `json:"password_set"`
+	SaltSet     bool `json:"salt_set"`
+
+	// RC (Remote Control) Configuration
+	RCEnabled bool              `json:"rc_enabled"`
+	RCUrl     string            `json:"rc_url"`
+	RCPort    int               `json:"rc_port"`
+	RCUser    string            `json:"rc_user"`
+	RCPassSet bool              `json:"rc_pass_set"`
+	RCOptions map[string]string `json:"rc_options"`
+
+	// Mount Configuration
+	MountEnabled bool              `json:"mount_enabled"`
+	MountOptions map[string]string `json:"mount_options"`
+
+	// Mount-Specific Settings
+	AllowOther    bool   `json:"allow_other"`
+	AllowNonEmpty bool   `json:"allow_non_empty"`
+	ReadOnly      bool   `json:"read_only"`
+	Timeout       string `json:"timeout"`
+	Syslog        bool   `json:"syslog"`
+
+	// System and filesystem options
+	LogLevel    string `json:"log_level"`
+	UID         int    `json:"uid"`
+	GID         int    `json:"gid"`
+	Umask       string `json:"umask"`
+	BufferSize  string `json:"buffer_size"`
+	AttrTimeout string `json:"attr_timeout"`
+	Transfers   int    `json:"transfers"`
+
+	// VFS Cache Settings
+	CacheDir             string `json:"cache_dir"`
+	VFSCacheMode         string `json:"vfs_cache_mode"`
+	VFSCacheMaxSize      string `json:"vfs_cache_max_size"`
+	VFSCacheMaxAge       string `json:"vfs_cache_max_age"`
+	ReadChunkSize        string `json:"read_chunk_size"`
+	ReadChunkSizeLimit   string `json:"read_chunk_size_limit"`
+	VFSReadAhead         string `json:"vfs_read_ahead"`
+	DirCacheTime         string `json:"dir_cache_time"`
+	VFSCacheMinFreeSpace string `json:"vfs_cache_min_free_space"`
+	VFSDiskSpaceTotal    string `json:"vfs_disk_space_total"`
+	VFSReadChunkStreams  int    `json:"vfs_read_chunk_streams"`
+
+	// Advanced Settings
+	NoModTime          bool `json:"no_mod_time"`
+	NoChecksum         bool `json:"no_checksum"`
+	AsyncRead          bool `json:"async_read"`
+	VFSFastFingerprint bool `json:"vfs_fast_fingerprint"`
+	UseMmap            bool `json:"use_mmap"`
 }
 
 // ProviderAPIResponse sanitizes Provider config for API responses
@@ -46,6 +92,16 @@ type ProviderAPIResponse struct {
 type ImportAPIResponse struct {
 	MaxProcessorWorkers            int `json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int `json:"queue_processing_interval_seconds"` // Interval in seconds
+}
+
+// SABnzbdAPIResponse sanitizes SABnzbd config for API responses
+type SABnzbdAPIResponse struct {
+	Enabled           bool                    `json:"enabled"`
+	CompleteDir       string                  `json:"complete_dir"`
+	Categories        []config.SABnzbdCategory `json:"categories"`
+	FallbackHost      string                  `json:"fallback_host"`
+	FallbackAPIKey    string                  `json:"fallback_api_key"`     // Obfuscated if set
+	FallbackAPIKeySet bool                    `json:"fallback_api_key_set"` // Indicates if API key is set
 }
 
 // Helper functions to create API responses from core config types
@@ -73,20 +129,76 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 		}
 	}
 
-	// Create RClone response with password status
+	// Create RClone response with all configuration fields
 	rcloneResp := RCloneAPIResponse{
-		PasswordSet: cfg.RClone.Password != "",
-		SaltSet:     cfg.RClone.Salt != "",
-		VFSEnabled:  cfg.RClone.VFSEnabled != nil && *cfg.RClone.VFSEnabled,
-		VFSURL:      cfg.RClone.VFSUrl,
-		VFSUser:     cfg.RClone.VFSUser,
-		VFSPassSet:  cfg.RClone.VFSPass != "",
+		PasswordSet:  cfg.RClone.Password != "",
+		SaltSet:      cfg.RClone.Salt != "",
+		RCEnabled:    cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled,
+		RCUrl:        cfg.RClone.RCUrl,
+		RCPort:       cfg.RClone.RCPort,
+		RCUser:       cfg.RClone.RCUser,
+		RCPassSet:    cfg.RClone.RCPass != "",
+		RCOptions:    cfg.RClone.RCOptions,
+		MountEnabled: cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled,
+		MountOptions: cfg.RClone.MountOptions,
+
+		// Mount-Specific Settings
+		AllowOther:    cfg.RClone.AllowOther,
+		AllowNonEmpty: cfg.RClone.AllowNonEmpty,
+		ReadOnly:      cfg.RClone.ReadOnly,
+		Timeout:       cfg.RClone.Timeout,
+		Syslog:        cfg.RClone.Syslog,
+
+		// System and filesystem options
+		LogLevel:    cfg.RClone.LogLevel,
+		UID:         cfg.RClone.UID,
+		GID:         cfg.RClone.GID,
+		Umask:       cfg.RClone.Umask,
+		BufferSize:  cfg.RClone.BufferSize,
+		AttrTimeout: cfg.RClone.AttrTimeout,
+		Transfers:   cfg.RClone.Transfers,
+
+		// VFS Cache Settings
+		CacheDir:             cfg.RClone.CacheDir,
+		VFSCacheMode:         cfg.RClone.VFSCacheMode,
+		VFSCacheMaxSize:      cfg.RClone.VFSCacheMaxSize,
+		VFSCacheMaxAge:       cfg.RClone.VFSCacheMaxAge,
+		ReadChunkSize:        cfg.RClone.ReadChunkSize,
+		ReadChunkSizeLimit:   cfg.RClone.ReadChunkSizeLimit,
+		VFSReadAhead:         cfg.RClone.VFSReadAhead,
+		DirCacheTime:         cfg.RClone.DirCacheTime,
+		VFSCacheMinFreeSpace: cfg.RClone.VFSCacheMinFreeSpace,
+		VFSDiskSpaceTotal:    cfg.RClone.VFSDiskSpaceTotal,
+		VFSReadChunkStreams:  cfg.RClone.VFSReadChunkStreams,
+
+		// Advanced Settings
+		NoModTime:          cfg.RClone.NoModTime,
+		NoChecksum:         cfg.RClone.NoChecksum,
+		AsyncRead:          cfg.RClone.AsyncRead,
+		VFSFastFingerprint: cfg.RClone.VFSFastFingerprint,
+		UseMmap:            cfg.RClone.UseMmap,
+	}
+
+	// Create SABnzbd response with API key obfuscated
+	fallbackAPIKey := ""
+	if cfg.SABnzbd.FallbackAPIKey != "" {
+		fallbackAPIKey = "********" // Obfuscate the actual key
+	}
+
+	sabnzbdResp := SABnzbdAPIResponse{
+		Enabled:           cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled,
+		CompleteDir:       cfg.SABnzbd.CompleteDir,
+		Categories:        cfg.SABnzbd.Categories,
+		FallbackHost:      cfg.SABnzbd.FallbackHost,
+		FallbackAPIKey:    fallbackAPIKey,
+		FallbackAPIKeySet: cfg.SABnzbd.FallbackAPIKey != "",
 	}
 
 	return &ConfigAPIResponse{
 		Config:    cfg,
 		Import:    ImportAPIResponse(cfg.Import),
 		RClone:    rcloneResp,
+		SABnzbd:   sabnzbdResp,
 		Providers: providers,
 	}
 }
@@ -317,6 +429,9 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		targetPath = targetPath[:len(targetPath)-4]
 	}
 
+	// Transform error message for better user understanding
+	errorMessage := transformQueueError(item.ErrorMessage)
+
 	return &QueueItemResponse{
 		ID:           item.ID,
 		NzbPath:      item.NzbPath,
@@ -330,7 +445,7 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		CompletedAt:  item.CompletedAt,
 		RetryCount:   item.RetryCount,
 		MaxRetries:   item.MaxRetries,
-		ErrorMessage: item.ErrorMessage,
+		ErrorMessage: &errorMessage,
 		BatchID:      item.BatchID,
 		Metadata:     item.Metadata,
 		FileSize:     item.FileSize,

@@ -22,7 +22,7 @@ Complete setup guides, configuration options, API reference, and troubleshooting
 services:
   altmount:
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
     image: ghcr.io/javi11/altmount:latest
     container_name: altmount
     environment:
@@ -33,9 +33,16 @@ services:
     volumes:
       - ./config:/config
       - /mnt:/mnt
+      - /metadata:/metadata # This is optional you can still use /mnt
     ports:
       - "8080:8080"
     restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
 ```
 
 ### CLI Installation

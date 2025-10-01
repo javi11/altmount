@@ -8,11 +8,11 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-	const { isAuthenticated, isLoading, user } = useAuth();
+	const { isAuthenticated, isLoading, loginRequired, user } = useAuth();
 	const isAdmin = useIsAdmin();
 
-	// Show loading spinner while checking authentication
-	if (isLoading) {
+	// Show loading spinner while checking authentication or loading config
+	if (isLoading || loginRequired === null) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<div className="h-12 w-12 animate-spin rounded-full border-blue-600 border-b-2" />
@@ -20,6 +20,12 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 		);
 	}
 
+	// If login is not required, allow access to all routes without authentication
+	if (!loginRequired) {
+		return <>{children}</>;
+	}
+
+	// From here on, login is required
 	// Show login page if not authenticated
 	if (!isAuthenticated) {
 		return <LoginPage />;

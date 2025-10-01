@@ -601,7 +601,7 @@ func (r *Repository) UpdateQueueStats() error {
 }
 
 // ListQueueItems retrieves queue items with optional filtering
-func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, offset int) ([]*ImportQueueItem, error) {
+func (r *Repository) ListQueueItems(status *QueueStatus, search string, category string, limit, offset int) ([]*ImportQueueItem, error) {
 	var query string
 	var args []interface{}
 
@@ -621,6 +621,11 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
 		searchPattern := "%" + search + "%"
 		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
+	}
+
+	if category != "" {
+		conditions = append(conditions, "category = ?")
+		conditionArgs = append(conditionArgs, category)
 	}
 
 	if len(conditions) > 0 {
@@ -656,7 +661,7 @@ func (r *Repository) ListQueueItems(status *QueueStatus, search string, limit, o
 }
 
 // CountQueueItems counts the total number of queue items matching the given filters
-func (r *Repository) CountQueueItems(status *QueueStatus, search string) (int, error) {
+func (r *Repository) CountQueueItems(status *QueueStatus, search string, category string) (int, error) {
 	var query string
 	var args []interface{}
 
@@ -674,6 +679,11 @@ func (r *Repository) CountQueueItems(status *QueueStatus, search string) (int, e
 		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
 		searchPattern := "%" + search + "%"
 		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
+	}
+
+	if category != "" {
+		conditions = append(conditions, "category = ?")
+		conditionArgs = append(conditionArgs, category)
 	}
 
 	if len(conditions) > 0 {

@@ -16,15 +16,30 @@ Configure health monitoring through the System Configuration interface:
 
 ```yaml
 health:
-  enabled: true # Enable health monitoring service
-  auto_repair_enabled: false # Enable automatic repair via ARRs (default: false)
+  enabled: true                      # Enable health monitoring service
+  auto_repair_enabled: false         # Enable automatic repair via ARRs
+  check_interval_seconds: 1800       # Health check interval (30 minutes)
+  max_concurrent_jobs: 1             # Parallel health check jobs
+  max_retries: 2                     # Retry attempts for failed checks
+  max_segment_connections: 5         # Connections per segment check
+  check_all_segments: true           # Check all file segments vs sampling
 ```
+
+**Configuration Options:**
+
+- **enabled**: Master toggle for health monitoring service
+- **auto_repair_enabled**: Enable automatic repair coordination with ARR applications
+- **check_interval_seconds**: How often to run scheduled health checks (default: 1800 = 30 minutes)
+- **max_concurrent_jobs**: Maximum number of parallel health check operations (default: 1)
+- **max_retries**: Number of retry attempts for failed health checks (default: 2)
+- **max_segment_connections**: NNTP connections used per segment during health checks (default: 5)
+- **check_all_segments**: When true, checks all file segments; when false, uses sampling (default: true)
 
 **Health Monitoring Components:**
 
 - **Corruption Detection**: Monitors file access and playback for corruption indicators
-- **Integrity Validation**: Checks file completeness and consistency
-- **Repair Coordination**: Interfaces with ARR applications for automatic re-downloads
+- **Integrity Validation**: Checks file completeness and consistency based on configured settings
+- **Repair Coordination**: Interfaces with ARR applications for automatic re-downloads when auto-repair is enabled
 - **Status Reporting**: Provides health status through API and web interface
 
 ## Health Monitoring Behavior
@@ -89,30 +104,36 @@ _Health status overview showing collection integrity metrics_
 Auto-repair requires properly configured ARR integration:
 
 ```yaml
+# Root-level mount path configuration
+mount_path: "/mnt/altmount" # Must match ARR WebDAV mount path
+
 arrs:
   enabled: true # Required for auto-repair
-  mount_path: "/mnt/altmount" # Must match ARR WebDAV mount path
+  max_workers: 5 # Concurrent repair operations
   radarr_instances:
     - name: "radarr-main"
       url: "http://localhost:7878"
       api_key: "your-radarr-api-key"
       enabled: true
+      sync_interval_hours: 24 # Optional periodic sync
   sonarr_instances:
     - name: "sonarr-main"
       url: "http://localhost:8989"
       api_key: "your-sonarr-api-key"
       enabled: true
+      sync_interval_hours: null # Null disables periodic sync
 ```
 
 ### Critical ARR Configuration
 
 **Mount Path Alignment:**
 
-The ARR `mount_path` must exactly match where your ARRs access the WebDAV mount:
+The root-level `mount_path` must exactly match where your ARRs access the WebDAV mount:
 
-- **AltMount Mount Path**: `/mnt/altmount` (where ARRs see WebDAV files)
+- **Root mount_path**: `/mnt/altmount` (where ARRs see WebDAV files)
 - **ARR Library Paths**: Must be under `/mnt/altmount/`
 - **Consistency**: All ARR instances must use the same mount path
+- **Configuration Location**: `mount_path` is at root config level, not inside arrs section
 
 **Example ARR Configuration:**
 

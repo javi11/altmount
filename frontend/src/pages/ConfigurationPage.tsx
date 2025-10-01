@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
+import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
@@ -37,12 +38,14 @@ import {
 } from "../hooks/useConfig";
 import type {
 	ArrsConfig,
+	AuthConfig,
 	ConfigSection,
 	HealthConfig,
 	ImportConfig,
 	LogFormData,
 	MetadataConfig,
-	RCloneVFSFormData,
+	RCloneMountFormData,
+	RCloneRCFormData,
 	SABnzbdConfig,
 	StreamingConfig,
 	WebDAVConfig,
@@ -156,15 +159,18 @@ export function ConfigurationPage() {
 		section: string,
 		data:
 			| WebDAVConfig
+			| AuthConfig
 			| StreamingConfig
 			| HealthConfig
 			| ImportConfig
 			| MetadataConfig
-			| RCloneVFSFormData
+			| RCloneRCFormData
+			| RCloneMountFormData
 			| LogFormData
 			| SABnzbdConfig
 			| ArrsConfig
-			| { mount_path: string },
+			| { mount_path: string }
+			| { rclone: RCloneMountFormData; mount_path: string },
 	) => {
 		try {
 			if (section === "webdav" && config) {
@@ -180,6 +186,11 @@ export function ConfigurationPage() {
 				if (portChanged) {
 					addRestartRequiredConfig("WebDAV Port");
 				}
+			} else if (section === "auth") {
+				await updateConfigSection.mutateAsync({
+					section: "auth",
+					config: { auth: data as AuthConfig },
+				});
 			} else if (section === "streaming") {
 				await updateConfigSection.mutateAsync({
 					section: "streaming",
@@ -215,7 +226,17 @@ export function ConfigurationPage() {
 			} else if (section === "rclone") {
 				await updateConfigSection.mutateAsync({
 					section: "rclone",
-					config: { rclone: data as RCloneVFSFormData },
+					config: { rclone: data as RCloneMountFormData },
+				});
+			} else if (section === "rclone_with_path") {
+				// Handle combined RClone settings + mount path to avoid validation errors
+				const combinedData = data as { rclone: RCloneMountFormData; mount_path: string };
+				await updateConfigSection.mutateAsync({
+					section: "rclone",
+					config: {
+						rclone: combinedData.rclone,
+						mount_path: combinedData.mount_path,
+					},
 				});
 			} else if (section === "mount_path") {
 				// For mount_path, we need to update the system section with mount_path
@@ -439,6 +460,14 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "auth" && (
+									<AuthConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{activeSection === "import" && (
 									<ImportConfigSection
 										config={config}
@@ -508,6 +537,7 @@ export function ConfigurationPage() {
 								{/* Placeholder for other sections */}
 								{![
 									"webdav",
+									"auth",
 									"import",
 									"metadata",
 									"streaming",

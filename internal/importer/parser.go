@@ -14,10 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/nntpcli"
 	"github.com/javi11/nntppool"
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
@@ -130,7 +132,8 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	// Process files in parallel using conc pool
 	for _, file := range validFiles {
 		concPool.Go(func() fileResult {
-			parsedFile, err := p.parseFile(file, n.Meta, n.Files)
+			parsedFile, err := p.parseFile(file, n.Meta, n.Files, parsed.Filename)
+
 			return fileResult{
 				parsedFile: parsedFile,
 				err:        err,
@@ -179,8 +182,22 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 }
 
 // parseFile processes a single file entry from the NZB
-func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile) (*ParsedFile, error) {
+func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile, nzbFilename string) (*ParsedFile, error) {
 	sort.Sort(file.Segments)
+
+	// Fetch yEnc headers from the first segment to get correct filename and file size, some nzbs have wrong filename in the segments
+	var yencFilename string
+	var yencFileSize int64
+	if p.poolManager != nil && p.poolManager.HasPool() && len(file.Segments) > 0 {
+		firstPartHeaders, err := p.fetchYencHeaders(file.Segments[0], nil)
+		if err != nil {
+			// If we can't fetch yEnc headers, log and continue with original sizes
+			return nil, fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
+		}
+
+		yencFilename = firstPartHeaders.FileName
+		yencFileSize = int64(firstPartHeaders.FileSize)
+	}
 
 	// Normalize segment sizes using yEnc PartSize headers if needed
 	// This handles cases where NZB segment sizes include yEnc encoding overhead
@@ -211,11 +228,17 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		}
 	}
 
-	// Calculate total size using the sophisticated logic
-	totalSize, err := p.calculateFileSize(file)
-	if err != nil {
-		// If we can't get the actual size, fallback to segment sum
-		totalSize = p.calculateSegmentSum(file)
+	// Use yEnc file size if available, otherwise calculate using the sophisticated logic
+	var totalSize int64
+	if yencFileSize > 0 {
+		totalSize = yencFileSize
+	} else {
+		var err error
+		totalSize, err = p.calculateFileSize(file)
+		if err != nil {
+			// If we can't get the actual size, fallback to segment sum
+			totalSize = p.calculateSegmentSum(file)
+		}
 	}
 
 	var (
@@ -231,12 +254,23 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		}
 	}
 
-	// Extract filename - priority: meta file_name > file.Filename
+	// Extract filename - priority: yEnc headers > meta file_name > file.Filename
 	enc := metapb.Encryption_NONE // Default to no encryption
 
-	filename := file.Filename
+	// Start with yEnc filename if available, otherwise use NZB filename
+	filename := yencFilename
+	if filename == "" || IsProbablyObfuscated(filename) {
+		filename = file.Filename
+	}
+
+	// Check metadata for overrides
 	if meta != nil {
 		if metaFilename, ok := meta["file_name"]; ok && metaFilename != "" {
+			if _, ok := meta["file_size"]; ok {
+				// This is a usenet-drive nzb with one file
+				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+			}
+
 			// This will add support for rclone encrypted files
 			if strings.HasSuffix(strings.ToLower(metaFilename), rclone.EncFileExtension) {
 				filename = metaFilename[:len(metaFilename)-4]
@@ -266,10 +300,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 
 		// Attempt deobfuscation using all available files in the NZB
 		if result := p.deobfuscator.DeobfuscateFilename(filename, allFiles, file); result.Success {
-			p.log.Info("Successfully deobfuscated filename",
-				"original", filename,
-				"deobfuscated", result.DeobfuscatedFilename,
-				"method", result.Method)
 			filename = result.DeobfuscatedFilename
 		} else {
 			p.log.Warn("Unable to deobfuscate filename",
@@ -341,7 +371,7 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 	defer cancel()
 
 	// Get a connection from the pool
-	r, err := cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+	r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get body reader: %w", err)
 	}
@@ -361,38 +391,63 @@ func (p *Parser) fetchActualFileSizeFromYencHeader(file nzbparser.NzbFile) (int6
 }
 
 // fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment
-func (p *Parser) fetchYencPartSize(segment nzbparser.NzbSegment, groups []string) (int64, error) {
+func (p *Parser) fetchYencHeaders(segment nzbparser.NzbSegment, groups []string) (nntpcli.YencHeaders, error) {
 	if p.poolManager == nil {
-		return 0, NewNonRetryableError("no pool manager available", nil)
+		return nntpcli.YencHeaders{}, NewNonRetryableError("no pool manager available", nil)
 	}
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
-		return 0, NewNonRetryableError("no connection pool available", err)
+		return nntpcli.YencHeaders{}, NewNonRetryableError("no connection pool available", err)
 	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	defer cancel()
+	var result nntpcli.YencHeaders
+	err = retry.Do(
+		func() error {
+			// Create context with timeout for each retry attempt
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+			defer cancel()
 
-	// Get a connection from the pool
-	r, err := cp.BodyReader(ctx, segment.ID, groups)
+			// Get a connection from the pool
+			r, err := cp.BodyReader(ctx, segment.ID, groups)
+			if err != nil {
+				return fmt.Errorf("failed to get body reader: %w", err)
+			}
+			defer r.Close()
+
+			if r == nil {
+				return fmt.Errorf("no connection pool available")
+			}
+
+			// Get yenc headers
+			h, err := r.GetYencHeaders()
+			if err != nil {
+				return fmt.Errorf("failed to get yenc headers: %w", err)
+			}
+
+			result = h
+			return nil
+		},
+		retry.Attempts(3),
+		retry.Delay(1*time.Second),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(5*time.Second),
+		retry.OnRetry(func(n uint, err error) {
+			p.log.Warn("Retrying fetchYencHeaders",
+				"attempt", n+1,
+				"segment_id", segment.ID,
+				"error", err)
+		}),
+	)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get body reader: %w", err)
-	}
-	defer r.Close()
-
-	// Get yenc headers
-	h, err := r.GetYencHeaders()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get yenc headers: %w", err)
+		return nntpcli.YencHeaders{}, err
 	}
 
-	if h.PartSize <= 0 {
-		return 0, fmt.Errorf("invalid part size from yenc header: %d", h.PartSize)
+	if result.PartSize <= 0 {
+		return nntpcli.YencHeaders{}, fmt.Errorf("invalid part size from yenc header: %d", result.PartSize)
 	}
 
-	return int64(h.PartSize), nil
+	return result, nil
 }
 
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
@@ -403,30 +458,25 @@ func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment) 
 		return nil
 	}
 
-	firstSegSize := segments[0].Bytes
-	secondSegSize := segments[1].Bytes
-
-	// If first and second segments have the same size, assume no yEnc overhead
-	if firstSegSize == secondSegSize {
-		p.log.Debug("Segments have consistent sizes, skipping yEnc normalization")
-		return nil
-	}
-
 	// Different segment sizes detected - fetch yEnc headers to get actual part sizes
 	// Fetch PartSize from first segment
-	firstPartSize, err := p.fetchYencPartSize(segments[0], nil)
+	firstPartHeaders, err := p.fetchYencHeaders(segments[0], nil)
 	if err != nil {
 		// If we can't fetch yEnc headers, log and continue with original sizes
 		return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
 	}
 
+	firstPartSize := int64(firstPartHeaders.PartSize)
+
 	// Fetch PartSize from last segment
 	lastSegmentIndex := len(segments) - 1
-	lastPartSize, err := p.fetchYencPartSize(segments[lastSegmentIndex], nil)
+	lastPartHeaders, err := p.fetchYencHeaders(segments[lastSegmentIndex], nil)
 	if err != nil {
 		// If we can't fetch yEnc headers, log and continue with original sizes
 		return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
 	}
+
+	lastPartSize := int64(lastPartHeaders.PartSize)
 
 	// Override all segments except the last one with the first segment's PartSize
 	for i := 0; i < len(segments)-1; i++ {

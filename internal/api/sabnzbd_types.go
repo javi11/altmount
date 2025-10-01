@@ -80,6 +80,7 @@ type SABnzbdHistorySlot struct {
 	NzbAvg       string   `json:"nzb_avg"`
 	Script_log   string   `json:"script_log"`
 	Script_line  string   `json:"script_line"`
+	DuplicateKey string   `json:"duplicate_key"`
 	Fail_message string   `json:"fail_message"`
 	Url_info     string   `json:"url_info"`
 	Bytes        int64    `json:"bytes"`
@@ -394,6 +395,7 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, mountPath s
 		Completetime: completetime,
 		NzbAvg:       "",
 		Script_log:   "",
+		DuplicateKey: name,
 		Script_line:  "",
 		Fail_message: failMessage,
 		Url_info:     "",

@@ -225,6 +225,8 @@ export class APIClient {
 		status?: string;
 		since?: string;
 		search?: string;
+		sort_by?: string;
+		sort_order?: "asc" | "desc";
 	}) {
 		const searchParams = new URLSearchParams();
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
@@ -232,6 +234,8 @@ export class APIClient {
 		if (params?.status) searchParams.set("status", params.status);
 		if (params?.since) searchParams.set("since", params.since);
 		if (params?.search) searchParams.set("search", params.search);
+		if (params?.sort_by) searchParams.set("sort_by", params.sort_by);
+		if (params?.sort_order) searchParams.set("sort_order", params.sort_order);
 
 		const query = searchParams.toString();
 		return this.requestWithMeta<FileHealth[]>(`/health${query ? `?${query}` : ""}`);
@@ -254,6 +258,18 @@ export class APIClient {
 			file_paths: string[];
 			deleted_at: string;
 		}>("/health/bulk/delete", {
+			method: "POST",
+			body: JSON.stringify({ file_paths: filePaths }),
+		});
+	}
+
+	async restartBulkHealthItems(filePaths: string[]) {
+		return this.request<{
+			message: string;
+			restarted_count: number;
+			file_paths: string[];
+			restarted_at: string;
+		}>("/health/bulk/restart", {
 			method: "POST",
 			body: JSON.stringify({ file_paths: filePaths }),
 		});
@@ -341,6 +357,28 @@ export class APIClient {
 		return this.request<FileMetadata>(`/files/info?path=${encodeURIComponent(path)}`);
 	}
 
+	async exportMetadataToNZB(path: string): Promise<Blob> {
+		const url = `${this.baseURL}/files/export-nzb?path=${encodeURIComponent(path)}`;
+
+		const response = await fetch(url, {
+			credentials: "include",
+			headers: {
+				Accept: "application/x-nzb",
+			},
+		});
+
+		if (!response.ok) {
+			const errorData = await response.json();
+			throw new APIError(
+				response.status,
+				errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+				errorData.details || "",
+			);
+		}
+
+		return response.blob();
+	}
+
 	// Authentication endpoints
 	async getCurrentUser() {
 		return this.request<User>("/user");
@@ -403,6 +441,10 @@ export class APIClient {
 		return this.request<{ registration_enabled: boolean; user_count: number }>(
 			"/auth/registration-status",
 		);
+	}
+
+	async getAuthConfig() {
+		return this.request<{ login_required: boolean }>("/auth/config");
 	}
 
 	// Configuration endpoints

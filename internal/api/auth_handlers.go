@@ -197,6 +197,23 @@ func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 	})
 }
 
+// handleGetAuthConfig returns authentication configuration (public endpoint)
+func (s *Server) handleGetAuthConfig(c *fiber.Ctx) error {
+	cfg := s.configManager.GetConfig()
+	loginRequired := true // Default to true if not set
+	if cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+
+	response := fiber.Map{
+		"login_required": loginRequired,
+	}
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
 // handleAuthUser returns current authenticated user information
 func (s *Server) handleAuthUser(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
