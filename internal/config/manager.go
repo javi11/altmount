@@ -267,11 +267,12 @@ type ArrsConfig struct {
 
 // ArrsInstanceConfig represents a single arrs instance configuration
 type ArrsInstanceConfig struct {
-	Name              string `yaml:"name" mapstructure:"name" json:"name"`
-	URL               string `yaml:"url" mapstructure:"url" json:"url"`
-	APIKey            string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
-	Enabled           *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	SyncIntervalHours *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
+	Name              string  `yaml:"name" mapstructure:"name" json:"name"`
+	URL               string  `yaml:"url" mapstructure:"url" json:"url"`
+	APIKey            string  `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Enabled           *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	SyncIntervalHours *int    `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
+	RootFolder        *string `yaml:"root_folder" mapstructure:"root_folder" json:"root_folder,omitempty"`
 }
 
 // DeepCopy returns a deep copy of the configuration
@@ -389,6 +390,12 @@ func (c *Config) DeepCopy() *Config {
 			} else {
 				ic.SyncIntervalHours = nil
 			}
+			if inst.RootFolder != nil {
+				rf := *inst.RootFolder
+				ic.RootFolder = &rf
+			} else {
+				ic.RootFolder = nil
+			}
 
 			copyCfg.Arrs.RadarrInstances[i] = ic
 		}
@@ -412,6 +419,12 @@ func (c *Config) DeepCopy() *Config {
 				ic.SyncIntervalHours = &iv
 			} else {
 				ic.SyncIntervalHours = nil
+			}
+			if inst.RootFolder != nil {
+				rf := *inst.RootFolder
+				ic.RootFolder = &rf
+			} else {
+				ic.RootFolder = nil
 			}
 
 			copyCfg.Arrs.SonarrInstances[i] = ic

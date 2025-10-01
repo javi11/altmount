@@ -188,6 +188,24 @@ export function ArrsInstanceCard({
 							</div>
 						)}
 					</fieldset>
+
+					<fieldset className="fieldset md:col-span-2">
+						<legend className="fieldset-legend">Root Folder (Optional)</legend>
+						<input
+							type="text"
+							className="input"
+							value={instance.root_folder || ""}
+							onChange={(e) => handleInstanceChange("root_folder", e.target.value || undefined)}
+							placeholder="/media"
+							disabled={isReadOnly}
+						/>
+						<p className="label">
+							Optional: Root folder path as seen by this Arr instance. Use this if your Arr sees
+							files at a different path due to mergefs/unionfs. For example, if your mount is at{" "}
+							<code>/mnt/altmount</code> but your Arr uses <code>/media</code>, enter{" "}
+							<code>/media</code> here. Leave empty to use the global mount path.
+						</p>
+					</fieldset>
 				</div>
 
 				<div className="mt-4">

@@ -518,6 +518,7 @@ export interface ArrsInstanceConfig {
 	api_key: string;
 	enabled: boolean;
 	sync_interval_hours: number;
+	root_folder?: string;
 }
 
 // Database-backed arrs instance (includes real ID from database)
