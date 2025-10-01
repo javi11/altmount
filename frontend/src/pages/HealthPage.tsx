@@ -580,7 +580,7 @@ export function HealthPage() {
 							>
 								<option value="">All Statuses</option>
 								<option value="pending">Pending</option>
-								<option value="processing">Processing</option>
+								<option value="checking">Checking</option>
 								<option value="healthy">Healthy</option>
 								<option value="partial">Partial</option>
 								<option value="corrupted">Corrupted</option>
