@@ -439,7 +439,7 @@ func (p *Parser) fetchYencHeaders(segment nzbparser.NzbSegment, groups []string)
 		retry.DelayType(retry.BackOffDelay),
 		retry.MaxDelay(5*time.Second),
 		retry.OnRetry(func(n uint, err error) {
-			p.log.Warn("Retrying fetchYencHeaders",
+			p.log.Debug("Retrying fetchYencHeaders",
 				"attempt", n+1,
 				"segment_id", segment.ID,
 				"error", err)
