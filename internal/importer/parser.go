@@ -269,6 +269,12 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 			if _, ok := meta["file_size"]; ok {
 				// This is a usenet-drive nzb with one file
 				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+				fileExt := filepath.Ext(metaFilename)
+				if fileExt != "" {
+					if fe, ok := meta["file_extension"]; ok {
+						metaFilename = metaFilename + fe
+					}
+				}
 			}
 
 			// This will add support for rclone encrypted files
