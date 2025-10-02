@@ -636,7 +636,7 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	// Create in mount path
 	mountDir := filepath.Join(config.Metadata.RootPath, config.SABnzbd.CompleteDir, categoryPath)
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
-		return fmt.Errorf("failed to create mount directory: %w", err)
+		return fmt.Errorf("failed to create category mount directory: %w", err)
 	}
 
 	// Create in temp path

@@ -49,7 +49,9 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 	m.logger.InfoContext(ctx, "Creating mount directory", "provider", provider, "path", mountPath)
 	// Create mount directory
 	if err := os.MkdirAll(mountPath, 0755); err != nil {
-		return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+		}
 	}
 
 	// Check if already mounted
