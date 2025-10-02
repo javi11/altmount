@@ -326,3 +326,11 @@ func (ms *MetadataService) WalkMetadata(walkFunc func(virtualPath string, metada
 		return nil
 	})
 }
+
+func (ms *MetadataService) CreateDirectory(name string) error {
+	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
+}
+
+func (ms *MetadataService) CreateDirectoryAll(name string) error {
+	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
+}
