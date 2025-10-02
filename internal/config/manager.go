@@ -1110,6 +1110,20 @@ func LoadConfig(configFile string) (*Config, error) {
 		config.RClone.CacheDir = filepath.Join(configDir, "cache")
 	}
 
+	// Check for PORT environment variable override
+	if portEnv := os.Getenv("PORT"); portEnv != "" {
+		port := 0
+		_, err := fmt.Sscanf(portEnv, "%d", &port)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PORT environment variable '%s': must be a number", portEnv)
+		}
+		if port <= 0 || port > 65535 {
+			return nil, fmt.Errorf("invalid PORT environment variable %d: must be between 1 and 65535", port)
+		}
+		config.WebDAV.Port = port
+		fmt.Printf("Using PORT from environment variable: %d\n", port)
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)

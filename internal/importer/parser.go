@@ -269,6 +269,12 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 			if _, ok := meta["file_size"]; ok {
 				// This is a usenet-drive nzb with one file
 				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+				fileExt := filepath.Ext(metaFilename)
+				if fileExt != "" {
+					if fe, ok := meta["file_extension"]; ok {
+						metaFilename = metaFilename + fe
+					}
+				}
 			}
 
 			// This will add support for rclone encrypted files
@@ -433,7 +439,7 @@ func (p *Parser) fetchYencHeaders(segment nzbparser.NzbSegment, groups []string)
 		retry.DelayType(retry.BackOffDelay),
 		retry.MaxDelay(5*time.Second),
 		retry.OnRetry(func(n uint, err error) {
-			p.log.Warn("Retrying fetchYencHeaders",
+			p.log.Debug("Retrying fetchYencHeaders",
 				"attempt", n+1,
 				"segment_id", segment.ID,
 				"error", err)

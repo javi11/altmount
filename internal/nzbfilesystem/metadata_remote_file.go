@@ -908,3 +908,11 @@ func (mrf *MetadataRemoteFile) isValidEmptyDirectory(normalizedPath string) bool
 	// Recursively check if parent could be a valid empty directory
 	return mrf.isValidEmptyDirectory(parentDir)
 }
+
+func (mrf *MetadataRemoteFile) Mkdir(name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
+}
+
+func (mrf *MetadataRemoteFile) MkdirAll(name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
+}

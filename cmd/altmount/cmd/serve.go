@@ -562,9 +562,12 @@ func setupSPARoutes(app *fiber.App) {
 	// Cli mode - use embedded filesystem
 	buildFS, err := frontend.GetBuildFS()
 	if err != nil {
-		// Docker or development
-		app.Static("/", frontendPath)
-		app.Static("*", frontendPath+"/index.html")
+		// Docker or development - serve static files with SPA fallback
+		app.All("/*", filesystem.New(filesystem.Config{
+			Root:         http.Dir(frontendPath),
+			NotFoundFile: "index.html",
+			Index:        "index.html",
+		}))
 	} else {
 		// For embedded filesystem, we'll handle it differently below
 		app.All("/*", filesystem.New(filesystem.Config{

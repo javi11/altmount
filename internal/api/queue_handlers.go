@@ -452,7 +452,7 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 
 	// Default to 24 hours ago if not specified
 	if olderThan == nil {
-		defaultTime := time.Now().Add(-24 * time.Hour)
+		defaultTime := time.Now()
 		olderThan = &defaultTime
 	}
 

@@ -49,7 +49,9 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 	m.logger.InfoContext(ctx, "Creating mount directory", "provider", provider, "path", mountPath)
 	// Create mount directory
 	if err := os.MkdirAll(mountPath, 0755); err != nil {
-		return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+		}
 	}
 
 	// Check if already mounted
@@ -66,7 +68,7 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 	if exists && !existingMount.Mounted {
 		err := m.forceUnmountPath(mountPath)
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to force unmount path", "err", err, "provider", provider, "path", mountPath)
+			slog.InfoContext(ctx, "Nothing to unmount", "err", err, "provider", provider, "path", mountPath)
 		}
 	}
 
@@ -81,8 +83,8 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 		"mountPoint": mountPath,
 	}
 	mountOpt := map[string]interface{}{
-		"AllowNonEmpty": true,
-		"AllowOther":    true,
+		"AllowNonEmpty": cfg.RClone.AllowNonEmpty,
+		"AllowOther":    cfg.RClone.AllowOther,
 		"DebugFUSE":     false,
 		"DeviceName":    provider,
 		"VolumeName":    provider,
