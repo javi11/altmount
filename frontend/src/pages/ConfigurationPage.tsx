@@ -260,6 +260,11 @@ export function ConfigurationPage() {
 					section: "health",
 					config: { health: data as HealthConfig },
 				});
+			} else if (section === "log") {
+				await updateConfigSection.mutateAsync({
+					section: "system",
+					config: { log: data as LogFormData },
+				});
 			}
 		} catch (error) {
 			// If update fails, don't show restart banner
