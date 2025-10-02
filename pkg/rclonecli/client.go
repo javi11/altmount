@@ -66,7 +66,7 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 	if exists && !existingMount.Mounted {
 		err := m.forceUnmountPath(mountPath)
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to force unmount path", "err", err, "provider", provider, "path", mountPath)
+			slog.InfoContext(ctx, "Nothing to unmount", "err", err, "provider", provider, "path", mountPath)
 		}
 	}
 
