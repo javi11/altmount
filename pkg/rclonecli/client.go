@@ -81,8 +81,8 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 		"mountPoint": mountPath,
 	}
 	mountOpt := map[string]interface{}{
-		"AllowNonEmpty": true,
-		"AllowOther":    true,
+		"AllowNonEmpty": cfg.RClone.AllowNonEmpty,
+		"AllowOther":    cfg.RClone.AllowOther,
 		"DebugFUSE":     false,
 		"DeviceName":    provider,
 		"VolumeName":    provider,
