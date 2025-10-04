@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
