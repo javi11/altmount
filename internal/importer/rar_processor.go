@@ -149,8 +149,17 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 
 	var candidates []candidateFile
 
+	rh.log.Debug("Analyzing RAR files for first part detection",
+		"total_files", len(rarFileNames),
+		"filenames", rarFileNames)
+
 	for _, filename := range rarFileNames {
 		base, part := rh.parseRarFilename(filename)
+
+		rh.log.Debug("Parsed RAR filename",
+			"filename", filename,
+			"base", base,
+			"part", part)
 
 		// Only consider files that are actually first parts (part 0)
 		if part != 0 {
@@ -169,6 +178,9 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 	}
 
 	if len(candidates) == 0 {
+		rh.log.Error("No valid first RAR part found",
+			"total_files", len(rarFileNames),
+			"files_checked", rarFileNames)
 		return "", NewNonRetryableError("no valid first RAR part found in archive", nil)
 	}
 
