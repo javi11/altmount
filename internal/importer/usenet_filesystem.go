@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,6 +32,7 @@ type UsenetFileSystem struct {
 	files          []ParsedFile
 	maxWorkers     int
 	maxCacheSizeMB int
+	log            *slog.Logger
 }
 
 // UsenetFile implements fs.File and io.Seeker for reading individual RAR parts from Usenet
@@ -55,13 +57,14 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, files []ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, files []ParsedFile, maxWorkers int, maxCacheSizeMB int, log *slog.Logger) *UsenetFileSystem {
 	return &UsenetFileSystem{
 		ctx:            ctx,
 		cp:             cp,
 		files:          files,
 		maxWorkers:     maxWorkers,
 		maxCacheSizeMB: maxCacheSizeMB,
+		log:            log,
 	}
 }
 
@@ -69,11 +72,18 @@ func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, 
 func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	name = path.Clean(name)
 
+	ufs.log.Debug("rarlist requesting file",
+		"requested_name", name,
+		"available_files_count", len(ufs.files))
+
 	// Find the corresponding RAR file
 	// Try multiple matching strategies to handle bracketed filenames
 	for _, file := range ufs.files {
 		// Exact match
 		if file.Filename == name || path.Base(file.Filename) == name {
+			ufs.log.Debug("File matched (exact)",
+				"requested", name,
+				"matched_file", file.Filename)
 			return &UsenetFile{
 				name:           name,
 				file:           &file,
@@ -96,6 +106,10 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 			if lastBracketStart >= 0 && lastBracketEnd > lastBracketStart {
 				innerFilename := file.Filename[lastBracketStart+1 : lastBracketEnd]
 				if innerFilename == name || path.Base(innerFilename) == name {
+					ufs.log.Debug("File matched (bracket extraction)",
+						"requested", name,
+						"matched_file", file.Filename,
+						"extracted_name", innerFilename)
 					return &UsenetFile{
 						name:           name,
 						file:           &file,
@@ -111,6 +125,16 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 			}
 		}
 	}
+
+	ufs.log.Warn("rarlist requested file not found",
+		"requested", name,
+		"available_files", func() []string {
+			names := make([]string, len(ufs.files))
+			for i, f := range ufs.files {
+				names[i] = f.Filename
+			}
+			return names
+		}())
 
 	return nil, &fs.PathError{
 		Op:   "open",

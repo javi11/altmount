@@ -86,7 +86,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
+	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB, rh.log)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortFiles))
