@@ -69,7 +69,9 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	name = path.Clean(name)
 
 	// Find the corresponding RAR file
+	// Try multiple matching strategies to handle bracketed filenames
 	for _, file := range ufs.files {
+		// Exact match
 		if file.Filename == name || path.Base(file.Filename) == name {
 			return &UsenetFile{
 				name:           name,
@@ -82,6 +84,30 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 				position:       0,
 				closed:         false,
 			}, nil
+		}
+		
+		// Try matching by extracting filename from brackets
+		// Handle cases like [PREFIX]-[MORE]-[actual.file.r00]
+		if strings.Contains(file.Filename, "[") && strings.Contains(file.Filename, "]") {
+			// Extract the last bracketed section
+			lastBracketStart := strings.LastIndex(file.Filename, "[")
+			lastBracketEnd := strings.LastIndex(file.Filename, "]")
+			if lastBracketStart >= 0 && lastBracketEnd > lastBracketStart {
+				innerFilename := file.Filename[lastBracketStart+1 : lastBracketEnd]
+				if innerFilename == name || path.Base(innerFilename) == name {
+					return &UsenetFile{
+						name:           name,
+						file:           &file,
+						cp:             ufs.cp,
+						ctx:            ufs.ctx,
+						maxWorkers:     ufs.maxWorkers,
+						maxCacheSizeMB: ufs.maxCacheSizeMB,
+						size:           file.Size,
+						position:       0,
+						closed:         false,
+					}, nil
+				}
+			}
 		}
 	}
 
@@ -98,12 +124,31 @@ func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 	path = filepath.Clean(path)
 
 	// Find the corresponding RAR file
+	// Try multiple matching strategies to handle bracketed filenames
 	for _, file := range ufs.files {
+		// Exact match
 		if file.Filename == path || filepath.Base(file.Filename) == path {
 			return &UsenetFileInfo{
 				name: filepath.Base(file.Filename),
 				size: file.Size,
 			}, nil
+		}
+		
+		// Try matching by extracting filename from brackets
+		// Handle cases like [PREFIX]-[MORE]-[actual.file.r00]
+		if strings.Contains(file.Filename, "[") && strings.Contains(file.Filename, "]") {
+			// Extract the last bracketed section
+			lastBracketStart := strings.LastIndex(file.Filename, "[")
+			lastBracketEnd := strings.LastIndex(file.Filename, "]")
+			if lastBracketStart >= 0 && lastBracketEnd > lastBracketStart {
+				innerFilename := file.Filename[lastBracketStart+1 : lastBracketEnd]
+				if innerFilename == path || filepath.Base(innerFilename) == path {
+					return &UsenetFileInfo{
+						name: filepath.Base(innerFilename),
+						size: file.Size,
+					}, nil
+				}
+			}
 		}
 	}
 

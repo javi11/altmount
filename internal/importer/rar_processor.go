@@ -105,6 +105,16 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		"total_parts", len(sortFiles),
 		"rar_files", len(rarFiles))
 
+	// Log the filenames available in the filesystem for rarlist matching
+	rh.log.Debug("UsenetFileSystem initialized with RAR files",
+		"main_file", mainRarFile,
+		"total_files", len(sortFiles))
+	for i, f := range sortFiles {
+		rh.log.Debug("UFS file entry",
+			"index", i,
+			"filename", f.Filename)
+	}
+
 	aggregatedFiles, err := rarlist.ListFilesFS(ufs, mainRarFile)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to aggregate RAR files", err)
