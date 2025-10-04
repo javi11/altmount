@@ -261,22 +261,7 @@ func (rh *rarProcessor) getRarFilePriority(filename string) int {
 // parseRarFilename extracts base name and part number from RAR filename
 // This is a simplified version of the logic from processor.go
 func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int) {
-	// Handle filenames with brackets like [PRiVATE]-[WtFnZb]-[actual.file.r00]
-	// Extract the last bracketed section if it contains a RAR extension
-	if lastBracket := strings.LastIndex(filename, "["); lastBracket >= 0 {
-		if closeBracket := strings.Index(filename[lastBracket:], "]"); closeBracket >= 0 {
-			innerFilename := filename[lastBracket+1 : lastBracket+closeBracket]
-			// Check if this looks like a RAR filename
-			lowerInner := strings.ToLower(innerFilename)
-			if strings.HasSuffix(lowerInner, ".rar") ||
-				strings.Contains(lowerInner, ".r0") ||
-				strings.Contains(lowerInner, ".r1") ||
-				strings.Contains(lowerInner, ".part") {
-				filename = innerFilename
-			}
-		}
-	}
-	
+	// Note: Filenames are already normalized by renameRarFilesAndSort before this is called
 	lowerFilename := strings.ToLower(filename)
 
 	// Pattern 1: filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
