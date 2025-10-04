@@ -77,7 +77,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	// Rename RAR files to match the first file's base name that will allow parse rar that have different files name
-	sortFiles := renameRarFilesAndSort(rarFiles)
+	sortFiles := renameRarFilesAndSort(rarFiles, rh.log)
 
 	cp, err := rh.poolManager.GetPool()
 	if err != nil {
@@ -496,6 +496,22 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 // extractBaseFilename extracts the base filename without the part suffix
 // This works with the original patterns (including leading zeros) to properly extract the base
 func extractBaseFilename(filename string) string {
+	// Handle filenames with brackets like [PRiVATE]-[WtFnZb]-[actual.file.r00]
+	// Extract the last bracketed section if it contains a RAR extension
+	if lastBracket := strings.LastIndex(filename, "["); lastBracket >= 0 {
+		if closeBracket := strings.Index(filename[lastBracket:], "]"); closeBracket >= 0 {
+			innerFilename := filename[lastBracket+1 : lastBracket+closeBracket]
+			// Check if this looks like a RAR filename
+			lowerInner := strings.ToLower(innerFilename)
+			if strings.HasSuffix(lowerInner, ".rar") ||
+				strings.Contains(lowerInner, ".r0") ||
+				strings.Contains(lowerInner, ".r1") ||
+				strings.Contains(lowerInner, ".part") {
+				filename = innerFilename
+			}
+		}
+	}
+
 	// Try each pattern and extract the base name (group 1)
 	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
 		return matches[1]
@@ -532,10 +548,14 @@ func stripLeadingZeros(s string) string {
 	return s[i:]
 }
 
-func renameRarFilesAndSort(rarFiles []ParsedFile) []ParsedFile {
+func renameRarFilesAndSort(rarFiles []ParsedFile, log *slog.Logger) []ParsedFile {
 	// Get the base name of the first RAR file (without extension)
 	// We need to use the original suffix (with leading zeros) to properly extract the base name
 	firstFileBase := extractBaseFilename(rarFiles[0].Filename)
+	
+	log.Debug("Normalizing RAR filenames",
+		"base_extracted", firstFileBase,
+		"original_first_file", rarFiles[0].Filename)
 
 	// Rename all RAR files to match the base name of the first file while preserving original part naming
 	for i := range rarFiles {
@@ -545,7 +565,16 @@ func renameRarFilesAndSort(rarFiles []ParsedFile) []ParsedFile {
 		partSuffix := getPartSuffix(originalFileName)
 
 		// Construct new filename with first file's base name and original part suffix
-		rarFiles[i].Filename = firstFileBase + partSuffix
+		newFilename := firstFileBase + partSuffix
+		
+		// Log if we're actually normalizing the filename (removing brackets, etc.)
+		if originalFileName != newFilename {
+			log.Debug("Normalized RAR filename",
+				"original", originalFileName,
+				"normalized", newFilename)
+		}
+		
+		rarFiles[i].Filename = newFilename
 	}
 
 	// Sort files by part number
@@ -559,15 +588,33 @@ func renameRarFilesAndSort(rarFiles []ParsedFile) []ParsedFile {
 }
 
 func getPartSuffix(originalFileName string) string {
-	if matches := partPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
+	filename := originalFileName
+	
+	// Handle filenames with brackets like [PRiVATE]-[WtFnZb]-[actual.file.r00]
+	// Extract the last bracketed section if it contains a RAR extension
+	if lastBracket := strings.LastIndex(filename, "["); lastBracket >= 0 {
+		if closeBracket := strings.Index(filename[lastBracket:], "]"); closeBracket >= 0 {
+			innerFilename := filename[lastBracket+1 : lastBracket+closeBracket]
+			// Check if this looks like a RAR filename
+			lowerInner := strings.ToLower(innerFilename)
+			if strings.HasSuffix(lowerInner, ".rar") ||
+				strings.Contains(lowerInner, ".r0") ||
+				strings.Contains(lowerInner, ".r1") ||
+				strings.Contains(lowerInner, ".part") {
+				filename = innerFilename
+			}
+		}
+	}
+	
+	if matches := partPatternNumber.FindStringSubmatch(filename); len(matches) > 1 {
 		return fmt.Sprintf(".part%s.rar", stripLeadingZeros(matches[1]))
-	} else if matches := rPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
+	} else if matches := rPatternNumber.FindStringSubmatch(filename); len(matches) > 1 {
 		return fmt.Sprintf(".r%s", matches[1])
-	} else if matches := numericPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
+	} else if matches := numericPatternNumber.FindStringSubmatch(filename); len(matches) > 1 {
 		return fmt.Sprintf(".%s", matches[1])
 	}
 
-	return filepath.Ext(originalFileName)
+	return filepath.Ext(filename)
 }
 
 // extractRarPartNumber extracts numeric part from RAR extension for sorting
