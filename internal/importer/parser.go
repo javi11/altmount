@@ -191,7 +191,11 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 	if p.poolManager != nil && p.poolManager.HasPool() && len(file.Segments) > 0 {
 		firstPartHeaders, err := p.fetchYencHeaders(file.Segments[0], nil)
 		if err != nil {
-			// If we can't fetch yEnc headers, log and continue with original sizes
+			// Check if articles are missing from all providers - this means NZB is incomplete/expired
+			if errors.Is(err, nntppool.ErrArticleNotFoundInProviders) {
+				return nil, NewNonRetryableError("failed to fetch yEnc headers: missing articles in all providers", err)
+			}
+			// For other errors (parse errors, etc), log and continue with NZB metadata
 			p.log.Debug("Failed to fetch yEnc headers, continuing with NZB metadata",
 				"filename", file.Filename,
 				"error", err)
