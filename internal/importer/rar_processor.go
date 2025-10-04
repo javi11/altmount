@@ -118,6 +118,23 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		"main_file", mainRarFile,
 		"files_found", len(aggregatedFiles))
 
+	// Log detailed information about the aggregated files
+	for i, af := range aggregatedFiles {
+		rh.log.Debug("RAR archive file details",
+			"index", i,
+			"name", af.Name,
+			"total_packed_size", af.TotalPackedSize,
+			"parts_count", len(af.Parts))
+		for j, part := range af.Parts {
+			rh.log.Debug("RAR archive file part",
+				"file_index", i,
+				"part_index", j,
+				"path", part.Path,
+				"data_offset", part.DataOffset,
+				"packed_size", part.PackedSize)
+		}
+	}
+
 	// Convert rarlist results to RarContent
 	rarContents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
 	if err != nil {
@@ -308,6 +325,11 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 	out := make([]rarContent, 0, len(aggregatedFiles))
 
 	for _, af := range aggregatedFiles {
+		rh.log.Debug("Converting aggregated file",
+			"name", af.Name,
+			"total_packed_size", af.TotalPackedSize,
+			"parts_count", len(af.Parts))
+
 		rc := rarContent{
 			InternalPath: af.Name,
 			Filename:     filepath.Base(af.Name),
@@ -319,6 +341,10 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 
 		for partIdx, part := range af.Parts {
 			if part.PackedSize <= 0 {
+				rh.log.Debug("Skipping part with zero or negative size",
+					"file", af.Name,
+					"part_index", partIdx,
+					"packed_size", part.PackedSize)
 				continue
 			}
 
@@ -331,6 +357,15 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 				continue
 			}
 
+			rh.log.Debug("Processing RAR part",
+				"file", af.Name,
+				"part_index", partIdx,
+				"part_path", part.Path,
+				"data_offset", part.DataOffset,
+				"packed_size", part.PackedSize,
+				"rar_file_size", pf.Size,
+				"segments_count", len(pf.Segments))
+
 			// Extract the slice of this part's bytes that belong to the aggregated file.
 			sliced, covered, err := slicePartSegments(pf.Segments, part.DataOffset, part.PackedSize)
 			if err != nil {
@@ -340,6 +375,13 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 			// Append maintaining order: parts order then segment order within part.
 			fileSegments = append(fileSegments, sliced...)
 			accumulated += covered
+
+			rh.log.Debug("Part processed",
+				"file", af.Name,
+				"part_index", partIdx,
+				"covered", covered,
+				"accumulated", accumulated,
+				"sliced_segments", len(sliced))
 
 			if covered != part.PackedSize {
 				rh.log.Warn("Part coverage mismatch", "file", af.Name, "part_index", partIdx, "expected", part.PackedSize, "covered", covered, "data_offset", part.DataOffset)
@@ -351,6 +393,14 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 		for _, s := range fileSegments {
 			sum += (s.EndOffset - s.StartOffset + 1)
 		}
+
+		rh.log.Debug("File conversion complete",
+			"name", af.Name,
+			"total_packed_size", af.TotalPackedSize,
+			"segments_sum", sum,
+			"accumulated", accumulated,
+			"total_segments", len(fileSegments))
+
 		if sum != af.TotalPackedSize {
 			rh.log.Warn("Aggregated file coverage mismatch", "file", af.Name, "expected", af.TotalPackedSize, "got", sum)
 		}
