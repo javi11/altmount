@@ -192,11 +192,13 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		firstPartHeaders, err := p.fetchYencHeaders(file.Segments[0], nil)
 		if err != nil {
 			// If we can't fetch yEnc headers, log and continue with original sizes
-			return nil, fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
+			p.log.Debug("Failed to fetch yEnc headers, continuing with NZB metadata",
+				"filename", file.Filename,
+				"error", err)
+		} else {
+			yencFilename = firstPartHeaders.FileName
+			yencFileSize = int64(firstPartHeaders.FileSize)
 		}
-
-		yencFilename = firstPartHeaders.FileName
-		yencFileSize = int64(firstPartHeaders.FileSize)
 	}
 
 	// Normalize segment sizes using yEnc PartSize headers if needed
@@ -309,7 +311,17 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 	}
 
 	// Check if this is a RAR file
-	isRarArchive := rarPattern.MatchString(filename)
+	// Check multiple filename sources to ensure we catch RAR archives
+	// even when yEnc headers provide different names
+	isRarArchive := rarPattern.MatchString(filename) ||
+		rarPattern.MatchString(file.Filename) ||
+		(yencFilename != "" && rarPattern.MatchString(yencFilename))
+
+	p.log.Debug("RAR detection",
+		"final_filename", filename,
+		"nzb_filename", file.Filename,
+		"yenc_filename", yencFilename,
+		"is_rar_archive", isRarArchive)
 
 	parsedFile := &ParsedFile{
 		Subject:      file.Subject,
