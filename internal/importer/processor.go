@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -300,8 +301,10 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			"parts", len(rarFiles),
 			"rar_dir", rarDirPath)
 
-		// Analyze RAR content using the new RAR handler
-		ctx := context.Background()
+		// Analyze RAR content using the new RAR handler with timeout
+		// Use a generous timeout for large RAR archives
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
 		rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, rarFiles)
 		if err != nil {
 			proc.log.Error("Failed to analyze RAR archive content",

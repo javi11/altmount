@@ -101,11 +101,28 @@ func (b *usenetReader) Close() error {
 	b.cancel()
 	close(b.init)
 
+	// Wait synchronously with timeout to prevent goroutine leaks
+	// Use a separate goroutine to detect when cleanup completes
+	done := make(chan struct{})
 	go func() {
 		b.wg.Wait()
+		close(done)
+	}()
+
+	// Wait for cleanup with reasonable timeout
+	select {
+	case <-done:
+		// Cleanup completed successfully
 		_ = b.rg.Clear()
 		b.rg = segmentRange{}
-	}()
+	case <-time.After(30 * time.Second):
+		// Timeout waiting for downloads to complete
+		// This prevents hanging but logs the issue
+		b.log.Warn("Timeout waiting for downloads to complete during close, potential goroutine leak")
+		// Still attempt to clear resources
+		_ = b.rg.Clear()
+		b.rg = segmentRange{}
+	}
 
 	return nil
 }
@@ -303,6 +320,14 @@ func (b *usenetReader) downloadManager(
 			b.mu.Lock()
 			segmentsToQueue := []int{}
 			for i := b.nextToDownload; i < targetDownload; i++ {
+				// Check for context cancellation frequently during segment selection
+				select {
+				case <-ctx.Done():
+					b.mu.Unlock()
+					return
+				default:
+				}
+
 				if !b.downloadingSegments[i] {
 					b.downloadingSegments[i] = true
 					segmentsToQueue = append(segmentsToQueue, i)
@@ -377,9 +402,20 @@ func (b *usenetReader) downloadManager(
 			}
 		}
 
-		// Wait for all downloads to complete
-		if err := pool.Wait(); err != nil {
-			b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
+		// Wait for all downloads to complete with context awareness
+		// Use a goroutine to detect when pool.Wait() completes
+		done := make(chan error, 1)
+		go func() {
+			done <- pool.Wait()
+		}()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
+			}
+		case <-ctx.Done():
+			b.log.WarnContext(ctx, "Download manager cancelled while waiting for pool to complete")
 			return
 		}
 	case <-ctx.Done():
