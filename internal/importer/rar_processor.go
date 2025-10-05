@@ -262,10 +262,14 @@ func (rh *rarProcessor) getRarFilePriority(filename string) int {
 // This is a simplified version of the logic from processor.go
 func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int) {
 	// Note: Filenames are already normalized by renameRarFilesAndSort before this is called
-	lowerFilename := strings.ToLower(filename)
+	
+	// Strip trailing ] bracket if present (malformed NZB filenames)
+	// E.g., "file.r31]" becomes "file.r31"
+	cleanFilename := strings.TrimSuffix(filename, "]")
+	lowerFilename := strings.ToLower(cleanFilename)
 
 	// Pattern 1: filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
-	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 2 {
+	if matches := partPattern.FindStringSubmatch(cleanFilename); len(matches) > 2 {
 		base = matches[1]
 		if partNum := parseInt(matches[2]); partNum >= 0 {
 			// Convert 1-based part numbers to 0-based (part001 becomes 0, part002 becomes 1)
@@ -278,12 +282,12 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 
 	// Pattern 2: filename.rar (first part)
 	if strings.HasSuffix(lowerFilename, ".rar") {
-		base = strings.TrimSuffix(filename, filepath.Ext(filename))
+		base = strings.TrimSuffix(cleanFilename, filepath.Ext(cleanFilename))
 		return base, 0 // First part
 	}
 
 	// Pattern 3: filename.r## or filename.r### (e.g., movie.r00, movie.r01)
-	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
+	if matches := rPattern.FindStringSubmatch(cleanFilename); len(matches) > 2 {
 		base = matches[1]
 		if partNum := parseInt(matches[2]); partNum >= 0 {
 			// .r00 is part 0, .r01 is part 1, etc.
@@ -292,7 +296,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 	}
 
 	// Pattern 4: filename.### (numeric extensions like .001, .002)
-	if matches := numericPattern.FindStringSubmatch(filename); len(matches) > 2 {
+	if matches := numericPattern.FindStringSubmatch(cleanFilename); len(matches) > 2 {
 		base = matches[1]
 		if partNum := parseInt(matches[2]); partNum >= 0 {
 			// .001 becomes part 0, .002 becomes part 1, etc.
@@ -303,8 +307,8 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 		}
 	}
 
-	// Unknown pattern - return filename as base with high part number (sorts last)
-	return filename, 999999
+	// Unknown pattern - return cleanFilename as base with high part number (sorts last)
+	return cleanFilename, 999999
 }
 
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
