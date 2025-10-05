@@ -402,20 +402,9 @@ func (b *usenetReader) downloadManager(
 			}
 		}
 
-		// Wait for all downloads to complete with context awareness
-		// Use a goroutine to detect when pool.Wait() completes
-		done := make(chan error, 1)
-		go func() {
-			done <- pool.Wait()
-		}()
-
-		select {
-		case err := <-done:
-			if err != nil {
-				b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
-			}
-		case <-ctx.Done():
-			b.log.WarnContext(ctx, "Download manager cancelled while waiting for pool to complete")
+		// Wait for all downloads to complete
+		if err := pool.Wait(); err != nil {
+			b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
 			return
 		}
 	case <-ctx.Done():
