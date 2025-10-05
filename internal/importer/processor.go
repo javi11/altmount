@@ -320,6 +320,8 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 	if len(rarFiles) > 0 {
 		// Create directory for the single RAR archive content
 		nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
+		// Sanitize the directory name to remove obfuscation
+		nzbBaseName = sanitizeFilename(nzbBaseName)
 		rarDirPath := filepath.Join(nzbVirtualDir, nzbBaseName)
 		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
 
@@ -356,9 +358,20 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 				continue
 			}
 
+			// Sanitize the filename portion of the internal path while preserving directory structure
+			internalDir := filepath.Dir(rarContent.InternalPath)
+			internalFilename := filepath.Base(rarContent.InternalPath)
+			sanitizedInternalFilename := sanitizeFilename(internalFilename)
+			
+			// Reconstruct the path with sanitized filename
+			sanitizedInternalPath := sanitizedInternalFilename
+			if internalDir != "." && internalDir != "/" {
+				sanitizedInternalPath = filepath.Join(internalDir, sanitizedInternalFilename)
+			}
+
 			// Determine the virtual file path for this extracted file
 			// The file path should be relative to the RAR directory
-			virtualFilePath := filepath.Join(rarDirPath, rarContent.InternalPath)
+			virtualFilePath := filepath.Join(rarDirPath, sanitizedInternalPath)
 			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
 			// Ensure parent directory exists for nested files
@@ -380,7 +393,8 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 			proc.log.Debug("Created metadata for RAR extracted file",
 				"file", rarContent.Filename,
-				"internal_path", rarContent.InternalPath,
+				"original_internal_path", rarContent.InternalPath,
+				"sanitized_internal_path", sanitizedInternalPath,
 				"virtual_path", virtualFilePath,
 				"size", rarContent.Size,
 				"segments", len(rarContent.Segments))
