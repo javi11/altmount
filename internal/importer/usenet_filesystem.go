@@ -11,8 +11,8 @@ import (
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
-	"github.com/javi11/nntppool"
 )
 
 // Compile-time interface checks
@@ -26,7 +26,7 @@ var (
 // This allows rardecode.OpenReader to access multi-part RAR files without downloading them entirely
 type UsenetFileSystem struct {
 	ctx            context.Context
-	cp             nntppool.UsenetConnectionPool
+	poolManager    pool.Manager
 	files          []ParsedFile
 	maxWorkers     int
 	maxCacheSizeMB int
@@ -37,7 +37,7 @@ type UsenetFileSystem struct {
 type UsenetFile struct {
 	name           string
 	file           *ParsedFile
-	cp             nntppool.UsenetConnectionPool
+	poolManager    pool.Manager
 	ctx            context.Context
 	maxWorkers     int
 	maxCacheSizeMB int
@@ -54,10 +54,10 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, files []ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
 	return &UsenetFileSystem{
 		ctx:            ctx,
-		cp:             cp,
+		poolManager:    poolManager,
 		files:          files,
 		maxWorkers:     maxWorkers,
 		maxCacheSizeMB: maxCacheSizeMB,
@@ -74,7 +74,7 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 			return &UsenetFile{
 				name:           name,
 				file:           &file,
-				cp:             ufs.cp,
+				poolManager:    ufs.poolManager,
 				ctx:            ufs.ctx,
 				maxWorkers:     ufs.maxWorkers,
 				maxCacheSizeMB: ufs.maxCacheSizeMB,
@@ -200,7 +200,7 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 	loader := dbSegmentLoader{segs: uf.file.Segments}
 
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, uf.cp, rg, uf.maxWorkers, uf.maxCacheSizeMB)
+	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxWorkers, uf.maxCacheSizeMB)
 }
 
 // dbSegmentLoader implements the segment loader interface for database segments

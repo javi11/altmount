@@ -11,7 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
 )
 
 // ConfigManager interface defines methods for configuration management

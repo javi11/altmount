@@ -16,8 +16,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
-	github.com/javi11/nntpcli v1.1.1
-	github.com/javi11/nntppool v1.5.5
+	github.com/javi11/nntppool/v2 v2.0.0
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.1
 	github.com/javi11/rarlist v1.1.4
@@ -208,6 +207,7 @@ require (
 	github.com/sashamelentyev/interfacebloat v1.1.0 // indirect
 	github.com/sashamelentyev/usestdlibvars v1.29.0 // indirect
 	github.com/securego/gosec/v2 v2.22.7 // indirect
+	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/sivchari/containedctx v1.0.3 // indirect

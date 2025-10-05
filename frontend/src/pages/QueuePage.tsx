@@ -79,6 +79,34 @@ export function QueuePage() {
 		await retryItem.mutateAsync(id);
 	};
 
+	const handleDownload = async (id: number) => {
+		try {
+			const response = await fetch(`/api/queue/${id}/download`);
+			if (!response.ok) {
+				throw new Error("Failed to download NZB file");
+			}
+
+			// Get filename from Content-Disposition header or use default
+			const contentDisposition = response.headers.get("Content-Disposition");
+			const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
+			const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
+
+			// Create blob and trigger download
+			const blob = await response.blob();
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			window.URL.revokeObjectURL(url);
+			document.body.removeChild(a);
+		} catch (error) {
+			console.error("Failed to download NZB:", error);
+			// TODO: Show error toast notification
+		}
+	};
+
 	const handleClearCompleted = async () => {
 		const confirmed = await confirmAction(
 			"Clear Completed Items",
@@ -587,6 +615,12 @@ export function QueuePage() {
 															</button>
 														</li>
 													)}
+													<li>
+														<button type="button" onClick={() => handleDownload(item.id)}>
+															<Download className="h-4 w-4" />
+															Download NZB
+														</button>
+													</li>
 													{item.status !== QueueStatus.PROCESSING && (
 														<li>
 															<button

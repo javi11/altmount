@@ -607,15 +607,15 @@ type ManualImportResponse struct {
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
-	ActiveConnections    int       `json:"active_connections"`
-	TotalBytesDownloaded int64     `json:"total_bytes_downloaded"`
-	DownloadSpeed        float64   `json:"download_speed_bytes_per_sec"`
-	ErrorRate            float64   `json:"error_rate_percent"`
-	CurrentMemoryUsage   int64     `json:"current_memory_usage"`
-	TotalConnections     int64     `json:"total_connections"`
-	CommandSuccessRate   float64   `json:"command_success_rate_percent"`
-	AcquireWaitTimeMs    int64     `json:"acquire_wait_time_ms"`
-	LastUpdated          time.Time `json:"last_updated"`
+	BytesDownloaded          int64             `json:"bytes_downloaded"`
+	BytesUploaded            int64             `json:"bytes_uploaded"`
+	ArticlesDownloaded       int64             `json:"articles_downloaded"`
+	ArticlesPosted           int64             `json:"articles_posted"`
+	TotalErrors              int64             `json:"total_errors"`
+	ProviderErrors           map[string]int64  `json:"provider_errors"`
+	DownloadSpeedBytesPerSec float64           `json:"download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec   float64           `json:"upload_speed_bytes_per_sec"`
+	Timestamp                time.Time         `json:"timestamp"`
 }
 
 type TestProviderResponse struct {

@@ -147,8 +147,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create config manager for dynamic configuration updates
 	configManager := config.NewManager(cfg, configFile)
 
+	// Create context with cancellation for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Create pool manager for dynamic NNTP connection management
-	poolManager := pool.NewManager()
+	poolManager := pool.NewManager(ctx)
 
 	// Register configuration change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
@@ -389,10 +393,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"providers", len(cfg.Providers),
 		"download_workers", cfg.Streaming.MaxDownloadWorkers,
 		"processor_workers", cfg.Import.MaxProcessorWorkers)
-
-	// Create context with cancellation for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// Create health worker if enabled
 	var healthWorker *health.HealthWorker

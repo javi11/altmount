@@ -777,19 +777,13 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, ErrNoNzbData
 	}
 
-	// Get connection pool dynamically from pool manager
-	cp, err := mvf.poolManager.GetPool()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get connection pool: %w", err)
-	}
-
 	if end == -1 {
 		end = mvf.fileMeta.FileSize - 1
 	}
 
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

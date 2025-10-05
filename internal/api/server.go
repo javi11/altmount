@@ -147,6 +147,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/queue/:id", s.handleGetQueue)
 	api.Delete("/queue/:id", s.handleDeleteQueue)
 	api.Post("/queue/:id/retry", s.handleRetryQueue)
+	api.Get("/queue/:id/download", s.handleDownloadNZB)
 
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)

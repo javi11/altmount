@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -971,12 +971,12 @@ func DefaultConfig(configDir ...string) *Config {
 			// VFS Cache Settings - matching your command
 			CacheDir:           cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
 			VFSCacheMode:       "full",    // --vfs-cache-mode=full
-			VFSCacheMaxSize:    "50G",  // --vfs-cache-max-size=50G (changed from 100G)
-			VFSCacheMaxAge:     "504h", // --vfs-cache-max-age=504h (changed from 100h)
-			ReadChunkSize:      "32M",  // --vfs-read-chunk-size=32M (changed from 128M)
-			ReadChunkSizeLimit: "2G",   // --vfs-read-chunk-size-limit=2G
-			VFSReadAhead:       "128M", // --vfs-read-ahead=128M (changed from 128k)
-			DirCacheTime:       "10m",  // --dir-cache-time=10m (changed from 5m)
+			VFSCacheMaxSize:    "50G",     // --vfs-cache-max-size=50G (changed from 100G)
+			VFSCacheMaxAge:     "504h",    // --vfs-cache-max-age=504h (changed from 100h)
+			ReadChunkSize:      "32M",     // --vfs-read-chunk-size=32M (changed from 128M)
+			ReadChunkSizeLimit: "2G",      // --vfs-read-chunk-size-limit=2G
+			VFSReadAhead:       "128M",    // --vfs-read-ahead=128M (changed from 128k)
+			DirCacheTime:       "10m",     // --dir-cache-time=10m (changed from 5m)
 
 			// Additional VFS Settings (not specified in your command, using sensible defaults)
 			VFSCacheMinFreeSpace: "1G",

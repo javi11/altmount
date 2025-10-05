@@ -262,15 +262,15 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Check if pool is available
 	if !s.poolManager.HasPool() {
 		response := PoolMetricsResponse{
-			ActiveConnections:    0,
-			TotalBytesDownloaded: 0,
-			DownloadSpeed:        0.0,
-			ErrorRate:            0.0,
-			CurrentMemoryUsage:   0,
-			TotalConnections:     0,
-			CommandSuccessRate:   0.0,
-			AcquireWaitTimeMs:    0,
-			LastUpdated:          time.Now(),
+			BytesDownloaded:          0,
+			BytesUploaded:            0,
+			ArticlesDownloaded:       0,
+			ArticlesPosted:           0,
+			TotalErrors:              0,
+			ProviderErrors:           make(map[string]int64),
+			DownloadSpeedBytesPerSec: 0.0,
+			UploadSpeedBytesPerSec:   0.0,
+			Timestamp:                time.Now(),
 		}
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,
@@ -278,30 +278,27 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get the pool
-	pool, err := s.poolManager.GetPool()
+	// Get metrics from the pool manager (includes calculated speeds)
+	metrics, err := s.poolManager.GetMetrics()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
-			"message": "Failed to get NNTP pool",
+			"message": "Failed to get NNTP pool metrics",
 			"details": err.Error(),
 		})
 	}
 
-	// Get metrics snapshot from the pool
-	snapshot := pool.GetMetricsSnapshot()
-
-	// Map nntppool metrics to our response format
+	// Map pool metrics to API response format
 	response := PoolMetricsResponse{
-		ActiveConnections:    int(snapshot.ActiveConnections),
-		TotalBytesDownloaded: snapshot.TotalBytesDownloaded,
-		DownloadSpeed:        snapshot.DownloadSpeed,
-		ErrorRate:            snapshot.ErrorRate,
-		CurrentMemoryUsage:   int64(snapshot.CurrentMemoryUsage),
-		TotalConnections:     int64(snapshot.TotalConnections),
-		CommandSuccessRate:   snapshot.CommandSuccessRate,
-		AcquireWaitTimeMs:    int64(snapshot.AverageAcquireWaitTime.Milliseconds()),
-		LastUpdated:          time.Now(),
+		BytesDownloaded:          metrics.BytesDownloaded,
+		BytesUploaded:            metrics.BytesUploaded,
+		ArticlesDownloaded:       metrics.ArticlesDownloaded,
+		ArticlesPosted:           metrics.ArticlesPosted,
+		TotalErrors:              metrics.TotalErrors,
+		ProviderErrors:           metrics.ProviderErrors,
+		DownloadSpeedBytesPerSec: metrics.DownloadSpeedBytesPerSec,
+		UploadSpeedBytesPerSec:   metrics.UploadSpeedBytesPerSec,
+		Timestamp:                metrics.Timestamp,
 	}
 
 	return c.Status(200).JSON(fiber.Map{

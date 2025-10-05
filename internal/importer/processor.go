@@ -286,10 +286,9 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 	// Process RAR archives if any exist
 	if len(rarFiles) > 0 {
-		// Create directory for the single RAR archive content
-		nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
-		rarDirPath := filepath.Join(nzbVirtualDir, nzbBaseName)
-		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
+		// Use the nzbVirtualDir directly to avoid double nesting
+		// All RAR contents will be flattened into this directory
+		rarDirPath := nzbVirtualDir
 
 		// Ensure RAR archive directory exists
 		if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
@@ -297,7 +296,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 		}
 
 		proc.log.Info("Processing RAR archive with content analysis",
-			"archive", nzbBaseName,
+			"archive", filepath.Base(rarDirPath),
 			"parts", len(rarFiles),
 			"rar_dir", rarDirPath)
 
@@ -313,7 +312,7 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 		}
 
 		proc.log.Info("Successfully analyzed RAR archive content",
-			"archive", nzbBaseName,
+			"archive", filepath.Base(rarDirPath),
 			"files_in_archive", len(rarContents))
 
 		// Process each file found in the RAR archive
@@ -324,16 +323,15 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 				continue
 			}
 
-			// Determine the virtual file path for this extracted file
-			// The file path should be relative to the RAR directory
-			virtualFilePath := filepath.Join(rarDirPath, rarContent.InternalPath)
-			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+			// Flatten the internal path by extracting only the base filename
+			baseFilename := filepath.Base(rarContent.InternalPath)
 
-			// Ensure parent directory exists for nested files
-			parentDir := filepath.Dir(virtualFilePath)
-			if err := proc.ensureDirectoryExists(parentDir); err != nil {
-				return "", fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
-			}
+			// Generate a unique filename to handle duplicates
+			uniqueFilename := proc.getUniqueFilename(rarDirPath, baseFilename)
+
+			// Create the virtual file path directly in the RAR directory (flattened)
+			virtualFilePath := filepath.Join(rarDirPath, uniqueFilename)
+			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
 			// Create file metadata using the RAR handler's helper function
 			fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
@@ -347,15 +345,15 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			}
 
 			proc.log.Debug("Created metadata for RAR extracted file",
-				"file", rarContent.Filename,
-				"internal_path", rarContent.InternalPath,
+				"file", uniqueFilename,
+				"original_internal_path", rarContent.InternalPath,
 				"virtual_path", virtualFilePath,
 				"size", rarContent.Size,
 				"segments", len(rarContent.Segments))
 		}
 
 		proc.log.Info("Successfully processed RAR archive with content analysis",
-			"archive", nzbBaseName,
+			"archive", filepath.Base(rarDirPath),
 			"files_processed", len(rarContents))
 	}
 
@@ -472,6 +470,33 @@ func (proc *Processor) ensureDirectoryExists(virtualDir string) error {
 	}
 
 	return nil
+}
+
+// getUniqueFilename generates a unique filename by checking if the file already exists
+// and appending _1, _2, etc. if duplicates are found
+func (proc *Processor) getUniqueFilename(basePath, filename string) string {
+	// Start with the original filename
+	candidateFilename := filename
+	counter := 1
+
+	// Keep trying until we find a unique filename
+	for {
+		candidatePath := filepath.Join(basePath, candidateFilename)
+		candidatePath = strings.ReplaceAll(candidatePath, string(filepath.Separator), "/")
+
+		// Check if metadata file exists for this path
+		metadataPath := proc.metadataService.GetMetadataFilePath(candidatePath)
+		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+			// File doesn't exist, we can use this filename
+			return candidateFilename
+		}
+
+		// File exists, generate next candidate with counter
+		ext := filepath.Ext(filename)
+		nameWithoutExt := strings.TrimSuffix(filename, ext)
+		candidateFilename = fmt.Sprintf("%s_%d%s", nameWithoutExt, counter, ext)
+		counter++
+	}
 }
 
 // Helper function to create string pointer
