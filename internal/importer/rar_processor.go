@@ -11,6 +11,7 @@ import (
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/nntppool"
 	"github.com/javi11/rarlist"
 )
 
