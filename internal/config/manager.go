@@ -717,9 +717,10 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 	return providers
 }
 
-// GetActualMountPath returns the actual mount path used by rclone, which includes the provider subdirectory
+// GetActualMountPath returns the actual mount path used by rclone
 func (c *Config) GetActualMountPath(provider string) string {
-	return filepath.Join(c.MountPath, provider)
+    // FIX: Do not join the provider name. Return the MountPath directly.
+	return c.MountPath
 }
 
 // ChangeCallback represents a function called when configuration changes
