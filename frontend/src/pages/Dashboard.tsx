@@ -19,7 +19,7 @@ export function Dashboard() {
 
 		const totalItems =
 			queueStats.total_processing + queueStats.total_completed + queueStats.total_failed;
-		const pendingItems = queueStats.total_queued - totalItems;
+		const pendingItems = queueStats.total_queued;
 		const completedAndFailed = queueStats.total_completed + queueStats.total_failed;
 
 		// Build progress text

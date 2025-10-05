@@ -156,7 +156,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Register configuration change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
-		logger.Info("Configuration updated", "new_config", newConfig)
+		logger.Info("Configuration updated")
 
 		// Handle provider changes dynamically using comprehensive comparison
 		providersChanged := !oldConfig.ProvidersEqual(newConfig)
@@ -199,7 +199,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Starting server without NNTP providers - configure via API to enable downloads")
 	}
 	defer func() {
-		_ = poolManager.ClearPool()
+		logger.Info("Clearing NNTP pool")
+		err := poolManager.ClearPool()
+		if err != nil {
+			logger.Error("failed to clear NNTP pool", "err", err)
+		}
 	}()
 
 	// Create RClone mount service
@@ -226,7 +230,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() {
-		_ = nsys.Close()
+		logger.Info("Closing NZB system")
+		err := nsys.Close()
+		if err != nil {
+			logger.Error("failed to close NZB system", "err", err)
+		}
 	}()
 
 	// Create Fiber app
