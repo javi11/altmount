@@ -68,8 +68,9 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 	}
 }
 
-// AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
+// AnalyzeRarContentFromNzb analyzes RAR archives directly from NZB data without downloading
 // This implementation uses rarlist with UsenetFileSystem to analyze RAR structure and stream data from Usenet
+// It supports multiple independent RAR archives in a single NZB (e.g., season packs)
 // Returns an array of files to be added to the metadata with all the info and segments for each file
 func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile) ([]rarContent, error) {
 	if rh.poolManager == nil {
@@ -84,32 +85,78 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, NewNonRetryableError("no connection pool available", err)
 	}
 
+	// Extract all RAR contents (may contain multiple independent archives)
+	allRarContents := make([]rarContent, 0)
+	remainingFiles := sortFiles
+	archiveIndex := 1
+
+	for len(remainingFiles) > 0 {
+		rh.log.Info("Analyzing RAR archive",
+			"archive_number", archiveIndex,
+			"remaining_parts", len(remainingFiles))
+
+		// Extract one archive and get the remaining files
+		contents, usedFiles, err := rh.extractSingleArchive(ctx, cp, remainingFiles)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add contents from this archive
+		allRarContents = append(allRarContents, contents...)
+
+		// Remove used files from the remaining list
+		remainingFiles = rh.filterUnusedFiles(remainingFiles, usedFiles)
+
+		rh.log.Info("Archive extraction complete",
+			"archive_number", archiveIndex,
+			"files_extracted", len(contents),
+			"parts_used", len(usedFiles),
+			"parts_remaining", len(remainingFiles))
+
+		// If no files were used, we have a problem - break to avoid infinite loop
+		if len(usedFiles) == 0 {
+			rh.log.Warn("No files were used in this iteration, stopping multi-archive detection",
+				"remaining_files", len(remainingFiles))
+			break
+		}
+
+		archiveIndex++
+	}
+
+	rh.log.Info("All RAR archives analyzed",
+		"total_archives", archiveIndex-1,
+		"total_files_extracted", len(allRarContents))
+
+	return allRarContents, nil
+}
+
+// extractSingleArchive extracts one RAR archive and returns its contents and the files it used
+func (rh *rarProcessor) extractSingleArchive(ctx context.Context, cp nntppool.UsenetConnectionPool, rarFiles []ParsedFile) ([]rarContent, []string, error) {
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB, rh.log)
+	ufs := NewUsenetFileSystem(ctx, cp, rarFiles, rh.maxWorkers, rh.maxCacheSizeMB, rh.log)
 
 	// Extract filenames for first part detection
-	fileNames := make([]string, len(sortFiles))
-	for i, file := range sortFiles {
+	fileNames := make([]string, len(rarFiles))
+	for i, file := range rarFiles {
 		fileNames[i] = file.Filename
 	}
 
 	// Find the first RAR part using intelligent detection
 	mainRarFile, err := rh.getFirstRarPart(fileNames)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	rh.log.Info("Starting RAR analysis",
 		"main_file", mainRarFile,
-		"total_parts", len(sortFiles),
-		"rar_files", len(rarFiles))
+		"total_parts", len(rarFiles))
 
 	// Log the filenames available in the filesystem for rarlist matching
 	rh.log.Debug("UsenetFileSystem initialized with RAR files",
 		"main_file", mainRarFile,
-		"total_files", len(sortFiles))
-	for i, f := range sortFiles {
+		"total_files", len(rarFiles))
+	for i, f := range rarFiles {
 		rh.log.Debug("UFS file entry",
 			"index", i,
 			"filename", f.Filename)
@@ -117,11 +164,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	aggregatedFiles, err := rarlist.ListFilesFS(ufs, mainRarFile)
 	if err != nil {
-		return nil, NewNonRetryableError("failed to aggregate RAR files", err)
+		return nil, nil, NewNonRetryableError("failed to aggregate RAR files", err)
 	}
 
 	if len(aggregatedFiles) == 0 {
-		return nil, NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
+		return nil, nil, NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
 	}
 
 	rh.log.Debug("Successfully analyzed RAR archive via rarlist",
@@ -145,13 +192,48 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		}
 	}
 
+	// Extract the list of RAR part files that were actually used
+	usedFiles := rh.extractUsedFiles(aggregatedFiles)
+
 	// Convert rarlist results to RarContent
 	rarContents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
 	if err != nil {
-		return nil, NewNonRetryableError("failed to convert rarlist results to RarContent", err)
+		return nil, nil, NewNonRetryableError("failed to convert rarlist results to RarContent", err)
 	}
 
-	return rarContents, nil
+	return rarContents, usedFiles, nil
+}
+
+// extractUsedFiles returns the list of RAR part filenames that were actually used by rarlist
+func (rh *rarProcessor) extractUsedFiles(aggregatedFiles []rarlist.AggregatedFile) []string {
+	usedFilesMap := make(map[string]bool)
+	for _, af := range aggregatedFiles {
+		for _, part := range af.Parts {
+			usedFilesMap[part.Path] = true
+		}
+	}
+
+	usedFiles := make([]string, 0, len(usedFilesMap))
+	for filename := range usedFilesMap {
+		usedFiles = append(usedFiles, filename)
+	}
+	return usedFiles
+}
+
+// filterUnusedFiles removes used files from the remaining file list
+func (rh *rarProcessor) filterUnusedFiles(allFiles []ParsedFile, usedFiles []string) []ParsedFile {
+	usedFilesMap := make(map[string]bool)
+	for _, filename := range usedFiles {
+		usedFilesMap[filename] = true
+	}
+
+	remainingFiles := make([]ParsedFile, 0)
+	for _, file := range allFiles {
+		if !usedFilesMap[file.Filename] {
+			remainingFiles = append(remainingFiles, file)
+		}
+	}
+	return remainingFiles
 }
 
 // getFirstRarPart finds and returns the filename of the first part of a RAR archive
