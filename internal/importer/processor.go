@@ -46,6 +46,34 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 	}
 }
 
+// sanitizeFilename removes problematic characters from filenames that can cause issues with Radarr/Sonarr and filesystems
+func sanitizeFilename(filename string) string {
+	// Handle filenames with brackets like [PRiVATE]-[WtFnZb]-[actual.file.mkv]
+	// Extract the last bracketed section if it looks like a real filename
+	if strings.Contains(filename, "[") && strings.HasSuffix(filename, "]") {
+		lastBracketStart := strings.LastIndex(filename, "[")
+		if lastBracketStart >= 0 {
+			innerFilename := filename[lastBracketStart+1 : len(filename)-1]
+			// Check if this looks like a real filename (has an extension)
+			if strings.Contains(innerFilename, ".") {
+				filename = innerFilename
+			}
+		}
+	}
+	
+	// Remove or replace problematic characters
+	// Remove double colons (problematic on Windows/NTFS)
+	filename = strings.ReplaceAll(filename, "::", "-")
+	// Remove backslashes  (path separators)
+	filename = strings.ReplaceAll(filename, "\\", "-")
+	// Clean up multiple spaces
+	filename = regexp.MustCompile(`\s+`).ReplaceAllString(filename, " ")
+	// Trim leading/trailing spaces
+	filename = strings.TrimSpace(filename)
+	
+	return filename
+}
+
 // ProcessNzbFileWithRelativePath processes an NZB or STRM file maintaining the folder structure relative to relative path
 func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, error) {
 	// Open and parse the file
@@ -116,8 +144,11 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 		return "", fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
+	// Sanitize filename to remove problematic characters
+	sanitizedFilename := sanitizeFilename(file.Filename)
+	
 	// Create virtual file path
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	virtualFilePath := filepath.Join(virtualDir, sanitizedFilename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 	// Create file metadata using simplified schema
 	fileMeta := proc.metadataService.CreateFileMetadata(
@@ -132,16 +163,17 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 
 	// Write file metadata to disk
 	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-		return "", fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)
+		return "", fmt.Errorf("failed to write metadata for single file %s: %w", sanitizedFilename, err)
 	}
 
 	// Store additional metadata if needed
 	if len(file.Groups) > 0 {
-		proc.log.Debug("Groups metadata", "file", file.Filename, "groups", strings.Join(file.Groups, ","))
+		proc.log.Debug("Groups metadata", "file", sanitizedFilename, "groups", strings.Join(file.Groups, ","))
 	}
 
 	proc.log.Info("Successfully processed single file NZB",
-		"file", file.Filename,
+		"original_file", file.Filename,
+		"sanitized_file", sanitizedFilename,
 		"virtual_path", virtualFilePath,
 		"size", file.Size)
 
@@ -379,6 +411,9 @@ type DirectoryInfo struct {
 func (proc *Processor) determineFileLocationWithBase(file ParsedFile, _ *DirectoryStructure, baseDir string) (parentPath, filename string) {
 	dir := filepath.Dir(file.Filename)
 	name := filepath.Base(file.Filename)
+	
+	// Sanitize the filename to remove problematic characters
+	name = sanitizeFilename(name)
 
 	if dir == "." || dir == "/" {
 		return baseDir, name
@@ -533,8 +568,11 @@ func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir stri
 		return "", fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
+	// Sanitize filename to remove problematic characters
+	sanitizedFilename := sanitizeFilename(file.Filename)
+	
 	// Create virtual file path
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	virtualFilePath := filepath.Join(virtualDir, sanitizedFilename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
 	// Create file metadata using simplified schema
@@ -550,11 +588,12 @@ func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir stri
 
 	// Write file metadata to disk
 	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-		return "", fmt.Errorf("failed to write metadata for STRM file %s: %w", file.Filename, err)
+		return "", fmt.Errorf("failed to write metadata for STRM file %s: %w", sanitizedFilename, err)
 	}
 
 	proc.log.Info("Successfully processed STRM file",
-		"file", file.Filename,
+		"original_file", file.Filename,
+		"sanitized_file", sanitizedFilename,
 		"virtual_path", virtualFilePath,
 		"size", file.Size,
 		"segments", len(file.Segments))
