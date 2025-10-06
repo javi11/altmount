@@ -16,6 +16,8 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 	const [modalMode, setModalMode] = useState<"create" | "edit">("create");
 	const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
 	const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
+	const [togglingProviderId, setTogglingProviderId] = useState<string | null>(null);
+	const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
 
 	const { deleteProvider, updateProvider, reorderProviders } = useProviders();
 	const isReordering = reorderProviders.isPending;
@@ -37,6 +39,7 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 	const handleDelete = async (providerId: string) => {
 		const confirmed = await confirmDelete("provider");
 		if (confirmed) {
+			setDeletingProviderId(providerId);
 			try {
 				await deleteProvider.mutateAsync(providerId);
 			} catch (error) {
@@ -46,11 +49,14 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 					title: "Delete Failed",
 					message: "Failed to delete provider. Please try again.",
 				});
+			} finally {
+				setDeletingProviderId(null);
 			}
 		}
 	};
 
 	const handleToggleEnabled = async (provider: ProviderConfig) => {
+		setTogglingProviderId(provider.id);
 		try {
 			await updateProvider.mutateAsync({
 				id: provider.id,
@@ -63,6 +69,8 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 				title: "Update Failed",
 				message: "Failed to update provider. Please try again.",
 			});
+		} finally {
+			setTogglingProviderId(null);
 		}
 	};
 
@@ -254,8 +262,11 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													}`}
 													onClick={() => handleToggleEnabled(provider)}
 													title={provider.enabled ? "Disable" : "Enable"}
+													disabled={togglingProviderId === provider.id}
 												>
-													{provider.enabled ? (
+													{togglingProviderId === provider.id ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : provider.enabled ? (
 														<PowerOff className="h-4 w-4" />
 													) : (
 														<Power className="h-4 w-4" />
@@ -274,8 +285,13 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													className="btn btn-sm btn-error join-item"
 													onClick={() => handleDelete(provider.id)}
 													title="Delete"
+													disabled={deletingProviderId === provider.id}
 												>
-													<Trash2 className="h-4 w-4" />
+													{deletingProviderId === provider.id ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : (
+														<Trash2 className="h-4 w-4" />
+													)}
 												</button>
 											</div>
 										</div>

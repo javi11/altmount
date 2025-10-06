@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -561,9 +562,8 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 		req.OlderThan = &defaultTime
 	}
 
-	// For now, we can only cleanup all records or none (the repository doesn't support selective cleanup)
-	// We'll need to implement a more sophisticated cleanup method
-	count, err := s.cleanupHealthRecords(*req.OlderThan, req.Status)
+	// Perform cleanup with optional file deletion
+	recordsDeleted, filesDeleted, deletionErrors, err := s.cleanupHealthRecords(*req.OlderThan, req.Status, req.DeleteFiles)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -573,9 +573,16 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 	}
 
 	response := map[string]interface{}{
-		"removed_count": count,
-		"older_than":    req.OlderThan.Format(time.RFC3339),
-		"status_filter": req.Status,
+		"records_deleted": recordsDeleted,
+		"older_than":      req.OlderThan.Format(time.RFC3339),
+		"status_filter":   req.Status,
+		"files_deleted":   filesDeleted,
+	}
+
+	// Include deletion errors if any occurred
+	if len(deletionErrors) > 0 {
+		response["file_deletion_errors"] = deletionErrors
+		response["warning"] = fmt.Sprintf("%d file(s) could not be deleted", len(deletionErrors))
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -585,12 +592,62 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 }
 
 // cleanupHealthRecords is a helper method to cleanup health records
-func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *database.HealthStatus) (int, error) {
-	// The current repository only supports CleanupHealthRecords with a list of existing files
-	// For now, we'll return 0 and suggest implementing selective cleanup in the repository
+func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *database.HealthStatus, deleteFiles bool) (recordsDeleted int, filesDeleted int, deletionErrors []string, err error) {
+	// Query records older than specified date with optional status filter
+	// Use a large limit to get all matching records (older_than is less than, so we need to find records created before that date)
+	items, queryErr := s.healthRepo.ListHealthItems(statusFilter, 10000, 0, nil, "", "created_at", "asc")
+	if queryErr != nil {
+		return 0, 0, nil, fmt.Errorf("failed to query health records: %w", queryErr)
+	}
 
-	// This should be implemented in the health repository with proper filtering
-	return 0, fmt.Errorf("selective health record cleanup not yet implemented")
+	if len(items) == 0 {
+		return 0, 0, nil, nil // No records to cleanup
+	}
+
+	// Filter items older than the specified date
+	var oldItems []*database.FileHealth
+	for _, item := range items {
+		if item.CreatedAt.Before(olderThan) {
+			oldItems = append(oldItems, item)
+		}
+	}
+
+	if len(oldItems) == 0 {
+		return 0, 0, nil, nil // No records to cleanup
+	}
+
+	// Extract file paths for deletion
+	filePaths := make([]string, 0, len(oldItems))
+	deletedFileCount := 0
+	fileErrors := make([]string, 0)
+
+	// Optionally delete physical files first
+	if deleteFiles {
+		for _, item := range oldItems {
+			filePaths = append(filePaths, item.FilePath)
+
+			// Attempt to delete the physical file using os.Remove
+			if deleteErr := os.Remove(item.FilePath); deleteErr != nil {
+				// Track error but continue with other files
+				fileErrors = append(fileErrors, fmt.Sprintf("%s: %v", item.FilePath, deleteErr))
+			} else {
+				deletedFileCount++
+			}
+		}
+	} else {
+		// Just collect file paths for database deletion
+		for _, item := range oldItems {
+			filePaths = append(filePaths, item.FilePath)
+		}
+	}
+
+	// Delete database records (proceed even if some file deletions failed)
+	deleteErr := s.healthRepo.DeleteHealthRecordsBulk(filePaths)
+	if deleteErr != nil {
+		return 0, deletedFileCount, fileErrors, fmt.Errorf("failed to delete health records from database: %w", deleteErr)
+	}
+
+	return len(filePaths), deletedFileCount, fileErrors, nil
 }
 
 // handleAddHealthCheck handles POST /api/health/check
