@@ -593,38 +593,52 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 
 // cleanupHealthRecords is a helper method to cleanup health records
 func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *database.HealthStatus, deleteFiles bool) (recordsDeleted int, filesDeleted int, deletionErrors []string, err error) {
-	// Query records older than specified date with optional status filter
-	// Use a large limit to get all matching records (older_than is less than, so we need to find records created before that date)
-	items, queryErr := s.healthRepo.ListHealthItems(statusFilter, 10000, 0, nil, "", "created_at", "asc")
-	if queryErr != nil {
-		return 0, 0, nil, fmt.Errorf("failed to query health records: %w", queryErr)
-	}
-
-	if len(items) == 0 {
-		return 0, 0, nil, nil // No records to cleanup
-	}
-
-	// Filter items older than the specified date
-	var oldItems []*database.FileHealth
-	for _, item := range items {
-		if item.CreatedAt.Before(olderThan) {
-			oldItems = append(oldItems, item)
+	// If not deleting files, use direct SQL delete for efficiency (handles unlimited records)
+	if !deleteFiles {
+		count, deleteErr := s.healthRepo.DeleteHealthRecordsByDate(olderThan, statusFilter)
+		if deleteErr != nil {
+			return 0, 0, nil, fmt.Errorf("failed to delete health records: %w", deleteErr)
 		}
+		return count, 0, nil, nil
 	}
 
-	if len(oldItems) == 0 {
-		return 0, 0, nil, nil // No records to cleanup
-	}
-
-	// Extract file paths for deletion
-	filePaths := make([]string, 0, len(oldItems))
+	// If deleting files, need to fetch records in batches to get file paths
+	const batchSize = 1000
+	allFilePaths := make([]string, 0)
 	deletedFileCount := 0
 	fileErrors := make([]string, 0)
+	offset := 0
 
-	// Optionally delete physical files first
-	if deleteFiles {
-		for _, item := range oldItems {
-			filePaths = append(filePaths, item.FilePath)
+	// Process records in batches until no more records found
+	for {
+		// Fetch next batch of records
+		items, queryErr := s.healthRepo.ListHealthItems(statusFilter, batchSize, offset, nil, "", "created_at", "asc")
+		if queryErr != nil {
+			return 0, 0, nil, fmt.Errorf("failed to query health records: %w", queryErr)
+		}
+
+		// No more records found
+		if len(items) == 0 {
+			break
+		}
+
+		// Filter items older than the specified date
+		var oldItemsInBatch []*database.FileHealth
+		for _, item := range items {
+			if item.CreatedAt.Before(olderThan) {
+				oldItemsInBatch = append(oldItemsInBatch, item)
+			}
+		}
+
+		// If no items in this batch match the date criteria, we've processed all old records
+		// (since results are sorted by created_at ascending)
+		if len(oldItemsInBatch) == 0 {
+			break
+		}
+
+		// Delete physical files and collect paths
+		for _, item := range oldItemsInBatch {
+			allFilePaths = append(allFilePaths, item.FilePath)
 
 			// Attempt to delete the physical file using os.Remove
 			if deleteErr := os.Remove(item.FilePath); deleteErr != nil {
@@ -634,20 +648,33 @@ func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *databas
 				deletedFileCount++
 			}
 		}
-	} else {
-		// Just collect file paths for database deletion
-		for _, item := range oldItems {
-			filePaths = append(filePaths, item.FilePath)
+
+		// If we got fewer items than the batch size, we've reached the end
+		if len(items) < batchSize {
+			break
 		}
+
+		// If all items in batch were old, continue to next batch
+		// If not all items were old, we're done (sorted by date)
+		if len(oldItemsInBatch) < len(items) {
+			break
+		}
+
+		offset += batchSize
+	}
+
+	// No records to cleanup
+	if len(allFilePaths) == 0 {
+		return 0, 0, nil, nil
 	}
 
 	// Delete database records (proceed even if some file deletions failed)
-	deleteErr := s.healthRepo.DeleteHealthRecordsBulk(filePaths)
+	deleteErr := s.healthRepo.DeleteHealthRecordsBulk(allFilePaths)
 	if deleteErr != nil {
 		return 0, deletedFileCount, fileErrors, fmt.Errorf("failed to delete health records from database: %w", deleteErr)
 	}
 
-	return len(filePaths), deletedFileCount, fileErrors, nil
+	return len(allFilePaths), deletedFileCount, fileErrors, nil
 }
 
 // handleAddHealthCheck handles POST /api/health/check
