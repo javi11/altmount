@@ -48,7 +48,7 @@ export function HealthPage() {
 		priority: false,
 	});
 	const [cleanupConfig, setCleanupConfig] = useState({
-		older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // 7 days ago, formatted as YYYY-MM-DD
+		older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16), // 7 days ago, formatted as YYYY-MM-DDTHH:mm
 		delete_files: false,
 	});
 	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
@@ -960,10 +960,10 @@ export function HealthPage() {
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">Delete Records Older Than</legend>
 								<input
-									type="date"
+									type="datetime-local"
 									className="input"
 									value={cleanupConfig.older_than}
-									max={new Date().toISOString().split("T")[0]}
+									max={new Date().toISOString().slice(0, 16)}
 									onChange={(e) =>
 										setCleanupConfig((prev) => ({
 											...prev,
@@ -972,7 +972,7 @@ export function HealthPage() {
 									}
 								/>
 								<p className="label text-base-content/70 text-sm">
-									Records created before this date will be deleted
+									Records created before this date and time will be deleted
 								</p>
 							</fieldset>
 
@@ -1024,7 +1024,7 @@ export function HealthPage() {
 									<div className="font-bold">Records to be deleted:</div>
 									<div>
 										Health records created before{" "}
-										{new Date(cleanupConfig.older_than).toLocaleDateString()}
+										{new Date(cleanupConfig.older_than).toLocaleString()}
 									</div>
 									{cleanupConfig.delete_files && (
 										<div className="mt-1 font-semibold text-error">
