@@ -188,23 +188,15 @@ func (rh *rarProcessor) checkForRarHeaders(ctx context.Context, cp nntppool.Usen
 		// Read first segment (first ~700KB) to check for RAR header
 		firstSegment := file.Segments[0]
 		
-		// Get article from first segment
-		if len(firstSegment.MessageIds) == 0 {
+		// Get article ID from first segment
+		if firstSegment.Id == "" {
 			continue
 		}
 		
-		conn, err := cp.Get(ctx)
+		// Get a body reader from the pool
+		reader, err := cp.BodyReader(ctx, firstSegment.Id, file.Groups)
 		if err != nil {
-			rh.log.Debug("Failed to get connection for RAR header check",
-				"file", file.Filename,
-				"error", err)
-			continue
-		}
-		
-		article, err := conn.Article(ctx, firstSegment.MessageIds[0])
-		if err != nil {
-			cp.Put(conn)
-			rh.log.Debug("Failed to fetch article for RAR header check",
+			rh.log.Debug("Failed to get body reader for RAR header check",
 				"file", file.Filename,
 				"error", err)
 			continue
@@ -212,9 +204,8 @@ func (rh *rarProcessor) checkForRarHeaders(ctx context.Context, cp nntppool.Usen
 		
 		// Read first 512 bytes to check for RAR signature
 		headerBytes := make([]byte, 512)
-		n, _ := article.Body.Read(headerBytes)
-		article.Body.Close()
-		cp.Put(conn)
+		n, _ := reader.Read(headerBytes)
+		reader.Close()
 		
 		if n < len(rarSignature) {
 			continue
