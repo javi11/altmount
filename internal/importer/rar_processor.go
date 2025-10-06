@@ -100,6 +100,22 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		// Extract one archive and get the remaining files
 		contents, usedFiles, err := rh.extractSingleArchive(ctx, cp, remainingFiles)
 		if err != nil {
+			// If extraction failed and we have many remaining parts, check for RAR headers
+			// before giving up - this handles multi-episode archives with embedded headers
+			if len(remainingFiles) > 10 {
+				rh.log.Warn("Archive extraction failed, checking for RAR headers in remaining parts",
+					"error", err,
+					"remaining_parts", len(remainingFiles))
+				
+				hasHeaders := rh.checkForRarHeaders(ctx, cp, remainingFiles)
+				if hasHeaders {
+					rh.log.Info("Found RAR headers in remaining parts - but current logic cannot extract them",
+						"remaining_parts", len(remainingFiles))
+					// TODO: Implement logic to extract from mid-volume RAR files with headers
+					// For now, we successfully extracted what we could
+					break
+				}
+			}
 			return nil, err
 		}
 
@@ -120,34 +136,6 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 			rh.log.Warn("No files were used in this iteration, stopping multi-archive detection",
 				"remaining_files", len(remainingFiles))
 			break
-		}
-
-		// Detect broken multi-volume RAR: if only 1 part was used but many parts remain,
-		// this indicates rarlist couldn't properly parse the archive structure
-		// (likely because we started from a mid-volume file without proper headers)
-		if len(usedFiles) == 1 && len(remainingFiles) > 10 {
-			// Before failing, check if the remaining parts contain RAR headers
-			// This would indicate multiple independent archives with sequential numbering
-			hasRarHeaders := rh.checkForRarHeaders(ctx, cp, remainingFiles)
-			
-			if hasRarHeaders {
-				rh.log.Warn("Detected RAR headers in remaining parts - continuing multi-archive extraction",
-					"archive_number", archiveIndex,
-					"parts_used", len(usedFiles),
-					"parts_remaining", len(remainingFiles))
-				// Continue to next iteration
-			} else {
-				rh.log.Error("Detected broken multi-volume RAR: only 1 part used but many parts remaining",
-					"archive_number", archiveIndex,
-					"parts_used", len(usedFiles),
-					"parts_remaining", len(remainingFiles),
-					"files_extracted", len(contents))
-				rh.log.Error("This typically indicates the archive is missing part 0 (.rar or .r00) and cannot be properly processed")
-				return nil, NewNonRetryableError(
-					fmt.Sprintf("broken multi-volume RAR detected: only 1 of %d parts used per iteration - archive may be incomplete or corrupted",
-						len(rarFiles)),
-					nil)
-			}
 		}
 
 		archiveIndex++
