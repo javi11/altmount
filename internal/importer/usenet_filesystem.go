@@ -98,7 +98,6 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 
 	ufs.log.Warn("rarlist requested file not found",
 		"requested", name,
-		"normalized", normalizedName,
 		"available_files", func() []string {
 			names := make([]string, len(ufs.files))
 			for i, f := range ufs.files {
