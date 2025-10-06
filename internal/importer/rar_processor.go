@@ -545,19 +545,11 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
 func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rarlist.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
 	// Build quick lookup for rar part ParsedFile by both full path and base name
-	// Also add normalized versions (without trailing ] bracket) to handle rarlist clean names
-	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*4)
+	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
 	for i := range rarFiles {
 		pf := &rarFiles[i]
 		fileIndex[pf.Filename] = pf
 		fileIndex[filepath.Base(pf.Filename)] = pf
-		
-		// Add normalized versions (strip trailing ] bracket)
-		normalizedFull := strings.TrimSuffix(pf.Filename, "]")
-		if normalizedFull != pf.Filename {
-			fileIndex[normalizedFull] = pf
-			fileIndex[filepath.Base(normalizedFull)] = pf
-		}
 	}
 
 	out := make([]rarContent, 0, len(aggregatedFiles))
@@ -796,6 +788,10 @@ func renameRarFilesAndSort(rarFiles []ParsedFile, log *slog.Logger) []ParsedFile
 
 		// Construct new filename with first file's base name and original part suffix
 		newFilename := firstFileBase + partSuffix
+		
+		// Strip any trailing ] bracket (handles orphan brackets like "file.r20]")
+		// This is a final cleanup for partial bracket corruption
+		newFilename = strings.TrimSuffix(newFilename, "]")
 		
 		// Log if we're actually normalizing the filename (removing brackets, etc.)
 		if originalFileName != newFilename {

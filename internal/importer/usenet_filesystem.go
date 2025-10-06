@@ -9,7 +9,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -68,46 +67,21 @@ func NewUsenetFileSystem(ctx context.Context, cp nntppool.UsenetConnectionPool, 
 	}
 }
 
-// normalizeRarFilename strips trailing ] bracket from RAR filenames for matching
-// This handles cases where some parts have brackets (e.g., "file.r20]") and others don't
-func normalizeRarFilename(name string) string {
-	return strings.TrimSuffix(name, "]")
-}
-
 // Open opens a file in the Usenet filesystem
 func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	name = path.Clean(name)
-	
-	// Normalize requested name for comparison (strip trailing bracket if present)
-	normalizedName := normalizeRarFilename(name)
-	normalizedBaseName := normalizeRarFilename(path.Base(name))
 
 	ufs.log.Debug("rarlist requesting file",
 		"requested_name", name,
-		"normalized_name", normalizedName,
 		"available_files_count", len(ufs.files))
 
-	// Find the corresponding RAR file using normalized matching
-	// This handles cases where rarlist requests "file.r20" but actual filename is "file.r20]"
+	// Find the corresponding RAR file
+	// Note: Filenames are already normalized by renameRarFilesAndSort, so simple exact match is sufficient
 	for _, file := range ufs.files {
-		normalizedFilename := normalizeRarFilename(file.Filename)
-		normalizedFileBase := normalizeRarFilename(path.Base(file.Filename))
-		
-		if normalizedFilename == normalizedName || 
-		   normalizedFileBase == normalizedBaseName ||
-		   file.Filename == name || 
-		   path.Base(file.Filename) == name {
+		if file.Filename == name || path.Base(file.Filename) == name {
 			ufs.log.Debug("File matched",
 				"requested", name,
-				"matched_file", file.Filename,
-				"match_type", func() string {
-					if normalizedFilename == normalizedName {
-						return "normalized_full"
-					} else if normalizedFileBase == normalizedBaseName {
-						return "normalized_base"
-					}
-					return "exact"
-				}())
+				"matched_file", file.Filename)
 			return &UsenetFile{
 				name:           name,
 				file:           &file,
@@ -144,20 +118,11 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 // This implements the rarlist.FileSystem interface
 func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 	path = filepath.Clean(path)
-	
-	// Normalize path for comparison (strip trailing bracket if present)
-	normalizedPath := normalizeRarFilename(path)
-	normalizedBasePath := normalizeRarFilename(filepath.Base(path))
 
-	// Find the corresponding RAR file using normalized matching
+	// Find the corresponding RAR file
+	// Note: Filenames are already normalized by renameRarFilesAndSort, so simple exact match is sufficient
 	for _, file := range ufs.files {
-		normalizedFilename := normalizeRarFilename(file.Filename)
-		normalizedFileBase := normalizeRarFilename(filepath.Base(file.Filename))
-		
-		if normalizedFilename == normalizedPath || 
-		   normalizedFileBase == normalizedBasePath ||
-		   file.Filename == path || 
-		   filepath.Base(file.Filename) == path {
+		if file.Filename == path || filepath.Base(file.Filename) == path {
 			return &UsenetFileInfo{
 				name: filepath.Base(file.Filename),
 				size: file.Size,
