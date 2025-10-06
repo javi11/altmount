@@ -18,7 +18,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/javi11/nntppool/v2 v2.1.0
 	github.com/javi11/nxg v0.1.0
-	github.com/javi11/nzbparser v0.4.1
+	github.com/javi11/nzbparser v0.4.2
 	github.com/javi11/rarlist v1.1.4
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
