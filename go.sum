@@ -301,8 +301,8 @@ github.com/javi11/nntppool/v2 v2.1.0 h1:ZdHEWaIlZWgDpb6dTDmMdGjHQzBR74B/0FFFR2IV
 github.com/javi11/nntppool/v2 v2.1.0/go.mod h1:Y9VTmnLp6P2w9/zWzpC4SYldO8tGu1/lABAOcIXt3Xk=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=
 github.com/javi11/nxg v0.1.0/go.mod h1:+GvYpp+y1oq+qBOWxFMvfTjtin/0zCeomWfjiPkiu8A=
-github.com/javi11/nzbparser v0.4.1 h1:zZs5CSmh3KS8eIjwIib6MakZ8yqyJBT8QLsG/S9+BiU=
-github.com/javi11/nzbparser v0.4.1/go.mod h1:ikF7WI3BUGs5IHQJmKzmtTkX29NZW5nvUdo6ZWFZgL4=
+github.com/javi11/nzbparser v0.4.2 h1:JFcsGoSekclNxcmw7vQraRfDWNSPukgzaabMaAKJllg=
+github.com/javi11/nzbparser v0.4.2/go.mod h1:ikF7WI3BUGs5IHQJmKzmtTkX29NZW5nvUdo6ZWFZgL4=
 github.com/javi11/rarlist v1.1.4 h1:5pLUuvsNNn4xavUhGHOWHyYSeN8B2q2819s0f5YTLHQ=
 github.com/javi11/rarlist v1.1.4/go.mod h1:W9mxzxW5Ia21taV3awEvUr9SSNH4rF+0vYnhL+sdZ2s=
 github.com/jgautheron/goconst v1.8.2 h1:y0XF7X8CikZ93fSNT6WBTb/NElBu9IjaY7CCYQrCMX4=
