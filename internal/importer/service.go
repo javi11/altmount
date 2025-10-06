@@ -578,8 +578,14 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 				"error", err)
 
 		} else {
-			if err := s.database.Repository.RemoveFromQueue(item.ID); err != nil {
-				log.Error("Failed to delete item from queue", "queue_id", item.ID, "error", err)
+			// Mark item as fallback instead of removing from queue
+			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFallback, nil); err != nil {
+				log.Error("Failed to mark item as fallback", "queue_id", item.ID, "error", err)
+			} else {
+				log.Info("Item marked as fallback after successful SABnzbd transfer",
+					"queue_id", item.ID,
+					"file", item.NzbPath,
+					"fallback_host", s.configGetter().SABnzbd.FallbackHost)
 			}
 		}
 	}
