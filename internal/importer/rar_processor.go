@@ -121,6 +121,22 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 			break
 		}
 
+		// Detect broken multi-volume RAR: if only 1 part was used but many parts remain,
+		// this indicates rarlist couldn't properly parse the archive structure
+		// (likely because we started from a mid-volume file without proper headers)
+		if len(usedFiles) == 1 && len(remainingFiles) > 10 {
+			rh.log.Error("Detected broken multi-volume RAR: only 1 part used but many parts remaining",
+				"archive_number", archiveIndex,
+				"parts_used", len(usedFiles),
+				"parts_remaining", len(remainingFiles),
+				"files_extracted", len(contents))
+			rh.log.Error("This typically indicates the archive is missing part 0 (.rar or .r00) and cannot be properly processed")
+			return nil, NewNonRetryableError(
+				fmt.Sprintf("broken multi-volume RAR detected: only 1 of %d parts used per iteration - archive may be incomplete or corrupted",
+					len(rarFiles)),
+				nil)
+		}
+
 		archiveIndex++
 	}
 
@@ -287,10 +303,21 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 		})
 	}
 
-	// If no part 0 found, fallback to using the lowest-numbered part
-	// This handles incomplete archives or non-standard numbering
+	// If no part 0 found, check if this might be a multi-volume RAR with missing initial parts
+	// In such cases, we should fail rather than attempt to process from a mid-volume file
 	if len(candidates) == 0 {
-		rh.log.Warn("No part 0 found, falling back to lowest-numbered part",
+		// Count how many parts we have - if it's many files with sequential numbering,
+		// this is likely a broken multi-volume RAR
+		if len(rarFileNames) > 5 {
+			rh.log.Error("No part 0 found in multi-volume RAR archive - initial parts may be missing or corrupted",
+				"total_parts", len(rarFileNames),
+				"sample_files", rarFileNames[:min(5, len(rarFileNames))])
+			return "", NewNonRetryableError("multi-volume RAR archive missing part 0 (.rar or .r00) - cannot process", nil)
+		}
+
+		// For small archives (≤5 files), try fallback to lowest-numbered part
+		// This handles edge cases like single-file non-standard archives
+		rh.log.Warn("No part 0 found in small archive, attempting fallback to lowest-numbered part",
 			"total_files", len(rarFileNames))
 
 		lowestPart := 999999
