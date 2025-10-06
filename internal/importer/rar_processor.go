@@ -545,11 +545,19 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
 func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rarlist.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
 	// Build quick lookup for rar part ParsedFile by both full path and base name
-	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
+	// Also add normalized versions (without trailing ] bracket) to handle rarlist clean names
+	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*4)
 	for i := range rarFiles {
 		pf := &rarFiles[i]
 		fileIndex[pf.Filename] = pf
 		fileIndex[filepath.Base(pf.Filename)] = pf
+		
+		// Add normalized versions (strip trailing ] bracket)
+		normalizedFull := strings.TrimSuffix(pf.Filename, "]")
+		if normalizedFull != pf.Filename {
+			fileIndex[normalizedFull] = pf
+			fileIndex[filepath.Base(normalizedFull)] = pf
+		}
 	}
 
 	out := make([]rarContent, 0, len(aggregatedFiles))
@@ -578,6 +586,8 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 				continue
 			}
 
+			// Try lookup with full path first, then base name
+			// The fileIndex includes both original and normalized (bracket-stripped) versions
 			pf := fileIndex[part.Path]
 			if pf == nil {
 				pf = fileIndex[filepath.Base(part.Path)]
