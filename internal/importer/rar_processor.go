@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -125,16 +126,28 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		// this indicates rarlist couldn't properly parse the archive structure
 		// (likely because we started from a mid-volume file without proper headers)
 		if len(usedFiles) == 1 && len(remainingFiles) > 10 {
-			rh.log.Error("Detected broken multi-volume RAR: only 1 part used but many parts remaining",
-				"archive_number", archiveIndex,
-				"parts_used", len(usedFiles),
-				"parts_remaining", len(remainingFiles),
-				"files_extracted", len(contents))
-			rh.log.Error("This typically indicates the archive is missing part 0 (.rar or .r00) and cannot be properly processed")
-			return nil, NewNonRetryableError(
-				fmt.Sprintf("broken multi-volume RAR detected: only 1 of %d parts used per iteration - archive may be incomplete or corrupted",
-					len(rarFiles)),
-				nil)
+			// Before failing, check if the remaining parts contain RAR headers
+			// This would indicate multiple independent archives with sequential numbering
+			hasRarHeaders := rh.checkForRarHeaders(ctx, cp, remainingFiles)
+			
+			if hasRarHeaders {
+				rh.log.Warn("Detected RAR headers in remaining parts - continuing multi-archive extraction",
+					"archive_number", archiveIndex,
+					"parts_used", len(usedFiles),
+					"parts_remaining", len(remainingFiles))
+				// Continue to next iteration
+			} else {
+				rh.log.Error("Detected broken multi-volume RAR: only 1 part used but many parts remaining",
+					"archive_number", archiveIndex,
+					"parts_used", len(usedFiles),
+					"parts_remaining", len(remainingFiles),
+					"files_extracted", len(contents))
+				rh.log.Error("This typically indicates the archive is missing part 0 (.rar or .r00) and cannot be properly processed")
+				return nil, NewNonRetryableError(
+					fmt.Sprintf("broken multi-volume RAR detected: only 1 of %d parts used per iteration - archive may be incomplete or corrupted",
+						len(rarFiles)),
+					nil)
+			}
 		}
 
 		archiveIndex++
@@ -145,6 +158,83 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		"total_files_extracted", len(allRarContents))
 
 	return allRarContents, nil
+}
+
+// checkForRarHeaders scans the remaining parts to detect if any contain RAR file headers
+// This helps identify multiple independent archives with sequential numbering (e.g., season packs)
+func (rh *rarProcessor) checkForRarHeaders(ctx context.Context, cp nntppool.UsenetConnectionPool, remainingFiles []ParsedFile) bool {
+	// RAR file signatures
+	// RAR 4.x: 52 61 72 21 1A 07 00 ("Rar!\x1A\x07\x00")
+	// RAR 5.x: 52 61 72 21 1A 07 01 00 ("Rar!\x1A\x07\x01\x00")
+	rarSignature := []byte{0x52, 0x61, 0x72, 0x21, 0x1A, 0x07}
+	
+	rh.log.Debug("Scanning remaining parts for RAR headers",
+		"total_parts", len(remainingFiles))
+	
+	// Check first few files for RAR headers (don't need to check all)
+	checkLimit := 10
+	if len(remainingFiles) < checkLimit {
+		checkLimit = len(remainingFiles)
+	}
+	
+	for i := 0; i < checkLimit; i++ {
+		file := remainingFiles[i]
+		
+		// Skip if no segments
+		if len(file.Segments) == 0 {
+			continue
+		}
+		
+		// Read first segment (first ~700KB) to check for RAR header
+		firstSegment := file.Segments[0]
+		
+		// Get article from first segment
+		if len(firstSegment.MessageIds) == 0 {
+			continue
+		}
+		
+		conn, err := cp.Get(ctx)
+		if err != nil {
+			rh.log.Debug("Failed to get connection for RAR header check",
+				"file", file.Filename,
+				"error", err)
+			continue
+		}
+		
+		article, err := conn.Article(ctx, firstSegment.MessageIds[0])
+		if err != nil {
+			cp.Put(conn)
+			rh.log.Debug("Failed to fetch article for RAR header check",
+				"file", file.Filename,
+				"error", err)
+			continue
+		}
+		
+		// Read first 512 bytes to check for RAR signature
+		headerBytes := make([]byte, 512)
+		n, _ := article.Body.Read(headerBytes)
+		article.Body.Close()
+		cp.Put(conn)
+		
+		if n < len(rarSignature) {
+			continue
+		}
+		
+		// Check if RAR signature exists in the first 512 bytes
+		for j := 0; j <= n-len(rarSignature); j++ {
+			if bytes.Equal(headerBytes[j:j+len(rarSignature)], rarSignature) {
+				rh.log.Info("Found RAR header in remaining part",
+					"file", file.Filename,
+					"offset", j,
+					"part_index", i)
+				return true
+			}
+		}
+	}
+	
+	rh.log.Debug("No RAR headers found in remaining parts",
+		"parts_checked", checkLimit)
+	return false
 }
 
 // extractSingleArchive extracts one RAR archive and returns its contents and the files it used
