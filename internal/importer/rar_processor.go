@@ -287,6 +287,51 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 		})
 	}
 
+	// If no part 0 found, fallback to using the lowest-numbered part
+	// This handles incomplete archives or non-standard numbering
+	if len(candidates) == 0 {
+		rh.log.Warn("No part 0 found, falling back to lowest-numbered part",
+			"total_files", len(rarFileNames))
+
+		lowestPart := 999999
+		var lowestFile string
+
+		for _, filename := range rarFileNames {
+			base, part := rh.parseRarFilename(filename)
+
+			if part < lowestPart {
+				lowestPart = part
+				lowestFile = filename
+				
+				// Determine priority based on file extension pattern
+				priority := rh.getRarFilePriority(filename)
+
+				candidates = []candidateFile{{
+					filename: filename,
+					baseName: base,
+					partNum:  part,
+					priority: priority,
+				}}
+			} else if part == lowestPart {
+				// Same part number, add as candidate
+				priority := rh.getRarFilePriority(filename)
+
+				candidates = append(candidates, candidateFile{
+					filename: filename,
+					baseName: base,
+					partNum:  part,
+					priority: priority,
+				})
+			}
+		}
+
+		if len(candidates) > 0 {
+			rh.log.Warn("Using lowest-numbered part as fallback",
+				"filename", lowestFile,
+				"part", lowestPart)
+		}
+	}
+
 	if len(candidates) == 0 {
 		rh.log.Error("No valid first RAR part found",
 			"total_files", len(rarFileNames),
