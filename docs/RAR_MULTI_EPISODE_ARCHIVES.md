@@ -57,23 +57,25 @@ AltMount now includes intelligent RAR header detection that activates when:
 
 ### Log Messages
 
-**Success Case:**
+**Multi-Episode Archive Detected (Partial Extraction Fails):**
 ```
 INFO  Archive extraction complete: archive_number=1, files_extracted=1, parts_used=21
 WARN  Archive extraction failed, checking for RAR headers in remaining parts
 DEBUG Scanning remaining parts for RAR headers: total_parts=63
 INFO  Found RAR header in remaining part: file=archive.r42, offset=0
-INFO  Found RAR headers in remaining parts - but current logic cannot extract them
-INFO  Successfully processed queue item
+ERROR Found RAR headers in remaining parts - indicating multi-episode archive with embedded headers
+ERROR This archive structure is not fully supported - only first episode can be extracted
+ERROR Recommendation: Use SABnzbd to download and extract the complete archive
+ERROR Item failed permanently: multi-episode archive with embedded RAR headers
 ```
 
-**Failure Case:**
+**Broken Archive (No Headers Found):**
 ```
 INFO  Archive extraction complete: archive_number=1, files_extracted=1, parts_used=21
 WARN  Archive extraction failed, checking for RAR headers in remaining parts
 DEBUG Scanning remaining parts for RAR headers: total_parts=63
 DEBUG No RAR headers found in remaining parts: parts_checked=10
-ERROR Broken multi-volume RAR detected
+ERROR multi-volume RAR archive missing part 0 (.rar or .r00) - cannot process
 ERROR Item failed permanently after max retries
 ```
 
@@ -83,9 +85,22 @@ ERROR Item failed permanently after max retries
 
 For sequential multi-episode archives like Bellicher:
 - ✅ **Episode 1 extracts successfully** (uses `.rar`, `.r00` - `.r19`)
-- ✅ **Episodes 2-4 are detected** (RAR headers found)
+- ✅ **Episodes 2-4 are detected** (RAR headers found in remaining parts)
 - ❌ **Episodes 2-4 cannot be extracted** (no part 0 available)
-- ✅ **Import completes successfully** with partial content
+- ❌ **Import fails with clear error message** (prevents false-positive success)
+
+**Why Fail Instead of Partial Success?**
+
+Reporting success for partial extractions would cause serious issues:
+- **Sonarr/Radarr** would mark the entire season as "downloaded"
+- **Plex/Jellyfin** would show all episodes as available (but only E01 exists)
+- **Users** would experience playback errors for E02-E04
+- **Arr apps** wouldn't retry or use alternative sources
+
+By failing with a clear error message, the Arr applications know to:
+- Try alternative NZB sources
+- Fall back to SABnzbd for extraction
+- Not mark incomplete downloads as successful
 
 ### Technical Constraints
 
@@ -107,18 +122,13 @@ For sequential multi-episode archives like Bellicher:
 
 ### For Users
 
-**Option A: Accept Partial Extraction (Recommended for Streaming)**
-- Use AltMount to extract Episode 1
-- Download remaining episodes individually if needed
-- Benefit: Zero-copy streaming for what's available
-
-**Option B: Use SABnzbd for Complete Extraction**
+**Option A: Use SABnzbd for Complete Extraction (Recommended)**
 - Let SABnzbd download and extract the full NZB
 - SABnzbd uses native `unrar` which handles this structure
 - Import extracted MKV files to your media server directly
 - Benefit: All episodes extracted to disk
 
-**Option C: Re-encode Archive (If You Control the Source)**
+**Option B: Re-encode Archive (If You Control the Source)**
 - Create separate RAR archives per episode:
   ```
   Episode1.rar, Episode1.r00, ..., Episode1.r19
@@ -197,16 +207,28 @@ time=2025-10-06T09:08:37.384Z level=INFO msg="Found RAR header in remaining part
   offset=0 
   part_index=0
 
-time=2025-10-06T09:08:37.384Z level=INFO msg="Found RAR headers in remaining parts - but current logic cannot extract them" 
+time=2025-10-06T09:08:37.384Z level=ERROR msg="Found RAR headers in remaining parts - indicating multi-episode archive with embedded headers" 
   component=rar-processor 
   remaining_parts=63
+  files_extracted=1
+
+time=2025-10-06T09:08:37.384Z level=ERROR msg="This archive structure is not fully supported - only first episode can be extracted" 
+  component=rar-processor
+
+time=2025-10-06T09:08:37.384Z level=ERROR msg="Recommendation: Use SABnzbd to download and extract the complete archive" 
+  component=rar-processor
+
+time=2025-10-06T09:08:37.385Z level=ERROR msg="Item failed permanently" 
+  component=importer-service 
+  error="multi-episode archive with embedded RAR headers: extracted 1 of 2+ episodes - full extraction not supported"
 ```
 
 ### User Impact
-- ✅ Bellicher S01E01 available for streaming (2.2 GB)
-- ⚠️ Episodes 2-4 detected but not available
-- ✅ Import succeeds (no error state)
-- 📝 Clear log messages explain what happened
+- ✅ Episode 1 extracted but not imported (fails before metadata creation)
+- ✅ Episodes 2-4 detected via RAR header scanning
+- ❌ Import fails with clear diagnostic error
+- 🔄 Sonarr/Radarr will try alternative sources or SABnzbd
+- 📝 Clear error messages guide users to SABnzbd solution
 
 ## Best Practices
 
@@ -246,9 +268,10 @@ When encountering sequential multi-episode archives:
 4. If yes: Scan first 10 files for RAR signatures
 5. If signature found:
    - Log: "Found RAR headers in remaining parts"
-   - Break gracefully with partial success
+   - Log: "Recommendation: Use SABnzbd"
+   - Return error: "multi-episode archive with embedded RAR headers"
 6. If no signature:
-   - Return error: "Broken multi-volume RAR detected"
+   - Return error: "multi-volume RAR archive missing part 0"
 ```
 
 ### Performance
@@ -260,13 +283,14 @@ When encountering sequential multi-episode archives:
 
 AltMount's RAR header detection provides intelligent handling of complex multi-episode archives. While current limitations prevent full extraction of sequential multi-episode archives, the system:
 
-- ✅ Extracts what it can (Episode 1)
-- ✅ Detects remaining content (Episodes 2-4)
-- ✅ Completes imports successfully
-- ✅ Provides clear diagnostic information
+- ✅ Detects multi-episode structure via RAR header scanning
+- ✅ Provides clear diagnostic information in error messages
+- ✅ Fails appropriately to prevent false-positive "success"
+- ✅ Guides users to SABnzbd for complete extraction
+- ✅ Prevents Arr applications from marking incomplete downloads as successful
 - ✅ Avoids catastrophic errors or data corruption
 
-This represents a **graceful degradation** approach that maximizes utility while maintaining system stability.
+This represents a **fail-safe** approach that prioritizes correct behavior over partial success, ensuring media management tools like Sonarr/Radarr can properly handle alternative download strategies.
 
 ## Related Documentation
 - [RAR Processing Architecture](./RAR_PROCESSING.md)

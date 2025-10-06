@@ -101,7 +101,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		contents, usedFiles, err := rh.extractSingleArchive(ctx, cp, remainingFiles)
 		if err != nil {
 			// If extraction failed and we have many remaining parts, check for RAR headers
-			// before giving up - this handles multi-episode archives with embedded headers
+			// to provide better diagnostic information before failing
 			if len(remainingFiles) > 10 {
 				rh.log.Warn("Archive extraction failed, checking for RAR headers in remaining parts",
 					"error", err,
@@ -109,11 +109,18 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 				
 				hasHeaders := rh.checkForRarHeaders(ctx, cp, remainingFiles)
 				if hasHeaders {
-					rh.log.Info("Found RAR headers in remaining parts - but current logic cannot extract them",
-						"remaining_parts", len(remainingFiles))
-					// TODO: Implement logic to extract from mid-volume RAR files with headers
-					// For now, we successfully extracted what we could
-					break
+					rh.log.Error("Found RAR headers in remaining parts - indicating multi-episode archive with embedded headers",
+						"remaining_parts", len(remainingFiles),
+						"files_extracted", len(allRarContents))
+					rh.log.Error("This archive structure is not fully supported - only first episode can be extracted")
+					rh.log.Error("Recommendation: Use SABnzbd to download and extract the complete archive")
+					
+					// Return error to prevent false-positive "success" in Arr applications
+					// This ensures Sonarr/Radarr don't mark partial extractions as complete downloads
+					return nil, NewNonRetryableError(
+						fmt.Sprintf("multi-episode archive with embedded RAR headers: extracted %d of %d+ episodes - full extraction not supported",
+							len(allRarContents), archiveIndex),
+						err)
 				}
 			}
 			return nil, err
