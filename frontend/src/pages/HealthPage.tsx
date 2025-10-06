@@ -41,10 +41,15 @@ export function HealthPage() {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState("");
 	const [showAddHealthModal, setShowAddHealthModal] = useState(false);
+	const [showCleanupModal, setShowCleanupModal] = useState(false);
 	const [healthCheckForm, setHealthCheckForm] = useState({
 		file_path: "",
 		source_nzb_path: "",
 		priority: false,
+	});
+	const [cleanupConfig, setCleanupConfig] = useState({
+		older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16), // 7 days ago, formatted as YYYY-MM-DDTHH:mm
+		delete_files: false,
 	});
 	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
 	const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds default
@@ -91,19 +96,50 @@ export function HealthPage() {
 		}
 	};
 
-	const handleCleanup = async () => {
-		const confirmed = await confirmAction(
-			"Cleanup Old Health Records",
-			"Are you sure you want to cleanup old health records? This will remove records older than 7 days.",
-			{
-				type: "warning",
-				confirmText: "Cleanup",
-				confirmButtonClass: "btn-warning",
-			},
-		);
-		if (confirmed) {
-			await cleanupHealth.mutateAsync({
-				older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+	const handleCleanup = () => {
+		// Reset cleanup config to defaults and show modal
+		setCleanupConfig({
+			older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+			delete_files: false,
+		});
+		setShowCleanupModal(true);
+	};
+
+	const handleCleanupConfirm = async () => {
+		try {
+			const data = await cleanupHealth.mutateAsync({
+				older_than: new Date(cleanupConfig.older_than).toISOString(),
+				delete_files: cleanupConfig.delete_files,
+			});
+
+			setShowCleanupModal(false);
+
+			// Show success message
+			let message = `Successfully deleted ${data.records_deleted} health record${data.records_deleted !== 1 ? "s" : ""}`;
+			if (cleanupConfig.delete_files && data.files_deleted !== undefined) {
+				message += ` and ${data.files_deleted} file${data.files_deleted !== 1 ? "s" : ""}`;
+			}
+
+			showToast({
+				title: "Cleanup Successful",
+				message,
+				type: "success",
+			});
+
+			// Show warning if there were file deletion errors
+			if (data.warning && data.file_deletion_errors) {
+				showToast({
+					title: "Warning",
+					message: data.warning,
+					type: "warning",
+				});
+			}
+		} catch (error) {
+			console.error("Failed to cleanup health records:", error);
+			showToast({
+				title: "Cleanup Failed",
+				message: "Failed to cleanup health records",
+				type: "error",
 			});
 		}
 	};
@@ -900,6 +936,130 @@ export function HealthPage() {
 						<div className="text-sm">
 							{stats.corrupted} corrupted files require immediate attention.
 							{stats.partial > 0 && ` ${stats.partial} files have partial issues.`}
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Cleanup Configuration Modal */}
+			{showCleanupModal && (
+				<div className="modal modal-open">
+					<div className="modal-box">
+						<div className="mb-4 flex items-center justify-between">
+							<h3 className="font-bold text-lg">Cleanup Old Health Records</h3>
+							<button
+								type="button"
+								className="btn btn-sm btn-circle btn-ghost"
+								onClick={() => setShowCleanupModal(false)}
+							>
+								✕
+							</button>
+						</div>
+
+						<div className="space-y-4">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Delete Records Older Than</legend>
+								<input
+									type="datetime-local"
+									className="input"
+									value={cleanupConfig.older_than}
+									max={new Date().toISOString().slice(0, 16)}
+									onChange={(e) =>
+										setCleanupConfig((prev) => ({
+											...prev,
+											older_than: e.target.value,
+										}))
+									}
+								/>
+								<p className="label text-base-content/70 text-sm">
+									Records created before this date and time will be deleted
+								</p>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Delete Options</legend>
+								<label className="label cursor-pointer">
+									<span className="label-text">Also delete physical files</span>
+									<input
+										type="checkbox"
+										className="checkbox"
+										checked={cleanupConfig.delete_files}
+										onChange={(e) =>
+											setCleanupConfig((prev) => ({
+												...prev,
+												delete_files: e.target.checked,
+											}))
+										}
+									/>
+								</label>
+								<p className="label text-base-content/70 text-sm">
+									{cleanupConfig.delete_files ? (
+										<span className="text-error">
+											⚠️ Warning: This will permanently delete the physical files from your system.
+											This action cannot be undone!
+										</span>
+									) : (
+										<span>Only database records will be removed, files will remain intact</span>
+									)}
+								</p>
+							</fieldset>
+
+							<div className="alert alert-info">
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									fill="none"
+									viewBox="0 0 24 24"
+									className="h-6 w-6 shrink-0 stroke-current"
+									role="img"
+									aria-label="Information"
+								>
+									<path
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										strokeWidth="2"
+										d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+									/>
+								</svg>
+								<div className="text-sm">
+									<div className="font-bold">Records to be deleted:</div>
+									<div>
+										Health records created before{" "}
+										{new Date(cleanupConfig.older_than).toLocaleString()}
+									</div>
+									{cleanupConfig.delete_files && (
+										<div className="mt-1 font-semibold text-error">
+											Physical files will also be deleted!
+										</div>
+									)}
+								</div>
+							</div>
+						</div>
+
+						<div className="modal-action">
+							<button
+								type="button"
+								className="btn btn-ghost"
+								onClick={() => setShowCleanupModal(false)}
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								className={`btn ${cleanupConfig.delete_files ? "btn-error" : "btn-warning"}`}
+								onClick={handleCleanupConfirm}
+								disabled={cleanupHealth.isPending}
+							>
+								{cleanupHealth.isPending ? (
+									<>
+										<span className="loading loading-spinner loading-sm" />
+										Cleaning up...
+									</>
+								) : cleanupConfig.delete_files ? (
+									"Delete Records & Files"
+								) : (
+									"Delete Records"
+								)}
+							</button>
 						</div>
 					</div>
 				</div>

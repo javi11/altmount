@@ -124,6 +124,16 @@ export interface HealthRepairRequest {
 export interface HealthCleanupRequest {
 	older_than?: string;
 	status?: HealthStatus;
+	delete_files?: boolean;
+}
+
+export interface HealthCleanupResponse {
+	records_deleted: number;
+	files_deleted?: number;
+	older_than: string;
+	status_filter?: HealthStatus;
+	file_deletion_errors?: string[];
+	warning?: string;
 }
 
 // System types

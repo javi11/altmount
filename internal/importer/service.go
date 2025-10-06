@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
 )
@@ -56,9 +56,9 @@ type Service struct {
 	database        *database.DB              // Database for processing queue
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
-	rcloneClient    rclonecli.RcloneRcClient  // Optional rclone client for VFS notifications
-	configGetter    config.ConfigGetter       // Config getter for dynamic configuration access
-	sabnzbdClient   *sabnzbd.SABnzbdClient    // SABnzbd client for fallback
+	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
+	configGetter    config.ConfigGetter      // Config getter for dynamic configuration access
+	sabnzbdClient   *sabnzbd.SABnzbdClient   // SABnzbd client for fallback
 	log             *slog.Logger
 
 	// Runtime state
@@ -570,29 +570,46 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 		}
 
 		// Attempt SABnzbd fallback if configured
-		s.attemptSABnzbdFallback(item, log)
+		if err := s.attemptSABnzbdFallback(item, log); err != nil {
+			log.Error("Failed to send to external SABnzbd",
+				"queue_id", item.ID,
+				"file", item.NzbPath,
+				"fallback_host", s.configGetter().SABnzbd.FallbackHost,
+				"error", err)
+
+		} else {
+			// Mark item as fallback instead of removing from queue
+			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFallback, nil); err != nil {
+				log.Error("Failed to mark item as fallback", "queue_id", item.ID, "error", err)
+			} else {
+				log.Info("Item marked as fallback after successful SABnzbd transfer",
+					"queue_id", item.ID,
+					"file", item.NzbPath,
+					"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+			}
+		}
 	}
 }
 
 // attemptSABnzbdFallback attempts to send a failed import to an external SABnzbd instance
-func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *slog.Logger) {
+func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *slog.Logger) error {
 	// Get current configuration
 	cfg := s.configGetter()
 
 	// Check if SABnzbd is enabled and fallback is configured
 	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
 		log.Debug("SABnzbd fallback not attempted - SABnzbd API not enabled", "queue_id", item.ID)
-		return
+		return fmt.Errorf("SABnzbd fallback not attempted - SABnzbd API not enabled")
 	}
 
 	if cfg.SABnzbd.FallbackHost == "" {
 		log.Debug("SABnzbd fallback not attempted - no fallback host configured", "queue_id", item.ID)
-		return
+		return fmt.Errorf("SABnzbd fallback not attempted - no fallback host configured")
 	}
 
 	if cfg.SABnzbd.FallbackAPIKey == "" {
 		log.Warn("SABnzbd fallback not attempted - no API key configured", "queue_id", item.ID)
-		return
+		return fmt.Errorf("SABnzbd fallback not attempted - no API key configured")
 	}
 
 	// Check if the NZB file still exists
@@ -601,7 +618,7 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
-		return
+		return err
 	}
 
 	log.Info("Attempting to send failed import to external SABnzbd",
@@ -622,12 +639,7 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 	)
 
 	if err != nil {
-		log.Error("Failed to send to external SABnzbd",
-			"queue_id", item.ID,
-			"file", item.NzbPath,
-			"fallback_host", cfg.SABnzbd.FallbackHost,
-			"error", err)
-		return
+		return err
 	}
 
 	log.Info("Successfully sent failed import to external SABnzbd",
@@ -635,6 +647,8 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 		"file", item.NzbPath,
 		"fallback_host", cfg.SABnzbd.FallbackHost,
 		"sabnzbd_nzo_id", nzoID)
+
+	return nil
 }
 
 // ServiceStats holds statistics about the service

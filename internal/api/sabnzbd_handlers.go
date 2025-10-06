@@ -252,6 +252,10 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	// Convert to SABnzbd format
 	slots := make([]SABnzbdQueueSlot, 0, len(items))
 	for i, item := range items {
+		if item.Status == database.QueueStatusFallback {
+			continue
+		}
+
 		slots = append(slots, ToSABnzbdQueueSlot(item, i))
 	}
 

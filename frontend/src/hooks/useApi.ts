@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
+import type { HealthCleanupRequest } from "../types/api";
 
 // Queue hooks
 export const useQueue = (params?: {
@@ -211,8 +212,7 @@ export const useCleanupHealth = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (params?: { older_than?: string; status?: string }) =>
-			apiClient.cleanupHealth(params),
+		mutationFn: (params?: HealthCleanupRequest) => apiClient.cleanupHealth(params),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},

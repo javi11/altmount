@@ -329,8 +329,9 @@ type HealthRepairRequest struct {
 
 // HealthCleanupRequest represents request to cleanup health records
 type HealthCleanupRequest struct {
-	OlderThan *time.Time             `json:"older_than"`
-	Status    *database.HealthStatus `json:"status"`
+	OlderThan   *time.Time             `json:"older_than"`
+	Status      *database.HealthStatus `json:"status"`
+	DeleteFiles bool                   `json:"delete_files"` // Whether to also delete the physical files
 }
 
 // HealthCheckRequest represents request to add file for manual health checking

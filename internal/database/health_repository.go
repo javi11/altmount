@@ -729,3 +729,35 @@ func (r *HealthRepository) ResetHealthChecksBulk(filePaths []string) (int, error
 
 	return int(rowsAffected), nil
 }
+
+// DeleteHealthRecordsByDate deletes health records older than the specified date with optional status filter
+func (r *HealthRepository) DeleteHealthRecordsByDate(olderThan time.Time, statusFilter *HealthStatus) (int, error) {
+	query := `
+		DELETE FROM file_health
+		WHERE created_at < ?
+		  AND (? IS NULL OR status = ?)
+	`
+
+	// Prepare arguments for the query
+	var statusParam interface{} = nil
+	if statusFilter != nil {
+		statusParam = string(*statusFilter)
+	}
+
+	args := []interface{}{
+		olderThan.Format("2006-01-02 15:04:05"),
+		statusParam, statusParam, // status filter (checked twice in WHERE clause)
+	}
+
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete health records by date: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}
