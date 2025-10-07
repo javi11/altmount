@@ -452,8 +452,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := mountService.Start(ctx); err != nil {
 			logger.Error("Failed to start mount service", "error", err)
 		} else {
-			actualMountPath := cfg.GetActualMountPath(config.MountProvider)
-			logger.Info("RClone mount service started", "mount_point", actualMountPath)
+			logger.Info("RClone mount service started", "mount_point", cfg.MountPath)
 		}
 	} else {
 		logger.Info("RClone mount service is disabled in configuration")

@@ -333,14 +333,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Combine and convert to SABnzbd format
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
+	cfg := s.configManager.GetConfig()
+	mountPath := cfg.MountPath
 	for _, item := range completed {
-		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, mountPath))
 		index++
 	}
 	for _, item := range failed {
-		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, mountPath))
 		index++
 	}
 
@@ -449,7 +449,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 
 		// Build misc configuration
 		sabnzbdConfig.Misc = SABnzbdMiscConfig{
-			CompleteDir:            filepath.Join(cfg.GetActualMountPath(config.MountProvider), cfg.SABnzbd.CompleteDir),
+			CompleteDir:            filepath.Join(cfg.MountPath, cfg.SABnzbd.CompleteDir),
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",

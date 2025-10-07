@@ -6,17 +6,16 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 )
 
 // Mount creates a mount using the rclone RC API with retry logic
-func (m *Manager) Mount(ctx context.Context, provider, webdavURL string) error {
-	return m.mountWithRetry(ctx, provider, webdavURL, 3)
+func (m *Manager) Mount(ctx context.Context, provider, mountPath, webdavURL string) error {
+	return m.mountWithRetry(ctx, provider, mountPath, webdavURL, 3)
 }
 
 // mountWithRetry attempts to mount with retry logic
-func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string, maxRetries int) error {
+func (m *Manager) mountWithRetry(ctx context.Context, provider, mountPath, webdavURL string, maxRetries int) error {
 	if !m.IsReady() {
 		if err := m.WaitForReady(30 * time.Second); err != nil {
 			return fmt.Errorf("rclone RC server not ready: %w", err)
@@ -31,7 +30,7 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string
 			time.Sleep(wait)
 		}
 
-		if err := m.performMount(ctx, provider, webdavURL); err != nil {
+		if err := m.performMount(ctx, provider, mountPath, webdavURL); err != nil {
 			m.logger.ErrorContext(ctx, "Mount attempt failed", "err", err, "provider", provider, "attempt", attempt+1)
 			continue
 		}
@@ -42,9 +41,8 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string
 }
 
 // performMount performs a single mount attempt
-func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) error {
+func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavURL string) error {
 	cfg := m.cfg.GetConfig()
-	mountPath := filepath.Join(cfg.MountPath, provider)
 
 	m.logger.InfoContext(ctx, "Creating mount directory", "provider", provider, "path", mountPath)
 	// Create mount directory
