@@ -1,4 +1,6 @@
-# Rclone Docker Volume Plugin (for docker-compose)
+# Rclone Docker Volume Plugin
+
+The Docker Rclone Plugin enables mounting remote storage like WebDAV directly as a Docker volume, allowing containers to transparently access external filesystems as if they were local volumes.
 
 This page explains how to install and configure the rclone Docker Volume Plugin.
 
