@@ -140,7 +140,7 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 
 	// Clean up queue items
 	if !req.DryRun {
-		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(*req.QueueOlderThan)
+		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems()
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"success": false,

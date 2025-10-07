@@ -82,10 +82,11 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 	// Create new pool with providers
 	m.logger.Info("Creating NNTP connection pool", "provider_count", len(providers))
 	pool, err := nntppool.NewConnectionPool(nntppool.Config{
-		Providers:  providers,
-		Logger:     m.logger,
-		DelayType:  nntppool.DelayTypeFixed,
-		RetryDelay: 10 * time.Millisecond,
+		Providers:      providers,
+		Logger:         m.logger,
+		DelayType:      nntppool.DelayTypeFixed,
+		RetryDelay:     10 * time.Millisecond,
+		MinConnections: 0,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create NNTP connection pool: %w", err)

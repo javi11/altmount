@@ -704,13 +704,13 @@ func (r *Repository) CountQueueItems(status *QueueStatus, search string, categor
 }
 
 // ClearCompletedQueueItems removes completed and failed items from the queue
-func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) {
+func (r *Repository) ClearCompletedQueueItems() (int, error) {
 	query := `
 		DELETE FROM import_queue 
-		WHERE status IN ('completed', 'failed') AND updated_at < ?
+		WHERE status IN ('completed')
 	`
 
-	result, err := r.db.Exec(query, olderThan)
+	result, err := r.db.Exec(query)
 	if err != nil {
 		return 0, fmt.Errorf("failed to clear completed queue items: %w", err)
 	}
@@ -724,13 +724,13 @@ func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) 
 }
 
 // ClearFailedQueueItems removes failed items from the queue
-func (r *Repository) ClearFailedQueueItems(olderThan time.Time) (int, error) {
+func (r *Repository) ClearFailedQueueItems() (int, error) {
 	query := `
 		DELETE FROM import_queue 
-		WHERE status = 'failed' AND updated_at < ?
+		WHERE status = 'failed'
 	`
 
-	result, err := r.db.Exec(query, olderThan)
+	result, err := r.db.Exec(query)
 	if err != nil {
 		return 0, fmt.Errorf("failed to clear failed queue items: %w", err)
 	}

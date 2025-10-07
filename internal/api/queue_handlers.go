@@ -392,27 +392,8 @@ func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 
 // handleClearCompletedQueue handles DELETE /api/queue/completed
 func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
-	// Parse older_than parameter
-	olderThan, err := ParseTimeParamFiber(c, "older_than")
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"error": fiber.Map{
-				"code":    "VALIDATION_ERROR",
-				"message": "Invalid older_than parameter",
-				"details": err.Error(),
-			},
-		})
-	}
-
-	// Default to 24 hours ago if not specified
-	if olderThan == nil {
-		defaultTime := time.Now().Add(-24 * time.Hour)
-		olderThan = &defaultTime
-	}
-
 	// Clear completed items
-	count, err := s.queueRepo.ClearCompletedQueueItems(*olderThan)
+	count, err := s.queueRepo.ClearCompletedQueueItems()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -426,7 +407,6 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 
 	response := map[string]interface{}{
 		"removed_count": count,
-		"older_than":    olderThan.Format(time.RFC3339),
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -437,27 +417,8 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 
 // handleClearFailedQueue handles DELETE /api/queue/failed
 func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
-	// Parse older_than parameter
-	olderThan, err := ParseTimeParamFiber(c, "older_than")
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"error": fiber.Map{
-				"code":    "VALIDATION_ERROR",
-				"message": "Invalid older_than parameter",
-				"details": err.Error(),
-			},
-		})
-	}
-
-	// Default to 24 hours ago if not specified
-	if olderThan == nil {
-		defaultTime := time.Now()
-		olderThan = &defaultTime
-	}
-
 	// Clear failed items
-	count, err := s.queueRepo.ClearFailedQueueItems(*olderThan)
+	count, err := s.queueRepo.ClearFailedQueueItems()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -471,7 +432,6 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 
 	response := map[string]interface{}{
 		"removed_count": count,
-		"older_than":    olderThan.Format(time.RFC3339),
 	}
 
 	return c.Status(200).JSON(fiber.Map{
