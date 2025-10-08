@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/nntppool/v2"
 )
@@ -65,7 +66,10 @@ func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 		})
 	}
 
-	response := ToConfigAPIResponse(config)
+	// Get API key from authenticated user or first admin user
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(config, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -128,7 +132,10 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	// Try to start RC server if RClone is enabled but RC is not running
 	s.startRCServerIfNeeded(c.Context())
 
-	response := ToConfigAPIResponse(&newConfig)
+	// Get API key for response
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(&newConfig, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -215,7 +222,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		s.startRCServerIfNeeded(c.Context())
 	}
 
-	response := ToConfigAPIResponse(&newConfig)
+	// Get API key for response
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(&newConfig, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -241,7 +251,11 @@ func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 	}
 
 	config := s.configManager.GetConfig()
-	response := ToConfigAPIResponse(config)
+
+	// Get API key for response
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(config, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -945,4 +959,23 @@ func (s *Server) ensureSABnzbdCategoryDirectories(cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// getAPIKeyForConfig retrieves the API key for config responses
+func (s *Server) getAPIKeyForConfig(c *fiber.Ctx) string {
+	// Try to get user from context (if authenticated)
+	user := auth.GetUserFromContext(c)
+	if user != nil && user.APIKey != nil {
+		return *user.APIKey
+	}
+
+	// If no authenticated user, try to get first admin user (for non-auth mode)
+	if s.userRepo != nil {
+		users, err := s.userRepo.ListUsers(1, 0)
+		if err == nil && len(users) > 0 && users[0].APIKey != nil {
+			return *users[0].APIKey
+		}
+	}
+
+	return ""
 }

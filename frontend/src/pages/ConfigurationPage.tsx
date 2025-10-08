@@ -501,6 +501,7 @@ export function ConfigurationPage() {
 									<SystemConfigSection
 										config={config}
 										onUpdate={handleConfigUpdate}
+										onRefresh={refetch}
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}

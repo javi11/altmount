@@ -17,6 +17,7 @@ type ConfigAPIResponse struct {
 	RClone    RCloneAPIResponse     `json:"rclone"`
 	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers []ProviderAPIResponse `json:"providers"`
+	APIKey    string                `json:"api_key,omitempty"` // User's API key for authentication
 }
 
 // RCloneAPIResponse sanitizes RClone config for API responses
@@ -107,7 +108,7 @@ type SABnzbdAPIResponse struct {
 // Helper functions to create API responses from core config types
 
 // ToConfigAPIResponse converts config.Config to ConfigAPIResponse with sensitive data masked
-func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
+func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	if cfg == nil {
 		return nil
 	}
@@ -200,6 +201,7 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 		RClone:    rcloneResp,
 		SABnzbd:   sabnzbdResp,
 		Providers: providers,
+		APIKey:    apiKey,
 	}
 }
 

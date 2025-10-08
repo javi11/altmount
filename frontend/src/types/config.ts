@@ -16,6 +16,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	providers: ProviderConfig[];
 	mount_path: string;
+	api_key?: string;
 }
 
 // WebDAV server configuration
