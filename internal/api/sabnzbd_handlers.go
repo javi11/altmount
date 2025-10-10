@@ -674,20 +674,6 @@ func (s *Server) calculateItemBasePath(category *string) string {
 		basePath = cfg.MountPath
 	}
 
-	// Determine category folder
-	categoryFolder := "default"
-	if category != nil && *category != "" {
-		categoryFolder = *category
-
-		// Look for category directory override in config
-		for _, cat := range cfg.SABnzbd.Categories {
-			if cat.Name == *category && cat.Dir != "" {
-				categoryFolder = cat.Dir
-				break
-			}
-		}
-	}
-
 	// Return base path with category folder
-	return filepath.Join(basePath, categoryFolder)
+	return basePath
 }

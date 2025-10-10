@@ -949,21 +949,17 @@ func (s *Service) createCategorySymlink(item *database.ImportQueueItem, resultin
 		return fmt.Errorf("symlink directory not configured")
 	}
 
-	// Determine category folder
-	categoryFolder := s.getCategoryFolder(item.Category, cfg)
-	symlinkBaseDir := filepath.Join(*cfg.SABnzbd.SymlinkDir, categoryFolder)
+	baseDir := filepath.Join(*cfg.SABnzbd.SymlinkDir, filepath.Dir(resultingPath))
 
 	// Ensure category directory exists
-	if err := os.MkdirAll(symlinkBaseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
 
 	// Get the actual metadata/mount path (where the file actually lives)
 	actualPath := filepath.Join(cfg.MountPath, resultingPath)
 
-	// Calculate symlink path (in category folder)
-	basename := filepath.Base(resultingPath)
-	symlinkPath := filepath.Join(symlinkBaseDir, basename)
+	symlinkPath := filepath.Join(*cfg.SABnzbd.SymlinkDir, resultingPath)
 
 	// Check if symlink already exists
 	if _, err := os.Lstat(symlinkPath); err == nil {
@@ -981,8 +977,7 @@ func (s *Service) createCategorySymlink(item *database.ImportQueueItem, resultin
 	s.log.Info("Created category symlink",
 		"queue_id", item.ID,
 		"target", actualPath,
-		"symlink", symlinkPath,
-		"category", categoryFolder)
+		"symlink", symlinkPath)
 
 	return nil
 }

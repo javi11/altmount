@@ -374,8 +374,7 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 	var storagePath string
 	if item.StoragePath != nil {
 		// Construct path: basePath/basename
-		basename := filepath.Base(*item.StoragePath)
-		storagePath = filepath.Join(basePath, basename)
+		storagePath = filepath.Join(basePath, *item.StoragePath)
 	} else {
 		storagePath = basePath
 	}
