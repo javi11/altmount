@@ -132,8 +132,9 @@ export function SABnzbdConfigSection({
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges && validationErrors.length === 0) {
-			// Include fallback_api_key in the update if it was changed
-			const updateData: SABnzbdConfig & { fallback_api_key?: string } = { ...formData };
+			// Remove fallback_api_key from formData to prevent sending placeholder
+			const { fallback_api_key, ...configWithoutApiKey } = formData;
+			const updateData: SABnzbdConfig & { fallback_api_key?: string } = configWithoutApiKey;
 			// Only include API key if user entered a new value (not empty and not obfuscated placeholder)
 			if (fallbackApiKey && fallbackApiKey !== "********") {
 				updateData.fallback_api_key = fallbackApiKey;
