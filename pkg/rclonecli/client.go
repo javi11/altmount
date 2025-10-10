@@ -366,9 +366,9 @@ func (m *Manager) createConfig(configName, webdavURL string, user, pass string) 
 // forceUnmountPath attempts to force unmount a path using system commands
 func (m *Manager) forceUnmountPath(mountPath string) error {
 	methods := [][]string{
+		{"fusermount", "-uz", mountPath},
 		{"umount", mountPath},
 		{"umount", "-l", mountPath}, // lazy unmount
-		{"fusermount", "-uz", mountPath},
 		{"fusermount3", "-uz", mountPath},
 	}
 
