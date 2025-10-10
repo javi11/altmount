@@ -281,7 +281,7 @@ func (b *usenetReader) downloadManager(
 		}
 
 		if len(b.rg.segments) == 0 {
-			b.log.Debug("No segments to download")
+			b.log.DebugContext(ctx, "No segments to download")
 
 			return
 		}

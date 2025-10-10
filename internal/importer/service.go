@@ -637,7 +637,6 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 		item.Category,
 		&priority,
 	)
-
 	if err != nil {
 		return err
 	}

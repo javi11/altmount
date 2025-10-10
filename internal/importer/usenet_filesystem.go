@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -198,6 +199,12 @@ func (uf *UsenetFile) Seek(offset int64, whence int) (int64, error) {
 func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	// Filter segments for this specific file
 	loader := dbSegmentLoader{segs: uf.file.Segments}
+
+	if loader.GetSegmentCount() == 0 {
+		slog.ErrorContext(ctx, "[importer.UsenetFile] No segments to download", "start", start, "end", end)
+
+		return nil, fmt.Errorf("no segments to download")
+	}
 
 	rg := usenet.GetSegmentsInRange(start, end, loader)
 	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxWorkers, uf.maxCacheSizeMB)

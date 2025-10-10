@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -783,6 +784,13 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
+
+	if len(loader.segments) == 0 {
+		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download", "start", start, "end", end)
+
+		return nil, ErrNoNzbData
+	}
+
 	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
 }
 
