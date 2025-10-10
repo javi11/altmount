@@ -524,7 +524,16 @@ func (s *Service) processQueueItems(workerID int) {
 		s.handleProcessingFailure(item, processingErr, log)
 	} else {
 		if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
-			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
+			log.Error("Failed to add storage path", "queue_id", item.ID, "error", err)
+		}
+
+		// Create category symlink (non-blocking)
+		if err := s.createCategorySymlink(item, resultingPath); err != nil {
+			log.Warn("Failed to create category symlink",
+				"queue_id", item.ID,
+				"path", resultingPath,
+				"error", err)
+			// Don't fail the import, just log the warning
 		}
 
 		// Mark as completed in queue database
@@ -816,6 +825,15 @@ func (s *Service) ProcessItemInBackground(itemID int64) {
 				log.Error("Failed to add storage path", "error", err)
 			}
 
+			// Create category symlink (non-blocking)
+			if err := s.createCategorySymlink(item, resultingPath); err != nil {
+				log.Warn("Failed to create category symlink",
+					"queue_id", item.ID,
+					"path", resultingPath,
+					"error", err)
+				// Don't fail the import, just log the warning
+			}
+
 			// Mark as completed
 			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
 				log.Error("Failed to mark item as completed", "error", err)
@@ -916,4 +934,74 @@ func (s *Service) convertPriorityToSABnzbd(priority database.QueuePriority) stri
 	default:
 		return "1" // Normal
 	}
+}
+
+// createCategorySymlink creates a symlink for an imported file in the category folder
+func (s *Service) createCategorySymlink(item *database.ImportQueueItem, resultingPath string) error {
+	cfg := s.configGetter()
+
+	// Check if symlinks are enabled
+	if cfg.SABnzbd.SymlinkEnabled == nil || !*cfg.SABnzbd.SymlinkEnabled {
+		return nil // Skip if not enabled
+	}
+
+	if cfg.SABnzbd.SymlinkDir == nil || *cfg.SABnzbd.SymlinkDir == "" {
+		return fmt.Errorf("symlink directory not configured")
+	}
+
+	// Determine category folder
+	categoryFolder := s.getCategoryFolder(item.Category, cfg)
+	symlinkBaseDir := filepath.Join(*cfg.SABnzbd.SymlinkDir, categoryFolder)
+
+	// Ensure category directory exists
+	if err := os.MkdirAll(symlinkBaseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create symlink category directory: %w", err)
+	}
+
+	// Get the actual metadata/mount path (where the file actually lives)
+	actualPath := filepath.Join(cfg.MountPath, resultingPath)
+
+	// Calculate symlink path (in category folder)
+	basename := filepath.Base(resultingPath)
+	symlinkPath := filepath.Join(symlinkBaseDir, basename)
+
+	// Check if symlink already exists
+	if _, err := os.Lstat(symlinkPath); err == nil {
+		// Symlink exists, remove it first
+		if err := os.Remove(symlinkPath); err != nil {
+			return fmt.Errorf("failed to remove existing symlink: %w", err)
+		}
+	}
+
+	// Create the symlink
+	if err := os.Symlink(actualPath, symlinkPath); err != nil {
+		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+
+	s.log.Info("Created category symlink",
+		"queue_id", item.ID,
+		"target", actualPath,
+		"symlink", symlinkPath,
+		"category", categoryFolder)
+
+	return nil
+}
+
+// getCategoryFolder returns the directory name for a category
+func (s *Service) getCategoryFolder(category *string, cfg *config.Config) string {
+	if category == nil || *category == "" {
+		return "default"
+	}
+
+	// Find matching category in config
+	for _, cat := range cfg.SABnzbd.Categories {
+		if cat.Name == *category {
+			if cat.Dir != "" {
+				return cat.Dir
+			}
+			return cat.Name
+		}
+	}
+
+	return *category // Use category name as fallback
 }

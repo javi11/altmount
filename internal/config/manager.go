@@ -244,9 +244,11 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
-	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled        *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir    string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	SymlinkDir     *string           `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
+	SymlinkEnabled *bool             `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
+	Categories     []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
@@ -358,6 +360,22 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.SABnzbd.Enabled = &v
 	} else {
 		copyCfg.SABnzbd.Enabled = nil
+	}
+
+	// Deep copy SABnzbd.SymlinkDir pointer
+	if c.SABnzbd.SymlinkDir != nil {
+		v := *c.SABnzbd.SymlinkDir
+		copyCfg.SABnzbd.SymlinkDir = &v
+	} else {
+		copyCfg.SABnzbd.SymlinkDir = nil
+	}
+
+	// Deep copy SABnzbd.SymlinkEnabled pointer
+	if c.SABnzbd.SymlinkEnabled != nil {
+		v := *c.SABnzbd.SymlinkEnabled
+		copyCfg.SABnzbd.SymlinkEnabled = &v
+	} else {
+		copyCfg.SABnzbd.SymlinkEnabled = nil
 	}
 
 	// Deep copy SABnzbd Categories slice
@@ -560,6 +578,16 @@ func (c *Config) Validate() error {
 		}
 		if !filepath.IsAbs(c.SABnzbd.CompleteDir) {
 			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
+		}
+
+		// Validate symlink configuration if enabled
+		if c.SABnzbd.SymlinkEnabled != nil && *c.SABnzbd.SymlinkEnabled {
+			if c.SABnzbd.SymlinkDir == nil || *c.SABnzbd.SymlinkDir == "" {
+				return fmt.Errorf("sabnzbd symlink_dir cannot be empty when symlinks are enabled")
+			}
+			if !filepath.IsAbs(*c.SABnzbd.SymlinkDir) {
+				return fmt.Errorf("sabnzbd symlink_dir must be an absolute path")
+			}
 		}
 
 		// Validate categories if provided
@@ -884,8 +912,9 @@ func DefaultConfig(configDir ...string) *Config {
 	healthCheckEnabled := true
 	autoRepairEnabled := false // Disabled by default for safety
 	vfsEnabled := false
-	mountEnabled := false // Disabled by default
+	mountEnabled := false       // Disabled by default
 	sabnzbdEnabled := false
+	symlinkEnabled := false // Disabled by default
 	scrapperEnabled := false
 	loginRequired := true // Require login by default
 
@@ -1002,6 +1031,8 @@ func DefaultConfig(configDir ...string) *Config {
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,
 			CompleteDir:    "/complete",
+			SymlinkDir:     nil,
+			SymlinkEnabled: &symlinkEnabled,
 			Categories:     []SABnzbdCategory{},
 			FallbackHost:   "",
 			FallbackAPIKey: "",

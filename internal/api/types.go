@@ -103,6 +103,8 @@ type SABnzbdAPIResponse struct {
 	FallbackHost      string                  `json:"fallback_host"`
 	FallbackAPIKey    string                  `json:"fallback_api_key"`     // Obfuscated if set
 	FallbackAPIKeySet bool                    `json:"fallback_api_key_set"` // Indicates if API key is set
+	SymlinkDir        *string                 `json:"symlink_dir,omitempty"`
+	SymlinkEnabled    bool                    `json:"symlink_enabled"`
 }
 
 // Helper functions to create API responses from core config types
@@ -193,6 +195,8 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FallbackHost:      cfg.SABnzbd.FallbackHost,
 		FallbackAPIKey:    fallbackAPIKey,
 		FallbackAPIKeySet: cfg.SABnzbd.FallbackAPIKey != "",
+		SymlinkDir:        cfg.SABnzbd.SymlinkDir,
+		SymlinkEnabled:    cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled,
 	}
 
 	return &ConfigAPIResponse{

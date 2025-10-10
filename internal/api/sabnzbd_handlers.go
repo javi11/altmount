@@ -333,14 +333,17 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Combine and convert to SABnzbd format
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
-	cfg := s.configManager.GetConfig()
-	mountPath := cfg.MountPath
+
 	for _, item := range completed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, mountPath))
+		// Calculate category-specific base path for this item
+		itemBasePath := s.calculateItemBasePath(item.Category)
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
 	for _, item := range failed {
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, mountPath))
+		// Calculate category-specific base path for this item
+		itemBasePath := s.calculateItemBasePath(item.Category)
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
 
@@ -650,4 +653,41 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	}
 
 	return nil
+}
+
+// calculateItemBasePath calculates the base path for an item based on its category and symlink configuration
+func (s *Server) calculateItemBasePath(category *string) string {
+	if s.configManager == nil {
+		return ""
+	}
+
+	cfg := s.configManager.GetConfig()
+
+	// Determine if we should use symlink directory or mount path
+	var basePath string
+	if cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled &&
+		cfg.SABnzbd.SymlinkDir != nil && *cfg.SABnzbd.SymlinkDir != "" {
+		// Use symlink directory as base when enabled
+		basePath = *cfg.SABnzbd.SymlinkDir
+	} else {
+		// Fall back to mount path
+		basePath = cfg.MountPath
+	}
+
+	// Determine category folder
+	categoryFolder := "default"
+	if category != nil && *category != "" {
+		categoryFolder = *category
+
+		// Look for category directory override in config
+		for _, cat := range cfg.SABnzbd.Categories {
+			if cat.Name == *category && cat.Dir != "" {
+				categoryFolder = cat.Dir
+				break
+			}
+		}
+	}
+
+	// Return base path with category folder
+	return filepath.Join(basePath, categoryFolder)
 }
