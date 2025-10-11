@@ -1,0 +1,34 @@
+services:
+  altmount:
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
+    image: ghcr.io/javi11/altmount:latest
+    container_name: altmount
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - PORT=8080
+      - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
+    volumes:
+      - ./config:/config
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  altmount:
+    driver: rclone # Make sure you have the rclone volume plugin installed
+    driver_opts:
+      remote: 'altmount:'
+      uid: 1000
+      gid: 1000
+      async_read: "true"
+      allow_non_empty: "true"
+      allow_other: "true"
+      vfs_read_ahead: 128M
+      vfs_read_chunk_size: 32M
+      vfs_read_chunk_size_limit: 2G
+      vfs_cache_mode: full
+      vfs_cache_max_age: 504h
+      vfs_cache_max_size: 50G
+      dir_cache_time: 10m
