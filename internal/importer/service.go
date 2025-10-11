@@ -528,8 +528,8 @@ func (s *Service) processQueueItems(workerID int) {
 		}
 
 		// Create category symlink (non-blocking)
-		if err := s.createCategorySymlink(item, resultingPath); err != nil {
-			log.Warn("Failed to create category symlink",
+		if err := s.createSymlinks(item, resultingPath); err != nil {
+			log.Warn("Failed to create symlink",
 				"queue_id", item.ID,
 				"path", resultingPath,
 				"error", err)
@@ -826,8 +826,8 @@ func (s *Service) ProcessItemInBackground(itemID int64) {
 			}
 
 			// Create category symlink (non-blocking)
-			if err := s.createCategorySymlink(item, resultingPath); err != nil {
-				log.Warn("Failed to create category symlink",
+			if err := s.createSymlinks(item, resultingPath); err != nil {
+				log.Warn("Failed to create symlink",
 					"queue_id", item.ID,
 					"path", resultingPath,
 					"error", err)
@@ -936,8 +936,8 @@ func (s *Service) convertPriorityToSABnzbd(priority database.QueuePriority) stri
 	}
 }
 
-// createCategorySymlink creates a symlink for an imported file in the category folder
-func (s *Service) createCategorySymlink(item *database.ImportQueueItem, resultingPath string) error {
+// createSymlinks creates symlinks for an imported file or directory in the category folder
+func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath string) error {
 	cfg := s.configGetter()
 
 	// Check if symlinks are enabled
@@ -949,15 +949,93 @@ func (s *Service) createCategorySymlink(item *database.ImportQueueItem, resultin
 		return fmt.Errorf("symlink directory not configured")
 	}
 
+	// Get the actual metadata/mount path (where the content actually lives)
+	actualPath := filepath.Join(cfg.MountPath, resultingPath)
+
+	// Check if the path is a directory or file
+	fileInfo, err := os.Stat(actualPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat path: %w", err)
+	}
+
+	if !fileInfo.IsDir() {
+		// Single file - create one symlink
+		return s.createSingleSymlink(item, actualPath, resultingPath)
+	}
+
+	// Directory - walk through and create symlinks for all files
+	var symlinkErrors []error
+	symlinkCount := 0
+
+	err = filepath.WalkDir(actualPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.log.Warn("Error accessing path during symlink creation",
+				"path", path,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Skip directories, we only create symlinks for files
+		if d.IsDir() {
+			return nil
+		}
+
+		// Calculate relative path from actualPath
+		relPath, err := filepath.Rel(actualPath, path)
+		if err != nil {
+			s.log.Error("Failed to calculate relative path",
+				"path", path,
+				"base", actualPath,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Create symlink for this file using the helper function
+		fileResultingPath := filepath.Join(resultingPath, relPath)
+		if err := s.createSingleSymlink(item, path, fileResultingPath); err != nil {
+			s.log.Error("Failed to create symlink",
+				"path", path,
+				"error", err)
+			symlinkErrors = append(symlinkErrors, err)
+			return nil // Continue walking
+		}
+
+		symlinkCount++
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	if len(symlinkErrors) > 0 {
+		s.log.Warn("Some symlinks failed to create",
+			"queue_id", item.ID,
+			"total_errors", len(symlinkErrors),
+			"successful", symlinkCount)
+		// Don't fail the import, just log the warning
+	}
+
+	s.log.Info("Created symlinks for directory",
+		"queue_id", item.ID,
+		"path", resultingPath,
+		"symlinks_created", symlinkCount,
+		"errors", len(symlinkErrors))
+
+	return nil
+}
+
+// createSingleSymlink creates a symlink for a single file
+func (s *Service) createSingleSymlink(item *database.ImportQueueItem, actualPath, resultingPath string) error {
+	cfg := s.configGetter()
+
 	baseDir := filepath.Join(*cfg.SABnzbd.SymlinkDir, filepath.Dir(resultingPath))
 
 	// Ensure category directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
-
-	// Get the actual metadata/mount path (where the file actually lives)
-	actualPath := filepath.Join(cfg.MountPath, resultingPath)
 
 	symlinkPath := filepath.Join(*cfg.SABnzbd.SymlinkDir, resultingPath)
 
@@ -974,29 +1052,10 @@ func (s *Service) createCategorySymlink(item *database.ImportQueueItem, resultin
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
 
-	s.log.Info("Created category symlink",
+	s.log.Info("Created symlink",
 		"queue_id", item.ID,
 		"target", actualPath,
 		"symlink", symlinkPath)
 
 	return nil
-}
-
-// getCategoryFolder returns the directory name for a category
-func (s *Service) getCategoryFolder(category *string, cfg *config.Config) string {
-	if category == nil || *category == "" {
-		return "default"
-	}
-
-	// Find matching category in config
-	for _, cat := range cfg.SABnzbd.Categories {
-		if cat.Name == *category {
-			if cat.Dir != "" {
-				return cat.Dir
-			}
-			return cat.Name
-		}
-	}
-
-	return *category // Use category name as fallback
 }

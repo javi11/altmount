@@ -297,8 +297,8 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/javi11/nntp-server-mock v0.0.1 h1:05KbUlFSnzk82CG/sHWLp9s6Vg8exL3wvdAetX8Bwhc=
 github.com/javi11/nntp-server-mock v0.0.1/go.mod h1:+QBpPor0q44ttab8kWo08+/t5C26IHhUpBTC1lZqujA=
-github.com/javi11/nntppool/v2 v2.2.0 h1:pcFhPsZkDyG2rzmtAVlPp7DfOmxf/320vJZkfj5cfso=
-github.com/javi11/nntppool/v2 v2.2.0/go.mod h1:Y9VTmnLp6P2w9/zWzpC4SYldO8tGu1/lABAOcIXt3Xk=
+github.com/javi11/nntppool/v2 v2.2.3 h1:aYOhVwZ7u22V6K4nCxkWi/UdyCbg3bi0+RSgmJIUVk8=
+github.com/javi11/nntppool/v2 v2.2.3/go.mod h1:Y9VTmnLp6P2w9/zWzpC4SYldO8tGu1/lABAOcIXt3Xk=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=
 github.com/javi11/nxg v0.1.0/go.mod h1:+GvYpp+y1oq+qBOWxFMvfTjtin/0zCeomWfjiPkiu8A=
 github.com/javi11/nzbparser v0.4.2 h1:JFcsGoSekclNxcmw7vQraRfDWNSPukgzaabMaAKJllg=

@@ -734,10 +734,10 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 				Username:                       p.Username,
 				Password:                       p.Password,
 				MaxConnections:                 p.MaxConnections,
-				MaxConnectionIdleTimeInSeconds: 300, // Default idle timeout
+				MaxConnectionIdleTimeInSeconds: 90, // Default idle timeout
 				TLS:                            p.TLS,
 				InsecureSSL:                    p.InsecureTLS,
-				MaxConnectionTTLInSeconds:      3600, // Default connection TTL
+				MaxConnectionTTLInSeconds:      90, // Default connection TTL
 				IsBackupProvider:               isBackup,
 			})
 		}
@@ -912,7 +912,7 @@ func DefaultConfig(configDir ...string) *Config {
 	healthCheckEnabled := true
 	autoRepairEnabled := false // Disabled by default for safety
 	vfsEnabled := false
-	mountEnabled := false       // Disabled by default
+	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	symlinkEnabled := false // Disabled by default
 	scrapperEnabled := false
