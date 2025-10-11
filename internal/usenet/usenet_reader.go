@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -45,6 +47,7 @@ type usenetReader struct {
 	init               chan any
 	initDownload       sync.Once
 	totalBytesRead     int64
+	poolGetter         func() (nntppool.UsenetConnectionPool, error) // Dynamic pool getter
 
 	// Dynamic download tracking
 	nextToDownload      int          // Index of next segment to download
@@ -56,7 +59,7 @@ type usenetReader struct {
 
 func NewUsenetReader(
 	ctx context.Context,
-	cp nntppool.UsenetConnectionPool,
+	poolGetter func() (nntppool.UsenetConnectionPool, error),
 	rg segmentRange,
 	maxDownloadWorkers int,
 	maxCacheSizeMB int,
@@ -77,6 +80,7 @@ func NewUsenetReader(
 		init:                make(chan any, 1),
 		maxDownloadWorkers:  maxDownloadWorkers,
 		maxCacheSize:        maxCacheSize,
+		poolGetter:          poolGetter,
 		nextToDownload:      0,
 		downloadingSegments: make(map[int]bool),
 	}
@@ -87,7 +91,7 @@ func NewUsenetReader(
 	ur.wg.Add(1)
 	go func() {
 		defer ur.wg.Done()
-		ur.downloadManager(ctx, cp)
+		ur.downloadManager(ctx)
 	}()
 
 	return ur, nil
@@ -97,11 +101,28 @@ func (b *usenetReader) Close() error {
 	b.cancel()
 	close(b.init)
 
+	// Wait synchronously with timeout to prevent goroutine leaks
+	// Use a separate goroutine to detect when cleanup completes
+	done := make(chan struct{})
 	go func() {
 		b.wg.Wait()
+		close(done)
+	}()
+
+	// Wait for cleanup with reasonable timeout
+	select {
+	case <-done:
+		// Cleanup completed successfully
 		_ = b.rg.Clear()
 		b.rg = segmentRange{}
-	}()
+	case <-time.After(30 * time.Second):
+		// Timeout waiting for downloads to complete
+		// This prevents hanging but logs the issue
+		b.log.Warn("Timeout waiting for downloads to complete during close, potential goroutine leak")
+		// Still attempt to clear resources
+		_ = b.rg.Clear()
+		b.rg = segmentRange{}
+	}
 
 	return nil
 }
@@ -202,9 +223,51 @@ func (b *usenetReader) isArticleNotFoundError(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFoundInProviders)
 }
 
+// isPoolUnavailableError checks if the error indicates the pool is unavailable or shutdown
+func (b *usenetReader) isPoolUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection pool is shutdown") ||
+		strings.Contains(errStr, "connection pool not available") ||
+		strings.Contains(errStr, "NNTP connection pool not available")
+}
+
+// downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
+func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segmentID string, writer io.Writer, groups []string) error {
+	return retry.Do(
+		func() error {
+			// Get current pool
+			cp, err := b.poolGetter()
+			if err != nil {
+				return err
+			}
+
+			// Attempt download
+			_, err = cp.Body(ctx, segmentID, writer, groups)
+			return err
+		},
+		retry.Attempts(10),
+		retry.Delay(50*time.Millisecond),
+		retry.MaxDelay(2*time.Second),
+		retry.DelayType(retry.BackOffDelay),
+		retry.RetryIf(func(err error) bool {
+			// Only retry if error is pool-related
+			return b.isPoolUnavailableError(err)
+		}),
+		retry.OnRetry(func(n uint, err error) {
+			b.log.DebugContext(ctx, "Pool unavailable, retrying segment download",
+				"attempt", n+1,
+				"segment_id", segmentID,
+				"error", err)
+		}),
+		retry.Context(ctx),
+	)
+}
+
 func (b *usenetReader) downloadManager(
 	ctx context.Context,
-	cp nntppool.UsenetConnectionPool,
 ) {
 	select {
 	case _, ok := <-b.init:
@@ -218,7 +281,7 @@ func (b *usenetReader) downloadManager(
 		}
 
 		if len(b.rg.segments) == 0 {
-			b.log.Debug("No segments to download")
+			b.log.DebugContext(ctx, "No segments to download")
 
 			return
 		}
@@ -257,6 +320,14 @@ func (b *usenetReader) downloadManager(
 			b.mu.Lock()
 			segmentsToQueue := []int{}
 			for i := b.nextToDownload; i < targetDownload; i++ {
+				// Check for context cancellation frequently during segment selection
+				select {
+				case <-ctx.Done():
+					b.mu.Unlock()
+					return
+				default:
+				}
+
 				if !b.downloadingSegments[i] {
 					b.downloadingSegments[i] = true
 					segmentsToQueue = append(segmentsToQueue, i)
@@ -278,7 +349,7 @@ func (b *usenetReader) downloadManager(
 
 					// Set the item ready to read
 					ctx = slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
-					_, err := cp.Body(ctx, s.Id, s.Writer(), s.groups)
+					err := b.downloadSegmentWithRetry(ctx, s.Id, s.Writer(), s.groups)
 
 					// Mark download complete
 					b.mu.Lock()

@@ -4,6 +4,8 @@ import type {
 	FileHealth,
 	FileMetadata,
 	HealthCheckRequest,
+	HealthCleanupRequest,
+	HealthCleanupResponse,
 	HealthStats,
 	HealthWorkerStatus,
 	ManualScanRequest,
@@ -302,8 +304,8 @@ export class APIClient {
 		return this.request<HealthStats>("/health/stats");
 	}
 
-	async cleanupHealth(params?: { older_than?: string; status?: string }) {
-		return this.request<HealthStats>("/health/cleanup", {
+	async cleanupHealth(params?: HealthCleanupRequest) {
+		return this.request<HealthCleanupResponse>("/health/cleanup", {
 			method: "DELETE",
 			body: JSON.stringify(params),
 		});

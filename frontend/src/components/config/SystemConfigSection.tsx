@@ -2,12 +2,13 @@ import { Copy, RefreshCw, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
-import { useAuth, useRegenerateAPIKey } from "../../hooks/useAuth";
+import { useRegenerateAPIKey } from "../../hooks/useAuth";
 import type { ConfigResponse, LogFormData } from "../../types/config";
 
 interface SystemConfigSectionProps {
 	config: ConfigResponse;
 	onUpdate?: (section: string, data: LogFormData) => Promise<void>;
+	onRefresh?: () => Promise<void>;
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
 }
@@ -15,6 +16,7 @@ interface SystemConfigSectionProps {
 export function SystemConfigSection({
 	config,
 	onUpdate,
+	onRefresh,
 	isReadOnly = false,
 	isUpdating = false,
 }: SystemConfigSectionProps) {
@@ -29,7 +31,6 @@ export function SystemConfigSection({
 	const [hasChanges, setHasChanges] = useState(false);
 
 	// API Key functionality
-	const { user, refreshToken } = useAuth();
 	const regenerateAPIKey = useRegenerateAPIKey();
 	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
@@ -77,9 +78,9 @@ export function SystemConfigSection({
 	};
 
 	const handleCopyAPIKey = async () => {
-		if (user?.api_key) {
+		if (config.api_key) {
 			try {
-				await navigator.clipboard.writeText(user.api_key);
+				await navigator.clipboard.writeText(config.api_key);
 				showToast({
 					type: "success",
 					title: "Success",
@@ -109,8 +110,10 @@ export function SystemConfigSection({
 		if (confirmed) {
 			try {
 				await regenerateAPIKey.mutateAsync();
-				// Refresh user data to get the new API key and update the UI
-				await refreshToken();
+				// Refresh config to get the new API key and update the UI
+				if (onRefresh) {
+					await onRefresh();
+				}
 				showToast({
 					type: "success",
 					title: "Success",
@@ -152,11 +155,11 @@ export function SystemConfigSection({
 						<input
 							type="text"
 							className="input flex-1"
-							value={user?.api_key ? user.api_key : "No API key generated"}
+							value={config.api_key ? config.api_key : "No API key generated"}
 							readOnly
 							disabled
 						/>
-						{user?.api_key && (
+						{config.api_key && (
 							<button
 								type="button"
 								className="btn btn-outline btn-sm"

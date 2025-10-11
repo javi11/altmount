@@ -147,12 +147,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create config manager for dynamic configuration updates
 	configManager := config.NewManager(cfg, configFile)
 
+	// Create context with cancellation for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Create pool manager for dynamic NNTP connection management
-	poolManager := pool.NewManager()
+	poolManager := pool.NewManager(ctx)
 
 	// Register configuration change handler
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
-		logger.Info("Configuration updated", "new_config", newConfig)
+		logger.Info("Configuration updated")
 
 		// Handle provider changes dynamically using comprehensive comparison
 		providersChanged := !oldConfig.ProvidersEqual(newConfig)
@@ -195,7 +199,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Starting server without NNTP providers - configure via API to enable downloads")
 	}
 	defer func() {
-		_ = poolManager.ClearPool()
+		logger.Info("Clearing NNTP pool")
+		err := poolManager.ClearPool()
+		if err != nil {
+			logger.Error("failed to clear NNTP pool", "err", err)
+		}
 	}()
 
 	// Create RClone mount service
@@ -222,7 +230,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() {
-		_ = nsys.Close()
+		logger.Info("Closing NZB system")
+		err := nsys.Close()
+		if err != nil {
+			logger.Error("failed to close NZB system", "err", err)
+		}
 	}()
 
 	// Create Fiber app
@@ -390,10 +402,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"download_workers", cfg.Streaming.MaxDownloadWorkers,
 		"processor_workers", cfg.Import.MaxProcessorWorkers)
 
-	// Create context with cancellation for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// Create health worker if enabled
 	var healthWorker *health.HealthWorker
 	if *cfg.Health.Enabled {
@@ -444,8 +452,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := mountService.Start(ctx); err != nil {
 			logger.Error("Failed to start mount service", "error", err)
 		} else {
-			actualMountPath := cfg.GetActualMountPath(config.MountProvider)
-			logger.Info("RClone mount service started", "mount_point", actualMountPath)
+			logger.Info("RClone mount service started", "mount_point", cfg.MountPath)
 		}
 	} else {
 		logger.Info("RClone mount service is disabled in configuration")
@@ -562,9 +569,12 @@ func setupSPARoutes(app *fiber.App) {
 	// Cli mode - use embedded filesystem
 	buildFS, err := frontend.GetBuildFS()
 	if err != nil {
-		// Docker or development
-		app.Static("/", frontendPath)
-		app.Static("*", frontendPath+"/index.html")
+		// Docker or development - serve static files with SPA fallback
+		app.All("/*", filesystem.New(filesystem.Config{
+			Root:         http.Dir(frontendPath),
+			NotFoundFile: "index.html",
+			Index:        "index.html",
+		}))
 	} else {
 		// For embedded filesystem, we'll handle it differently below
 		app.All("/*", filesystem.New(filesystem.Config{

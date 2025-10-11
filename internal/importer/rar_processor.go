@@ -79,14 +79,9 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Rename RAR files to match the first file's base name that will allow parse rar that have different files name
 	sortFiles := renameRarFilesAndSort(rarFiles)
 
-	cp, err := rh.poolManager.GetPool()
-	if err != nil {
-		return nil, NewNonRetryableError("no connection pool available", err)
-	}
-
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, cp, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
+	ufs := NewUsenetFileSystem(ctx, rh.poolManager, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortFiles))

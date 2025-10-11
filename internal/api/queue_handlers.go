@@ -392,27 +392,8 @@ func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 
 // handleClearCompletedQueue handles DELETE /api/queue/completed
 func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
-	// Parse older_than parameter
-	olderThan, err := ParseTimeParamFiber(c, "older_than")
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"error": fiber.Map{
-				"code":    "VALIDATION_ERROR",
-				"message": "Invalid older_than parameter",
-				"details": err.Error(),
-			},
-		})
-	}
-
-	// Default to 24 hours ago if not specified
-	if olderThan == nil {
-		defaultTime := time.Now().Add(-24 * time.Hour)
-		olderThan = &defaultTime
-	}
-
 	// Clear completed items
-	count, err := s.queueRepo.ClearCompletedQueueItems(*olderThan)
+	count, err := s.queueRepo.ClearCompletedQueueItems()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -426,7 +407,6 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 
 	response := map[string]interface{}{
 		"removed_count": count,
-		"older_than":    olderThan.Format(time.RFC3339),
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -437,27 +417,8 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 
 // handleClearFailedQueue handles DELETE /api/queue/failed
 func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
-	// Parse older_than parameter
-	olderThan, err := ParseTimeParamFiber(c, "older_than")
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"error": fiber.Map{
-				"code":    "VALIDATION_ERROR",
-				"message": "Invalid older_than parameter",
-				"details": err.Error(),
-			},
-		})
-	}
-
-	// Default to 24 hours ago if not specified
-	if olderThan == nil {
-		defaultTime := time.Now().Add(-24 * time.Hour)
-		olderThan = &defaultTime
-	}
-
 	// Clear failed items
-	count, err := s.queueRepo.ClearFailedQueueItems(*olderThan)
+	count, err := s.queueRepo.ClearFailedQueueItems()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -471,7 +432,6 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 
 	response := map[string]interface{}{
 		"removed_count": count,
-		"older_than":    olderThan.Format(time.RFC3339),
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -771,4 +731,76 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 		"success": true,
 		"data":    response,
 	})
+}
+
+// handleDownloadNZB handles GET /api/queue/{id}/download
+func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Queue item ID is required",
+				"details": "",
+			},
+		})
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid queue item ID",
+				"details": "ID must be a valid integer",
+			},
+		})
+	}
+
+	// Get queue item from repository
+	item, err := s.queueRepo.GetQueueItem(id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to retrieve queue item",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	if item == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "Queue item not found",
+				"details": "",
+			},
+		})
+	}
+
+	// Check if NZB file exists
+	if _, err := os.Stat(item.NzbPath); os.IsNotExist(err) {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "NZB file not found",
+				"details": "The NZB file no longer exists on disk",
+			},
+		})
+	}
+
+	// Set headers for file download
+	filename := filepath.Base(item.NzbPath)
+	c.Set("Content-Type", "application/x-nzb")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	// Send the file
+	return c.SendFile(item.NzbPath)
 }

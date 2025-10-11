@@ -584,6 +584,21 @@ func IsProbablyObfuscated(input string) bool {
 		return false
 	}
 
+	// Simple lowercase words (common filenames like "readme", "license", "changelog")
+	if lowers >= 3 && uppers == 0 && digits == 0 &&
+		spacesDots == 0 && len(filebasename) >= 3 && len(filebasename) <= 20 {
+		// Check for vowel distribution (heuristic for pronounceable words)
+		vowelCount := strings.Count(strings.ToLower(filebasename), "a") +
+			strings.Count(strings.ToLower(filebasename), "e") +
+			strings.Count(strings.ToLower(filebasename), "i") +
+			strings.Count(strings.ToLower(filebasename), "o") +
+			strings.Count(strings.ToLower(filebasename), "u")
+		// Reasonable vowel distribution: at least 2 vowels, but not all vowels
+		if vowelCount >= 2 && vowelCount < len(filebasename) {
+			return false
+		}
+	}
+
 	logger.Debug("obfuscation check: default -> obfuscated", "basename", filebasename)
 	return true
 }

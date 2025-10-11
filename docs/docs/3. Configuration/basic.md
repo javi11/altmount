@@ -280,6 +280,17 @@ AltMount can act as a drop-in replacement for SABnzbd:
 sabnzbd:
   enabled: false # Enable SABnzbd-compatible API
   complete_dir: "/mnt/altmount/completed" # The complete directory where the files will be imported from the WebDAV mount POINT OF VIEW
+  symlink_enabled: false # Enable category-based symlinks (optional)
+  symlink_dir: "/symlinks" # Directory for symlinks (required when symlink_enabled is true)
+  categories:
+    - name: "movies"
+      order: 1
+      priority: 0
+      dir: "movies"
+    - name: "tv"
+      order: 2
+      priority: 0
+      dir: "tv"
 ```
 
 **Integration Workflow:**
@@ -290,6 +301,8 @@ sabnzbd:
 4. **Complete Directory**: Must be configured from the mounted directory point of view (where ARRs see the files)
 
 **Critical Configuration**: The `complete_dir` must be set to the path where your ARRs see the WebDAV-mounted files, not the local AltMount path.
+
+**Symlink Configuration (Optional)**: Enable `symlink_enabled` and configure `symlink_dir` to create category-based symbolic links for imported files. This is useful when ARR applications need direct filesystem access or cleaner path structures. See [Symlink Configuration](integration.md#symlink-configuration-advanced) for detailed setup instructions and use cases.
 
 See [SABnzbd Integration](integration.md) for complete setup instructions.
 

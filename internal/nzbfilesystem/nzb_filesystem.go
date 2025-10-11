@@ -132,12 +132,12 @@ func (nfs *NzbFilesystem) Create(name string) (afero.File, error) {
 
 // Mkdir creates a directory (not supported - read-only filesystem)
 func (nfs *NzbFilesystem) Mkdir(name string, perm os.FileMode) error {
-	return os.ErrPermission
+	return nfs.remoteFile.Mkdir(name, perm)
 }
 
 // MkdirAll creates a directory and all parent directories (not supported)
 func (nfs *NzbFilesystem) MkdirAll(name string, perm os.FileMode) error {
-	return os.ErrPermission
+	return nfs.remoteFile.MkdirAll(name, perm)
 }
 
 // Chmod changes file permissions (not supported)

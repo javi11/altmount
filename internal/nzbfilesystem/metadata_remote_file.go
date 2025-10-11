@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -128,10 +129,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 
 	if fileMeta == nil {
 		return false, nil, nil
-	}
-
-	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
-		return false, nil, ErrFileIsCorrupted
 	}
 
 	// Create a metadata-based virtual file handle
@@ -537,20 +534,17 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 			// Update file health status and database tracking
 			mvf.updateFileHealthOnError(articleErr, articleErr.BytesRead > 0 || totalRead > 0)
 
-			if articleErr.BytesRead > 0 || totalRead > 0 {
-				// Some content was read - return partial content error
-				return totalRead, &PartialContentError{
-					BytesRead:     articleErr.BytesRead,
-					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: articleErr,
-				}
-			} else {
-				// No content read - return corrupted file error
-				return totalRead, &CorruptedFileError{
-					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: articleErr,
+			// Fill remaining buffer with zeros to allow partial playback
+			// File is already marked as corrupted in metadata via updateFileHealthOnError
+			if totalRead < len(p) {
+				for i := totalRead; i < len(p); i++ {
+					p[i] = 0
 				}
 			}
+
+			// Return successful read to prevent retry loops
+			mvf.position += int64(len(p))
+			return len(p), nil
 		}
 
 		// Update position even on error if we read some data
@@ -777,19 +771,20 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, ErrNoNzbData
 	}
 
-	// Get connection pool dynamically from pool manager
-	cp, err := mvf.poolManager.GetPool()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get connection pool: %w", err)
-	}
-
 	if end == -1 {
 		end = mvf.fileMeta.FileSize - 1
 	}
 
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
+
+	if len(loader.segments) == 0 {
+		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download", "start", start, "end", end)
+
+		return nil, ErrNoNzbData
+	}
+
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
@@ -907,4 +902,12 @@ func (mrf *MetadataRemoteFile) isValidEmptyDirectory(normalizedPath string) bool
 
 	// Recursively check if parent could be a valid empty directory
 	return mrf.isValidEmptyDirectory(parentDir)
+}
+
+func (mrf *MetadataRemoteFile) Mkdir(name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
+}
+
+func (mrf *MetadataRemoteFile) MkdirAll(name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
 }

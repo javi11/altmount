@@ -252,6 +252,10 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	// Convert to SABnzbd format
 	slots := make([]SABnzbdQueueSlot, 0, len(items))
 	for i, item := range items {
+		if item.Status == database.QueueStatusFallback {
+			continue
+		}
+
 		slots = append(slots, ToSABnzbdQueueSlot(item, i))
 	}
 
@@ -329,14 +333,17 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Combine and convert to SABnzbd format
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
+
 	for _, item := range completed {
-		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
+		// Calculate category-specific base path for this item
+		itemBasePath := s.calculateItemBasePath(item.Category)
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
 	for _, item := range failed {
-		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
+		// Calculate category-specific base path for this item
+		itemBasePath := s.calculateItemBasePath(item.Category)
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
 
@@ -445,7 +452,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 
 		// Build misc configuration
 		sabnzbdConfig.Misc = SABnzbdMiscConfig{
-			CompleteDir:            filepath.Join(cfg.GetActualMountPath(config.MountProvider), cfg.SABnzbd.CompleteDir),
+			CompleteDir:            filepath.Join(cfg.MountPath, cfg.SABnzbd.CompleteDir),
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",
@@ -636,7 +643,7 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	// Create in mount path
 	mountDir := filepath.Join(config.Metadata.RootPath, config.SABnzbd.CompleteDir, categoryPath)
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
-		return fmt.Errorf("failed to create mount directory: %w", err)
+		return fmt.Errorf("failed to create category mount directory: %w", err)
 	}
 
 	// Create in temp path
@@ -646,4 +653,27 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	}
 
 	return nil
+}
+
+// calculateItemBasePath calculates the base path for an item based on its category and symlink configuration
+func (s *Server) calculateItemBasePath(category *string) string {
+	if s.configManager == nil {
+		return ""
+	}
+
+	cfg := s.configManager.GetConfig()
+
+	// Determine if we should use symlink directory or mount path
+	var basePath string
+	if cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled &&
+		cfg.SABnzbd.SymlinkDir != nil && *cfg.SABnzbd.SymlinkDir != "" {
+		// Use symlink directory as base when enabled
+		basePath = *cfg.SABnzbd.SymlinkDir
+	} else {
+		// Fall back to mount path
+		basePath = cfg.MountPath
+	}
+
+	// Return base path with category folder
+	return basePath
 }

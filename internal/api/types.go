@@ -17,6 +17,7 @@ type ConfigAPIResponse struct {
 	RClone    RCloneAPIResponse     `json:"rclone"`
 	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers []ProviderAPIResponse `json:"providers"`
+	APIKey    string                `json:"api_key,omitempty"` // User's API key for authentication
 }
 
 // RCloneAPIResponse sanitizes RClone config for API responses
@@ -102,12 +103,14 @@ type SABnzbdAPIResponse struct {
 	FallbackHost      string                  `json:"fallback_host"`
 	FallbackAPIKey    string                  `json:"fallback_api_key"`     // Obfuscated if set
 	FallbackAPIKeySet bool                    `json:"fallback_api_key_set"` // Indicates if API key is set
+	SymlinkDir        *string                 `json:"symlink_dir,omitempty"`
+	SymlinkEnabled    bool                    `json:"symlink_enabled"`
 }
 
 // Helper functions to create API responses from core config types
 
 // ToConfigAPIResponse converts config.Config to ConfigAPIResponse with sensitive data masked
-func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
+func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	if cfg == nil {
 		return nil
 	}
@@ -192,6 +195,8 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 		FallbackHost:      cfg.SABnzbd.FallbackHost,
 		FallbackAPIKey:    fallbackAPIKey,
 		FallbackAPIKeySet: cfg.SABnzbd.FallbackAPIKey != "",
+		SymlinkDir:        cfg.SABnzbd.SymlinkDir,
+		SymlinkEnabled:    cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled,
 	}
 
 	return &ConfigAPIResponse{
@@ -200,6 +205,7 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 		RClone:    rcloneResp,
 		SABnzbd:   sabnzbdResp,
 		Providers: providers,
+		APIKey:    apiKey,
 	}
 }
 
@@ -329,8 +335,9 @@ type HealthRepairRequest struct {
 
 // HealthCleanupRequest represents request to cleanup health records
 type HealthCleanupRequest struct {
-	OlderThan *time.Time             `json:"older_than"`
-	Status    *database.HealthStatus `json:"status"`
+	OlderThan   *time.Time             `json:"older_than"`
+	Status      *database.HealthStatus `json:"status"`
+	DeleteFiles bool                   `json:"delete_files"` // Whether to also delete the physical files
 }
 
 // HealthCheckRequest represents request to add file for manual health checking
@@ -607,15 +614,15 @@ type ManualImportResponse struct {
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
-	ActiveConnections    int       `json:"active_connections"`
-	TotalBytesDownloaded int64     `json:"total_bytes_downloaded"`
-	DownloadSpeed        float64   `json:"download_speed_bytes_per_sec"`
-	ErrorRate            float64   `json:"error_rate_percent"`
-	CurrentMemoryUsage   int64     `json:"current_memory_usage"`
-	TotalConnections     int64     `json:"total_connections"`
-	CommandSuccessRate   float64   `json:"command_success_rate_percent"`
-	AcquireWaitTimeMs    int64     `json:"acquire_wait_time_ms"`
-	LastUpdated          time.Time `json:"last_updated"`
+	BytesDownloaded          int64             `json:"bytes_downloaded"`
+	BytesUploaded            int64             `json:"bytes_uploaded"`
+	ArticlesDownloaded       int64             `json:"articles_downloaded"`
+	ArticlesPosted           int64             `json:"articles_posted"`
+	TotalErrors              int64             `json:"total_errors"`
+	ProviderErrors           map[string]int64  `json:"provider_errors"`
+	DownloadSpeedBytesPerSec float64           `json:"download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec   float64           `json:"upload_speed_bytes_per_sec"`
+	Timestamp                time.Time         `json:"timestamp"`
 }
 
 type TestProviderResponse struct {

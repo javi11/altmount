@@ -9,11 +9,13 @@ interface UploadedFile {
 	status: "pending" | "uploading" | "success" | "error";
 	errorMessage?: string;
 	queueId?: string;
+	category?: string;
 }
 
 export function DragDropUpload() {
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+	const [category, setCategory] = useState<string>("");
 	const uploadMutation = useUploadToQueue();
 
 	const validateFile = useCallback((file: File): string | null => {
@@ -36,6 +38,7 @@ export function DragDropUpload() {
 				file,
 				id: `${file.name}-${Date.now()}-${Math.random()}`,
 				status: "pending" as const,
+				category: category || undefined,
 			}));
 
 			// Validate files first
@@ -65,6 +68,7 @@ export function DragDropUpload() {
 				try {
 					const response = await uploadMutation.mutateAsync({
 						file: uploadFile.file,
+						category: uploadFile.category,
 					});
 
 					// Update status to success
@@ -95,7 +99,7 @@ export function DragDropUpload() {
 				}
 			});
 		},
-		[uploadMutation, validateFile],
+		[uploadMutation, validateFile, category],
 	);
 
 	const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -142,6 +146,7 @@ export function DragDropUpload() {
 
 	const clearAllFiles = () => {
 		setUploadedFiles([]);
+		setCategory("");
 	};
 
 	const getFileStatusIcon = (status: UploadedFile["status"]) => {
@@ -177,6 +182,19 @@ export function DragDropUpload() {
 					<Upload className="h-5 w-5 text-primary" />
 					<h2 className="card-title">Upload NZB Files</h2>
 				</div>
+
+				{/* Category Input */}
+				<fieldset className="fieldset mb-4">
+					<legend className="fieldset-legend">Category (optional)</legend>
+					<input
+						type="text"
+						className="input"
+						placeholder="e.g., movies, tv, software"
+						value={category}
+						onChange={(e) => setCategory(e.target.value)}
+					/>
+					<p className="label">Category will be applied to all uploaded files</p>
+				</fieldset>
 
 				{/* Drag and Drop Zone */}
 				{/* biome-ignore lint/a11y/useSemanticElements: drag-drop zone requires div for proper drag events */}
@@ -246,6 +264,14 @@ export function DragDropUpload() {
 											<span>{getFileStatusText(uploadFile.status)}</span>
 											<span>•</span>
 											<span>{(uploadFile.file.size / 1024 / 1024).toFixed(1)} MB</span>
+											{uploadFile.category && (
+												<>
+													<span>•</span>
+													<span className="badge badge-outline badge-sm">
+														{uploadFile.category}
+													</span>
+												</>
+											)}
 											{uploadFile.queueId && (
 												<>
 													<span>•</span>

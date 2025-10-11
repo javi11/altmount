@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -244,9 +244,11 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
-	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled        *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir    string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	SymlinkDir     *string           `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
+	SymlinkEnabled *bool             `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
+	Categories     []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
@@ -358,6 +360,22 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.SABnzbd.Enabled = &v
 	} else {
 		copyCfg.SABnzbd.Enabled = nil
+	}
+
+	// Deep copy SABnzbd.SymlinkDir pointer
+	if c.SABnzbd.SymlinkDir != nil {
+		v := *c.SABnzbd.SymlinkDir
+		copyCfg.SABnzbd.SymlinkDir = &v
+	} else {
+		copyCfg.SABnzbd.SymlinkDir = nil
+	}
+
+	// Deep copy SABnzbd.SymlinkEnabled pointer
+	if c.SABnzbd.SymlinkEnabled != nil {
+		v := *c.SABnzbd.SymlinkEnabled
+		copyCfg.SABnzbd.SymlinkEnabled = &v
+	} else {
+		copyCfg.SABnzbd.SymlinkEnabled = nil
 	}
 
 	// Deep copy SABnzbd Categories slice
@@ -562,6 +580,16 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
 		}
 
+		// Validate symlink configuration if enabled
+		if c.SABnzbd.SymlinkEnabled != nil && *c.SABnzbd.SymlinkEnabled {
+			if c.SABnzbd.SymlinkDir == nil || *c.SABnzbd.SymlinkDir == "" {
+				return fmt.Errorf("sabnzbd symlink_dir cannot be empty when symlinks are enabled")
+			}
+			if !filepath.IsAbs(*c.SABnzbd.SymlinkDir) {
+				return fmt.Errorf("sabnzbd symlink_dir must be an absolute path")
+			}
+		}
+
 		// Validate categories if provided
 		categoryNames := make(map[string]bool)
 		for i, category := range c.SABnzbd.Categories {
@@ -706,20 +734,15 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 				Username:                       p.Username,
 				Password:                       p.Password,
 				MaxConnections:                 p.MaxConnections,
-				MaxConnectionIdleTimeInSeconds: 300, // Default idle timeout
+				MaxConnectionIdleTimeInSeconds: 90, // Default idle timeout
 				TLS:                            p.TLS,
 				InsecureSSL:                    p.InsecureTLS,
-				MaxConnectionTTLInSeconds:      3600, // Default connection TTL
+				MaxConnectionTTLInSeconds:      90, // Default connection TTL
 				IsBackupProvider:               isBackup,
 			})
 		}
 	}
 	return providers
-}
-
-// GetActualMountPath returns the actual mount path used by rclone, which includes the provider subdirectory
-func (c *Config) GetActualMountPath(provider string) string {
-	return filepath.Join(c.MountPath, provider)
 }
 
 // ChangeCallback represents a function called when configuration changes
@@ -891,6 +914,7 @@ func DefaultConfig(configDir ...string) *Config {
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
+	symlinkEnabled := false // Disabled by default
 	scrapperEnabled := false
 	loginRequired := true // Require login by default
 
@@ -971,12 +995,12 @@ func DefaultConfig(configDir ...string) *Config {
 			// VFS Cache Settings - matching your command
 			CacheDir:           cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
 			VFSCacheMode:       "full",    // --vfs-cache-mode=full
-			VFSCacheMaxSize:    "50G",  // --vfs-cache-max-size=50G (changed from 100G)
-			VFSCacheMaxAge:     "504h", // --vfs-cache-max-age=504h (changed from 100h)
-			ReadChunkSize:      "32M",  // --vfs-read-chunk-size=32M (changed from 128M)
-			ReadChunkSizeLimit: "2G",   // --vfs-read-chunk-size-limit=2G
-			VFSReadAhead:       "128M", // --vfs-read-ahead=128M (changed from 128k)
-			DirCacheTime:       "10m",  // --dir-cache-time=10m (changed from 5m)
+			VFSCacheMaxSize:    "50G",     // --vfs-cache-max-size=50G (changed from 100G)
+			VFSCacheMaxAge:     "504h",    // --vfs-cache-max-age=504h (changed from 100h)
+			ReadChunkSize:      "32M",     // --vfs-read-chunk-size=32M (changed from 128M)
+			ReadChunkSizeLimit: "2G",      // --vfs-read-chunk-size-limit=2G
+			VFSReadAhead:       "128M",    // --vfs-read-ahead=128M (changed from 128k)
+			DirCacheTime:       "10m",     // --dir-cache-time=10m (changed from 5m)
 
 			// Additional VFS Settings (not specified in your command, using sensible defaults)
 			VFSCacheMinFreeSpace: "1G",
@@ -1007,6 +1031,8 @@ func DefaultConfig(configDir ...string) *Config {
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,
 			CompleteDir:    "/complete",
+			SymlinkDir:     nil,
+			SymlinkEnabled: &symlinkEnabled,
 			Categories:     []SABnzbdCategory{},
 			FallbackHost:   "",
 			FallbackAPIKey: "",
@@ -1108,6 +1134,20 @@ func LoadConfig(configFile string) (*Config, error) {
 	if configFile != "" && (!viper.IsSet("rclone.cache_dir") || config.RClone.CacheDir == "") {
 		configDir := filepath.Dir(configFile)
 		config.RClone.CacheDir = filepath.Join(configDir, "cache")
+	}
+
+	// Check for PORT environment variable override
+	if portEnv := os.Getenv("PORT"); portEnv != "" {
+		port := 0
+		_, err := fmt.Sscanf(portEnv, "%d", &port)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PORT environment variable '%s': must be a number", portEnv)
+		}
+		if port <= 0 || port > 65535 {
+			return nil, fmt.Errorf("invalid PORT environment variable %d: must be between 1 and 65535", port)
+		}
+		config.WebDAV.Port = port
+		fmt.Printf("Using PORT from environment variable: %d\n", port)
 	}
 
 	// Validate configuration

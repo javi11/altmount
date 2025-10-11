@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
 )
@@ -56,9 +56,9 @@ type Service struct {
 	database        *database.DB              // Database for processing queue
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
-	rcloneClient    rclonecli.RcloneRcClient  // Optional rclone client for VFS notifications
-	configGetter    config.ConfigGetter       // Config getter for dynamic configuration access
-	sabnzbdClient   *sabnzbd.SABnzbdClient    // SABnzbd client for fallback
+	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
+	configGetter    config.ConfigGetter      // Config getter for dynamic configuration access
+	sabnzbdClient   *sabnzbd.SABnzbdClient   // SABnzbd client for fallback
 	log             *slog.Logger
 
 	// Runtime state
@@ -524,7 +524,16 @@ func (s *Service) processQueueItems(workerID int) {
 		s.handleProcessingFailure(item, processingErr, log)
 	} else {
 		if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
-			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
+			log.Error("Failed to add storage path", "queue_id", item.ID, "error", err)
+		}
+
+		// Create category symlink (non-blocking)
+		if err := s.createSymlinks(item, resultingPath); err != nil {
+			log.Warn("Failed to create symlink",
+				"queue_id", item.ID,
+				"path", resultingPath,
+				"error", err)
+			// Don't fail the import, just log the warning
 		}
 
 		// Mark as completed in queue database
@@ -570,29 +579,46 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 		}
 
 		// Attempt SABnzbd fallback if configured
-		s.attemptSABnzbdFallback(item, log)
+		if err := s.attemptSABnzbdFallback(item, log); err != nil {
+			log.Error("Failed to send to external SABnzbd",
+				"queue_id", item.ID,
+				"file", item.NzbPath,
+				"fallback_host", s.configGetter().SABnzbd.FallbackHost,
+				"error", err)
+
+		} else {
+			// Mark item as fallback instead of removing from queue
+			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFallback, nil); err != nil {
+				log.Error("Failed to mark item as fallback", "queue_id", item.ID, "error", err)
+			} else {
+				log.Info("Item marked as fallback after successful SABnzbd transfer",
+					"queue_id", item.ID,
+					"file", item.NzbPath,
+					"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+			}
+		}
 	}
 }
 
 // attemptSABnzbdFallback attempts to send a failed import to an external SABnzbd instance
-func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *slog.Logger) {
+func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *slog.Logger) error {
 	// Get current configuration
 	cfg := s.configGetter()
 
 	// Check if SABnzbd is enabled and fallback is configured
 	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
 		log.Debug("SABnzbd fallback not attempted - SABnzbd API not enabled", "queue_id", item.ID)
-		return
+		return fmt.Errorf("SABnzbd fallback not attempted - SABnzbd API not enabled")
 	}
 
 	if cfg.SABnzbd.FallbackHost == "" {
 		log.Debug("SABnzbd fallback not attempted - no fallback host configured", "queue_id", item.ID)
-		return
+		return fmt.Errorf("SABnzbd fallback not attempted - no fallback host configured")
 	}
 
 	if cfg.SABnzbd.FallbackAPIKey == "" {
 		log.Warn("SABnzbd fallback not attempted - no API key configured", "queue_id", item.ID)
-		return
+		return fmt.Errorf("SABnzbd fallback not attempted - no API key configured")
 	}
 
 	// Check if the NZB file still exists
@@ -601,7 +627,7 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
-		return
+		return err
 	}
 
 	log.Info("Attempting to send failed import to external SABnzbd",
@@ -620,14 +646,8 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 		item.Category,
 		&priority,
 	)
-
 	if err != nil {
-		log.Error("Failed to send to external SABnzbd",
-			"queue_id", item.ID,
-			"file", item.NzbPath,
-			"fallback_host", cfg.SABnzbd.FallbackHost,
-			"error", err)
-		return
+		return err
 	}
 
 	log.Info("Successfully sent failed import to external SABnzbd",
@@ -635,6 +655,8 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 		"file", item.NzbPath,
 		"fallback_host", cfg.SABnzbd.FallbackHost,
 		"sabnzbd_nzo_id", nzoID)
+
+	return nil
 }
 
 // ServiceStats holds statistics about the service
@@ -803,6 +825,15 @@ func (s *Service) ProcessItemInBackground(itemID int64) {
 				log.Error("Failed to add storage path", "error", err)
 			}
 
+			// Create category symlink (non-blocking)
+			if err := s.createSymlinks(item, resultingPath); err != nil {
+				log.Warn("Failed to create symlink",
+					"queue_id", item.ID,
+					"path", resultingPath,
+					"error", err)
+				// Don't fail the import, just log the warning
+			}
+
 			// Mark as completed
 			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
 				log.Error("Failed to mark item as completed", "error", err)
@@ -903,4 +934,128 @@ func (s *Service) convertPriorityToSABnzbd(priority database.QueuePriority) stri
 	default:
 		return "1" // Normal
 	}
+}
+
+// createSymlinks creates symlinks for an imported file or directory in the category folder
+func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath string) error {
+	cfg := s.configGetter()
+
+	// Check if symlinks are enabled
+	if cfg.SABnzbd.SymlinkEnabled == nil || !*cfg.SABnzbd.SymlinkEnabled {
+		return nil // Skip if not enabled
+	}
+
+	if cfg.SABnzbd.SymlinkDir == nil || *cfg.SABnzbd.SymlinkDir == "" {
+		return fmt.Errorf("symlink directory not configured")
+	}
+
+	// Get the actual metadata/mount path (where the content actually lives)
+	actualPath := filepath.Join(cfg.MountPath, resultingPath)
+
+	// Check if the path is a directory or file
+	fileInfo, err := os.Stat(actualPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat path: %w", err)
+	}
+
+	if !fileInfo.IsDir() {
+		// Single file - create one symlink
+		return s.createSingleSymlink(item, actualPath, resultingPath)
+	}
+
+	// Directory - walk through and create symlinks for all files
+	var symlinkErrors []error
+	symlinkCount := 0
+
+	err = filepath.WalkDir(actualPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.log.Warn("Error accessing path during symlink creation",
+				"path", path,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Skip directories, we only create symlinks for files
+		if d.IsDir() {
+			return nil
+		}
+
+		// Calculate relative path from actualPath
+		relPath, err := filepath.Rel(actualPath, path)
+		if err != nil {
+			s.log.Error("Failed to calculate relative path",
+				"path", path,
+				"base", actualPath,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Create symlink for this file using the helper function
+		fileResultingPath := filepath.Join(resultingPath, relPath)
+		if err := s.createSingleSymlink(item, path, fileResultingPath); err != nil {
+			s.log.Error("Failed to create symlink",
+				"path", path,
+				"error", err)
+			symlinkErrors = append(symlinkErrors, err)
+			return nil // Continue walking
+		}
+
+		symlinkCount++
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	if len(symlinkErrors) > 0 {
+		s.log.Warn("Some symlinks failed to create",
+			"queue_id", item.ID,
+			"total_errors", len(symlinkErrors),
+			"successful", symlinkCount)
+		// Don't fail the import, just log the warning
+	}
+
+	s.log.Info("Created symlinks for directory",
+		"queue_id", item.ID,
+		"path", resultingPath,
+		"symlinks_created", symlinkCount,
+		"errors", len(symlinkErrors))
+
+	return nil
+}
+
+// createSingleSymlink creates a symlink for a single file
+func (s *Service) createSingleSymlink(item *database.ImportQueueItem, actualPath, resultingPath string) error {
+	cfg := s.configGetter()
+
+	baseDir := filepath.Join(*cfg.SABnzbd.SymlinkDir, filepath.Dir(resultingPath))
+
+	// Ensure category directory exists
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create symlink category directory: %w", err)
+	}
+
+	symlinkPath := filepath.Join(*cfg.SABnzbd.SymlinkDir, resultingPath)
+
+	// Check if symlink already exists
+	if _, err := os.Lstat(symlinkPath); err == nil {
+		// Symlink exists, remove it first
+		if err := os.Remove(symlinkPath); err != nil {
+			return fmt.Errorf("failed to remove existing symlink: %w", err)
+		}
+	}
+
+	// Create the symlink
+	if err := os.Symlink(actualPath, symlinkPath); err != nil {
+		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+
+	s.log.Info("Created symlink",
+		"queue_id", item.ID,
+		"target", actualPath,
+		"symlink", symlinkPath)
+
+	return nil
 }

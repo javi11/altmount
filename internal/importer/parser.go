@@ -19,8 +19,8 @@ import (
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/nntpcli"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v2/pkg/nntpcli"
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
 )
@@ -269,6 +269,12 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 			if _, ok := meta["file_size"]; ok {
 				// This is a usenet-drive nzb with one file
 				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+				fileExt := filepath.Ext(metaFilename)
+				if fileExt != "" {
+					if fe, ok := meta["file_extension"]; ok {
+						metaFilename = metaFilename + fe
+					}
+				}
 			}
 
 			// This will add support for rclone encrypted files
@@ -433,7 +439,7 @@ func (p *Parser) fetchYencHeaders(segment nzbparser.NzbSegment, groups []string)
 		retry.DelayType(retry.BackOffDelay),
 		retry.MaxDelay(5*time.Second),
 		retry.OnRetry(func(n uint, err error) {
-			p.log.Warn("Retrying fetchYencHeaders",
+			p.log.Debug("Retrying fetchYencHeaders",
 				"attempt", n+1,
 				"segment_id", segment.ID,
 				"error", err)

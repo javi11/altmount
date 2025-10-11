@@ -380,11 +380,22 @@ func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 
 // handleRegenerateAPIKey regenerates API key for the authenticated user
 func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
+	// Try to get user from context (auth enabled case)
 	user := auth.GetUserFromContext(c)
+
+	// If no user in context, try to get first admin user (auth disabled case)
+	if user == nil && s.userRepo != nil {
+		users, err := s.userRepo.ListUsers(1, 0)
+		if err == nil && len(users) > 0 {
+			user = users[0]
+		}
+	}
+
+	// If still no user, return error
 	if user == nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "Not authenticated",
+			"message": "No user found",
 		})
 	}
 

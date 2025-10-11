@@ -319,7 +319,7 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueS
 }
 
 // ToSABnzbdHistorySlot converts an AltMount ImportQueueItem to SABnzbd history format
-func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, mountPath string) SABnzbdHistorySlot {
+func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath string) SABnzbdHistorySlot {
 	if item == nil {
 		return SABnzbdHistorySlot{}
 	}
@@ -370,10 +370,13 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, mountPath s
 		category = *item.Category
 	}
 
-	storagePath := mountPath
-
+	// Calculate storage path using the provided base path (which includes category folder)
+	var storagePath string
 	if item.StoragePath != nil {
-		storagePath = filepath.Join(mountPath, *item.StoragePath)
+		// Construct path: basePath/basename
+		storagePath = filepath.Join(basePath, *item.StoragePath)
+	} else {
+		storagePath = basePath
 	}
 
 	return SABnzbdHistorySlot{

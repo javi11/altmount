@@ -24,6 +24,14 @@ func NewQueueRepository(db interface {
 	return &QueueRepository{db: db}
 }
 
+// RemoveFromQueue removes an item from the queue
+func (r *QueueRepository) RemoveFromQueue(id int64) error {
+	query := `DELETE FROM import_queue WHERE id = ?`
+	_, err := r.db.Exec(query, id)
+
+	return err
+}
+
 // AddToQueue adds a new NZB file to the import queue
 func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 	query := `
