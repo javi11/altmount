@@ -11,6 +11,7 @@ import (
 type Segment struct {
 	Id    string
 	Start int64
+	End   int64 // End offset in the segment (inclusive)
 	Size  int64 // Size of the segment in bytes
 }
 
@@ -74,28 +75,34 @@ func (r *segmentRange) Clear() error {
 }
 
 type segment struct {
-	Id          string
-	Start       int64
-	End         int64
-	SegmentSize int64
-	groups      []string
-	reader      *bufpipe.PipeReader
-	writer      *bufpipe.PipeWriter
-	once        sync.Once
-	mx          sync.Mutex
+	Id            string
+	Start         int64
+	End           int64
+	SegmentSize   int64
+	groups        []string
+	reader        *bufpipe.PipeReader
+	writer        *bufpipe.PipeWriter
+	once          sync.Once
+	limitedReader io.Reader // Cached limited reader to prevent multiple LimitReader wraps
+	mx            sync.Mutex
 }
 
 func (s *segment) GetReader() io.Reader {
 	s.once.Do(func() {
+		// Skip to Start position
 		if s.Start > 0 {
 			// Seek to the start of the segment
 			_, _ = io.CopyN(io.Discard, s.reader, s.Start)
 		}
+
+		// Create LimitReader once - this ensures the limit is enforced correctly
+		// across multiple Read() calls in usenet_reader.go
+		// Without this, each GetReader() call would create a NEW LimitReader with
+		// the full limit, allowing reading beyond the intended End offset
+		s.limitedReader = io.LimitReader(s.reader, s.End-s.Start+1)
 	})
 
-	// Limit reader to exact byte range: (End - Start + 1)
-	// After skipping Start bytes, we read from Start to End inclusive
-	return io.LimitReader(s.reader, s.End-s.Start+1)
+	return s.limitedReader
 }
 
 func (s *segment) Close() error {

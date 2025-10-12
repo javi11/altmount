@@ -235,7 +235,7 @@ func (b *usenetReader) isPoolUnavailableError(err error) bool {
 }
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
-func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segmentID string, writer io.Writer, groups []string) error {
+func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment, writer io.Writer, groups []string) error {
 	return retry.Do(
 		func() error {
 			// Get current pool
@@ -245,8 +245,16 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segmentID s
 			}
 
 			// Attempt download
-			_, err = cp.Body(ctx, segmentID, writer, groups)
-			return err
+			bytesWritten, err := cp.Body(ctx, segment.Id, writer, groups)
+			if err != nil {
+				return err
+			}
+
+			if bytesWritten != segment.SegmentSize {
+				b.log.ErrorContext(ctx, "Expected %d bytes, got %d", "expected", segment.SegmentSize, "got", bytesWritten)
+			}
+
+			return nil
 		},
 		retry.Attempts(10),
 		retry.Delay(50*time.Millisecond),
@@ -259,7 +267,7 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segmentID s
 		retry.OnRetry(func(n uint, err error) {
 			b.log.DebugContext(ctx, "Pool unavailable, retrying segment download",
 				"attempt", n+1,
-				"segment_id", segmentID,
+				"segment_id", segment.Id,
 				"error", err)
 		}),
 		retry.Context(ctx),
@@ -353,7 +361,7 @@ func (b *usenetReader) downloadManager(
 
 					// Set the item ready to read
 					ctx = slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
-					err := b.downloadSegmentWithRetry(ctx, s.Id, s.Writer(), s.groups)
+					err := b.downloadSegmentWithRetry(ctx, s, s.Writer(), s.groups)
 
 					// Mark download complete
 					b.mu.Lock()
