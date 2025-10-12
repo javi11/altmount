@@ -17,7 +17,7 @@ func (m *mockLoader) GetSegment(i int) (Segment, []string, bool) {
 }
 
 // helper to collect lengths
-func collectedLen(r segmentRange) int64 {
+func collectedLen(r *segmentRange) int64 {
 	var total int64
 	for _, s := range r.segments {
 		if s != nil {

@@ -24,14 +24,20 @@ type segmentRange struct {
 	end      int64
 	segments []*segment
 	current  int
+	mu       sync.RWMutex
 }
 
 // GetCurrentIndex returns the current segment index being read
 func (r *segmentRange) GetCurrentIndex() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.current
 }
 
-func (r segmentRange) Get() (*segment, error) {
+func (r *segmentRange) Get() (*segment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.current >= len(r.segments) {
 		return nil, ErrSegmentLimit
 	}
@@ -40,7 +46,9 @@ func (r segmentRange) Get() (*segment, error) {
 }
 
 func (r *segmentRange) Next() (*segment, error) {
+	r.mu.Lock()
 	if r.current >= len(r.segments) {
+		r.mu.Unlock()
 		return nil, ErrSegmentLimit
 	}
 
@@ -48,6 +56,7 @@ func (r *segmentRange) Next() (*segment, error) {
 	_ = r.segments[r.current].Close()
 
 	r.current += 1
+	r.mu.Unlock()
 
 	return r.Get()
 }
@@ -84,7 +93,9 @@ func (s *segment) GetReader() io.Reader {
 		}
 	})
 
-	return io.LimitReader(s.reader, s.End+1)
+	// Limit reader to exact byte range: (End - Start + 1)
+	// After skipping Start bytes, we read from Start to End inclusive
+	return io.LimitReader(s.reader, s.End-s.Start+1)
 }
 
 func (s *segment) Close() error {

@@ -23,10 +23,10 @@ type SegmentLoader interface {
 //   - First and last returned segments are trimmed so the concatenation of (End-Start+1) bytes across
 //     returned segments equals the requested range length (unless the range lies fully outside available
 //     data, in which case zero segments are returned).
-func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
+func GetSegmentsInRange(start, end int64, ml SegmentLoader) *segmentRange {
 	// Defensive handling of invalid input ranges
 	if start < 0 || end < start {
-		return segmentRange{start: start, end: end, segments: nil}
+		return &segmentRange{start: start, end: end, segments: nil}
 	}
 
 	requestedLen := end - start + 1
@@ -108,7 +108,7 @@ func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
 		}
 	}
 
-	return segmentRange{segments: segments, start: start, end: end}
+	return &segmentRange{segments: segments, start: start, end: end}
 }
 
 // int64AccumulatedLen calculates total bytes represented by current slice of segments

@@ -41,7 +41,7 @@ type usenetReader struct {
 	log                *slog.Logger
 	wg                 sync.WaitGroup
 	cancel             context.CancelFunc
-	rg                 segmentRange
+	rg                 *segmentRange
 	maxDownloadWorkers int
 	maxCacheSize       int64 // Maximum cache size in bytes
 	init               chan any
@@ -60,7 +60,7 @@ type usenetReader struct {
 func NewUsenetReader(
 	ctx context.Context,
 	poolGetter func() (nntppool.UsenetConnectionPool, error),
-	rg segmentRange,
+	rg *segmentRange,
 	maxDownloadWorkers int,
 	maxCacheSizeMB int,
 ) (io.ReadCloser, error) {
@@ -114,14 +114,14 @@ func (b *usenetReader) Close() error {
 	case <-done:
 		// Cleanup completed successfully
 		_ = b.rg.Clear()
-		b.rg = segmentRange{}
+		b.rg = nil
 	case <-time.After(30 * time.Second):
 		// Timeout waiting for downloads to complete
 		// This prevents hanging but logs the issue
 		b.log.Warn("Timeout waiting for downloads to complete during close, potential goroutine leak")
 		// Still attempt to clear resources
 		_ = b.rg.Clear()
-		b.rg = segmentRange{}
+		b.rg = nil
 	}
 
 	return nil
@@ -333,6 +333,10 @@ func (b *usenetReader) downloadManager(
 					segmentsToQueue = append(segmentsToQueue, i)
 				}
 			}
+			// Update nextToDownload to reflect we've checked up to targetDownload
+			if targetDownload > b.nextToDownload {
+				b.nextToDownload = targetDownload
+			}
 			b.mu.Unlock()
 
 			// Queue downloads for new segments
@@ -353,9 +357,6 @@ func (b *usenetReader) downloadManager(
 
 					// Mark download complete
 					b.mu.Lock()
-					if segmentIdx >= b.nextToDownload {
-						b.nextToDownload = segmentIdx + 1
-					}
 					delete(b.downloadingSegments, segmentIdx)
 					b.downloadCond.Signal()
 					b.mu.Unlock()
