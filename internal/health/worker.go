@@ -592,7 +592,6 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	totalFiles := len(unhealthyFiles) + len(repairFiles)
 	if totalFiles == 0 {
-		hw.logger.Debug("No unhealthy files found, skipping health check cycle")
 		hw.updateStats(func(s *WorkerStats) {
 			s.CurrentRunStartTime = nil
 			s.CurrentRunFilesChecked = 0

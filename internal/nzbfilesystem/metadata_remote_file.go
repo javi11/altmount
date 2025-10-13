@@ -703,6 +703,10 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	// Get request range from args or use default range starting from current position
 	start, end := mvf.getRequestRange()
 
+	if end == -1 {
+		end = mvf.fileMeta.FileSize - 1
+	}
+
 	// Track the current reader's range for progressive reading
 	mvf.currentRangeStart = start
 	mvf.currentRangeEnd = end

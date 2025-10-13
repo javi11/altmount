@@ -369,23 +369,22 @@ func (b *usenetReader) downloadManager(
 					b.downloadCond.Signal()
 					b.mu.Unlock()
 
-					if !errors.Is(err, context.Canceled) {
+					if err != nil {
+						if errors.Is(err, context.Canceled) {
+							err = w.Close()
+							if err != nil {
+								b.log.ErrorContext(ctx, "Error closing segment writer:", "error", err)
+							}
+
+							return nil
+						}
+
 						cErr := w.CloseWithError(err)
 						if cErr != nil {
 							b.log.ErrorContext(ctx, "Error closing segment buffer:", "error", cErr)
 						}
 
-						if err != nil && !errors.Is(err, context.Canceled) {
-							b.log.DebugContext(ctx, "Error downloading segment:", "error", err)
-							return err
-						}
-
-						return nil
-					}
-
-					err = w.Close()
-					if err != nil {
-						b.log.ErrorContext(ctx, "Error closing segment writer:", "error", err)
+						return err
 					}
 
 					return nil
