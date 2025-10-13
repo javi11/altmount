@@ -28,6 +28,10 @@ type segmentRange struct {
 	mu       sync.RWMutex
 }
 
+func (r *segmentRange) HasSegments() bool {
+	return len(r.segments) > 0
+}
+
 // GetCurrentIndex returns the current segment index being read
 func (r *segmentRange) GetCurrentIndex() int {
 	r.mu.RLock()

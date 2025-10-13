@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
@@ -36,6 +37,8 @@ func (nfs *NzbFilesystem) Open(name string) (afero.File, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	ctx = slogutil.With(ctx, "file_name", pr.Path)
 
 	// Try to open with NZB remote file
 	ok, file, err := nfs.remoteFile.OpenFile(ctx, pr.Path, pr)

@@ -4,6 +4,7 @@ import { apiClient } from "../api/client";
 import { useToast } from "../contexts/ToastContext";
 import { webdavClient } from "../services/webdavClient";
 import type { WebDAVDirectory } from "../types/webdav";
+import { encodeWebDAVPath } from "../utils/fileUtils";
 
 export function useWebDAVConnection() {
 	const [isConnected, setIsConnected] = useState(false);
@@ -100,8 +101,8 @@ export function useWebDAVFileOperations() {
 
 	const downloadFile = useMutation({
 		mutationFn: async ({ path, filename }: { path: string; filename: string }) => {
-			// Use direct WebDAV URL for download
-			const downloadUrl = `/webdav${path}`;
+			// Use direct WebDAV URL for download with proper encoding
+			const downloadUrl = `/webdav${encodeWebDAVPath(path)}`;
 			let downloadMethod = "window";
 
 			try {

@@ -266,7 +266,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 	// Check metadata for overrides
 	if meta != nil {
 		if metaFilename, ok := meta["file_name"]; ok && metaFilename != "" {
-			if _, ok := meta["file_size"]; ok {
+			if fSize, ok := meta["file_size"]; ok {
 				// This is a usenet-drive nzb with one file
 				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
 				fileExt := filepath.Ext(metaFilename)
@@ -275,6 +275,13 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 						metaFilename = metaFilename + fe
 					}
 				}
+
+				fSizeInt, err := strconv.ParseInt(fSize, 10, 64)
+				if err != nil {
+					return nil, NewNonRetryableError("failed to parse file size", err)
+				}
+
+				totalSize = fSizeInt
 			}
 
 			// This will add support for rclone encrypted files

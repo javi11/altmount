@@ -81,7 +81,7 @@ func (o *rcloneCrypt) Open(
 	initReader := func() (io.ReadCloser, error) {
 		rc, err = o.cipher.DecryptDataSeek(ctx, func(ctx context.Context, underlyingOffset, underlyingLimit int64) (io.ReadCloser, error) {
 			if underlyingOffset == 0 && underlyingLimit < 0 {
-				reader, err := getReader(ctx, 0, encryptedFileSize)
+				reader, err := getReader(ctx, 0, encryptedFileSize-1)
 				if err != nil {
 					return nil, err
 				}

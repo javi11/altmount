@@ -501,7 +501,7 @@ export function ConfigurationPage() {
 									<SystemConfigSection
 										config={config}
 										onUpdate={handleConfigUpdate}
-										onRefresh={() => refetch().then(() => { })}
+										onRefresh={() => refetch().then(() => {})}
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
@@ -554,10 +554,10 @@ export function ConfigurationPage() {
 									"arrs",
 									"health",
 								].includes(activeSection) && (
-										<ComingSoonSection
-											sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
-										/>
-									)}
+									<ComingSoonSection
+										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
+									/>
+								)}
 							</div>
 						</div>
 					</div>

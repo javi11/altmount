@@ -203,7 +203,7 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 	if loader.GetSegmentCount() == 0 {
 		slog.ErrorContext(ctx, "[importer.UsenetFile] No segments to download", "start", start, "end", end)
 
-		return nil, fmt.Errorf("no segments to download")
+		return nil, fmt.Errorf("[importer.UsenetFile] no segments to download")
 	}
 
 	rg := usenet.GetSegmentsInRange(start, end, loader)
