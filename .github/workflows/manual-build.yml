@@ -1,0 +1,286 @@
+name: Manual Multi-Architecture Docker Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build from'
+        required: true
+        default: 'main'
+        type: string
+      tag_suffix:
+        description: 'Tag suffix (e.g., "test", "dev"). Will create tag: <branch>-<suffix>'
+        required: false
+        default: 'manual'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout specified branch
+      - name: Checkout ${{ inputs.branch }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      # Install Bun for frontend build
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      # Cache frontend dependencies
+      - name: Cache frontend dependencies
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: frontend-deps-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}
+          restore-keys: |
+            frontend-deps-${{ runner.os }}-
+
+      # Install frontend dependencies
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      # Build frontend for embedding
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          npm_package_version: ${{ inputs.branch }}-${{ inputs.tag_suffix }}
+          GIT_COMMIT: ${{ github.sha }}
+        run: bun run build
+
+      # Upload built frontend as artifact
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+          retention-days: 1
+
+  build-image-amd64:
+    runs-on: ubuntu-latest
+    needs: build-frontend
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Checkout specified branch
+      - name: Checkout ${{ inputs.branch }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      # Download frontend build
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Docker login
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Create sanitized branch name for tag
+      - name: Create sanitized tag
+        id: tag
+        run: |
+          # Replace / with - and remove other special characters
+          SAFE_BRANCH=$(echo "${{ inputs.branch }}" | sed 's/\//-/g' | sed 's/[^a-zA-Z0-9._-]/-/g')
+          TAG="${SAFE_BRANCH}-${{ inputs.tag_suffix }}-amd64"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building image with tag: $TAG"
+
+      # Build and push AMD64 image
+      - name: Build and push AMD64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.ci
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.event.repository.html_url }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha,scope=amd64-manual
+          cache-to: type=gha,mode=max,scope=amd64-manual
+          provenance: false
+          sbom: false
+
+      # Output image details
+      - name: Image built successfully
+        run: |
+          echo "✅ AMD64 Docker image built and pushed successfully!"
+          echo ""
+          echo "📦 Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
+          echo ""
+          echo "To pull this image:"
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
+
+  build-image-arm64:
+    runs-on: ubuntu-latest
+    needs: build-frontend
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Checkout specified branch
+      - name: Checkout ${{ inputs.branch }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      # Download frontend build
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Docker login
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Create sanitized branch name for tag
+      - name: Create sanitized tag
+        id: tag
+        run: |
+          # Replace / with - and remove other special characters
+          SAFE_BRANCH=$(echo "${{ inputs.branch }}" | sed 's/\//-/g' | sed 's/[^a-zA-Z0-9._-]/-/g')
+          TAG="${SAFE_BRANCH}-${{ inputs.tag_suffix }}-arm64"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building image with tag: $TAG"
+
+      # Build and push ARM64 image
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.ci
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.event.repository.html_url }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha,scope=arm64-manual
+          cache-to: type=gha,mode=max,scope=arm64-manual
+          provenance: false
+          sbom: false
+
+      # Output image details
+      - name: Image built successfully
+        run: |
+          echo "✅ ARM64 Docker image built and pushed successfully!"
+          echo ""
+          echo "📦 Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
+          echo ""
+          echo "To pull this image:"
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
+
+  create-manifest:
+    runs-on: ubuntu-latest
+    needs: [build-image-amd64, build-image-arm64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Checkout specified branch
+      - name: Checkout ${{ inputs.branch }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      # Normalize image name to lowercase for GHCR (required)
+      - name: Normalize image name
+        run: |
+          echo "IMAGE_NAME_LC=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      # Docker login
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Create sanitized branch name for tag
+      - name: Create sanitized tag
+        id: tag
+        run: |
+          # Replace / with - and remove other special characters
+          SAFE_BRANCH=$(echo "${{ inputs.branch }}" | sed 's/\//-/g' | sed 's/[^a-zA-Z0-9._-]/-/g')
+          TAG="${SAFE_BRANCH}-${{ inputs.tag_suffix }}"
+          AMD64_TAG="${TAG}-amd64"
+          ARM64_TAG="${TAG}-arm64"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "amd64_tag=$AMD64_TAG" >> $GITHUB_OUTPUT
+          echo "arm64_tag=$ARM64_TAG" >> $GITHUB_OUTPUT
+          echo "Creating multi-arch manifest with tag: $TAG"
+
+      # Create and push multi-platform manifest
+      - name: Create multi-platform manifest
+        run: |
+          AMD64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.amd64_tag }}"
+          ARM64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.arm64_tag }}"
+          MANIFEST_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
+
+          echo "AMD64 Image: $AMD64_IMAGE"
+          echo "ARM64 Image: $ARM64_IMAGE"
+          echo "Manifest Tag: $MANIFEST_TAG"
+
+          # Create and push multi-arch manifest
+          docker manifest create $MANIFEST_TAG $AMD64_IMAGE $ARM64_IMAGE
+          docker manifest push $MANIFEST_TAG
+
+      # Output manifest details
+      - name: Manifest created successfully
+        run: |
+          echo "✅ Multi-architecture Docker manifest created successfully!"
+          echo ""
+          echo "📦 Multi-arch image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
+          echo "📦 AMD64 image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.amd64_tag }}"
+          echo "📦 ARM64 image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.arm64_tag }}"
+          echo ""
+          echo "To pull the multi-arch image (automatically selects correct architecture):"
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
