@@ -84,6 +84,10 @@ func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, er
 	// Calculate the relative virtual directory path for this file
 	virtualDir := proc.calculateVirtualDirectory(filePath, relativePath)
 
+	// Initialize batch tracking map for this import
+	// Tracks all files created in this import to handle collisions correctly
+	currentBatchFiles := make(map[string]bool)
+
 	proc.log.Info("Processing file",
 		"file_path", filePath,
 		"virtual_dir", virtualDir,
@@ -94,20 +98,20 @@ func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, er
 	// Process based on file type
 	switch parsed.Type {
 	case NzbTypeSingleFile:
-		return proc.processSingleFileWithDir(parsed, virtualDir)
+		return proc.processSingleFileWithDir(parsed, virtualDir, currentBatchFiles)
 	case NzbTypeMultiFile:
-		return proc.processMultiFileWithDir(parsed, virtualDir)
+		return proc.processMultiFileWithDir(parsed, virtualDir, currentBatchFiles)
 	case NzbTypeRarArchive:
-		return proc.processRarArchiveWithDir(parsed, virtualDir)
+		return proc.processRarArchiveWithDir(parsed, virtualDir, currentBatchFiles)
 	case NzbTypeStrm:
-		return proc.processStrmFileWithDir(parsed, virtualDir)
+		return proc.processStrmFileWithDir(parsed, virtualDir, currentBatchFiles)
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
 }
 
 // processSingleFileWithDir handles NZBs with a single file in a specific virtual directory
-func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
+func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir string, currentBatchFiles map[string]bool) (string, error) {
 	regularFiles, _ := proc.separatePar2Files(parsed.Files)
 
 	file := regularFiles[0] // Single file NZB, take the first regular file
@@ -117,9 +121,16 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 		return "", fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
-	// Create virtual file path
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	// Handle potential filename collisions
+	uniqueFilename := proc.getUniqueFilename(virtualDir, file.Filename, currentBatchFiles)
+
+	// Create virtual file path with potentially adjusted filename
+	virtualFilePath := filepath.Join(virtualDir, uniqueFilename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+	// Track this file in current batch
+	currentBatchFiles[virtualFilePath] = true
+
 	// Create file metadata using simplified schema
 	fileMeta := proc.metadataService.CreateFileMetadata(
 		file.Size,
@@ -150,7 +161,7 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 }
 
 // processMultiFileWithDir handles NZBs with multiple files in a specific virtual directory
-func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
+func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir string, currentBatchFiles map[string]bool) (string, error) {
 	// Create a folder named after the NZB file for multi-file imports
 	nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
 	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
@@ -177,9 +188,15 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 			return "", fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
 		}
 
-		// Create virtual file path
-		virtualPath := filepath.Join(parentPath, filename)
+		// Handle potential filename collisions
+		uniqueFilename := proc.getUniqueFilename(parentPath, filename, currentBatchFiles)
+
+		// Create virtual file path with potentially adjusted filename
+		virtualPath := filepath.Join(parentPath, uniqueFilename)
 		virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
+
+		// Track this file in current batch
+		currentBatchFiles[virtualPath] = true
 
 		// Create file metadata using simplified schema
 		fileMeta := proc.metadataService.CreateFileMetadata(
@@ -217,7 +234,7 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 }
 
 // processRarArchiveWithDir handles NZBs containing RAR archives and regular files in a specific virtual directory
-func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
+func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir string, currentBatchFiles map[string]bool) (string, error) {
 	// Create a folder named after the NZB file for multi-file imports
 	nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
 	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
@@ -254,9 +271,15 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 				return "", fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
 			}
 
-			// Create virtual file path
-			virtualPath := filepath.Join(parentPath, filename)
+			// Handle potential filename collisions
+			uniqueFilename := proc.getUniqueFilename(parentPath, filename, currentBatchFiles)
+
+			// Create virtual file path with potentially adjusted filename
+			virtualPath := filepath.Join(parentPath, uniqueFilename)
 			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
+
+			// Track this file in current batch
+			currentBatchFiles[virtualPath] = true
 
 			// Create file metadata
 			fileMeta := proc.metadataService.CreateFileMetadata(
@@ -330,11 +353,14 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			baseFilename := filepath.Base(rarContent.InternalPath)
 
 			// Generate a unique filename to handle duplicates
-			uniqueFilename := proc.getUniqueFilename(rarDirPath, baseFilename)
+			uniqueFilename := proc.getUniqueFilename(rarDirPath, baseFilename, currentBatchFiles)
 
 			// Create the virtual file path directly in the RAR directory (flattened)
 			virtualFilePath := filepath.Join(rarDirPath, uniqueFilename)
 			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+			// Track this file in current batch
+			currentBatchFiles[virtualFilePath] = true
 
 			// Create file metadata using the RAR handler's helper function
 			fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
@@ -475,31 +501,61 @@ func (proc *Processor) ensureDirectoryExists(virtualDir string) error {
 	return nil
 }
 
-// getUniqueFilename generates a unique filename by checking if the file already exists
-// and appending _1, _2, etc. if duplicates are found
-func (proc *Processor) getUniqueFilename(basePath, filename string) string {
+// getUniqueFilename generates a unique filename handling two types of collisions:
+// 1. Within-batch collision (file from current import): Add suffix (_1, _2, etc.)
+// 2. Cross-batch collision (file from previous import): Override by deleting old metadata
+func (proc *Processor) getUniqueFilename(basePath, filename string, currentBatchFiles map[string]bool) string {
 	// Start with the original filename
-	candidateFilename := filename
-	counter := 1
+	candidatePath := filepath.Join(basePath, filename)
+	candidatePath = strings.ReplaceAll(candidatePath, string(filepath.Separator), "/")
 
-	// Keep trying until we find a unique filename
-	for {
-		candidatePath := filepath.Join(basePath, candidateFilename)
-		candidatePath = strings.ReplaceAll(candidatePath, string(filepath.Separator), "/")
+	// Check if this path collides with a file from the current batch
+	if currentBatchFiles[candidatePath] {
+		// Within-batch collision: Add suffix to keep both files
+		proc.log.Debug("Within-batch collision detected, adding suffix",
+			"path", candidatePath,
+			"original_filename", filename)
 
-		// Check if metadata file exists for this path
-		metadataPath := proc.metadataService.GetMetadataFilePath(candidatePath)
-		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
-			// File doesn't exist, we can use this filename
-			return candidateFilename
-		}
-
-		// File exists, generate next candidate with counter
+		counter := 1
+		candidateFilename := filename
 		ext := filepath.Ext(filename)
 		nameWithoutExt := strings.TrimSuffix(filename, ext)
-		candidateFilename = fmt.Sprintf("%s_%d%s", nameWithoutExt, counter, ext)
-		counter++
+
+		// Find next available suffix
+		for {
+			candidateFilename = fmt.Sprintf("%s_%d%s", nameWithoutExt, counter, ext)
+			candidatePath = filepath.Join(basePath, candidateFilename)
+			candidatePath = strings.ReplaceAll(candidatePath, string(filepath.Separator), "/")
+
+			// Check if this suffixed path is also in current batch or exists on disk
+			if !currentBatchFiles[candidatePath] {
+				metadataPath := proc.metadataService.GetMetadataFilePath(candidatePath)
+				if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+					// Path is available
+					return candidateFilename
+				}
+			}
+			counter++
+		}
 	}
+
+	// Check if metadata file exists from a previous import
+	metadataPath := proc.metadataService.GetMetadataFilePath(candidatePath)
+	if _, err := os.Stat(metadataPath); err == nil {
+		// Cross-batch collision: Override by deleting old metadata
+		proc.log.Info("Cross-batch collision detected, overriding existing file",
+			"path", candidatePath,
+			"old_metadata_path", metadataPath)
+
+		if err := proc.metadataService.DeleteFileMetadata(candidatePath); err != nil {
+			proc.log.Warn("Failed to delete old metadata during override",
+				"path", candidatePath,
+				"error", err)
+		}
+	}
+
+	// No collision or handled cross-batch collision, use original filename
+	return filename
 }
 
 // Helper function to create string pointer
@@ -549,7 +605,7 @@ func (proc *Processor) separateRarFiles(files []ParsedFile) ([]ParsedFile, []Par
 }
 
 // processStrmFileWithDir handles STRM files (single file from NXG link) in a specific virtual directory
-func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
+func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string, currentBatchFiles map[string]bool) (string, error) {
 	if len(parsed.Files) != 1 {
 		return "", NewNonRetryableError(fmt.Sprintf("STRM file should contain exactly one file, got %d", len(parsed.Files)), nil)
 	}
@@ -561,9 +617,15 @@ func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir stri
 		return "", fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
-	// Create virtual file path
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	// Handle potential filename collisions
+	uniqueFilename := proc.getUniqueFilename(virtualDir, file.Filename, currentBatchFiles)
+
+	// Create virtual file path with potentially adjusted filename
+	virtualFilePath := filepath.Join(virtualDir, uniqueFilename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+	// Track this file in current batch
+	currentBatchFiles[virtualFilePath] = true
 
 	// Create file metadata using simplified schema
 	fileMeta := proc.metadataService.CreateFileMetadata(
