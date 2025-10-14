@@ -29,10 +29,11 @@ import (
 type NzbType string
 
 const (
-	NzbTypeSingleFile NzbType = "single_file"
-	NzbTypeMultiFile  NzbType = "multi_file"
-	NzbTypeRarArchive NzbType = "rar_archive"
-	NzbTypeStrm       NzbType = "strm_file"
+	NzbTypeSingleFile   NzbType = "single_file"
+	NzbTypeMultiFile    NzbType = "multi_file"
+	NzbTypeRarArchive   NzbType = "rar_archive"
+	NzbType7zArchive    NzbType = "7z_archive"
+	NzbTypeStrm         NzbType = "strm_file"
 )
 
 // ParsedNzb contains the parsed NZB data and extracted metadata
@@ -54,6 +55,7 @@ type ParsedFile struct {
 	Segments     []*metapb.SegmentData
 	Groups       []string
 	IsRarArchive bool
+	Is7zArchive  bool
 	Encryption   metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
 	Password     string            // Password from NZB meta, nil if not encrypted
 	Salt         string            // Salt from NZB meta, nil if not encrypted
@@ -62,6 +64,8 @@ type ParsedFile struct {
 var (
 	// Pattern to detect RAR files
 	rarPattern = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
+	// Pattern to detect 7zip files
+	sevenZipPattern = regexp.MustCompile(`(?i)\.7z$|\.7z\.\d+$`)
 	// Pattern to detect PAR2 files
 	par2Pattern = regexp.MustCompile(`(?i)\.par2$|\.p\d+$|\.vol\d+\+\d+\.par2$`)
 )
@@ -321,8 +325,9 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		}
 	}
 
-	// Check if this is a RAR file
+	// Check if this is a RAR file or 7zip file
 	isRarArchive := rarPattern.MatchString(filename)
+	is7zArchive := sevenZipPattern.MatchString(filename)
 
 	parsedFile := &ParsedFile{
 		Subject:      file.Subject,
@@ -331,6 +336,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		Segments:     segments,
 		Groups:       file.Groups,
 		IsRarArchive: isRarArchive,
+		Is7zArchive:  is7zArchive,
 		Encryption:   enc,
 		Password:     password,
 		Salt:         salt,
@@ -510,20 +516,30 @@ func (p *Parser) determineNzbType(files []ParsedFile) NzbType {
 		if files[0].IsRarArchive {
 			return NzbTypeRarArchive
 		}
+		if files[0].Is7zArchive {
+			return NzbType7zArchive
+		}
 		return NzbTypeSingleFile
 	}
 
-	// Multiple files - check if any are RAR archives
+	// Multiple files - check if any are RAR or 7zip archives
 	hasRarFiles := false
+	has7zFiles := false
 	for _, file := range files {
 		if file.IsRarArchive {
 			hasRarFiles = true
-			break
+		}
+		if file.Is7zArchive {
+			has7zFiles = true
 		}
 	}
 
+	// Prioritize RAR if both types exist (shouldn't normally happen)
 	if hasRarFiles {
 		return NzbTypeRarArchive
+	}
+	if has7zFiles {
+		return NzbType7zArchive
 	}
 
 	return NzbTypeMultiFile

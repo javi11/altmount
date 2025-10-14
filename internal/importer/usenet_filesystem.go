@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/afero"
+
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
@@ -18,9 +21,10 @@ import (
 
 // Compile-time interface checks
 var (
-	_ fs.File   = (*UsenetFile)(nil)       // UsenetFile implements fs.File
-	_ io.Seeker = (*UsenetFile)(nil)       // UsenetFile implements io.Seeker
-	_ fs.FS     = (*UsenetFileSystem)(nil) // UsenetFileSystem implements fs.FS
+	_ fs.File    = (*UsenetFile)(nil)       // UsenetFile implements fs.File
+	_ io.Seeker  = (*UsenetFile)(nil)       // UsenetFile implements io.Seeker
+	_ io.ReaderAt = (*UsenetFile)(nil)       // UsenetFile implements io.ReaderAt
+	_ fs.FS      = (*UsenetFileSystem)(nil) // UsenetFileSystem implements fs.FS
 )
 
 // UsenetFileSystem implements fs.FS for reading RAR archives from Usenet
@@ -195,6 +199,39 @@ func (uf *UsenetFile) Seek(offset int64, whence int) (int64, error) {
 	return abs, nil
 }
 
+// ReadAt implements io.ReaderAt interface for 7zip access
+// ReadAt reads len(p) bytes into p starting at offset off in the file
+// It returns the number of bytes read and any error encountered
+func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
+	if uf.closed {
+		return 0, fs.ErrClosed
+	}
+
+	if off < 0 {
+		return 0, fmt.Errorf("negative offset: %d", off)
+	}
+
+	if off >= uf.size {
+		return 0, io.EOF
+	}
+
+	// Calculate the end position for this read
+	end := off + int64(len(p)) - 1
+	if end >= uf.size {
+		end = uf.size - 1
+	}
+
+	// Create a new reader for this specific range
+	reader, err := uf.createUsenetReader(uf.ctx, off, end)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create usenet reader: %w", err)
+	}
+	defer reader.Close()
+
+	// Read from the reader
+	return io.ReadFull(reader, p)
+}
+
 // createUsenetReader creates a Usenet reader for the specified range
 func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	// Filter segments for this specific file
@@ -241,3 +278,153 @@ func (ufi *UsenetFileInfo) Mode() fs.FileMode  { return 0644 }
 func (ufi *UsenetFileInfo) ModTime() time.Time { return time.Now() }
 func (ufi *UsenetFileInfo) IsDir() bool        { return false }
 func (ufi *UsenetFileInfo) Sys() interface{}   { return nil }
+
+// AferoAdapter wraps UsenetFileSystem to implement afero.Fs interface
+// This allows sevenzip.OpenReader to use UsenetFileSystem as a custom filesystem
+type AferoAdapter struct {
+	ufs *UsenetFileSystem
+}
+
+// NewAferoAdapter creates a new Afero filesystem adapter for UsenetFileSystem
+func NewAferoAdapter(ufs *UsenetFileSystem) afero.Fs {
+	return &AferoAdapter{ufs: ufs}
+}
+
+// Compile-time interface check
+var _ afero.Fs = (*AferoAdapter)(nil)
+
+// Read-only operations (delegate to UsenetFileSystem)
+
+func (a *AferoAdapter) Open(name string) (afero.File, error) {
+	file, err := a.ufs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	// Wrap fs.File to afero.File
+	return &aferoFileAdapter{file: file}, nil
+}
+
+func (a *AferoAdapter) Stat(name string) (os.FileInfo, error) {
+	return a.ufs.Stat(name)
+}
+
+func (a *AferoAdapter) Name() string {
+	return "UsenetFileSystem"
+}
+
+// Write operations (not supported - return errors)
+
+var ErrReadOnlyFilesystem = errors.New("filesystem is read-only")
+
+func (a *AferoAdapter) Create(name string) (afero.File, error) {
+	return nil, ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) Mkdir(name string, perm os.FileMode) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) MkdirAll(path string, perm os.FileMode) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) Remove(name string) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) RemoveAll(path string) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) Rename(oldname, newname string) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) Chmod(name string, mode os.FileMode) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) Chown(name string, uid, gid int) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) Chtimes(name string, atime time.Time, mtime time.Time) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *AferoAdapter) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	// Only support read-only operations
+	if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND) != 0 {
+		return nil, ErrReadOnlyFilesystem
+	}
+	return a.Open(name)
+}
+
+// aferoFileAdapter wraps fs.File to implement afero.File interface
+type aferoFileAdapter struct {
+	file fs.File
+}
+
+// Compile-time interface check
+var _ afero.File = (*aferoFileAdapter)(nil)
+
+func (a *aferoFileAdapter) Close() error {
+	return a.file.Close()
+}
+
+func (a *aferoFileAdapter) Read(p []byte) (n int, err error) {
+	return a.file.Read(p)
+}
+
+func (a *aferoFileAdapter) ReadAt(p []byte, off int64) (n int, err error) {
+	if ra, ok := a.file.(io.ReaderAt); ok {
+		return ra.ReadAt(p, off)
+	}
+	return 0, errors.New("ReadAt not supported")
+}
+
+func (a *aferoFileAdapter) Seek(offset int64, whence int) (int64, error) {
+	if seeker, ok := a.file.(io.Seeker); ok {
+		return seeker.Seek(offset, whence)
+	}
+	return 0, errors.New("Seek not supported")
+}
+
+func (a *aferoFileAdapter) Write(p []byte) (n int, err error) {
+	return 0, ErrReadOnlyFilesystem
+}
+
+func (a *aferoFileAdapter) WriteAt(p []byte, off int64) (n int, err error) {
+	return 0, ErrReadOnlyFilesystem
+}
+
+func (a *aferoFileAdapter) Name() string {
+	if namer, ok := a.file.(interface{ Name() string }); ok {
+		return namer.Name()
+	}
+	return ""
+}
+
+func (a *aferoFileAdapter) Readdir(count int) ([]os.FileInfo, error) {
+	return nil, errors.New("Readdir not supported")
+}
+
+func (a *aferoFileAdapter) Readdirnames(n int) ([]string, error) {
+	return nil, errors.New("Readdirnames not supported")
+}
+
+func (a *aferoFileAdapter) Stat() (os.FileInfo, error) {
+	return a.file.Stat()
+}
+
+func (a *aferoFileAdapter) Sync() error {
+	return nil // No-op for read-only filesystem
+}
+
+func (a *aferoFileAdapter) Truncate(size int64) error {
+	return ErrReadOnlyFilesystem
+}
+
+func (a *aferoFileAdapter) WriteString(s string) (ret int, err error) {
+	return 0, ErrReadOnlyFilesystem
+}
