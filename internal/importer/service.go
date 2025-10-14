@@ -527,6 +527,10 @@ func (s *Service) processQueueItems(workerID int) {
 			log.Error("Failed to add storage path", "queue_id", item.ID, "error", err)
 		}
 
+		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
+		}
+
 		// Notify rclone VFS about the new import (async, don't fail on error)
 		s.notifyRcloneVFS(item, log)
 
