@@ -261,6 +261,9 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 		retry.MaxDelay(2*time.Second),
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(func(err error) bool {
+			if b.isArticleNotFoundError(err) {
+				return false
+			}
 			// Only retry if error is pool-related
 			return b.isPoolUnavailableError(err)
 		}),

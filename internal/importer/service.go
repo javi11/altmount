@@ -527,6 +527,17 @@ func (s *Service) processQueueItems(workerID int) {
 			log.Error("Failed to add storage path", "queue_id", item.ID, "error", err)
 		}
 
+		mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
+		if _, err := os.Stat(mountPath); err != nil {
+			if os.IsNotExist(err) {
+				// Refresh the root path if the mount path is not found
+				err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
+				if err != nil {
+					log.Error("Failed to refresh mount path", "queue_id", item.ID, "path", mountPath, "error", err)
+				}
+			}
+		}
+
 		// Notify rclone VFS about the new import (async, don't fail on error)
 		s.notifyRcloneVFS(item, log)
 
@@ -820,6 +831,17 @@ func (s *Service) ProcessItemInBackground(itemID int64) {
 			// Handle success
 			if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
 				log.Error("Failed to add storage path", "error", err)
+			}
+
+			mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
+			if _, err := os.Stat(mountPath); err != nil {
+				if os.IsNotExist(err) {
+					// Refresh the root path if the mount path is not found
+					err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
+					if err != nil {
+						log.Error("Failed to refresh mount path", "queue_id", item.ID, "path", mountPath, "error", err)
+					}
+				}
 			}
 
 			// Notify rclone VFS about the new import (async, don't fail on error)
