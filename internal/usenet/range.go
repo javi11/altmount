@@ -96,13 +96,14 @@ func GetSegmentsInRange(start, end int64, ml SegmentLoader) *segmentRange {
 		}
 		segments = append(segments, seg)
 
+		logicalFilePos += usableLen
+
 		// If we've satisfied the full request length, stop
 		// (Check by seeing if this segment covered the end)
 		if segFileEnd >= end {
 			break
 		}
 
-		logicalFilePos += usableLen
 		// If we've already accumulated requestedLen bytes across segments we could also break early
 		if int64AccumulatedLen(segments) >= requestedLen { // redundancy safeguard
 			break

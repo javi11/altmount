@@ -282,7 +282,6 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 		}
 
 		var fileSegments []*metapb.SegmentData
-		var accumulated int64
 
 		for partIdx, part := range af.Parts {
 			if part.PackedSize <= 0 {
@@ -301,31 +300,88 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 			// Extract the slice of this part's bytes that belong to the aggregated file.
 			sliced, covered, err := slicePartSegments(pf.Segments, part.DataOffset, part.PackedSize)
 			if err != nil {
-				rh.log.Warn("Failed slicing part segments", "error", err, "part_path", part.Path, "file", af.Name)
+				rh.log.Error("Failed slicing part segments", "error", err, "part_path", part.Path, "file", af.Name)
 				continue
 			}
+
+			// Attempt to patch missing segments if needed
+			originalCovered := covered
+			sliced, covered, err = patchMissingSegment(sliced, part.PackedSize, covered)
+			if err != nil {
+				return nil, NewNonRetryableError(
+					fmt.Sprintf("incomplete NZB data for %s (part %s): %v",
+						af.Name, filepath.Base(part.Path), err), nil)
+			}
+
+			// Log if patching was applied
+			if covered > originalCovered {
+				shortfall := covered - originalCovered
+				lastSeg := sliced[len(sliced)-1]
+				rh.log.Warn("Patched missing segment at end of part",
+					"file", af.Name,
+					"part_index", partIdx,
+					"part_path", filepath.Base(part.Path),
+					"shortfall", shortfall,
+					"duplicated_segment", lastSeg.Id)
+			}
+
 			// Append maintaining order: parts order then segment order within part.
 			fileSegments = append(fileSegments, sliced...)
-			accumulated += covered
-
-			if covered != part.PackedSize {
-				rh.log.Warn("Part coverage mismatch", "file", af.Name, "part_index", partIdx, "expected", part.PackedSize, "covered", covered, "data_offset", part.DataOffset)
-			}
 		}
 
-		// Validation: sum of trimmed segment lengths should match total packed size.
-		var sum int64
-		for _, s := range fileSegments {
-			sum += (s.EndOffset - s.StartOffset + 1)
-		}
-		if sum != af.TotalPackedSize {
-			rh.log.Warn("Aggregated file coverage mismatch", "file", af.Name, "expected", af.TotalPackedSize, "got", sum)
-		}
 		rc.Segments = fileSegments
 		out = append(out, rc)
 	}
 
 	return out, nil
+}
+
+// patchMissingSegment attempts to patch a missing segment at the end of a part by duplicating
+// the last available segment. This is used when NZB data is incomplete but the gap is small
+// enough to be filled with a duplicate segment (typically ≤800KB for a single missing segment).
+//
+// Parameters:
+//   - segments: the current slice of segments covering part of the expected data
+//   - expectedSize: the total size in bytes that should be covered
+//   - coveredSize: the actual size in bytes covered by the segments
+//
+// Returns:
+//   - patched segments slice with the duplicate segment appended
+//   - new covered size after patching
+//   - error if patching is not possible (multiple segments missing or no segments to duplicate)
+func patchMissingSegment(segments []*metapb.SegmentData, expectedSize, coveredSize int64) ([]*metapb.SegmentData, int64, error) {
+	shortfall := expectedSize - coveredSize
+	if shortfall <= 0 {
+		// No patching needed
+		return segments, coveredSize, nil
+	}
+
+	const maxSingleSegmentSize = 800000 // ~800KB, typical segment is ~768KB
+
+	// Check if the shortfall is small enough to be a single missing segment
+	if shortfall > maxSingleSegmentSize {
+		return nil, 0, NewNonRetryableError(
+			fmt.Sprintf("missing %d bytes exceeds single segment threshold (%d bytes), cannot auto-patch", shortfall, maxSingleSegmentSize), nil)
+	}
+
+	// Check if we have segments to duplicate
+	if len(segments) == 0 {
+		return nil, 0, NewNonRetryableError("no segments available to duplicate for patching", nil)
+	}
+
+	// Duplicate the last segment to fill the gap
+	lastSeg := segments[len(segments)-1]
+	patchSeg := &metapb.SegmentData{
+		Id:          lastSeg.Id,
+		StartOffset: lastSeg.StartOffset,
+		EndOffset:   lastSeg.StartOffset + shortfall - 1,
+		SegmentSize: lastSeg.SegmentSize,
+	}
+
+	patchedSegments := append(segments, patchSeg)
+	newCovered := coveredSize + shortfall
+
+	return patchedSegments, newCovered, nil
 }
 
 // slicePartSegments returns the slice of segment ranges (cloned and trimmed) covering

@@ -29,11 +29,11 @@ import (
 type NzbType string
 
 const (
-	NzbTypeSingleFile   NzbType = "single_file"
-	NzbTypeMultiFile    NzbType = "multi_file"
-	NzbTypeRarArchive   NzbType = "rar_archive"
-	NzbType7zArchive    NzbType = "7z_archive"
-	NzbTypeStrm         NzbType = "strm_file"
+	NzbTypeSingleFile NzbType = "single_file"
+	NzbTypeMultiFile  NzbType = "multi_file"
+	NzbTypeRarArchive NzbType = "rar_archive"
+	NzbType7zArchive  NzbType = "7z_archive"
+	NzbTypeStrm       NzbType = "strm_file"
 )
 
 // ParsedNzb contains the parsed NZB data and extracted metadata
@@ -205,7 +205,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 
 	// Normalize segment sizes using yEnc PartSize headers if needed
 	// This handles cases where NZB segment sizes include yEnc encoding overhead
-	if p.poolManager != nil && p.poolManager.HasPool() && len(file.Segments) >= 2 {
+	if p.poolManager != nil && p.poolManager.HasPool() {
 		err := p.normalizeSegmentSizesWithYenc(file.Segments)
 		if err != nil {
 			// Log the error but continue with original segment sizes
@@ -274,7 +274,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 				// This is a usenet-drive nzb with one file
 				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
 				fileExt := filepath.Ext(metaFilename)
-				if fileExt != "" {
+				if fileExt == "" {
 					if fe, ok := meta["file_extension"]; ok {
 						metaFilename = metaFilename + fe
 					}
@@ -472,39 +472,86 @@ func (p *Parser) fetchYencHeaders(segment nzbparser.NzbSegment, groups []string)
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
 // This handles cases where NZB segment sizes include yEnc overhead
 func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment) error {
-	if len(segments) < 2 {
-		// Not enough segments to determine if normalization is needed
+	if len(segments) == 1 {
+		firstPartHeaders, err := p.fetchYencHeaders(segments[0], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
+		}
+
+		segments[0].Bytes = int(firstPartHeaders.PartSize)
+
 		return nil
 	}
 
-	// Different segment sizes detected - fetch yEnc headers to get actual part sizes
+	// Handle files with exactly 2 segments (first and last only)
+	if len(segments) == 2 {
+		p.log.Debug("Normalizing segment sizes for 2-segment file")
+
+		// Fetch PartSize from first segment
+		firstPartHeaders, err := p.fetchYencHeaders(segments[0], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
+		}
+
+		// Fetch PartSize from last segment
+		lastPartHeaders, err := p.fetchYencHeaders(segments[1], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
+		}
+
+		segments[0].Bytes = int(firstPartHeaders.PartSize)
+		segments[1].Bytes = int(lastPartHeaders.PartSize)
+
+		p.log.Debug("Normalized 2 segments",
+			"first_size", firstPartHeaders.PartSize,
+			"last_size", lastPartHeaders.PartSize)
+
+		return nil
+	}
+
+	// Handle files with 3+ segments - use second segment as reference for standard size
+	// This is more robust as the first segment can sometimes have anomalous sizes
+	p.log.Debug("Normalizing segment sizes for multi-segment file", "segment_count", len(segments))
+
 	// Fetch PartSize from first segment
 	firstPartHeaders, err := p.fetchYencHeaders(segments[0], nil)
 	if err != nil {
-		// If we can't fetch yEnc headers, log and continue with original sizes
 		return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
 	}
-
 	firstPartSize := int64(firstPartHeaders.PartSize)
+
+	// Fetch PartSize from second segment (this represents the "standard" segment size)
+	secondPartHeaders, err := p.fetchYencHeaders(segments[1], nil)
+	if err != nil {
+		return fmt.Errorf("failed to fetch second segment yEnc part size: %w", err)
+	}
+	standardPartSize := int64(secondPartHeaders.PartSize)
 
 	// Fetch PartSize from last segment
 	lastSegmentIndex := len(segments) - 1
 	lastPartHeaders, err := p.fetchYencHeaders(segments[lastSegmentIndex], nil)
 	if err != nil {
-		// If we can't fetch yEnc headers, log and continue with original sizes
 		return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
 	}
-
 	lastPartSize := int64(lastPartHeaders.PartSize)
 
-	// Override all segments except the last one with the first segment's PartSize
-	for i := 0; i < len(segments)-1; i++ {
-		segments[i].Bytes = int(firstPartSize)
+	// Apply the sizes:
+	// - First segment: use its actual size
+	segments[0].Bytes = int(firstPartSize)
+
+	// - Middle segments (indices 1 through n-2): use standard size from second segment
+	for i := 1; i < len(segments)-1; i++ {
+		segments[i].Bytes = int(standardPartSize)
 	}
 
-	// Override the last segment with its specific PartSize
-	lastSegmentIdx := len(segments) - 1
-	segments[lastSegmentIdx].Bytes = int(lastPartSize)
+	// - Last segment: use its actual size
+	segments[lastSegmentIndex].Bytes = int(lastPartSize)
+
+	p.log.Debug("Normalized segment sizes",
+		"first_size", firstPartSize,
+		"standard_size", standardPartSize,
+		"last_size", lastPartSize,
+		"middle_segments_count", len(segments)-2)
 
 	return nil
 }

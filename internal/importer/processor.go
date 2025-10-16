@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
@@ -135,6 +136,11 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 	// Track this file in current batch
 	currentBatchFiles[virtualFilePath] = true
 
+	// Validate segment sizes match file size
+	if err := proc.validateSegmentSizes(file.Filename, file.Size, file.Segments, file.Encryption); err != nil {
+		return "", NewNonRetryableError(err.Error(), nil)
+	}
+
 	// Create file metadata using simplified schema
 	fileMeta := proc.metadataService.CreateFileMetadata(
 		file.Size,
@@ -201,6 +207,11 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 
 		// Track this file in current batch
 		currentBatchFiles[virtualPath] = true
+
+		// Validate segment sizes match file size
+		if err := proc.validateSegmentSizes(filename, file.Size, file.Segments, file.Encryption); err != nil {
+			return "", NewNonRetryableError(err.Error(), nil)
+		}
 
 		// Create file metadata using simplified schema
 		fileMeta := proc.metadataService.CreateFileMetadata(
@@ -285,6 +296,11 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			// Track this file in current batch
 			currentBatchFiles[virtualPath] = true
 
+			// Validate segment sizes match file size
+			if err := proc.validateSegmentSizes(filename, file.Size, file.Segments, file.Encryption); err != nil {
+				return "", NewNonRetryableError(err.Error(), nil)
+			}
+
 			// Create file metadata
 			fileMeta := proc.metadataService.CreateFileMetadata(
 				file.Size,
@@ -365,6 +381,11 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 			// Track this file in current batch
 			currentBatchFiles[virtualFilePath] = true
+
+			// Validate segment sizes match file size for RAR content
+			if err := proc.validateSegmentSizes(baseFilename, rarContent.Size, rarContent.Segments, metapb.Encryption_NONE); err != nil {
+				return "", NewNonRetryableError(err.Error(), nil)
+			}
 
 			// Create file metadata using the RAR handler's helper function
 			fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
@@ -570,6 +591,42 @@ func stringPtr(s string) *string {
 	return &s
 }
 
+// validateSegmentSizes verifies that the sum of segment sizes matches the expected file size
+// For encrypted files, it accounts for the encryption overhead by converting the decrypted size to encrypted size
+func (proc *Processor) validateSegmentSizes(filename string, fileSize int64, segments []*metapb.SegmentData, encryption metapb.Encryption) error {
+	if len(segments) == 0 {
+		return fmt.Errorf("no segments provided for file %s", filename)
+	}
+
+	var totalSegmentSize int64
+	for i, seg := range segments {
+		segSize := seg.EndOffset - seg.StartOffset + 1
+		if segSize <= 0 {
+			return fmt.Errorf("invalid segment %d for %s: segment has non-positive size (start=%d, end=%d)",
+				i, filename, seg.StartOffset, seg.EndOffset)
+		}
+		totalSegmentSize += segSize
+	}
+
+	// For encrypted files, segments contain encrypted data, so we need to convert
+	// the decrypted file size to encrypted size for comparison
+	expectedSize := fileSize
+	if encryption == metapb.Encryption_RCLONE {
+		expectedSize = rclone.EncryptedSize(fileSize)
+	}
+
+	if totalSegmentSize != expectedSize {
+		sizeType := "decrypted"
+		if encryption == metapb.Encryption_RCLONE {
+			sizeType = "encrypted"
+		}
+		return fmt.Errorf("file '%s' is incomplete: expected %d bytes (%s) but found %d bytes (missing %d bytes)",
+			filename, expectedSize, sizeType, totalSegmentSize, expectedSize-totalSegmentSize)
+	}
+
+	return nil
+}
+
 // isPar2File checks if a filename is a PAR2 repair file
 func (proc *Processor) isPar2File(filename string) bool {
 	lower := strings.ToLower(filename)
@@ -672,6 +729,11 @@ func (proc *Processor) process7zArchiveWithDir(parsed *ParsedNzb, virtualDir str
 			// Track this file in current batch
 			currentBatchFiles[virtualPath] = true
 
+			// Validate segment sizes match file size
+			if err := proc.validateSegmentSizes(filename, file.Size, file.Segments, file.Encryption); err != nil {
+				return "", NewNonRetryableError(err.Error(), nil)
+			}
+
 			// Create file metadata
 			fileMeta := proc.metadataService.CreateFileMetadata(
 				file.Size,
@@ -752,6 +814,11 @@ func (proc *Processor) process7zArchiveWithDir(parsed *ParsedNzb, virtualDir str
 
 			// Track this file in current batch
 			currentBatchFiles[virtualFilePath] = true
+
+			// Validate segment sizes match file size for 7zip content
+			if err := proc.validateSegmentSizes(baseFilename, sevenZipContent.Size, sevenZipContent.Segments, metapb.Encryption_NONE); err != nil {
+				return "", NewNonRetryableError(err.Error(), nil)
+			}
 
 			// Create file metadata using the 7zip handler's helper function
 			fileMeta := proc.sevenZipProcessor.CreateFileMetadataFromSevenZipContent(

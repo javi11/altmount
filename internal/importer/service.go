@@ -508,55 +508,71 @@ func (s *Service) processQueueItems(workerID int) {
 	log.Debug("Processing claimed queue item", "queue_id", item.ID, "file", item.NzbPath)
 
 	// Step 3: Process the NZB file and write to main database
-	var (
-		processingErr error
-		resultingPath string
-	)
-	if item.RelativePath != nil {
-		resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
-	} else {
-		resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, "")
-	}
+	resultingPath, processingErr := s.processNzbItem(item)
 
 	// Step 4: Update queue database with results
 	if processingErr != nil {
 		// Handle failure in queue database
 		s.handleProcessingFailure(item, processingErr, log)
 	} else {
-		if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
-			log.Error("Failed to add storage path", "queue_id", item.ID, "error", err)
-		}
+		// Handle success (storage path, VFS notification, symlinks, status update)
+		s.handleProcessingSuccess(item, resultingPath, log)
+	}
+}
 
-		mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
-		if _, err := os.Stat(mountPath); err != nil {
-			if os.IsNotExist(err) {
-				// Refresh the root path if the mount path is not found
-				err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
-				if err != nil {
-					log.Error("Failed to refresh mount path", "queue_id", item.ID, "path", mountPath, "error", err)
-				}
+// refreshMountPathIfNeeded checks if the mount path exists and refreshes the root directory if not found
+func (s *Service) refreshMountPathIfNeeded(resultingPath string, itemID int64, log *slog.Logger) {
+	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
+	if _, err := os.Stat(mountPath); err != nil {
+		if os.IsNotExist(err) {
+			// Refresh the root path if the mount path is not found
+			err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
+			if err != nil {
+				log.Error("Failed to refresh mount path", "queue_id", itemID, "path", mountPath, "error", err)
 			}
 		}
-
-		// Notify rclone VFS about the new import (async, don't fail on error)
-		s.notifyRcloneVFS(item, log)
-
-		// Create category symlink (non-blocking)
-		if err := s.createSymlinks(item, resultingPath); err != nil {
-			log.Warn("Failed to create symlink",
-				"queue_id", item.ID,
-				"path", resultingPath,
-				"error", err)
-			// Don't fail the import, just log the warning
-		}
-
-		// Mark as completed in queue database
-		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
-		} else {
-			log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
-		}
 	}
+}
+
+// processNzbItem processes the NZB file for a queue item
+func (s *Service) processNzbItem(item *database.ImportQueueItem) (string, error) {
+	if item.RelativePath != nil {
+		return s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
+	}
+	return s.processor.ProcessNzbFile(item.NzbPath, "")
+}
+
+// handleProcessingSuccess handles all steps after successful NZB processing
+func (s *Service) handleProcessingSuccess(item *database.ImportQueueItem, resultingPath string, log *slog.Logger) error {
+	// Add storage path to database
+	if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
+		log.Error("Failed to add storage path", "queue_id", item.ID, "error", err)
+		return err
+	}
+
+	// Refresh mount path if needed
+	s.refreshMountPathIfNeeded(resultingPath, item.ID, log)
+
+	// Notify rclone VFS about the new import (async, don't fail on error)
+	s.notifyRcloneVFS(item, log)
+
+	// Create category symlink (non-blocking)
+	if err := s.createSymlinks(item, resultingPath); err != nil {
+		log.Warn("Failed to create symlink",
+			"queue_id", item.ID,
+			"path", resultingPath,
+			"error", err)
+		// Don't fail the import, just log the warning
+	}
+
+	// Mark as completed in queue database
+	if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+		log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
+		return err
+	}
+
+	log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
+	return nil
 }
 
 // handleProcessingFailure handles when processing fails
@@ -813,55 +829,15 @@ func (s *Service) ProcessItemInBackground(itemID int64) {
 		}
 
 		// Process the NZB file
-		var (
-			processingErr error
-			resultingPath string
-		)
-		if item.RelativePath != nil {
-			resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
-		} else {
-			resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, "")
-		}
+		resultingPath, processingErr := s.processNzbItem(item)
 
 		// Update queue database with results
 		if processingErr != nil {
 			// Handle failure
 			s.handleProcessingFailure(item, processingErr, log)
 		} else {
-			// Handle success
-			if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
-				log.Error("Failed to add storage path", "error", err)
-			}
-
-			mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
-			if _, err := os.Stat(mountPath); err != nil {
-				if os.IsNotExist(err) {
-					// Refresh the root path if the mount path is not found
-					err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
-					if err != nil {
-						log.Error("Failed to refresh mount path", "queue_id", item.ID, "path", mountPath, "error", err)
-					}
-				}
-			}
-
-			// Notify rclone VFS about the new import (async, don't fail on error)
-			s.notifyRcloneVFS(item, log)
-
-			// Create category symlink (non-blocking)
-			if err := s.createSymlinks(item, resultingPath); err != nil {
-				log.Warn("Failed to create symlink",
-					"queue_id", item.ID,
-					"path", resultingPath,
-					"error", err)
-				// Don't fail the import, just log the warning
-			}
-
-			// Mark as completed
-			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-				log.Error("Failed to mark item as completed", "error", err)
-			} else {
-				log.Info("Successfully processed queue item in background", "resulting_path", resultingPath)
-			}
+			// Handle success (storage path, VFS notification, symlinks, status update)
+			s.handleProcessingSuccess(item, resultingPath, log)
 		}
 	}()
 }
