@@ -520,23 +520,26 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 			}
 		}
 
-		var articleErr *usenet.ArticleNotFoundError
+		var dataCorruptionErr *usenet.DataCorruptionError
 		// Handle UsenetReader errors the same way as VirtualFile
-		if errors.As(err, &articleErr) {
+		if errors.As(err, &dataCorruptionErr) {
 			// Update file health status and database tracking
-			mvf.updateFileHealthOnError(articleErr, articleErr.BytesRead > 0 || totalRead > 0)
+			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.BytesRead > 0 || totalRead > 0, dataCorruptionErr.NoRetry)
 
-			// Fill remaining buffer with zeros to allow partial playback
-			// File is already marked as corrupted in metadata via updateFileHealthOnError
-			if totalRead < len(p) {
-				for i := totalRead; i < len(p); i++ {
-					p[i] = 0
+			if dataCorruptionErr.BytesRead > 0 || totalRead > 0 {
+				// Some content was read - return partial content error
+				return totalRead, &PartialContentError{
+					BytesRead:     dataCorruptionErr.BytesRead,
+					TotalExpected: mvf.fileMeta.FileSize,
+					UnderlyingErr: dataCorruptionErr,
+				}
+			} else {
+				// No content read - return corrupted file error
+				return totalRead, &CorruptedFileError{
+					TotalExpected: mvf.fileMeta.FileSize,
+					UnderlyingErr: dataCorruptionErr,
 				}
 			}
-
-			// Return successful read to prevent retry loops
-			mvf.position += int64(len(p))
-			return len(p), nil
 		}
 
 		// Update position even on error if we read some data
@@ -773,7 +776,14 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	if !rg.HasSegments() {
 		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download", "start", start, "end", end)
 
-		return nil, ErrNoNzbData
+		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+			UnderlyingErr: ErrNoNzbData,
+		}, false, true)
+
+		return nil, &CorruptedFileError{
+			TotalExpected: mvf.fileMeta.FileSize,
+			UnderlyingErr: ErrNoNzbData,
+		}
 	}
 
 	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
@@ -828,7 +838,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 }
 
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected
-func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.ArticleNotFoundError, hasPartialContent bool) {
+func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, hasPartialContent bool, noRetry bool) {
 	// Determine the appropriate status
 	var metadataStatus metapb.FileStatus
 	var dbStatus database.HealthStatus
@@ -851,7 +861,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 
 	// Update database health tracking (non-blocking)
 	go func() {
-		errorMsg := articleErr.Error()
+		errorMsg := dataCorruptionErr.Error()
 		sourceNzbPath := &mvf.fileMeta.SourceNzbPath
 		if *sourceNzbPath == "" {
 			sourceNzbPath = nil
@@ -867,6 +877,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 			&errorMsg,
 			sourceNzbPath,
 			&errorDetails,
+			noRetry,
 		); err != nil {
 			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
 		}

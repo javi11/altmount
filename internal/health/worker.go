@@ -216,7 +216,7 @@ func (hw *HealthWorker) CancelHealthCheck(filePath string) error {
 	delete(hw.activeChecks, filePath)
 
 	// Update file status to pending to allow retry
-	err := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, nil, nil, nil)
+	err := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, nil, nil, nil, false)
 	if err != nil {
 		hw.logger.Error("Failed to update file status after cancellation", "file_path", filePath, "error", err)
 		return fmt.Errorf("failed to update file status after cancellation: %w", err)
@@ -294,6 +294,7 @@ func (hw *HealthWorker) AddToHealthCheck(filePath string, sourceNzb *string) err
 			nil,
 			sourceNzb,
 			nil,
+			false,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to add file to health database: %w", err)
@@ -309,6 +310,7 @@ func (hw *HealthWorker) AddToHealthCheck(filePath string, sourceNzb *string) err
 				nil,
 				sourceNzb,
 				nil,
+				false,
 			)
 			if err != nil {
 				return fmt.Errorf("failed to update file status to pending: %w", err)
@@ -346,7 +348,7 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 
 			// Set status back to pending if the check failed
 			errorMsg := checkErr.Error()
-			updateErr := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil)
+			updateErr := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil, false)
 			if updateErr != nil {
 				hw.logger.Error("Failed to update status after failed check", "file_path", filePath, "error", updateErr)
 			}

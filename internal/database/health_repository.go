@@ -28,21 +28,22 @@ func NewHealthRepository(db interface {
 }
 
 // UpdateFileHealth updates or inserts a file health record
-func (r *HealthRepository) UpdateFileHealth(filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string) error {
+func (r *HealthRepository) UpdateFileHealth(filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error {
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, repair_retry_count, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), ?, ?, ?, 0, 0, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at)
+		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		status = excluded.status,
 		last_checked = datetime('now'),
 		last_error = excluded.last_error,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
 		error_details = excluded.error_details,
+		retry_count = CASE WHEN ? THEN max_retries ELSE retry_count END,
+		max_retries = excluded.max_retries,
 		updated_at = datetime('now')
-		WHERE status != excluded.status OR last_error != excluded.last_error
 	`
 
-	_, err := r.db.Exec(query, filePath, status, errorMessage, sourceNzbPath, errorDetails)
+	_, err := r.db.Exec(query, filePath, status, errorMessage, sourceNzbPath, errorDetails, noRetry, noRetry)
 	if err != nil {
 		return fmt.Errorf("failed to update file health: %w", err)
 	}

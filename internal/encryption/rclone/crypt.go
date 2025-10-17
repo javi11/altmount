@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/javi11/altmount/internal/encryption"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
 )
 
@@ -15,6 +16,20 @@ var (
 	ErrMissingPassword          = errors.New("password is required in metadata")
 	ErrMissingSalt              = errors.New("salt is required in metadata")
 	ErrMissingEncryptedFileSize = errors.New("cipher_file_size is required in metadata")
+	noRetryErrors               = []error{
+		ErrorBadDecryptUTF8,
+		ErrorBadDecryptControlChar,
+		ErrorNotAMultipleOfBlocksize,
+		ErrorTooShortAfterDecode,
+		ErrorTooLongAfterDecode,
+		ErrorEncryptedFileTooShort,
+		ErrorEncryptedFileBadHeader,
+		ErrorEncryptedBadMagic,
+		ErrorEncryptedBadBlock,
+		ErrorBadBase32Encoding,
+		ErrorFileClosed,
+		ErrorBadSeek,
+	}
 )
 
 type rcloneCrypt struct {
@@ -161,7 +176,21 @@ func (r *reader) Read(p []byte) (n int, err error) {
 		return 0, errors.New("rclone crypt reader not initialized")
 	}
 
-	return r.rd.Read(p)
+	if n, err := r.rd.Read(p); err != nil {
+		for _, noRetryError := range noRetryErrors {
+			if errors.Is(err, noRetryError) {
+				return n, &usenet.DataCorruptionError{
+					UnderlyingErr: err,
+					BytesRead:     int64(n),
+					NoRetry:       true,
+				}
+			}
+		}
+
+		return n, err
+	}
+
+	return n, nil
 }
 
 func (r *reader) Close() error {

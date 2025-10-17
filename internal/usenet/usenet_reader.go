@@ -24,16 +24,17 @@ var (
 	_ io.ReadCloser = &usenetReader{}
 )
 
-type ArticleNotFoundError struct {
+type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
+	NoRetry       bool
 }
 
-func (e *ArticleNotFoundError) Error() string {
+func (e *DataCorruptionError) Error() string {
 	return e.UnderlyingErr.Error()
 }
 
-func (e *ArticleNotFoundError) Unwrap() error {
+func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
@@ -149,13 +150,13 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 		if b.isArticleNotFoundError(err) {
 			if totalRead > 0 {
 				// We read some data before failing - this is partial content
-				return 0, &ArticleNotFoundError{
+				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     totalRead,
 				}
 			} else {
 				// No data read at all - this is corrupted/missing
-				return 0, &ArticleNotFoundError{
+				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     0,
 				}
@@ -194,7 +195,7 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 					if b.isArticleNotFoundError(err) {
 						if totalRead > 0 {
 							// Return what we have read so far and the article error
-							return n, &ArticleNotFoundError{
+							return n, &DataCorruptionError{
 								UnderlyingErr: err,
 								BytesRead:     totalRead,
 							}
@@ -205,7 +206,7 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 			} else {
 				// Check if this is an article not found error
 				if b.isArticleNotFoundError(err) {
-					return n, &ArticleNotFoundError{
+					return n, &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     totalRead,
 					}
@@ -235,7 +236,7 @@ func (b *usenetReader) isPoolUnavailableError(err error) bool {
 }
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
-func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment, writer io.Writer, groups []string) error {
+func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
 	return retry.Do(
 		func() error {
 			// Get current pool
@@ -245,8 +246,15 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 			}
 
 			// Attempt download
-			bytesWritten, err := cp.Body(ctx, segment.Id, writer, groups)
+			bytesWritten, err := cp.Body(ctx, segment.Id, segment.Writer(), segment.groups)
 			if err != nil {
+				if strings.Contains(err.Error(), "data corruption detected") {
+					return &DataCorruptionError{
+						UnderlyingErr: err,
+						BytesRead:     bytesWritten,
+					}
+				}
+
 				return err
 			}
 
@@ -364,7 +372,7 @@ func (b *usenetReader) downloadManager(
 
 					// Set the item ready to read
 					ctx = slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
-					err := b.downloadSegmentWithRetry(ctx, s, s.Writer(), s.groups)
+					err := b.downloadSegmentWithRetry(ctx, s)
 
 					// Mark download complete
 					b.mu.Lock()

@@ -547,12 +547,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment) 
 	// - Last segment: use its actual size
 	segments[lastSegmentIndex].Bytes = int(lastPartSize)
 
-	p.log.Debug("Normalized segment sizes",
-		"first_size", firstPartSize,
-		"standard_size", standardPartSize,
-		"last_size", lastPartSize,
-		"middle_segments_count", len(segments)-2)
-
 	return nil
 }
 
