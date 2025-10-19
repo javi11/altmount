@@ -34,9 +34,19 @@ type SABnzbdAPIResponse struct {
 	NzoIds []string `json:"nzo_ids,omitempty"`
 }
 
+// Priority constants for SABnzbd downloads
+const (
+	PriorityDefault = "-100" // Default priority
+	PriorityPaused  = "-2"   // Paused download
+	PriorityLow     = "-1"   // Low priority
+	PriorityNormal  = "0"    // Normal priority
+	PriorityHigh    = "1"    // High priority
+	PriorityForce   = "2"    // Force priority
+)
+
 // SendNZBFile sends an NZB file to an external SABnzbd instance
 // Returns the NZO ID assigned by SABnzbd, or an error
-// Priority should be "0" (low), "1" (normal), or "2" (high)
+// Priority values: "-100" (default), "-2" (paused), "-1" (low), "0" (normal), "1" (high), "2" (force)
 func (c *SABnzbdClient) SendNZBFile(host, apiKey, nzbPath string, category *string, priority *string) (string, error) {
 	// Validate inputs
 	if host == "" {

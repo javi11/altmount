@@ -16,6 +16,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	providers: ProviderConfig[];
 	mount_path: string;
+	api_key?: string;
 }
 
 // WebDAV server configuration
@@ -155,6 +156,8 @@ export interface SABnzbdConfig {
 	fallback_host?: string;
 	fallback_api_key?: string; // Obfuscated when returned from API
 	fallback_api_key_set?: boolean; // For display purposes only
+	symlink_dir?: string;
+	symlink_enabled: boolean;
 }
 
 // SABnzbd category configuration
@@ -315,6 +318,8 @@ export interface SABnzbdUpdateRequest {
 	categories?: SABnzbdCategory[];
 	fallback_host?: string;
 	fallback_api_key?: string;
+	symlink_dir?: string;
+	symlink_enabled?: boolean;
 }
 
 // Configuration validation request
@@ -506,6 +511,8 @@ export interface SABnzbdFormData {
 	categories: SABnzbdCategory[];
 	fallback_host: string;
 	fallback_api_key: string;
+	symlink_dir: string;
+	symlink_enabled: boolean;
 }
 
 // Arrs configuration types

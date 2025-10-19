@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -130,8 +131,11 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		return false, nil, nil
 	}
 
-	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
-		return false, nil, ErrFileIsCorrupted
+	// If the file is marked as corrupted in metadata and the client didn't
+	// request to show corrupted files, treat it as not found so WebDAV will
+	// return 404 and clients (rclone) will stop trying to access it.
+	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED && !showCorrupted {
+		return false, nil, nil
 	}
 
 	// Create a metadata-based virtual file handle
@@ -258,6 +262,14 @@ func (mrf *MetadataRemoteFile) Stat(name string) (bool, fs.FileInfo, error) {
 		return false, nil, fs.ErrNotExist
 	}
 
+	// If the file is marked as corrupted and the client did not request
+	// to show corrupted files, treat it as not found so WebDAV returns 404
+	// and clients (rclone) will stop attempting to open/read it.
+	pa := utils.NewPathWithArgs(name)
+	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED && !pa.ShowCorrupted() {
+		return false, nil, fs.ErrNotExist
+	}
+
 	// Convert to fs.FileInfo
 	info := &MetadataFileInfo{
 		name:    filepath.Base(normalizedName),
@@ -306,19 +318,11 @@ func (msl *MetadataSegmentLoader) GetSegment(index int) (segment usenet.Segment,
 
 	seg := msl.segments[index]
 
-	// Important: range builder only knows (Start, Size) and assumes usable bytes are [Start, Size-1].
-	// Our metadata may have a trimmed EndOffset (< SegmentSize-1). Provide a synthetic Size = EndOffset+1
-	// so usable length becomes (EndOffset - StartOffset + 1) and no extra tail bytes are exposed.
-	size := seg.SegmentSize
-	if seg.EndOffset > 0 && seg.EndOffset < seg.SegmentSize-1 {
-		size = seg.EndOffset + 1
-	}
-
-	// Keep original start offset (could be >0 due to RAR processing) and size
 	return usenet.Segment{
 		Id:    seg.Id,
 		Start: seg.StartOffset,
-		Size:  size,
+		End:   seg.EndOffset,
+		Size:  seg.SegmentSize,
 	}, []string{}, true // Empty groups for now - could be stored in metadata if needed
 }
 
@@ -531,24 +535,24 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 			}
 		}
 
-		var articleErr *usenet.ArticleNotFoundError
+		var dataCorruptionErr *usenet.DataCorruptionError
 		// Handle UsenetReader errors the same way as VirtualFile
-		if errors.As(err, &articleErr) {
+		if errors.As(err, &dataCorruptionErr) {
 			// Update file health status and database tracking
-			mvf.updateFileHealthOnError(articleErr, articleErr.BytesRead > 0 || totalRead > 0)
+			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.BytesRead > 0 || totalRead > 0, dataCorruptionErr.NoRetry)
 
-			if articleErr.BytesRead > 0 || totalRead > 0 {
+			if dataCorruptionErr.BytesRead > 0 || totalRead > 0 {
 				// Some content was read - return partial content error
 				return totalRead, &PartialContentError{
-					BytesRead:     articleErr.BytesRead,
+					BytesRead:     dataCorruptionErr.BytesRead,
 					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: articleErr,
+					UnderlyingErr: dataCorruptionErr,
 				}
 			} else {
 				// No content read - return corrupted file error
 				return totalRead, &CorruptedFileError{
 					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: articleErr,
+					UnderlyingErr: dataCorruptionErr,
 				}
 			}
 		}
@@ -717,6 +721,10 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	// Get request range from args or use default range starting from current position
 	start, end := mvf.getRequestRange()
 
+	if end == -1 {
+		end = mvf.fileMeta.FileSize - 1
+	}
+
 	// Track the current reader's range for progressive reading
 	mvf.currentRangeStart = start
 	mvf.currentRangeEnd = end
@@ -777,19 +785,23 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, ErrNoNzbData
 	}
 
-	// Get connection pool dynamically from pool manager
-	cp, err := mvf.poolManager.GetPool()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get connection pool: %w", err)
-	}
-
-	if end == -1 {
-		end = mvf.fileMeta.FileSize - 1
-	}
-
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
+
+	if !rg.HasSegments() {
+		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download", "start", start, "end", end)
+
+		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+			UnderlyingErr: ErrNoNzbData,
+		}, false, true)
+
+		return nil, &CorruptedFileError{
+			TotalExpected: mvf.fileMeta.FileSize,
+			UnderlyingErr: ErrNoNzbData,
+		}
+	}
+
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
@@ -841,7 +853,7 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 }
 
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected
-func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.ArticleNotFoundError, hasPartialContent bool) {
+func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, hasPartialContent bool, noRetry bool) {
 	// Determine the appropriate status
 	var metadataStatus metapb.FileStatus
 	var dbStatus database.HealthStatus
@@ -864,7 +876,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 
 	// Update database health tracking (non-blocking)
 	go func() {
-		errorMsg := articleErr.Error()
+		errorMsg := dataCorruptionErr.Error()
 		sourceNzbPath := &mvf.fileMeta.SourceNzbPath
 		if *sourceNzbPath == "" {
 			sourceNzbPath = nil
@@ -880,6 +892,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 			&errorMsg,
 			sourceNzbPath,
 			&errorDetails,
+			noRetry,
 		); err != nil {
 			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
 		}
@@ -907,4 +920,12 @@ func (mrf *MetadataRemoteFile) isValidEmptyDirectory(normalizedPath string) bool
 
 	// Recursively check if parent could be a valid empty directory
 	return mrf.isValidEmptyDirectory(parentDir)
+}
+
+func (mrf *MetadataRemoteFile) Mkdir(name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
+}
+
+func (mrf *MetadataRemoteFile) MkdirAll(name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
 }

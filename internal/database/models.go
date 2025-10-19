@@ -13,6 +13,7 @@ const (
 	QueueStatusCompleted  QueueStatus = "completed"
 	QueueStatusFailed     QueueStatus = "failed"
 	QueueStatusRetrying   QueueStatus = "retrying"
+	QueueStatusFallback   QueueStatus = "fallback" // Sent to external SABnzbd as fallback
 )
 
 // QueuePriority represents the priority level of a queued import

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -561,9 +562,8 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 		req.OlderThan = &defaultTime
 	}
 
-	// For now, we can only cleanup all records or none (the repository doesn't support selective cleanup)
-	// We'll need to implement a more sophisticated cleanup method
-	count, err := s.cleanupHealthRecords(*req.OlderThan, req.Status)
+	// Perform cleanup with optional file deletion
+	recordsDeleted, filesDeleted, deletionErrors, err := s.cleanupHealthRecords(*req.OlderThan, req.Status, req.DeleteFiles)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -573,9 +573,16 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 	}
 
 	response := map[string]interface{}{
-		"removed_count": count,
-		"older_than":    req.OlderThan.Format(time.RFC3339),
-		"status_filter": req.Status,
+		"records_deleted": recordsDeleted,
+		"older_than":      req.OlderThan.Format(time.RFC3339),
+		"status_filter":   req.Status,
+		"files_deleted":   filesDeleted,
+	}
+
+	// Include deletion errors if any occurred
+	if len(deletionErrors) > 0 {
+		response["file_deletion_errors"] = deletionErrors
+		response["warning"] = fmt.Sprintf("%d file(s) could not be deleted", len(deletionErrors))
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -585,12 +592,89 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 }
 
 // cleanupHealthRecords is a helper method to cleanup health records
-func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *database.HealthStatus) (int, error) {
-	// The current repository only supports CleanupHealthRecords with a list of existing files
-	// For now, we'll return 0 and suggest implementing selective cleanup in the repository
+func (s *Server) cleanupHealthRecords(olderThan time.Time, statusFilter *database.HealthStatus, deleteFiles bool) (recordsDeleted int, filesDeleted int, deletionErrors []string, err error) {
+	// If not deleting files, use direct SQL delete for efficiency (handles unlimited records)
+	if !deleteFiles {
+		count, deleteErr := s.healthRepo.DeleteHealthRecordsByDate(olderThan, statusFilter)
+		if deleteErr != nil {
+			return 0, 0, nil, fmt.Errorf("failed to delete health records: %w", deleteErr)
+		}
+		return count, 0, nil, nil
+	}
 
-	// This should be implemented in the health repository with proper filtering
-	return 0, fmt.Errorf("selective health record cleanup not yet implemented")
+	// If deleting files, need to fetch records in batches to get file paths
+	const batchSize = 1000
+	allFilePaths := make([]string, 0)
+	deletedFileCount := 0
+	fileErrors := make([]string, 0)
+	offset := 0
+
+	// Process records in batches until no more records found
+	for {
+		// Fetch next batch of records
+		items, queryErr := s.healthRepo.ListHealthItems(statusFilter, batchSize, offset, nil, "", "created_at", "asc")
+		if queryErr != nil {
+			return 0, 0, nil, fmt.Errorf("failed to query health records: %w", queryErr)
+		}
+
+		// No more records found
+		if len(items) == 0 {
+			break
+		}
+
+		// Filter items older than the specified date
+		var oldItemsInBatch []*database.FileHealth
+		for _, item := range items {
+			if item.CreatedAt.Before(olderThan) {
+				oldItemsInBatch = append(oldItemsInBatch, item)
+			}
+		}
+
+		// If no items in this batch match the date criteria, we've processed all old records
+		// (since results are sorted by created_at ascending)
+		if len(oldItemsInBatch) == 0 {
+			break
+		}
+
+		// Delete physical files and collect paths
+		for _, item := range oldItemsInBatch {
+			allFilePaths = append(allFilePaths, item.FilePath)
+
+			// Attempt to delete the physical file using os.Remove
+			if deleteErr := os.Remove(item.FilePath); deleteErr != nil {
+				// Track error but continue with other files
+				fileErrors = append(fileErrors, fmt.Sprintf("%s: %v", item.FilePath, deleteErr))
+			} else {
+				deletedFileCount++
+			}
+		}
+
+		// If we got fewer items than the batch size, we've reached the end
+		if len(items) < batchSize {
+			break
+		}
+
+		// If all items in batch were old, continue to next batch
+		// If not all items were old, we're done (sorted by date)
+		if len(oldItemsInBatch) < len(items) {
+			break
+		}
+
+		offset += batchSize
+	}
+
+	// No records to cleanup
+	if len(allFilePaths) == 0 {
+		return 0, 0, nil, nil
+	}
+
+	// Delete database records (proceed even if some file deletions failed)
+	deleteErr := s.healthRepo.DeleteHealthRecordsBulk(allFilePaths)
+	if deleteErr != nil {
+		return 0, deletedFileCount, fileErrors, fmt.Errorf("failed to delete health records from database: %w", deleteErr)
+	}
+
+	return len(allFilePaths), deletedFileCount, fileErrors, nil
 }
 
 // handleAddHealthCheck handles POST /api/health/check

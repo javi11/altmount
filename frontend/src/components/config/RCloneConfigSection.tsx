@@ -714,6 +714,40 @@ export function RCloneConfigSection({
 									<p className="label text-xs">Log level for rclone operations</p>
 								</fieldset>
 							</div>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">User ID (UID)</legend>
+									<input
+										type="number"
+										className="input"
+										value={mountFormData.uid}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleMountInputChange("uid", Number.parseInt(e.target.value, 10) || 1000)
+										}
+										min="0"
+										max="65535"
+									/>
+									<p className="label text-xs">User ID for file ownership (default: 1000)</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Group ID (GID)</legend>
+									<input
+										type="number"
+										className="input"
+										value={mountFormData.gid}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleMountInputChange("gid", Number.parseInt(e.target.value, 10) || 1000)
+										}
+										min="0"
+										max="65535"
+									/>
+									<p className="label text-xs">Group ID for file ownership (default: 1000)</p>
+								</fieldset>
+							</div>
 						</div>
 
 						{/* VFS Cache Settings */}

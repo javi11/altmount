@@ -99,7 +99,7 @@ func AllExtensionsWith(extra []string) []string {
 }
 
 // HasPopularExtension reports whether file_path has a popular extension (case-insensitive)
-// or matches known RAR patterns (e.g., .rar, .r00, .partXX.rar).
+// or matches known RAR or 7zip patterns (e.g., .rar, .r00, .partXX.rar, .7z, .7z.001).
 func HasPopularExtension(filePath string) bool {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext == "" {
@@ -111,9 +111,9 @@ func HasPopularExtension(filePath string) bool {
 			return true
 		}
 	}
-	// Fallback to the package's RAR detector on the basename
+	// Fallback to the package's RAR and 7zip detector on the basename
 	base := filepath.Base(filePath)
-	return rarPattern.MatchString(strings.ToLower(base))
+	return rarPattern.MatchString(strings.ToLower(base)) || sevenZipPattern.MatchString(strings.ToLower(base))
 }
 
 // AllPossibleExtensions attempts to detect the file's extension(s).

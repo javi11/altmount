@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -25,14 +26,17 @@ func NewMetadataService(rootPath string) *MetadataService {
 // truncateFilename truncates the filename if it's too long to prevent filesystem issues
 // when creating .meta files. Keeps filename under 250 characters.
 func (ms *MetadataService) truncateFilename(filename string) string {
+	fileExt := filepath.Ext(filename)
+	filename = strings.TrimSuffix(filename, fileExt)
+
 	const maxLen = 250 // Leave room for .meta extension
 
 	if len(filename) <= maxLen {
-		return filename
+		return filename + fileExt
 	}
 
 	// Simply truncate to maxLen
-	return filename[:maxLen]
+	return filename[:maxLen] + fileExt
 }
 
 // WriteFileMetadata writes file metadata to disk
@@ -321,4 +325,12 @@ func (ms *MetadataService) WalkMetadata(walkFunc func(virtualPath string, metada
 
 		return nil
 	})
+}
+
+func (ms *MetadataService) CreateDirectory(name string) error {
+	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
+}
+
+func (ms *MetadataService) CreateDirectoryAll(name string) error {
+	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
 }

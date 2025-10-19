@@ -16,8 +16,11 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 	const [modalMode, setModalMode] = useState<"create" | "edit">("create");
 	const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
 	const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
+	const [togglingProviderId, setTogglingProviderId] = useState<string | null>(null);
+	const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
 
 	const { deleteProvider, updateProvider, reorderProviders } = useProviders();
+	const isReordering = reorderProviders.isPending;
 	const { confirmDelete } = useConfirm();
 	const { showToast } = useToast();
 
@@ -36,6 +39,7 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 	const handleDelete = async (providerId: string) => {
 		const confirmed = await confirmDelete("provider");
 		if (confirmed) {
+			setDeletingProviderId(providerId);
 			try {
 				await deleteProvider.mutateAsync(providerId);
 			} catch (error) {
@@ -45,11 +49,14 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 					title: "Delete Failed",
 					message: "Failed to delete provider. Please try again.",
 				});
+			} finally {
+				setDeletingProviderId(null);
 			}
 		}
 	};
 
 	const handleToggleEnabled = async (provider: ProviderConfig) => {
+		setTogglingProviderId(provider.id);
 		try {
 			await updateProvider.mutateAsync({
 				id: provider.id,
@@ -62,6 +69,8 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 				title: "Update Failed",
 				message: "Failed to update provider. Please try again.",
 			});
+		} finally {
+			setTogglingProviderId(null);
 		}
 	};
 
@@ -173,150 +182,174 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 					</button>
 				</div>
 			) : (
-				<div className="grid gap-4">
-					{config.providers.map((provider, index) => (
-						// biome-ignore lint/a11y/useSemanticElements: <a button can not be a child of a button>
-						<div
-							key={provider.id}
-							draggable
-							role="button"
-							tabIndex={0}
-							aria-label={`Reorder provider ${provider.host}:${provider.port}@${provider.username}`}
-							onDragStart={(e) => handleDragStart(e, provider.id)}
-							onDragOver={(e) => handleDragOver(e, provider.id)}
-							onDragLeave={handleDragLeave}
-							onDrop={(e) => handleDrop(e, provider.id)}
-							onDragEnd={handleDragEnd}
-							className={`card cursor-move border-2 bg-base-100 transition-all duration-200 ${
-								provider.enabled
-									? provider.is_backup_provider
-										? "border-warning/20"
-										: "border-success/20"
-									: "border-base-300"
-							} ${draggedProvider === provider.id ? "scale-95 opacity-50" : ""} ${
-								dragOverProvider === provider.id ? "border-primary border-dashed bg-primary/5" : ""
-							}`}
-						>
-							<div className="card-body p-4">
-								<div className="flex items-center justify-between">
-									<div className="flex items-center space-x-3">
+				<div className="relative">
+					{/* Loading overlay */}
+					{isReordering && (
+						<div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-base-300/50 backdrop-blur-sm">
+							<div className="flex flex-col items-center gap-2">
+								<div className="loading loading-spinner loading-lg text-primary" />
+								<p className="font-medium text-sm">Reordering providers...</p>
+							</div>
+						</div>
+					)}
+
+					<div className="grid gap-4">
+						{config.providers.map((provider, index) => (
+							// biome-ignore lint/a11y/useSemanticElements: <a button can not be a child of a button>
+							<div
+								key={provider.id}
+								draggable={!isReordering}
+								role="button"
+								tabIndex={0}
+								aria-label={`Reorder provider ${provider.host}:${provider.port}@${provider.username}`}
+								onDragStart={(e) => !isReordering && handleDragStart(e, provider.id)}
+								onDragOver={(e) => !isReordering && handleDragOver(e, provider.id)}
+								onDragLeave={!isReordering ? handleDragLeave : undefined}
+								onDrop={(e) => !isReordering && handleDrop(e, provider.id)}
+								onDragEnd={!isReordering ? handleDragEnd : undefined}
+								className={`card border-2 bg-base-100 transition-all duration-200 ${
+									isReordering ? "cursor-not-allowed opacity-60" : "cursor-move"
+								} ${
+									provider.enabled
+										? provider.is_backup_provider
+											? "border-warning/20"
+											: "border-success/20"
+										: "border-base-300"
+								} ${draggedProvider === provider.id ? "scale-95 opacity-50" : ""} ${
+									dragOverProvider === provider.id
+										? "border-primary border-dashed bg-primary/5"
+										: ""
+								}`}
+							>
+								<div className="card-body p-4">
+									<div className="flex items-center justify-between">
+										<div className="flex items-center space-x-3">
+											<div className="flex items-center space-x-2">
+												<GripVertical className="h-4 w-4 text-base-content/40" />
+												<div
+													className={`h-3 w-3 rounded-full ${
+														provider.enabled ? "bg-success" : "bg-base-300"
+													}`}
+												/>
+												<div className="text-base-content/50 text-xs">#{index + 1}</div>
+											</div>
+											<div>
+												<h4 className="font-semibold">
+													{provider.host}:{provider.port}@{provider.username}
+												</h4>
+											</div>
+										</div>
+
 										<div className="flex items-center space-x-2">
-											<GripVertical className="h-4 w-4 text-base-content/40" />
+											{/* Status Badge */}
 											<div
-												className={`h-3 w-3 rounded-full ${
-													provider.enabled ? "bg-success" : "bg-base-300"
-												}`}
-											/>
-											<div className="text-base-content/50 text-xs">#{index + 1}</div>
-										</div>
-										<div>
-											<h4 className="font-semibold">
-												{provider.host}:{provider.port}@{provider.username}
-											</h4>
+												className={`badge ${provider.enabled ? "badge-success" : "badge-neutral"}`}
+											>
+												{provider.enabled ? "Enabled" : "Disabled"}
+											</div>
+
+											{/* Backup Provider Badge */}
+											{provider.is_backup_provider && (
+												<div className="badge badge-warning badge-sm">Backup</div>
+											)}
+
+											{/* Actions */}
+											<div className="join">
+												<button
+													type="button"
+													className={`btn btn-sm join-item ${
+														provider.enabled ? "btn-warning" : "btn-success"
+													}`}
+													onClick={() => handleToggleEnabled(provider)}
+													title={provider.enabled ? "Disable" : "Enable"}
+													disabled={togglingProviderId === provider.id}
+												>
+													{togglingProviderId === provider.id ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : provider.enabled ? (
+														<PowerOff className="h-4 w-4" />
+													) : (
+														<Power className="h-4 w-4" />
+													)}
+												</button>
+												<button
+													type="button"
+													className="btn btn-sm btn-outline join-item"
+													onClick={() => handleEdit(provider)}
+													title="Edit"
+												>
+													<Edit className="h-4 w-4" />
+												</button>
+												<button
+													type="button"
+													className="btn btn-sm btn-error join-item"
+													onClick={() => handleDelete(provider.id)}
+													title="Delete"
+													disabled={deletingProviderId === provider.id}
+												>
+													{deletingProviderId === provider.id ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : (
+														<Trash2 className="h-4 w-4" />
+													)}
+												</button>
+											</div>
 										</div>
 									</div>
 
-									<div className="flex items-center space-x-2">
-										{/* Status Badge */}
-										<div
-											className={`badge ${provider.enabled ? "badge-success" : "badge-neutral"}`}
-										>
-											{provider.enabled ? "Enabled" : "Disabled"}
-										</div>
-
-										{/* Backup Provider Badge */}
-										{provider.is_backup_provider && (
-											<div className="badge badge-warning badge-sm">Backup</div>
-										)}
-
-										{/* Actions */}
-										<div className="join">
-											<button
-												type="button"
-												className={`btn btn-sm join-item ${
-													provider.enabled ? "btn-warning" : "btn-success"
-												}`}
-												onClick={() => handleToggleEnabled(provider)}
-												title={provider.enabled ? "Disable" : "Enable"}
-											>
-												{provider.enabled ? (
-													<PowerOff className="h-4 w-4" />
-												) : (
-													<Power className="h-4 w-4" />
-												)}
-											</button>
-											<button
-												type="button"
-												className="btn btn-sm btn-outline join-item"
-												onClick={() => handleEdit(provider)}
-												title="Edit"
-											>
-												<Edit className="h-4 w-4" />
-											</button>
-											<button
-												type="button"
-												className="btn btn-sm btn-error join-item"
-												onClick={() => handleDelete(provider.id)}
-												title="Delete"
-											>
-												<Trash2 className="h-4 w-4" />
-											</button>
-										</div>
-									</div>
-								</div>
-
-								{/* Provider Details */}
-								<div className="mt-3 border-base-300 border-t pt-3">
-									<div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-5">
-										<div>
-											<span className="text-base-content/60">Username:</span>
-											<div className="font-mono">{provider.username}</div>
-										</div>
-										<div>
-											<span className="text-base-content/60">Max Connections:</span>
-											<div className="font-mono">{provider.max_connections}</div>
-										</div>
-										<div>
-											<span className="text-base-content/60">TLS:</span>
-											<div className="flex items-center space-x-1">
-												{provider.tls ? (
-													<>
-														<Wifi className="h-4 w-4 text-success" />
-														<span>Enabled</span>
-													</>
-												) : (
-													<>
-														<WifiOff className="h-4 w-4 text-warning" />
-														<span>Disabled</span>
-													</>
-												)}
+									{/* Provider Details */}
+									<div className="mt-3 border-base-300 border-t pt-3">
+										<div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-5">
+											<div>
+												<span className="text-base-content/60">Username:</span>
+												<div className="font-mono">{provider.username}</div>
 											</div>
-										</div>
-										<div>
-											<span className="text-base-content/60">Password:</span>
-											<div className="flex items-center space-x-1">
-												{provider.password_set ? (
-													<span className="badge badge-success badge-sm">Set</span>
-												) : (
-													<span className="badge badge-error badge-sm">Not Set</span>
-												)}
+											<div>
+												<span className="text-base-content/60">Max Connections:</span>
+												<div className="font-mono">{provider.max_connections}</div>
 											</div>
-										</div>
-										<div>
-											<span className="text-base-content/60">Type:</span>
-											<div className="flex items-center space-x-1">
-												{provider.is_backup_provider ? (
-													<span className="badge badge-warning badge-sm">Backup</span>
-												) : (
-													<span className="badge badge-primary badge-sm">Primary</span>
-												)}
+											<div>
+												<span className="text-base-content/60">TLS:</span>
+												<div className="flex items-center space-x-1">
+													{provider.tls ? (
+														<>
+															<Wifi className="h-4 w-4 text-success" />
+															<span>Enabled</span>
+														</>
+													) : (
+														<>
+															<WifiOff className="h-4 w-4 text-warning" />
+															<span>Disabled</span>
+														</>
+													)}
+												</div>
+											</div>
+											<div>
+												<span className="text-base-content/60">Password:</span>
+												<div className="flex items-center space-x-1">
+													{provider.password_set ? (
+														<span className="badge badge-success badge-sm">Set</span>
+													) : (
+														<span className="badge badge-error badge-sm">Not Set</span>
+													)}
+												</div>
+											</div>
+											<div>
+												<span className="text-base-content/60">Type:</span>
+												<div className="flex items-center space-x-1">
+													{provider.is_backup_provider ? (
+														<span className="badge badge-warning badge-sm">Backup</span>
+													) : (
+														<span className="badge badge-primary badge-sm">Primary</span>
+													)}
+												</div>
 											</div>
 										</div>
 									</div>
 								</div>
 							</div>
-						</div>
-					))}
+						))}
+					</div>
 				</div>
 			)}
 

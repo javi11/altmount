@@ -25,6 +25,27 @@ type Handler struct {
 	configGetter config.ConfigGetter
 }
 
+// trackedWriter wraps http.ResponseWriter to record if a header/body was written.
+type trackedWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+	status      int
+}
+
+func (wt *trackedWriter) WriteHeader(status int) {
+	if wt.wroteHeader {
+		return
+	}
+	wt.ResponseWriter.WriteHeader(status)
+	wt.wroteHeader = true
+	wt.status = status
+}
+
+func (wt *trackedWriter) Write(b []byte) (int, error) {
+	wt.wroteHeader = true
+	return wt.ResponseWriter.Write(b)
+}
+
 // NewHandler creates a new WebDAV handler that can be used with Fiber adaptor
 func NewHandler(
 	config *Config,
@@ -35,7 +56,7 @@ func NewHandler(
 ) (*Handler, error) {
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
-	
+
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
 		fileSystem: aferoToWebdavFS(fs),
@@ -132,12 +153,21 @@ func NewHandler(
 		}
 
 		if r.Method == "PROPFIND" {
-			status, err := propfind.HandlePropfind(webdavHandler.FileSystem, webdavHandler.LockSystem, w, r, config.Prefix)
+			// Wrap the ResponseWriter to detect if the propfind handler
+			// already wrote headers/body (for example it writes a 207 Multi-Status).
+			// If it did, avoid calling WriteHeader again which triggers the
+			// "superfluous response.WriteHeader" log from net/http.
+			tw := &trackedWriter{ResponseWriter: w}
+
+			status, err := propfind.HandlePropfind(webdavHandler.FileSystem, webdavHandler.LockSystem, tw, r, config.Prefix)
 			if status != 0 {
-				w.WriteHeader(status)
-				if status != http.StatusNoContent {
-					_, _ = w.Write([]byte(webdav.StatusText(status)))
-					return
+				// Only write a status if the handler didn't already write any header/body.
+				if !tw.wroteHeader {
+					tw.WriteHeader(status)
+					if status != http.StatusNoContent {
+						_, _ = tw.Write([]byte(webdav.StatusText(status)))
+						return
+					}
 				}
 			}
 

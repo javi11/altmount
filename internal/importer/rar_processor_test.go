@@ -102,3 +102,121 @@ func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 	require.Equal(t, int64(0), got.Segments[3].StartOffset)
 	require.Equal(t, int64(9), got.Segments[3].EndOffset)
 }
+
+func TestPatchMissingSegment_NoPatchingNeeded(t *testing.T) {
+	segments := []*metapb.SegmentData{seg("s1", 768000), seg("s2", 768000)}
+	expectedSize := int64(1536000)
+	coveredSize := int64(1536000)
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.NoError(t, err)
+	require.Equal(t, segments, patched, "segments should not be modified")
+	require.Equal(t, coveredSize, newCovered, "covered size should remain the same")
+	require.Len(t, patched, 2, "should have original 2 segments")
+}
+
+func TestPatchMissingSegment_SmallShortfall(t *testing.T) {
+	segments := []*metapb.SegmentData{seg("s1", 768000)}
+	expectedSize := int64(800000)
+	coveredSize := int64(768000)
+	shortfall := int64(32000)
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.NoError(t, err)
+	require.Len(t, patched, 2, "should have original segment + patch segment")
+	require.Equal(t, expectedSize, newCovered, "should cover full expected size")
+
+	// Verify the patch segment
+	patchSeg := patched[1]
+	require.Equal(t, "s1", patchSeg.Id, "patch should duplicate last segment ID")
+	require.Equal(t, int64(0), patchSeg.StartOffset, "patch should start at offset 0")
+	require.Equal(t, shortfall-1, patchSeg.EndOffset, "patch should cover shortfall bytes")
+	require.Equal(t, int64(768000), patchSeg.SegmentSize, "patch should have same segment size")
+}
+
+func TestPatchMissingSegment_ExactThreshold(t *testing.T) {
+	segments := []*metapb.SegmentData{seg("s1", 500000)}
+	expectedSize := int64(1300000)  // 800000 bytes shortfall
+	coveredSize := int64(500000)
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.NoError(t, err, "should succeed at exact threshold")
+	require.Len(t, patched, 2, "should have original segment + patch segment")
+	require.Equal(t, expectedSize, newCovered, "should cover full expected size")
+
+	// Verify the patch segment
+	patchSeg := patched[1]
+	require.Equal(t, int64(799999), patchSeg.EndOffset, "patch should cover exactly 800000 bytes")
+}
+
+func TestPatchMissingSegment_ExceedsThreshold(t *testing.T) {
+	segments := []*metapb.SegmentData{seg("s1", 500000)}
+	expectedSize := int64(1300001)  // 800001 bytes shortfall - exceeds threshold
+	coveredSize := int64(500000)
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.Error(t, err, "should fail when shortfall exceeds threshold")
+	require.Nil(t, patched, "should return nil on error")
+	require.Equal(t, int64(0), newCovered, "should return 0 covered on error")
+	require.Contains(t, err.Error(), "exceeds single segment threshold", "error should mention threshold")
+}
+
+func TestPatchMissingSegment_NoSegmentsAvailable(t *testing.T) {
+	segments := []*metapb.SegmentData{}
+	expectedSize := int64(50000)
+	coveredSize := int64(0)
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.Error(t, err, "should fail when no segments available to duplicate")
+	require.Nil(t, patched, "should return nil on error")
+	require.Equal(t, int64(0), newCovered, "should return 0 covered on error")
+	require.Contains(t, err.Error(), "no segments available", "error should mention no segments")
+}
+
+func TestPatchMissingSegment_TypicalSegmentGap(t *testing.T) {
+	// Simulate typical scenario: missing one ~768KB segment at end of part
+	segments := []*metapb.SegmentData{
+		seg("s1", 768000),
+		seg("s2", 768000),
+		seg("s3", 768000),
+	}
+	expectedSize := int64(3072000)
+	coveredSize := int64(2304000) // missing ~768KB
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.NoError(t, err, "should successfully patch typical segment gap")
+	require.Len(t, patched, 4, "should have 3 original + 1 patch segment")
+	require.Equal(t, expectedSize, newCovered, "should cover full expected size")
+
+	// Verify the patch segment duplicates the last segment
+	patchSeg := patched[3]
+	require.Equal(t, "s3", patchSeg.Id, "should duplicate last segment")
+	require.Equal(t, int64(767999), patchSeg.EndOffset, "should cover exactly 768000 bytes")
+}
+
+func TestPatchMissingSegment_MultipleSegmentsMissing(t *testing.T) {
+	segments := []*metapb.SegmentData{seg("s1", 768000)}
+	expectedSize := int64(3000000) // missing ~2.2MB
+	coveredSize := int64(768000)
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.Error(t, err, "should fail when multiple segments missing")
+	require.Nil(t, patched, "should return nil on error")
+	require.Equal(t, int64(0), newCovered, "should return 0 covered on error")
+}
+
+func TestPatchMissingSegment_VerySmallShortfall(t *testing.T) {
+	segments := []*metapb.SegmentData{seg("s1", 768000)}
+	expectedSize := int64(768100)
+	coveredSize := int64(768000)
+	shortfall := int64(100)
+
+	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
+	require.NoError(t, err, "should handle very small shortfalls")
+	require.Len(t, patched, 2, "should have original segment + patch segment")
+	require.Equal(t, expectedSize, newCovered, "should cover full expected size")
+
+	// Verify the patch segment
+	patchSeg := patched[1]
+	require.Equal(t, shortfall-1, patchSeg.EndOffset, "patch should cover exactly 100 bytes")
+}

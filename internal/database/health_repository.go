@@ -28,21 +28,22 @@ func NewHealthRepository(db interface {
 }
 
 // UpdateFileHealth updates or inserts a file health record
-func (r *HealthRepository) UpdateFileHealth(filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string) error {
+func (r *HealthRepository) UpdateFileHealth(filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error {
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, repair_retry_count, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), ?, ?, ?, 0, 0, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at)
+		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		status = excluded.status,
 		last_checked = datetime('now'),
 		last_error = excluded.last_error,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
 		error_details = excluded.error_details,
+		retry_count = CASE WHEN ? THEN max_retries ELSE retry_count END,
+		max_retries = excluded.max_retries,
 		updated_at = datetime('now')
-		WHERE status != excluded.status OR last_error != excluded.last_error
 	`
 
-	_, err := r.db.Exec(query, filePath, status, errorMessage, sourceNzbPath, errorDetails)
+	_, err := r.db.Exec(query, filePath, status, errorMessage, sourceNzbPath, errorDetails, noRetry, noRetry)
 	if err != nil {
 		return fmt.Errorf("failed to update file health: %w", err)
 	}
@@ -720,6 +721,38 @@ func (r *HealthRepository) ResetHealthChecksBulk(filePaths []string) (int, error
 	result, err := r.db.Exec(query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to reset health records: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}
+
+// DeleteHealthRecordsByDate deletes health records older than the specified date with optional status filter
+func (r *HealthRepository) DeleteHealthRecordsByDate(olderThan time.Time, statusFilter *HealthStatus) (int, error) {
+	query := `
+		DELETE FROM file_health
+		WHERE created_at < ?
+		  AND (? IS NULL OR status = ?)
+	`
+
+	// Prepare arguments for the query
+	var statusParam interface{} = nil
+	if statusFilter != nil {
+		statusParam = string(*statusFilter)
+	}
+
+	args := []interface{}{
+		olderThan.Format("2006-01-02 15:04:05"),
+		statusParam, statusParam, // status filter (checked twice in WHERE clause)
+	}
+
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete health records by date: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()

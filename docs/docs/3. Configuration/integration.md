@@ -43,6 +43,188 @@ _SABnzbd-compatible API configuration in the AltMount web interface_
    - **tv**: For TV show downloads (order: 2, priority: 0)
    - **music**: For music downloads (order: 3, priority: 0)
 
+### Symlink Configuration (Advanced)
+
+AltMount can create category-based symlinks for imported files, providing an alternative access method for applications that require filesystem paths. This is particularly useful when ARR applications need direct filesystem access instead of WebDAV mounts.
+
+#### When to Use Symlinks
+
+**Use symlinks when:**
+
+- Your ARR applications have issues with WebDAV mounts
+- You need a clean category-based directory structure
+- You want files organized by category without moving them from metadata storage
+- Your setup uses containerized ARRs with specific volume mappings
+
+**Traditional WebDAV mount is sufficient when:**
+
+- ARRs can mount WebDAV successfully
+- You prefer the simplicity of a single mount point
+- Network filesystems work well in your environment
+
+#### Symlink Structure
+
+When symlinks are enabled, AltMount creates symbolic links organized by category:
+
+```
+/symlinks/                    # Your configured symlink directory
+├── movies/                   # Movies category folder
+│   ├── Movie.2023.mkv       -> /mnt/altmount/completed/movies/Movie.2023.mkv
+│   └── Another.Movie.mkv    -> /mnt/altmount/completed/movies/Another.Movie.mkv
+├── tv/                       # TV shows category folder
+│   ├── Show.S01E01.mkv      -> /mnt/altmount/completed/tv/Show.S01E01.mkv
+│   └── Show.S01E02.mkv      -> /mnt/altmount/completed/tv/Show.S01E02.mkv
+└── default/                  # Default category for uncategorized imports
+    └── file.mkv             -> /mnt/altmount/completed/default/file.mkv
+```
+
+**Key Concepts:**
+
+- **Category folders**: Each configured category gets its own subdirectory
+- **Symbolic links**: Files are symlinked, not copied or moved
+- **Target**: Symlinks point to the actual files in the WebDAV mount/metadata path
+- **Path reporting**: When symlinks are enabled, AltMount reports symlink paths to ARR applications
+
+#### Configuration Steps
+
+Enable and configure symlinks through the SABnzbd configuration interface:
+
+![Symlink Configuration](../../static/img/symlink_config.png)
+_Symlink configuration in the SABnzbd settings showing enable toggle and directory path_
+
+**Configuration Options:**
+
+1. **Enable Symlinks**: Toggle to activate symlink creation
+2. **Symlink Directory**: Absolute path where category folders and symlinks will be created
+   - Must be an absolute path (e.g., `/symlinks`, `/mnt/altmount-symlinks`)
+   - Directory will be created automatically if it doesn't exist
+   - Must be writable by the AltMount process
+
+**YAML Configuration Example:**
+
+```yaml
+sabnzbd:
+  enabled: true
+  complete_dir: "/mnt/altmount/completed"
+  symlink_enabled: true
+  symlink_dir: "/symlinks"
+  categories:
+    - name: "movies"
+      order: 1
+      priority: 0
+      dir: "movies" # Category subdirectory name
+    - name: "tv"
+      order: 2
+      priority: 0
+      dir: "tv"
+```
+
+#### How Sonarr/Radarr Use Symlinks
+
+When symlinks are enabled, the import workflow changes to use symlink paths:
+
+**Import Workflow:**
+
+1. **ARR sends NZB**: Radarr/Sonarr identifies content and sends NZB to AltMount with category (e.g., "movies")
+2. **AltMount imports**: AltMount processes the NZB and imports the file to metadata storage
+3. **Symlink created**: AltMount creates a symlink in `/symlinks/movies/Movie.2023.mkv`
+4. **ARR notified**: AltMount reports the path as `/symlinks/movies/Movie.2023.mkv` (symlink path, not mount path)
+5. **ARR imports**: Radarr/Sonarr sees the file at the symlink location and moves/hardlinks it to the final library location
+
+**Path Reporting Behavior:**
+
+| Symlinks Enabled | Path Reported to ARR                       | Actual File Location                                     |
+| ---------------- | ------------------------------------------ | -------------------------------------------------------- |
+| ❌ No            | `/mnt/altmount/completed/movies/Movie.mkv` | `/mnt/altmount/completed/movies/Movie.mkv`               |
+| ✅ Yes           | `/symlinks/movies/Movie.mkv`               | `/mnt/altmount/completed/movies/Movie.mkv` (via symlink) |
+
+**Sonarr will see:**
+
+- Download completes at: `/downloads/tv/Show.S01E01.mkv`
+- Moves to library: `/tv/Show Name/Season 01/Show.S01E01.mkv`
+
+##### Linux Bare-Metal Setup
+
+```yaml
+# AltMount configuration
+sabnzbd:
+  complete_dir: "/symlinks"
+  symlink_enabled: true
+  symlink_dir: "/symlinks"
+
+mount_path: "/symlinks" # For health monitoring path reporting
+
+# Sonarr/Radarr configuration
+# - Host: localhost:8080
+# - Category: tv or movies
+# - Remote Path Mappings: /symlinks -> /symlinks
+```
+
+**Directory Structure:**
+
+```
+/metadata/                      # AltMount metadata storage
+  └── completed/
+      ├── movies/Movie.mkv
+      └── tv/Show.mkv
+
+/symlinks/                      # Symlink directory
+  ├── movies/
+  │   └── Movie.mkv -> /metadata/completed/movies/Movie.mkv
+  └── tv/
+      └── Show.mkv -> /metadata/completed/tv/Show.mkv
+
+/media/                         # Final ARR library
+  ├── movies/Movie.mkv
+  └── tv/Show.mkv
+```
+
+#### Best Practices
+
+**Permissions:**
+
+- Ensure the symlink directory is writable by AltMount
+- Ensure ARR applications can read from the symlink directory
+- In Docker, use appropriate user/group permissions
+
+**Path Accessibility:**
+
+- Symlink directory must be accessible from both AltMount and ARR containers
+- Use shared volumes in Docker Compose
+- Verify symlink targets are resolvable from ARR's perspective
+
+**Category Configuration:**
+
+- Configure categories before enabling symlinks
+- Category names should match ARR categories (e.g., "movies", "tv")
+- Use the "dir" field to customize subdirectory names
+
+#### Troubleshooting
+
+**Symlinks not created:**
+
+- Check AltMount logs for permission errors
+- Verify symlink directory path is absolute
+- Ensure directory exists and is writable
+
+**ARR cannot find files:**
+
+- Verify symlink directory is mounted in ARR container
+- Check that symlink targets are resolvable (use `ls -l` to check symlinks)
+- Confirm category names match between AltMount and ARR configuration
+
+**Symlinks break after restart:**
+
+- Check that both symlink directory and target paths are mounted consistently
+- Verify Docker volume configurations persist across restarts
+- Use absolute paths in configuration
+
+**Permission denied errors:**
+
+- Ensure AltMount process has write permission to symlink directory
+- In Docker, match user/group IDs between containers
+- Check that ARR can read from the symlink directory
+
 ### ARR Application Configuration
 
 Configure your ARR applications to use AltMount as their download client:
@@ -106,12 +288,12 @@ arrs:
 
 **Mount Path Examples:**
 
-| Deployment Method  | mount_path Value | ARR Library Path        | Notes               |
-| ------------------ | ---------------- | ----------------------- | ------------------- |
-| **Docker Compose** | `/downloads`     | `/downloads/movies/`    | Shared volume mount |
-| **Linux rclone**   | `/mnt/altmount`  | `/mnt/altmount/movies/` | rclone WebDAV mount |
+| Deployment Method  | mount_path Value | ARR Library Path        | Notes                 |
+| ------------------ | ---------------- | ----------------------- | --------------------- |
+| **Docker Compose** | `/downloads`     | `/downloads/movies/`    | Shared volume mount   |
+| **Linux rclone**   | `/mnt/altmount`  | `/mnt/altmount/movies/` | rclone WebDAV mount   |
 | **Built-in Mount** | `/mnt/altmount`  | `/mnt/altmount/movies/` | AltMount rclone mount |
-| **UnionFS**        | `/mnt/unionfs`   | `/mnt/unionfs/movies/`  | UnionFS with WebDAV |
+| **UnionFS**        | `/mnt/unionfs`   | `/mnt/unionfs/movies/`  | UnionFS with WebDAV   |
 
 **Why Mount Path Matters:**
 
