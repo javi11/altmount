@@ -124,12 +124,13 @@ func (f *errorHandlingFile) Read(p []byte) (int, error) {
 		}
 
 		if errors.As(err, &corruptedErr) {
-			// Corrupted file - log and return 503
+			// Corrupted file - log and return 404 Not Found so clients like rclone
+			// do not keep retrying access to the remote backend.
 			slog.ErrorContext(f.ctx, "File corrupted",
 				"total_expected", corruptedErr.TotalExpected,
 				"error", corruptedErr.UnderlyingErr)
 			return n, &HTTPError{
-				StatusCode: http.StatusServiceUnavailable,
+				StatusCode: http.StatusNotFound,
 				Message:    "File unavailable due to missing articles",
 				Err:        err,
 			}

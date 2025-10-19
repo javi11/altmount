@@ -131,6 +131,13 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		return false, nil, nil
 	}
 
+	// If the file is marked as corrupted in metadata and the client didn't
+	// request to show corrupted files, treat it as not found so WebDAV will
+	// return 404 and clients (rclone) will stop trying to access it.
+	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED && !showCorrupted {
+		return false, nil, nil
+	}
+
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -252,6 +259,14 @@ func (mrf *MetadataRemoteFile) Stat(name string) (bool, fs.FileInfo, error) {
 	}
 
 	if fileMeta == nil {
+		return false, nil, fs.ErrNotExist
+	}
+
+	// If the file is marked as corrupted and the client did not request
+	// to show corrupted files, treat it as not found so WebDAV returns 404
+	// and clients (rclone) will stop attempting to open/read it.
+	pa := utils.NewPathWithArgs(name)
+	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED && !pa.ShowCorrupted() {
 		return false, nil, fs.ErrNotExist
 	}
 

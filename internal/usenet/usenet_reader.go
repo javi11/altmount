@@ -248,10 +248,16 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 			// Attempt download
 			bytesWritten, err := cp.Body(ctx, segment.Id, segment.Writer(), segment.groups)
 			if err != nil {
-				if strings.Contains(err.Error(), "data corruption detected") {
+				// Some backends (for example rclone/webdav) may surface a
+				// "File corrupted" error. Treat that as a non-retriable
+				// data corruption condition so we stop re-access attempts
+				// to the upstream (rclone mount / webdav).
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "data corruption detected") || strings.Contains(errStr, "file corrupted") {
 					return &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     bytesWritten,
+						NoRetry:       true,
 					}
 				}
 
@@ -269,6 +275,16 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 		retry.MaxDelay(2*time.Second),
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(func(err error) bool {
+			if err == nil {
+				return false
+			}
+			// Do not retry if it's a DataCorruptionError marked as non-retriable
+			var dce *DataCorruptionError
+			if errors.As(err, &dce) {
+				if dce.NoRetry {
+					return false
+				}
+			}
 			if b.isArticleNotFoundError(err) {
 				return false
 			}
