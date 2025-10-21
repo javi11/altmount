@@ -125,8 +125,10 @@ type RCloneConfig struct {
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	MaxProcessorWorkers            int  `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int  `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	MaxValidationGoroutines        int  `yaml:"max_validation_goroutines" mapstructure:"max_validation_goroutines" json:"max_validation_goroutines"`
+	FullSegmentValidation          bool `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -485,6 +487,10 @@ func (c *Config) Validate() error {
 
 	if c.Import.QueueProcessingIntervalSeconds > 300 {
 		return fmt.Errorf("import queue_processing_interval_seconds must not exceed 300 seconds")
+	}
+
+	if c.Import.MaxValidationGoroutines < 1 {
+		return fmt.Errorf("import max_validation_goroutines must be more than 1")
 	}
 
 	// Validate log level (both old and new config)
@@ -1008,8 +1014,10 @@ func DefaultConfig(configDir ...string) *Config {
 			VFSReadChunkStreams:  4,
 		},
 		Import: ImportConfig{
-			MaxProcessorWorkers:            2, // Default: 2 processor workers
-			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
+			MaxProcessorWorkers:            2,     // Default: 2 processor workers
+			QueueProcessingIntervalSeconds: 5,     // Default: check for work every 5 seconds
+			MaxValidationGoroutines:        5,     // Default: 5 concurrent validation workers
+			FullSegmentValidation:          false, // Default: validate 10 random segments for speed
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

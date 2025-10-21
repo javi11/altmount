@@ -122,6 +122,8 @@ export interface RCloneConfig {
 export interface ImportConfig {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
+	max_validation_goroutines: number;
+	full_segment_validation: boolean;
 }
 
 // Log configuration
@@ -285,6 +287,8 @@ export interface RCloneUpdateRequest {
 export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
+	max_validation_goroutines?: number;
+	full_segment_validation?: boolean;
 }
 
 // Log update request
@@ -367,6 +371,8 @@ export interface APIFormData {
 export interface ImportFormData {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
+	max_validation_goroutines: number;
+	full_segment_validation: boolean;
 }
 
 export interface MetadataFormData {

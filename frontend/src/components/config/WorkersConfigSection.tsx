@@ -24,7 +24,7 @@ export function ImportConfigSection({
 		setHasChanges(false);
 	}, [config.import]);
 
-	const handleInputChange = (field: keyof ImportConfig, value: number) => {
+	const handleInputChange = (field: keyof ImportConfig, value: number | boolean) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.import));
@@ -76,6 +76,46 @@ export function ImportConfigSection({
 					<p className="label">
 						How often workers check for new queue items (1-300 seconds). Changes require service
 						restart.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Validation Goroutines</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.max_validation_goroutines}
+						readOnly={isReadOnly}
+						min={1}
+						max={15}
+						onChange={(e) =>
+							handleInputChange(
+								"max_validation_goroutines",
+								Number.parseInt(e.target.value, 10) || 3,
+							)
+						}
+					/>
+					<p className="label">
+						Number of concurrent workers for validating segment availability. Higher values increase
+						validation speed but use more network connections.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Full Segment Validation</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Validate all segments (slower but thorough)</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.full_segment_validation}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("full_segment_validation", e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						When disabled, validates 10 random segments for faster processing. Enable for thorough
+						validation of all segments (slower).
 					</p>
 				</fieldset>
 			</div>

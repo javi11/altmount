@@ -81,8 +81,13 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		config.Workers = 2
 	}
 
+	// Get the initial config to pass max validation goroutines and full validation setting
+	currentConfig := configGetter()
+	maxValidationGoroutines := currentConfig.Import.MaxValidationGoroutines
+	fullSegmentValidation := currentConfig.Import.FullSegmentValidation
+
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager)
+	processor := NewProcessor(metadataService, poolManager, maxValidationGoroutines, fullSegmentValidation)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

@@ -509,10 +509,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(segments []nzbparser.NzbSegment) 
 		return nil
 	}
 
-	// Handle files with 3+ segments - use second segment as reference for standard size
-	// This is more robust as the first segment can sometimes have anomalous sizes
-	p.log.Debug("Normalizing segment sizes for multi-segment file", "segment_count", len(segments))
-
 	// Fetch PartSize from first segment
 	firstPartHeaders, err := p.fetchYencHeaders(segments[0], nil)
 	if err != nil {

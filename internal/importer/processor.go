@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,17 +15,20 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	concpool "github.com/sourcegraph/conc/pool"
 )
 
 // Processor handles the processing and storage of parsed NZB files using metadata storage
 type Processor struct {
-	parser            *Parser
-	strmParser        *StrmParser
-	metadataService   *metadata.MetadataService
-	rarProcessor      RarProcessor
-	sevenZipProcessor SevenZipProcessor
-	poolManager       pool.Manager // Pool manager for dynamic pool access
-	log               *slog.Logger
+	parser                  *Parser
+	strmParser              *StrmParser
+	metadataService         *metadata.MetadataService
+	rarProcessor            RarProcessor
+	sevenZipProcessor       SevenZipProcessor
+	poolManager             pool.Manager // Pool manager for dynamic pool access
+	maxValidationGoroutines int          // Maximum concurrent goroutines for segment validation
+	fullSegmentValidation   bool         // Whether to validate all segments or just a random sample
+	log                     *slog.Logger
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern    *regexp.Regexp // pattern.part###.rar
@@ -33,15 +37,17 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool) *Processor {
 	return &Processor{
-		parser:            NewParser(poolManager),
-		strmParser:        NewStrmParser(),
-		metadataService:   metadataService,
-		rarProcessor:      NewRarProcessor(poolManager, 10, 64),      // 10 max workers, 64MB cache for RAR analysis
-		sevenZipProcessor: NewSevenZipProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for 7zip analysis
-		poolManager:       poolManager,
-		log:               slog.Default().With("component", "nzb-processor"),
+		parser:                  NewParser(poolManager),
+		strmParser:              NewStrmParser(),
+		metadataService:         metadataService,
+		rarProcessor:            NewRarProcessor(poolManager, 10, 64),      // 10 max workers, 64MB cache for RAR analysis
+		sevenZipProcessor:       NewSevenZipProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for 7zip analysis
+		poolManager:             poolManager,
+		maxValidationGoroutines: maxValidationGoroutines,
+		fullSegmentValidation:   fullSegmentValidation,
+		log:                     slog.Default().With("component", "nzb-processor"),
 
 		// Initialize pre-compiled regex patterns for RAR file sorting
 		rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
@@ -136,8 +142,8 @@ func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir st
 	// Track this file in current batch
 	currentBatchFiles[virtualFilePath] = true
 
-	// Validate segment sizes match file size
-	if err := proc.validateSegmentSizes(file.Filename, file.Size, file.Segments, file.Encryption); err != nil {
+	// Validate segments comprehensively (size, structure, and reachability)
+	if err := proc.validateSegments(file.Filename, file.Size, file.Segments, file.Encryption); err != nil {
 		return "", NewNonRetryableError(err.Error(), nil)
 	}
 
@@ -208,8 +214,8 @@ func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir str
 		// Track this file in current batch
 		currentBatchFiles[virtualPath] = true
 
-		// Validate segment sizes match file size
-		if err := proc.validateSegmentSizes(filename, file.Size, file.Segments, file.Encryption); err != nil {
+		// Validate segments comprehensively (size, structure, and reachability)
+		if err := proc.validateSegments(filename, file.Size, file.Segments, file.Encryption); err != nil {
 			return "", NewNonRetryableError(err.Error(), nil)
 		}
 
@@ -296,8 +302,8 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			// Track this file in current batch
 			currentBatchFiles[virtualPath] = true
 
-			// Validate segment sizes match file size
-			if err := proc.validateSegmentSizes(filename, file.Size, file.Segments, file.Encryption); err != nil {
+			// Validate segments comprehensively (size, structure, and reachability)
+			if err := proc.validateSegments(filename, file.Size, file.Segments, file.Encryption); err != nil {
 				return "", NewNonRetryableError(err.Error(), nil)
 			}
 
@@ -382,8 +388,8 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			// Track this file in current batch
 			currentBatchFiles[virtualFilePath] = true
 
-			// Validate segment sizes match file size for RAR content
-			if err := proc.validateSegmentSizes(baseFilename, rarContent.Size, rarContent.Segments, metapb.Encryption_NONE); err != nil {
+			// Validate segments comprehensively (size, structure, and reachability)
+			if err := proc.validateSegments(baseFilename, rarContent.Size, rarContent.Segments, metapb.Encryption_NONE); err != nil {
 				return "", NewNonRetryableError(err.Error(), nil)
 			}
 
@@ -591,21 +597,108 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-// validateSegmentSizes verifies that the sum of segment sizes matches the expected file size
-// For encrypted files, it accounts for the encryption overhead by converting the decrypted size to encrypted size
-func (proc *Processor) validateSegmentSizes(filename string, fileSize int64, segments []*metapb.SegmentData, encryption metapb.Encryption) error {
+// validateSegments performs comprehensive validation of file segments including size verification
+// and reachability checks. It validates that segments are structurally sound, accessible via
+// the Usenet connection pool, and that their total size matches the expected file size (accounting
+// for encryption overhead). This replaces the previous separate validateSegmentSizes and
+// validateSegmentsReachable functions for better performance and consistency.
+func (proc *Processor) validateSegments(filename string, fileSize int64, segments []*metapb.SegmentData, encryption metapb.Encryption) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments provided for file %s", filename)
 	}
 
-	var totalSegmentSize int64
-	for i, seg := range segments {
-		segSize := seg.EndOffset - seg.StartOffset + 1
-		if segSize <= 0 {
-			return fmt.Errorf("invalid segment %d for %s: segment has non-positive size (start=%d, end=%d)",
-				i, filename, seg.StartOffset, seg.EndOffset)
+	// First, verify that the connection pool is available
+	// This ensures we can actually fetch segment data when needed
+	usenetPool, err := proc.poolManager.GetPool()
+	if err != nil {
+		return fmt.Errorf("cannot write metadata for %s: usenet connection pool unavailable: %w", filename, err)
+	}
+
+	if usenetPool == nil {
+		return fmt.Errorf("cannot write metadata for %s: usenet connection pool is nil", filename)
+	}
+
+	// First loop: Calculate total size from ALL segments
+	// This validates file completeness regardless of sampling mode
+	totalSegmentSize := int64(0)
+	for i, segment := range segments {
+		if segment == nil {
+			return fmt.Errorf("segment %d is nil for file %s", i, filename)
 		}
+
+		// Validate segment has valid offsets
+		if segment.StartOffset < 0 || segment.EndOffset < 0 {
+			return fmt.Errorf("invalid offsets (start=%d, end=%d) in segment %d for file %s",
+				segment.StartOffset, segment.EndOffset, i, filename)
+		}
+
+		if segment.StartOffset > segment.EndOffset {
+			return fmt.Errorf("start offset greater than end offset (start=%d, end=%d) in segment %d for file %s",
+				segment.StartOffset, segment.EndOffset, i, filename)
+		}
+
+		// Calculate segment size
+		segSize := segment.EndOffset - segment.StartOffset + 1
+		if segSize <= 0 {
+			return fmt.Errorf("non-positive size %d in segment %d for file %s", segSize, i, filename)
+		}
+
+		// Validate segment has a valid Usenet message ID
+		if segment.Id == "" {
+			return fmt.Errorf("empty message ID in segment %d for file %s (cannot retrieve data)", i, filename)
+		}
+
+		// Accumulate total size from all segments
 		totalSegmentSize += segSize
+	}
+
+	// Determine which segments to validate for reachability
+	var segmentsToValidate []*metapb.SegmentData
+	if proc.fullSegmentValidation {
+		// Validate all segments for reachability
+		segmentsToValidate = segments
+	} else {
+		// Validate a random sample of up to 10 segments for reachability
+		sampleSize := 10
+		if len(segments) < sampleSize {
+			sampleSize = len(segments)
+		}
+
+		// Create a random sample
+		segmentsToValidate = make([]*metapb.SegmentData, sampleSize)
+		if sampleSize == len(segments) {
+			// If we're validating all anyway, just use the original slice
+			segmentsToValidate = segments
+		} else {
+			// Random sampling without replacement
+			perm := rand.Perm(len(segments))
+			for i := 0; i < sampleSize; i++ {
+				segmentsToValidate[i] = segments[perm[i]]
+			}
+		}
+	}
+
+	// Second loop: Validate reachability of sampled segments only
+	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(proc.maxValidationGoroutines)
+	for _, segment := range segmentsToValidate {
+		pl.Go(func() error {
+			// Create a context with timeout for the validation
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			// Check if the segment is reachable via pool.Stat()
+			// This verifies that the message ID exists on the Usenet server
+			_, err := usenetPool.Stat(ctx, segment.Id, []string{})
+			if err != nil {
+				return fmt.Errorf("segment with ID %s unreachable for file %s: %w", segment.Id, filename, err)
+			}
+
+			return nil
+		})
+	}
+
+	if err := pl.Wait(); err != nil {
+		return err
 	}
 
 	// For encrypted files, segments contain encrypted data, so we need to convert
@@ -620,8 +713,22 @@ func (proc *Processor) validateSegmentSizes(filename string, fileSize int64, seg
 		if encryption == metapb.Encryption_RCLONE {
 			sizeType = "encrypted"
 		}
+
 		return fmt.Errorf("file '%s' is incomplete: expected %d bytes (%s) but found %d bytes (missing %d bytes)",
 			filename, expectedSize, sizeType, totalSegmentSize, expectedSize-totalSegmentSize)
+	}
+
+	if proc.fullSegmentValidation {
+		proc.log.Debug("All segments validated successfully",
+			"file", filename,
+			"segment_count", len(segments),
+			"total_size", totalSegmentSize)
+	} else {
+		proc.log.Debug("Random sample of segments validated successfully",
+			"file", filename,
+			"total_segments", len(segments),
+			"validated_segments", len(segmentsToValidate),
+			"total_size", totalSegmentSize)
 	}
 
 	return nil
@@ -729,8 +836,8 @@ func (proc *Processor) process7zArchiveWithDir(parsed *ParsedNzb, virtualDir str
 			// Track this file in current batch
 			currentBatchFiles[virtualPath] = true
 
-			// Validate segment sizes match file size
-			if err := proc.validateSegmentSizes(filename, file.Size, file.Segments, file.Encryption); err != nil {
+			// Validate segments comprehensively (size, structure, and reachability)
+			if err := proc.validateSegments(filename, file.Size, file.Segments, file.Encryption); err != nil {
 				return "", NewNonRetryableError(err.Error(), nil)
 			}
 
@@ -815,8 +922,8 @@ func (proc *Processor) process7zArchiveWithDir(parsed *ParsedNzb, virtualDir str
 			// Track this file in current batch
 			currentBatchFiles[virtualFilePath] = true
 
-			// Validate segment sizes match file size for 7zip content
-			if err := proc.validateSegmentSizes(baseFilename, sevenZipContent.Size, sevenZipContent.Segments, metapb.Encryption_NONE); err != nil {
+			// Validate segments comprehensively (size, structure, and reachability)
+			if err := proc.validateSegments(baseFilename, sevenZipContent.Size, sevenZipContent.Segments, metapb.Encryption_NONE); err != nil {
 				return "", NewNonRetryableError(err.Error(), nil)
 			}
 
@@ -869,6 +976,11 @@ func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir stri
 
 	// Track this file in current batch
 	currentBatchFiles[virtualFilePath] = true
+
+	// Validate segments comprehensively (size, structure, and reachability)
+	if err := proc.validateSegments(file.Filename, file.Size, file.Segments, file.Encryption); err != nil {
+		return "", NewNonRetryableError(err.Error(), nil)
+	}
 
 	// Create file metadata using simplified schema
 	fileMeta := proc.metadataService.CreateFileMetadata(
