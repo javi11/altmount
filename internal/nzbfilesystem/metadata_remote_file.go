@@ -223,7 +223,7 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 }
 
 // Stat returns file information for a path using metadata
-func (mrf *MetadataRemoteFile) Stat(name string) (bool, fs.FileInfo, error) {
+func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.FileInfo, error) {
 	// Normalize the path
 	normalizedName := normalizePath(name)
 
@@ -907,10 +907,10 @@ func (mrf *MetadataRemoteFile) isValidEmptyDirectory(normalizedPath string) bool
 	return mrf.isValidEmptyDirectory(parentDir)
 }
 
-func (mrf *MetadataRemoteFile) Mkdir(name string, perm os.FileMode) error {
+func (mrf *MetadataRemoteFile) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	return mrf.metadataService.CreateDirectory(name)
 }
 
-func (mrf *MetadataRemoteFile) MkdirAll(name string, perm os.FileMode) error {
+func (mrf *MetadataRemoteFile) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
 	return mrf.metadataService.CreateDirectory(name)
 }

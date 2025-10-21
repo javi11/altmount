@@ -13,7 +13,6 @@ import (
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/pkg/rclonecli"
-	"github.com/spf13/afero"
 )
 
 // NzbConfig holds configuration for the NZB system
@@ -28,10 +27,10 @@ type NzbConfig struct {
 
 // NzbSystem represents the complete NZB-backed filesystem
 type NzbSystem struct {
-	database       *database.DB             // Database for processing queue
-	metadataReader *metadata.MetadataReader // Metadata reader for serving files
+	database       *database.DB                  // Database for processing queue
+	metadataReader *metadata.MetadataReader      // Metadata reader for serving files
 	service        *importer.Service
-	fs             afero.Fs
+	fs             *nzbfilesystem.NzbFilesystem
 	poolManager    pool.Manager
 
 	// Configuration tracking for dynamic updates
@@ -128,7 +127,7 @@ func (ns *NzbSystem) GetServiceStats(ctx context.Context) (*importer.ServiceStat
 }
 
 // FileSystem returns the virtual filesystem interface
-func (ns *NzbSystem) FileSystem() afero.Fs {
+func (ns *NzbSystem) FileSystem() *nzbfilesystem.NzbFilesystem {
 	return ns.fs
 }
 
