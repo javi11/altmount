@@ -381,15 +381,6 @@ func (b *usenetReader) downloadManager(
 					b.mu.Unlock()
 
 					if err != nil {
-						if errors.Is(err, context.Canceled) {
-							err = w.Close()
-							if err != nil {
-								b.log.ErrorContext(ctx, "Error closing segment writer:", "error", err)
-							}
-
-							return nil
-						}
-
 						cErr := w.CloseWithError(err)
 						if cErr != nil {
 							b.log.ErrorContext(ctx, "Error closing segment buffer:", "error", cErr)
@@ -423,6 +414,10 @@ func (b *usenetReader) downloadManager(
 
 		// Wait for all downloads to complete
 		if err := pool.Wait(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
 			b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
 			return
 		}
