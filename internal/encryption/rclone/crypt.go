@@ -176,6 +176,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 		return 0, errors.New("rclone crypt reader not initialized")
 	}
 
+	if r.ctx.Err() != nil {
+		return 0, r.ctx.Err()
+	}
+
 	if n, err := r.rd.Read(p); err != nil {
 		for _, noRetryError := range noRetryErrors {
 			if errors.Is(err, noRetryError) {
