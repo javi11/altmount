@@ -320,7 +320,6 @@ type HealthListRequest struct {
 type HealthStatsResponse struct {
 	Pending   int `json:"pending"`
 	Healthy   int `json:"healthy"`
-	Partial   int `json:"partial"`
 	Corrupted int `json:"corrupted"`
 	Total     int `json:"total"`
 }
@@ -503,10 +502,9 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResponse {
 	response := &HealthStatsResponse{
 		Healthy:   stats[database.HealthStatusHealthy],
-		Partial:   stats[database.HealthStatusPartial],
 		Corrupted: stats[database.HealthStatusCorrupted],
 	}
-	response.Total = response.Healthy + response.Partial + response.Corrupted
+	response.Total = response.Healthy + response.Corrupted
 	return response
 }
 

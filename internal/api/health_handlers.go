@@ -44,7 +44,7 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusHealthy, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 			statusFilter = &status
 		default:
 			return c.Status(400).JSON(fiber.Map{
@@ -52,7 +52,7 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 				"error": fiber.Map{
 					"code":    "VALIDATION_ERROR",
 					"message": "Invalid status filter",
-					"details": "Valid values: pending, checking, healthy, partial, corrupted, repair_triggered",
+					"details": "Valid values: pending, checking, healthy, corrupted, repair_triggered",
 				},
 			})
 		}
@@ -544,13 +544,13 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 		if statusStr := c.Query("status"); statusStr != "" {
 			status := database.HealthStatus(statusStr)
 			switch status {
-			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusHealthy, database.HealthStatusPartial, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusHealthy, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
 				req.Status = &status
 			default:
 				return c.Status(422).JSON(fiber.Map{
 					"success": false,
 					"message": "Invalid status filter",
-					"details": "Valid values: pending, checking, healthy, partial, corrupted, repair_triggered",
+					"details": "Valid values: pending, checking, healthy, corrupted, repair_triggered",
 				})
 			}
 		}

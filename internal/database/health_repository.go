@@ -111,16 +111,16 @@ func (r *HealthRepository) GetFileHealthByID(id int64) (*FileHealth, error) {
 func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
-		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path, 
+		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path,
 		       error_details, created_at, updated_at
 		FROM file_health
-		WHERE status IN ('pending', 'partial', 'corrupted') 
+		WHERE status IN ('pending', 'corrupted')
 		  AND retry_count < max_retries
 		  AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
-		ORDER BY 
-		  CASE 
-		    WHEN status = 'pending' THEN 0 
-		    ELSE 1 
+		ORDER BY
+		  CASE
+		    WHEN status = 'pending' THEN 0
+		    ELSE 1
 		  END,  -- Prioritize pending files
 		  last_checked ASC
 		LIMIT ?

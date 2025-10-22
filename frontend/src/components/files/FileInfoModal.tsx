@@ -519,7 +519,7 @@ export function FileInfoModal({
 					<div className="flex min-w-0 flex-1 items-center space-x-3">
 						<FileText className="h-6 w-6 text-primary" />
 						<div className="min-w-0 flex-1">
-							<h3 className="truncate font-semibold text-lg">{file.basename}</h3>
+							<h3 className="font-semibold text-lg">{file.basename}</h3>
 							<p className="text-base-content/70 text-sm">
 								{formatFileSize(file.size)} • {file.type}
 							</p>

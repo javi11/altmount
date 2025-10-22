@@ -13,9 +13,8 @@ enum Encryption {
 // FileStatus represents the health status of a file
 enum FileStatus {
   FILE_STATUS_UNSPECIFIED = 0;
-  FILE_STATUS_HEALTHY = 1;     // All segments available
-  FILE_STATUS_PARTIAL = 2;     // Some segments missing
-  FILE_STATUS_CORRUPTED = 3;   // No segments available or corrupted
+  FILE_STATUS_HEALTHY = 1;     // All segments available and file is complete
+  FILE_STATUS_CORRUPTED = 3;   // Segments missing or corrupted
 }
 
 // SegmentData contains Usenet segment information with byte offsets

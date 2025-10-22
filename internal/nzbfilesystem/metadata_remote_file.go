@@ -524,7 +524,7 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		// Handle UsenetReader errors the same way as VirtualFile
 		if errors.As(err, &dataCorruptionErr) {
 			// Update file health status and database tracking
-			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.BytesRead > 0 || totalRead > 0, dataCorruptionErr.NoRetry)
+			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
 
 			if dataCorruptionErr.BytesRead > 0 || totalRead > 0 {
 				// Some content was read - return partial content error
@@ -778,7 +778,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 
 		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
 			UnderlyingErr: ErrNoNzbData,
-		}, false, true)
+		}, true)
 
 		return nil, &CorruptedFileError{
 			TotalExpected: mvf.fileMeta.FileSize,
@@ -838,18 +838,10 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 }
 
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected
-func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, hasPartialContent bool, noRetry bool) {
-	// Determine the appropriate status
-	var metadataStatus metapb.FileStatus
-	var dbStatus database.HealthStatus
-
-	if hasPartialContent {
-		metadataStatus = metapb.FileStatus_FILE_STATUS_PARTIAL
-		dbStatus = database.HealthStatusPartial
-	} else {
-		metadataStatus = metapb.FileStatus_FILE_STATUS_CORRUPTED
-		dbStatus = database.HealthStatusCorrupted
-	}
+func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	// Any file with missing segments or corruption is marked as corrupted
+	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
+	dbStatus := database.HealthStatusCorrupted
 
 	// Update metadata status (non-blocking)
 	go func() {

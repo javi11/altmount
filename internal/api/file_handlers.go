@@ -92,8 +92,6 @@ func (s *Server) convertFileStatusToString(status metapb.FileStatus) string {
 	switch status {
 	case metapb.FileStatus_FILE_STATUS_HEALTHY:
 		return "healthy"
-	case metapb.FileStatus_FILE_STATUS_PARTIAL:
-		return "partial"
 	case metapb.FileStatus_FILE_STATUS_CORRUPTED:
 		return "corrupted"
 	default:
