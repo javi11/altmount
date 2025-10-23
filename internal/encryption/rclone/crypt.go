@@ -180,7 +180,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 		return 0, r.ctx.Err()
 	}
 
-	n, err := r.rd.Read(p)
+	n, err = r.rd.Read(p)
  if err != nil {
 		for _, noRetryError := range noRetryErrors {
 			if errors.Is(err, noRetryError) {
