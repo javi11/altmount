@@ -32,7 +32,7 @@ services:
       - COOKIE_DOMAIN=localhost # Must match the domain/IP where web interface is accessed
     volumes:
       - ./config:/config
-      - /mnt:/mnt
+      - /mnt:/mnt:rshared
       - /metadata:/metadata # This is optional you can still use /mnt
     ports:
       - "8080:8080"
