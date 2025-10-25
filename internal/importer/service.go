@@ -1004,12 +1004,12 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 			return nil
 		}
 
-		// Calculate relative path from metadataPath
-		relPath, err := filepath.Rel(metadataPath, path)
+		// Calculate relative path from the root metadata directory (not metadataPath)
+		relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
 		if err != nil {
 			s.log.Error("Failed to calculate relative path",
 				"path", path,
-				"base", metadataPath,
+				"base", cfg.Metadata.RootPath,
 				"error", err)
 			return nil // Continue walking
 		}
@@ -1017,11 +1017,11 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 		// Remove .meta extension to get the actual filename
 		relPath = strings.TrimSuffix(relPath, ".meta")
 
-		// Build the actual file path in the mount
-		actualFilePath := filepath.Join(actualPath, relPath)
+		// Build the actual file path in the mount (mount root + virtual path)
+		actualFilePath := filepath.Join(cfg.MountPath, relPath)
 		
-		// Build the resulting path for symlink
-		fileResultingPath := filepath.Join(resultingPath, relPath)
+		// The relPath already IS the full virtual path from root, so use it directly
+		fileResultingPath := relPath
 		
 		// Create symlink for this file using the helper function
 		if err := s.createSingleSymlink(item, actualFilePath, fileResultingPath); err != nil {
