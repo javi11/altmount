@@ -541,10 +541,18 @@ func (s *Service) refreshMountPathIfNeeded(resultingPath string, itemID int64, l
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(item *database.ImportQueueItem) (string, error) {
+	// Determine the base path, incorporating category if present
+	basePath := ""
 	if item.RelativePath != nil {
-		return s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
+		basePath = *item.RelativePath
 	}
-	return s.processor.ProcessNzbFile(item.NzbPath, "")
+	
+	// If category is specified, append it to the base path
+	if item.Category != nil && *item.Category != "" {
+		basePath = filepath.Join(basePath, *item.Category)
+	}
+	
+	return s.processor.ProcessNzbFile(item.NzbPath, basePath)
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing
