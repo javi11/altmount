@@ -131,6 +131,13 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		return false, nil, nil
 	}
 
+	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
+		return false, nil, &CorruptedFileError{
+			TotalExpected: fileMeta.FileSize,
+			UnderlyingErr: ErrNoNzbData,
+		}
+	}
+
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -525,20 +532,10 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		if errors.As(err, &dataCorruptionErr) {
 			// Update file health status and database tracking
 			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
-
-			if dataCorruptionErr.BytesRead > 0 || totalRead > 0 {
-				// Some content was read - return partial content error
-				return totalRead, &PartialContentError{
-					BytesRead:     dataCorruptionErr.BytesRead,
-					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: dataCorruptionErr,
-				}
-			} else {
-				// No content read - return corrupted file error
-				return totalRead, &CorruptedFileError{
-					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: dataCorruptionErr,
-				}
+			// No content read - return corrupted file error
+			return totalRead, &CorruptedFileError{
+				TotalExpected: mvf.fileMeta.FileSize,
+				UnderlyingErr: dataCorruptionErr,
 			}
 		}
 
