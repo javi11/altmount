@@ -280,9 +280,12 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 			continue
 		}
 
+		// Normalize backslashes in path (Windows-style paths in 7zip archives)
+		normalizedName := strings.ReplaceAll(fi.Name, "\\", "/")
+		
 		content := sevenZipContent{
-			InternalPath: fi.Name,
-			Filename:     filepath.Base(fi.Name),
+			InternalPath: normalizedName,
+			Filename:     filepath.Base(normalizedName),
 			Size:         int64(fi.Size),
 			IsDirectory:  isDirectory,
 		}
