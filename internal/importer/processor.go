@@ -376,7 +376,9 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			}
 
 			// Flatten the internal path by extracting only the base filename
-			baseFilename := filepath.Base(rarContent.InternalPath)
+			// Normalize backslashes first (Windows-style paths in RAR archives)
+			normalizedInternalPath := strings.ReplaceAll(rarContent.InternalPath, "\\", "/")
+			baseFilename := filepath.Base(normalizedInternalPath)
 
 			// Generate a unique filename to handle duplicates
 			uniqueFilename := proc.getUniqueFilename(rarDirPath, baseFilename, currentBatchFiles)
