@@ -1,15 +1,17 @@
-import { AlertTriangle, CheckCircle, Download } from "lucide-react";
+import { AlertTriangle, CheckCircle, Download, Network } from "lucide-react";
 import { useMemo } from "react";
 import { HealthChart, QueueChart } from "../components/charts/QueueChart";
 import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
+import { ProviderCard } from "../components/system/ProviderCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner } from "../components/ui/LoadingSpinner";
 import { StatusBadge } from "../components/ui/StatusBadge";
-import { useHealthStats, useQueueStats } from "../hooks/useApi";
+import { useHealthStats, usePoolMetrics, useQueueStats } from "../hooks/useApi";
 
 export function Dashboard() {
 	const { data: queueStats, error: queueError } = useQueueStats();
 	const { data: healthStats, error: healthError } = useHealthStats();
+	const { data: poolMetrics } = usePoolMetrics();
 
 	const hasError = queueError || healthError;
 
@@ -150,6 +152,21 @@ export function Dashboard() {
 					</div>
 				</div>
 			</div>
+
+			{/* Provider Status */}
+			{poolMetrics?.providers && poolMetrics.providers.length > 0 && (
+				<div>
+					<h2 className="mb-4 flex items-center gap-2 font-semibold text-xl">
+						<Network className="h-6 w-6" />
+						NNTP Providers
+					</h2>
+					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+						{poolMetrics.providers.map((provider) => (
+							<ProviderCard key={provider.id} provider={provider} />
+						))}
+					</div>
+				</div>
+			)}
 
 			{/* Charts */}
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

@@ -248,6 +248,19 @@ export interface HealthWorkerStatus {
 }
 
 // Pool Metrics types
+export interface ProviderStatus {
+	id: string;
+	host: string;
+	username: string;
+	used_connections: number;
+	max_connections: number;
+	state: string;
+	error_count: number;
+	last_connection_attempt: string;
+	last_successful_connect: string;
+	failure_reason: string;
+}
+
 export interface PoolMetrics {
 	bytes_downloaded: number;
 	bytes_uploaded: number;
@@ -258,6 +271,7 @@ export interface PoolMetrics {
 	download_speed_bytes_per_sec: number;
 	upload_speed_bytes_per_sec: number;
 	timestamp: string;
+	providers: ProviderStatus[];
 }
 
 // SABnzbd API response types

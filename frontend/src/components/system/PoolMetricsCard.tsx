@@ -95,23 +95,6 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 								</span>
 							</div>
 						)}
-
-						{/* Provider Errors - Only show if there are any */}
-						{poolMetrics.provider_errors && Object.keys(poolMetrics.provider_errors).length > 0 && (
-							<div className="space-y-2">
-								<span className="font-medium text-base-content/70 text-sm">Provider Errors</span>
-								<div className="space-y-1">
-									{Object.entries(poolMetrics.provider_errors).map(([provider, errorCount]) => (
-										<div key={provider} className="flex items-center justify-between pl-2 text-sm">
-											<span className="text-base-content/60">
-												<span className="badge badge-ghost badge-sm mr-2">{provider}</span>
-											</span>
-											<span className="font-medium text-error">{errorCount.toLocaleString()}</span>
-										</div>
-									))}
-								</div>
-							</div>
-						)}
 					</div>
 				)}
 			</div>

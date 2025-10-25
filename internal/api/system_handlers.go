@@ -271,6 +271,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			DownloadSpeedBytesPerSec: 0.0,
 			UploadSpeedBytesPerSec:   0.0,
 			Timestamp:                time.Now(),
+			Providers:                []ProviderStatusResponse{},
 		}
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,
@@ -288,6 +289,44 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get the pool to fetch provider information
+	pool, err := s.poolManager.GetPool()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to get NNTP pool",
+			"details": err.Error(),
+		})
+	}
+
+	// Get provider information from pool
+	providersInfo := pool.GetProvidersInfo()
+
+	// Map provider info to response format
+	providers := make([]ProviderStatusResponse, 0, len(providersInfo))
+	for _, providerInfo := range providersInfo {
+		// Get error count for this provider from metrics
+		errorCount := int64(0)
+		if metrics.ProviderErrors != nil {
+			if count, exists := metrics.ProviderErrors[providerInfo.ID()]; exists {
+				errorCount = count
+			}
+		}
+
+		providers = append(providers, ProviderStatusResponse{
+			ID:                    providerInfo.ID(),
+			Host:                  providerInfo.Host,
+			Username:              providerInfo.Username,
+			UsedConnections:       providerInfo.UsedConnections,
+			MaxConnections:        providerInfo.MaxConnections,
+			State:                 providerInfo.State.String(),
+			ErrorCount:            errorCount,
+			LastConnectionAttempt: providerInfo.LastConnectionAttempt,
+			LastSuccessfulConnect: providerInfo.LastSuccessfulConnect,
+			FailureReason:         providerInfo.FailureReason,
+		})
+	}
+
 	// Map pool metrics to API response format
 	response := PoolMetricsResponse{
 		BytesDownloaded:          metrics.BytesDownloaded,
@@ -299,6 +338,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		DownloadSpeedBytesPerSec: metrics.DownloadSpeedBytesPerSec,
 		UploadSpeedBytesPerSec:   metrics.UploadSpeedBytesPerSec,
 		Timestamp:                metrics.Timestamp,
+		Providers:                providers,
 	}
 
 	return c.Status(200).JSON(fiber.Map{

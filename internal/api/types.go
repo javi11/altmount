@@ -612,17 +612,32 @@ type ManualImportResponse struct {
 	Message string `json:"message"`
 }
 
+// ProviderStatusResponse represents NNTP provider connection status in API responses
+type ProviderStatusResponse struct {
+	ID                    string    `json:"id"`
+	Host                  string    `json:"host"`
+	Username              string    `json:"username"`
+	UsedConnections       int       `json:"used_connections"`
+	MaxConnections        int       `json:"max_connections"`
+	State                 string    `json:"state"`
+	ErrorCount            int64     `json:"error_count"`
+	LastConnectionAttempt time.Time `json:"last_connection_attempt"`
+	LastSuccessfulConnect time.Time `json:"last_successful_connect"`
+	FailureReason         string    `json:"failure_reason"`
+}
+
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
-	BytesDownloaded          int64             `json:"bytes_downloaded"`
-	BytesUploaded            int64             `json:"bytes_uploaded"`
-	ArticlesDownloaded       int64             `json:"articles_downloaded"`
-	ArticlesPosted           int64             `json:"articles_posted"`
-	TotalErrors              int64             `json:"total_errors"`
-	ProviderErrors           map[string]int64  `json:"provider_errors"`
-	DownloadSpeedBytesPerSec float64           `json:"download_speed_bytes_per_sec"`
-	UploadSpeedBytesPerSec   float64           `json:"upload_speed_bytes_per_sec"`
-	Timestamp                time.Time         `json:"timestamp"`
+	BytesDownloaded          int64                     `json:"bytes_downloaded"`
+	BytesUploaded            int64                     `json:"bytes_uploaded"`
+	ArticlesDownloaded       int64                     `json:"articles_downloaded"`
+	ArticlesPosted           int64                     `json:"articles_posted"`
+	TotalErrors              int64                     `json:"total_errors"`
+	ProviderErrors           map[string]int64          `json:"provider_errors"`
+	DownloadSpeedBytesPerSec float64                   `json:"download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec   float64                   `json:"upload_speed_bytes_per_sec"`
+	Timestamp                time.Time                 `json:"timestamp"`
+	Providers                []ProviderStatusResponse  `json:"providers"`
 }
 
 type TestProviderResponse struct {
