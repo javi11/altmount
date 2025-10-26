@@ -309,9 +309,12 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 	out := make([]rarContent, 0, len(aggregatedFiles))
 
 	for _, af := range aggregatedFiles {
+		// Normalize backslashes in path (Windows-style paths in RAR archives)
+		normalizedName := strings.ReplaceAll(af.Name, "\\", "/")
+		
 		rc := rarContent{
-			InternalPath: af.Name,
-			Filename:     filepath.Base(af.Name),
+			InternalPath: normalizedName,
+			Filename:     filepath.Base(normalizedName),
 			Size:         af.TotalPackedSize,
 			AesKey:       aesKey,
 			AesIV:        aesIV,
