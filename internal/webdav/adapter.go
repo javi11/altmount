@@ -183,14 +183,6 @@ func NewHandler(
 		mux.Handle(base+"/", h)
 	}
 
-	// Add pprof endpoints for profiling only in debug mode
-	if config.Debug {
-		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/profile", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
-	}
-
 	return &Handler{
 		handler:      mux,
 		authCreds:    authCreds,

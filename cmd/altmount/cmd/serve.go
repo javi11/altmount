@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -80,7 +81,7 @@ func init() {
 }
 
 // createCustomListener creates a custom HTTP server that routes between WebDAV and Fiber handlers
-func createListener(app *fiber.App, webdavHandler *webdav.Handler, port int) *http.Server {
+func createListener(app *fiber.App, webdavHandler *webdav.Handler, port int, profilerEnabled bool) *http.Server {
 	// Mount WebDAV handler directly (no Fiber adapter needed)
 	webdavHTTPHandler := webdavHandler.GetHTTPHandler()
 
@@ -90,6 +91,12 @@ func createListener(app *fiber.App, webdavHandler *webdav.Handler, port int) *ht
 	// Create a handler that routes between WebDAV and Fiber
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+
+		// Route profiler requests if enabled
+		if profilerEnabled && strings.HasPrefix(path, "/debug/pprof") {
+			http.DefaultServeMux.ServeHTTP(w, r)
+			return
+		}
 
 		// Route WebDAV requests directly to WebDAV handler
 		if strings.HasPrefix(path, "/webdav") {
@@ -349,7 +356,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Port:   cfg.WebDAV.Port,
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
-		Debug:  cfg.Log.Level == "debug",
 		Prefix: "/webdav",
 	}, nsys.FileSystem(), tokenService, webdavUserRepo, configManager.GetConfigGetter())
 	if err != nil {
@@ -465,7 +471,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	setupSPARoutes(app)
 
 	// Create HTTP server with WebDAV and Fiber integration
-	customServer := createListener(app, webdavHandler, cfg.WebDAV.Port)
+	customServer := createListener(app, webdavHandler, cfg.WebDAV.Port, cfg.ProfilerEnabled)
 
 	logger.Info("AltMount server started",
 		"port", cfg.WebDAV.Port,

@@ -17,20 +17,21 @@ const MountProvider = "altmount"
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
-	API       APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
-	Auth      AuthConfig       `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database  DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health    HealthConfig     `yaml:"health" mapstructure:"health" json:"health,omitempty"`
-	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
-	Import    ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
-	Log       LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
-	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
+	WebDAV          WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API             APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
+	Auth            AuthConfig       `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database        DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata        MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming       StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health          HealthConfig     `yaml:"health" mapstructure:"health" json:"health,omitempty"`
+	RClone          RCloneConfig     `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import          ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
+	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
+	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
+	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
+	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
