@@ -376,7 +376,9 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 			}
 
 			// Flatten the internal path by extracting only the base filename
-			baseFilename := filepath.Base(rarContent.InternalPath)
+			// Normalize backslashes first (Windows-style paths in RAR archives)
+			normalizedInternalPath := strings.ReplaceAll(rarContent.InternalPath, "\\", "/")
+			baseFilename := filepath.Base(normalizedInternalPath)
 
 			// Generate a unique filename to handle duplicates
 			uniqueFilename := proc.getUniqueFilename(rarDirPath, baseFilename, currentBatchFiles)
@@ -435,8 +437,11 @@ type DirectoryInfo struct {
 
 // determineFileLocationWithBase determines where a file should be placed in the virtual structure within a base directory
 func (proc *Processor) determineFileLocationWithBase(file ParsedFile, _ *DirectoryStructure, baseDir string) (parentPath, filename string) {
-	dir := filepath.Dir(file.Filename)
-	name := filepath.Base(file.Filename)
+	// Normalize backslashes to forward slashes (Windows-style paths in NZB/RAR files)
+	normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
+	
+	dir := filepath.Dir(normalizedFilename)
+	name := filepath.Base(normalizedFilename)
 
 	if dir == "." || dir == "/" {
 		return baseDir, name
@@ -453,7 +458,10 @@ func (proc *Processor) analyzeDirectoryStructureWithBase(files []ParsedFile, bas
 	pathMap := make(map[string]bool)
 
 	for _, file := range files {
-		dir := filepath.Dir(file.Filename)
+		// Normalize backslashes to forward slashes (Windows-style paths in NZB/RAR files)
+		normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
+		
+		dir := filepath.Dir(normalizedFilename)
 		if dir != "." && dir != "/" {
 			// Add the directory path within the base directory
 			virtualPath := filepath.Join(baseDir, dir)
@@ -910,7 +918,9 @@ func (proc *Processor) process7zArchiveWithDir(parsed *ParsedNzb, virtualDir str
 			}
 
 			// Flatten the internal path by extracting only the base filename
-			baseFilename := filepath.Base(sevenZipContent.InternalPath)
+			// Normalize backslashes first (Windows-style paths in 7zip archives)
+			normalizedInternalPath := strings.ReplaceAll(sevenZipContent.InternalPath, "\\", "/")
+			baseFilename := filepath.Base(normalizedInternalPath)
 
 			// Generate a unique filename to handle duplicates
 			uniqueFilename := proc.getUniqueFilename(sevenZipDirPath, baseFilename, currentBatchFiles)
