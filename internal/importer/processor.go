@@ -352,9 +352,11 @@ func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir st
 
 		// Analyze RAR content using the new RAR handler with timeout
 		// Use a generous timeout for large RAR archives
+		// Extract password from parsed NZB for password-protected archives
+		password := parsed.password
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, rarFiles)
+		rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, rarFiles, password)
 		if err != nil {
 			proc.log.Error("Failed to analyze RAR archive content",
 				"archive", nzbBaseName,
