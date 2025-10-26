@@ -11,7 +11,7 @@ import (
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/rarlist"
+	"github.com/javi11/rardecode/v2"
 )
 
 // RarProcessor interface for analyzing RAR content from NZB data
@@ -100,7 +100,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		"total_parts", len(sortFiles),
 		"rar_files", len(rarFiles))
 
-	aggregatedFiles, err := rarlist.ListFilesFS(ufs, mainRarFile)
+	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, rardecode.FileSystem(ufs))
 	if err != nil {
 		return nil, NewNonRetryableError("failed to aggregate RAR files", err)
 	}
@@ -263,7 +263,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 }
 
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
-func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rarlist.AggregatedFile, rarFiles []ParsedFile) ([]rarContent, error) {
+func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []ParsedFile) ([]rarContent, error) {
 	// Build quick lookup for rar part ParsedFile by both full path and base name
 	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
 	for i := range rarFiles {

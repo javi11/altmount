@@ -481,11 +481,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"download_workers", cfg.Streaming.MaxDownloadWorkers,
 		"processor_workers", cfg.Import.MaxProcessorWorkers)
 
-	routes := app.GetRoutes()
-	for _, route := range routes {
-		logger.Debug("Fiber route", "path", route.Path, "method", route.Method)
-	}
-
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)

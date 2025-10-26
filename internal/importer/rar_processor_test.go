@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/rarlist"
+	"github.com/javi11/rardecode/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +53,7 @@ func TestSlicePartSegmentsBeyondEnd(t *testing.T) {
 func TestConvertAggregatedFilesToRarContentSinglePart(t *testing.T) {
 	rp := &rarProcessor{}
 	rarFiles := []ParsedFile{{Filename: "vol1.rar", Segments: []*metapb.SegmentData{seg("s1", 100)}}}
-	ag := []rarlist.AggregatedFile{{Name: "file.bin", TotalPackedSize: 60, Parts: []rarlist.AggregatedFilePart{{Path: "vol1.rar", DataOffset: 10, PackedSize: 60}}}}
+	ag := []rardecode.ArchiveFileInfo{{Name: "file.bin", TotalPackedSize: 60, Parts: []rardecode.FilePartInfo{{Path: "vol1.rar", DataOffset: 10, PackedSize: 60}}}}
 
 	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles)
 	require.NoError(t, err)
@@ -70,10 +70,10 @@ func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 		{Filename: "part1.rar", Segments: []*metapb.SegmentData{seg("p1s1", 50), seg("p1s2", 50)}}, // 100 bytes
 		{Filename: "part2.rar", Segments: []*metapb.SegmentData{seg("p2s1", 30), seg("p2s2", 30)}}, // 60 bytes
 	}
-	ag := []rarlist.AggregatedFile{{
+	ag := []rardecode.ArchiveFileInfo{{
 		Name:            "movie.mkv",
 		TotalPackedSize: 120,
-		Parts: []rarlist.AggregatedFilePart{
+		Parts: []rardecode.FilePartInfo{
 			{Path: "part1.rar", DataOffset: 20, PackedSize: 80}, // last 30 of first seg + all second seg (50) => 30+50=80
 			{Path: "part2.rar", DataOffset: 0, PackedSize: 40},  // all first seg (30) + 10 of second seg
 		},
@@ -136,7 +136,7 @@ func TestPatchMissingSegment_SmallShortfall(t *testing.T) {
 
 func TestPatchMissingSegment_ExactThreshold(t *testing.T) {
 	segments := []*metapb.SegmentData{seg("s1", 500000)}
-	expectedSize := int64(1300000)  // 800000 bytes shortfall
+	expectedSize := int64(1300000) // 800000 bytes shortfall
 	coveredSize := int64(500000)
 
 	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)
@@ -151,7 +151,7 @@ func TestPatchMissingSegment_ExactThreshold(t *testing.T) {
 
 func TestPatchMissingSegment_ExceedsThreshold(t *testing.T) {
 	segments := []*metapb.SegmentData{seg("s1", 500000)}
-	expectedSize := int64(1300001)  // 800001 bytes shortfall - exceeds threshold
+	expectedSize := int64(1300001) // 800001 bytes shortfall - exceeds threshold
 	coveredSize := int64(500000)
 
 	patched, newCovered, err := patchMissingSegment(segments, expectedSize, coveredSize)

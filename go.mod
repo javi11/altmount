@@ -19,7 +19,7 @@ require (
 	github.com/javi11/nntppool/v2 v2.2.7
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.2
-	github.com/javi11/rarlist v1.1.4
+	github.com/javi11/rardecode/v2 v2.1.2-0.20251026142545-4237d4339497
 	github.com/javi11/sevenzip v1.6.2-0.20251014071335-fa8f4a5ebc05
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
