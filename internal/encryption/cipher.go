@@ -16,6 +16,8 @@ const (
 	RCloneCipherType CipherType = "rclone"
 	// The none cipher type, which will not encrypt the file
 	NoneCipherType CipherType = "none"
+	// The AES cipher type, for AES-CBC encrypted archives (RAR, 7z, etc.)
+	AesCipherType CipherType = "aes"
 )
 
 type Cipher interface {

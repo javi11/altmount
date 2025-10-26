@@ -45,6 +45,7 @@ type ParsedNzb struct {
 	Files         []ParsedFile
 	SegmentsCount int
 	SegmentSize   int64
+	password      string
 }
 
 // ParsedFile represents a file extracted from the NZB
@@ -105,6 +106,10 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	// Determine segment size from meta chunk_size or fallback to first segment size
 	var segSize int64
 	if n.Meta != nil {
+		if pwd, ok := n.Meta["password"]; ok && pwd != "" {
+			parsed.password = pwd
+		}
+
 		if v, ok := n.Meta["chunk_size"]; ok {
 			if iv, err := strconv.ParseInt(v, 10, 64); err == nil && iv > 0 {
 				segSize = iv

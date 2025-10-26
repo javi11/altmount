@@ -15,6 +15,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
+	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -31,6 +32,7 @@ type MetadataRemoteFile struct {
 	poolManager      pool.Manager        // Pool manager for dynamic pool access
 	configGetter     config.ConfigGetter // Dynamic config access
 	rcloneCipher     encryption.Cipher   // For rclone encryption/decryption
+	aesCipher        encryption.Cipher   // For AES encryption/decryption
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -52,12 +54,16 @@ func NewMetadataRemoteFile(
 
 	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
 
+	// Initialize AES cipher for encrypted archives
+	aesCipher := aes.NewAesCipher()
+
 	return &MetadataRemoteFile{
 		metadataService:  metadataService,
 		healthRepository: healthRepository,
 		poolManager:      poolManager,
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
+		aesCipher:        aesCipher,
 	}
 }
 
@@ -150,6 +156,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		maxWorkers:       mrf.getMaxDownloadWorkers(),
 		maxCacheSizeMB:   mrf.getMaxCacheSizeMB(),
 		rcloneCipher:     mrf.rcloneCipher,
+		aesCipher:        mrf.aesCipher,
 		globalPassword:   mrf.getGlobalPassword(),
 		globalSalt:       mrf.getGlobalSalt(),
 	}
@@ -472,6 +479,7 @@ type MetadataVirtualFile struct {
 	maxWorkers       int
 	maxCacheSizeMB   int // Maximum cache size in MB for ahead downloads
 	rcloneCipher     encryption.Cipher
+	aesCipher        encryption.Cipher
 	globalPassword   string
 	globalSalt       string
 
@@ -793,27 +801,70 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 	}
 
 	var cipher encryption.Cipher
+	var password, salt string
+
 	switch mvf.fileMeta.Encryption {
 	case metapb.Encryption_RCLONE:
 		if mvf.rcloneCipher == nil {
 			return nil, ErrNoCipherConfig
 		}
 		cipher = mvf.rcloneCipher
+
+		// Get password and salt from metadata, with global fallback
+		password = mvf.fileMeta.Password
+		if password == "" {
+			password = mvf.globalPassword
+		}
+		salt = mvf.fileMeta.Salt
+		if salt == "" {
+			salt = mvf.globalSalt
+		}
+
+	case metapb.Encryption_AES:
+		// AES encryption for RAR archives
+		if mvf.aesCipher == nil {
+			return nil, ErrNoCipherConfig
+		}
+		if len(mvf.fileMeta.AesKey) == 0 {
+			return nil, fmt.Errorf("missing AES key in metadata")
+		}
+		if len(mvf.fileMeta.AesIv) == 0 {
+			return nil, fmt.Errorf("missing AES IV in metadata")
+		}
+
+		// Create usenet reader first for encrypted data
+		usenetReader, err := mvf.createUsenetReader(mvf.ctx, start, end)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create usenet reader for AES decryption: %w", err)
+		}
+
+		// Store AES key/IV in context for the cipher to use
+		ctx := context.WithValue(mvf.ctx, "aes_key", mvf.fileMeta.AesKey)
+		ctx = context.WithValue(ctx, "aes_iv", mvf.fileMeta.AesIv)
+
+		// Wrap with AES decryption
+		decryptedReader, err := mvf.aesCipher.Open(
+			ctx,
+			&utils.RangeHeader{Start: start, End: end},
+			mvf.fileMeta.FileSize,
+			"", // password not used for AES
+			"", // salt not used for AES
+			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
+				return usenetReader, nil
+			},
+		)
+		if err != nil {
+			usenetReader.Close()
+			return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
+		}
+
+		return decryptedReader, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.fileMeta.Encryption)
 	}
 
-	// Get password and salt from metadata, with global fallback
-	password := mvf.fileMeta.Password
-	if password == "" {
-		password = mvf.globalPassword
-	}
-
-	salt := mvf.fileMeta.Salt
-	if salt == "" {
-		salt = mvf.globalSalt
-	}
-
+	// Handle rclone encryption
 	decryptedReader, err := cipher.Open(
 		mvf.ctx,
 		&utils.RangeHeader{

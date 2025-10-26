@@ -19,8 +19,8 @@ require (
 	github.com/javi11/nntppool/v2 v2.2.7
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.4.2
-	github.com/javi11/rardecode/v2 v2.1.2-0.20251026142545-4237d4339497
-	github.com/javi11/sevenzip v1.6.2-0.20251014071335-fa8f4a5ebc05
+	github.com/javi11/rardecode/v2 v2.1.2-0.20251026143725-58cb449b4d10
+	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pressly/goose/v3 v3.24.3
@@ -30,7 +30,7 @@ require (
 	github.com/spf13/afero v1.14.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.0
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	go.uber.org/mock v0.5.2
 	golang.org/x/crypto v0.41.0
 	golang.org/x/net v0.43.0
@@ -229,7 +229,7 @@ require (
 	github.com/timonwong/loggercheck v0.11.0 // indirect
 	github.com/tomarrell/wrapcheck/v2 v2.11.0 // indirect
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1 // indirect
-	github.com/ulikunitz/xz v0.5.12 // indirect
+	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/ultraware/funlen v0.2.0 // indirect
 	github.com/ultraware/whitespace v0.2.0 // indirect
 	github.com/uudashr/gocognit v1.2.0 // indirect

@@ -8,6 +8,7 @@ enum Encryption {
   NONE = 0; // No encryption
   RCLONE = 1;      // Rclone encryption
   HEADERS = 2;        // Headers encryption
+  AES = 3;         // Generic AES-CBC encryption (for RAR, 7z, etc.)
 }
 
 // FileStatus represents the health status of a file
@@ -33,8 +34,10 @@ message FileMetadata {
   FileStatus status = 3;        // Health status of the file
   int64 created_at = 4;         // Unix timestamp when metadata was created
   int64 modified_at = 5;        // Unix timestamp when last modified
-  string password = 6;          // Password for encrypted files (if any)
-  string salt = 7;              // Salt for encrypted files (if any)
+  string password = 6;          // Password for rclone encrypted files
+  string salt = 7;              // Salt for rclone encrypted files
   Encryption encryption = 8;    // Encryption type used for the file
   repeated SegmentData segment_data = 9;  // Segment information (lazy-loaded)
+  bytes aes_key = 10;           // AES encryption key (for AES-encrypted archives)
+  bytes aes_iv = 11;            // AES initialization vector (for AES-encrypted archives)
 }
