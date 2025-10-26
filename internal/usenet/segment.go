@@ -59,6 +59,7 @@ func (r *segmentRange) Next() (*segment, error) {
 
 	// Ignore close errors
 	_ = r.segments[r.current].Close()
+	r.segments[r.current] = nil
 
 	r.current += 1
 	r.mu.Unlock()
@@ -110,6 +111,10 @@ func (s *segment) GetReader() io.Reader {
 }
 
 func (s *segment) Close() error {
+	if s == nil {
+		return nil
+	}
+
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
