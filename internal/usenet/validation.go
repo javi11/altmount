@@ -56,7 +56,7 @@ func ValidateSegmentAvailability(
 
 			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
 			if err != nil {
-				return fmt.Errorf("segment with ID %s unreachable for file %s: %w", seg.Id, err)
+				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}
 
 			return nil

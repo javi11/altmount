@@ -154,7 +154,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	if checkErr != nil {
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("corrupted file some segments are missing")
+		event.Error = fmt.Errorf("corrupted file some segments are missing: %w", checkErr)
 		return event
 	}
 

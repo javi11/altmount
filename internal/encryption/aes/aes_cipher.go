@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/utils"
 )
 
-// AesCipher implements the Cipher interface for AES-CBC encrypted archives
+// AesCipher handles AES-CBC decryption for encrypted archives
 // Used for password-protected RAR, 7z, and other AES-encrypted archive formats
 type AesCipher struct{}
 
 // NewAesCipher creates a new AES cipher
-func NewAesCipher() encryption.Cipher {
+func NewAesCipher() *AesCipher {
 	return &AesCipher{}
 }
 
@@ -49,25 +48,21 @@ func (c *AesCipher) DecryptedSize(encryptedFileSize int64) (int64, error) {
 }
 
 // Open creates a decrypting reader for AES-encrypted data
-// The password and salt parameters are not used for AES - the key and IV are provided through context
 func (c *AesCipher) Open(
 	ctx context.Context,
 	rh *utils.RangeHeader,
 	encryptedFileSize int64,
-	password string, // Not used for AES - kept for interface compatibility
-	salt string, // Not used for AES - kept for interface compatibility
+	key []byte,
+	iv []byte,
 	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error),
 ) (io.ReadCloser, error) {
-	// Extract AES key and IV from context
-	// These should be stored in the context by the caller
-	key, ok := ctx.Value("aes_key").([]byte)
-	if !ok || len(key) == 0 {
-		return nil, fmt.Errorf("AES key not found in context")
+	// Validate key and IV
+	if len(key) == 0 {
+		return nil, fmt.Errorf("AES key is required")
 	}
 
-	iv, ok := ctx.Value("aes_iv").([]byte)
-	if !ok || len(iv) == 0 {
-		return nil, fmt.Errorf("AES IV not found in context")
+	if len(iv) == 0 {
+		return nil, fmt.Errorf("AES IV is required")
 	}
 
 	// Calculate the decrypted size
@@ -91,9 +86,4 @@ func (c *AesCipher) Open(
 	}
 
 	return decryptReader, nil
-}
-
-// Name returns the cipher type identifier
-func (c *AesCipher) Name() encryption.CipherType {
-	return encryption.AesCipherType
 }

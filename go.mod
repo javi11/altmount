@@ -31,7 +31,6 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.0
 	github.com/stretchr/testify v1.11.1
-	go.uber.org/mock v0.5.2
 	golang.org/x/crypto v0.41.0
 	golang.org/x/net v0.43.0
 	golang.org/x/text v0.28.0
@@ -254,6 +253,7 @@ require (
 	go.etcd.io/bbolt v1.3.9 // indirect
 	go.mongodb.org/mongo-driver v1.13.4 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
+	go.uber.org/mock v0.5.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go4.org v0.0.0-20200411211856-f5505b9728dd // indirect

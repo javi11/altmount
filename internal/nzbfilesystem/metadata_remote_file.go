@@ -31,8 +31,8 @@ type MetadataRemoteFile struct {
 	healthRepository *database.HealthRepository
 	poolManager      pool.Manager        // Pool manager for dynamic pool access
 	configGetter     config.ConfigGetter // Dynamic config access
-	rcloneCipher     encryption.Cipher   // For rclone encryption/decryption
-	aesCipher        encryption.Cipher   // For AES encryption/decryption
+	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
+	aesCipher        *aes.AesCipher      // For AES encryption/decryption
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -478,8 +478,8 @@ type MetadataVirtualFile struct {
 	ctx              context.Context
 	maxWorkers       int
 	maxCacheSizeMB   int // Maximum cache size in MB for ahead downloads
-	rcloneCipher     encryption.Cipher
-	aesCipher        encryption.Cipher
+	rcloneCipher     *rclone.RcloneCrypt
+	aesCipher        *aes.AesCipher
 	globalPassword   string
 	globalSalt       string
 
@@ -800,25 +800,37 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 		return nil, ErrNoEncryptionParams
 	}
 
-	var cipher encryption.Cipher
-	var password, salt string
-
 	switch mvf.fileMeta.Encryption {
 	case metapb.Encryption_RCLONE:
 		if mvf.rcloneCipher == nil {
 			return nil, ErrNoCipherConfig
 		}
-		cipher = mvf.rcloneCipher
 
 		// Get password and salt from metadata, with global fallback
-		password = mvf.fileMeta.Password
+		password := mvf.fileMeta.Password
 		if password == "" {
 			password = mvf.globalPassword
 		}
-		salt = mvf.fileMeta.Salt
+		salt := mvf.fileMeta.Salt
 		if salt == "" {
 			salt = mvf.globalSalt
 		}
+
+		// Wrap with rclone decryption
+		decryptedReader, err := mvf.rcloneCipher.Open(
+			mvf.ctx,
+			&utils.RangeHeader{Start: start, End: end},
+			mvf.fileMeta.FileSize,
+			password,
+			salt,
+			func(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+				return mvf.createUsenetReader(ctx, start, end)
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf(ErrMsgFailedCreateDecryptReader, err)
+		}
+		return decryptedReader, nil
 
 	case metapb.Encryption_AES:
 		// AES encryption for RAR archives
@@ -832,17 +844,13 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 			return nil, fmt.Errorf("missing AES IV in metadata")
 		}
 
-		// Store AES key/IV in context for the cipher to use
-		ctx := context.WithValue(mvf.ctx, "aes_key", mvf.fileMeta.AesKey)
-		ctx = context.WithValue(ctx, "aes_iv", mvf.fileMeta.AesIv)
-
-		// Wrap with AES decryption
+		// Wrap with AES decryption - pass key and IV directly
 		decryptedReader, err := mvf.aesCipher.Open(
-			ctx,
+			mvf.ctx,
 			&utils.RangeHeader{Start: start, End: end},
 			mvf.fileMeta.FileSize,
-			"", // password not used for AES
-			"", // salt not used for AES
+			mvf.fileMeta.AesKey,
+			mvf.fileMeta.AesIv,
 			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
 				// Create usenet reader first for encrypted data
 				return mvf.createUsenetReader(ctx, s, e)
@@ -851,32 +859,11 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 		if err != nil {
 			return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
 		}
-
 		return decryptedReader, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.fileMeta.Encryption)
 	}
-
-	// Handle rclone encryption
-	decryptedReader, err := cipher.Open(
-		mvf.ctx,
-		&utils.RangeHeader{
-			Start: start,
-			End:   end,
-		},
-		mvf.fileMeta.FileSize,
-		password,
-		salt,
-		func(ctx context.Context, start, end int64) (io.ReadCloser, error) {
-			return mvf.createUsenetReader(ctx, start, end)
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf(ErrMsgFailedCreateDecryptReader, err)
-	}
-
-	return decryptedReader, nil
 }
 
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected

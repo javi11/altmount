@@ -32,7 +32,8 @@ var (
 	}
 )
 
-type rcloneCrypt struct {
+// RcloneCrypt handles rclone-style file encryption/decryption
+type RcloneCrypt struct {
 	// Cipher to use for encrypting/decrypting
 	cipher            *Cipher
 	hasGlobalPassword bool
@@ -40,7 +41,7 @@ type rcloneCrypt struct {
 
 func NewRcloneCipher(
 	config *encryption.Config,
-) (*rcloneCrypt, error) {
+) (*RcloneCrypt, error) {
 	cipher, err := NewCipher(
 		NameEncryptionOff,
 		config.RclonePassword,
@@ -52,7 +53,7 @@ func NewRcloneCipher(
 		return nil, err
 	}
 
-	return &rcloneCrypt{
+	return &RcloneCrypt{
 		cipher:            cipher,
 		hasGlobalPassword: config.RclonePassword != "",
 	}, nil
@@ -60,7 +61,7 @@ func NewRcloneCipher(
 
 // Opens a new crypt session, until read is not called, the underlying usenet reader is not called
 // this way we don't perform reads while fetching the modtime
-func (o *rcloneCrypt) Open(
+func (o *RcloneCrypt) Open(
 	ctx context.Context,
 	rh *utils.RangeHeader,
 	fileSize int64,
@@ -140,20 +141,16 @@ func (o *rcloneCrypt) Open(
 	}, nil
 }
 
-func (o *rcloneCrypt) DecryptedSize(fileSize int64) (int64, error) {
+func (o *RcloneCrypt) DecryptedSize(fileSize int64) (int64, error) {
 	return o.cipher.DecryptedSize(fileSize)
 }
 
-func (o *rcloneCrypt) EncryptedSize(fileSize int64) int64 {
+func (o *RcloneCrypt) EncryptedSize(fileSize int64) int64 {
 	return EncryptedSize(fileSize)
 }
 
-func (o *rcloneCrypt) OverheadSize(fileSize int64) int64 {
+func (o *RcloneCrypt) OverheadSize(fileSize int64) int64 {
 	return EncryptedSize(fileSize) - fileSize
-}
-
-func (o *rcloneCrypt) Name() encryption.CipherType {
-	return encryption.RCloneCipherType
 }
 
 type reader struct {

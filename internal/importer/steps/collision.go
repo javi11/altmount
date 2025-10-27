@@ -46,9 +46,10 @@ func GetUniqueFilename(
 
 	// Check if this path collides with a file from the current batch
 	if currentBatchFiles[candidatePath] {
+		var candidateFilename string
+
 		// Within-batch collision: Add suffix to keep both files
 		counter := 1
-		candidateFilename := filename
 		ext := filepath.Ext(filename)
 		nameWithoutExt := strings.TrimSuffix(filename, ext)
 
