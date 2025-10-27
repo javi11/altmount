@@ -58,6 +58,7 @@ func (s *ProcessSingleFileStep) Execute(ctx context.Context, pctx *ProcessingCon
 
 	// Validate segments
 	if err := ValidateSegmentsForFile(
+		ctx,
 		file.Filename,
 		file.Size,
 		file.Segments,
@@ -155,6 +156,7 @@ func (s *ProcessMultipleFilesStep) Execute(ctx context.Context, pctx *Processing
 
 		// Validate segments
 		if err := ValidateSegmentsForFile(
+			ctx,
 			filename,
 			file.Size,
 			file.Segments,

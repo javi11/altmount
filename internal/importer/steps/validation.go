@@ -3,13 +3,11 @@ package steps
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"time"
 
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	concpool "github.com/sourcegraph/conc/pool"
+	"github.com/javi11/altmount/internal/usenet"
 )
 
 // ValidateParsedDataStep validates the parsed NZB/STRM structure
@@ -67,6 +65,7 @@ func (s *ValidateSegmentsStep) Name() string {
 // the Usenet connection pool, and that their total size matches the expected file size (accounting
 // for encryption overhead).
 func ValidateSegmentsForFile(
+	ctx context.Context,
 	filename string,
 	fileSize int64,
 	segments []*metapb.SegmentData,
@@ -121,46 +120,8 @@ func ValidateSegmentsForFile(
 		totalSegmentSize += segSize
 	}
 
-	// Determine which segments to validate for reachability
-	var segmentsToValidate []*metapb.SegmentData
-	if fullValidation {
-		segmentsToValidate = segments
-	} else {
-		// Validate a random sample of up to 10 segments
-		sampleSize := 10
-		if len(segments) < sampleSize {
-			sampleSize = len(segments)
-		}
-
-		segmentsToValidate = make([]*metapb.SegmentData, sampleSize)
-		if sampleSize == len(segments) {
-			segmentsToValidate = segments
-		} else {
-			// Random sampling without replacement
-			perm := rand.Perm(len(segments))
-			for i := 0; i < sampleSize; i++ {
-				segmentsToValidate[i] = segments[perm[i]]
-			}
-		}
-	}
-
-	// Second loop: Validate reachability of sampled segments
-	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxGoroutines)
-	for _, segment := range segmentsToValidate {
-		pl.Go(func() error {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-
-			_, err := usenetPool.Stat(ctx, segment.Id, []string{})
-			if err != nil {
-				return fmt.Errorf("segment with ID %s unreachable for file %s: %w", segment.Id, filename, err)
-			}
-
-			return nil
-		})
-	}
-
-	if err := pl.Wait(); err != nil {
+	// Validate segment availability using shared validation logic
+	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, fullValidation); err != nil {
 		return err
 	}
 

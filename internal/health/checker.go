@@ -2,7 +2,6 @@ package health
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -13,8 +12,8 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/pkg/rclonecli"
-	concpool "github.com/sourcegraph/conc/pool"
 )
 
 // EventType represents the type of health event
@@ -141,19 +140,16 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		return event
 	}
 
-	var segmentsToCheck []*metapb.SegmentData
-	if hc.getCheckAllSegments() {
-		// Check all segments
-		segmentsToCheck = fileMeta.SegmentData
-	} else {
-		// Check only first segment (faster, default behavior)
-		segmentsToCheck = []*metapb.SegmentData{fileMeta.SegmentData[0]}
-	}
+	slog.Info("Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "full_validation", hc.getCheckAllSegments())
 
-	slog.Info("Checking segments", "file_path", filePath, "segments_to_check", len(segmentsToCheck))
-
-	// Check segments with configurable concurrency
-	checkErr := hc.checkSegments(ctx, segmentsToCheck)
+	// Validate segment availability using shared validation logic
+	checkErr := usenet.ValidateSegmentAvailability(
+		ctx,
+		fileMeta.SegmentData,
+		hc.poolManager,
+		hc.getMaxSegmentConnections(),
+		hc.getCheckAllSegments(),
+	)
 
 	if checkErr != nil {
 		event.Type = EventTypeCheckFailed
@@ -167,59 +163,6 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	event.Status = database.HealthStatusHealthy
 
 	return event
-}
-
-// checkSegments checks multiple segments concurrently with connection limit
-func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.SegmentData) (err error) {
-	totalCount := len(segments)
-	if totalCount == 0 {
-		return nil
-	}
-
-	// Create pool with concurrency limit and context cancellation
-	p := concpool.NewWithResults[bool]().
-		WithMaxGoroutines(hc.getMaxSegmentConnections()).
-		WithContext(ctx).
-		WithCancelOnError()
-
-	// Check all segments concurrently using pool
-	for _, segment := range segments {
-		p.Go(func(ctx context.Context) (bool, error) {
-			return hc.checkSingleSegment(ctx, segment.Id)
-		})
-	}
-
-	// Wait for all checks to complete and collect results
-	_, err = p.Wait()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// checkSingleSegment checks if a single segment exists
-func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// Get current pool from manager
-	usenetPool, err := hc.poolManager.GetPool()
-	if err != nil {
-		return false, fmt.Errorf("failed to get usenet pool: %w", err)
-	}
-
-	responseCode, err := usenetPool.Stat(ctx, segmentID, []string{})
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return false, nil
-		}
-
-		return false, fmt.Errorf("failed to check article %s: %w", segmentID, err)
-	}
-
-	// NNTP response codes: 223 = article exists, other codes indicate issues
-	return responseCode == 223, nil
 }
 
 // NotifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)

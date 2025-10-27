@@ -126,6 +126,7 @@ func (s *ProcessRarArchiveFilesStep) Execute(ctx context.Context, pctx *Processi
 
 		// Validate segments
 		if err := ValidateSegmentsForFile(
+			ctx,
 			baseFilename,
 			rarContent.Size,
 			rarContent.Segments,
@@ -270,6 +271,7 @@ func (s *ProcessSevenZipArchiveFilesStep) Execute(ctx context.Context, pctx *Pro
 
 		// Validate segments
 		if err := ValidateSegmentsForFile(
+			ctx,
 			baseFilename,
 			sevenZipContent.Size,
 			sevenZipContent.Segments,
