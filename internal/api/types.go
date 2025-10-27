@@ -318,10 +318,9 @@ type HealthListRequest struct {
 
 // HealthStatsResponse represents health statistics in API responses
 type HealthStatsResponse struct {
-	Pending   int `json:"pending"`
-	Healthy   int `json:"healthy"`
-	Corrupted int `json:"corrupted"`
 	Total     int `json:"total"`
+	Pending   int `json:"pending"`
+	Corrupted int `json:"corrupted"`
 }
 
 // HealthRetryRequest represents request to retry a corrupted file
@@ -500,12 +499,20 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 
 // ToHealthStatsResponse converts health stats map to HealthStatsResponse
 func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResponse {
-	response := &HealthStatsResponse{
-		Healthy:   stats[database.HealthStatusHealthy],
-		Corrupted: stats[database.HealthStatusCorrupted],
+	pending := stats[database.HealthStatusPending]
+	corrupted := stats[database.HealthStatusCorrupted]
+
+	// Calculate total from all tracked statuses
+	total := 0
+	for _, count := range stats {
+		total += count
 	}
-	response.Total = response.Healthy + response.Corrupted
-	return response
+
+	return &HealthStatsResponse{
+		Total:     total,
+		Pending:   pending,
+		Corrupted: corrupted,
+	}
 }
 
 // File Metadata API Types

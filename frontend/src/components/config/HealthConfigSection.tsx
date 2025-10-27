@@ -153,25 +153,23 @@ export function HealthConfigSection({
 									</p>
 								</fieldset>
 							)}
-
-							{formData.check_all_segments !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Check All Segments</legend>
-									<label className="label cursor-pointer">
-										<span className="label-text">Deep segment checking</span>
-										<input
-											type="checkbox"
-											className="checkbox"
-											checked={formData.check_all_segments}
-											disabled={isReadOnly}
-											onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
-										/>
-									</label>
-									<p className="label text-gray-600 text-sm">
-										Check all file segments (slower but more thorough)
-									</p>
-								</fieldset>
-							)}
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Check All Segments</legend>
+								<label className="label cursor-pointer">
+									<span className="label-text">Deep segment checking</span>
+									<input
+										type="checkbox"
+										className="checkbox"
+										checked={formData.check_all_segments ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+									/>
+								</label>
+								<p className="label text-gray-600 text-sm">
+									When disabled, use a sampling approach for faster processing. Enable for thorough
+									validation of all segments (slower).
+								</p>
+							</fieldset>
 						</div>
 					</div>
 				</details>

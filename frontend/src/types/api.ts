@@ -80,8 +80,6 @@ export interface ScanStatusResponse {
 export const HealthStatus = {
 	PENDING: "pending",
 	CHECKING: "checking",
-	HEALTHY: "healthy",
-	PARTIAL: "partial",
 	CORRUPTED: "corrupted",
 	REPAIR_TRIGGERED: "repair_triggered",
 } as const;
@@ -108,8 +106,6 @@ export interface FileHealth {
 export interface HealthStats {
 	total: number;
 	pending: number;
-	healthy: number;
-	partial: number;
 	corrupted: number;
 }
 
@@ -173,7 +169,7 @@ export interface SegmentInfo {
 export interface FileMetadata {
 	file_size: number;
 	source_nzb_path: string;
-	status: "healthy" | "partial" | "corrupted" | "unspecified";
+	status: "corrupted" | "unspecified";
 	segment_count: number;
 	available_segments?: number;
 	encryption: "none" | "rclone";

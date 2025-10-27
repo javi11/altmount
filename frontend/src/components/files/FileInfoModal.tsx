@@ -68,10 +68,6 @@ export function FileInfoModal({
 
 	const getHealthIcon = (status: string) => {
 		switch (status) {
-			case "healthy":
-				return "✓";
-			case "partial":
-				return "⚠";
 			case "corrupted":
 				return "✗";
 			default:
@@ -81,10 +77,6 @@ export function FileInfoModal({
 
 	const getHealthColor = (status: string) => {
 		switch (status) {
-			case "healthy":
-				return "text-success";
-			case "partial":
-				return "text-warning";
 			case "corrupted":
 				return "text-error";
 			default:

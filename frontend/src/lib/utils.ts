@@ -80,7 +80,6 @@ export function formatFutureTime(date: string | Date | null | undefined): string
 
 export function getStatusColor(status: string): string {
 	switch (status.toLowerCase()) {
-		case "healthy":
 		case "completed":
 			return "success";
 		case "processing":
@@ -94,7 +93,6 @@ export function getStatusColor(status: string): string {
 		case "corrupted":
 		case "unhealthy":
 			return "error";
-		case "partial":
 		case "degraded":
 			return "warning";
 		default:

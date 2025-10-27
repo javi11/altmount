@@ -114,7 +114,7 @@ export function ImportConfigSection({
 						/>
 					</label>
 					<p className="label">
-						When disabled, validates 10 random segments for faster processing. Enable for thorough
+						When disabled, use a sampling approach for faster processing. Enable for thorough
 						validation of all segments (slower).
 					</p>
 				</fieldset>

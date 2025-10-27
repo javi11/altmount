@@ -158,9 +158,9 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		return event
 	}
 
-	// All checked segments are available
+	// All checked segments are available - record will be deleted
 	event.Type = EventTypeFileRecovered
-	event.Status = database.HealthStatusHealthy
+	// Status not needed as the record will be deleted from database
 
 	return event
 }

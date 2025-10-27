@@ -1035,7 +1035,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxConcurrentJobs:     1,
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,
-			CheckAllSegments:      true,
+			CheckAllSegments:      false,
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,

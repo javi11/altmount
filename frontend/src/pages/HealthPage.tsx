@@ -29,7 +29,6 @@ import {
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
-	useHealthWorkerStatus,
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
 } from "../hooks/useApi";
@@ -77,7 +76,6 @@ export function HealthPage() {
 	});
 
 	const { data: stats } = useHealthStats();
-	const { data: workerStatus } = useHealthWorkerStatus();
 	const deleteItem = useDeleteHealthItem();
 	const deleteBulkItems = useDeleteBulkHealthItems();
 	const restartBulkItems = useRestartBulkHealthItems();
@@ -517,7 +515,7 @@ export function HealthPage() {
 
 			{/* Stats Cards */}
 			{stats && (
-				<div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+				<div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
 					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Files Tracked</div>
 						<div className="stat-value text-primary">{stats.total}</div>
@@ -529,59 +527,9 @@ export function HealthPage() {
 						<div className="stat-desc">Awaiting check</div>
 					</div>
 					<div className="stat rounded-box bg-base-100 shadow">
-						<div className="stat-title">Partial</div>
-						<div className="stat-value text-warning">{stats.partial}</div>
-						<div className="stat-desc">Need attention</div>
-					</div>
-					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Corrupted</div>
 						<div className="stat-value text-error">{stats.corrupted}</div>
 						<div className="stat-desc">Require action</div>
-					</div>
-				</div>
-			)}
-
-			{/* Health Worker Status */}
-			{workerStatus && (
-				<div className="card bg-base-100 shadow-lg">
-					<div className="card-body">
-						<div className="flex items-center justify-between">
-							<h2 className="card-title">Health Worker Status</h2>
-							<div
-								className={`badge ${workerStatus.status === "running" ? "badge-success" : "badge-error"}`}
-							>
-								{workerStatus.status === "running" ? "Running" : "Stopped"}
-							</div>
-						</div>
-
-						<div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-							<div className="stat">
-								<div className="stat-title">Manual Checks</div>
-								<div className="stat-value text-info">{workerStatus.pending_manual_checks}</div>
-								<div className="stat-desc">Pending checks</div>
-							</div>
-							<div className="stat">
-								<div className="stat-title">Files Checked</div>
-								<div className="stat-value text-success">{workerStatus.total_files_checked}</div>
-								<div className="stat-desc">Total checked</div>
-							</div>
-							<div className="stat">
-								<div className="stat-title">Corrupted</div>
-								<div className="stat-value text-error">{workerStatus.total_files_corrupted}</div>
-								<div className="stat-desc">Files corrupted</div>
-							</div>
-							<div className="stat">
-								<div className="stat-title">Runs</div>
-								<div className="stat-value text-sm">{workerStatus.total_runs_completed}</div>
-								<div className="stat-desc">Cycles completed</div>
-							</div>
-						</div>
-
-						{workerStatus.last_run_time && (
-							<div className="mt-2 text-base-content/70 text-sm">
-								Last run: {formatRelativeTime(workerStatus.last_run_time)}
-							</div>
-						)}
 					</div>
 				</div>
 			)}
@@ -617,8 +565,6 @@ export function HealthPage() {
 								<option value="">All Statuses</option>
 								<option value="pending">Pending</option>
 								<option value="checking">Checking</option>
-								<option value="healthy">Healthy</option>
-								<option value="partial">Partial</option>
 								<option value="corrupted">Corrupted</option>
 								<option value="repair_triggered">Repair Triggered</option>
 							</select>
@@ -935,7 +881,6 @@ export function HealthPage() {
 						<div className="font-bold">File Integrity Issues Detected</div>
 						<div className="text-sm">
 							{stats.corrupted} corrupted files require immediate attention.
-							{stats.partial > 0 && ` ${stats.partial} files have partial issues.`}
 						</div>
 					</div>
 				</div>
