@@ -441,7 +441,7 @@ type DirectoryInfo struct {
 func (proc *Processor) determineFileLocationWithBase(file ParsedFile, _ *DirectoryStructure, baseDir string) (parentPath, filename string) {
 	// Normalize backslashes to forward slashes (Windows-style paths in NZB/RAR files)
 	normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
-	
+
 	dir := filepath.Dir(normalizedFilename)
 	name := filepath.Base(normalizedFilename)
 
@@ -462,7 +462,7 @@ func (proc *Processor) analyzeDirectoryStructureWithBase(files []ParsedFile, bas
 	for _, file := range files {
 		// Normalize backslashes to forward slashes (Windows-style paths in NZB/RAR files)
 		normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
-		
+
 		dir := filepath.Dir(normalizedFilename)
 		if dir != "." && dir != "/" {
 			// Add the directory path within the base directory
@@ -583,11 +583,6 @@ func (proc *Processor) getUniqueFilename(basePath, filename string, currentBatch
 	// Check if metadata file exists from a previous import
 	metadataPath := proc.metadataService.GetMetadataFilePath(candidatePath)
 	if _, err := os.Stat(metadataPath); err == nil {
-		// Cross-batch collision: Override by deleting old metadata
-		proc.log.Info("Cross-batch collision detected, overriding existing file",
-			"path", candidatePath,
-			"old_metadata_path", metadataPath)
-
 		if err := proc.metadataService.DeleteFileMetadata(candidatePath); err != nil {
 			proc.log.Warn("Failed to delete old metadata during override",
 				"path", candidatePath,

@@ -1017,7 +1017,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 		// Don't fail the import, just log the warning
 	}
 
-	s.log.Info("Created symlinks for directory",
+	s.log.Debug("Created symlinks for directory",
 		"queue_id", item.ID,
 		"path", resultingPath,
 		"symlinks_created", symlinkCount,

@@ -129,26 +129,13 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
 	}
 
-	// Extract AES key/IV from first part if encrypted
-	var aesKey, aesIV []byte
-	if len(aggregatedFiles) > 0 && len(aggregatedFiles[0].Parts) > 0 {
-		firstPart := aggregatedFiles[0].Parts[0]
-		if firstPart.AesKey != nil {
-			aesKey = firstPart.AesKey
-			aesIV = firstPart.AesIV
-			rh.log.Info("Detected AES-encrypted RAR",
-				"key_len", len(aesKey),
-				"iv_len", len(aesIV))
-		}
-	}
-
 	rh.log.Debug("Successfully analyzed RAR archive via rarlist",
 		"main_file", mainRarFile,
-		"files_found", len(aggregatedFiles),
-		"encrypted", len(aesKey) > 0)
+		"files_found", len(aggregatedFiles))
 
-	// Convert rarlist results to RarContent with AES info
-	rarContents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles, aesKey, aesIV)
+	// Convert rarlist results to RarContent
+	// Note: AES credentials are extracted per-file, not per-archive
+	rarContents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to convert rarlist results to RarContent", err)
 	}
@@ -297,7 +284,9 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 }
 
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
-func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []ParsedFile, aesKey, aesIV []byte) ([]rarContent, error) {
+// Note: AES credentials are extracted per-file from each file's first part, similar to
+// the reference implementation in github.com/javi11/rardecode/blob/main/examples/rarextract/main.go
+func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []ParsedFile) ([]rarContent, error) {
 	// Build quick lookup for rar part ParsedFile by both full path and base name
 	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
 	for i := range rarFiles {
@@ -311,7 +300,22 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 	for _, af := range aggregatedFiles {
 		// Normalize backslashes in path (Windows-style paths in RAR archives)
 		normalizedName := strings.ReplaceAll(af.Name, "\\", "/")
-		
+
+		// Extract AES credentials from this file's first part (if encrypted)
+		// Each file can have its own encryption credentials
+		var aesKey, aesIV []byte
+		if len(af.Parts) > 0 {
+			firstPart := af.Parts[0]
+			if firstPart.AesKey != nil {
+				aesKey = firstPart.AesKey
+				aesIV = firstPart.AesIV
+				rh.log.Debug("Extracted AES credentials for file",
+					"file", normalizedName,
+					"key_len", len(aesKey),
+					"iv_len", len(aesIV))
+			}
+		}
+
 		rc := rarContent{
 			InternalPath: normalizedName,
 			Filename:     filepath.Base(normalizedName),

@@ -302,10 +302,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		// PAR2 match is highest priority - use PAR2 filename and size
 		filename = par2Matched.Filename
 		totalSize = int64(par2Matched.FileLength)
-		p.log.Info("Using PAR2 descriptor for file info",
-			"subject", file.Subject,
-			"par2_filename", filename,
-			"par2_size", totalSize)
 	} else {
 		// Fallback to existing logic: yEnc > NZB filename
 		filename = yencFilename
@@ -776,9 +772,6 @@ func (p *Parser) parsePAR2File(par2File nzbparser.NzbFile) []PAR2FileDesc {
 			}
 
 			descriptors = append(descriptors, *fileDesc)
-			p.log.Debug("Found file in PAR2",
-				"filename", fileDesc.Filename,
-				"file_length", fileDesc.FileLength)
 		} else {
 			// Skip non-file-description packets
 			remainingBytes := header.Length - 64 // Header is 64 bytes
@@ -930,14 +923,8 @@ func (p *Parser) matchFileToPAR2Descriptor(
 
 	// Look up in PAR2 descriptors map
 	if desc, found := par2Descriptors[hash]; found {
-		p.log.Info("Successfully matched file to PAR2 descriptor via MD5 hash",
-			"subject", file.Subject,
-			"par2_filename", desc.Filename,
-			"par2_size", desc.FileLength)
 		return desc
 	}
 
-	p.log.Debug("No PAR2 descriptor match found for file",
-		"subject", file.Subject)
 	return nil
 }

@@ -55,7 +55,7 @@ func TestConvertAggregatedFilesToRarContentSinglePart(t *testing.T) {
 	rarFiles := []ParsedFile{{Filename: "vol1.rar", Segments: []*metapb.SegmentData{seg("s1", 100)}}}
 	ag := []rardecode.ArchiveFileInfo{{Name: "file.bin", TotalPackedSize: 60, Parts: []rardecode.FilePartInfo{{Path: "vol1.rar", DataOffset: 10, PackedSize: 60}}}}
 
-	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles, nil, nil)
+	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	require.Len(t, out[0].Segments, 1)
@@ -79,7 +79,7 @@ func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 		},
 	}}
 
-	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles, nil, nil)
+	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	got := out[0]

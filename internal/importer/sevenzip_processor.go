@@ -187,35 +187,13 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		return nil, NewNonRetryableError("no valid files found in 7zip archive. Compressed or encrypted archives are not supported", nil)
 	}
 
-	// Extract AES key/IV from first encrypted file if present
-	var aesKey, aesIV []byte
-	if password != "" {
-		for _, fi := range fileInfos {
-			if fi.Encrypted && len(fi.AESIV) > 0 {
-				aesIV = fi.AESIV
-				// Derive the AES key from the password using the 7-zip algorithm
-				derivedKey, err := sz.deriveAESKey(password, fi)
-				if err != nil {
-					return nil, NewNonRetryableError(fmt.Sprintf("failed to derive AES key for file %s", fi.Name), err)
-				}
-				aesKey = derivedKey
-				sz.log.Info("Detected AES-encrypted 7zip file",
-					"file", fi.Name,
-					"key_len", len(aesKey),
-					"iv_len", len(aesIV),
-					"kdf_iterations", fi.KDFIterations)
-				break
-			}
-		}
-	}
-
 	sz.log.Debug("Successfully analyzed 7zip archive",
 		"main_file", mainSevenZipFile,
-		"files_found", len(fileInfos),
-		"encrypted", len(aesIV) > 0)
+		"files_found", len(fileInfos))
 
 	// Convert sevenzip FileInfo results to sevenZipContent
-	contents, err := sz.convertFileInfosToSevenZipContent(fileInfos, sevenZipFiles, aesKey, aesIV)
+	// Note: AES credentials are extracted per-file, not per-archive
+	contents, err := sz.convertFileInfosToSevenZipContent(fileInfos, sevenZipFiles, password)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to convert 7zip results to content", err)
 	}
@@ -338,7 +316,8 @@ func (sz *sevenZipProcessor) parseSevenZipFilename(filename string) (base string
 
 
 // convertFileInfosToSevenZipContent converts sevenzip FileInfo results to sevenZipContent
-func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []sevenzip.FileInfo, sevenZipFiles []ParsedFile, aesKey, aesIV []byte) ([]sevenZipContent, error) {
+// Note: AES credentials are extracted per-file from each file's encryption metadata
+func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []sevenzip.FileInfo, sevenZipFiles []ParsedFile, password string) ([]sevenZipContent, error) {
 	out := make([]sevenZipContent, 0, len(fileInfos))
 
 	for _, fi := range fileInfos {
@@ -357,6 +336,27 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 
 		// Normalize backslashes in path (Windows-style paths in 7zip archives)
 		normalizedName := strings.ReplaceAll(fi.Name, "\\", "/")
+
+		// Extract AES credentials from this file's encryption metadata (if encrypted)
+		// Each file can have its own encryption credentials
+		var aesKey, aesIV []byte
+		if password != "" && fi.Encrypted && len(fi.AESIV) > 0 {
+			aesIV = fi.AESIV
+			// Derive the AES key from the password using the 7-zip algorithm
+			derivedKey, err := sz.deriveAESKey(password, fi)
+			if err != nil {
+				sz.log.Warn("Failed to derive AES key for file",
+					"file", normalizedName,
+					"error", err)
+				continue
+			}
+			aesKey = derivedKey
+			sz.log.Debug("Extracted AES credentials for file",
+				"file", normalizedName,
+				"key_len", len(aesKey),
+				"iv_len", len(aesIV),
+				"kdf_iterations", fi.KDFIterations)
+		}
 
 		content := sevenZipContent{
 			InternalPath: normalizedName,
