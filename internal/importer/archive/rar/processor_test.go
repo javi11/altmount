@@ -1,9 +1,10 @@
-package importer
+package rar
 
 import (
 	"testing"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/rardecode/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -52,7 +53,7 @@ func TestSlicePartSegmentsBeyondEnd(t *testing.T) {
 
 func TestConvertAggregatedFilesToRarContentSinglePart(t *testing.T) {
 	rp := &rarProcessor{}
-	rarFiles := []ParsedFile{{Filename: "vol1.rar", Segments: []*metapb.SegmentData{seg("s1", 100)}}}
+	rarFiles := []parser.ParsedFile{{Filename: "vol1.rar", Segments: []*metapb.SegmentData{seg("s1", 100)}}}
 	ag := []rardecode.ArchiveFileInfo{{Name: "file.bin", TotalPackedSize: 60, Parts: []rardecode.FilePartInfo{{Path: "vol1.rar", DataOffset: 10, PackedSize: 60}}}}
 
 	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles)
@@ -66,7 +67,7 @@ func TestConvertAggregatedFilesToRarContentSinglePart(t *testing.T) {
 
 func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 	rp := &rarProcessor{}
-	rarFiles := []ParsedFile{
+	rarFiles := []parser.ParsedFile{
 		{Filename: "part1.rar", Segments: []*metapb.SegmentData{seg("p1s1", 50), seg("p1s2", 50)}}, // 100 bytes
 		{Filename: "part2.rar", Segments: []*metapb.SegmentData{seg("p2s1", 30), seg("p2s2", 30)}}, // 60 bytes
 	}

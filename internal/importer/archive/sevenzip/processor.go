@@ -1,4 +1,4 @@
-package importer
+package sevenzip
 
 import (
 	"bytes"
@@ -13,33 +13,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/sevenzip"
+	"github.com/javi11/altmount/internal/importer/archive"
+	"github.com/javi11/altmount/internal/importer/filesystem"
+	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/sevenzip"
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 )
 
-// SevenZipProcessor interface for analyzing 7zip content from NZB data
-type SevenZipProcessor interface {
-	// AnalyzeSevenZipContentFromNzb analyzes a 7zip archive directly from NZB data
-	// without downloading. Returns an array of SevenZipContent with file metadata and segments.
-	// password parameter is used to unlock password-protected 7zip archives.
-	AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []ParsedFile, password string) ([]sevenZipContent, error)
-	// CreateFileMetadataFromSevenZipContent creates FileMetadata from SevenZipContent for the metadata
-	// system. This is used to convert SevenZipContent into the protobuf format used by the metadata system.
-	CreateFileMetadataFromSevenZipContent(content sevenZipContent, sourceNzbPath string) *metapb.FileMetadata
-}
-
-// sevenZipContent represents a file within a 7zip archive for processing
-type sevenZipContent struct {
-	InternalPath string                `json:"internal_path"`
-	Filename     string                `json:"filename"`
-	Size         int64                 `json:"size"`
-	Segments     []*metapb.SegmentData `json:"segments"`               // Segment data for this file
-	IsDirectory  bool                  `json:"is_directory,omitempty"` // Indicates if this is a directory
-	AesKey       []byte                `json:"aes_key,omitempty"`      // AES encryption key (if encrypted)
-	AesIV        []byte                `json:"aes_iv,omitempty"`       // AES initialization vector (if encrypted)
+// NewNonRetryableError creates a non-retryable error (defined here to avoid import cycles)
+func NewNonRetryableError(message string, cause error) error {
+	if cause != nil {
+		return fmt.Errorf("%s: %w", message, cause)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 // sevenZipProcessor handles 7zip archive analysis and content extraction
@@ -50,8 +39,8 @@ type sevenZipProcessor struct {
 	maxCacheSizeMB int
 }
 
-// NewSevenZipProcessor creates a new 7zip processor
-func NewSevenZipProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) SevenZipProcessor {
+// NewProcessor creates a new 7zip processor
+func NewProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) Processor {
 	return &sevenZipProcessor{
 		log:            slog.Default().With("component", "7z-processor"),
 		poolManager:    poolManager,
@@ -70,7 +59,7 @@ var (
 
 // CreateFileMetadataFromSevenZipContent creates FileMetadata from SevenZipContent for the metadata system
 func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
-	content sevenZipContent,
+	content Content,
 	sourceNzbPath string,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
@@ -128,7 +117,7 @@ func (sz *sevenZipProcessor) deriveAESKey(password string, fileInfo sevenzip.Fil
 // AnalyzeSevenZipContentFromNzb analyzes a 7zip archive directly from NZB data without downloading
 // This implementation uses sevenzip with UsenetFileSystem to analyze 7z structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
-func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []ParsedFile, password string) ([]sevenZipContent, error) {
+func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []parser.ParsedFile, password string) ([]Content, error) {
 	if sz.poolManager == nil {
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
@@ -138,7 +127,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
 	// 7zip part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB)
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))
@@ -159,7 +148,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		"has_password", password != "")
 
 	// Create Afero adapter for the Usenet filesystem
-	aferoFS := NewAferoAdapter(ufs)
+	aferoFS := filesystem.NewAferoAdapter(ufs)
 
 	// Open 7zip archive using OpenReaderWithPassword if password provided
 	var reader *sevenzip.ReadCloser
@@ -191,7 +180,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		"main_file", mainSevenZipFile,
 		"files_found", len(fileInfos))
 
-	// Convert sevenzip FileInfo results to sevenZipContent
+	// Convert sevenzip FileInfo results to Content
 	// Note: AES credentials are extracted per-file, not per-archive
 	contents, err := sz.convertFileInfosToSevenZipContent(fileInfos, sevenZipFiles, password)
 	if err != nil {
@@ -295,7 +284,7 @@ func (sz *sevenZipProcessor) parseSevenZipFilename(filename string) (base string
 	// Pattern 1: filename.7z.001, filename.7z.002 (multi-part)
 	if matches := sevenZipPartPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
-		if partNum := parseInt(matches[2]); partNum >= 0 {
+		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			// Convert 1-based part numbers to 0-based (001 becomes 0, 002 becomes 1)
 			if partNum > 0 {
 				part = partNum - 1
@@ -314,11 +303,10 @@ func (sz *sevenZipProcessor) parseSevenZipFilename(filename string) (base string
 	return filename, 999999
 }
 
-
-// convertFileInfosToSevenZipContent converts sevenzip FileInfo results to sevenZipContent
+// convertFileInfosToSevenZipContent converts sevenzip FileInfo results to Content
 // Note: AES credentials are extracted per-file from each file's encryption metadata
-func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []sevenzip.FileInfo, sevenZipFiles []ParsedFile, password string) ([]sevenZipContent, error) {
-	out := make([]sevenZipContent, 0, len(fileInfos))
+func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []sevenzip.FileInfo, sevenZipFiles []parser.ParsedFile, password string) ([]Content, error) {
+	out := make([]Content, 0, len(fileInfos))
 
 	for _, fi := range fileInfos {
 		// Skip directories (7zip lists directories as files with trailing slash)
@@ -351,14 +339,9 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 				continue
 			}
 			aesKey = derivedKey
-			sz.log.Debug("Extracted AES credentials for file",
-				"file", normalizedName,
-				"key_len", len(aesKey),
-				"iv_len", len(aesIV),
-				"kdf_iterations", fi.KDFIterations)
 		}
 
-		content := sevenZipContent{
+		content := Content{
 			InternalPath: normalizedName,
 			Filename:     filepath.Base(normalizedName),
 			Size:         int64(fi.Size),
@@ -384,7 +367,7 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 // mapOffsetToSegments maps a file's offset within the 7z archive to Usenet segments
 func (sz *sevenZipProcessor) mapOffsetToSegments(
 	fi sevenzip.FileInfo,
-	sevenZipFiles []ParsedFile,
+	sevenZipFiles []parser.ParsedFile,
 ) ([]*metapb.SegmentData, error) {
 	// The FileInfo provides:
 	// - Offset: where the file data starts in the archive
@@ -514,7 +497,7 @@ func extractBaseFilenameSevenZip(filename string) string {
 }
 
 // renameSevenZipFilesAndSort renames all 7z files to have the same base name and sorts them
-func renameSevenZipFilesAndSort(sevenZipFiles []ParsedFile) []ParsedFile {
+func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.ParsedFile {
 	// Get the base name of the first 7zip file
 	firstFileBase := extractBaseFilenameSevenZip(sevenZipFiles[0].Filename)
 
@@ -552,7 +535,7 @@ func getPartSuffixSevenZip(originalFileName string) string {
 // extractSevenZipPartNumber extracts numeric part from 7z extension for sorting
 func extractSevenZipPartNumber(fileName string) int {
 	if matches := sevenZipPartNumberPattern.FindStringSubmatch(fileName); len(matches) > 1 {
-		if partNum := parseInt(matches[1]); partNum > 0 {
+		if partNum := archive.ParseInt(matches[1]); partNum > 0 {
 			return partNum
 		}
 	}

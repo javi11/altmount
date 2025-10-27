@@ -1,4 +1,4 @@
-package importer
+package filesystem
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
+	"github.com/javi11/altmount/internal/importer/parser"
 )
 
 // Compile-time interface checks
@@ -32,7 +33,7 @@ var (
 type UsenetFileSystem struct {
 	ctx            context.Context
 	poolManager    pool.Manager
-	files          []ParsedFile
+	files          []parser.ParsedFile
 	maxWorkers     int
 	maxCacheSizeMB int
 }
@@ -41,7 +42,7 @@ type UsenetFileSystem struct {
 // The Seeker interface allows rardecode.OpenReader to efficiently seek within RAR parts
 type UsenetFile struct {
 	name           string
-	file           *ParsedFile
+	file           *parser.ParsedFile
 	poolManager    pool.Manager
 	ctx            context.Context
 	maxWorkers     int
@@ -59,7 +60,7 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
 	return &UsenetFileSystem{
 		ctx:            ctx,
 		poolManager:    poolManager,

@@ -1,4 +1,4 @@
-package importer
+package parser
 
 import (
 	"context"
@@ -27,41 +27,12 @@ import (
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
-// NzbType represents the type of NZB content
-type NzbType string
-
-const (
-	NzbTypeSingleFile NzbType = "single_file"
-	NzbTypeMultiFile  NzbType = "multi_file"
-	NzbTypeRarArchive NzbType = "rar_archive"
-	NzbType7zArchive  NzbType = "7z_archive"
-	NzbTypeStrm       NzbType = "strm_file"
-)
-
-// ParsedNzb contains the parsed NZB data and extracted metadata
-type ParsedNzb struct {
-	Path          string
-	Filename      string
-	TotalSize     int64
-	Type          NzbType
-	Files         []ParsedFile
-	SegmentsCount int
-	SegmentSize   int64
-	password      string
-}
-
-// ParsedFile represents a file extracted from the NZB
-type ParsedFile struct {
-	Subject      string
-	Filename     string
-	Size         int64
-	Segments     []*metapb.SegmentData
-	Groups       []string
-	IsRarArchive bool
-	Is7zArchive  bool
-	Encryption   metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
-	Password     string            // Password from NZB meta, nil if not encrypted
-	Salt         string            // Salt from NZB meta, nil if not encrypted
+// NewNonRetryableError creates a non-retryable error (defined here to avoid import cycles)
+func NewNonRetryableError(message string, cause error) error {
+	if cause != nil {
+		return fmt.Errorf("%s: %w", message, cause)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 var (
@@ -127,7 +98,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	var segSize int64
 	if n.Meta != nil {
 		if pwd, ok := n.Meta["password"]; ok && pwd != "" {
-			parsed.password = pwd
+			parsed.SetPassword(pwd)
 		}
 
 		if v, ok := n.Meta["chunk_size"]; ok {

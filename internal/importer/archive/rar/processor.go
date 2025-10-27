@@ -1,4 +1,4 @@
-package importer
+package rar
 
 import (
 	"context"
@@ -9,31 +9,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/importer/archive"
+	"github.com/javi11/altmount/internal/importer/filesystem"
+	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/rardecode/v2"
 )
 
-// RarProcessor interface for analyzing RAR content from NZB data
-type RarProcessor interface {
-	// AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data
-	// without downloading. Returns an array of RarContent with file metadata and segments.
-	// password parameter is used to unlock password-protected RAR archives.
-	AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile, password string) ([]rarContent, error)
-	// CreateFileMetadataFromRarContent creates FileMetadata from RarContent for the metadata
-	// system. This is used to convert RarContent into the protobuf format used by the metadata system.
-	CreateFileMetadataFromRarContent(rarContent rarContent, sourceNzbPath string) *metapb.FileMetadata
-}
-
-// RarContent represents a file within a RAR archive for processing
-type rarContent struct {
-	InternalPath string                `json:"internal_path"`
-	Filename     string                `json:"filename"`
-	Size         int64                 `json:"size"`
-	Segments     []*metapb.SegmentData `json:"segments"`               // Segment data for this file
-	IsDirectory  bool                  `json:"is_directory,omitempty"` // Indicates if this is a directory
-	AesKey       []byte                `json:"aes_key,omitempty"`      // AES encryption key (if encrypted)
-	AesIV        []byte                `json:"aes_iv,omitempty"`       // AES initialization vector (if encrypted)
+// NewNonRetryableError creates a non-retryable error (defined here to avoid import cycles)
+func NewNonRetryableError(message string, cause error) error {
+	if cause != nil {
+		return fmt.Errorf("%s: %w", message, cause)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 // rarProcessor handles RAR archive analysis and content extraction
@@ -44,8 +33,8 @@ type rarProcessor struct {
 	maxCacheSizeMB int
 }
 
-// NewRarProcessor creates a new RAR processor
-func NewRarProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) RarProcessor {
+// NewProcessor creates a new RAR processor
+func NewProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) Processor {
 	return &rarProcessor{
 		log:            slog.Default().With("component", "rar-processor"),
 		poolManager:    poolManager,
@@ -56,25 +45,25 @@ func NewRarProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB in
 
 // CreateFileMetadataFromRarContent creates FileMetadata from RarContent for the metadata system
 func (rh *rarProcessor) CreateFileMetadataFromRarContent(
-	rarContent rarContent,
+	Content Content,
 	sourceNzbPath string,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
 	meta := &metapb.FileMetadata{
-		FileSize:      rarContent.Size,
+		FileSize:      Content.Size,
 		SourceNzbPath: sourceNzbPath,
 		Status:        metapb.FileStatus_FILE_STATUS_HEALTHY,
 		CreatedAt:     now,
 		ModifiedAt:    now,
-		SegmentData:   rarContent.Segments,
+		SegmentData:   Content.Segments,
 	}
 
 	// Set AES encryption if keys are present
-	if len(rarContent.AesKey) > 0 {
+	if len(Content.AesKey) > 0 {
 		meta.Encryption = metapb.Encryption_AES
-		meta.AesKey = rarContent.AesKey
-		meta.AesIv = rarContent.AesIV
+		meta.AesKey = Content.AesKey
+		meta.AesIv = Content.AesIV
 	}
 
 	return meta
@@ -83,7 +72,7 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses rarlist with UsenetFileSystem to analyze RAR structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
-func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []ParsedFile, password string) ([]rarContent, error) {
+func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string) ([]Content, error) {
 	if rh.poolManager == nil {
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
@@ -93,7 +82,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := NewUsenetFileSystem(ctx, rh.poolManager, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortFiles))
@@ -135,12 +124,12 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Convert rarlist results to RarContent
 	// Note: AES credentials are extracted per-file, not per-archive
-	rarContents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
+	Contents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to convert rarlist results to RarContent", err)
 	}
 
-	return rarContents, nil
+	return Contents, nil
 }
 
 // getFirstRarPart finds and returns the filename of the first part of a RAR archive
@@ -243,7 +232,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 	// Pattern 1: filename.part###.rar (e.g., movie.part001.rar, movie.part01.rar)
 	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
-		if partNum := parseInt(matches[2]); partNum >= 0 {
+		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			// Convert 1-based part numbers to 0-based (part001 becomes 0, part002 becomes 1)
 			if partNum > 0 {
 				part = partNum - 1
@@ -261,7 +250,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 	// Pattern 3: filename.r## or filename.r### (e.g., movie.r00, movie.r01)
 	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
-		if partNum := parseInt(matches[2]); partNum >= 0 {
+		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			// .r00 is part 0, .r01 is part 1, etc.
 			return base, partNum
 		}
@@ -270,7 +259,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 	// Pattern 4: filename.### (numeric extensions like .001, .002)
 	if matches := numericPattern.FindStringSubmatch(filename); len(matches) > 2 {
 		base = matches[1]
-		if partNum := parseInt(matches[2]); partNum >= 0 {
+		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
 			// .001 becomes part 0, .002 becomes part 1, etc.
 			if partNum > 0 {
 				part = partNum - 1
@@ -286,16 +275,16 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
 // Note: AES credentials are extracted per-file from each file's first part, similar to
 // the reference implementation in github.com/javi11/rardecode/blob/main/examples/rarextract/main.go
-func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []ParsedFile) ([]rarContent, error) {
-	// Build quick lookup for rar part ParsedFile by both full path and base name
-	fileIndex := make(map[string]*ParsedFile, len(rarFiles)*2)
+func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []parser.ParsedFile) ([]Content, error) {
+	// Build quick lookup for rar part parser.ParsedFile by both full path and base name
+	fileIndex := make(map[string]*parser.ParsedFile, len(rarFiles)*2)
 	for i := range rarFiles {
 		pf := &rarFiles[i]
 		fileIndex[pf.Filename] = pf
 		fileIndex[filepath.Base(pf.Filename)] = pf
 	}
 
-	out := make([]rarContent, 0, len(aggregatedFiles))
+	out := make([]Content, 0, len(aggregatedFiles))
 
 	for _, af := range aggregatedFiles {
 		// Normalize backslashes in path (Windows-style paths in RAR archives)
@@ -309,14 +298,10 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 			if firstPart.AesKey != nil {
 				aesKey = firstPart.AesKey
 				aesIV = firstPart.AesIV
-				rh.log.Debug("Extracted AES credentials for file",
-					"file", normalizedName,
-					"key_len", len(aesKey),
-					"iv_len", len(aesIV))
 			}
 		}
 
-		rc := rarContent{
+		rc := Content{
 			InternalPath: normalizedName,
 			Filename:     filepath.Base(normalizedName),
 			Size:         af.TotalPackedSize,
@@ -538,7 +523,7 @@ func stripLeadingZeros(s string) string {
 	return s[i:]
 }
 
-func renameRarFilesAndSort(rarFiles []ParsedFile) []ParsedFile {
+func renameRarFilesAndSort(rarFiles []parser.ParsedFile) []parser.ParsedFile {
 	// Get the base name of the first RAR file (without extension)
 	// We need to use the original suffix (with leading zeros) to properly extract the base name
 	firstFileBase := extractBaseFilename(rarFiles[0].Filename)

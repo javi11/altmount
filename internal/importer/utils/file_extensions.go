@@ -1,9 +1,10 @@
-package importer
+package utils
 
 import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -12,6 +13,13 @@ import (
 
 // This file provides helpers translated from https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/utils/file_extension.py for detecting
 // popular/likely file extensions, adapted to Go.
+
+var (
+	// Pattern to detect RAR files
+	rarPattern = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
+	// Pattern to detect 7zip files
+	sevenZipPattern = regexp.MustCompile(`(?i)\.7z$|\.7z\.\d+$`)
+)
 
 // popularExt and downloadExt are combined (unique) and dot-prefixed.
 var popularExt = []string{

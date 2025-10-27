@@ -546,12 +546,12 @@ func (s *Service) processNzbItem(item *database.ImportQueueItem) (string, error)
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
 	}
-	
+
 	// If category is specified, append it to the base path
 	if item.Category != nil && *item.Category != "" {
 		basePath = filepath.Join(basePath, *item.Category)
 	}
-	
+
 	return s.processor.ProcessNzbFile(item.NzbPath, basePath)
 }
 
@@ -964,7 +964,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	// (Don't use os.Stat on mount path as it might not be immediately available)
 	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
 	fileInfo, err := os.Stat(metadataPath)
-	
+
 	// If stat fails, check if it's a .meta file (single file case)
 	if err != nil {
 		// Try checking for .meta file
@@ -1019,10 +1019,10 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 
 		// Build the actual file path in the mount (mount root + virtual path)
 		actualFilePath := filepath.Join(cfg.MountPath, relPath)
-		
+
 		// The relPath already IS the full virtual path from root, so use it directly
 		fileResultingPath := relPath
-		
+
 		// Create symlink for this file using the helper function
 		if err := s.createSingleSymlink(item, actualFilePath, fileResultingPath); err != nil {
 			s.log.Error("Failed to create symlink",
@@ -1048,12 +1048,6 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 			"successful", symlinkCount)
 		// Don't fail the import, just log the warning
 	}
-
-	s.log.Debug("Created symlinks for directory",
-		"queue_id", item.ID,
-		"path", resultingPath,
-		"symlinks_created", symlinkCount,
-		"errors", len(symlinkErrors))
 
 	return nil
 }
@@ -1083,11 +1077,6 @@ func (s *Service) createSingleSymlink(item *database.ImportQueueItem, actualPath
 	if err := os.Symlink(actualPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
-
-	s.log.Info("Created symlink",
-		"queue_id", item.ID,
-		"target", actualPath,
-		"symlink", symlinkPath)
 
 	return nil
 }

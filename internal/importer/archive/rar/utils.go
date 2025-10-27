@@ -1,7 +1,9 @@
-package importer
+package rar
 
 import (
 	"regexp"
+
+	"github.com/javi11/altmount/internal/importer/archive"
 )
 
 var (
@@ -18,31 +20,18 @@ var (
 
 func getPartNumber(originalFileName string) int {
 	if matches := partPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		if num := parseInt(matches[1]); num >= 0 {
+		if num := archive.ParseInt(matches[1]); num >= 0 {
 			return num
 		}
 	} else if matches := rPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		if num := parseInt(matches[1]); num >= 0 {
+		if num := archive.ParseInt(matches[1]); num >= 0 {
 			return num + 1
 		}
 	} else if matches := numericPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		if num := parseInt(matches[1]); num >= 0 {
+		if num := archive.ParseInt(matches[1]); num >= 0 {
 			return num
 		}
 	}
 
 	return 0
-}
-
-// parseInt safely converts string to int
-func parseInt(s string) int {
-	num := 0
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			num = num*10 + int(r-'0')
-		} else {
-			return -1
-		}
-	}
-	return num
 }
