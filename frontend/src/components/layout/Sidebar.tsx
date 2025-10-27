@@ -59,7 +59,7 @@ export function Sidebar() {
 			case "/queue":
 				return queueStats ? queueStats.total_processing + queueStats.total_failed : 0;
 			case "/health":
-				return healthStats ? healthStats.corrupted + healthStats.partial : 0;
+				return healthStats ? healthStats.corrupted : 0;
 			default:
 				return 0;
 		}
@@ -106,8 +106,7 @@ export function Sidebar() {
 								key={item.name}
 								to={item.href}
 								className={({ isActive }) =>
-									`flex items-center space-x-3 rounded-lg px-4 py-3 transition-colors ${
-										isActive ? "bg-primary text-primary-content" : "hover:bg-base-300"
+									`flex items-center space-x-3 rounded-lg px-4 py-3 transition-colors ${isActive ? "bg-primary text-primary-content" : "hover:bg-base-300"
 									}`
 								}
 							>

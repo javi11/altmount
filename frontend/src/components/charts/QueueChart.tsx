@@ -68,8 +68,6 @@ export function HealthChart() {
 	}
 
 	const data = [
-		{ name: "Healthy", value: stats.healthy, fill: "#10b981" },
-		{ name: "Partial", value: stats.partial, fill: "#f59e0b" },
 		{ name: "Corrupted", value: stats.corrupted, fill: "#ef4444" },
 	];
 

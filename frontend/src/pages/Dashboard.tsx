@@ -98,7 +98,7 @@ export function Dashboard() {
 								<h2 className="card-title font-medium text-base-content/70 text-sm">File Health</h2>
 								{healthStats ? (
 									<div className="font-bold text-2xl text-success">
-										{healthStats.healthy} / {healthStats.total}
+										{healthStats.corrupted} / {healthStats.total}
 									</div>
 								) : (
 									<LoadingSpinner size="sm" />
