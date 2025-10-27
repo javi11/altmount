@@ -136,7 +136,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	// Process files in parallel using conc pool
 	for _, file := range validFiles {
 		concPool.Go(func() fileResult {
-			parsedFile, err := p.parseFile(file, n.Meta, n.Files, parsed.Filename, par2Descriptors)
+			parsedFile, err := p.parseFile(file, n.Meta, parsed.Filename, par2Descriptors)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -186,7 +186,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 }
 
 // parseFile processes a single file entry from the NZB
-func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile, nzbFilename string, par2Descriptors map[[16]byte]*PAR2FileDesc) (*ParsedFile, error) {
+func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, nzbFilename string, par2Descriptors map[[16]byte]*PAR2FileDesc) (*ParsedFile, error) {
 	sort.Sort(file.Segments)
 
 	// Fetch yEnc headers from the first segment to get correct filename and file size, some nzbs have wrong filename in the segments
@@ -258,7 +258,7 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		}
 	}
 
-	// Extract filename - priority: PAR2 match > yEnc headers > meta file_name > file.Filename
+	// Extract filename - priority: PAR2 match > meta file_name > yEnc headers > file.Filename
 	enc := metapb.Encryption_NONE // Default to no encryption
 
 	// Try PAR2 matching first if descriptors are available
@@ -287,10 +287,15 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 			if fSize, ok := meta["file_size"]; ok {
 				// This is a usenet-drive nzb with one file
 				metaFilename = strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
-				fileExt := filepath.Ext(metaFilename)
-				if fileExt == "" {
-					if fe, ok := meta["file_extension"]; ok {
-						metaFilename = metaFilename + fe
+
+				if fe, ok := meta["file_extension"]; ok {
+					metaFilename = metaFilename + fe
+				} else {
+					fileExt := filepath.Ext(metaFilename)
+					if fileExt == "" {
+						if fe, ok := meta["file_extension"]; ok {
+							metaFilename = metaFilename + fe
+						}
 					}
 				}
 
@@ -322,20 +327,6 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 			if metaCipher == string(encryption.RCloneCipherType) {
 				enc = metapb.Encryption_RCLONE
 			}
-		}
-	}
-
-	// Attempt deobfuscation if filename appears obfuscated
-	if IsProbablyObfuscated(filename) {
-		p.log.Debug("Attempting deobfuscation", "filename", filename, "subject", file.Subject)
-
-		// Attempt deobfuscation using all available files in the NZB
-		if result := p.deobfuscator.DeobfuscateFilename(filename, allFiles, file); result.Success {
-			filename = result.DeobfuscatedFilename
-		} else {
-			p.log.Warn("Unable to deobfuscate filename",
-				"filename", filename,
-				"subject", file.Subject)
 		}
 	}
 
@@ -634,8 +625,29 @@ func (p *Parser) ValidateNzb(parsed *ParsedNzb) error {
 	return nil
 }
 
+// hasPAR2MagicBytes checks if the provided data contains a valid PAR2 magic signature
+// The PAR2 format uses "PAR2\0PKT" as its magic bytes at the start of each packet
+func hasPAR2MagicBytes(data []byte) bool {
+	if len(data) < 8 {
+		return false
+	}
+
+	// Expected PAR2 magic signature: "PAR2\0PKT"
+	expectedMagic := [8]byte{'P', 'A', 'R', '2', 0, 'P', 'K', 'T'}
+
+	// Compare the first 8 bytes with the expected magic
+	for i := range 8 {
+		if data[i] != expectedMagic[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
 // extractPAR2Descriptors extracts file descriptors from PAR2 files in the NZB
 // Returns a map of File16kMD5 hash to PAR2FileDesc for fast lookup
+// Uses content-based detection by checking PAR2 magic bytes in the first 16KB of each file
 func (p *Parser) extractPAR2Descriptors(allFiles []nzbparser.NzbFile) map[[16]byte]*PAR2FileDesc {
 	descriptors := make(map[[16]byte]*PAR2FileDesc)
 
@@ -644,33 +656,74 @@ func (p *Parser) extractPAR2Descriptors(allFiles []nzbparser.NzbFile) map[[16]by
 		return descriptors
 	}
 
-	// Find the smallest PAR2 file (likely the index file, not a .vol file)
+	cp, err := p.poolManager.GetPool()
+	if err != nil {
+		p.log.Debug("Failed to get connection pool for PAR2 detection", "error", err)
+		return descriptors
+	}
+
+	// Find PAR2 files by checking magic bytes in first 16KB of each file
+	// Following nzbdav strategy: download first segment, check for PAR2 magic bytes
 	var smallestPAR2 *nzbparser.NzbFile
-	var smallestSize int64 = -1
+	var smallestSegmentCount int = -1
+
+	p.log.Debug("Scanning files for PAR2 magic bytes", "total_files", len(allFiles))
 
 	for i := range allFiles {
 		file := &allFiles[i]
-		// Look for .par2 files but exclude .vol files (recovery volumes)
-		if strings.HasSuffix(strings.ToLower(file.Filename), ".par2") &&
-			!strings.Contains(strings.ToLower(file.Filename), ".vol") {
 
-			// Calculate total file size from segments
-			var totalSize int64
-			for _, seg := range file.Segments {
-				totalSize += int64(seg.Bytes)
-			}
+		// Skip files without segments
+		if len(file.Segments) == 0 {
+			continue
+		}
 
-			if smallestSize == -1 || totalSize < smallestSize {
-				smallestSize = totalSize
+		// Download first 16KB of the first segment to check for PAR2 magic bytes
+		firstSegment := file.Segments[0]
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		r, err := cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+		if err != nil {
+			cancel()
+			p.log.Debug("Failed to get body reader for PAR2 detection",
+				"filename", file.Filename,
+				"error", err)
+			continue
+		}
+
+		// Read first 16KB
+		const maxRead = 16 * 1024
+		buffer := make([]byte, maxRead)
+		bytesRead, err := io.ReadAtLeast(r, buffer, 8) // Need at least 8 bytes for magic check
+		r.Close()
+		cancel()
+
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			p.log.Debug("Failed to read first segment for PAR2 detection",
+				"filename", file.Filename,
+				"error", err)
+			continue
+		}
+
+		// Check for PAR2 magic bytes
+		if bytesRead >= 8 && hasPAR2MagicBytes(buffer[:bytesRead]) {
+			segmentCount := len(file.Segments)
+
+			// Select the PAR2 file with the smallest segment count (likely the index file)
+			if smallestSegmentCount == -1 || segmentCount < smallestSegmentCount {
+				smallestSegmentCount = segmentCount
 				smallestPAR2 = file
 			}
 		}
 	}
 
 	if smallestPAR2 == nil {
-		p.log.Debug("No PAR2 index file found in NZB")
+		p.log.Debug("No PAR2 index file found in NZB (checked magic bytes)")
 		return descriptors
 	}
+
+	p.log.Debug("Selected PAR2 file for descriptor extraction",
+		"filename", smallestPAR2.Filename,
+		"segment_count", smallestSegmentCount)
 
 	// Download and parse the PAR2 file
 	parsed := p.parsePAR2File(*smallestPAR2)
@@ -754,10 +807,6 @@ func (p *Parser) parsePAR2File(par2File nzbparser.NzbFile) []PAR2FileDesc {
 			}
 		}
 	}
-
-	p.log.Debug("Completed PAR2 parsing",
-		"packets_processed", packetCount,
-		"descriptors_found", len(descriptors))
 
 	return descriptors
 }

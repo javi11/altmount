@@ -64,8 +64,6 @@ func (d *Deobfuscator) DeobfuscateFilename(filename string, allFiles []nzbparser
 		Method:               "none",
 	}
 
-	d.log.Debug("Attempting deobfuscation", "filename", filename)
-
 	// Strategy 1: Try to extract filename from PAR2 files if available
 	if par2Name := d.extractFromPar2Files(allFiles, filename); par2Name != "" {
 		result.DeobfuscatedFilename = par2Name
@@ -430,14 +428,10 @@ func (d *Deobfuscator) streamParsePAR2(r io.Reader, targetFilename string) strin
 		}
 
 		packetCount++
-		d.log.Debug("Found PAR2 packet",
-			"type", string(header.Type[:]),
-			"length", header.Length)
 
 		// Check if this is a file description packet
 		expectedFileDescType := [16]byte{'P', 'A', 'R', ' ', '2', '.', '0', 0, 'F', 'i', 'l', 'e', 'D', 'e', 's', 'c'}
 		if header.Type == expectedFileDescType {
-			d.log.Debug("Processing file description packet", "length", header.Length)
 
 			// Parse file description packet
 			fileDesc, err := d.parseFileDescPacket(r, header.Length)
@@ -447,25 +441,11 @@ func (d *Deobfuscator) streamParsePAR2(r io.Reader, targetFilename string) strin
 				continue
 			}
 
-			d.log.Debug("Found filename in PAR2",
-				"filename", fileDesc.Filename,
-				"file_length", fileDesc.FileLength)
-
 			// Check if this filename looks less obfuscated than target
 			if fileDesc.Filename != "" &&
 				fileDesc.Filename != targetFilename &&
 				!IsProbablyObfuscated(fileDesc.Filename) {
-				d.log.Debug("Found better filename in PAR2",
-					"original", targetFilename,
-					"par2_filename", fileDesc.Filename)
 				return fileDesc.Filename
-			}
-
-			// Even if obfuscated, if it's different, it might be useful
-			if fileDesc.Filename != "" && fileDesc.Filename != targetFilename {
-				d.log.Debug("Found alternative filename in PAR2 (may still be obfuscated)",
-					"filename", fileDesc.Filename)
-				// Continue looking for better options but remember this one
 			}
 		} else {
 			// Skip non-file-description packets by reading the remaining content
@@ -479,7 +459,6 @@ func (d *Deobfuscator) streamParsePAR2(r io.Reader, targetFilename string) strin
 		}
 	}
 
-	d.log.Debug("Completed PAR2 parsing", "packets_processed", packetCount)
 	return ""
 }
 
@@ -504,8 +483,6 @@ func (d *Deobfuscator) streamParsePAR2(r io.Reader, targetFilename string) strin
 // IsProbablyObfuscated returns true if the provided filename/path appears obfuscated.
 // See detailed heuristic description above.
 func IsProbablyObfuscated(input string) bool {
-	logger := slog.Default()
-
 	// Extract filename then its basename without extension
 	filename := filepath.Base(input)
 	ext := filepath.Ext(filename)
@@ -581,6 +558,5 @@ func IsProbablyObfuscated(input string) bool {
 		}
 	}
 
-	logger.Debug("obfuscation check: default -> obfuscated", "basename", filebasename)
 	return true
 }
