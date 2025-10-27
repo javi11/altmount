@@ -145,11 +145,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.Info("Arrs service is disabled in configuration")
 	}
 
-	// Start mount service
-	if err := startMountService(ctx, cfg, mountService, logger); err != nil {
-		logger.Warn("Mount service failed to start", "err", err)
-	}
-
 	// 9. Create HTTP server
 	customServer := createHTTPServer(app, webdavHandler, cfg.WebDAV.Port, cfg.ProfilerEnabled)
 
@@ -171,6 +166,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := customServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Custom server error", "error", err)
 			serverErr <- err
+		}
+	}()
+
+	// Start mount service after HTTP server is running
+	// This ensures the WebDAV server is ready to accept connections
+	go func() {
+		// Wait for HTTP server to be fully ready
+		time.Sleep(2 * time.Second)
+
+		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
+			logger.Warn("Mount service failed to start", "err", err)
 		}
 	}()
 

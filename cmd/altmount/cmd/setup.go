@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-pkgz/auth/v2/token"
@@ -373,7 +374,7 @@ func createHTTPServer(app *fiber.App, webdavHandler *webdav.Handler, port int, p
 		path := r.URL.Path
 
 		// Route profiler requests if enabled
-		if profilerEnabled && http.DefaultServeMux != nil {
+		if profilerEnabled && strings.HasPrefix(path, "/debug/pprof") {
 			http.DefaultServeMux.ServeHTTP(w, r)
 			return
 		}
