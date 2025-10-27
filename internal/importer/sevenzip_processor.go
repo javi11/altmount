@@ -1,7 +1,10 @@
 package importer
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -13,13 +16,16 @@ import (
 	"github.com/javi11/sevenzip"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
 )
 
 // SevenZipProcessor interface for analyzing 7zip content from NZB data
 type SevenZipProcessor interface {
 	// AnalyzeSevenZipContentFromNzb analyzes a 7zip archive directly from NZB data
 	// without downloading. Returns an array of SevenZipContent with file metadata and segments.
-	AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []ParsedFile) ([]sevenZipContent, error)
+	// password parameter is used to unlock password-protected 7zip archives.
+	AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []ParsedFile, password string) ([]sevenZipContent, error)
 	// CreateFileMetadataFromSevenZipContent creates FileMetadata from SevenZipContent for the metadata
 	// system. This is used to convert SevenZipContent into the protobuf format used by the metadata system.
 	CreateFileMetadataFromSevenZipContent(content sevenZipContent, sourceNzbPath string) *metapb.FileMetadata
@@ -32,6 +38,8 @@ type sevenZipContent struct {
 	Size         int64                 `json:"size"`
 	Segments     []*metapb.SegmentData `json:"segments"`               // Segment data for this file
 	IsDirectory  bool                  `json:"is_directory,omitempty"` // Indicates if this is a directory
+	AesKey       []byte                `json:"aes_key,omitempty"`      // AES encryption key (if encrypted)
+	AesIV        []byte                `json:"aes_iv,omitempty"`       // AES initialization vector (if encrypted)
 }
 
 // sevenZipProcessor handles 7zip archive analysis and content extraction
@@ -67,7 +75,7 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
-	return &metapb.FileMetadata{
+	meta := &metapb.FileMetadata{
 		FileSize:      content.Size,
 		SourceNzbPath: sourceNzbPath,
 		Status:        metapb.FileStatus_FILE_STATUS_HEALTHY,
@@ -75,12 +83,52 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 		ModifiedAt:    now,
 		SegmentData:   content.Segments,
 	}
+
+	// Set AES encryption if keys are present
+	if len(content.AesKey) > 0 {
+		meta.Encryption = metapb.Encryption_AES
+		meta.AesKey = content.AesKey
+		meta.AesIv = content.AesIV
+	}
+
+	return meta
+}
+
+// deriveAESKey derives the AES encryption key from a password using the 7-zip algorithm
+func (sz *sevenZipProcessor) deriveAESKey(password string, fileInfo sevenzip.FileInfo) ([]byte, error) {
+	// Build the input for hashing: salt + password (UTF-16LE)
+	b := bytes.NewBuffer(fileInfo.AESSalt)
+
+	// Convert password to UTF-16LE
+	utf16le := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
+	t := transform.NewWriter(b, utf16le.NewEncoder())
+	if _, err := t.Write([]byte(password)); err != nil {
+		return nil, fmt.Errorf("failed to encode password: %w", err)
+	}
+
+	// Calculate the key using SHA-256
+	key := make([]byte, sha256.Size)
+
+	if fileInfo.KDFIterations == 0 {
+		// Special case: no hashing, use data directly (padded/truncated to 32 bytes)
+		copy(key, b.Bytes())
+	} else {
+		// Apply SHA-256 hash in rounds
+		h := sha256.New()
+		for i := uint64(0); i < uint64(fileInfo.KDFIterations); i++ {
+			h.Write(b.Bytes())
+			binary.Write(h, binary.LittleEndian, i)
+		}
+		copy(key, h.Sum(nil))
+	}
+
+	return key, nil
 }
 
 // AnalyzeSevenZipContentFromNzb analyzes a 7zip archive directly from NZB data without downloading
 // This implementation uses sevenzip with UsenetFileSystem to analyze 7z structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
-func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []ParsedFile) ([]sevenZipContent, error) {
+func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []ParsedFile, password string) ([]sevenZipContent, error) {
 	if sz.poolManager == nil {
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
@@ -107,15 +155,25 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	sz.log.Info("Starting 7zip analysis",
 		"main_file", mainSevenZipFile,
 		"total_parts", len(sortedFiles),
-		"7z_files", len(sevenZipFiles))
+		"7z_files", len(sevenZipFiles),
+		"has_password", password != "")
 
 	// Create Afero adapter for the Usenet filesystem
 	aferoFS := NewAferoAdapter(ufs)
 
-	// Open 7zip archive using OpenReader with custom filesystem
-	reader, err := sevenzip.OpenReader(mainSevenZipFile, aferoFS)
-	if err != nil {
-		return nil, NewNonRetryableError("failed to open 7zip archive", err)
+	// Open 7zip archive using OpenReaderWithPassword if password provided
+	var reader *sevenzip.ReadCloser
+	if password != "" {
+		reader, err = sevenzip.OpenReaderWithPassword(mainSevenZipFile, password, aferoFS)
+		if err != nil {
+			return nil, NewNonRetryableError("failed to open password-protected 7zip archive", err)
+		}
+		sz.log.Info("Using password to unlock 7zip archive")
+	} else {
+		reader, err = sevenzip.OpenReader(mainSevenZipFile, aferoFS)
+		if err != nil {
+			return nil, NewNonRetryableError("failed to open 7zip archive", err)
+		}
 	}
 	defer reader.Close()
 
@@ -129,19 +187,42 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		return nil, NewNonRetryableError("no valid files found in 7zip archive. Compressed or encrypted archives are not supported", nil)
 	}
 
+	// Extract AES key/IV from first encrypted file if present
+	var aesKey, aesIV []byte
+	if password != "" {
+		for _, fi := range fileInfos {
+			if fi.Encrypted && len(fi.AESIV) > 0 {
+				aesIV = fi.AESIV
+				// Derive the AES key from the password using the 7-zip algorithm
+				derivedKey, err := sz.deriveAESKey(password, fi)
+				if err != nil {
+					return nil, NewNonRetryableError(fmt.Sprintf("failed to derive AES key for file %s", fi.Name), err)
+				}
+				aesKey = derivedKey
+				sz.log.Info("Detected AES-encrypted 7zip file",
+					"file", fi.Name,
+					"key_len", len(aesKey),
+					"iv_len", len(aesIV),
+					"kdf_iterations", fi.KDFIterations)
+				break
+			}
+		}
+	}
+
 	sz.log.Debug("Successfully analyzed 7zip archive",
 		"main_file", mainSevenZipFile,
-		"files_found", len(fileInfos))
+		"files_found", len(fileInfos),
+		"encrypted", len(aesIV) > 0)
 
 	// Convert sevenzip FileInfo results to sevenZipContent
-	contents, err := sz.convertFileInfosToSevenZipContent(fileInfos, sevenZipFiles)
+	contents, err := sz.convertFileInfosToSevenZipContent(fileInfos, sevenZipFiles, aesKey, aesIV)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to convert 7zip results to content", err)
 	}
 
 	// Verify we have valid files after filtering
 	if len(contents) == 0 {
-		return nil, NewNonRetryableError("no valid files found in 7zip archive after filtering. Only uncompressed, unencrypted files are supported", nil)
+		return nil, NewNonRetryableError("no valid files found in 7zip archive after filtering. Only uncompressed files are supported", nil)
 	}
 
 	return contents, nil
@@ -257,7 +338,7 @@ func (sz *sevenZipProcessor) parseSevenZipFilename(filename string) (base string
 
 
 // convertFileInfosToSevenZipContent converts sevenzip FileInfo results to sevenZipContent
-func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []sevenzip.FileInfo, sevenZipFiles []ParsedFile) ([]sevenZipContent, error) {
+func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []sevenzip.FileInfo, sevenZipFiles []ParsedFile, aesKey, aesIV []byte) ([]sevenZipContent, error) {
 	out := make([]sevenZipContent, 0, len(fileInfos))
 
 	for _, fi := range fileInfos {
@@ -274,20 +355,16 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 			continue
 		}
 
-		// Skip encrypted files - they cannot be directly streamed
-		if fi.Encrypted {
-			sz.log.Warn("Skipping encrypted file in 7zip archive (encryption not supported)", "path", fi.Name)
-			continue
-		}
-
 		// Normalize backslashes in path (Windows-style paths in 7zip archives)
 		normalizedName := strings.ReplaceAll(fi.Name, "\\", "/")
-		
+
 		content := sevenZipContent{
 			InternalPath: normalizedName,
 			Filename:     filepath.Base(normalizedName),
 			Size:         int64(fi.Size),
 			IsDirectory:  isDirectory,
+			AesKey:       aesKey,
+			AesIV:        aesIV,
 		}
 
 		// Map the file's offset and size to segments from the 7z parts

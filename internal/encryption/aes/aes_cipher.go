@@ -70,33 +70,24 @@ func (c *AesCipher) Open(
 		return nil, fmt.Errorf("AES IV not found in context")
 	}
 
-	// Get the encrypted data reader
-	// For AES-CBC, we need to handle the range carefully due to block alignment
-	start := int64(0)
-	end := encryptedFileSize - 1
-
-	if rh != nil {
-		start = rh.Start
-		if rh.End > 0 {
-			end = rh.End
-		}
-	}
-
-	// Get the underlying encrypted stream
-	encryptedReader, err := getReader(ctx, start, end)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get encrypted reader: %w", err)
-	}
-
 	// Calculate the decrypted size
 	// This is approximate due to padding
 	decryptedSize := encryptedFileSize
 
 	// Wrap with AES decryption
-	decryptReader, err := newAesDecryptReader(encryptedReader, key, iv, decryptedSize)
+	// The decrypt reader will lazily initialize the source reader when needed
+	decryptReader, err := newAesDecryptReader(ctx, getReader, key, iv, decryptedSize)
 	if err != nil {
-		encryptedReader.Close()
 		return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
+	}
+
+	// If a range header is provided, seek to the requested position
+	if rh != nil && rh.Start > 0 {
+		_, err := decryptReader.Seek(rh.Start, io.SeekStart)
+		if err != nil {
+			decryptReader.Close()
+			return nil, fmt.Errorf("failed to seek to start position: %w", err)
+		}
 	}
 
 	return decryptReader, nil

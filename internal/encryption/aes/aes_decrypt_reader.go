@@ -1,6 +1,7 @@
 package aes
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 // aesDecryptReader wraps an io.ReadCloser with AES-CBC decryption
 // Based on the implementation from rardecode example: github.com/javi11/rardecode/blob/main/examples/rarextract/main.go
 type aesDecryptReader struct {
+	ctx       context.Context
+	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error)
 	source    io.ReadCloser
 	key       []byte
 	iv        []byte
@@ -24,7 +27,12 @@ type aesDecryptReader struct {
 }
 
 // newAesDecryptReader creates a new AES-CBC decrypt reader
-func newAesDecryptReader(source io.ReadCloser, key, iv []byte, size int64) (*aesDecryptReader, error) {
+func newAesDecryptReader(
+	ctx context.Context,
+	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error),
+	key, iv []byte,
+	size int64,
+) (*aesDecryptReader, error) {
 	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
 		return nil, fmt.Errorf("invalid AES key size: %d (must be 16, 24, or 32 bytes)", len(key))
 	}
@@ -43,7 +51,9 @@ func newAesDecryptReader(source io.ReadCloser, key, iv []byte, size int64) (*aes
 	copy(ivCopy, iv)
 
 	return &aesDecryptReader{
-		source:    source,
+		ctx:       ctx,
+		getReader: getReader,
+		source:    nil, // Will be initialized lazily on first read
 		key:       key,
 		iv:        ivCopy,
 		origIV:    iv,
@@ -57,6 +67,15 @@ func newAesDecryptReader(source io.ReadCloser, key, iv []byte, size int64) (*aes
 func (r *aesDecryptReader) Read(p []byte) (int, error) {
 	if r.closed {
 		return 0, io.ErrClosedPipe
+	}
+
+	// Lazy initialization of source reader
+	if r.source == nil {
+		var err error
+		r.source, err = r.getReader(r.ctx, 0, r.size-1)
+		if err != nil {
+			return 0, fmt.Errorf("failed to initialize source reader: %w", err)
+		}
 	}
 
 	totalRead := 0
@@ -169,6 +188,12 @@ func (r *aesDecryptReader) Seek(offset int64, whence int) (int64, error) {
 		return abs, nil
 	}
 
+	// Close the current source if it exists
+	if r.source != nil {
+		r.source.Close()
+		r.source = nil
+	}
+
 	// Seeking requires recreating the decrypter with the correct IV
 	// For CBC mode: IV for block N = ciphertext of block N-1
 	blockNum := abs / int64(aes.BlockSize)
@@ -183,42 +208,38 @@ func (r *aesDecryptReader) Seek(offset int64, whence int) (int64, error) {
 	} else {
 		// Need to read the previous block's ciphertext to use as IV
 		prevBlockOffset := (blockNum - 1) * int64(aes.BlockSize)
+		prevBlockEnd := prevBlockOffset + int64(aes.BlockSize) - 1
 
-		// Seek in source to previous block
-		if seeker, ok := r.source.(io.Seeker); ok {
-			_, err := seeker.Seek(prevBlockOffset, io.SeekStart)
-			if err != nil {
-				return 0, fmt.Errorf("failed to seek in source: %w", err)
-			}
-		} else {
-			return 0, fmt.Errorf("source does not support seeking")
+		// Get a reader for the previous block
+		prevBlockReader, err := r.getReader(r.ctx, prevBlockOffset, prevBlockEnd)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get reader for IV block: %w", err)
 		}
+		defer prevBlockReader.Close()
 
 		// Read previous block as new IV
 		newIV = make([]byte, aes.BlockSize)
-		_, err := io.ReadFull(r.source, newIV)
+		_, err = io.ReadFull(prevBlockReader, newIV)
 		if err != nil {
 			return 0, fmt.Errorf("failed to read IV block: %w", err)
 		}
 	}
 
-	// Seek source to the target block
+	// Get a new reader starting at the target block
 	sourceOffset := blockNum * int64(aes.BlockSize)
-	if seeker, ok := r.source.(io.Seeker); ok {
-		_, err := seeker.Seek(sourceOffset, io.SeekStart)
-		if err != nil {
-			return 0, fmt.Errorf("failed to seek source to target: %w", err)
-		}
-	} else {
-		return 0, fmt.Errorf("source does not support seeking")
+	newSource, err := r.getReader(r.ctx, sourceOffset, r.size-1)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get reader for seek position: %w", err)
 	}
 
 	// Recreate decrypter with new IV
 	block, err := aes.NewCipher(r.key)
 	if err != nil {
+		newSource.Close()
 		return 0, fmt.Errorf("failed to recreate cipher: %w", err)
 	}
 
+	r.source = newSource
 	r.iv = newIV
 	r.decrypter = cipher.NewCBCDecrypter(block, newIV)
 	r.offset = blockNum * int64(aes.BlockSize)
@@ -244,6 +265,11 @@ func (r *aesDecryptReader) Close() error {
 	if r.closed {
 		return nil
 	}
+
 	r.closed = true
-	return r.source.Close()
+	if r.source != nil {
+		return r.source.Close()
+	}
+
+	return nil
 }

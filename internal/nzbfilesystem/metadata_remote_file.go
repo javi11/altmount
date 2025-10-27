@@ -832,12 +832,6 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 			return nil, fmt.Errorf("missing AES IV in metadata")
 		}
 
-		// Create usenet reader first for encrypted data
-		usenetReader, err := mvf.createUsenetReader(mvf.ctx, start, end)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create usenet reader for AES decryption: %w", err)
-		}
-
 		// Store AES key/IV in context for the cipher to use
 		ctx := context.WithValue(mvf.ctx, "aes_key", mvf.fileMeta.AesKey)
 		ctx = context.WithValue(ctx, "aes_iv", mvf.fileMeta.AesIv)
@@ -850,11 +844,11 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 			"", // password not used for AES
 			"", // salt not used for AES
 			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
-				return usenetReader, nil
+				// Create usenet reader first for encrypted data
+				return mvf.createUsenetReader(ctx, s, e)
 			},
 		)
 		if err != nil {
-			usenetReader.Close()
 			return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
 		}
 
