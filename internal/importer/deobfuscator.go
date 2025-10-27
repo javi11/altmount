@@ -338,24 +338,6 @@ func (d *Deobfuscator) IsDeobfuscationWorthwhile(filename string, allFiles []nzb
 	return true
 }
 
-// PAR2PacketHeader represents the header of a PAR2 packet
-type PAR2PacketHeader struct {
-	Magic      [8]byte  // "PAR2\0PKT"
-	Length     uint64   // Total packet length including header
-	MD5Hash    [16]byte // MD5 hash of packet
-	RecoveryID [16]byte // Recovery Set ID
-	Type       [16]byte // Packet type
-}
-
-// PAR2FileDesc represents a file description packet content
-type PAR2FileDesc struct {
-	FileID     [16]byte // Unique file identifier
-	FileMD5    [16]byte // MD5 hash of entire file
-	FirstMD5   [16]byte // MD5 hash of first 16KB
-	FileLength uint64   // File length in bytes
-	Filename   string   // Original filename (variable length)
-}
-
 // parsePAR2Header reads and validates a PAR2 packet header from a reader
 func (d *Deobfuscator) parsePAR2Header(r io.Reader) (*PAR2PacketHeader, error) {
 	header := &PAR2PacketHeader{}
@@ -391,8 +373,8 @@ func (d *Deobfuscator) parseFileDescPacket(r io.Reader, packetLength uint64) (*P
 	if err := binary.Read(r, binary.LittleEndian, &desc.FileMD5); err != nil {
 		return nil, fmt.Errorf("failed to read FileMD5: %w", err)
 	}
-	if err := binary.Read(r, binary.LittleEndian, &desc.FirstMD5); err != nil {
-		return nil, fmt.Errorf("failed to read FirstMD5: %w", err)
+	if err := binary.Read(r, binary.LittleEndian, &desc.File16kMD5); err != nil {
+		return nil, fmt.Errorf("failed to read File16kMD5: %w", err)
 	}
 	if err := binary.Read(r, binary.LittleEndian, &desc.FileLength); err != nil {
 		return nil, fmt.Errorf("failed to read FileLength: %w", err)

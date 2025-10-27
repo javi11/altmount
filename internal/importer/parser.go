@@ -2,6 +2,8 @@ package importer
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -71,6 +73,24 @@ var (
 	par2Pattern = regexp.MustCompile(`(?i)\.par2$|\.p\d+$|\.vol\d+\+\d+\.par2$`)
 )
 
+// PAR2PacketHeader represents the header of a PAR2 packet
+type PAR2PacketHeader struct {
+	Magic      [8]byte  // "PAR2\0PKT"
+	Length     uint64   // Total packet length including header
+	MD5Hash    [16]byte // MD5 hash of packet
+	RecoveryID [16]byte // Recovery Set ID
+	Type       [16]byte // Packet type
+}
+
+// PAR2FileDesc represents a file description packet content
+type PAR2FileDesc struct {
+	FileID     [16]byte // Unique file identifier
+	FileMD5    [16]byte // MD5 hash of entire file
+	File16kMD5 [16]byte // MD5 hash of first 16KB
+	FileLength uint64   // File length in bytes
+	Filename   string   // Original filename (variable length)
+}
+
 // Parser handles NZB file parsing
 type Parser struct {
 	poolManager  pool.Manager  // Pool manager for dynamic pool access
@@ -117,6 +137,10 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		}
 	}
 
+	// Extract PAR2 file descriptors before processing files
+	// This provides accurate filename and size information via MD5 hash matching
+	par2Descriptors := p.extractPAR2Descriptors(n.Files)
+
 	// Process each file in the NZB in parallel
 	// Filter out PAR2 files first
 	var validFiles []nzbparser.NzbFile
@@ -141,7 +165,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	// Process files in parallel using conc pool
 	for _, file := range validFiles {
 		concPool.Go(func() fileResult {
-			parsedFile, err := p.parseFile(file, n.Meta, n.Files, parsed.Filename)
+			parsedFile, err := p.parseFile(file, n.Meta, n.Files, parsed.Filename, par2Descriptors)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -191,7 +215,7 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 }
 
 // parseFile processes a single file entry from the NZB
-func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile, nzbFilename string) (*ParsedFile, error) {
+func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFiles []nzbparser.NzbFile, nzbFilename string, par2Descriptors map[[16]byte]*PAR2FileDesc) (*ParsedFile, error) {
 	sort.Sort(file.Segments)
 
 	// Fetch yEnc headers from the first segment to get correct filename and file size, some nzbs have wrong filename in the segments
@@ -263,13 +287,31 @@ func (p *Parser) parseFile(file nzbparser.NzbFile, meta map[string]string, allFi
 		}
 	}
 
-	// Extract filename - priority: yEnc headers > meta file_name > file.Filename
+	// Extract filename - priority: PAR2 match > yEnc headers > meta file_name > file.Filename
 	enc := metapb.Encryption_NONE // Default to no encryption
 
-	// Start with yEnc filename if available, otherwise use NZB filename
-	filename := yencFilename
-	if filename == "" || IsProbablyObfuscated(filename) {
-		filename = file.Filename
+	// Try PAR2 matching first if descriptors are available
+	var par2Matched *PAR2FileDesc
+	if len(par2Descriptors) > 0 {
+		par2Matched = p.matchFileToPAR2Descriptor(file, par2Descriptors)
+	}
+
+	// Start with PAR2 matched filename if available, then yEnc, otherwise use NZB filename
+	var filename string
+	if par2Matched != nil {
+		// PAR2 match is highest priority - use PAR2 filename and size
+		filename = par2Matched.Filename
+		totalSize = int64(par2Matched.FileLength)
+		p.log.Info("Using PAR2 descriptor for file info",
+			"subject", file.Subject,
+			"par2_filename", filename,
+			"par2_size", totalSize)
+	} else {
+		// Fallback to existing logic: yEnc > NZB filename
+		filename = yencFilename
+		if filename == "" || IsProbablyObfuscated(filename) {
+			filename = file.Filename
+		}
 	}
 
 	// Check metadata for overrides
@@ -622,5 +664,280 @@ func (p *Parser) ValidateNzb(parsed *ParsedNzb) error {
 		}
 	}
 
+	return nil
+}
+
+// extractPAR2Descriptors extracts file descriptors from PAR2 files in the NZB
+// Returns a map of File16kMD5 hash to PAR2FileDesc for fast lookup
+func (p *Parser) extractPAR2Descriptors(allFiles []nzbparser.NzbFile) map[[16]byte]*PAR2FileDesc {
+	descriptors := make(map[[16]byte]*PAR2FileDesc)
+
+	if p.poolManager == nil || !p.poolManager.HasPool() {
+		p.log.Debug("No pool manager available for PAR2 extraction")
+		return descriptors
+	}
+
+	// Find the smallest PAR2 file (likely the index file, not a .vol file)
+	var smallestPAR2 *nzbparser.NzbFile
+	var smallestSize int64 = -1
+
+	for i := range allFiles {
+		file := &allFiles[i]
+		// Look for .par2 files but exclude .vol files (recovery volumes)
+		if strings.HasSuffix(strings.ToLower(file.Filename), ".par2") &&
+			!strings.Contains(strings.ToLower(file.Filename), ".vol") {
+
+			// Calculate total file size from segments
+			var totalSize int64
+			for _, seg := range file.Segments {
+				totalSize += int64(seg.Bytes)
+			}
+
+			if smallestSize == -1 || totalSize < smallestSize {
+				smallestSize = totalSize
+				smallestPAR2 = file
+			}
+		}
+	}
+
+	if smallestPAR2 == nil {
+		p.log.Debug("No PAR2 index file found in NZB")
+		return descriptors
+	}
+
+	// Download and parse the PAR2 file
+	parsed := p.parsePAR2File(*smallestPAR2)
+	if len(parsed) == 0 {
+		p.log.Warn("Failed to extract any file descriptors from PAR2",
+			"filename", smallestPAR2.Filename)
+		return descriptors
+	}
+
+	// Build the lookup map
+	for i := range parsed {
+		desc := &parsed[i]
+		descriptors[desc.File16kMD5] = desc
+	}
+
+	return descriptors
+}
+
+// parsePAR2File downloads and parses a PAR2 file to extract file descriptors
+func (p *Parser) parsePAR2File(par2File nzbparser.NzbFile) []PAR2FileDesc {
+	var descriptors []PAR2FileDesc
+
+	if len(par2File.Segments) == 0 {
+		return descriptors
+	}
+
+	cp, err := p.poolManager.GetPool()
+	if err != nil {
+		p.log.Debug("Failed to get connection pool for PAR2 parsing", "error", err)
+		return descriptors
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	// Get the first segment to start parsing
+	firstSegment := par2File.Segments[0]
+	r, err := cp.BodyReader(ctx, firstSegment.ID, par2File.Groups)
+	if err != nil {
+		p.log.Debug("Failed to get body reader for PAR2 file", "error", err)
+		return descriptors
+	}
+	defer r.Close()
+
+	// Stream parse PAR2 packets
+	maxPackets := 100 // Limit the number of packets to process
+	packetCount := 0
+
+	for packetCount < maxPackets {
+		// Parse packet header
+		header, err := p.parsePAR2Header(r)
+		if err != nil {
+			p.log.Debug("Failed to parse PAR2 header or reached end", "error", err)
+			break
+		}
+
+		packetCount++
+
+		// Check if this is a file description packet
+		expectedFileDescType := [16]byte{'P', 'A', 'R', ' ', '2', '.', '0', 0, 'F', 'i', 'l', 'e', 'D', 'e', 's', 'c'}
+		if header.Type == expectedFileDescType {
+
+			// Parse file description packet
+			fileDesc, err := p.parseFileDescPacket(r, header.Length)
+			if err != nil {
+				p.log.Debug("Failed to parse file description packet", "error", err)
+				// Skip to next packet
+				continue
+			}
+
+			descriptors = append(descriptors, *fileDesc)
+			p.log.Debug("Found file in PAR2",
+				"filename", fileDesc.Filename,
+				"file_length", fileDesc.FileLength)
+		} else {
+			// Skip non-file-description packets
+			remainingBytes := header.Length - 64 // Header is 64 bytes
+			if remainingBytes > 0 {
+				if err := p.skipBytes(r, remainingBytes); err != nil {
+					p.log.Debug("Failed to skip packet content", "error", err)
+					break
+				}
+			}
+		}
+	}
+
+	p.log.Debug("Completed PAR2 parsing",
+		"packets_processed", packetCount,
+		"descriptors_found", len(descriptors))
+
+	return descriptors
+}
+
+// parsePAR2Header reads and validates a PAR2 packet header from a reader
+func (p *Parser) parsePAR2Header(r io.Reader) (*PAR2PacketHeader, error) {
+	header := &PAR2PacketHeader{}
+
+	// Read the header (8 + 8 + 16 + 16 + 16 = 64 bytes)
+	if err := binary.Read(r, binary.LittleEndian, header); err != nil {
+		return nil, fmt.Errorf("failed to read PAR2 header: %w", err)
+	}
+
+	// Validate magic signature
+	expectedMagic := [8]byte{'P', 'A', 'R', '2', 0, 'P', 'K', 'T'}
+	if header.Magic != expectedMagic {
+		return nil, fmt.Errorf("invalid PAR2 magic signature")
+	}
+
+	return header, nil
+}
+
+// parseFileDescPacket reads and parses a file description packet
+func (p *Parser) parseFileDescPacket(r io.Reader, packetLength uint64) (*PAR2FileDesc, error) {
+	// Calculate remaining bytes after header (64 bytes)
+	contentLength := packetLength - 64
+	if contentLength < 56 { // Minimum: 16 + 16 + 16 + 8 = 56 bytes for fixed fields
+		return nil, fmt.Errorf("file description packet too small: %d bytes", contentLength)
+	}
+
+	desc := &PAR2FileDesc{}
+
+	// Read fixed fields (56 bytes total)
+	if err := binary.Read(r, binary.LittleEndian, &desc.FileID); err != nil {
+		return nil, fmt.Errorf("failed to read FileID: %w", err)
+	}
+	if err := binary.Read(r, binary.LittleEndian, &desc.FileMD5); err != nil {
+		return nil, fmt.Errorf("failed to read FileMD5: %w", err)
+	}
+	if err := binary.Read(r, binary.LittleEndian, &desc.File16kMD5); err != nil {
+		return nil, fmt.Errorf("failed to read File16kMD5: %w", err)
+	}
+	if err := binary.Read(r, binary.LittleEndian, &desc.FileLength); err != nil {
+		return nil, fmt.Errorf("failed to read FileLength: %w", err)
+	}
+
+	// Read filename (remaining bytes)
+	filenameLength := contentLength - 56
+	if filenameLength > 0 {
+		filenameBytes := make([]byte, filenameLength)
+		if _, err := io.ReadFull(r, filenameBytes); err != nil {
+			return nil, fmt.Errorf("failed to read filename: %w", err)
+		}
+
+		// Remove padding bytes (PAR2 uses 4-byte alignment)
+		// Find the actual end of the filename by looking for null bytes
+		actualLength := filenameLength
+		for i := len(filenameBytes) - 1; i >= 0; i-- {
+			if filenameBytes[i] == 0 || filenameBytes[i] < 32 {
+				actualLength = uint64(i)
+			} else {
+				break
+			}
+		}
+
+		desc.Filename = string(filenameBytes[:actualLength])
+	}
+
+	return desc, nil
+}
+
+// skipBytes skips the specified number of bytes in the reader
+func (p *Parser) skipBytes(r io.Reader, n uint64) error {
+	if n == 0 {
+		return nil
+	}
+
+	// Use io.CopyN with a discard writer to skip bytes efficiently
+	_, err := io.CopyN(io.Discard, r, int64(n))
+	return err
+}
+
+// matchFileToPAR2Descriptor matches a file to its PAR2 descriptor using MD5 hash of first 16KB
+// Returns the matched descriptor if found, nil otherwise
+func (p *Parser) matchFileToPAR2Descriptor(
+	file nzbparser.NzbFile,
+	par2Descriptors map[[16]byte]*PAR2FileDesc,
+) *PAR2FileDesc {
+	// Can't match if no pool available or no segments
+	if p.poolManager == nil || !p.poolManager.HasPool() || len(file.Segments) == 0 {
+		return nil
+	}
+
+	cp, err := p.poolManager.GetPool()
+	if err != nil {
+		p.log.Debug("Failed to get connection pool for PAR2 matching", "error", err)
+		return nil
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	// Download first 16KB of the first segment
+	firstSegment := file.Segments[0]
+	r, err := cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+	if err != nil {
+		p.log.Debug("Failed to get body reader for PAR2 matching",
+			"subject", file.Subject,
+			"error", err)
+		return nil
+	}
+	defer r.Close()
+
+	// Read up to 16KB of data
+	const maxRead = 16 * 1024 // 16KB
+	buffer := make([]byte, maxRead)
+
+	bytesRead, err := io.ReadFull(r, buffer)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		p.log.Debug("Failed to read first 16KB for PAR2 matching",
+			"subject", file.Subject,
+			"error", err)
+		return nil
+	}
+
+	// If we read less than 16KB, use only what we read
+	if bytesRead < maxRead {
+		buffer = buffer[:bytesRead]
+	}
+
+	// Compute MD5 hash of the data
+	hash := md5.Sum(buffer)
+
+	// Look up in PAR2 descriptors map
+	if desc, found := par2Descriptors[hash]; found {
+		p.log.Info("Successfully matched file to PAR2 descriptor via MD5 hash",
+			"subject", file.Subject,
+			"par2_filename", desc.Filename,
+			"par2_size", desc.FileLength)
+		return desc
+	}
+
+	p.log.Debug("No PAR2 descriptor match found for file",
+		"subject", file.Subject)
 	return nil
 }
