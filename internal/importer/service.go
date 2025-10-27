@@ -541,10 +541,18 @@ func (s *Service) refreshMountPathIfNeeded(resultingPath string, itemID int64, l
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(item *database.ImportQueueItem) (string, error) {
+	// Determine the base path, incorporating category if present
+	basePath := ""
 	if item.RelativePath != nil {
-		return s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
+		basePath = *item.RelativePath
 	}
-	return s.processor.ProcessNzbFile(item.NzbPath, "")
+	
+	// If category is specified, append it to the base path
+	if item.Category != nil && *item.Category != "" {
+		basePath = filepath.Join(basePath, *item.Category)
+	}
+	
+	return s.processor.ProcessNzbFile(item.NzbPath, basePath)
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing
@@ -952,10 +960,20 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	// Get the actual metadata/mount path (where the content actually lives)
 	actualPath := filepath.Join(cfg.MountPath, resultingPath)
 
-	// Check if the path is a directory or file
-	fileInfo, err := os.Stat(actualPath)
+	// Check the metadata directory to determine if this is a file or directory
+	// (Don't use os.Stat on mount path as it might not be immediately available)
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	fileInfo, err := os.Stat(metadataPath)
+	
+	// If stat fails, check if it's a .meta file (single file case)
 	if err != nil {
-		return fmt.Errorf("failed to stat path: %w", err)
+		// Try checking for .meta file
+		metaFile := metadataPath + ".meta"
+		if _, metaErr := os.Stat(metaFile); metaErr == nil {
+			// It's a single file
+			return s.createSingleSymlink(item, actualPath, resultingPath)
+		}
+		return fmt.Errorf("failed to stat metadata path: %w", err)
 	}
 
 	if !fileInfo.IsDir() {
@@ -967,34 +985,48 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	var symlinkErrors []error
 	symlinkCount := 0
 
-	err = filepath.WalkDir(actualPath, func(path string, d fs.DirEntry, err error) error {
+	// Walk the metadata directory to find all files
+	err = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			s.log.Warn("Error accessing path during symlink creation",
+			s.log.Warn("Error accessing metadata path during symlink creation",
 				"path", path,
 				"error", err)
 			return nil // Continue walking
 		}
 
-		// Skip directories, we only create symlinks for files
+		// Skip directories, we only create symlinks for files (.meta files)
 		if d.IsDir() {
 			return nil
 		}
 
-		// Calculate relative path from actualPath
-		relPath, err := filepath.Rel(actualPath, path)
+		// Only process .meta files
+		if !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		// Calculate relative path from the root metadata directory (not metadataPath)
+		relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
 		if err != nil {
 			s.log.Error("Failed to calculate relative path",
 				"path", path,
-				"base", actualPath,
+				"base", cfg.Metadata.RootPath,
 				"error", err)
 			return nil // Continue walking
 		}
 
+		// Remove .meta extension to get the actual filename
+		relPath = strings.TrimSuffix(relPath, ".meta")
+
+		// Build the actual file path in the mount (mount root + virtual path)
+		actualFilePath := filepath.Join(cfg.MountPath, relPath)
+		
+		// The relPath already IS the full virtual path from root, so use it directly
+		fileResultingPath := relPath
+		
 		// Create symlink for this file using the helper function
-		fileResultingPath := filepath.Join(resultingPath, relPath)
-		if err := s.createSingleSymlink(item, path, fileResultingPath); err != nil {
+		if err := s.createSingleSymlink(item, actualFilePath, fileResultingPath); err != nil {
 			s.log.Error("Failed to create symlink",
-				"path", path,
+				"path", actualFilePath,
 				"error", err)
 			symlinkErrors = append(symlinkErrors, err)
 			return nil // Continue walking

@@ -503,11 +503,16 @@ func (proc *Processor) calculateVirtualDirectory(nzbPath, relativePath string) s
 	nzbPath = filepath.Clean(nzbPath)
 	relativePath = filepath.Clean(relativePath)
 
-	// Get relative path from watch root to NZB file
+	// Check if the NZB file is actually within the relativePath directory
+	// If not, treat relativePath as a direct virtual path (for manually uploaded files with category)
 	relPath, err := filepath.Rel(relativePath, nzbPath)
-	if err != nil {
-		// If we can't get relative path, default to root
-		return "/"
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		// Can't establish relationship or file is outside the relativePath
+		// Treat relativePath as a direct virtual directory path (e.g., category)
+		if strings.HasPrefix(relativePath, "/") {
+			return filepath.Clean(relativePath)
+		}
+		return "/" + strings.ReplaceAll(relativePath, string(filepath.Separator), "/")
 	}
 
 	// Get directory of NZB file (without filename)
