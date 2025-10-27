@@ -47,6 +47,37 @@ func ApplyLogLevel(level string) {
 	}
 }
 
+// getEffectiveLogLevel returns the effective log level, preferring new config over legacy
+func getEffectiveLogLevel(newLevel, legacyLevel string) string {
+	if newLevel != "" {
+		return newLevel
+	}
+	if legacyLevel != "" {
+		return legacyLevel
+	}
+	return "info"
+}
+
+// RegisterLogLevelHandler registers handler for log level configuration changes
+func RegisterLogLevelHandler(configManager *config.Manager, debugMode *bool, logger *slog.Logger) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		// Determine old and new log levels
+		oldLevel := getEffectiveLogLevel(oldConfig.Log.Level, oldConfig.Log.Level)
+		newLevel := getEffectiveLogLevel(newConfig.Log.Level, newConfig.Log.Level)
+
+		// Apply log level change if it changed
+		if oldLevel != newLevel {
+			ApplyLogLevel(newLevel)
+			// Update Fiber logger debug mode
+			*debugMode = newLevel == "debug"
+			logger.Info("Log level updated dynamically",
+				"old_level", oldLevel,
+				"new_level", newLevel,
+				"fiber_logging", *debugMode)
+		}
+	})
+}
+
 // handleGetConfig returns the current configuration
 func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {

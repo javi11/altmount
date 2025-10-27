@@ -114,16 +114,10 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		s.LastError = nil
 	})
 
-	hw.logger.Info("Starting health worker",
-		"check_interval", hw.getCheckInterval(),
-		"max_concurrent_jobs", hw.getMaxConcurrentJobs())
-
 	// Initialize health system - reset any files stuck in 'checking' status
 	if err := hw.healthRepo.ResetFileAllChecking(); err != nil {
 		hw.logger.Error("Failed to reset checking files during initialization", "error", err)
 		// Don't fail startup for this - just log and continue
-	} else {
-		hw.logger.Info("Health system initialized - reset any files from 'checking' to 'pending' status")
 	}
 
 	// Start the main worker goroutine
@@ -138,7 +132,7 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		s.Status = WorkerStatusRunning
 	})
 
-	hw.logger.Info("Health worker started successfully")
+	hw.logger.Info("Health worker started successfully", "check_interval", hw.getCheckInterval(), "max_concurrent_jobs", hw.getMaxConcurrentJobs())
 	return nil
 }
 

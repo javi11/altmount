@@ -1,5 +1,11 @@
 package webdav
 
+import (
+	"log/slog"
+
+	"github.com/javi11/altmount/internal/config"
+)
+
 type Config struct {
 	// Port is the port where the webdav server will be listening
 	Port int `yaml:"port" default:"8080" mapstructure:"port"`
@@ -9,4 +15,17 @@ type Config struct {
 	Pass string `yaml:"password" default:"usenet" json:"-" mapstructure:"password"`
 	// Prefix is the URL path prefix for the WebDAV server
 	Prefix string `yaml:"prefix" default:"/webdav/" mapstructure:"prefix"`
+}
+
+// RegisterConfigHandlers registers handlers for WebDAV-related configuration changes
+func RegisterConfigHandlers(configManager *config.Manager, handler *Handler, logger *slog.Logger) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		// Sync WebDAV auth credentials if they changed
+		if oldConfig.WebDAV.User != newConfig.WebDAV.User || oldConfig.WebDAV.Password != newConfig.WebDAV.Password {
+			handler.SyncAuthCredentials()
+			logger.Info("WebDAV auth credentials updated",
+				"old_user", oldConfig.WebDAV.User,
+				"new_user", newConfig.WebDAV.User)
+		}
+	})
 }

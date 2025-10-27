@@ -117,9 +117,6 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("service is already started")
 	}
 
-	s.log.InfoContext(ctx, "Starting NZB import service",
-		"workers", s.config.Workers)
-
 	// Reset any stale queue items from processing/retrying back to pending
 	if err := s.database.Repository.ResetStaleItems(); err != nil {
 		s.log.ErrorContext(ctx, "Failed to reset stale queue items", "error", err)
@@ -133,7 +130,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	s.running = true
-	s.log.InfoContext(ctx, "NZB import service started successfully")
+	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
 	return nil
 }
@@ -423,7 +420,6 @@ func (s *Service) workerLoop(workerID int) {
 	// Get processing interval from configuration
 	processingIntervalSeconds := s.configGetter().Import.QueueProcessingIntervalSeconds
 	processingInterval := time.Duration(processingIntervalSeconds) * time.Second
-	log.Info("Queue worker started", "processing_interval", processingInterval)
 
 	ticker := time.NewTicker(processingInterval)
 	defer ticker.Stop()
