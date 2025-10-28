@@ -96,6 +96,17 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	// This cache is used by both PAR2 extraction and file parsing to avoid redundant fetches
 	firstSegmentCache := p.fetchAllFirstSegments(n.Files)
 
+	// Create a map of first segment ID to PartSize for optimization in normalizeSegmentSizesWithYenc
+	// This avoids redundant fetching of yEnc headers for the first segment
+	firstSegmentSizeCache := make(map[string]int64)
+	for _, data := range firstSegmentCache {
+		if data != nil && data.File != nil && !data.MissingFirstSegment && len(data.File.Segments) > 0 {
+			if data.Headers.PartSize > 0 {
+				firstSegmentSizeCache[data.File.Segments[0].ID] = int64(data.Headers.PartSize)
+			}
+		}
+	}
+
 	// Extract PAR2 file descriptors before processing files
 	// This provides accurate filename and size information via MD5 hash matching
 	// Convert firstSegmentCache to par2.FirstSegmentData format
@@ -121,6 +132,16 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	// Skip files with missing first segments as they cannot be processed
 	filesWithFirstSegment := make([]*fileinfo.NzbFileWithFirstSegment, 0, len(firstSegmentCache))
 	for _, data := range firstSegmentCache {
+		// Skip files with missing first segment data
+		// These files can't be properly processed (no PAR2 matching, no yEnc size data, no magic bytes)
+		if data == nil || data.File == nil || data.MissingFirstSegment {
+			if data != nil && data.File != nil {
+				p.log.Warn("Skipping file with missing first segment data",
+					"subject", data.File.Subject)
+			}
+			continue
+		}
+
 		filesWithFirstSegment = append(filesWithFirstSegment, &fileinfo.NzbFileWithFirstSegment{
 			NzbFile:     data.File,
 			Headers:     &data.Headers,
@@ -141,7 +162,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	// Process files in parallel using conc pool
 	for _, info := range fileInfos {
 		concPool.Go(func() fileResult {
-			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info)
+			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache)
 
 			return fileResult{
 				parsedFile: parsedFile,
@@ -192,13 +213,18 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 
 // parseFile processes a single file entry from the NZB
 // Uses fileInfo for filename, size, and type information
-func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo) (*ParsedFile, error) {
+// firstSegmentSizeCache contains pre-fetched yEnc PartSize values for first segments to avoid redundant fetching
+func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilename string, info *fileinfo.FileInfo, firstSegmentSizeCache map[string]int64) (*ParsedFile, error) {
 	sort.Sort(info.NzbFile.Segments)
 
 	// Normalize segment sizes using yEnc PartSize headers if needed
 	// This handles cases where NZB segment sizes include yEnc encoding overhead
 	if p.poolManager != nil && p.poolManager.HasPool() {
-		err := p.normalizeSegmentSizesWithYenc(ctx, info.NzbFile.Segments)
+		// Look up cached first segment size to avoid redundant fetching
+		// Safe to access Segments[0] since files without segments are filtered earlier
+		cachedFirstSegmentSize := firstSegmentSizeCache[info.NzbFile.Segments[0].ID]
+
+		err := p.normalizeSegmentSizesWithYenc(ctx, info.NzbFile.Segments, cachedFirstSegmentSize)
 		if err != nil {
 			// Log the error but continue with original segment sizes
 			// This ensures processing continues even if yEnc header fetching fails
@@ -479,9 +505,6 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 	// Build cache from all fetches (successful and failed)
 	for _, result := range results {
 		if result.err != nil {
-			p.log.Info("Failed to fetch first segment, marking as missing",
-				"segment_id", result.segmentID,
-				"error", result.err)
 			// Add the data with MissingFirstSegment=true to track the failure
 			if result.data != nil {
 				cache = append(cache, result.data)
@@ -549,44 +572,31 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
 // This handles cases where NZB segment sizes include yEnc overhead
-func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []nzbparser.NzbSegment) error {
+// cachedFirstSegmentSize is the pre-fetched PartSize for the first segment (guaranteed to be > 0)
+func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []nzbparser.NzbSegment, cachedFirstSegmentSize int64) error {
 	if len(segments) == 1 {
-		firstPartHeaders, err := p.fetchYencHeaders(ctx, segments[0], nil)
-		if err != nil {
-			return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
-		}
-
-		segments[0].Bytes = int(firstPartHeaders.PartSize)
-
+		// Use cached first segment size (guaranteed to exist after filtering)
+		segments[0].Bytes = int(cachedFirstSegmentSize)
 		return nil
 	}
 
 	// Handle files with exactly 2 segments (first and last only)
 	if len(segments) == 2 {
-		// Fetch PartSize from first segment
-		firstPartHeaders, err := p.fetchYencHeaders(ctx, segments[0], nil)
-		if err != nil {
-			return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
-		}
+		// Use cached first segment size (guaranteed to exist after filtering)
+		segments[0].Bytes = int(cachedFirstSegmentSize)
 
 		// Fetch PartSize from last segment
 		lastPartHeaders, err := p.fetchYencHeaders(ctx, segments[1], nil)
 		if err != nil {
 			return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
 		}
-
-		segments[0].Bytes = int(firstPartHeaders.PartSize)
 		segments[1].Bytes = int(lastPartHeaders.PartSize)
 
 		return nil
 	}
 
-	// Fetch PartSize from first segment
-	firstPartHeaders, err := p.fetchYencHeaders(ctx, segments[0], nil)
-	if err != nil {
-		return fmt.Errorf("failed to fetch first segment yEnc part size: %w", err)
-	}
-	firstPartSize := int64(firstPartHeaders.PartSize)
+	// Use cached first segment size (guaranteed to exist after filtering)
+	firstPartSize := cachedFirstSegmentSize
 
 	// Fetch PartSize from second segment (this represents the "standard" segment size)
 	secondPartHeaders, err := p.fetchYencHeaders(ctx, segments[1], nil)

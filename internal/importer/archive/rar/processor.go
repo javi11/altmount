@@ -24,6 +24,33 @@ func NewNonRetryableError(message string, cause error) error {
 	return fmt.Errorf("%s", message)
 }
 
+// isIncompleteRarError checks if an error indicates an incomplete RAR archive with missing volume segments
+func isIncompleteRarError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errMsg := strings.ToLower(err.Error())
+
+	// Check for various indicators of incomplete RAR archives
+	indicators := []string{
+		"bad volume number",
+		"bad volume",
+		"volume not found",
+		"missing volume",
+		"incomplete archive",
+		"archive continues in next volume",
+	}
+
+	for _, indicator := range indicators {
+		if strings.Contains(errMsg, indicator) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
 	log            *slog.Logger
@@ -106,6 +133,12 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
 	if err != nil {
+		// Check if error indicates incomplete RAR archive with missing volume segments
+		if isIncompleteRarError(err) {
+			return nil, NewNonRetryableError(
+				"incomplete RAR archive: missing one or more segments.",
+				err)
+		}
 		return nil, NewNonRetryableError("failed to aggregate RAR files", err)
 	}
 
