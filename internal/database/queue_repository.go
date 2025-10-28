@@ -48,7 +48,7 @@ func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 		started_at = NULL,
 		updated_at = datetime('now'),
 		relative_path = excluded.relative_path
-		WHERE status NOT IN ('processing', 'retrying', 'pending')
+		WHERE status NOT IN ('processing', 'pending')
 	`
 
 	result, err := r.db.Exec(query,
@@ -84,9 +84,9 @@ func (r *QueueRepository) AddStoragePath(itemID int64, storagePath string) error
 	return nil
 }
 
-// IsFileInQueue checks if a file is already in the queue (pending, retrying, or processing)
+// IsFileInQueue checks if a file is already in the queue (pending or processing)
 func (r *QueueRepository) IsFileInQueue(filePath string) (bool, error) {
-	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'retrying', 'processing') LIMIT 1`
+	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing') LIMIT 1`
 
 	var exists int
 	err := r.db.QueryRow(query, filePath).Scan(&exists)
@@ -109,9 +109,8 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		// First, get the next available item ID within the transaction
 		var itemID int64
 		selectQuery := `
-			SELECT id FROM import_queue 
-			WHERE status IN ('pending', 'retrying') 
-			  AND retry_count < max_retries
+			SELECT id FROM import_queue
+			WHERE status = 'pending'
 			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
 			ORDER BY priority ASC, created_at ASC
 			LIMIT 1
@@ -128,9 +127,9 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 
 		// Now atomically update that specific item and get all its data
 		updateQuery := `
-			UPDATE import_queue 
+			UPDATE import_queue
 			SET status = 'processing', started_at = datetime('now'), updated_at = datetime('now')
-			WHERE id = ? AND status IN ('pending', 'retrying')
+			WHERE id = ? AND status = 'pending'
 		`
 
 		result, err := txRepo.db.Exec(updateQuery, itemID)
@@ -190,8 +189,8 @@ func (r *QueueRepository) UpdateQueueItemStatus(id int64, status QueueStatus, er
 	case QueueStatusCompleted:
 		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
 		args = []interface{}{status, now, now, id}
-	case QueueStatusFailed, QueueStatusRetrying:
-		query = `UPDATE import_queue SET status = ?, retry_count = retry_count + 1, error_message = ?, updated_at = ? WHERE id = ?`
+	case QueueStatusFailed:
+		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
 		args = []interface{}{status, errorMessage, now, id}
 	default:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
@@ -355,12 +354,12 @@ func (r *QueueRepository) withQueueTransaction(fn func(*QueueRepository) error) 
 	return nil
 }
 
-// ResetStaleItems resets processing and retrying items back to pending on service startup
+// ResetStaleItems resets processing items back to pending on service startup
 func (r *QueueRepository) ResetStaleItems() error {
 	query := `
-		UPDATE import_queue 
+		UPDATE import_queue
 		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
-		WHERE status IN ('processing', 'retrying')
+		WHERE status = 'processing'
 	`
 
 	result, err := r.db.Exec(query)
@@ -375,7 +374,7 @@ func (r *QueueRepository) ResetStaleItems() error {
 
 	if rowsAffected > 0 {
 		// Log the reset operation for operational visibility
-		fmt.Printf("Reset %d stale queue items from processing/retrying to pending\n", rowsAffected)
+		fmt.Printf("Reset %d stale queue items from processing to pending\n", rowsAffected)
 	}
 
 	return nil

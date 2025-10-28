@@ -403,7 +403,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		items, err := s.queueRepo.ListQueueItems(nil, "", "", 50, 0)
 		if err == nil {
 			for i, item := range items {
-				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing || item.Status == database.QueueStatusRetrying {
+				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing {
 					slots = append(slots, ToSABnzbdQueueSlot(item, i))
 				}
 			}

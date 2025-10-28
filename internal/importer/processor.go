@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -14,6 +15,10 @@ import (
 	"github.com/javi11/altmount/internal/importer/steps"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+)
+
+const (
+	strmFileExtension = ".strm"
 )
 
 // Processor handles the processing and storage of parsed NZB files using metadata storage
@@ -56,7 +61,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
 func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string) (string, error) {
-	// Open and parse the file
+	// Step 1: Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", NewNonRetryableError("failed to open file", err)
@@ -66,7 +71,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	var parsed *parser.ParsedNzb
 
 	// Determine file type and parse accordingly
-	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
+	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
 		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
 		if err != nil {
 			return "", NewNonRetryableError("failed to parse STRM file", err)
@@ -77,7 +82,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 			return "", NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
-		parsed, err = proc.parser.ParseFile(file, filePath)
+		parsed, err = proc.parser.ParseFile(ctx, file, filePath)
 		if err != nil {
 			return "", NewNonRetryableError("failed to parse NZB file", err)
 		}
@@ -88,12 +93,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		}
 	}
 
-	// Calculate the relative virtual directory path for this file
+	// Step 2: Calculate virtual directory
 	virtualDir := steps.CalculateVirtualDirectory(filePath, relativePath)
-
-	// Initialize batch tracking map for this import
-	// Tracks all files created in this import to handle collisions correctly
-	currentBatchFiles := make(map[string]bool)
 
 	proc.log.Info("Processing file",
 		"file_path", filePath,
@@ -102,47 +103,227 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		"total_size", parsed.TotalSize,
 		"files", len(parsed.Files))
 
-	// Create processing context
-	pctx := &steps.ProcessingContext{
-		Parsed:       parsed,
-		VirtualDir:   virtualDir,
-		CurrentBatch: currentBatchFiles,
-		Processor:    proc,
-	}
+	// Step 3: Separate files by type (regular, archive, PAR2)
+	regularFiles, archiveFiles, _ := steps.SeparateFiles(parsed.Files, parsed.Type)
 
-	// Select and execute pipeline based on file type
-	pipeline := proc.getPipelineForType(parsed.Type)
-	if pipeline == nil {
+	// Step 4: Process based on file type
+	switch parsed.Type {
+	case parser.NzbTypeSingleFile:
+		return proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+
+	case parser.NzbTypeMultiFile:
+		return proc.processMultiFile(ctx, virtualDir, regularFiles, parsed.Path)
+
+	case parser.NzbTypeRarArchive:
+		return proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed)
+
+	case parser.NzbType7zArchive:
+		return proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed)
+
+	case parser.NzbTypeStrm:
+		return proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+
+	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
-
-	return pipeline.Execute(ctx, pctx)
 }
 
-// getPipelineForType returns the appropriate pipeline for a given file type
-func (proc *Processor) getPipelineForType(fileType parser.NzbType) *steps.Pipeline {
-	cfg := &steps.PipelineConfig{
-		MetadataService:         proc.metadataService,
-		RarProcessor:            proc.rarProcessor,
-		SevenZipProcessor:       proc.sevenZipProcessor,
-		PoolManager:             proc.poolManager,
-		MaxValidationGoroutines: proc.maxValidationGoroutines,
-		FullSegmentValidation:   proc.fullSegmentValidation,
-		Log:                     proc.log,
+// processSingleFile handles single file imports
+func (proc *Processor) processSingleFile(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	nzbPath string,
+) (string, error) {
+	if len(regularFiles) == 0 {
+		return "", fmt.Errorf("no regular files to process")
 	}
 
-	switch fileType {
-	case parser.NzbTypeSingleFile:
-		return steps.BuildSingleFilePipeline(cfg)
-	case parser.NzbTypeMultiFile:
-		return steps.BuildMultiFilePipeline(cfg)
-	case parser.NzbTypeRarArchive:
-		return steps.BuildRarArchivePipeline(cfg)
-	case parser.NzbType7zArchive:
-		return steps.BuildSevenZipArchivePipeline(cfg)
-	case parser.NzbTypeStrm:
-		return steps.BuildStrmFilePipeline(cfg)
-	default:
-		return nil
+	// Ensure directory exists
+	if err := steps.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+		return "", err
 	}
+
+	// Process the single file
+	return steps.ProcessSingleFile(
+		ctx,
+		virtualDir,
+		regularFiles[0],
+		nzbPath,
+		proc.metadataService,
+		proc.poolManager,
+		proc.maxValidationGoroutines,
+		proc.fullSegmentValidation,
+		proc.log,
+	)
+}
+
+// processMultiFile handles multi-file imports
+func (proc *Processor) processMultiFile(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	nzbPath string,
+) (string, error) {
+	// Create NZB folder
+	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	if err != nil {
+		return "", err
+	}
+
+	// Create directories for files
+	if err := steps.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+		return "", err
+	}
+
+	// Process all regular files
+	if err := steps.ProcessRegularFiles(
+		ctx,
+		nzbFolder,
+		regularFiles,
+		nzbPath,
+		proc.metadataService,
+		proc.poolManager,
+		proc.maxValidationGoroutines,
+		proc.fullSegmentValidation,
+		proc.log,
+	); err != nil {
+		return "", err
+	}
+
+	return nzbFolder, nil
+}
+
+// processRarArchive handles RAR archive imports
+func (proc *Processor) processRarArchive(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	archiveFiles []parser.ParsedFile,
+	parsed *parser.ParsedNzb,
+) (string, error) {
+	// Create NZB folder
+	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
+	if err != nil {
+		return "", err
+	}
+
+	// Process regular files first if any
+	if len(regularFiles) > 0 {
+		if err := steps.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+			return "", err
+		}
+
+		if err := steps.ProcessRegularFiles(
+			ctx,
+			nzbFolder,
+			regularFiles,
+			parsed.Path,
+			proc.metadataService,
+			proc.poolManager,
+			proc.maxValidationGoroutines,
+			proc.fullSegmentValidation,
+			proc.log,
+		); err != nil {
+			return "", err
+		}
+	}
+
+	// Analyze and process RAR archive
+	if len(archiveFiles) > 0 {
+		rarContents, err := steps.AnalyzeRarArchive(
+			ctx,
+			archiveFiles,
+			parsed.GetPassword(),
+			proc.rarProcessor,
+			proc.log,
+		)
+		if err != nil {
+			return "", err
+		}
+
+		if err := steps.ProcessRarArchiveFiles(
+			ctx,
+			nzbFolder,
+			rarContents,
+			parsed.Path,
+			proc.rarProcessor,
+			proc.metadataService,
+			proc.poolManager,
+			proc.maxValidationGoroutines,
+			proc.fullSegmentValidation,
+			proc.log,
+		); err != nil {
+			return "", err
+		}
+	}
+
+	return nzbFolder, nil
+}
+
+// processSevenZipArchive handles 7zip archive imports
+func (proc *Processor) processSevenZipArchive(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	archiveFiles []parser.ParsedFile,
+	parsed *parser.ParsedNzb,
+) (string, error) {
+	// Create NZB folder
+	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
+	if err != nil {
+		return "", err
+	}
+
+	// Process regular files first if any
+	if len(regularFiles) > 0 {
+		if err := steps.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+			return "", err
+		}
+
+		if err := steps.ProcessRegularFiles(
+			ctx,
+			nzbFolder,
+			regularFiles,
+			parsed.Path,
+			proc.metadataService,
+			proc.poolManager,
+			proc.maxValidationGoroutines,
+			proc.fullSegmentValidation,
+			proc.log,
+		); err != nil {
+			return "", err
+		}
+	}
+
+	// Analyze and process 7zip archive
+	if len(archiveFiles) > 0 {
+		sevenZipContents, err := steps.AnalyzeSevenZipArchive(
+			ctx,
+			archiveFiles,
+			parsed.GetPassword(),
+			proc.sevenZipProcessor,
+			proc.log,
+		)
+		if err != nil {
+			return "", err
+		}
+
+		if err := steps.ProcessSevenZipArchiveFiles(
+			ctx,
+			nzbFolder,
+			sevenZipContents,
+			parsed.Path,
+			proc.sevenZipProcessor,
+			proc.metadataService,
+			proc.poolManager,
+			proc.maxValidationGoroutines,
+			proc.fullSegmentValidation,
+			proc.log,
+		); err != nil {
+			return "", err
+		}
+	}
+
+	return nzbFolder, nil
 }

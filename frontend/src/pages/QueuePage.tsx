@@ -441,7 +441,6 @@ export function QueuePage() {
 								<option value={QueueStatus.PROCESSING}>Processing</option>
 								<option value={QueueStatus.COMPLETED}>Completed</option>
 								<option value={QueueStatus.FAILED}>Failed</option>
-								<option value={QueueStatus.RETRYING}>Retrying</option>
 							</select>
 						</fieldset>
 					</div>
@@ -567,8 +566,7 @@ export function QueuePage() {
 											)}
 										</td>
 										<td>
-											{(item.status === QueueStatus.FAILED ||
-												item.status === QueueStatus.RETRYING) &&
+											{item.status === QueueStatus.FAILED &&
 											item.error_message ? (
 												<div
 													className="tooltip tooltip-top"

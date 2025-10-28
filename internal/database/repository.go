@@ -140,11 +140,10 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 	// Use a CTE to select items and immediately mark them as claimed to avoid race conditions
 	query := `
 		WITH selected_items AS (
-			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
+			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
-			FROM import_queue 
-			WHERE status IN ('pending', 'retrying') 
-			  AND retry_count < max_retries
+			FROM import_queue
+			WHERE status = 'pending'
 			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
 			ORDER BY priority ASC, created_at ASC
 			LIMIT ?
@@ -185,9 +184,8 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		// First, get the next available item ID within the transaction
 		var itemID int64
 		selectQuery := `
-			SELECT id FROM import_queue 
-			WHERE status IN ('pending', 'retrying') 
-			  AND retry_count < max_retries
+			SELECT id FROM import_queue
+			WHERE status = 'pending'
 			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
 			ORDER BY priority ASC, created_at ASC
 			LIMIT 1
@@ -204,9 +202,9 @@ func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 
 		// Now atomically update that specific item and get all its data
 		updateQuery := `
-			UPDATE import_queue 
+			UPDATE import_queue
 			SET status = 'processing', started_at = datetime('now'), updated_at = datetime('now')
-			WHERE id = ? AND status IN ('pending', 'retrying')
+			WHERE id = ? AND status = 'pending'
 		`
 
 		result, err := txRepo.db.Exec(updateQuery, itemID)
@@ -309,8 +307,8 @@ func (r *Repository) UpdateQueueItemStatus(id int64, status QueueStatus, errorMe
 	case QueueStatusCompleted:
 		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
 		args = []interface{}{status, now, now, id}
-	case QueueStatusFailed, QueueStatusRetrying:
-		query = `UPDATE import_queue SET status = ?, retry_count = retry_count + 1, error_message = ?, updated_at = ? WHERE id = ?`
+	case QueueStatusFailed:
+		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
 		args = []interface{}{status, errorMessage, now, id}
 	default:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
@@ -542,7 +540,7 @@ func (r *Repository) GetQueueStats() (*QueueStats, error) {
 func (r *Repository) UpdateQueueStats() error {
 	// Get current counts
 	countQueries := []string{
-		`SELECT COUNT(*) FROM import_queue WHERE status IN ('pending', 'retrying')`,
+		`SELECT COUNT(*) FROM import_queue WHERE status = 'pending'`,
 		`SELECT COUNT(*) FROM import_queue WHERE status = 'processing'`,
 		`SELECT COUNT(*) FROM import_queue WHERE status = 'completed'`,
 		`SELECT COUNT(*) FROM import_queue WHERE status = 'failed'`,
@@ -743,9 +741,9 @@ func (r *Repository) ClearFailedQueueItems() (int, error) {
 	return int(rowsAffected), nil
 }
 
-// IsFileInQueue checks if a file is already in the queue (pending, retrying, or processing)
+// IsFileInQueue checks if a file is already in the queue (pending or processing)
 func (r *Repository) IsFileInQueue(filePath string) (bool, error) {
-	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'retrying', 'processing') LIMIT 1`
+	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing') LIMIT 1`
 
 	var exists int
 	err := r.db.QueryRow(query, filePath).Scan(&exists)

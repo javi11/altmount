@@ -67,9 +67,7 @@ export function HealthChart() {
 		);
 	}
 
-	const data = [
-		{ name: "Corrupted", value: stats.corrupted, fill: "#ef4444" },
-	];
+	const data = [{ name: "Corrupted", value: stats.corrupted, fill: "#ef4444" }];
 
 	return (
 		<ResponsiveContainer width="100%" height={300}>

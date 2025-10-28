@@ -83,7 +83,6 @@ export function getStatusColor(status: string): string {
 		case "completed":
 			return "success";
 		case "processing":
-		case "retrying":
 		case "checking":
 		case "repair_triggered":
 			return "info";

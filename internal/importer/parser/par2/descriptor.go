@@ -23,8 +23,7 @@ type FirstSegmentData struct {
 // Similar to C# GetPar2FileDescriptorsStep.GetPar2FileDescriptors
 // Uses cached first segment data and streams through the PAR2 file
 func GetFileDescriptors(
-	allFiles []nzbparser.NzbFile,
-	firstSegmentCache map[string]*FirstSegmentData,
+	firstSegmentCache []*FirstSegmentData,
 	poolManager pool.Manager,
 	log *slog.Logger,
 ) (map[[16]byte]*FileDescriptor, error) {
@@ -40,29 +39,20 @@ func GetFileDescriptors(
 	var par2IndexFile *nzbparser.NzbFile
 	smallestSegmentCount := -1
 
-	for i := range allFiles {
-		file := &allFiles[i]
-
-		// Skip files without segments
-		if len(file.Segments) == 0 {
-			continue
-		}
-
-		// Look up cached first segment data
-		firstSegment := file.Segments[0]
-		cachedData, found := firstSegmentCache[firstSegment.ID]
-		if !found {
+	for _, cachedData := range firstSegmentCache {
+		// Skip invalid entries
+		if cachedData == nil || cachedData.File == nil || len(cachedData.File.Segments) == 0 {
 			continue
 		}
 
 		// Check for PAR2 magic bytes using cached data
 		if HasMagicBytes(cachedData.RawBytes) {
-			segmentCount := len(file.Segments)
+			segmentCount := len(cachedData.File.Segments)
 
 			// Select the PAR2 file with the smallest segment count (likely the index file)
 			if smallestSegmentCount == -1 || segmentCount < smallestSegmentCount {
 				smallestSegmentCount = segmentCount
-				par2IndexFile = file
+				par2IndexFile = cachedData.File
 			}
 		}
 	}
@@ -118,10 +108,6 @@ func readFileDescriptors(
 	}
 	defer r.Close()
 
-	log.Debug("Reading PAR2 file with sequential reader",
-		"filename", par2File.Filename,
-		"segments", len(par2File.Segments))
-
 	// Create packet reader for streaming across all segments
 	packetReader := NewPacketReader(r)
 
@@ -139,7 +125,7 @@ func readFileDescriptors(
 				// Reached end of file
 				break
 			}
-			log.Debug("Failed to read PAR2 packet header", "error", err)
+
 			break
 		}
 

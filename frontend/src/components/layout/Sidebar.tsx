@@ -106,7 +106,8 @@ export function Sidebar() {
 								key={item.name}
 								to={item.href}
 								className={({ isActive }) =>
-									`flex items-center space-x-3 rounded-lg px-4 py-3 transition-colors ${isActive ? "bg-primary text-primary-content" : "hover:bg-base-300"
+									`flex items-center space-x-3 rounded-lg px-4 py-3 transition-colors ${
+										isActive ? "bg-primary text-primary-content" : "hover:bg-base-300"
 									}`
 								}
 							>

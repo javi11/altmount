@@ -10,56 +10,6 @@ import (
 	"github.com/javi11/altmount/internal/usenet"
 )
 
-// ValidateParsedDataStep validates the parsed NZB/STRM structure
-type ValidateParsedDataStep struct {
-	parser interface{} // parser.Parser or parser.StrmParser
-}
-
-// NewValidateParsedDataStep creates a new validation step for parsed data
-func NewValidateParsedDataStep(parser interface{}) *ValidateParsedDataStep {
-	return &ValidateParsedDataStep{parser: parser}
-}
-
-// Execute validates the parsed data structure
-func (s *ValidateParsedDataStep) Execute(ctx context.Context, pctx *ProcessingContext) error {
-	// Validation is typically done by the parser itself
-	// This step is a placeholder for any additional validation
-	return nil
-}
-
-// Name returns the step name
-func (s *ValidateParsedDataStep) Name() string {
-	return "ValidateParsedData"
-}
-
-// ValidateSegmentsStep performs comprehensive validation of file segments
-type ValidateSegmentsStep struct {
-	poolManager             pool.Manager
-	maxValidationGoroutines int
-	fullSegmentValidation   bool
-}
-
-// NewValidateSegmentsStep creates a new segment validation step
-func NewValidateSegmentsStep(poolManager pool.Manager, maxGoroutines int, fullValidation bool) *ValidateSegmentsStep {
-	return &ValidateSegmentsStep{
-		poolManager:             poolManager,
-		maxValidationGoroutines: maxGoroutines,
-		fullSegmentValidation:   fullValidation,
-	}
-}
-
-// Execute validates segments for all files in the context
-func (s *ValidateSegmentsStep) Execute(ctx context.Context, pctx *ProcessingContext) error {
-	// This step validates segments - actual validation logic will be called per-file
-	// during metadata creation steps
-	return nil
-}
-
-// Name returns the step name
-func (s *ValidateSegmentsStep) Name() string {
-	return "ValidateSegments"
-}
-
 // ValidateSegmentsForFile performs comprehensive validation of file segments including size verification
 // and reachability checks. It validates that segments are structurally sound, accessible via
 // the Usenet connection pool, and that their total size matches the expected file size (accounting

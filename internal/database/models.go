@@ -12,7 +12,6 @@ const (
 	QueueStatusProcessing QueueStatus = "processing"
 	QueueStatusCompleted  QueueStatus = "completed"
 	QueueStatusFailed     QueueStatus = "failed"
-	QueueStatusRetrying   QueueStatus = "retrying"
 	QueueStatusFallback   QueueStatus = "fallback" // Sent to external SABnzbd as fallback
 )
 

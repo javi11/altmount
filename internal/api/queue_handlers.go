@@ -39,8 +39,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 		// Validate status
 		switch status {
 		case database.QueueStatusPending, database.QueueStatusProcessing,
-			database.QueueStatusCompleted, database.QueueStatusFailed,
-			database.QueueStatusRetrying:
+			database.QueueStatusCompleted, database.QueueStatusFailed:
 			statusFilter = &status
 		default:
 			return c.Status(400).JSON(fiber.Map{
@@ -48,7 +47,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 				"error": fiber.Map{
 					"code":    "VALIDATION_ERROR",
 					"message": "Invalid status filter",
-					"details": "Valid values: pending, processing, completed, failed, retrying",
+					"details": "Valid values: pending, processing, completed, failed",
 				},
 			})
 		}
@@ -331,8 +330,8 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 		})
 	}
 
-	// Update status to retrying
-	err = s.queueRepo.UpdateQueueItemStatus(id, database.QueueStatusRetrying, nil)
+	// Update status to pending for manual retry
+	err = s.queueRepo.UpdateQueueItemStatus(id, database.QueueStatusPending, nil)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

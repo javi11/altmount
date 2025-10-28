@@ -117,7 +117,7 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("service is already started")
 	}
 
-	// Reset any stale queue items from processing/retrying back to pending
+	// Reset any stale queue items from processing back to pending
 	if err := s.database.Repository.ResetStaleItems(); err != nil {
 		s.log.ErrorContext(ctx, "Failed to reset stale queue items", "error", err)
 		return fmt.Errorf("failed to reset stale queue items: %w", err)
@@ -591,47 +591,34 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 	log.Warn("Processing failed",
 		"queue_id", item.ID,
 		"file", item.NzbPath,
-		"error", processingErr,
-		"retry_count", item.RetryCount,
-		"max_retries", item.MaxRetries)
+		"error", processingErr)
 
-	// Check if we should retry
-	if !IsNonRetryable(processingErr) && item.RetryCount < item.MaxRetries {
-		// Mark for retry in queue database
-		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusRetrying, &errorMessage); err != nil {
-			log.Error("Failed to mark item for retry", "queue_id", item.ID, "error", err)
-		} else {
-			log.Info("Item marked for retry", "queue_id", item.ID, "retry_count", item.RetryCount+1)
-		}
+	// Mark as failed in queue database (no automatic retry)
+	if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+		log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", err)
 	} else {
-		// Max retries exceeded, mark as failed in queue database
-		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
-			log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", err)
+		log.Error("Item failed",
+			"queue_id", item.ID,
+			"file", item.NzbPath)
+	}
+
+	// Attempt SABnzbd fallback if configured
+	if err := s.attemptSABnzbdFallback(item, log); err != nil {
+		log.Error("Failed to send to external SABnzbd",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"fallback_host", s.configGetter().SABnzbd.FallbackHost,
+			"error", err)
+
+	} else {
+		// Mark item as fallback instead of removing from queue
+		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFallback, nil); err != nil {
+			log.Error("Failed to mark item as fallback", "queue_id", item.ID, "error", err)
 		} else {
-			log.Error("Item failed permanently after max retries",
+			log.Info("Item marked as fallback after successful SABnzbd transfer",
 				"queue_id", item.ID,
 				"file", item.NzbPath,
-				"retry_count", item.RetryCount)
-		}
-
-		// Attempt SABnzbd fallback if configured
-		if err := s.attemptSABnzbdFallback(item, log); err != nil {
-			log.Error("Failed to send to external SABnzbd",
-				"queue_id", item.ID,
-				"file", item.NzbPath,
-				"fallback_host", s.configGetter().SABnzbd.FallbackHost,
-				"error", err)
-
-		} else {
-			// Mark item as fallback instead of removing from queue
-			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFallback, nil); err != nil {
-				log.Error("Failed to mark item as fallback", "queue_id", item.ID, "error", err)
-			} else {
-				log.Info("Item marked as fallback after successful SABnzbd transfer",
-					"queue_id", item.ID,
-					"file", item.NzbPath,
-					"fallback_host", s.configGetter().SABnzbd.FallbackHost)
-			}
+				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
 		}
 	}
 }

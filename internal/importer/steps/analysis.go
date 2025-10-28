@@ -4,109 +4,69 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/javi11/altmount/internal/importer/archive/rar"
 	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
+	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 )
 
-// AnalyzeRarContentStep analyzes RAR archive content
-type AnalyzeRarContentStep struct {
-	rarProcessor rar.Processor
-	log          *slog.Logger
-}
-
-// NewAnalyzeRarContentStep creates a step to analyze RAR content
-func NewAnalyzeRarContentStep(rarProcessor rar.Processor, log *slog.Logger) *AnalyzeRarContentStep {
-	return &AnalyzeRarContentStep{
-		rarProcessor: rarProcessor,
-		log:          log,
-	}
-}
-
-// Execute analyzes RAR archive content
-func (s *AnalyzeRarContentStep) Execute(ctx context.Context, pctx *ProcessingContext) error {
-	if len(pctx.ArchiveFiles) == 0 {
-		return nil
+// AnalyzeRarArchive analyzes RAR archive content from NZB files
+func AnalyzeRarArchive(
+	ctx context.Context,
+	archiveFiles []parser.ParsedFile,
+	password string,
+	rarProcessor rar.Processor,
+	log *slog.Logger,
+) ([]rar.Content, error) {
+	if len(archiveFiles) == 0 {
+		return nil, nil
 	}
 
-	s.log.Info("Processing RAR archive with content analysis",
-		"parts", len(pctx.ArchiveFiles),
-		"rar_dir", pctx.VirtualDir)
+	log.Info("Analyzing RAR archive content", "parts", len(archiveFiles))
 
 	// Analyze RAR content with timeout
-	password := pctx.Parsed.GetPassword()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	rarContents, err := s.rarProcessor.AnalyzeRarContentFromNzb(ctx, pctx.ArchiveFiles, password)
+	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password)
 	if err != nil {
-		s.log.Error("Failed to analyze RAR archive content", "error", err)
-		return err
+		log.Error("Failed to analyze RAR archive content", "error", err)
+		return nil, err
 	}
 
-	s.log.Info("Successfully analyzed RAR archive content", "files_in_archive", len(rarContents))
+	log.Info("Successfully analyzed RAR archive content", "files_in_archive", len(rarContents))
 
-	// Store results in context
-	pctx.ArchiveContents = rarContents
-
-	return nil
+	return rarContents, nil
 }
 
-// Name returns the step name
-func (s *AnalyzeRarContentStep) Name() string {
-	return "AnalyzeRarContent"
-}
-
-// ProcessRarArchiveFilesStep processes files extracted from RAR archives
-type ProcessRarArchiveFilesStep struct {
-	rarProcessor            rar.Processor
-	metadataService         *metadata.MetadataService
-	poolManager             pool.Manager
-	maxValidationGoroutines int
-	fullSegmentValidation   bool
-	log                     *slog.Logger
-}
-
-// NewProcessRarArchiveFilesStep creates a step to process RAR archive files
-func NewProcessRarArchiveFilesStep(
+// ProcessRarArchiveFiles processes files extracted from RAR archives
+func ProcessRarArchiveFiles(
+	ctx context.Context,
+	virtualDir string,
+	contents []rar.Content,
+	nzbPath string,
 	rarProcessor rar.Processor,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
-	maxGoroutines int,
-	fullValidation bool,
+	maxValidationGoroutines int,
+	fullSegmentValidation bool,
 	log *slog.Logger,
-) *ProcessRarArchiveFilesStep {
-	return &ProcessRarArchiveFilesStep{
-		rarProcessor:            rarProcessor,
-		metadataService:         metadataService,
-		poolManager:             poolManager,
-		maxValidationGoroutines: maxGoroutines,
-		fullSegmentValidation:   fullValidation,
-		log:                     log,
-	}
-}
-
-// Execute processes all files from the RAR archive
-func (s *ProcessRarArchiveFilesStep) Execute(ctx context.Context, pctx *ProcessingContext) error {
-	if pctx.ArchiveContents == nil {
+) error {
+	if len(contents) == 0 {
 		return nil
 	}
 
-	rarContents, ok := pctx.ArchiveContents.([]rar.Content)
-	if !ok {
-		return fmt.Errorf("invalid archive content type for RAR processing")
-	}
-
-	for _, rarContent := range rarContents {
+	for _, rarContent := range contents {
 		// Skip directories
 		if rarContent.IsDirectory {
-			s.log.Debug("Skipping directory in RAR archive", "path", rarContent.InternalPath)
+			log.Debug("Skipping directory in RAR archive", "path", rarContent.InternalPath)
 			continue
 		}
 
@@ -114,15 +74,9 @@ func (s *ProcessRarArchiveFilesStep) Execute(ctx context.Context, pctx *Processi
 		normalizedInternalPath := strings.ReplaceAll(rarContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
 
-		// Generate a unique filename to handle duplicates
-		uniqueFilename := GetUniqueFilename(pctx.VirtualDir, baseFilename, pctx.CurrentBatch, s.metadataService)
-
 		// Create the virtual file path directly in the RAR directory (flattened)
-		virtualFilePath := filepath.Join(pctx.VirtualDir, uniqueFilename)
+		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
-
-		// Track this file in current batch
-		TrackBatchFile(virtualFilePath, pctx.CurrentBatch)
 
 		// Validate segments
 		if err := ValidateSegmentsForFile(
@@ -131,127 +85,90 @@ func (s *ProcessRarArchiveFilesStep) Execute(ctx context.Context, pctx *Processi
 			rarContent.Size,
 			rarContent.Segments,
 			metapb.Encryption_NONE,
-			s.poolManager,
-			s.maxValidationGoroutines,
-			s.fullSegmentValidation,
+			poolManager,
+			maxValidationGoroutines,
+			fullSegmentValidation,
 		); err != nil {
 			return err
 		}
 
 		// Create file metadata using the RAR handler's helper function
-		fileMeta := s.rarProcessor.CreateFileMetadataFromRarContent(rarContent, pctx.Parsed.Path)
+		fileMeta := rarProcessor.CreateFileMetadataFromRarContent(rarContent, nzbPath)
+
+		// Delete old metadata if exists (simple collision handling)
+		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
+		if _, err := os.Stat(metadataPath); err == nil {
+			_ = metadataService.DeleteFileMetadata(virtualFilePath)
+		}
 
 		// Write file metadata to disk
-		if err := s.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+		if err := metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
 			return fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
 		}
+
+		log.Debug("Created metadata for RAR extracted file",
+			"file", baseFilename,
+			"original_internal_path", rarContent.InternalPath,
+			"virtual_path", virtualFilePath,
+			"size", rarContent.Size,
+			"segments", len(rarContent.Segments))
 	}
 
-	s.log.Info("Successfully processed RAR archive files", "files_processed", len(rarContents))
-
-	// Set the final virtual path
-	pctx.VirtualPath = pctx.VirtualDir
+	log.Info("Successfully processed RAR archive files", "files_processed", len(contents))
 
 	return nil
 }
 
-// Name returns the step name
-func (s *ProcessRarArchiveFilesStep) Name() string {
-	return "ProcessRarArchiveFiles"
-}
-
-// AnalyzeSevenZipContentStep analyzes 7zip archive content
-type AnalyzeSevenZipContentStep struct {
-	sevenZipProcessor sevenzip.Processor
-	log               *slog.Logger
-}
-
-// NewAnalyzeSevenZipContentStep creates a step to analyze 7zip content
-func NewAnalyzeSevenZipContentStep(sevenZipProcessor sevenzip.Processor, log *slog.Logger) *AnalyzeSevenZipContentStep {
-	return &AnalyzeSevenZipContentStep{
-		sevenZipProcessor: sevenZipProcessor,
-		log:               log,
-	}
-}
-
-// Execute analyzes 7zip archive content
-func (s *AnalyzeSevenZipContentStep) Execute(ctx context.Context, pctx *ProcessingContext) error {
-	if len(pctx.ArchiveFiles) == 0 {
-		return nil
+// AnalyzeSevenZipArchive analyzes 7zip archive content from NZB files
+func AnalyzeSevenZipArchive(
+	ctx context.Context,
+	archiveFiles []parser.ParsedFile,
+	password string,
+	sevenZipProcessor sevenzip.Processor,
+	log *slog.Logger,
+) ([]sevenzip.Content, error) {
+	if len(archiveFiles) == 0 {
+		return nil, nil
 	}
 
-	s.log.Info("Processing 7zip archive with content analysis",
-		"parts", len(pctx.ArchiveFiles),
-		"7z_dir", pctx.VirtualDir)
+	log.Info("Analyzing 7zip archive content", "parts", len(archiveFiles))
 
 	// Analyze 7zip content with timeout
-	password := pctx.Parsed.GetPassword()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	sevenZipContents, err := s.sevenZipProcessor.AnalyzeSevenZipContentFromNzb(ctx, pctx.ArchiveFiles, password)
+	sevenZipContents, err := sevenZipProcessor.AnalyzeSevenZipContentFromNzb(ctx, archiveFiles, password)
 	if err != nil {
-		s.log.Error("Failed to analyze 7zip archive content", "error", err)
-		return err
+		log.Error("Failed to analyze 7zip archive content", "error", err)
+		return nil, err
 	}
 
-	s.log.Info("Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
+	log.Info("Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
 
-	// Store results in context
-	pctx.ArchiveContents = sevenZipContents
-
-	return nil
+	return sevenZipContents, nil
 }
 
-// Name returns the step name
-func (s *AnalyzeSevenZipContentStep) Name() string {
-	return "AnalyzeSevenZipContent"
-}
-
-// ProcessSevenZipArchiveFilesStep processes files extracted from 7zip archives
-type ProcessSevenZipArchiveFilesStep struct {
-	sevenZipProcessor       sevenzip.Processor
-	metadataService         *metadata.MetadataService
-	poolManager             pool.Manager
-	maxValidationGoroutines int
-	fullSegmentValidation   bool
-	log                     *slog.Logger
-}
-
-// NewProcessSevenZipArchiveFilesStep creates a step to process 7zip archive files
-func NewProcessSevenZipArchiveFilesStep(
+// ProcessSevenZipArchiveFiles processes files extracted from 7zip archives
+func ProcessSevenZipArchiveFiles(
+	ctx context.Context,
+	virtualDir string,
+	contents []sevenzip.Content,
+	nzbPath string,
 	sevenZipProcessor sevenzip.Processor,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
-	maxGoroutines int,
-	fullValidation bool,
+	maxValidationGoroutines int,
+	fullSegmentValidation bool,
 	log *slog.Logger,
-) *ProcessSevenZipArchiveFilesStep {
-	return &ProcessSevenZipArchiveFilesStep{
-		sevenZipProcessor:       sevenZipProcessor,
-		metadataService:         metadataService,
-		poolManager:             poolManager,
-		maxValidationGoroutines: maxGoroutines,
-		fullSegmentValidation:   fullValidation,
-		log:                     log,
-	}
-}
-
-// Execute processes all files from the 7zip archive
-func (s *ProcessSevenZipArchiveFilesStep) Execute(ctx context.Context, pctx *ProcessingContext) error {
-	if pctx.ArchiveContents == nil {
+) error {
+	if len(contents) == 0 {
 		return nil
 	}
 
-	sevenZipContents, ok := pctx.ArchiveContents.([]sevenzip.Content)
-	if !ok {
-		return fmt.Errorf("invalid archive content type for 7zip processing")
-	}
-
-	for _, sevenZipContent := range sevenZipContents {
+	for _, sevenZipContent := range contents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
-			s.log.Debug("Skipping directory in 7zip archive", "path", sevenZipContent.InternalPath)
+			log.Debug("Skipping directory in 7zip archive", "path", sevenZipContent.InternalPath)
 			continue
 		}
 
@@ -259,15 +176,9 @@ func (s *ProcessSevenZipArchiveFilesStep) Execute(ctx context.Context, pctx *Pro
 		normalizedInternalPath := strings.ReplaceAll(sevenZipContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
 
-		// Generate a unique filename to handle duplicates
-		uniqueFilename := GetUniqueFilename(pctx.VirtualDir, baseFilename, pctx.CurrentBatch, s.metadataService)
-
 		// Create the virtual file path directly in the 7zip directory (flattened)
-		virtualFilePath := filepath.Join(pctx.VirtualDir, uniqueFilename)
+		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
-
-		// Track this file in current batch
-		TrackBatchFile(virtualFilePath, pctx.CurrentBatch)
 
 		// Validate segments
 		if err := ValidateSegmentsForFile(
@@ -276,38 +187,36 @@ func (s *ProcessSevenZipArchiveFilesStep) Execute(ctx context.Context, pctx *Pro
 			sevenZipContent.Size,
 			sevenZipContent.Segments,
 			metapb.Encryption_NONE,
-			s.poolManager,
-			s.maxValidationGoroutines,
-			s.fullSegmentValidation,
+			poolManager,
+			maxValidationGoroutines,
+			fullSegmentValidation,
 		); err != nil {
 			return err
 		}
 
 		// Create file metadata using the 7zip handler's helper function
-		fileMeta := s.sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, pctx.Parsed.Path)
+		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath)
+
+		// Delete old metadata if exists (simple collision handling)
+		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
+		if _, err := os.Stat(metadataPath); err == nil {
+			_ = metadataService.DeleteFileMetadata(virtualFilePath)
+		}
 
 		// Write file metadata to disk
-		if err := s.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
+		if err := metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
 			return fmt.Errorf("failed to write metadata for 7zip file %s: %w", sevenZipContent.Filename, err)
 		}
 
-		s.log.Debug("Created metadata for 7zip extracted file",
-			"file", uniqueFilename,
+		log.Debug("Created metadata for 7zip extracted file",
+			"file", baseFilename,
 			"original_internal_path", sevenZipContent.InternalPath,
 			"virtual_path", virtualFilePath,
 			"size", sevenZipContent.Size,
 			"segments", len(sevenZipContent.Segments))
 	}
 
-	s.log.Info("Successfully processed 7zip archive files", "files_processed", len(sevenZipContents))
-
-	// Set the final virtual path
-	pctx.VirtualPath = pctx.VirtualDir
+	log.Info("Successfully processed 7zip archive files", "files_processed", len(contents))
 
 	return nil
-}
-
-// Name returns the step name
-func (s *ProcessSevenZipArchiveFilesStep) Name() string {
-	return "ProcessSevenZipArchiveFiles"
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -77,16 +76,13 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
 
-	// Rename RAR files to match the first file's base name that will allow parse rar that have different files name
-	sortFiles := renameRarFilesAndSort(rarFiles)
-
 	// Create Usenet filesystem for RAR access - this enables rarlist to access
 	// RAR part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, sortFiles, rh.maxWorkers, rh.maxCacheSizeMB)
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, rarFiles, rh.maxWorkers, rh.maxCacheSizeMB)
 
 	// Extract filenames for first part detection
-	fileNames := make([]string, len(sortFiles))
-	for i, file := range sortFiles {
+	fileNames := make([]string, len(rarFiles))
+	for i, file := range rarFiles {
 		fileNames[i] = file.Filename
 	}
 
@@ -98,8 +94,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	rh.log.Info("Starting RAR analysis",
 		"main_file", mainRarFile,
-		"total_parts", len(sortFiles),
-		"rar_files", len(rarFiles),
+		"total_parts", len(rarFiles),
 		"has_password", password != "")
 
 	// Build options with password if provided
@@ -118,6 +113,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
 	}
 
+	// Validate that no files are compressed
+	if err := rh.checkForCompressedFiles(aggregatedFiles); err != nil {
+		return nil, err
+	}
+
 	rh.log.Debug("Successfully analyzed RAR archive via rarlist",
 		"main_file", mainRarFile,
 		"files_found", len(aggregatedFiles))
@@ -130,6 +130,24 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	return Contents, nil
+}
+
+// checkForCompressedFiles validates that no files in the archive are compressed
+// Returns an error if any compressed files are detected
+func (rh *rarProcessor) checkForCompressedFiles(aggregatedFiles []rardecode.ArchiveFileInfo) error {
+	for _, file := range aggregatedFiles {
+		if file.Compressed {
+			compressionInfo := ""
+			if file.CompressionMethod != "" {
+				compressionInfo = fmt.Sprintf(" (uses %s compression)", file.CompressionMethod)
+			}
+			return NewNonRetryableError(
+				fmt.Sprintf("compressed files are not supported: %s%s", file.Name, compressionInfo),
+				nil,
+			)
+		}
+	}
+	return nil
 }
 
 // getFirstRarPart finds and returns the filename of the first part of a RAR archive
@@ -482,91 +500,4 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 	}
 
 	return out, covered, nil
-}
-
-// extractBaseFilename extracts the base filename without the part suffix
-// This works with the original patterns (including leading zeros) to properly extract the base
-func extractBaseFilename(filename string) string {
-	// Try each pattern and extract the base name (group 1)
-	if matches := partPattern.FindStringSubmatch(filename); len(matches) > 1 {
-		return matches[1]
-	}
-	if matches := rPattern.FindStringSubmatch(filename); len(matches) > 1 {
-		return matches[1]
-	}
-	if matches := numericPattern.FindStringSubmatch(filename); len(matches) > 1 {
-		return matches[1]
-	}
-
-	// If no pattern matches, return the filename without extension
-	return strings.TrimSuffix(filename, filepath.Ext(filename))
-}
-
-// stripLeadingZeros removes leading zeros from a numeric string while preserving at least one digit
-func stripLeadingZeros(s string) string {
-	if s == "" {
-		return "0"
-	}
-
-	// Find first non-zero digit
-	i := 0
-	for i < len(s) && s[i] == '0' {
-		i++
-	}
-
-	// If all digits are zero, return "0"
-	if i == len(s) {
-		return "0"
-	}
-
-	// Return string starting from first non-zero digit
-	return s[i:]
-}
-
-func renameRarFilesAndSort(rarFiles []parser.ParsedFile) []parser.ParsedFile {
-	// Get the base name of the first RAR file (without extension)
-	// We need to use the original suffix (with leading zeros) to properly extract the base name
-	firstFileBase := extractBaseFilename(rarFiles[0].Filename)
-
-	// Rename all RAR files to match the base name of the first file while preserving original part naming
-	for i := range rarFiles {
-		originalFileName := rarFiles[i].Filename
-
-		// Try to extract the part suffix from the original filename
-		partSuffix := getPartSuffix(originalFileName)
-
-		// Construct new filename with first file's base name and original part suffix
-		rarFiles[i].Filename = firstFileBase + partSuffix
-	}
-
-	// Sort files by part number
-	sort.Slice(rarFiles, func(i, j int) bool {
-		partI := extractRarPartNumber(rarFiles[i].Filename)
-		partJ := extractRarPartNumber(rarFiles[j].Filename)
-		return partI < partJ
-	})
-
-	return rarFiles
-}
-
-func getPartSuffix(originalFileName string) string {
-	if matches := partPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		return fmt.Sprintf(".part%s.rar", stripLeadingZeros(matches[1]))
-	} else if matches := rPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		return fmt.Sprintf(".r%s", matches[1])
-	} else if matches := numericPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		return fmt.Sprintf(".%s", matches[1])
-	}
-
-	return filepath.Ext(originalFileName)
-}
-
-// extractRarPartNumber extracts numeric part from RAR extension for sorting
-func extractRarPartNumber(fileName string) int {
-	partNumber := getPartNumber(fileName)
-	if partNumber > 0 {
-		return partNumber
-	}
-
-	return 999999 // Unknown format goes last
 }

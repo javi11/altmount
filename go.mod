@@ -18,8 +18,8 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/javi11/nntppool/v2 v2.2.7
 	github.com/javi11/nxg v0.1.0
-	github.com/javi11/nzbparser v0.4.2
-	github.com/javi11/rardecode/v2 v2.1.2-0.20251027072710-f11d22c10e2a
+	github.com/javi11/nzbparser v0.5.1
+	github.com/javi11/rardecode/v2 v2.1.2-0.20251028124959-f42fe5f81df7
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible

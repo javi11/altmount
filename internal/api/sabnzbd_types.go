@@ -247,8 +247,6 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueS
 		status = "Completed"
 	case database.QueueStatusFailed:
 		status = "Failed"
-	case database.QueueStatusRetrying:
-		status = "Queued"
 	default:
 		status = "Unknown"
 	}
