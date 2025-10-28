@@ -56,6 +56,7 @@ export interface StreamingConfig {
 export interface HealthConfig {
 	enabled: boolean;
 	auto_repair_enabled: boolean;
+	library_dir?: string;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_concurrent_jobs?: number;
 	max_retries?: number;

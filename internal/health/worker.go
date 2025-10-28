@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +66,10 @@ type HealthWorker struct {
 	activeChecks   map[string]context.CancelFunc // filePath -> cancel function
 	activeChecksMu sync.RWMutex
 
+	// Symlink cache for library directory lookups
+	symlinkCache   map[string]string // mount path -> library symlink path
+	symlinkCacheMu sync.RWMutex
+
 	// Statistics
 	stats   WorkerStats
 	statsMu sync.RWMutex
@@ -87,6 +94,7 @@ func NewHealthWorker(
 		status:          WorkerStatusStopped,
 		stopChan:        make(chan struct{}),
 		activeChecks:    make(map[string]context.CancelFunc),
+		symlinkCache:    make(map[string]string),
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -713,23 +721,152 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 
 	hw.logger.Info("Triggering file repair using direct ARR API approach", "file_path", filePath)
 
+	// Determine which path to use for ARR rescan
+	pathForRescan := filePath
+	librarySymlink, err := hw.findLibrarySymlink(ctx, filePath)
+	if err != nil {
+		hw.logger.Warn("Error searching for library symlink, using mount path",
+			"mount_path", filePath,
+			"error", err)
+	} else if librarySymlink != "" {
+		pathForRescan = librarySymlink
+		hw.logger.Debug("Using library symlink path for ARR rescan",
+			"mount_path", filePath,
+			"library_path", librarySymlink)
+	} else {
+		hw.logger.Debug("No library symlink found, using mount path for ARR rescan",
+			"mount_path", filePath)
+	}
+
 	// Try to trigger rescan through the ARR service
 	// The service will determine which instance manages this file
-	err := hw.arrsService.TriggerFileRescan(ctx, filePath)
+	err = hw.arrsService.TriggerFileRescan(ctx, pathForRescan)
 	if err != nil {
 		hw.logger.Error("Failed to trigger ARR rescan",
-			"file_path", filePath,
+			"file_path", pathForRescan,
+			"original_path", filePath,
 			"error", err)
 
 		// If we can't trigger repair, mark as corrupted for manual investigation
-		if lastErr := err; lastErr != nil {
-			errMsg := lastErr.Error()
-			return hw.healthRepo.SetCorrupted(filePath, &errMsg)
-		}
-		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
+		errMsg := err.Error()
+		return hw.healthRepo.SetCorrupted(filePath, &errMsg)
 	}
 
 	// ARR rescan was triggered successfully - set repair triggered status
-	hw.logger.Info("Successfully triggered ARR rescan for file repair", "file_path", filePath)
+	hw.logger.Info("Successfully triggered ARR rescan for file repair",
+		"file_path", pathForRescan,
+		"original_path", filePath)
 	return hw.healthRepo.SetRepairTriggered(filePath, errorMsg)
+}
+
+// findLibrarySymlink searches for a symlink in the library directory that points to the given file path
+// It checks the cache first, and if not found, performs a recursive search through the library directory
+// Returns the library symlink path if found, empty string otherwise
+func (hw *HealthWorker) findLibrarySymlink(ctx context.Context, mountFilePath string) (string, error) {
+	cfg := hw.configGetter()
+
+	// If library_dir is not configured, return empty
+	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
+		return "", nil
+	}
+
+	libraryDir := *cfg.Health.LibraryDir
+
+	// Check cache first
+	hw.symlinkCacheMu.RLock()
+	if cachedPath, ok := hw.symlinkCache[mountFilePath]; ok {
+		hw.symlinkCacheMu.RUnlock()
+
+		// Verify the cached symlink still exists
+		if _, err := os.Lstat(cachedPath); err == nil {
+			hw.logger.Debug("Found symlink in cache", "mount_path", mountFilePath, "library_path", cachedPath)
+			return cachedPath, nil
+		}
+
+		// Symlink no longer exists, remove from cache and continue searching
+		hw.symlinkCacheMu.Lock()
+		delete(hw.symlinkCache, mountFilePath)
+		hw.symlinkCacheMu.Unlock()
+		hw.logger.Debug("Cached symlink no longer exists, removed from cache", "mount_path", mountFilePath, "cached_path", cachedPath)
+		// Fall through to directory search
+	} else {
+		hw.symlinkCacheMu.RUnlock()
+	}
+
+	// Get the mount directory from config to filter symlinks
+	mountDir := cfg.Metadata.RootPath
+
+	hw.logger.Info("Searching for library symlink",
+		"mount_path", mountFilePath,
+		"library_dir", libraryDir,
+		"mount_dir", mountDir)
+
+	var foundSymlink string
+
+	// Walk the library directory recursively
+	err := filepath.WalkDir(libraryDir, func(path string, d os.DirEntry, err error) error {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // Continue walking despite errors
+		}
+
+		// Skip if not a symlink
+		if d.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+
+		// Read the symlink target
+		target, err := os.Readlink(path)
+		if err != nil {
+			hw.logger.Warn("Failed to read symlink", "path", path, "error", err)
+			return nil
+		}
+
+		// Make target absolute if it's relative
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+
+		// Clean the paths for comparison
+		cleanTarget := filepath.Clean(target)
+		cleanMountPath := filepath.Clean(mountFilePath)
+
+		// Check if this symlink points to our mount path
+		if cleanTarget == cleanMountPath {
+			foundSymlink = path
+
+			return filepath.SkipAll // Stop walking once found
+		}
+
+		// Cache symlinks that point to the mount directory for potential future use
+		if strings.HasPrefix(cleanTarget, mountDir) {
+			hw.symlinkCacheMu.Lock()
+			hw.symlinkCache[cleanTarget] = path
+			hw.symlinkCacheMu.Unlock()
+		}
+
+		return nil
+	})
+
+	if err != nil && err != filepath.SkipAll {
+		hw.logger.Error("Error during library symlink search", "error", err)
+		return "", err
+	}
+
+	if foundSymlink != "" {
+		// Cache the successful finding
+		hw.symlinkCacheMu.Lock()
+		hw.symlinkCache[mountFilePath] = foundSymlink
+		hw.symlinkCacheMu.Unlock()
+		return foundSymlink, nil
+	}
+
+	hw.logger.Info("No matching symlink found in library directory", "mount_path", mountFilePath)
+	return "", nil
 }

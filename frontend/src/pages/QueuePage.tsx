@@ -566,8 +566,7 @@ export function QueuePage() {
 											)}
 										</td>
 										<td>
-											{item.status === QueueStatus.FAILED &&
-											item.error_message ? (
+											{item.status === QueueStatus.FAILED && item.error_message ? (
 												<div
 													className="tooltip tooltip-top"
 													data-tip={truncateText(item.error_message, 200)}

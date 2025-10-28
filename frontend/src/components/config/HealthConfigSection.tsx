@@ -79,6 +79,24 @@ export function HealthConfigSection({
 						</div>
 					</div>
 				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Library Directory</legend>
+					<input
+						type="text"
+						className="input"
+						value={formData.library_dir || ""}
+						disabled={isReadOnly || !formData.enabled}
+						placeholder="/media/library"
+						onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
+					/>
+					<p className="label text-gray-600 text-sm">
+						Path to your organized media library that contains symlinks pointing to altmount files.
+						When a repair is triggered, the system will search for symlinks in this directory and
+						use the library path for ARR rescan instead of the mount path. Leave empty to use mount
+						paths directly.
+					</p>
+				</fieldset>
 			</div>
 
 			{/* Advanced Settings (Optional) */}

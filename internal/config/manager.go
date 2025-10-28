@@ -144,13 +144,14 @@ type LogConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled               *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	AutoRepairEnabled     *bool `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
-	CheckIntervalSeconds  int   `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConcurrentJobs     int   `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	MaxRetries            int   `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
-	MaxSegmentConnections int   `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
-	CheckAllSegments      bool  `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	Enabled               *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	AutoRepairEnabled     *bool   `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
+	LibraryDir            *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CheckIntervalSeconds  int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConcurrentJobs     int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	MaxRetries            int     `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
+	MaxSegmentConnections int     `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
+	CheckAllSegments      bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username

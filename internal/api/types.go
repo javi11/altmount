@@ -295,6 +295,7 @@ type QueueStatsResponse struct {
 type HealthItemResponse struct {
 	ID               int64                 `json:"id"`
 	FilePath         string                `json:"file_path"`
+	LibraryPath      *string               `json:"library_path,omitempty"`
 	Status           database.HealthStatus `json:"status"`
 	LastChecked      time.Time             `json:"last_checked"`
 	LastError        *string               `json:"last_error"`
