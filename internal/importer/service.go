@@ -954,14 +954,14 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 		metaFile := metadataPath + ".meta"
 		if _, metaErr := os.Stat(metaFile); metaErr == nil {
 			// It's a single file
-			return s.createSingleSymlink(item, actualPath, resultingPath)
+			return s.createSingleSymlink(actualPath, resultingPath)
 		}
 		return fmt.Errorf("failed to stat metadata path: %w", err)
 	}
 
 	if !fileInfo.IsDir() {
 		// Single file - create one symlink
-		return s.createSingleSymlink(item, actualPath, resultingPath)
+		return s.createSingleSymlink(actualPath, resultingPath)
 	}
 
 	// Directory - walk through and create symlinks for all files
@@ -1007,7 +1007,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 		fileResultingPath := relPath
 
 		// Create symlink for this file using the helper function
-		if err := s.createSingleSymlink(item, actualFilePath, fileResultingPath); err != nil {
+		if err := s.createSingleSymlink(actualFilePath, fileResultingPath); err != nil {
 			s.log.Error("Failed to create symlink",
 				"path", actualFilePath,
 				"error", err)
@@ -1036,7 +1036,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 }
 
 // createSingleSymlink creates a symlink for a single file
-func (s *Service) createSingleSymlink(item *database.ImportQueueItem, actualPath, resultingPath string) error {
+func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
 	cfg := s.configGetter()
 
 	baseDir := filepath.Join(*cfg.SABnzbd.SymlinkDir, filepath.Dir(resultingPath))
