@@ -346,7 +346,7 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 
 	// Trigger background processing immediately
 	if s.importerService != nil {
-		s.importerService.ProcessItemInBackground(id)
+		s.importerService.ProcessItemInBackground(c.Context(), id)
 	}
 
 	// Get updated item

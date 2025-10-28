@@ -40,8 +40,8 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
 		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, 10, 64),       // 10 max workers, 64MB cache for RAR analysis
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, 10, 64),  // 10 max workers, 64MB cache for 7zip analysis
+		rarProcessor:            rar.NewProcessor(poolManager, 10, 64),      // 10 max workers, 64MB cache for RAR analysis
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for 7zip analysis
 		poolManager:             poolManager,
 		maxValidationGoroutines: maxValidationGoroutines,
 		fullSegmentValidation:   fullSegmentValidation,
@@ -55,7 +55,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string) (string, error) {
 	// Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -116,7 +116,7 @@ func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, er
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
 
-	return pipeline.Execute(context.Background(), pctx)
+	return pipeline.Execute(ctx, pctx)
 }
 
 // getPipelineForType returns the appropriate pipeline for a given file type

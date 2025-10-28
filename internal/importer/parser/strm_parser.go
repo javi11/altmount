@@ -12,6 +12,7 @@ import (
 
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/nxg"
 )
@@ -184,7 +185,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 	}
 
 	// Check if this is a RAR file
-	isRarArchive := rarPattern.MatchString(actualFilename)
+	isRarArchive := fileinfo.IsRarFile(actualFilename)
 
 	parsedFile := &ParsedFile{
 		Subject:      fmt.Sprintf("NXG: %s", actualFilename),

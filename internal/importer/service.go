@@ -427,7 +427,7 @@ func (s *Service) workerLoop(workerID int) {
 	for {
 		select {
 		case <-ticker.C:
-			s.processQueueItems(workerID)
+			s.processQueueItems(s.ctx, workerID)
 		case <-s.ctx.Done():
 			log.Info("Queue worker stopped")
 			return
@@ -489,7 +489,7 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 }
 
 // processQueueItems gets and processes pending queue items using two-database workflow
-func (s *Service) processQueueItems(workerID int) {
+func (s *Service) processQueueItems(ctx context.Context, workerID int) {
 	log := s.log.With("worker_id", workerID)
 
 	// Step 1: Atomically claim next available item from queue database with retry logic
@@ -509,7 +509,7 @@ func (s *Service) processQueueItems(workerID int) {
 	log.Debug("Processing claimed queue item", "queue_id", item.ID, "file", item.NzbPath)
 
 	// Step 3: Process the NZB file and write to main database
-	resultingPath, processingErr := s.processNzbItem(item)
+	resultingPath, processingErr := s.processNzbItem(ctx, item)
 
 	// Step 4: Update queue database with results
 	if processingErr != nil {
@@ -536,7 +536,7 @@ func (s *Service) refreshMountPathIfNeeded(resultingPath string, itemID int64, l
 }
 
 // processNzbItem processes the NZB file for a queue item
-func (s *Service) processNzbItem(item *database.ImportQueueItem) (string, error) {
+func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
 	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
@@ -548,7 +548,7 @@ func (s *Service) processNzbItem(item *database.ImportQueueItem) (string, error)
 		basePath = filepath.Join(basePath, *item.Category)
 	}
 
-	return s.processor.ProcessNzbFile(item.NzbPath, basePath)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath)
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing
@@ -814,7 +814,7 @@ func (s *Service) calculateVirtualDirectory(nzbPath, relativePath string) string
 }
 
 // ProcessItemInBackground processes a specific queue item in the background
-func (s *Service) ProcessItemInBackground(itemID int64) {
+func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 	go func() {
 		log := s.log.With("item_id", itemID, "background", true)
 		log.Debug("Starting background processing of queue item")
@@ -838,7 +838,7 @@ func (s *Service) ProcessItemInBackground(itemID int64) {
 		}
 
 		// Process the NZB file
-		resultingPath, processingErr := s.processNzbItem(item)
+		resultingPath, processingErr := s.processNzbItem(ctx, item)
 
 		// Update queue database with results
 		if processingErr != nil {
