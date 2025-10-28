@@ -9,10 +9,6 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 )
 
-// SubjectFilenamePattern extracts the filename from NZB subject line
-// Matches patterns like: Movie.Name.2023.1080p.mkv - [1/50] - "filename.mkv" yEnc (1/100)
-var subjectFilenamePattern = regexp.MustCompile(`"([^"]+)"`)
-
 // GetFileInfos extracts file information from NZB files with first segment data
 // Similar to C# GetFileInfosStep.GetFileInfos
 func GetFileInfos(
@@ -35,32 +31,37 @@ func getFileInfo(
 	hashToDescMap map[[16]byte]*par2.FileDescriptor,
 	log *slog.Logger,
 ) *FileInfo {
-	// Calculate MD5 hash of first 16KB for PAR2 matching
-	var hash [16]byte
-	var par2Desc *par2.FileDescriptor
-	if len(file.First16KB) > 0 {
-		hash = md5.Sum(file.First16KB)
-		par2Desc = hashToDescMap[hash]
-
-		// Log warning if we have less than 16KB and might need more data
-		if len(file.First16KB) < 16*1024 {
-			log.Warn("File has less than 16KB of data - hash may not match PAR2",
-				"subject", file.NzbFile.Subject,
-				"data_size", len(file.First16KB),
-				"expected_size", 16*1024)
-		}
-	} else {
-		log.Warn("File has no First16KB data for PAR2 matching",
-			"subject", file.NzbFile.Subject)
-	}
-
-	// Extract candidate filenames
 	par2Filename := ""
-	if par2Desc != nil {
-		par2Filename = par2Desc.Name
+	par2FileSize := int64(0)
+
+	if len(hashToDescMap) > 0 {
+		// Calculate MD5 hash of first 16KB for PAR2 matching
+		var hash [16]byte
+		var par2Desc *par2.FileDescriptor
+		if len(file.First16KB) > 0 {
+			hash = md5.Sum(file.First16KB)
+			par2Desc = hashToDescMap[hash]
+
+			// Log warning if we have less than 16KB and might need more data
+			if len(file.First16KB) < 16*1024 {
+				log.Warn("File has less than 16KB of data - hash may not match PAR2",
+					"subject", file.NzbFile.Subject,
+					"data_size", len(file.First16KB),
+					"expected_size", 16*1024)
+			}
+		} else {
+			log.Warn("File has no First16KB data for PAR2 matching",
+				"subject", file.NzbFile.Subject)
+		}
+
+		// Extract candidate filenames
+		if par2Desc != nil {
+			par2Filename = par2Desc.Name
+			par2FileSize = int64(par2Desc.Length)
+		}
 	}
 
-	subjectFilename := extractSubjectFilename(file.NzbFile.Subject)
+	subjectFilename := file.NzbFile.Filename
 
 	headerFilename := ""
 	if file.Headers != nil {
@@ -72,9 +73,8 @@ func getFileInfo(
 
 	// Determine file size (PAR2 has highest priority)
 	var fileSize *int64
-	if par2Desc != nil {
-		size := int64(par2Desc.Length)
-		fileSize = &size
+	if par2FileSize > 0 {
+		fileSize = &par2FileSize
 	} else if file.Headers != nil && file.Headers.FileSize > 0 {
 		size := int64(file.Headers.FileSize)
 		fileSize = &size
@@ -96,16 +96,6 @@ func getFileInfo(
 		YencHeaders: file.Headers,
 		First16KB:   file.First16KB,
 	}
-}
-
-// extractSubjectFilename extracts the filename from NZB subject line
-// Looks for quoted filenames in the subject
-func extractSubjectFilename(subject string) string {
-	matches := subjectFilenamePattern.FindStringSubmatch(subject)
-	if len(matches) > 1 {
-		return matches[1]
-	}
-	return ""
 }
 
 // selectBestFilename selects the best filename using priority system

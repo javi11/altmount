@@ -67,6 +67,7 @@ func Is7zFile(filename string) bool {
 	if filename == "" {
 		return false
 	}
+
 	return sevenZipPattern.MatchString(filename)
 }
 

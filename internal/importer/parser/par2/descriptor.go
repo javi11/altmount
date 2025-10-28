@@ -40,8 +40,6 @@ func GetFileDescriptors(
 	var par2IndexFile *nzbparser.NzbFile
 	smallestSegmentCount := -1
 
-	log.Debug("Scanning files for PAR2 index", "total_files", len(allFiles))
-
 	for i := range allFiles {
 		file := &allFiles[i]
 
@@ -70,13 +68,8 @@ func GetFileDescriptors(
 	}
 
 	if par2IndexFile == nil {
-		log.Debug("No PAR2 index file found in NZB")
 		return descriptors, nil
 	}
-
-	log.Debug("Found PAR2 index file",
-		"filename", par2IndexFile.Filename,
-		"segment_count", len(par2IndexFile.Segments))
 
 	// Parse the PAR2 file and extract file descriptors
 	fileDescriptors, err := readFileDescriptors(par2IndexFile, poolManager, log)
@@ -89,9 +82,6 @@ func GetFileDescriptors(
 		desc := &fileDescriptors[i]
 		descriptors[desc.Hash16k] = desc
 	}
-
-	log.Debug("Extracted PAR2 file descriptors",
-		"count", len(descriptors))
 
 	return descriptors, nil
 }

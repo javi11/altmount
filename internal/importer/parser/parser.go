@@ -48,6 +48,12 @@ type Parser struct {
 	log         *slog.Logger // Logger for debug/error messages
 }
 
+// Use conc pool for parallel processing with proper error handling
+type fileResult struct {
+	parsedFile *ParsedFile
+	err        error
+}
+
 // NewParser creates a new NZB parser
 func NewParser(poolManager pool.Manager) *Parser {
 	return &Parser{
@@ -106,15 +112,6 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 		p.log.Warn("Failed to extract PAR2 file descriptors", "error", err)
 	}
 
-	// Validation: Warn if no PAR2 descriptors were found
-	if len(par2Descriptors) == 0 {
-		p.log.Debug("No PAR2 file descriptors extracted - filename and size will be determined from yEnc headers and subject lines")
-	} else {
-		p.log.Debug("Successfully extracted PAR2 file descriptors",
-			"count", len(par2Descriptors),
-			"note", "These will be used for accurate filename and size matching via Hash16k")
-	}
-
 	// Extract file information using priority-based filename selection
 	// Convert firstSegmentCache to fileinfo format
 	filesWithFirstSegment := make([]*fileinfo.NzbFileWithFirstSegment, 0, len(firstSegmentCache))
@@ -133,15 +130,8 @@ func (p *Parser) ParseFile(r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	// Get file infos with priority-based filename selection
 	// This already filters out PAR2 files
 	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors, p.log)
-
 	if len(fileInfos) == 0 {
 		return nil, NewNonRetryableError("NZB file contains no valid files (only PAR2)", nil)
-	}
-
-	// Use conc pool for parallel processing with proper error handling
-	type fileResult struct {
-		parsedFile *ParsedFile
-		err        error
 	}
 
 	concPool := concpool.NewWithResults[fileResult]().WithMaxGoroutines(runtime.NumCPU())
