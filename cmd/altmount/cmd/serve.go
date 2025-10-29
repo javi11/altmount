@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
@@ -97,7 +98,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 5. Initialize importer and filesystem
 	repos := setupRepositories(db, logger)
 
-	importerService, err := initializeImporter(cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), ctx, logger)
+	// Create progress broadcaster for WebSocket progress updates
+	progressBroadcaster := importer.NewProgressBroadcaster()
+
+	importerService, err := initializeImporter(cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -115,7 +119,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	authService := setupAuthService(repos.UserRepo, logger)
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), logger)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, logger)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, progressBroadcaster, logger)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, logger)
 	if err != nil {

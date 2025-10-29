@@ -65,6 +65,7 @@ func initializeImporter(
 	poolManager pool.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 	configGetter config.ConfigGetter,
+	broadcaster *importer.ProgressBroadcaster,
 	ctx context.Context,
 	logger *slog.Logger,
 ) (*importer.Service, error) {
@@ -78,7 +79,7 @@ func initializeImporter(
 		Workers: maxProcessorWorkers,
 	}
 
-	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter)
+	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, broadcaster)
 	if err != nil {
 		logger.Error("failed to create importer service", "err", err)
 		return nil, err
@@ -232,6 +233,7 @@ func setupAPIServer(
 	importerService *importer.Service,
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
+	progressBroadcaster *importer.ProgressBroadcaster,
 	logger *slog.Logger,
 ) *api.Server {
 	apiConfig := &api.Config{
@@ -251,6 +253,7 @@ func setupAPIServer(
 		importerService,
 		arrsService,
 		mountService,
+		progressBroadcaster,
 	)
 
 	apiServer.SetupRoutes(app)

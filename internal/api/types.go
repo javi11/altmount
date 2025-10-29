@@ -270,6 +270,7 @@ type QueueItemResponse struct {
 	BatchID      *string                `json:"batch_id"`
 	Metadata     *string                `json:"metadata"`
 	FileSize     *int64                 `json:"file_size"`
+	Percentage   *int                   `json:"percentage,omitempty"` // Progress percentage (0-100), only for items being processed
 }
 
 // QueueListRequest represents request parameters for listing queue items

@@ -34,22 +34,23 @@ func DefaultConfig() *Config {
 
 // Server represents the API server
 type Server struct {
-	config          *Config
-	queueRepo       *database.Repository
-	healthRepo      *database.HealthRepository
-	mediaRepo       *database.MediaRepository
-	authService     *auth.Service
-	userRepo        *database.UserRepository
-	configManager   ConfigManager
-	metadataReader  *metadata.MetadataReader
-	healthWorker    *health.HealthWorker
-	importerService *importer.Service
-	poolManager     pool.Manager
-	arrsService     *arrs.Service
-	rcloneClient    rclonecli.RcloneRcClient
-	mountService    *rclone.MountService
-	logger          *slog.Logger
-	startTime       time.Time
+	config              *Config
+	queueRepo           *database.Repository
+	healthRepo          *database.HealthRepository
+	mediaRepo           *database.MediaRepository
+	authService         *auth.Service
+	userRepo            *database.UserRepository
+	configManager       ConfigManager
+	metadataReader      *metadata.MetadataReader
+	healthWorker        *health.HealthWorker
+	importerService     *importer.Service
+	poolManager         pool.Manager
+	arrsService         *arrs.Service
+	rcloneClient        rclonecli.RcloneRcClient
+	mountService        *rclone.MountService
+	logger              *slog.Logger
+	startTime           time.Time
+	progressBroadcaster *importer.ProgressBroadcaster
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -65,26 +66,28 @@ func NewServer(
 	poolManager pool.Manager,
 	importService *importer.Service,
 	arrsService *arrs.Service,
-	mountService *rclone.MountService) *Server {
+	mountService *rclone.MountService,
+	progressBroadcaster *importer.ProgressBroadcaster) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
 	server := &Server{
-		config:          config,
-		queueRepo:       queueRepo,
-		healthRepo:      healthRepo,
-		mediaRepo:       mediaRepo,
-		authService:     authService,
-		userRepo:        userRepo,
-		configManager:   configManager,
-		metadataReader:  metadataReader,
-		importerService: importService, // Will be set later via SetImporterService
-		poolManager:     poolManager,
-		arrsService:     arrsService,
-		mountService:    mountService,
-		logger:          slog.Default(),
-		startTime:       time.Now(),
+		config:              config,
+		queueRepo:           queueRepo,
+		healthRepo:          healthRepo,
+		mediaRepo:           mediaRepo,
+		authService:         authService,
+		userRepo:            userRepo,
+		configManager:       configManager,
+		metadataReader:      metadataReader,
+		importerService:     importService, // Will be set later via SetImporterService
+		poolManager:         poolManager,
+		arrsService:         arrsService,
+		mountService:        mountService,
+		logger:              slog.Default(),
+		startTime:           time.Now(),
+		progressBroadcaster: progressBroadcaster,
 	}
 
 	return server
@@ -98,6 +101,11 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 // SetRcloneClient sets the rclone client reference for the server
 func (s *Server) SetRcloneClient(rcloneClient rclonecli.RcloneRcClient) {
 	s.rcloneClient = rcloneClient
+}
+
+// GetProgressBroadcaster returns the progress broadcaster for use by the importer service
+func (s *Server) GetProgressBroadcaster() *importer.ProgressBroadcaster {
+	return s.progressBroadcaster
 }
 
 // SetupFiberRoutes configures API routes directly on the Fiber app

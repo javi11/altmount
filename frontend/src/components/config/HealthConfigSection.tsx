@@ -24,7 +24,10 @@ export function HealthConfigSection({
 		setHasChanges(false);
 	}, [config.health]);
 
-	const handleInputChange = (field: keyof HealthConfig, value: string | boolean | number | undefined) => {
+	const handleInputChange = (
+		field: keyof HealthConfig,
+		value: string | boolean | number | undefined,
+	) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.health));

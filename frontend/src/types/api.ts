@@ -41,6 +41,12 @@ export interface QueueItem {
 	batch_id?: string;
 	metadata?: string;
 	file_size?: number;
+	percentage?: number; // Progress percentage (0-100), only present for items being processed
+}
+
+export interface ProgressUpdate {
+	id: number;
+	percentage: number;
 }
 
 export interface QueueStats {

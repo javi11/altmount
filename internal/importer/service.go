@@ -59,6 +59,7 @@ type Service struct {
 	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter      // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient   // SABnzbd client for fallback
+	broadcaster     *ProgressBroadcaster     // WebSocket progress broadcaster
 	log             *slog.Logger
 
 	// Runtime state
@@ -75,7 +76,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, broadcaster *ProgressBroadcaster) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -87,7 +88,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	fullSegmentValidation := currentConfig.Import.FullSegmentValidation
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxValidationGoroutines, fullSegmentValidation)
+	processor := NewProcessor(metadataService, poolManager, maxValidationGoroutines, fullSegmentValidation, broadcaster)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -99,6 +100,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
+		broadcaster:     broadcaster,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -548,7 +550,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		basePath = filepath.Join(basePath, *item.Category)
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID))
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing
@@ -580,6 +582,11 @@ func (s *Service) handleProcessingSuccess(item *database.ImportQueueItem, result
 		return err
 	}
 
+	// Clear progress tracking
+	if s.broadcaster != nil {
+		s.broadcaster.ClearProgress(int(item.ID))
+	}
+
 	log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }
@@ -600,6 +607,11 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 		log.Error("Item failed",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
+	}
+
+	// Clear progress tracking
+	if s.broadcaster != nil {
+		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
 	// Attempt SABnzbd fallback if configured

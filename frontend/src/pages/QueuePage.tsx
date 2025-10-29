@@ -566,19 +566,31 @@ export function QueuePage() {
 											)}
 										</td>
 										<td>
-											{item.status === QueueStatus.FAILED && item.error_message ? (
-												<div
-													className="tooltip tooltip-top"
-													data-tip={truncateText(item.error_message, 200)}
-												>
-													<div className="flex items-center gap-1">
-														<StatusBadge status={item.status} />
-														<AlertCircle className="h-3 w-3 text-error" />
+											<div className="flex flex-col gap-1">
+												{item.status === QueueStatus.FAILED && item.error_message ? (
+													<div
+														className="tooltip tooltip-top"
+														data-tip={truncateText(item.error_message, 200)}
+													>
+														<div className="flex items-center gap-1">
+															<StatusBadge status={item.status} />
+															<AlertCircle className="h-3 w-3 text-error" />
+														</div>
 													</div>
-												</div>
-											) : (
-												<StatusBadge status={item.status} />
-											)}
+												) : (
+													<StatusBadge status={item.status} />
+												)}
+												{item.status === QueueStatus.PROCESSING && item.percentage != null && (
+													<div className="flex items-center gap-2">
+														<progress
+															className="progress progress-primary w-24"
+															value={item.percentage}
+															max={100}
+														/>
+														<span className="text-xs">{item.percentage}%</span>
+													</div>
+												)}
+											</div>
 										</td>
 										<td>
 											<span

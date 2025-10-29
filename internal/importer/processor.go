@@ -32,6 +32,7 @@ type Processor struct {
 	maxValidationGoroutines int          // Maximum concurrent goroutines for segment validation
 	fullSegmentValidation   bool         // Whether to validate all segments or just a random sample
 	log                     *slog.Logger
+	broadcaster             *ProgressBroadcaster // WebSocket progress broadcaster
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern    *regexp.Regexp // pattern.part###.rar
@@ -40,7 +41,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, broadcaster *ProgressBroadcaster) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -51,6 +52,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		maxValidationGoroutines: maxValidationGoroutines,
 		fullSegmentValidation:   fullSegmentValidation,
 		log:                     slog.Default().With("component", "nzb-processor"),
+		broadcaster:             broadcaster,
 
 		// Initialize pre-compiled regex patterns for RAR file sorting
 		rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
@@ -59,8 +61,17 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 	}
 }
 
+// updateProgress emits a progress update if broadcaster is available
+func (proc *Processor) updateProgress(queueID int, percentage int) {
+	if proc.broadcaster != nil {
+		proc.broadcaster.UpdateProgress(queueID, percentage)
+	}
+}
+
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string) (string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int) (string, error) {
+	// Update progress: starting
+	proc.updateProgress(queueID, 0)
 	// Step 1: Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -93,6 +104,9 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		}
 	}
 
+	// Update progress: parsing complete
+	proc.updateProgress(queueID, 10)
+
 	// Step 2: Calculate virtual directory
 	virtualDir := steps.CalculateVirtualDirectory(filePath, relativePath)
 
@@ -107,25 +121,38 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	regularFiles, archiveFiles, _ := steps.SeparateFiles(parsed.Files, parsed.Type)
 
 	// Step 4: Process based on file type
+	var result string
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
-		return proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
 
 	case parser.NzbTypeMultiFile:
-		return proc.processMultiFile(ctx, virtualDir, regularFiles, parsed.Path)
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, parsed.Path)
 
 	case parser.NzbTypeRarArchive:
-		return proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed)
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID)
 
 	case parser.NzbType7zArchive:
-		return proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed)
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID)
 
 	case parser.NzbTypeStrm:
-		return proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
 
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
+
+	// Update progress: complete
+	if err == nil {
+		proc.updateProgress(queueID, 100)
+	}
+
+	return result, err
 }
 
 // processSingleFile handles single file imports
@@ -201,6 +228,7 @@ func (proc *Processor) processRarArchive(
 	regularFiles []parser.ParsedFile,
 	archiveFiles []parser.ParsedFile,
 	parsed *parser.ParsedNzb,
+	queueID int,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -231,6 +259,7 @@ func (proc *Processor) processRarArchive(
 
 	// Analyze and process RAR archive
 	if len(archiveFiles) > 0 {
+		proc.updateProgress(queueID, 50)
 		rarContents, err := steps.AnalyzeRarArchive(
 			ctx,
 			archiveFiles,
@@ -242,6 +271,7 @@ func (proc *Processor) processRarArchive(
 			return "", err
 		}
 
+		proc.updateProgress(queueID, 70)
 		if err := steps.ProcessRarArchiveFiles(
 			ctx,
 			nzbFolder,
@@ -256,6 +286,7 @@ func (proc *Processor) processRarArchive(
 		); err != nil {
 			return "", err
 		}
+		proc.updateProgress(queueID, 90)
 	}
 
 	return nzbFolder, nil
@@ -268,6 +299,7 @@ func (proc *Processor) processSevenZipArchive(
 	regularFiles []parser.ParsedFile,
 	archiveFiles []parser.ParsedFile,
 	parsed *parser.ParsedNzb,
+	queueID int,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -298,6 +330,7 @@ func (proc *Processor) processSevenZipArchive(
 
 	// Analyze and process 7zip archive
 	if len(archiveFiles) > 0 {
+		proc.updateProgress(queueID, 50)
 		sevenZipContents, err := steps.AnalyzeSevenZipArchive(
 			ctx,
 			archiveFiles,
@@ -309,6 +342,7 @@ func (proc *Processor) processSevenZipArchive(
 			return "", err
 		}
 
+		proc.updateProgress(queueID, 70)
 		if err := steps.ProcessSevenZipArchiveFiles(
 			ctx,
 			nzbFolder,
@@ -323,6 +357,7 @@ func (proc *Processor) processSevenZipArchive(
 		); err != nil {
 			return "", err
 		}
+		proc.updateProgress(queueID, 90)
 	}
 
 	return nzbFolder, nil
