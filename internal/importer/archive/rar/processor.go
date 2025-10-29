@@ -171,6 +171,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	for iter.Next() {
 		info := iter.FileInfo()
 		if info != nil {
+			rh.log.Debug("Found file in RAR archive", "file_name", info.Name, "file_size", info.TotalPackedSize)
 			aggregatedFiles = append(aggregatedFiles, *info)
 
 			// Report progress if callback provided

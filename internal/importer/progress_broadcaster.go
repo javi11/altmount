@@ -43,10 +43,6 @@ func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 		pb.progress[queueID] = percentage
 	}
 	pb.mu.Unlock()
-
-	pb.log.Debug("progress updated",
-		"queue_id", queueID,
-		"percentage", percentage)
 }
 
 // ClearProgress removes progress tracking for a completed or failed queue item
