@@ -2,6 +2,7 @@ package rar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -30,6 +31,12 @@ func isIncompleteRarError(err error) bool {
 		return false
 	}
 
+	// Check for specific rardecode sentinel errors first
+	if errors.Is(err, rardecode.ErrVerMismatch) {
+		return true
+	}
+
+	// Fallback to string matching for wrapped errors or other indicators
 	errMsg := strings.ToLower(err.Error())
 
 	// Check for various indicators of incomplete RAR archives
@@ -133,10 +140,21 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
 	if err != nil {
+		// Check for specific rardecode errors with user-friendly messages
+		if errors.Is(err, rardecode.ErrNoSig) {
+			return nil, NewNonRetryableError(
+				"invalid RAR archive: RAR signature not found. The file may be corrupted or not a valid RAR archive",
+				err)
+		}
+		if errors.Is(err, rardecode.ErrBadPassword) {
+			return nil, NewNonRetryableError(
+				"RAR archive is password protected. Please provide the correct password",
+				err)
+		}
 		// Check if error indicates incomplete RAR archive with missing volume segments
 		if isIncompleteRarError(err) {
 			return nil, NewNonRetryableError(
-				"incomplete RAR archive: missing one or more segments.",
+				"incomplete RAR archive: missing one or more segments",
 				err)
 		}
 		return nil, NewNonRetryableError("failed to aggregate RAR files", err)
