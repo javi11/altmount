@@ -384,7 +384,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 			defer cancel()
 
 			// Get body reader for the first segment
-			r, err := cp.BodyReader(ctx, firstSegment.ID, file.Groups)
+			r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
 			if err != nil {
 				return fetchResult{
 					segmentID: firstSegment.ID,
@@ -446,7 +446,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					// Create a new context for this segment
 					segCtx, segCancel := context.WithTimeout(context.Background(), time.Second*30)
 
-					segReader, err := cp.BodyReader(segCtx, segment.ID, file.Groups)
+					segReader, err := cp.BodyReader(segCtx, segment.ID, nil)
 					if err != nil {
 						segCancel()
 						p.log.Debug("Failed to read additional segment for 16KB completion",
@@ -552,7 +552,7 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 		return nntpcli.YencHeaders{}, NewNonRetryableError("no connection pool available", err)
 	}
 
-	r, err := cp.BodyReader(ctx, segment.ID, groups)
+	r, err := cp.BodyReader(ctx, segment.ID, nil)
 	if err != nil {
 		return nntpcli.YencHeaders{}, NewNonRetryableError("failed to get body reader: %w", err)
 	}
