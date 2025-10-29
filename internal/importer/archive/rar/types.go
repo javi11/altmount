@@ -7,15 +7,20 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 )
 
+// ProgressCallback is a function type for reporting progress during RAR analysis
+// Parameters: current file index (0-based), total files
+type ProgressCallback func(current, total int)
+
 // Processor interface for analyzing RAR content from NZB data
 type Processor interface {
 	// AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data
 	// without downloading. Returns an array of Content with file metadata and segments.
 	// password parameter is used to unlock password-protected RAR archives.
-	AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string) ([]Content, error)
+	// progressCallback is optional and will be called for each file processed.
+	AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string, progressCallback ProgressCallback) ([]Content, error)
 	// CreateFileMetadataFromRarContent creates FileMetadata from Content for the metadata
 	// system. This is used to convert Content into the protobuf format used by the metadata system.
-	CreateFileMetadataFromRarContent(content Content, sourceNzbPath string) *metapb.FileMetadata
+	CreateFileMetadataFromRarContent(content Content, sourceNzbPath string, releaseDate int64) *metapb.FileMetadata
 }
 
 // Content represents a file within a RAR archive for processing

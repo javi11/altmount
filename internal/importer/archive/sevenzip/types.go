@@ -15,7 +15,7 @@ type Processor interface {
 	AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []parser.ParsedFile, password string) ([]Content, error)
 	// CreateFileMetadataFromSevenZipContent creates FileMetadata from Content for the metadata
 	// system. This is used to convert Content into the protobuf format used by the metadata system.
-	CreateFileMetadataFromSevenZipContent(content Content, sourceNzbPath string) *metapb.FileMetadata
+	CreateFileMetadataFromSevenZipContent(content Content, sourceNzbPath string, releaseDate int64) *metapb.FileMetadata
 }
 
 // Content represents a file within a 7zip archive for processing

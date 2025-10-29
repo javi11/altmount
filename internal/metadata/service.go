@@ -164,6 +164,7 @@ func (ms *MetadataService) CreateFileMetadata(
 	encryption metapb.Encryption,
 	password string,
 	salt string,
+	releaseDate int64,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -177,6 +178,7 @@ func (ms *MetadataService) CreateFileMetadata(
 		SegmentData:   segmentData,
 		CreatedAt:     now,
 		ModifiedAt:    now,
+		ReleaseDate:   releaseDate,
 	}
 }
 

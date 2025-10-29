@@ -146,7 +146,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 			NzbFile:     data.File,
 			Headers:     &data.Headers,
 			First16KB:   data.RawBytes,
-			ReleaseDate: time.Now(), // TODO: Extract from NZB metadata if available
+			ReleaseDate: time.Unix(int64(data.File.Date), 0),
 		})
 	}
 
@@ -332,6 +332,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		Encryption:   enc,
 		Password:     password,
 		Salt:         salt,
+		ReleaseDate:  info.ReleaseDate,
 	}
 
 	return parsedFile, nil

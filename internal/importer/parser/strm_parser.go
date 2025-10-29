@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
@@ -197,6 +198,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 		Encryption:   enc,
 		Password:     password,
 		Salt:         salt,
+		ReleaseDate:  time.Now(), // STRM files don't have release dates, use current time
 	}
 
 	return parsedFile, nil

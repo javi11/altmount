@@ -266,17 +266,26 @@ func (proc *Processor) processRarArchive(
 			parsed.GetPassword(),
 			proc.rarProcessor,
 			proc.log,
+			proc.updateProgress,
+			queueID,
 		)
 		if err != nil {
 			return "", err
 		}
 
 		proc.updateProgress(queueID, 70)
+		// Get release date from first archive file
+		var releaseDate int64
+		if len(archiveFiles) > 0 {
+			releaseDate = archiveFiles[0].ReleaseDate.Unix()
+		}
+
 		if err := steps.ProcessRarArchiveFiles(
 			ctx,
 			nzbFolder,
 			rarContents,
 			parsed.Path,
+			releaseDate,
 			proc.rarProcessor,
 			proc.metadataService,
 			proc.poolManager,
@@ -343,11 +352,17 @@ func (proc *Processor) processSevenZipArchive(
 		}
 
 		proc.updateProgress(queueID, 70)
+		// Get release date from first archive file
+		var releaseDate int64
+		if len(archiveFiles) > 0 {
+			releaseDate = archiveFiles[0].ReleaseDate.Unix()
+		}
 		if err := steps.ProcessSevenZipArchiveFiles(
 			ctx,
 			nzbFolder,
 			sevenZipContents,
 			parsed.Path,
+			releaseDate,
 			proc.sevenZipProcessor,
 			proc.metadataService,
 			proc.poolManager,

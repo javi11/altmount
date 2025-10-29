@@ -207,6 +207,7 @@ type FileMetadata struct {
 	SegmentData   []*SegmentData         `protobuf:"bytes,9,rep,name=segment_data,json=segmentData,proto3" json:"segment_data,omitempty"`         // Segment information (lazy-loaded)
 	AesKey        []byte                 `protobuf:"bytes,10,opt,name=aes_key,json=aesKey,proto3" json:"aes_key,omitempty"`                       // AES encryption key (for AES-encrypted archives)
 	AesIv         []byte                 `protobuf:"bytes,11,opt,name=aes_iv,json=aesIv,proto3" json:"aes_iv,omitempty"`                          // AES initialization vector (for AES-encrypted archives)
+	ReleaseDate   int64                  `protobuf:"varint,12,opt,name=release_date,json=releaseDate,proto3" json:"release_date,omitempty"`       // Unix timestamp of the original Usenet post release date
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -318,6 +319,13 @@ func (x *FileMetadata) GetAesIv() []byte {
 	return nil
 }
 
+func (x *FileMetadata) GetReleaseDate() int64 {
+	if x != nil {
+		return x.ReleaseDate
+	}
+	return 0
+}
+
 var File_internal_metadata_proto_metadata_proto protoreflect.FileDescriptor
 
 const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
@@ -328,7 +336,7 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\fstart_offset\x18\x03 \x01(\x03R\vstartOffset\x12\x1d\n" +
 	"\n" +
 	"end_offset\x18\x04 \x01(\x03R\tendOffset\x12\x0e\n" +
-	"\x02id\x18\x05 \x01(\tR\x02id\"\x91\x03\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\"\xb4\x03\n" +
 	"\fFileMetadata\x12\x1b\n" +
 	"\tfile_size\x18\x01 \x01(\x03R\bfileSize\x12&\n" +
 	"\x0fsource_nzb_path\x18\x02 \x01(\tR\rsourceNzbPath\x12,\n" +
@@ -345,7 +353,8 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\fsegment_data\x18\t \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\x12\x17\n" +
 	"\aaes_key\x18\n" +
 	" \x01(\fR\x06aesKey\x12\x15\n" +
-	"\x06aes_iv\x18\v \x01(\fR\x05aesIv*8\n" +
+	"\x06aes_iv\x18\v \x01(\fR\x05aesIv\x12!\n" +
+	"\frelease_date\x18\f \x01(\x03R\vreleaseDate*8\n" +
 	"\n" +
 	"Encryption\x12\b\n" +
 	"\x04NONE\x10\x00\x12\n" +

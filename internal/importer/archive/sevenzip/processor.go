@@ -61,6 +61,7 @@ var (
 func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 	content Content,
 	sourceNzbPath string,
+	releaseDate int64,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -71,6 +72,7 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 		CreatedAt:     now,
 		ModifiedAt:    now,
 		SegmentData:   content.Segments,
+		ReleaseDate:   releaseDate,
 	}
 
 	// Set AES encryption if keys are present

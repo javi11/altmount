@@ -24,6 +24,8 @@ func AnalyzeRarArchive(
 	password string,
 	rarProcessor rar.Processor,
 	log *slog.Logger,
+	updateProgress func(queueID int, percentage int),
+	queueID int,
 ) ([]rar.Content, error) {
 	if len(archiveFiles) == 0 {
 		return nil, nil
@@ -35,7 +37,16 @@ func AnalyzeRarArchive(
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password)
+	// Create progress callback for RAR analysis (50% to 70% range)
+	progressCallback := func(current, total int) {
+		if total > 0 && updateProgress != nil {
+			// Map iteration progress to 50-70% range
+			percentage := 50 + (current * 20 / total)
+			updateProgress(queueID, percentage)
+		}
+	}
+
+	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password, progressCallback)
 	if err != nil {
 		log.Error("Failed to analyze RAR archive content", "error", err)
 		return nil, err
@@ -52,6 +63,7 @@ func ProcessRarArchiveFiles(
 	virtualDir string,
 	contents []rar.Content,
 	nzbPath string,
+	releaseDate int64,
 	rarProcessor rar.Processor,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
@@ -93,7 +105,7 @@ func ProcessRarArchiveFiles(
 		}
 
 		// Create file metadata using the RAR handler's helper function
-		fileMeta := rarProcessor.CreateFileMetadataFromRarContent(rarContent, nzbPath)
+		fileMeta := rarProcessor.CreateFileMetadataFromRarContent(rarContent, nzbPath, releaseDate)
 
 		// Delete old metadata if exists (simple collision handling)
 		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
@@ -154,6 +166,7 @@ func ProcessSevenZipArchiveFiles(
 	virtualDir string,
 	contents []sevenzip.Content,
 	nzbPath string,
+	releaseDate int64,
 	sevenZipProcessor sevenzip.Processor,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
@@ -195,7 +208,7 @@ func ProcessSevenZipArchiveFiles(
 		}
 
 		// Create file metadata using the 7zip handler's helper function
-		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath)
+		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate)
 
 		// Delete old metadata if exists (simple collision handling)
 		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)

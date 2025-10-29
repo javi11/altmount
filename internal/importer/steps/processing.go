@@ -191,6 +191,7 @@ func ProcessSingleFile(
 		file.Encryption,
 		file.Password,
 		file.Salt,
+		file.ReleaseDate.Unix(),
 	)
 
 	// Delete old metadata if exists (simple collision handling)
@@ -263,6 +264,7 @@ func ProcessRegularFiles(
 			file.Encryption,
 			file.Password,
 			file.Salt,
+			file.ReleaseDate.Unix(),
 		)
 
 		// Delete old metadata if exists (simple collision handling)

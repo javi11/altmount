@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"time"
+
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 )
 
@@ -49,4 +51,5 @@ type ParsedFile struct {
 	Encryption   metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
 	Password     string            // Password from NZB meta, nil if not encrypted
 	Salt         string            // Salt from NZB meta, nil if not encrypted
+	ReleaseDate  time.Time         // Release date from the Usenet post
 }
