@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/steps"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
 )
@@ -31,6 +32,7 @@ type Processor struct {
 	poolManager             pool.Manager // Pool manager for dynamic pool access
 	maxValidationGoroutines int          // Maximum concurrent goroutines for segment validation
 	fullSegmentValidation   bool         // Whether to validate all segments or just a random sample
+	failImportsWithoutVideos bool        // Whether to fail imports that don't contain video files
 	log                     *slog.Logger
 	broadcaster             *ProgressBroadcaster // WebSocket progress broadcaster
 
@@ -41,18 +43,19 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, broadcaster *ProgressBroadcaster) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, failImportsWithoutVideos bool, broadcaster *ProgressBroadcaster) *Processor {
 	return &Processor{
-		parser:                  parser.NewParser(poolManager),
-		strmParser:              parser.NewStrmParser(),
-		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, 10, 64),      // 10 max workers, 64MB cache for RAR analysis
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for 7zip analysis
-		poolManager:             poolManager,
-		maxValidationGoroutines: maxValidationGoroutines,
-		fullSegmentValidation:   fullSegmentValidation,
-		log:                     slog.Default().With("component", "nzb-processor"),
-		broadcaster:             broadcaster,
+		parser:                   parser.NewParser(poolManager),
+		strmParser:               parser.NewStrmParser(),
+		metadataService:          metadataService,
+		rarProcessor:             rar.NewProcessor(poolManager, 10, 64),      // 10 max workers, 64MB cache for RAR analysis
+		sevenZipProcessor:        sevenzip.NewProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for 7zip analysis
+		poolManager:              poolManager,
+		maxValidationGoroutines:  maxValidationGoroutines,
+		fullSegmentValidation:    fullSegmentValidation,
+		failImportsWithoutVideos: failImportsWithoutVideos,
+		log:                      slog.Default().With("component", "nzb-processor"),
+		broadcaster:              broadcaster,
 
 		// Initialize pre-compiled regex patterns for RAR file sorting
 		rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
@@ -66,6 +69,25 @@ func (proc *Processor) updateProgress(queueID int, percentage int) {
 	if proc.broadcaster != nil {
 		proc.broadcaster.UpdateProgress(queueID, percentage)
 	}
+}
+
+// validateVideoPresence checks if the import contains video files
+// Returns an error if video validation is enabled and no video files are found
+func (proc *Processor) validateVideoPresence(regularFiles []parser.ParsedFile, rarContents []rar.Content, sevenZipContents []sevenzip.Content) error {
+	// If validation is disabled, return success
+	if !proc.failImportsWithoutVideos {
+		return nil
+	}
+
+	// Check if any video files exist in the import
+	hasVideos := utils.HasVideoFiles(regularFiles, rarContents, sevenZipContents)
+
+	if !hasVideos {
+		proc.log.Warn("Import contains no video files, marking as failed")
+		return ErrNoVideoFiles
+	}
+
+	return nil
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
@@ -172,7 +194,7 @@ func (proc *Processor) processSingleFile(
 	}
 
 	// Process the single file
-	return steps.ProcessSingleFile(
+	result, err := steps.ProcessSingleFile(
 		ctx,
 		virtualDir,
 		regularFiles[0],
@@ -183,6 +205,16 @@ func (proc *Processor) processSingleFile(
 		proc.fullSegmentValidation,
 		proc.log,
 	)
+	if err != nil {
+		return "", err
+	}
+
+	// Validate video presence after successful processing
+	if err := proc.validateVideoPresence(regularFiles, nil, nil); err != nil {
+		return "", err
+	}
+
+	return result, nil
 }
 
 // processMultiFile handles multi-file imports
@@ -215,6 +247,11 @@ func (proc *Processor) processMultiFile(
 		proc.fullSegmentValidation,
 		proc.log,
 	); err != nil {
+		return "", err
+	}
+
+	// Validate video presence after successful processing
+	if err := proc.validateVideoPresence(regularFiles, nil, nil); err != nil {
 		return "", err
 	}
 
@@ -257,10 +294,13 @@ func (proc *Processor) processRarArchive(
 		}
 	}
 
+	// Variable to store RAR contents for video validation
+	var rarContents []rar.Content
+
 	// Analyze and process RAR archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
-		rarContents, err := steps.AnalyzeRarArchive(
+		rarContents, err = steps.AnalyzeRarArchive(
 			ctx,
 			archiveFiles,
 			parsed.GetPassword(),
@@ -296,6 +336,11 @@ func (proc *Processor) processRarArchive(
 			return "", err
 		}
 		proc.updateProgress(queueID, 90)
+	}
+
+	// Validate video presence after successful processing
+	if err := proc.validateVideoPresence(regularFiles, rarContents, nil); err != nil {
+		return "", err
 	}
 
 	return nzbFolder, nil
@@ -337,10 +382,13 @@ func (proc *Processor) processSevenZipArchive(
 		}
 	}
 
+	// Variable to store 7zip contents for video validation
+	var sevenZipContents []sevenzip.Content
+
 	// Analyze and process 7zip archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
-		sevenZipContents, err := steps.AnalyzeSevenZipArchive(
+		sevenZipContents, err = steps.AnalyzeSevenZipArchive(
 			ctx,
 			archiveFiles,
 			parsed.GetPassword(),
@@ -373,6 +421,11 @@ func (proc *Processor) processSevenZipArchive(
 			return "", err
 		}
 		proc.updateProgress(queueID, 90)
+	}
+
+	// Validate video presence after successful processing
+	if err := proc.validateVideoPresence(regularFiles, nil, sevenZipContents); err != nil {
+		return "", err
 	}
 
 	return nzbFolder, nil

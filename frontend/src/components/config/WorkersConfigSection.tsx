@@ -118,6 +118,24 @@ export function ImportConfigSection({
 						validation of all segments (slower).
 					</p>
 				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Fail Imports Without Videos</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Fail imports that don't contain video files</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.fail_imports_without_videos}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("fail_imports_without_videos", e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						When enabled, imports that don't contain any video files will be marked as failed. This
+						helps filter out incomplete or non-video content.
+					</p>
+				</fieldset>
 			</div>
 
 			{/* Save Button */}

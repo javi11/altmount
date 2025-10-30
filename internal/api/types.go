@@ -95,6 +95,7 @@ type ImportAPIResponse struct {
 	QueueProcessingIntervalSeconds int  `json:"queue_processing_interval_seconds"` // Interval in seconds
 	MaxValidationGoroutines        int  `json:"max_validation_goroutines"`
 	FullSegmentValidation          bool `json:"full_segment_validation"`
+	FailImportsWithoutVideos       bool `json:"fail_imports_without_videos"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses

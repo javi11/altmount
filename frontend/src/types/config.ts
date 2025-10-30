@@ -125,6 +125,7 @@ export interface ImportConfig {
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	max_validation_goroutines: number;
 	full_segment_validation: boolean;
+	fail_imports_without_videos: boolean;
 }
 
 // Log configuration
@@ -290,6 +291,7 @@ export interface ImportUpdateRequest {
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
 	max_validation_goroutines?: number;
 	full_segment_validation?: boolean;
+	fail_imports_without_videos?: boolean;
 }
 
 // Log update request
