@@ -510,21 +510,9 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 		cache = append(cache, result.data)
 	}
 
-	// Validation: Check for files with insufficient data for PAR2 matching
-	const expectedSize = 16 * 1024
 	for _, data := range cache {
 		if data == nil || data.File == nil || data.MissingFirstSegment {
 			continue
-		}
-
-		if len(data.RawBytes) < expectedSize {
-			// This is expected for small files (< 16KB total)
-			// But could indicate an issue if the file is actually larger
-			p.log.Debug("First segment data is less than 16KB",
-				"file", data.File.Subject,
-				"data_size", len(data.RawBytes),
-				"expected_size", expectedSize,
-				"note", "This is expected for small files, but may affect PAR2 matching for larger files")
 		}
 
 		if len(data.RawBytes) == 0 {

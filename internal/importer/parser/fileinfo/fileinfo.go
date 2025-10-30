@@ -1,7 +1,6 @@
 package fileinfo
 
 import (
-	"crypto/md5"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -36,23 +35,7 @@ func getFileInfo(
 
 	if len(hashToDescMap) > 0 {
 		// Calculate MD5 hash of first 16KB for PAR2 matching
-		var hash [16]byte
 		var par2Desc *par2.FileDescriptor
-		if len(file.First16KB) > 0 {
-			hash = md5.Sum(file.First16KB)
-			par2Desc = hashToDescMap[hash]
-
-			// Log warning if we have less than 16KB and might need more data
-			if len(file.First16KB) < 16*1024 {
-				log.Warn("File has less than 16KB of data - hash may not match PAR2",
-					"subject", file.NzbFile.Subject,
-					"data_size", len(file.First16KB),
-					"expected_size", 16*1024)
-			}
-		} else {
-			log.Warn("File has no First16KB data for PAR2 matching",
-				"subject", file.NzbFile.Subject)
-		}
 
 		// Extract candidate filenames
 		if par2Desc != nil {
