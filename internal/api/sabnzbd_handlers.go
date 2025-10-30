@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
@@ -34,15 +35,38 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 		}
 	}
 
-	// Check for API key authentication
+	// Extract authentication parameters
 	apiKey := c.Query("apikey")
-	if apiKey == "" {
-		return s.writeSABnzbdErrorFiber(c, "API key required")
+	maUsername := c.Query("ma_username") // ARR URL
+	maPassword := c.Query("ma_password") // ARR API key
+
+	// Determine authentication method
+	authenticated := false
+
+	// Method 1: Traditional API key authentication
+	if apiKey != "" {
+		if s.validateAPIKey(c, apiKey) {
+			authenticated = true
+			// Still try auto-registration if ARR credentials provided
+			if maUsername != "" && maPassword != "" {
+				s.tryAutoRegisterARR(c)
+			}
+		}
 	}
 
-	// Validate API key using existing authentication system
-	if !s.validateAPIKey(c, apiKey) {
-		return s.writeSABnzbdErrorFiber(c, "Invalid API key")
+	// Method 2: ARR credentials authentication
+	if !authenticated && maUsername != "" && maPassword != "" {
+		if s.validateARRCredentials(maUsername, maPassword) {
+			authenticated = true
+		}
+	}
+
+	// Check if authenticated by either method
+	if !authenticated {
+		if apiKey != "" {
+			return s.writeSABnzbdErrorFiber(c, "Invalid API key")
+		}
+		return s.writeSABnzbdErrorFiber(c, "Authentication required: provide either apikey or ma_username+ma_password")
 	}
 
 	// Get mode parameter to determine which API method to call
@@ -65,6 +89,89 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	default:
 		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Unknown mode: %s", mode))
 	}
+}
+
+// tryAutoRegisterARR attempts to auto-register an ARR instance from SABnzbd request parameters
+// It extracts ma_username (ARR URL) and ma_password (ARR API key) from the query parameters
+// This method logs errors but does not fail the SABnzbd request if registration fails
+func (s *Server) tryAutoRegisterARR(c *fiber.Ctx) {
+	// Check if arrsService is available
+	if s.arrsService == nil {
+		return
+	}
+
+	// Extract ma_username (ARR URL) and ma_password (ARR API key)
+	maUsername := c.Query("ma_username")
+	maPassword := c.Query("ma_password")
+
+	// Both parameters must be present
+	if maUsername == "" || maPassword == "" {
+		return
+	}
+
+	// URL decode the username parameter (contains ARR URL)
+	arrURL, err := url.QueryUnescape(maUsername)
+	if err != nil {
+		s.logger.Warn("Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
+		return
+	}
+
+	arrAPIKey := maPassword
+
+	s.logger.Debug("Attempting ARR auto-registration from SABnzbd request",
+		"arr_url", arrURL)
+
+	// Attempt to register the instance
+	if err := s.arrsService.RegisterInstance(arrURL, arrAPIKey); err != nil {
+		s.logger.Warn("Failed to auto-register ARR instance",
+			"arr_url", arrURL,
+			"error", err)
+		return
+	}
+
+	s.logger.Info("Successfully auto-registered ARR instance", "arr_url", arrURL)
+}
+
+// validateARRCredentials validates ARR credentials and auto-registers if needed
+// Returns true if credentials are valid (either already registered or newly registered)
+func (s *Server) validateARRCredentials(maUsername, maPassword string) bool {
+	if s.arrsService == nil {
+		s.logger.Warn("ARR service not available for credential validation")
+		return false
+	}
+
+	// URL decode the username parameter (contains ARR URL)
+	arrURL, err := url.QueryUnescape(maUsername)
+	if err != nil {
+		s.logger.Warn("Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
+		return false
+	}
+
+	arrAPIKey := maPassword
+
+	// Step 1: Check if instance exists and credentials match
+	if instance := s.findARRInstanceByURL(arrURL); instance != nil {
+		// Instance exists, verify credentials match
+		if instance.APIKey == arrAPIKey {
+			s.logger.Debug("ARR instance found with matching credentials", "arr_url", arrURL)
+			return true
+		}
+		s.logger.Warn("ARR credentials do not match registered instance", "arr_url", arrURL)
+		return false
+	}
+
+	// Step 2: Instance doesn't exist, try to register it
+	s.logger.Debug("ARR instance not found, attempting auto-registration", "arr_url", arrURL)
+
+	if err := s.arrsService.RegisterInstance(arrURL, arrAPIKey); err != nil {
+		s.logger.Warn("Failed to auto-register ARR instance",
+			"arr_url", arrURL,
+			"error", err)
+		return false
+	}
+
+	s.logger.Info("Successfully auto-registered and validated ARR instance", "arr_url", arrURL)
+	return true
 }
 
 // handleSABnzbdAddFile handles file upload for NZB files
@@ -678,4 +785,28 @@ func (s *Server) calculateItemBasePath(category *string) string {
 
 	// Return base path with category folder
 	return basePath
+}
+
+// normalizeURL normalizes a URL for comparison by removing trailing slashes
+func normalizeURL(rawURL string) string {
+	return strings.TrimSuffix(rawURL, "/")
+}
+
+// findARRInstanceByURL finds an ARR instance by URL
+func (s *Server) findARRInstanceByURL(checkURL string) *arrs.ConfigInstance {
+	if s.arrsService == nil {
+		return nil
+	}
+
+	normalizedCheck := normalizeURL(checkURL)
+	instances := s.arrsService.GetAllInstances()
+
+	for _, instance := range instances {
+		normalizedInstance := normalizeURL(instance.URL)
+		if normalizedInstance == normalizedCheck {
+			return instance
+		}
+	}
+
+	return nil
 }

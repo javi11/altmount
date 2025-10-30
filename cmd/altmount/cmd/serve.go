@@ -117,7 +117,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 6. Setup web services
 	app, debugMode := createFiberApp(cfg, logger)
 	authService := setupAuthService(repos.UserRepo, logger)
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), logger)
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, logger)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, progressBroadcaster, logger)
 
