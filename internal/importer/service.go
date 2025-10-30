@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
@@ -438,57 +439,52 @@ func (s *Service) workerLoop(workerID int) {
 	}
 }
 
-// claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic
+// isDatabaseContentionError checks if an error is a retryable database contention error
+func isDatabaseContentionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "database is locked") ||
+		strings.Contains(err.Error(), "database is busy")
+}
+
+// claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic using retry-go
 func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.ImportQueueItem, error) {
-	const maxRetries = 5
-	const baseDelay = 10 * time.Millisecond
-	const maxDelay = 500 * time.Millisecond
+	var item *database.ImportQueueItem
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		item, err := s.database.Repository.ClaimNextQueueItem()
-		if err == nil {
-			if item == nil {
-				return nil, nil
+	err := retry.Do(
+		func() error {
+			claimedItem, err := s.database.Repository.ClaimNextQueueItem()
+			if err != nil {
+				return err
 			}
 
-			log.Debug("Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
-
-			return item, nil
-		}
-
-		// Check if this is a database contention error
-		if strings.Contains(err.Error(), "database is locked") ||
-			strings.Contains(err.Error(), "database is busy") {
-
-			if attempt == maxRetries-1 {
-				// Final attempt failed, return the error
-				return nil, fmt.Errorf("failed to claim queue item after %d attempts: %w", maxRetries, err)
-			}
-
-			// Calculate backoff delay with jitter
-			delay := time.Duration(attempt+1) * baseDelay
-			if delay > maxDelay {
-				delay = maxDelay
-			}
-
-			// Add random jitter (0-50% of delay) to prevent thundering herd
-			jitter := time.Duration(float64(delay) * (0.5 * float64(workerID%10) / 10.0))
-			delay += jitter
-
+			item = claimedItem
+			return nil
+		},
+		retry.Attempts(5),
+		retry.Delay(10*time.Millisecond),
+		retry.MaxDelay(500*time.Millisecond),
+		retry.DelayType(retry.BackOffDelay),
+		retry.RetryIf(isDatabaseContentionError),
+		retry.OnRetry(func(n uint, err error) {
 			log.Debug("Database contention, retrying claim",
-				"attempt", attempt+1,
-				"delay", delay,
-				"worker_id", workerID)
+				"attempt", n+1,
+				"worker_id", workerID,
+				"error", err)
+		}),
+	)
 
-			time.Sleep(delay)
-			continue
-		}
-
-		// Non-contention error, return immediately
+	if err != nil {
 		return nil, fmt.Errorf("failed to claim queue item: %w", err)
 	}
 
-	return nil, fmt.Errorf("failed to claim queue item after %d attempts", maxRetries)
+	if item == nil {
+		return nil, nil
+	}
+
+	log.Debug("Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
+	return item, nil
 }
 
 // processQueueItems gets and processes pending queue items using two-database workflow

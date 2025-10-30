@@ -111,7 +111,6 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		selectQuery := `
 			SELECT id FROM import_queue
 			WHERE status = 'pending'
-			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
 			ORDER BY priority ASC, created_at ASC
 			LIMIT 1
 		`
