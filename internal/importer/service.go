@@ -565,7 +565,7 @@ func (s *Service) handleProcessingSuccess(item *database.ImportQueueItem, result
 	s.refreshMountPathIfNeeded(resultingPath, item.ID, log)
 
 	// Notify rclone VFS about the new import (async, don't fail on error)
-	s.notifyRcloneVFS(item, log)
+	s.notifyRcloneVFS(resultingPath, log)
 
 	// Create category symlink (non-blocking)
 	if err := s.createSymlinks(item, resultingPath); err != nil {
@@ -749,35 +749,22 @@ func (s *Service) GetWorkerCount() int {
 }
 
 // notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
-func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logger) {
+func (s *Service) notifyRcloneVFS(resultingPath string, log *slog.Logger) {
 	if s.rcloneClient == nil {
 		return // No rclone client configured or RClone RC is disabled
-	}
-
-	// Calculate the virtual directory path for VFS notification
-	var virtualDir string
-	if item.RelativePath != nil {
-		// Calculate virtual directory based on NZB file location relative to watch root
-		virtualDir = s.calculateVirtualDirectory(item.NzbPath, *item.RelativePath)
-	} else {
-		// Default to root if no watch root specified
-		virtualDir = "/"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
 	defer cancel()
 
-	err := s.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
+	err := s.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
 	if err != nil {
 		log.Warn("Failed to notify rclone VFS about new import",
-			"queue_id", item.ID,
-			"file", item.NzbPath,
-			"virtual_dir", virtualDir,
+			"virtual_dir", resultingPath,
 			"error", err)
 	} else {
 		log.Info("Successfully notified rclone VFS about new import",
-			"queue_id", item.ID,
-			"virtual_dir", virtualDir)
+			"virtual_dir", resultingPath)
 	}
 }
 

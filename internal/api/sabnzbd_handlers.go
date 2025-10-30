@@ -153,9 +153,9 @@ func (s *Server) validateARRCredentials(maUsername, maPassword string) bool {
 	if instance := s.findARRInstanceByURL(arrURL); instance != nil {
 		// Instance exists, verify credentials match
 		if instance.APIKey == arrAPIKey {
-			s.logger.Debug("ARR instance found with matching credentials", "arr_url", arrURL)
 			return true
 		}
+
 		s.logger.Warn("ARR credentials do not match registered instance", "arr_url", arrURL)
 		return false
 	}
@@ -167,6 +167,7 @@ func (s *Server) validateARRCredentials(maUsername, maPassword string) bool {
 		s.logger.Warn("Failed to auto-register ARR instance",
 			"arr_url", arrURL,
 			"error", err)
+
 		return false
 	}
 
