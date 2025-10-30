@@ -19,14 +19,15 @@ var (
 // FileInfo represents parsed information about an NZB file
 // Similar to C# GetFileInfosStep.FileInfo
 type FileInfo struct {
-	NzbFile     nzbparser.NzbFile   // The original NZB file
-	Filename    string              // Selected filename (using priority system)
-	ReleaseDate time.Time           // Release date from NZB metadata
-	FileSize    *int64              // File size (from PAR2 or yEnc headers, nil if unknown)
-	IsRar       bool                // Whether this is a RAR archive (detected by magic or extension)
-	Is7z        bool                // Whether this is a 7z archive (detected by extension)
-	YencHeaders *nntpcli.YencHeaders // yEnc headers from first segment
-	First16KB   []byte              // First 16KB of the file (for magic byte detection)
+	NzbFile       nzbparser.NzbFile    // The original NZB file
+	Filename      string               // Selected filename (using priority system)
+	ReleaseDate   time.Time            // Release date from NZB metadata
+	FileSize      *int64               // File size (from PAR2 or yEnc headers, nil if unknown)
+	IsRar         bool                 // Whether this is a RAR archive (detected by magic or extension)
+	Is7z          bool                 // Whether this is a 7z archive (detected by extension)
+	IsPar2Archive bool                 // Whether this is a PAR2 archive (detected by extension)
+	YencHeaders   *nntpcli.YencHeaders // yEnc headers from first segment
+	First16KB     []byte               // First 16KB of the file (for magic byte detection)
 }
 
 // NzbFileWithFirstSegment represents an NZB file with its first segment data

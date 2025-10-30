@@ -79,16 +79,9 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		Files:    make([]ParsedFile, 0, len(n.Files)),
 	}
 	// Determine segment size from meta chunk_size or fallback to first segment size
-	var segSize int64
 	if n.Meta != nil {
 		if pwd, ok := n.Meta["password"]; ok && pwd != "" {
 			parsed.SetPassword(pwd)
-		}
-
-		if v, ok := n.Meta["chunk_size"]; ok {
-			if iv, err := strconv.ParseInt(v, 10, 64); err == nil && iv > 0 {
-				segSize = iv
-			}
 		}
 	}
 
@@ -183,27 +176,27 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		parsedFiles = append(parsedFiles, result.parsedFile)
 	}
 
+	// Check if all files are PAR2 files - indicates missing segments
+	if len(parsedFiles) > 0 {
+		allPar2 := true
+		for _, pf := range parsedFiles {
+			if !pf.IsPar2Archive {
+				allPar2 = false
+				break
+			}
+		}
+
+		if allPar2 {
+			return nil, NewNonRetryableError("NZB file contains only PAR2 files. This indicates that there are missing segments in your providers.", nil)
+		}
+	}
+
 	// Aggregate results in the original order
 	for _, parsedFile := range parsedFiles {
 		parsed.Files = append(parsed.Files, *parsedFile)
 		parsed.TotalSize += parsedFile.Size
 		parsed.SegmentsCount += len(parsedFile.Segments)
-
-		if len(parsedFile.Segments) > 0 {
-			// Find the corresponding file info to check segment bytes
-			for _, info := range fileInfos {
-				if info.NzbFile.Subject == parsedFile.Subject {
-					if len(info.NzbFile.Segments) > 0 && info.NzbFile.Segments[0].Bytes > int(segSize) {
-						// Fallback to the first segment size encountered
-						segSize = int64(info.NzbFile.Segments[0].Bytes)
-					}
-					break
-				}
-			}
-		}
 	}
-
-	parsed.SegmentSize = segSize
 
 	// Determine NZB type based on content analysis
 	parsed.Type = p.determineNzbType(parsed.Files)
@@ -322,17 +315,18 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 	// Use RAR/7z detection from fileInfo (includes magic byte detection)
 	parsedFile := &ParsedFile{
-		Subject:      info.NzbFile.Subject,
-		Filename:     filename,
-		Size:         totalSize,
-		Segments:     segments,
-		Groups:       info.NzbFile.Groups,
-		IsRarArchive: info.IsRar,
-		Is7zArchive:  info.Is7z,
-		Encryption:   enc,
-		Password:     password,
-		Salt:         salt,
-		ReleaseDate:  info.ReleaseDate,
+		Subject:       info.NzbFile.Subject,
+		Filename:      filename,
+		Size:          totalSize,
+		Segments:      segments,
+		Groups:        info.NzbFile.Groups,
+		IsRarArchive:  info.IsRar,
+		Is7zArchive:   info.Is7z,
+		Encryption:    enc,
+		Password:      password,
+		Salt:          salt,
+		ReleaseDate:   info.ReleaseDate,
+		IsPar2Archive: info.IsPar2Archive,
 	}
 
 	return parsedFile, nil

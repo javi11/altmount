@@ -86,15 +86,18 @@ func getFileInfo(
 	// Detect 7z archives (by extension only, no magic bytes check for 7z)
 	is7z := Is7zFile(filename)
 
+	isPar2Archive := IsPar2File(filename)
+
 	return &FileInfo{
-		NzbFile:     *file.NzbFile,
-		Filename:    filename,
-		ReleaseDate: file.ReleaseDate,
-		FileSize:    fileSize,
-		IsRar:       isRar,
-		Is7z:        is7z,
-		YencHeaders: file.Headers,
-		First16KB:   file.First16KB,
+		NzbFile:       *file.NzbFile,
+		Filename:      filename,
+		ReleaseDate:   file.ReleaseDate,
+		IsPar2Archive: isPar2Archive,
+		FileSize:      fileSize,
+		IsRar:         isRar,
+		Is7z:          is7z,
+		YencHeaders:   file.Headers,
+		First16KB:     file.First16KB,
 	}
 }
 
@@ -251,4 +254,9 @@ func isProbablyObfuscated(filename string) bool {
 
 	// Finally: default to obfuscated
 	return true
+}
+
+// IsPar2File checks if a filename is a PAR2 archive
+func IsPar2File(filename string) bool {
+	return strings.HasSuffix(strings.ToLower(filename), ".par2")
 }

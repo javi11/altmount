@@ -25,7 +25,6 @@ type ParsedNzb struct {
 	Type          NzbType
 	Files         []ParsedFile
 	SegmentsCount int
-	SegmentSize   int64
 	password      string // Private field - use GetPassword() to access
 }
 
@@ -41,15 +40,16 @@ func (p *ParsedNzb) SetPassword(password string) {
 
 // ParsedFile represents a file extracted from the NZB
 type ParsedFile struct {
-	Subject      string
-	Filename     string
-	Size         int64
-	Segments     []*metapb.SegmentData
-	Groups       []string
-	IsRarArchive bool
-	Is7zArchive  bool
-	Encryption   metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
-	Password     string            // Password from NZB meta, nil if not encrypted
-	Salt         string            // Salt from NZB meta, nil if not encrypted
-	ReleaseDate  time.Time         // Release date from the Usenet post
+	Subject       string
+	Filename      string
+	Size          int64
+	Segments      []*metapb.SegmentData
+	Groups        []string
+	IsRarArchive  bool
+	Is7zArchive   bool
+	IsPar2Archive bool
+	Encryption    metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
+	Password      string            // Password from NZB meta, nil if not encrypted
+	Salt          string            // Salt from NZB meta, nil if not encrypted
+	ReleaseDate   time.Time         // Release date from the Usenet post
 }

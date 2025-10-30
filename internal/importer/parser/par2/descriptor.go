@@ -151,9 +151,5 @@ func readFileDescriptors(
 		}
 	}
 
-	log.Debug("Read PAR2 packets",
-		"total_packets", packetCount,
-		"file_descriptors", len(descriptors))
-
 	return descriptors, nil
 }

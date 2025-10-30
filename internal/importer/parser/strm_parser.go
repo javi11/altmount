@@ -66,14 +66,6 @@ func (p *StrmParser) ParseStrmFile(r io.Reader, strmPath string) (*ParsedNzb, er
 		Files:         []ParsedFile{*parsedFile},
 		TotalSize:     parsedFile.Size,
 		SegmentsCount: len(parsedFile.Segments),
-		SegmentSize:   0, // Will be set from chunk_size
-	}
-
-	// Extract segment size from the first segment if available
-	if len(parsedFile.Segments) > 0 {
-		// For NXG links, all segments should be the same size except possibly the last one
-		firstSegmentSize := parsedFile.Segments[0].EndOffset - parsedFile.Segments[0].StartOffset + 1
-		parsed.SegmentSize = firstSegmentSize
 	}
 
 	return parsed, nil
