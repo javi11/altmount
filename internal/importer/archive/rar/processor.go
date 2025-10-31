@@ -112,13 +112,20 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
 
+	// Normalize RAR part filenames (e.g., part010 -> part10) for consistent processing
+	normalizedFiles := make([]parser.ParsedFile, len(rarFiles))
+	for i, file := range rarFiles {
+		normalizedFiles[i] = file
+		normalizedFiles[i].Filename = normalizeRarPartFilename(file.Filename)
+	}
+
 	// Create Usenet filesystem for RAR access - this enables the iterator to access
 	// RAR part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, rarFiles, rh.maxWorkers, rh.maxCacheSizeMB)
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, rh.maxWorkers, rh.maxCacheSizeMB)
 
 	// Extract filenames for first part detection
-	fileNames := make([]string, len(rarFiles))
-	for i, file := range rarFiles {
+	fileNames := make([]string, len(normalizedFiles))
+	for i, file := range normalizedFiles {
 		fileNames[i] = file.Filename
 	}
 
@@ -130,7 +137,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	rh.log.Info("Starting RAR analysis",
 		"main_file", mainRarFile,
-		"total_parts", len(rarFiles),
+		"total_parts", len(normalizedFiles),
 		"has_password", password != "")
 
 	// Build options with password if provided
@@ -216,7 +223,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Convert iterator results to RarContent
 	// Note: AES credentials are extracted per-file, not per-archive
-	Contents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, rarFiles)
+	Contents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, normalizedFiles)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to convert iterator results to RarContent", err)
 	}

@@ -32,7 +32,7 @@ type Processor struct {
 	poolManager             pool.Manager // Pool manager for dynamic pool access
 	maxValidationGoroutines int          // Maximum concurrent goroutines for segment validation
 	fullSegmentValidation   bool         // Whether to validate all segments or just a random sample
-	failImportsWithoutVideos bool        // Whether to fail imports that don't contain video files
+	allowedFileExtensions   []string     // Allowed file extensions for validation (empty = allow all)
 	log                     *slog.Logger
 	broadcaster             *ProgressBroadcaster // WebSocket progress broadcaster
 
@@ -43,19 +43,19 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, failImportsWithoutVideos bool, broadcaster *ProgressBroadcaster) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, allowedFileExtensions []string, broadcaster *ProgressBroadcaster) *Processor {
 	return &Processor{
-		parser:                   parser.NewParser(poolManager),
-		strmParser:               parser.NewStrmParser(),
-		metadataService:          metadataService,
-		rarProcessor:             rar.NewProcessor(poolManager, 10, 64),      // 10 max workers, 64MB cache for RAR analysis
-		sevenZipProcessor:        sevenzip.NewProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for 7zip analysis
-		poolManager:              poolManager,
-		maxValidationGoroutines:  maxValidationGoroutines,
-		fullSegmentValidation:    fullSegmentValidation,
-		failImportsWithoutVideos: failImportsWithoutVideos,
-		log:                      slog.Default().With("component", "nzb-processor"),
-		broadcaster:              broadcaster,
+		parser:                  parser.NewParser(poolManager),
+		strmParser:              parser.NewStrmParser(),
+		metadataService:         metadataService,
+		rarProcessor:            rar.NewProcessor(poolManager, 10, 64),      // 10 max workers, 64MB cache for RAR analysis
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for 7zip analysis
+		poolManager:             poolManager,
+		maxValidationGoroutines: maxValidationGoroutines,
+		fullSegmentValidation:   fullSegmentValidation,
+		allowedFileExtensions:   allowedFileExtensions,
+		log:                     slog.Default().With("component", "nzb-processor"),
+		broadcaster:             broadcaster,
 
 		// Initialize pre-compiled regex patterns for RAR file sorting
 		rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
@@ -71,20 +71,21 @@ func (proc *Processor) updateProgress(queueID int, percentage int) {
 	}
 }
 
-// validateVideoPresence checks if the import contains video files
-// Returns an error if video validation is enabled and no video files are found
-func (proc *Processor) validateVideoPresence(regularFiles []parser.ParsedFile, rarContents []rar.Content, sevenZipContents []sevenzip.Content) error {
-	// If validation is disabled, return success
-	if !proc.failImportsWithoutVideos {
+// validateFileExtensions checks if the import contains files with allowed extensions
+// Returns an error if allowed extensions are configured and no matching files are found
+// If allowedFileExtensions is empty, all files are allowed (validation passes)
+func (proc *Processor) validateFileExtensions(regularFiles []parser.ParsedFile, rarContents []rar.Content, sevenZipContents []sevenzip.Content) error {
+	// Empty list = allow all files (no validation)
+	if len(proc.allowedFileExtensions) == 0 {
 		return nil
 	}
 
-	// Check if any video files exist in the import
-	hasVideos := utils.HasVideoFiles(regularFiles, rarContents, sevenZipContents)
+	// Check if any files with allowed extensions exist in the import
+	hasAllowedFiles := utils.HasAllowedFiles(regularFiles, rarContents, sevenZipContents, proc.allowedFileExtensions)
 
-	if !hasVideos {
-		proc.log.Warn("Import contains no video files, marking as failed")
-		return ErrNoVideoFiles
+	if !hasAllowedFiles {
+		proc.log.Warn("Import contains no files with allowed extensions", "allowed_extensions", proc.allowedFileExtensions)
+		return ErrNoVideoFiles // Reuse the same error for now, can be renamed later
 	}
 
 	return nil
@@ -210,7 +211,7 @@ func (proc *Processor) processSingleFile(
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateVideoPresence(regularFiles, nil, nil); err != nil {
+	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
 		return "", err
 	}
 
@@ -251,7 +252,7 @@ func (proc *Processor) processMultiFile(
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateVideoPresence(regularFiles, nil, nil); err != nil {
+	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
 		return "", err
 	}
 
@@ -339,7 +340,7 @@ func (proc *Processor) processRarArchive(
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateVideoPresence(regularFiles, rarContents, nil); err != nil {
+	if err := proc.validateFileExtensions(regularFiles, rarContents, nil); err != nil {
 		return "", err
 	}
 
@@ -424,7 +425,7 @@ func (proc *Processor) processSevenZipArchive(
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateVideoPresence(regularFiles, nil, sevenZipContents); err != nil {
+	if err := proc.validateFileExtensions(regularFiles, nil, sevenZipContents); err != nil {
 		return "", err
 	}
 

@@ -87,10 +87,10 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	currentConfig := configGetter()
 	maxValidationGoroutines := currentConfig.Import.MaxValidationGoroutines
 	fullSegmentValidation := currentConfig.Import.FullSegmentValidation
-	failImportsWithoutVideos := currentConfig.Import.FailImportsWithoutVideos
+	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxValidationGoroutines, fullSegmentValidation, failImportsWithoutVideos, broadcaster)
+	processor := NewProcessor(metadataService, poolManager, maxValidationGoroutines, fullSegmentValidation, allowedFileExtensions, broadcaster)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

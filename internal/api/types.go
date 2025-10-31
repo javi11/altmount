@@ -91,11 +91,11 @@ type ProviderAPIResponse struct {
 
 // ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers            int  `json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int  `json:"queue_processing_interval_seconds"` // Interval in seconds
-	MaxValidationGoroutines        int  `json:"max_validation_goroutines"`
-	FullSegmentValidation          bool `json:"full_segment_validation"`
-	FailImportsWithoutVideos       bool `json:"fail_imports_without_videos"`
+	MaxProcessorWorkers            int      `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `json:"queue_processing_interval_seconds"` // Interval in seconds
+	MaxValidationGoroutines        int      `json:"max_validation_goroutines"`
+	FullSegmentValidation          bool     `json:"full_segment_validation"`
+	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses

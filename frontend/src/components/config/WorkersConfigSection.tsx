@@ -1,4 +1,4 @@
-import { Save } from "lucide-react";
+import { Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, ImportConfig } from "../../types/config";
 
@@ -17,6 +17,7 @@ export function ImportConfigSection({
 }: ImportConfigSectionProps) {
 	const [formData, setFormData] = useState<ImportConfig>(config.import);
 	const [hasChanges, setHasChanges] = useState(false);
+	const [extensionInput, setExtensionInput] = useState("");
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -24,7 +25,7 @@ export function ImportConfigSection({
 		setHasChanges(false);
 	}, [config.import]);
 
-	const handleInputChange = (field: keyof ImportConfig, value: number | boolean) => {
+	const handleInputChange = (field: keyof ImportConfig, value: number | boolean | string[]) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.import));
@@ -34,6 +35,38 @@ export function ImportConfigSection({
 		if (onUpdate && hasChanges) {
 			await onUpdate("import", formData);
 			setHasChanges(false);
+		}
+	};
+
+	// Tag management functions
+	const addExtension = (extension: string) => {
+		const trimmed = extension.trim();
+		if (!trimmed) return;
+
+		// Ensure extension starts with a dot
+		const normalized = trimmed.startsWith(".")
+			? trimmed.toLowerCase()
+			: `.${trimmed.toLowerCase()}`;
+
+		// Check if already exists
+		if (formData.allowed_file_extensions.includes(normalized)) {
+			return;
+		}
+
+		const newExtensions = [...formData.allowed_file_extensions, normalized];
+		handleInputChange("allowed_file_extensions", newExtensions);
+		setExtensionInput("");
+	};
+
+	const removeExtension = (extension: string) => {
+		const newExtensions = formData.allowed_file_extensions.filter((ext) => ext !== extension);
+		handleInputChange("allowed_file_extensions", newExtensions);
+	};
+
+	const handleExtensionKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			addExtension(extensionInput);
 		}
 	};
 
@@ -120,20 +153,117 @@ export function ImportConfigSection({
 				</fieldset>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Fail Imports Without Videos</legend>
-					<label className="label cursor-pointer">
-						<span className="label-text">Fail imports that don't contain video files</span>
-						<input
-							type="checkbox"
-							className="checkbox"
-							checked={formData.fail_imports_without_videos}
+					<legend className="fieldset-legend">Allowed File Extensions</legend>
+
+					{/* Tag display area */}
+					<div className="mb-3 flex min-h-[3rem] flex-wrap gap-2 rounded-lg border border-base-300 bg-base-100 p-2">
+						{formData.allowed_file_extensions.length === 0 ? (
+							<span className="text-base-content/60 text-sm">
+								No extensions specified (all files allowed)
+							</span>
+						) : (
+							formData.allowed_file_extensions.map((ext) => (
+								<div key={ext} className="badge badge-primary gap-2">
+									<span>{ext}</span>
+									{!isReadOnly && (
+										<button
+											type="button"
+											className="btn btn-ghost btn-xs h-4 min-h-0 w-4 p-0"
+											onClick={() => removeExtension(ext)}
+											aria-label={`Remove ${ext}`}
+										>
+											<X className="h-3 w-3" />
+										</button>
+									)}
+								</div>
+							))
+						)}
+					</div>
+
+					{/* Input field for adding new extensions */}
+					{!isReadOnly && (
+						<div className="mb-3">
+							<div className="flex gap-2">
+								<input
+									type="text"
+									className="input input-sm flex-1"
+									placeholder="Type extension and press Enter (e.g., .mp4)"
+									value={extensionInput}
+									onChange={(e) => setExtensionInput(e.target.value)}
+									onKeyDown={handleExtensionKeyDown}
+								/>
+								<button
+									type="button"
+									className="btn btn-primary btn-sm"
+									onClick={() => addExtension(extensionInput)}
+									disabled={!extensionInput.trim()}
+								>
+									Add
+								</button>
+							</div>
+						</div>
+					)}
+
+					{/* Preset buttons */}
+					<div className="flex gap-2">
+						<button
+							type="button"
+							className="btn btn-sm btn-outline"
 							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("fail_imports_without_videos", e.target.checked)}
-						/>
-					</label>
+							onClick={() => {
+								const videoDefaults = [
+									".mp4",
+									".mkv",
+									".avi",
+									".mov",
+									".wmv",
+									".flv",
+									".webm",
+									".m4v",
+									".mpg",
+									".mpeg",
+									".m2ts",
+									".ts",
+									".vob",
+									".3gp",
+									".3g2",
+									".h264",
+									".h265",
+									".hevc",
+									".ogv",
+									".ogm",
+									".strm",
+									".iso",
+									".img",
+									".divx",
+									".xvid",
+									".rm",
+									".rmvb",
+									".asf",
+									".asx",
+									".wtv",
+									".mk3d",
+									".dvr-ms",
+								];
+								handleInputChange("allowed_file_extensions", videoDefaults);
+							}}
+						>
+							Reset to Video Defaults
+						</button>
+						<button
+							type="button"
+							className="btn btn-sm btn-outline"
+							disabled={isReadOnly}
+							onClick={() => handleInputChange("allowed_file_extensions", [])}
+						>
+							Clear (Allow All)
+						</button>
+					</div>
+
 					<p className="label">
-						When enabled, imports that don't contain any video files will be marked as failed. This
-						helps filter out incomplete or non-video content.
+						Add file extensions to allow during import validation. Press Enter or click Add to add
+						an extension. Leave empty to allow all file types. Default: common video file
+						extensions.
 					</p>
 				</fieldset>
 			</div>

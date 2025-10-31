@@ -126,11 +126,11 @@ type RCloneConfig struct {
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int  `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int  `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	MaxValidationGoroutines        int  `yaml:"max_validation_goroutines" mapstructure:"max_validation_goroutines" json:"max_validation_goroutines"`
-	FullSegmentValidation          bool `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
-	FailImportsWithoutVideos       bool `yaml:"fail_imports_without_videos" mapstructure:"fail_imports_without_videos" json:"fail_imports_without_videos"`
+	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	MaxValidationGoroutines        int      `yaml:"max_validation_goroutines" mapstructure:"max_validation_goroutines" json:"max_validation_goroutines"`
+	FullSegmentValidation          bool     `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
+	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -1021,7 +1021,12 @@ func DefaultConfig(configDir ...string) *Config {
 			QueueProcessingIntervalSeconds: 5,     // Default: check for work every 5 seconds
 			MaxValidationGoroutines:        5,     // Default: 5 concurrent validation workers
 			FullSegmentValidation:          false, // Default: validate 10 random segments for speed
-			FailImportsWithoutVideos:       true,  // Default: fail imports without video files
+			AllowedFileExtensions: []string{ // Default: common video file extensions
+				".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
+				".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264",
+				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
+				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
+			},
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
