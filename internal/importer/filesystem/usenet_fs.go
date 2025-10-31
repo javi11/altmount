@@ -14,18 +14,18 @@ import (
 
 	"github.com/spf13/afero"
 
+	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
-	"github.com/javi11/altmount/internal/importer/parser"
 )
 
 // Compile-time interface checks
 var (
-	_ fs.File    = (*UsenetFile)(nil)       // UsenetFile implements fs.File
-	_ io.Seeker  = (*UsenetFile)(nil)       // UsenetFile implements io.Seeker
+	_ fs.File     = (*UsenetFile)(nil)       // UsenetFile implements fs.File
+	_ io.Seeker   = (*UsenetFile)(nil)       // UsenetFile implements io.Seeker
 	_ io.ReaderAt = (*UsenetFile)(nil)       // UsenetFile implements io.ReaderAt
-	_ fs.FS      = (*UsenetFileSystem)(nil) // UsenetFileSystem implements fs.FS
+	_ fs.FS       = (*UsenetFileSystem)(nil) // UsenetFileSystem implements fs.FS
 )
 
 // UsenetFileSystem implements fs.FS for reading RAR archives from Usenet

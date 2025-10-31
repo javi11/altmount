@@ -135,6 +135,43 @@ export function ImportConfigSection({
 				</fieldset>
 
 				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Max Import Connections</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.max_import_connections}
+						readOnly={isReadOnly}
+						min={1}
+						max={50}
+						onChange={(e) =>
+							handleInputChange("max_import_connections", Number.parseInt(e.target.value, 10) || 10)
+						}
+					/>
+					<p className="label">
+						Maximum concurrent connections for archive processing (RAR, 7zip). Higher values can increase
+						processing speed but use more memory and network resources but it can also overload and slow down the system.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Import Cache Size (MB)</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.import_cache_size_mb}
+						readOnly={isReadOnly}
+						min={16}
+						max={512}
+						onChange={(e) =>
+							handleInputChange("import_cache_size_mb", Number.parseInt(e.target.value, 10) || 64)
+						}
+					/>
+					<p className="label">
+						Cache size in MB for archive analysis.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Full Segment Validation</legend>
 					<label className="label cursor-pointer">
 						<span className="label-text">Validate all segments (slower but thorough)</span>

@@ -131,6 +131,8 @@ type ImportConfig struct {
 	MaxValidationGoroutines        int      `yaml:"max_validation_goroutines" mapstructure:"max_validation_goroutines" json:"max_validation_goroutines"`
 	FullSegmentValidation          bool     `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
 	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	ImportCacheSizeMB              int      `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -494,6 +496,14 @@ func (c *Config) Validate() error {
 
 	if c.Import.MaxValidationGoroutines < 1 {
 		return fmt.Errorf("import max_validation_goroutines must be more than 1")
+	}
+
+	if c.Import.MaxImportConnections <= 0 {
+		return fmt.Errorf("import max_import_connections must be greater than 0")
+	}
+
+	if c.Import.ImportCacheSizeMB <= 0 {
+		return fmt.Errorf("import import_cache_size_mb must be greater than 0")
 	}
 
 	// Validate log level (both old and new config)
@@ -1027,6 +1037,8 @@ func DefaultConfig(configDir ...string) *Config {
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
+			MaxImportConnections: 10, // Default: 10 max workers for archive processing
+			ImportCacheSizeMB:    64, // Default: 64MB cache for archive analysis
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

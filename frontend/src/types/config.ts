@@ -126,6 +126,8 @@ export interface ImportConfig {
 	max_validation_goroutines: number;
 	full_segment_validation: boolean;
 	allowed_file_extensions: string[];
+	max_import_connections: number;
+	import_cache_size_mb: number;
 }
 
 // Log configuration
