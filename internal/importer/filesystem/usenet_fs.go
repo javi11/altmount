@@ -33,7 +33,7 @@ var (
 type UsenetFileSystem struct {
 	ctx            context.Context
 	poolManager    pool.Manager
-	files          []parser.ParsedFile
+	files          map[string]parser.ParsedFile
 	maxWorkers     int
 	maxCacheSizeMB int
 }
@@ -61,10 +61,15 @@ type UsenetFileInfo struct {
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
 func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
+	filesMap := make(map[string]parser.ParsedFile)
+	for _, file := range files {
+		filesMap[file.Filename] = file
+	}
+
 	return &UsenetFileSystem{
 		ctx:            ctx,
 		poolManager:    poolManager,
-		files:          files,
+		files:          filesMap,
 		maxWorkers:     maxWorkers,
 		maxCacheSizeMB: maxCacheSizeMB,
 	}
@@ -75,27 +80,26 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	name = path.Clean(name)
 
 	// Find the corresponding RAR file
-	for _, file := range ufs.files {
-		if file.Filename == name || path.Base(file.Filename) == name {
-			return &UsenetFile{
-				name:           name,
-				file:           &file,
-				poolManager:    ufs.poolManager,
-				ctx:            ufs.ctx,
-				maxWorkers:     ufs.maxWorkers,
-				maxCacheSizeMB: ufs.maxCacheSizeMB,
-				size:           file.Size,
-				position:       0,
-				closed:         false,
-			}, nil
+	file, ok := ufs.files[name]
+	if !ok {
+		return nil, &fs.PathError{
+			Op:   "open",
+			Path: name,
+			Err:  fs.ErrNotExist,
 		}
 	}
 
-	return nil, &fs.PathError{
-		Op:   "open",
-		Path: name,
-		Err:  fs.ErrNotExist,
-	}
+	return &UsenetFile{
+		name:           name,
+		file:           &file,
+		poolManager:    ufs.poolManager,
+		ctx:            ufs.ctx,
+		maxWorkers:     ufs.maxWorkers,
+		maxCacheSizeMB: ufs.maxCacheSizeMB,
+		size:           file.Size,
+		position:       0,
+		closed:         false,
+	}, nil
 }
 
 // Stat returns file information for a file in the Usenet filesystem
@@ -104,20 +108,19 @@ func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 	path = filepath.Clean(path)
 
 	// Find the corresponding RAR file
-	for _, file := range ufs.files {
-		if file.Filename == path || filepath.Base(file.Filename) == path {
-			return &UsenetFileInfo{
-				name: filepath.Base(file.Filename),
-				size: file.Size,
-			}, nil
+	file, ok := ufs.files[path]
+	if !ok {
+		return nil, &fs.PathError{
+			Op:   "stat",
+			Path: path,
+			Err:  fs.ErrNotExist,
 		}
 	}
 
-	return nil, &fs.PathError{
-		Op:   "stat",
-		Path: path,
-		Err:  fs.ErrNotExist,
-	}
+	return &UsenetFileInfo{
+		name: filepath.Base(file.Filename),
+		size: file.Size,
+	}, nil
 }
 
 // UsenetFile methods implementing fs.File interface
