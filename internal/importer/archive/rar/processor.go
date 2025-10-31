@@ -135,6 +135,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		return nil, err
 	}
 
+	start := time.Now()
 	rh.log.Info("Starting RAR analysis",
 		"main_file", mainRarFile,
 		"total_parts", len(normalizedFiles),
@@ -147,8 +148,12 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		rh.log.Info("Using password to unlock RAR archive")
 	}
 
+	if len(normalizedFiles) > 1 {
+		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(rh.maxWorkers))
+	}
+
 	// Create iterator for memory-efficient archive traversal
-	iter, err := rardecode.NewArchiveIterator(mainRarFile, opts...)
+	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
 	if err != nil {
 		// Check for specific rardecode errors with user-friendly messages
 		if errors.Is(err, rardecode.ErrNoSig) {
@@ -169,43 +174,6 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		}
 		return nil, NewNonRetryableError("failed to create archive iterator", err)
 	}
-	defer iter.Close()
-
-	// Collect files through iteration
-	var aggregatedFiles []rardecode.ArchiveFileInfo
-	fileIndex := 0
-
-	for iter.Next() {
-		info := iter.FileInfo()
-		if info != nil {
-			rh.log.Debug("Found file in RAR archive", "file_name", info.Name, "file_size", info.TotalPackedSize)
-			aggregatedFiles = append(aggregatedFiles, *info)
-
-			// Report progress if callback provided
-			if progressCallback != nil {
-				// We don't know total yet, so report current count
-				progressCallback(fileIndex, len(aggregatedFiles))
-			}
-			fileIndex++
-		}
-	}
-
-	// Check for iteration errors
-	if err := iter.Err(); err != nil {
-		// Check for specific rardecode errors with user-friendly messages
-		if errors.Is(err, rardecode.ErrBadPassword) {
-			return nil, NewNonRetryableError(
-				"RAR archive is password protected. Please provide the correct password",
-				err)
-		}
-		// Check if error indicates incomplete RAR archive with missing volume segments
-		if isIncompleteRarError(err) {
-			return nil, NewNonRetryableError(
-				"incomplete RAR archive: missing one or more segments",
-				err)
-		}
-		return nil, NewNonRetryableError("error during archive iteration", err)
-	}
 
 	if len(aggregatedFiles) == 0 {
 		return nil, NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
@@ -220,6 +188,9 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	if err := rh.checkForCompressedFiles(aggregatedFiles); err != nil {
 		return nil, err
 	}
+
+	duration := time.Since(start)
+	rh.log.Info("RAR analysis completed", "duration_s", duration.Seconds(), "files_in_archive", len(aggregatedFiles))
 
 	// Convert iterator results to RarContent
 	// Note: AES credentials are extracted per-file, not per-archive

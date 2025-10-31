@@ -52,8 +52,6 @@ func AnalyzeRarArchive(
 		return nil, err
 	}
 
-	log.Info("Successfully analyzed RAR archive content", "files_in_archive", len(rarContents))
-
 	return rarContents, nil
 }
 

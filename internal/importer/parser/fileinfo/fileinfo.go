@@ -1,6 +1,7 @@
 package fileinfo
 
 import (
+	"bytes"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -36,6 +37,13 @@ func getFileInfo(
 	if len(hashToDescMap) > 0 {
 		// Calculate MD5 hash of first 16KB for PAR2 matching
 		var par2Desc *par2.FileDescriptor
+
+		for _, desc := range hashToDescMap {
+			if bytes.Equal(file.First16KB, desc.Hash16k[:]) {
+				par2Desc = desc
+				break
+			}
+		}
 
 		// Extract candidate filenames
 		if par2Desc != nil {
