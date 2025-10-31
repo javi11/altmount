@@ -100,14 +100,14 @@ type ImportAPIResponse struct {
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
 type SABnzbdAPIResponse struct {
-	Enabled           bool                    `json:"enabled"`
-	CompleteDir       string                  `json:"complete_dir"`
+	Enabled           bool                     `json:"enabled"`
+	CompleteDir       string                   `json:"complete_dir"`
 	Categories        []config.SABnzbdCategory `json:"categories"`
-	FallbackHost      string                  `json:"fallback_host"`
-	FallbackAPIKey    string                  `json:"fallback_api_key"`     // Obfuscated if set
-	FallbackAPIKeySet bool                    `json:"fallback_api_key_set"` // Indicates if API key is set
-	SymlinkDir        *string                 `json:"symlink_dir,omitempty"`
-	SymlinkEnabled    bool                    `json:"symlink_enabled"`
+	FallbackHost      string                   `json:"fallback_host"`
+	FallbackAPIKey    string                   `json:"fallback_api_key"`     // Obfuscated if set
+	FallbackAPIKeySet bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
+	SymlinkDir        *string                  `json:"symlink_dir,omitempty"`
+	SymlinkEnabled    bool                     `json:"symlink_enabled"`
 }
 
 // Helper functions to create API responses from core config types
@@ -204,11 +204,21 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 
 	return &ConfigAPIResponse{
 		Config:    cfg,
-		Import:    ImportAPIResponse(cfg.Import),
+		Import:    ToImportAPIResponse(cfg.Import),
 		RClone:    rcloneResp,
 		SABnzbd:   sabnzbdResp,
 		Providers: providers,
 		APIKey:    apiKey,
+	}
+}
+
+func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
+	return ImportAPIResponse{
+		MaxProcessorWorkers:            importConfig.MaxProcessorWorkers,
+		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
+		MaxValidationGoroutines:        importConfig.MaxValidationGoroutines,
+		FullSegmentValidation:          importConfig.FullSegmentValidation,
+		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 	}
 }
 
@@ -638,16 +648,16 @@ type ProviderStatusResponse struct {
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
-	BytesDownloaded          int64                     `json:"bytes_downloaded"`
-	BytesUploaded            int64                     `json:"bytes_uploaded"`
-	ArticlesDownloaded       int64                     `json:"articles_downloaded"`
-	ArticlesPosted           int64                     `json:"articles_posted"`
-	TotalErrors              int64                     `json:"total_errors"`
-	ProviderErrors           map[string]int64          `json:"provider_errors"`
-	DownloadSpeedBytesPerSec float64                   `json:"download_speed_bytes_per_sec"`
-	UploadSpeedBytesPerSec   float64                   `json:"upload_speed_bytes_per_sec"`
-	Timestamp                time.Time                 `json:"timestamp"`
-	Providers                []ProviderStatusResponse  `json:"providers"`
+	BytesDownloaded          int64                    `json:"bytes_downloaded"`
+	BytesUploaded            int64                    `json:"bytes_uploaded"`
+	ArticlesDownloaded       int64                    `json:"articles_downloaded"`
+	ArticlesPosted           int64                    `json:"articles_posted"`
+	TotalErrors              int64                    `json:"total_errors"`
+	ProviderErrors           map[string]int64         `json:"provider_errors"`
+	DownloadSpeedBytesPerSec float64                  `json:"download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec   float64                  `json:"upload_speed_bytes_per_sec"`
+	Timestamp                time.Time                `json:"timestamp"`
+	Providers                []ProviderStatusResponse `json:"providers"`
 }
 
 type TestProviderResponse struct {

@@ -18,24 +18,6 @@ var (
 	numericPatternNumber = regexp.MustCompile(`\.(\d+)$`)
 )
 
-func getPartNumber(originalFileName string) int {
-	if matches := partPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		if num := archive.ParseInt(matches[1]); num >= 0 {
-			return num
-		}
-	} else if matches := rPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		if num := archive.ParseInt(matches[1]); num >= 0 {
-			return num + 1
-		}
-	} else if matches := numericPatternNumber.FindStringSubmatch(originalFileName); len(matches) > 1 {
-		if num := archive.ParseInt(matches[1]); num >= 0 {
-			return num
-		}
-	}
-
-	return 0
-}
-
 // normalizeRarPartFilename normalizes RAR part numbers by removing leading zeros
 // Examples:
 //   - "movie.part010.rar" -> "movie.part10.rar"

@@ -767,37 +767,6 @@ func (s *Service) notifyRcloneVFS(resultingPath string, log *slog.Logger) {
 	}
 }
 
-// calculateVirtualDirectory calculates the virtual directory for VFS notification
-func (s *Service) calculateVirtualDirectory(nzbPath, relativePath string) string {
-	if relativePath == "" {
-		return "/"
-	}
-
-	// Clean paths for consistent comparison
-	nzbPath = filepath.Clean(nzbPath)
-	relativePath = filepath.Clean(relativePath)
-
-	// Get relative path from watch root to NZB file
-	relPath, err := filepath.Rel(relativePath, nzbPath)
-	if err != nil {
-		// If we can't get relative path, default to root
-		return "/"
-	}
-
-	// Get directory of NZB file (without filename)
-	relDir := filepath.Dir(relPath)
-
-	// Convert to virtual path
-	if relDir == "." || relDir == "" {
-		// NZB is directly in watch root
-		return "/"
-	}
-
-	// Ensure virtual path starts with / and uses forward slashes
-	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
-	return filepath.Clean(virtualPath)
-}
-
 // ProcessItemInBackground processes a specific queue item in the background
 func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 	go func() {
