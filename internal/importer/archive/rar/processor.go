@@ -141,7 +141,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		"has_password", password != "")
 
 	// Build options with password if provided
-	opts := []rardecode.Option{rardecode.FileSystem(ufs)}
+	opts := []rardecode.Option{rardecode.FileSystem(ufs), rardecode.SkipCheck}
 	if password != "" {
 		opts = append(opts, rardecode.Password(password))
 		rh.log.Info("Using password to unlock RAR archive")
