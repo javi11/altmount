@@ -580,7 +580,7 @@ export function QueuePage() {
 												<Download className="h-4 w-4 text-primary" />
 												<div>
 													<div className="font-bold">
-														<PathDisplay path={item.nzb_path} maxLength={40} showFileName={true} />
+														<PathDisplay path={item.nzb_path} maxLength={90} showFileName={true} />
 													</div>
 													<div className="text-base-content/70 text-sm">ID: {item.id}</div>
 												</div>
@@ -616,17 +616,14 @@ export function QueuePage() {
 														</div>
 													</div>
 												) : (
-													<StatusBadge status={item.status} />
-												)}
-												{item.status === QueueStatus.PROCESSING && item.percentage != null && (
-													<div className="flex items-center gap-2">
-														<progress
-															className="progress progress-primary w-24"
-															value={item.percentage}
-															max={100}
-														/>
-														<span className="text-xs">{item.percentage}%</span>
-													</div>
+													item.status === QueueStatus.PROCESSING && item.percentage != null ? (
+														<div className="flex items-center gap-2">
+															<progress className="progress progress-primary w-24" value={item.percentage} max={100} />
+															<span className="text-xs">{item.percentage}%</span>
+														</div>
+													) : (
+														<StatusBadge status={item.status} />
+													)
 												)}
 											</div>
 										</td>
@@ -651,17 +648,17 @@ export function QueuePage() {
 													{(item.status === QueueStatus.PENDING ||
 														item.status === QueueStatus.FAILED ||
 														item.status === QueueStatus.COMPLETED) && (
-														<li>
-															<button
-																type="button"
-																onClick={() => handleRetry(item.id)}
-																disabled={retryItem.isPending}
-															>
-																<PlayCircle className="h-4 w-4" />
-																{item.status === QueueStatus.PENDING ? "Process" : "Retry"}
-															</button>
-														</li>
-													)}
+															<li>
+																<button
+																	type="button"
+																	onClick={() => handleRetry(item.id)}
+																	disabled={retryItem.isPending}
+																>
+																	<PlayCircle className="h-4 w-4" />
+																	{item.status === QueueStatus.PENDING ? "Process" : "Retry"}
+																</button>
+															</li>
+														)}
 													<li>
 														<button type="button" onClick={() => handleDownload(item.id)}>
 															<Download className="h-4 w-4" />

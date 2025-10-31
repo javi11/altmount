@@ -10,9 +10,13 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/importer/archive/rar"
+	rar_agg "github.com/javi11/altmount/internal/importer/archive/rar"
 	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
+	sz_agg "github.com/javi11/altmount/internal/importer/archive/sevenzip"
+	"github.com/javi11/altmount/internal/importer/filesystem"
+	"github.com/javi11/altmount/internal/importer/multifile"
 	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/importer/steps"
+	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
@@ -132,7 +136,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	proc.updateProgress(queueID, 10)
 
 	// Step 2: Calculate virtual directory
-	virtualDir := steps.CalculateVirtualDirectory(filePath, relativePath)
+	virtualDir := filesystem.CalculateVirtualDirectory(filePath, relativePath)
 
 	proc.log.Info("Processing file",
 		"file_path", filePath,
@@ -142,7 +146,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		"files", len(parsed.Files))
 
 	// Step 3: Separate files by type (regular, archive, PAR2)
-	regularFiles, archiveFiles, _ := steps.SeparateFiles(parsed.Files, parsed.Type)
+	regularFiles, archiveFiles, _ := filesystem.SeparateFiles(parsed.Files, parsed.Type)
 
 	// Step 4: Process based on file type
 	var result string
@@ -191,12 +195,12 @@ func (proc *Processor) processSingleFile(
 	}
 
 	// Ensure directory exists
-	if err := steps.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+	if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
 		return "", err
 	}
 
 	// Process the single file
-	result, err := steps.ProcessSingleFile(
+	result, err := singlefile.ProcessSingleFile(
 		ctx,
 		virtualDir,
 		regularFiles[0],
@@ -227,18 +231,18 @@ func (proc *Processor) processMultiFile(
 	nzbPath string,
 ) (string, error) {
 	// Create NZB folder
-	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
 	if err != nil {
 		return "", err
 	}
 
 	// Create directories for files
-	if err := steps.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+	if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
 		return "", err
 	}
 
 	// Process all regular files
-	if err := steps.ProcessRegularFiles(
+	if err := multifile.ProcessRegularFiles(
 		ctx,
 		nzbFolder,
 		regularFiles,
@@ -270,18 +274,18 @@ func (proc *Processor) processRarArchive(
 	queueID int,
 ) (string, error) {
 	// Create NZB folder
-	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
 	if err != nil {
 		return "", err
 	}
 
 	// Process regular files first if any
 	if len(regularFiles) > 0 {
-		if err := steps.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
 			return "", err
 		}
 
-		if err := steps.ProcessRegularFiles(
+		if err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -296,55 +300,44 @@ func (proc *Processor) processRarArchive(
 		}
 	}
 
-	// Variable to store RAR contents for video validation
-	var rarContents []rar.Content
-
 	// Analyze and process RAR archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
 
-		// Create progress tracker for 50-70% range
-		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 70)
+		// Create progress tracker for 50-90% range
+		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 90)
 
-		rarContents, err = steps.AnalyzeRarArchive(
-			ctx,
-			archiveFiles,
-			parsed.GetPassword(),
-			proc.rarProcessor,
-			proc.log,
-			progressTracker,
-		)
-		if err != nil {
-			return "", err
-		}
-
-		proc.updateProgress(queueID, 70)
 		// Get release date from first archive file
 		var releaseDate int64
 		if len(archiveFiles) > 0 {
 			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
 
-		if err := steps.ProcessRarArchiveFiles(
+		// Process archive with unified aggregator
+		err := rar_agg.ProcessArchive(
 			ctx,
 			nzbFolder,
-			rarContents,
-			parsed.Path,
+			archiveFiles,
+			parsed.GetPassword(),
 			releaseDate,
+			parsed.Path,
 			proc.rarProcessor,
 			proc.metadataService,
 			proc.poolManager,
+			progressTracker,
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
 			proc.log,
-		); err != nil {
+		)
+		if err != nil {
 			return "", err
 		}
 		proc.updateProgress(queueID, 90)
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateFileExtensions(regularFiles, rarContents, nil); err != nil {
+	// Note: For RAR archives, validation is performed inside ProcessArchive
+	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
 		return "", err
 	}
 
@@ -361,18 +354,18 @@ func (proc *Processor) processSevenZipArchive(
 	queueID int,
 ) (string, error) {
 	// Create NZB folder
-	nzbFolder, err := steps.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
 	if err != nil {
 		return "", err
 	}
 
 	// Process regular files first if any
 	if len(regularFiles) > 0 {
-		if err := steps.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
 			return "", err
 		}
 
-		if err := steps.ProcessRegularFiles(
+		if err := multifile.ProcessRegularFiles(
 			ctx,
 			nzbFolder,
 			regularFiles,
@@ -387,54 +380,44 @@ func (proc *Processor) processSevenZipArchive(
 		}
 	}
 
-	// Variable to store 7zip contents for video validation
-	var sevenZipContents []sevenzip.Content
-
 	// Analyze and process 7zip archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
 
-		// Create progress tracker for 50-70% range
-		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 70)
+		// Create progress tracker for 50-90% range
+		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 90)
 
-		sevenZipContents, err = steps.AnalyzeSevenZipArchive(
-			ctx,
-			archiveFiles,
-			parsed.GetPassword(),
-			proc.sevenZipProcessor,
-			proc.log,
-			progressTracker,
-		)
-		if err != nil {
-			return "", err
-		}
-
-		proc.updateProgress(queueID, 70)
 		// Get release date from first archive file
 		var releaseDate int64
 		if len(archiveFiles) > 0 {
 			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
-		if err := steps.ProcessSevenZipArchiveFiles(
+
+		// Process archive with unified aggregator
+		err := sz_agg.ProcessArchive(
 			ctx,
 			nzbFolder,
-			sevenZipContents,
-			parsed.Path,
+			archiveFiles,
+			parsed.GetPassword(),
 			releaseDate,
+			parsed.Path,
 			proc.sevenZipProcessor,
 			proc.metadataService,
 			proc.poolManager,
+			progressTracker,
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
 			proc.log,
-		); err != nil {
+		)
+		if err != nil {
 			return "", err
 		}
 		proc.updateProgress(queueID, 90)
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateFileExtensions(regularFiles, nil, sevenZipContents); err != nil {
+	// Note: For 7zip archives, validation is performed inside ProcessArchive
+	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
 		return "", err
 	}
 
