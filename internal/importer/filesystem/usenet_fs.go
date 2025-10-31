@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/afero"
@@ -17,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/usenet"
 )
 
@@ -30,11 +32,14 @@ var (
 // UsenetFileSystem implements fs.FS for reading RAR archives from Usenet
 // This allows rardecode.OpenReader to access multi-part RAR files without downloading them entirely
 type UsenetFileSystem struct {
-	ctx            context.Context
-	poolManager    pool.Manager
-	files          map[string]parser.ParsedFile
-	maxWorkers     int
-	maxCacheSizeMB int
+	ctx             context.Context
+	poolManager     pool.Manager
+	files           map[string]parser.ParsedFile
+	maxWorkers      int
+	maxCacheSizeMB  int
+	progressTracker *progress.Tracker
+	filesCompleted  int32 // atomic counter
+	totalFiles      int
 }
 
 // UsenetFile implements fs.File and io.Seeker for reading individual RAR parts from Usenet
@@ -50,6 +55,7 @@ type UsenetFile struct {
 	reader         io.ReadCloser
 	position       int64
 	closed         bool
+	ufs            *UsenetFileSystem
 }
 
 // UsenetFileInfo implements fs.FileInfo for RAR part files
@@ -59,18 +65,21 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int, progressTracker *progress.Tracker) *UsenetFileSystem {
 	filesMap := make(map[string]parser.ParsedFile)
 	for _, file := range files {
 		filesMap[file.Filename] = file
 	}
 
 	return &UsenetFileSystem{
-		ctx:            ctx,
-		poolManager:    poolManager,
-		files:          filesMap,
-		maxWorkers:     maxWorkers,
-		maxCacheSizeMB: maxCacheSizeMB,
+		ctx:             ctx,
+		poolManager:     poolManager,
+		files:           filesMap,
+		maxWorkers:      maxWorkers,
+		maxCacheSizeMB:  maxCacheSizeMB,
+		progressTracker: progressTracker,
+		filesCompleted:  0,
+		totalFiles:      len(files),
 	}
 }
 
@@ -98,6 +107,7 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 		size:           file.Size,
 		position:       0,
 		closed:         false,
+		ufs:            ufs,
 	}, nil
 }
 
@@ -159,11 +169,18 @@ func (uf *UsenetFile) Close() error {
 
 	uf.closed = true
 
+	var closeErr error
 	if uf.reader != nil {
-		return uf.reader.Close()
+		closeErr = uf.reader.Close()
 	}
 
-	return nil
+	// Report progress on file close
+	if uf.ufs != nil && uf.ufs.progressTracker != nil {
+		completed := atomic.AddInt32(&uf.ufs.filesCompleted, 1)
+		uf.ufs.progressTracker.Update(int(completed), uf.ufs.totalFiles)
+	}
+
+	return closeErr
 }
 
 // Seek implements io.Seeker interface for efficient RAR part access

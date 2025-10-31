@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
@@ -65,7 +66,7 @@ func initializeImporter(
 	poolManager pool.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 	configGetter config.ConfigGetter,
-	broadcaster *importer.ProgressBroadcaster,
+	broadcaster *progress.ProgressBroadcaster,
 	ctx context.Context,
 	logger *slog.Logger,
 ) (*importer.Service, error) {
@@ -233,7 +234,7 @@ func setupAPIServer(
 	importerService *importer.Service,
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
-	progressBroadcaster *importer.ProgressBroadcaster,
+	progressBroadcaster *progress.ProgressBroadcaster,
 	logger *slog.Logger,
 ) *api.Server {
 	apiConfig := &api.Config{

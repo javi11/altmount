@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 )
 
 const (
@@ -34,7 +35,7 @@ type Processor struct {
 	fullSegmentValidation   bool         // Whether to validate all segments or just a random sample
 	allowedFileExtensions   []string     // Allowed file extensions for validation (empty = allow all)
 	log                     *slog.Logger
-	broadcaster             *ProgressBroadcaster // WebSocket progress broadcaster
+	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern    *regexp.Regexp // pattern.part###.rar
@@ -43,7 +44,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, allowedFileExtensions []string, maxImportConnections int, importCacheSizeMB int, broadcaster *ProgressBroadcaster) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, allowedFileExtensions []string, maxImportConnections int, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -301,14 +302,17 @@ func (proc *Processor) processRarArchive(
 	// Analyze and process RAR archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
+
+		// Create progress tracker for 50-70% range
+		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 70)
+
 		rarContents, err = steps.AnalyzeRarArchive(
 			ctx,
 			archiveFiles,
 			parsed.GetPassword(),
 			proc.rarProcessor,
 			proc.log,
-			proc.updateProgress,
-			queueID,
+			progressTracker,
 		)
 		if err != nil {
 			return "", err
@@ -389,12 +393,17 @@ func (proc *Processor) processSevenZipArchive(
 	// Analyze and process 7zip archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
+
+		// Create progress tracker for 50-70% range
+		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 70)
+
 		sevenZipContents, err = steps.AnalyzeSevenZipArchive(
 			ctx,
 			archiveFiles,
 			parsed.GetPassword(),
 			proc.sevenZipProcessor,
 			proc.log,
+			progressTracker,
 		)
 		if err != nil {
 			return "", err

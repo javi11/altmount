@@ -15,6 +15,7 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 )
 
 // AnalyzeRarArchive analyzes RAR archive content from NZB files
@@ -24,8 +25,7 @@ func AnalyzeRarArchive(
 	password string,
 	rarProcessor rar.Processor,
 	log *slog.Logger,
-	updateProgress func(queueID int, percentage int),
-	queueID int,
+	progressTracker *progress.Tracker,
 ) ([]rar.Content, error) {
 	if len(archiveFiles) == 0 {
 		return nil, nil
@@ -37,16 +37,7 @@ func AnalyzeRarArchive(
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	// Create progress callback for RAR analysis (50% to 70% range)
-	progressCallback := func(current, total int) {
-		if total > 0 && updateProgress != nil {
-			// Map iteration progress to 50-70% range
-			percentage := 50 + (current * 20 / total)
-			updateProgress(queueID, percentage)
-		}
-	}
-
-	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password, progressCallback)
+	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password, progressTracker)
 	if err != nil {
 		log.Error("Failed to analyze RAR archive content", "error", err)
 		return nil, err
@@ -136,6 +127,7 @@ func AnalyzeSevenZipArchive(
 	password string,
 	sevenZipProcessor sevenzip.Processor,
 	log *slog.Logger,
+	progressTracker *progress.Tracker,
 ) ([]sevenzip.Content, error) {
 	if len(archiveFiles) == 0 {
 		return nil, nil
@@ -147,7 +139,7 @@ func AnalyzeSevenZipArchive(
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	sevenZipContents, err := sevenZipProcessor.AnalyzeSevenZipContentFromNzb(ctx, archiveFiles, password)
+	sevenZipContents, err := sevenZipProcessor.AnalyzeSevenZipContentFromNzb(ctx, archiveFiles, password, progressTracker)
 	if err != nil {
 		log.Error("Failed to analyze 7zip archive content", "error", err)
 		return nil, err

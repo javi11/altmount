@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/sevenzip"
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
@@ -119,7 +120,7 @@ func (sz *sevenZipProcessor) deriveAESKey(password string, fileInfo sevenzip.Fil
 // AnalyzeSevenZipContentFromNzb analyzes a 7zip archive directly from NZB data without downloading
 // This implementation uses sevenzip with UsenetFileSystem to analyze 7z structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
-func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []parser.ParsedFile, password string) ([]Content, error) {
+func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker) ([]Content, error) {
 	if sz.poolManager == nil {
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
@@ -129,7 +130,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
 	// 7zip part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB)
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB, progressTracker)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))

@@ -16,8 +16,8 @@ import (
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/webdav"
@@ -99,7 +99,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	repos := setupRepositories(db, logger)
 
 	// Create progress broadcaster for WebSocket progress updates
-	progressBroadcaster := importer.NewProgressBroadcaster()
+	progressBroadcaster := progress.NewProgressBroadcaster()
 
 	importerService, err := initializeImporter(cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, ctx, logger)
 	if err != nil {

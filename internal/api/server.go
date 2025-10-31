@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -50,7 +51,7 @@ type Server struct {
 	mountService        *rclone.MountService
 	logger              *slog.Logger
 	startTime           time.Time
-	progressBroadcaster *importer.ProgressBroadcaster
+	progressBroadcaster *progress.ProgressBroadcaster
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -67,7 +68,7 @@ func NewServer(
 	importService *importer.Service,
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
-	progressBroadcaster *importer.ProgressBroadcaster) *Server {
+	progressBroadcaster *progress.ProgressBroadcaster) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -104,7 +105,7 @@ func (s *Server) SetRcloneClient(rcloneClient rclonecli.RcloneRcClient) {
 }
 
 // GetProgressBroadcaster returns the progress broadcaster for use by the importer service
-func (s *Server) GetProgressBroadcaster() *importer.ProgressBroadcaster {
+func (s *Server) GetProgressBroadcaster() *progress.ProgressBroadcaster {
 	return s.progressBroadcaster
 }
 
@@ -147,6 +148,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
 	api.Get("/queue/stats", s.handleGetQueueStats)
+	api.Get("/queue/progress/stream", s.handleProgressStream) // SSE endpoint for real-time progress
 	api.Delete("/queue/completed", s.handleClearCompletedQueue)
 	api.Delete("/queue/failed", s.handleClearFailedQueue)
 	api.Delete("/queue/bulk", s.handleDeleteQueueBulk)

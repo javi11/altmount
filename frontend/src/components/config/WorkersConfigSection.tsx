@@ -148,8 +148,9 @@ export function ImportConfigSection({
 						}
 					/>
 					<p className="label">
-						Maximum concurrent connections for archive processing (RAR, 7zip). Higher values can increase
-						processing speed but use more memory and network resources but it can also overload and slow down the system.
+						Maximum concurrent connections for archive processing (RAR, 7zip). Higher values can
+						increase processing speed but use more memory and network resources but it can also
+						overload and slow down the system.
 					</p>
 				</fieldset>
 
@@ -166,9 +167,7 @@ export function ImportConfigSection({
 							handleInputChange("import_cache_size_mb", Number.parseInt(e.target.value, 10) || 64)
 						}
 					/>
-					<p className="label">
-						Cache size in MB for archive analysis.
-					</p>
+					<p className="label">Cache size in MB for archive analysis.</p>
 				</fieldset>
 
 				<fieldset className="fieldset">

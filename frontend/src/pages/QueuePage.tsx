@@ -7,8 +7,10 @@ import {
 	PlayCircle,
 	RefreshCw,
 	Trash2,
+	Wifi,
+	WifiOff,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
 import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -27,6 +29,7 @@ import {
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
 } from "../hooks/useApi";
+import { useProgressStream } from "../hooks/useProgressStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
 import { type QueueItem, QueueStatus } from "../types/api";
 
@@ -58,6 +61,25 @@ export function QueuePage() {
 	const queueData = queueResponse?.data;
 	const meta = queueResponse?.meta;
 	const totalPages = meta?.total ? Math.ceil(meta.total / pageSize) : 0;
+
+	// Check if there are any processing items
+	const hasProcessingItems = useMemo(() => {
+		return queueData?.some((item) => item.status === QueueStatus.PROCESSING) ?? false;
+	}, [queueData]);
+
+	// Real-time progress stream (only enabled when there are processing items)
+	const { progress: liveProgress, isConnected: progressStreamConnected } = useProgressStream({
+		enabled: hasProcessingItems,
+	});
+
+	// Enrich queue data with live progress
+	const enrichedQueueData = useMemo(() => {
+		if (!queueData) return undefined;
+		return queueData.map((item) => ({
+			...item,
+			percentage: liveProgress[item.id] ?? item.percentage,
+		}));
+	}, [queueData, liveProgress]);
 
 	const { data: stats } = useQueueStats();
 	const deleteItem = useDeleteQueueItem();
@@ -161,8 +183,8 @@ export function QueuePage() {
 	};
 
 	const handleSelectAll = (checked: boolean) => {
-		if (checked && queueData) {
-			setSelectedItems(new Set(queueData.map((item) => item.id)));
+		if (checked && enrichedQueueData) {
+			setSelectedItems(new Set(enrichedQueueData.map((item) => item.id)));
 		} else {
 			setSelectedItems(new Set());
 		}
@@ -312,6 +334,22 @@ export function QueuePage() {
 							<span className="ml-2 text-sm text-warning">• Auto-refresh paused</span>
 						)}
 					</p>
+					{/* Connection status indicator - only show when there are processing items */}
+					{hasProcessingItems && (
+						<div className="mt-2 flex items-center gap-2">
+							{progressStreamConnected ? (
+								<>
+									<Wifi className="h-4 w-4 text-success" aria-hidden="true" />
+									<span className="text-sm text-success">Live updates</span>
+								</>
+							) : (
+								<>
+									<WifiOff className="h-4 w-4 text-error" aria-hidden="true" />
+									<span className="text-error text-sm">Reconnecting...</span>
+								</>
+							)}
+						</div>
+					)}
 				</div>
 				<div className="flex flex-wrap gap-2">
 					{/* Auto-refresh controls */}
@@ -522,7 +560,7 @@ export function QueuePage() {
 								</tr>
 							</thead>
 							<tbody>
-								{queueData.map((item: QueueItem) => (
+								{enrichedQueueData?.map((item: QueueItem) => (
 									<tr
 										key={item.id}
 										className={`hover ${selectedItems.has(item.id) ? "bg-base-200" : ""}`}

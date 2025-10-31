@@ -114,16 +114,6 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 		response[i] = ToQueueItemResponse(item)
 	}
 
-	// Enrich response with progress data from broadcaster
-	if s.progressBroadcaster != nil {
-		progressMap := s.progressBroadcaster.GetAllProgress()
-		for i, item := range response {
-			if percentage, exists := progressMap[int(item.ID)]; exists {
-				response[i].Percentage = &percentage
-			}
-		}
-	}
-
 	// Create metadata
 	meta := &APIMeta{
 		Total:  totalCount,

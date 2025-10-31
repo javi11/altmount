@@ -21,6 +21,7 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
@@ -57,10 +58,10 @@ type Service struct {
 	database        *database.DB              // Database for processing queue
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
-	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
-	configGetter    config.ConfigGetter      // Config getter for dynamic configuration access
-	sabnzbdClient   *sabnzbd.SABnzbdClient   // SABnzbd client for fallback
-	broadcaster     *ProgressBroadcaster     // WebSocket progress broadcaster
+	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
+	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
+	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
+	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	log             *slog.Logger
 
 	// Runtime state
@@ -77,7 +78,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, broadcaster *ProgressBroadcaster) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, broadcaster *progress.ProgressBroadcaster) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
