@@ -76,17 +76,18 @@ func (proc *Processor) updateProgress(queueID int, percentage int) {
 	}
 }
 
-// validateFileExtensions checks if the import contains files with allowed extensions
+// validateFileExtensions checks if regular files contain any files with allowed extensions
 // Returns an error if allowed extensions are configured and no matching files are found
 // If allowedFileExtensions is empty, all files are allowed (validation passes)
-func (proc *Processor) validateFileExtensions(regularFiles []parser.ParsedFile, rarContents []rar.Content, sevenZipContents []sevenzip.Content) error {
+// Note: Archive files are validated during aggregation in their respective processors
+func (proc *Processor) validateFileExtensions(regularFiles []parser.ParsedFile) error {
 	// Empty list = allow all files (no validation)
 	if len(proc.allowedFileExtensions) == 0 {
 		return nil
 	}
 
-	// Check if any files with allowed extensions exist in the import
-	hasAllowedFiles := utils.HasAllowedFiles(regularFiles, rarContents, sevenZipContents, proc.allowedFileExtensions)
+	// Check if any regular files with allowed extensions exist
+	hasAllowedFiles := utils.HasAllowedFilesInRegular(regularFiles, proc.allowedFileExtensions)
 
 	if !hasAllowedFiles {
 		proc.log.Warn("Import contains no files with allowed extensions", "allowed_extensions", proc.allowedFileExtensions)
@@ -216,7 +217,7 @@ func (proc *Processor) processSingleFile(
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
+	if err := proc.validateFileExtensions(regularFiles); err != nil {
 		return "", err
 	}
 
@@ -257,7 +258,7 @@ func (proc *Processor) processMultiFile(
 	}
 
 	// Validate video presence after successful processing
-	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
+	if err := proc.validateFileExtensions(regularFiles); err != nil {
 		return "", err
 	}
 
@@ -327,6 +328,7 @@ func (proc *Processor) processRarArchive(
 			progressTracker,
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
+			proc.allowedFileExtensions,
 			proc.log,
 		)
 		if err != nil {
@@ -336,9 +338,12 @@ func (proc *Processor) processRarArchive(
 	}
 
 	// Validate video presence after successful processing
-	// Note: For RAR archives, validation is performed inside ProcessArchive
-	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
-		return "", err
+	// Note: For RAR archives, validation is performed inside ProcessArchive during aggregation
+	// Only need to validate regular files here (if any exist outside the archive)
+	if len(regularFiles) > 0 {
+		if err := proc.validateFileExtensions(regularFiles); err != nil {
+			return "", err
+		}
 	}
 
 	return nzbFolder, nil
@@ -407,6 +412,7 @@ func (proc *Processor) processSevenZipArchive(
 			progressTracker,
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
+			proc.allowedFileExtensions,
 			proc.log,
 		)
 		if err != nil {
@@ -416,9 +422,12 @@ func (proc *Processor) processSevenZipArchive(
 	}
 
 	// Validate video presence after successful processing
-	// Note: For 7zip archives, validation is performed inside ProcessArchive
-	if err := proc.validateFileExtensions(regularFiles, nil, nil); err != nil {
-		return "", err
+	// Note: For 7zip archives, validation is performed inside ProcessArchive during aggregation
+	// Only need to validate regular files here (if any exist outside the archive)
+	if len(regularFiles) > 0 {
+		if err := proc.validateFileExtensions(regularFiles); err != nil {
+			return "", err
+		}
 	}
 
 	return nzbFolder, nil

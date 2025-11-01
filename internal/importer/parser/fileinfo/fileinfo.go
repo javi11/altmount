@@ -1,8 +1,7 @@
 package fileinfo
 
 import (
-	"bytes"
-	"log/slog"
+	"crypto/md5"
 	"regexp"
 	"strings"
 
@@ -14,11 +13,10 @@ import (
 func GetFileInfos(
 	files []*NzbFileWithFirstSegment,
 	par2Descriptors map[[16]byte]*par2.FileDescriptor,
-	log *slog.Logger,
 ) []*FileInfo {
 	fileInfos := make([]*FileInfo, 0, len(files))
 	for _, file := range files {
-		info := getFileInfo(file, par2Descriptors, log)
+		info := getFileInfo(file, par2Descriptors)
 		fileInfos = append(fileInfos, info)
 	}
 
@@ -29,26 +27,18 @@ func GetFileInfos(
 func getFileInfo(
 	file *NzbFileWithFirstSegment,
 	hashToDescMap map[[16]byte]*par2.FileDescriptor,
-	log *slog.Logger,
 ) *FileInfo {
 	par2Filename := ""
 	par2FileSize := int64(0)
 
 	if len(hashToDescMap) > 0 {
 		// Calculate MD5 hash of first 16KB for PAR2 matching
-		var par2Desc *par2.FileDescriptor
+		md5Hash := md5.Sum(file.First16KB)
 
-		for _, desc := range hashToDescMap {
-			if bytes.Equal(file.First16KB, desc.Hash16k[:]) {
-				par2Desc = desc
-				break
-			}
-		}
-
-		// Extract candidate filenames
-		if par2Desc != nil {
-			par2Filename = par2Desc.Name
-			par2FileSize = int64(par2Desc.Length)
+		desc, ok := hashToDescMap[md5Hash]
+		if ok {
+			par2Filename = desc.Name
+			par2FileSize = int64(desc.Length)
 		}
 	}
 

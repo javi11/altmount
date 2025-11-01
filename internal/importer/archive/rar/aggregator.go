@@ -2,6 +2,7 @@ package rar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,52 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 )
+
+var (
+	// ErrNoAllowedFiles indicates that the archive contains no files matching allowed extensions
+	ErrNoAllowedFiles = errors.New("archive contains no files with allowed extensions")
+)
+
+// hasAllowedFiles checks if any files within RAR archive contents match allowed extensions
+// If allowedExtensions is empty, returns true (all files allowed)
+func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
+	// Empty list = allow all files
+	if len(allowedExtensions) == 0 {
+		return true
+	}
+
+	for _, content := range rarContents {
+		// Skip directories
+		if content.IsDirectory {
+			continue
+		}
+		// Check both the internal path and filename
+		if isAllowedFile(content.InternalPath, allowedExtensions) || isAllowedFile(content.Filename, allowedExtensions) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAllowedFile checks if a filename has an allowed extension
+func isAllowedFile(filename string, allowedExtensions []string) bool {
+	if filename == "" {
+		return false
+	}
+
+	// Empty list = allow all files
+	if len(allowedExtensions) == 0 {
+		return true
+	}
+
+	ext := strings.ToLower(filepath.Ext(filename))
+	for _, allowedExt := range allowedExtensions {
+		if ext == strings.ToLower(allowedExt) {
+			return true
+		}
+	}
+	return false
+}
 
 // ProcessArchive analyzes and processes RAR archive files, creating metadata for all extracted files.
 // This function handles the complete workflow: analysis → file processing → metadata creation.
@@ -32,6 +79,7 @@ func ProcessArchive(
 	progressTracker *progress.Tracker,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
+	allowedFileExtensions []string,
 	log *slog.Logger,
 ) error {
 	if len(archiveFiles) == 0 {
@@ -48,6 +96,12 @@ func ProcessArchive(
 	if err != nil {
 		log.Error("Failed to analyze RAR archive content", "error", err)
 		return err
+	}
+
+	// Validate file extensions before processing
+	if !hasAllowedFiles(rarContents, allowedFileExtensions) {
+		log.Warn("RAR archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
+		return ErrNoAllowedFiles
 	}
 
 	// Process extracted files

@@ -24,9 +24,10 @@ import (
 
 // Compile-time interface checks
 var (
-	_ fs.File   = (*UsenetFile)(nil)       // UsenetFile implements fs.File
-	_ io.Seeker = (*UsenetFile)(nil)       // UsenetFile implements io.Seeker
-	_ fs.FS     = (*UsenetFileSystem)(nil) // UsenetFileSystem implements fs.FS
+	_ fs.File     = (*UsenetFile)(nil)       // UsenetFile implements fs.File
+	_ io.Seeker   = (*UsenetFile)(nil)       // UsenetFile implements io.Seeker
+	_ io.ReaderAt = (*UsenetFile)(nil)       // UsenetFile implements io.ReaderAt
+	_ fs.FS       = (*UsenetFileSystem)(nil) // UsenetFileSystem implements fs.FS
 )
 
 // UsenetFileSystem implements fs.FS for reading RAR archives from Usenet
@@ -217,6 +218,39 @@ func (uf *UsenetFile) Seek(offset int64, whence int) (int64, error) {
 
 	uf.position = abs
 	return abs, nil
+}
+
+// ReadAt implements io.ReaderAt interface for 7zip access
+// ReadAt reads len(p) bytes into p starting at offset off in the file
+// It returns the number of bytes read and any error encountered
+func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
+	if uf.closed {
+		return 0, fs.ErrClosed
+	}
+
+	if off < 0 {
+		return 0, fmt.Errorf("negative offset: %d", off)
+	}
+
+	if off >= uf.size {
+		return 0, io.EOF
+	}
+
+	// Calculate the end position for this read
+	end := off + int64(len(p)) - 1
+	if end >= uf.size {
+		end = uf.size - 1
+	}
+
+	// Create a new reader for this specific range
+	reader, err := uf.createUsenetReader(uf.ctx, off, end)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create usenet reader: %w", err)
+	}
+	defer reader.Close()
+
+	// Read from the reader
+	return io.ReadFull(reader, p)
 }
 
 // createUsenetReader creates a Usenet reader for the specified range

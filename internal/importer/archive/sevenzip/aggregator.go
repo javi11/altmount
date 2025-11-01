@@ -2,6 +2,7 @@ package sevenzip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,52 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 )
+
+var (
+	// ErrNoAllowedFiles indicates that the archive contains no files matching allowed extensions
+	ErrNoAllowedFiles = errors.New("archive contains no files with allowed extensions")
+)
+
+// hasAllowedFiles checks if any files within 7zip archive contents match allowed extensions
+// If allowedExtensions is empty, returns true (all files allowed)
+func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) bool {
+	// Empty list = allow all files
+	if len(allowedExtensions) == 0 {
+		return true
+	}
+
+	for _, content := range sevenZipContents {
+		// Skip directories
+		if content.IsDirectory {
+			continue
+		}
+		// Check both the internal path and filename
+		if isAllowedFile(content.InternalPath, allowedExtensions) || isAllowedFile(content.Filename, allowedExtensions) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAllowedFile checks if a filename has an allowed extension
+func isAllowedFile(filename string, allowedExtensions []string) bool {
+	if filename == "" {
+		return false
+	}
+
+	// Empty list = allow all files
+	if len(allowedExtensions) == 0 {
+		return true
+	}
+
+	ext := strings.ToLower(filepath.Ext(filename))
+	for _, allowedExt := range allowedExtensions {
+		if ext == strings.ToLower(allowedExt) {
+			return true
+		}
+	}
+	return false
+}
 
 // ProcessArchive analyzes and processes 7zip archive files, creating metadata for all extracted files.
 // This function handles the complete workflow: analysis → file processing → metadata creation.
@@ -32,6 +79,7 @@ func ProcessArchive(
 	progressTracker *progress.Tracker,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
+	allowedFileExtensions []string,
 	log *slog.Logger,
 ) error {
 	if len(archiveFiles) == 0 {
@@ -51,6 +99,12 @@ func ProcessArchive(
 	}
 
 	log.Info("Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
+
+	// Validate file extensions before processing
+	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions) {
+		log.Warn("7zip archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
+		return ErrNoAllowedFiles
+	}
 
 	// Process extracted files
 	for _, sevenZipContent := range sevenZipContents {

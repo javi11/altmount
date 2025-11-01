@@ -145,7 +145,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 
 	// Get file infos with priority-based filename selection
 	// This already filters out PAR2 files
-	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors, p.log)
+	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors)
 	if len(fileInfos) == 0 {
 		return nil, NewNonRetryableError("NZB file contains no valid files. This can be caused because the file has missing segments in your providers.", nil)
 	}
