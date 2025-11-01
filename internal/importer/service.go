@@ -525,6 +525,10 @@ func (s *Service) processQueueItems(ctx context.Context, workerID int) {
 
 // refreshMountPathIfNeeded checks if the mount path exists and refreshes the root directory if not found
 func (s *Service) refreshMountPathIfNeeded(resultingPath string, itemID int64, log *slog.Logger) {
+	if s.rcloneClient == nil {
+		return
+	}
+
 	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
 	if _, err := os.Stat(mountPath); err != nil {
 		if os.IsNotExist(err) {
