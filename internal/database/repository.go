@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -29,7 +30,8 @@ func (r *Repository) WithTransaction(fn func(*Repository) error) error {
 }
 
 // WithImmediateTransaction executes a function within an immediate database transaction
-// This reduces lock contention for queue operations by acquiring locks immediately
+// This reduces lock contention for queue operations by acquiring write locks immediately
+// Uses SQLite's IMMEDIATE transaction mode via BeginTx with Serializable isolation
 func (r *Repository) WithImmediateTransaction(fn func(*Repository) error) error {
 	// Cast to *sql.DB to access BeginTx method
 	sqlDB, ok := r.db.(*sql.DB)
@@ -37,17 +39,14 @@ func (r *Repository) WithImmediateTransaction(fn func(*Repository) error) error 
 		return fmt.Errorf("repository not connected to sql.DB")
 	}
 
-	// Begin transaction with immediate isolation
-	// First set pragma for immediate locking, then begin transaction
-	tx, err := sqlDB.Begin()
+	// Begin IMMEDIATE transaction using Serializable isolation level
+	// In SQLite with go-sqlite3, this translates to: BEGIN IMMEDIATE TRANSACTION
+	// which acquires a RESERVED lock immediately, preventing other writes
+	tx, err := sqlDB.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
-	// Set immediate locking mode for this transaction
-	if _, err := tx.Exec("PRAGMA locking_mode = IMMEDIATE"); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to set immediate locking: %w", err)
+		return fmt.Errorf("failed to begin immediate transaction: %w", err)
 	}
 
 	// Create a repository that uses the transaction
@@ -176,68 +175,45 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 
 // ClaimNextQueueItem atomically claims and returns the next available queue item
 // This prevents multiple workers from processing the same item
+// Uses a single atomic UPDATE...RETURNING query to eliminate race conditions
 func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 	// Use immediate transaction to atomically claim an item
 	var claimedItem *ImportQueueItem
 
 	err := r.WithImmediateTransaction(func(txRepo *Repository) error {
-		// First, get the next available item ID within the transaction
-		var itemID int64
-		selectQuery := `
-			SELECT id FROM import_queue
-			WHERE status = 'pending'
-			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
-			ORDER BY priority ASC, created_at ASC
-			LIMIT 1
-		`
-
-		err := txRepo.db.QueryRow(selectQuery).Scan(&itemID)
-		if err != nil {
-			if err.Error() == "sql: no rows in result set" {
-				// No items available
-				return nil
-			}
-			return fmt.Errorf("failed to select queue item: %w", err)
-		}
-
-		// Now atomically update that specific item and get all its data
+		// Single atomic operation: update and return in one query
+		// This eliminates the race condition window between SELECT and UPDATE
 		updateQuery := `
 			UPDATE import_queue
-			SET status = 'processing', started_at = datetime('now'), updated_at = datetime('now')
-			WHERE id = ? AND status = 'pending'
-		`
-
-		result, err := txRepo.db.Exec(updateQuery, itemID)
-		if err != nil {
-			return fmt.Errorf("failed to claim queue item %d: %w", itemID, err)
-		}
-
-		rowsAffected, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		}
-
-		if rowsAffected == 0 {
-			// Item was claimed by another worker between SELECT and UPDATE
-			return nil
-		}
-
-		// Get the complete claimed item data
-		getQuery := `
-			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
-			FROM import_queue 
-			WHERE id = ?
+			SET status = 'processing',
+			    started_at = datetime('now'),
+			    updated_at = datetime('now')
+			WHERE id = (
+				SELECT id FROM import_queue
+				WHERE status = 'pending'
+				  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
+				ORDER BY priority ASC, created_at ASC
+				LIMIT 1
+			) AND status = 'pending'
+			RETURNING id, nzb_path, relative_path, category, priority, status,
+			          created_at, updated_at, started_at, completed_at,
+			          retry_count, max_retries, error_message, batch_id, metadata, file_size
 		`
 
 		var item ImportQueueItem
-		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
-			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
-			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
+		err := txRepo.db.QueryRow(updateQuery).Scan(
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category,
+			&item.Priority, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+			&item.StartedAt, &item.CompletedAt, &item.RetryCount,
+			&item.MaxRetries, &item.ErrorMessage, &item.BatchID,
+			&item.Metadata, &item.FileSize,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to get claimed item: %w", err)
+			if err == sql.ErrNoRows {
+				// No items available to claim
+				return nil
+			}
+			return fmt.Errorf("failed to claim queue item: %w", err)
 		}
 
 		claimedItem = &item

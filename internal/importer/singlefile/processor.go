@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -25,8 +26,17 @@ func ProcessSingleFile(
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
+	allowedFileExtensions []string,
 	log *slog.Logger,
 ) (string, error) {
+	// Validate file extension before processing
+	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions) {
+		log.Warn("File does not match allowed extensions",
+			"filename", file.Filename,
+			"allowed_extensions", allowedFileExtensions)
+		return "", fmt.Errorf("file '%s' does not match allowed extensions (allowed: %v)", file.Filename, allowedFileExtensions)
+	}
+
 	// Create virtual file path
 	virtualFilePath := filepath.Join(virtualDir, file.Filename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")

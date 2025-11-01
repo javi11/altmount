@@ -10,6 +10,7 @@ import (
 
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -26,10 +27,19 @@ func ProcessRegularFiles(
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
+	allowedFileExtensions []string,
 	log *slog.Logger,
 ) error {
 	if len(files) == 0 {
 		return nil
+	}
+
+	// Validate file extensions before processing
+	if !utils.HasAllowedFilesInRegular(files, allowedFileExtensions) {
+		log.Warn("No files with allowed extensions found",
+			"allowed_extensions", allowedFileExtensions,
+			"file_count", len(files))
+		return fmt.Errorf("no files with allowed extensions found (allowed: %v)", allowedFileExtensions)
 	}
 
 	for _, file := range files {

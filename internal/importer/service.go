@@ -471,10 +471,18 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(isDatabaseContentionError),
 		retry.OnRetry(func(n uint, err error) {
-			log.Debug("Database contention, retrying claim",
-				"attempt", n+1,
-				"worker_id", workerID,
-				"error", err)
+			// Only log warnings after multiple retries to reduce noise
+			if n >= 2 {
+				log.Warn("Database contention, retrying claim",
+					"attempt", n+1,
+					"worker_id", workerID,
+					"error", err)
+			} else {
+				log.Debug("Database contention, retrying claim",
+					"attempt", n+1,
+					"worker_id", workerID,
+					"error", err)
+			}
 		}),
 	)
 
