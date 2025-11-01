@@ -244,7 +244,11 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 	}
 
 	// Get file size from fileInfo (priority-based: PAR2 > yEnc headers)
-	totalSize := *info.FileSize
+	var totalSize int64
+
+	if info.FileSize != nil {
+		totalSize = *info.FileSize
+	}
 
 	// Usenet Drive files parsing
 	var (
