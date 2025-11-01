@@ -7,8 +7,10 @@ import {
 	PlayCircle,
 	RefreshCw,
 	Trash2,
+	Wifi,
+	WifiOff,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
 import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -27,6 +29,7 @@ import {
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
 } from "../hooks/useApi";
+import { useProgressStream } from "../hooks/useProgressStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
 import { type QueueItem, QueueStatus } from "../types/api";
 
@@ -59,6 +62,25 @@ export function QueuePage() {
 	const meta = queueResponse?.meta;
 	const totalPages = meta?.total ? Math.ceil(meta.total / pageSize) : 0;
 
+	// Check if there are any processing items
+	const hasProcessingItems = useMemo(() => {
+		return queueData?.some((item) => item.status === QueueStatus.PROCESSING) ?? false;
+	}, [queueData]);
+
+	// Real-time progress stream (only enabled when there are processing items)
+	const { progress: liveProgress, isConnected: progressStreamConnected } = useProgressStream({
+		enabled: hasProcessingItems,
+	});
+
+	// Enrich queue data with live progress
+	const enrichedQueueData = useMemo(() => {
+		if (!queueData) return undefined;
+		return queueData.map((item) => ({
+			...item,
+			percentage: liveProgress[item.id] ?? item.percentage,
+		}));
+	}, [queueData, liveProgress]);
+
 	const { data: stats } = useQueueStats();
 	const deleteItem = useDeleteQueueItem();
 	const deleteBulk = useDeleteBulkQueueItems();
@@ -77,6 +99,34 @@ export function QueuePage() {
 
 	const handleRetry = async (id: number) => {
 		await retryItem.mutateAsync(id);
+	};
+
+	const handleDownload = async (id: number) => {
+		try {
+			const response = await fetch(`/api/queue/${id}/download`);
+			if (!response.ok) {
+				throw new Error("Failed to download NZB file");
+			}
+
+			// Get filename from Content-Disposition header or use default
+			const contentDisposition = response.headers.get("Content-Disposition");
+			const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
+			const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
+
+			// Create blob and trigger download
+			const blob = await response.blob();
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			window.URL.revokeObjectURL(url);
+			document.body.removeChild(a);
+		} catch (error) {
+			console.error("Failed to download NZB:", error);
+			// TODO: Show error toast notification
+		}
 	};
 
 	const handleClearCompleted = async () => {
@@ -133,8 +183,8 @@ export function QueuePage() {
 	};
 
 	const handleSelectAll = (checked: boolean) => {
-		if (checked && queueData) {
-			setSelectedItems(new Set(queueData.map((item) => item.id)));
+		if (checked && enrichedQueueData) {
+			setSelectedItems(new Set(enrichedQueueData.map((item) => item.id)));
 		} else {
 			setSelectedItems(new Set());
 		}
@@ -284,6 +334,22 @@ export function QueuePage() {
 							<span className="ml-2 text-sm text-warning">• Auto-refresh paused</span>
 						)}
 					</p>
+					{/* Connection status indicator - only show when there are processing items */}
+					{hasProcessingItems && (
+						<div className="mt-2 flex items-center gap-2">
+							{progressStreamConnected ? (
+								<>
+									<Wifi className="h-4 w-4 text-success" aria-hidden="true" />
+									<span className="text-sm text-success">Live updates</span>
+								</>
+							) : (
+								<>
+									<WifiOff className="h-4 w-4 text-error" aria-hidden="true" />
+									<span className="text-error text-sm">Reconnecting...</span>
+								</>
+							)}
+						</div>
+					)}
 				</div>
 				<div className="flex flex-wrap gap-2">
 					{/* Auto-refresh controls */}
@@ -413,7 +479,6 @@ export function QueuePage() {
 								<option value={QueueStatus.PROCESSING}>Processing</option>
 								<option value={QueueStatus.COMPLETED}>Completed</option>
 								<option value={QueueStatus.FAILED}>Failed</option>
-								<option value={QueueStatus.RETRYING}>Retrying</option>
 							</select>
 						</fieldset>
 					</div>
@@ -495,7 +560,7 @@ export function QueuePage() {
 								</tr>
 							</thead>
 							<tbody>
-								{queueData.map((item: QueueItem) => (
+								{enrichedQueueData?.map((item: QueueItem) => (
 									<tr
 										key={item.id}
 										className={`hover ${selectedItems.has(item.id) ? "bg-base-200" : ""}`}
@@ -515,7 +580,7 @@ export function QueuePage() {
 												<Download className="h-4 w-4 text-primary" />
 												<div>
 													<div className="font-bold">
-														<PathDisplay path={item.nzb_path} maxLength={40} showFileName={true} />
+														<PathDisplay path={item.nzb_path} maxLength={90} showFileName={true} />
 													</div>
 													<div className="text-base-content/70 text-sm">ID: {item.id}</div>
 												</div>
@@ -539,21 +604,28 @@ export function QueuePage() {
 											)}
 										</td>
 										<td>
-											{(item.status === QueueStatus.FAILED ||
-												item.status === QueueStatus.RETRYING) &&
-											item.error_message ? (
-												<div
-													className="tooltip tooltip-top"
-													data-tip={truncateText(item.error_message, 200)}
-												>
-													<div className="flex items-center gap-1">
-														<StatusBadge status={item.status} />
-														<AlertCircle className="h-3 w-3 text-error" />
+											<div className="flex flex-col gap-1">
+												{item.status === QueueStatus.FAILED && item.error_message ? (
+													<div
+														className="tooltip tooltip-top"
+														data-tip={truncateText(item.error_message, 200)}
+													>
+														<div className="flex items-center gap-1">
+															<StatusBadge status={item.status} />
+															<AlertCircle className="h-3 w-3 text-error" />
+														</div>
 													</div>
-												</div>
-											) : (
-												<StatusBadge status={item.status} />
-											)}
+												) : (
+													item.status === QueueStatus.PROCESSING && item.percentage != null ? (
+														<div className="flex items-center gap-2">
+															<progress className="progress progress-primary w-24" value={item.percentage} max={100} />
+															<span className="text-xs">{item.percentage}%</span>
+														</div>
+													) : (
+														<StatusBadge status={item.status} />
+													)
+												)}
+											</div>
 										</td>
 										<td>
 											<span
@@ -576,17 +648,23 @@ export function QueuePage() {
 													{(item.status === QueueStatus.PENDING ||
 														item.status === QueueStatus.FAILED ||
 														item.status === QueueStatus.COMPLETED) && (
-														<li>
-															<button
-																type="button"
-																onClick={() => handleRetry(item.id)}
-																disabled={retryItem.isPending}
-															>
-																<PlayCircle className="h-4 w-4" />
-																{item.status === QueueStatus.PENDING ? "Process" : "Retry"}
-															</button>
-														</li>
-													)}
+															<li>
+																<button
+																	type="button"
+																	onClick={() => handleRetry(item.id)}
+																	disabled={retryItem.isPending}
+																>
+																	<PlayCircle className="h-4 w-4" />
+																	{item.status === QueueStatus.PENDING ? "Process" : "Retry"}
+																</button>
+															</li>
+														)}
+													<li>
+														<button type="button" onClick={() => handleDownload(item.id)}>
+															<Download className="h-4 w-4" />
+															Download NZB
+														</button>
+													</li>
 													{item.status !== QueueStatus.PROCESSING && (
 														<li>
 															<button

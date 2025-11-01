@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -29,7 +30,8 @@ func (r *Repository) WithTransaction(fn func(*Repository) error) error {
 }
 
 // WithImmediateTransaction executes a function within an immediate database transaction
-// This reduces lock contention for queue operations by acquiring locks immediately
+// This reduces lock contention for queue operations by acquiring write locks immediately
+// Uses SQLite's IMMEDIATE transaction mode via BeginTx with Serializable isolation
 func (r *Repository) WithImmediateTransaction(fn func(*Repository) error) error {
 	// Cast to *sql.DB to access BeginTx method
 	sqlDB, ok := r.db.(*sql.DB)
@@ -37,17 +39,14 @@ func (r *Repository) WithImmediateTransaction(fn func(*Repository) error) error 
 		return fmt.Errorf("repository not connected to sql.DB")
 	}
 
-	// Begin transaction with immediate isolation
-	// First set pragma for immediate locking, then begin transaction
-	tx, err := sqlDB.Begin()
+	// Begin IMMEDIATE transaction using Serializable isolation level
+	// In SQLite with go-sqlite3, this translates to: BEGIN IMMEDIATE TRANSACTION
+	// which acquires a RESERVED lock immediately, preventing other writes
+	tx, err := sqlDB.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
-	// Set immediate locking mode for this transaction
-	if _, err := tx.Exec("PRAGMA locking_mode = IMMEDIATE"); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to set immediate locking: %w", err)
+		return fmt.Errorf("failed to begin immediate transaction: %w", err)
 	}
 
 	// Create a repository that uses the transaction
@@ -140,11 +139,10 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 	// Use a CTE to select items and immediately mark them as claimed to avoid race conditions
 	query := `
 		WITH selected_items AS (
-			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
+			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
-			FROM import_queue 
-			WHERE status IN ('pending', 'retrying') 
-			  AND retry_count < max_retries
+			FROM import_queue
+			WHERE status = 'pending'
 			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
 			ORDER BY priority ASC, created_at ASC
 			LIMIT ?
@@ -177,69 +175,45 @@ func (r *Repository) GetNextQueueItems(limit int) ([]*ImportQueueItem, error) {
 
 // ClaimNextQueueItem atomically claims and returns the next available queue item
 // This prevents multiple workers from processing the same item
+// Uses a single atomic UPDATE...RETURNING query to eliminate race conditions
 func (r *Repository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 	// Use immediate transaction to atomically claim an item
 	var claimedItem *ImportQueueItem
 
 	err := r.WithImmediateTransaction(func(txRepo *Repository) error {
-		// First, get the next available item ID within the transaction
-		var itemID int64
-		selectQuery := `
-			SELECT id FROM import_queue 
-			WHERE status IN ('pending', 'retrying') 
-			  AND retry_count < max_retries
-			  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
-			ORDER BY priority ASC, created_at ASC
-			LIMIT 1
-		`
-
-		err := txRepo.db.QueryRow(selectQuery).Scan(&itemID)
-		if err != nil {
-			if err.Error() == "sql: no rows in result set" {
-				// No items available
-				return nil
-			}
-			return fmt.Errorf("failed to select queue item: %w", err)
-		}
-
-		// Now atomically update that specific item and get all its data
+		// Single atomic operation: update and return in one query
+		// This eliminates the race condition window between SELECT and UPDATE
 		updateQuery := `
-			UPDATE import_queue 
-			SET status = 'processing', started_at = datetime('now'), updated_at = datetime('now')
-			WHERE id = ? AND status IN ('pending', 'retrying')
-		`
-
-		result, err := txRepo.db.Exec(updateQuery, itemID)
-		if err != nil {
-			return fmt.Errorf("failed to claim queue item %d: %w", itemID, err)
-		}
-
-		rowsAffected, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		}
-
-		if rowsAffected == 0 {
-			// Item was claimed by another worker between SELECT and UPDATE
-			return nil
-		}
-
-		// Get the complete claimed item data
-		getQuery := `
-			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
-			FROM import_queue 
-			WHERE id = ?
+			UPDATE import_queue
+			SET status = 'processing',
+			    started_at = datetime('now'),
+			    updated_at = datetime('now')
+			WHERE id = (
+				SELECT id FROM import_queue
+				WHERE status = 'pending'
+				  AND (started_at IS NULL OR datetime(started_at, '+10 minutes') < datetime('now'))
+				ORDER BY priority ASC, created_at ASC
+				LIMIT 1
+			) AND status = 'pending'
+			RETURNING id, nzb_path, relative_path, category, priority, status,
+			          created_at, updated_at, started_at, completed_at,
+			          retry_count, max_retries, error_message, batch_id, metadata, file_size
 		`
 
 		var item ImportQueueItem
-		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
-			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
-			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
+		err := txRepo.db.QueryRow(updateQuery).Scan(
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category,
+			&item.Priority, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+			&item.StartedAt, &item.CompletedAt, &item.RetryCount,
+			&item.MaxRetries, &item.ErrorMessage, &item.BatchID,
+			&item.Metadata, &item.FileSize,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to get claimed item: %w", err)
+			if err == sql.ErrNoRows {
+				// No items available to claim
+				return nil
+			}
+			return fmt.Errorf("failed to claim queue item: %w", err)
 		}
 
 		claimedItem = &item
@@ -309,8 +283,8 @@ func (r *Repository) UpdateQueueItemStatus(id int64, status QueueStatus, errorMe
 	case QueueStatusCompleted:
 		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
 		args = []interface{}{status, now, now, id}
-	case QueueStatusFailed, QueueStatusRetrying:
-		query = `UPDATE import_queue SET status = ?, retry_count = retry_count + 1, error_message = ?, updated_at = ? WHERE id = ?`
+	case QueueStatusFailed:
+		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
 		args = []interface{}{status, errorMessage, now, id}
 	default:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
@@ -542,7 +516,7 @@ func (r *Repository) GetQueueStats() (*QueueStats, error) {
 func (r *Repository) UpdateQueueStats() error {
 	// Get current counts
 	countQueries := []string{
-		`SELECT COUNT(*) FROM import_queue WHERE status IN ('pending', 'retrying')`,
+		`SELECT COUNT(*) FROM import_queue WHERE status = 'pending'`,
 		`SELECT COUNT(*) FROM import_queue WHERE status = 'processing'`,
 		`SELECT COUNT(*) FROM import_queue WHERE status = 'completed'`,
 		`SELECT COUNT(*) FROM import_queue WHERE status = 'failed'`,
@@ -704,13 +678,13 @@ func (r *Repository) CountQueueItems(status *QueueStatus, search string, categor
 }
 
 // ClearCompletedQueueItems removes completed and failed items from the queue
-func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) {
+func (r *Repository) ClearCompletedQueueItems() (int, error) {
 	query := `
 		DELETE FROM import_queue 
-		WHERE status IN ('completed', 'failed') AND updated_at < ?
+		WHERE status IN ('completed')
 	`
 
-	result, err := r.db.Exec(query, olderThan)
+	result, err := r.db.Exec(query)
 	if err != nil {
 		return 0, fmt.Errorf("failed to clear completed queue items: %w", err)
 	}
@@ -724,13 +698,13 @@ func (r *Repository) ClearCompletedQueueItems(olderThan time.Time) (int, error) 
 }
 
 // ClearFailedQueueItems removes failed items from the queue
-func (r *Repository) ClearFailedQueueItems(olderThan time.Time) (int, error) {
+func (r *Repository) ClearFailedQueueItems() (int, error) {
 	query := `
 		DELETE FROM import_queue 
-		WHERE status = 'failed' AND updated_at < ?
+		WHERE status = 'failed'
 	`
 
-	result, err := r.db.Exec(query, olderThan)
+	result, err := r.db.Exec(query)
 	if err != nil {
 		return 0, fmt.Errorf("failed to clear failed queue items: %w", err)
 	}
@@ -743,9 +717,9 @@ func (r *Repository) ClearFailedQueueItems(olderThan time.Time) (int, error) {
 	return int(rowsAffected), nil
 }
 
-// IsFileInQueue checks if a file is already in the queue (pending, retrying, or processing)
+// IsFileInQueue checks if a file is already in the queue (pending or processing)
 func (r *Repository) IsFileInQueue(filePath string) (bool, error) {
-	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'retrying', 'processing') LIMIT 1`
+	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing') LIMIT 1`
 
 	var exists int
 	err := r.db.QueryRow(query, filePath).Scan(&exists)

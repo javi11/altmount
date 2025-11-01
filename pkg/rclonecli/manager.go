@@ -328,7 +328,10 @@ func (m *Manager) waitForServer() {
 
 // pingServer checks if the RC server is responding
 func (m *Manager) pingServer() bool {
-	req := RCRequest{Command: "core/version"}
+	req := RCRequest{
+		Command: "core/version",
+		Args:    map[string]interface{}{},
+	}
 	_, err := m.makeRequest(req, true)
 	return err == nil
 }

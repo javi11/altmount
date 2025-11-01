@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,9 +25,17 @@ type ConfigInstance struct {
 	RootFolder string `json:"root_folder"`
 }
 
+// ConfigManager interface defines methods needed for configuration management
+type ConfigManager interface {
+	GetConfig() *config.Config
+	UpdateConfig(config *config.Config) error
+	SaveConfig() error
+}
+
 // Service manages Radarr and Sonarr instances for health monitoring and file repair
 type Service struct {
 	configGetter  config.ConfigGetter
+	configManager ConfigManager
 	logger        *slog.Logger
 	mu            sync.RWMutex
 	radarrClients map[string]*radarr.Radarr // key: instance name
@@ -34,9 +43,10 @@ type Service struct {
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
-func NewService(configGetter config.ConfigGetter, logger *slog.Logger) *Service {
+func NewService(configGetter config.ConfigGetter, configManager ConfigManager, logger *slog.Logger) *Service {
 	return &Service{
 		configGetter:  configGetter,
+		configManager: configManager,
 		logger:        logger,
 		radarrClients: make(map[string]*radarr.Radarr),
 		sonarrClients: make(map[string]*sonarr.Sonarr),
@@ -447,6 +457,145 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 // GetAllInstances returns all arrs instances from configuration
 func (s *Service) GetAllInstances() []*ConfigInstance {
 	return s.getConfigInstances()
+}
+
+// generateInstanceName generates an instance name from a URL
+// Format: hostname-port (e.g., "localhost-8989", "sonarr.local-80")
+func (s *Service) generateInstanceName(rawURL string) (string, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	// Get hostname and port
+	hostname := parsedURL.Hostname()
+	port := parsedURL.Port()
+
+	// If no port specified, use default based on scheme
+	if port == "" {
+		if parsedURL.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+
+	// Combine hostname and port
+	return fmt.Sprintf("%s-%s", hostname, port), nil
+}
+
+// normalizeURL normalizes a URL for comparison by removing trailing slashes
+func normalizeURL(rawURL string) string {
+	return strings.TrimSuffix(rawURL, "/")
+}
+
+// instanceExistsByURL checks if an instance with the given URL already exists
+func (s *Service) instanceExistsByURL(checkURL string) bool {
+	normalizedCheck := normalizeURL(checkURL)
+	instances := s.getConfigInstances()
+
+	for _, instance := range instances {
+		normalizedInstance := normalizeURL(instance.URL)
+		if normalizedInstance == normalizedCheck {
+			return true
+		}
+	}
+
+	return false
+}
+
+// detectARRType attempts to detect if a URL points to Radarr or Sonarr
+// Returns "radarr", "sonarr", or an error if neither can be determined
+func (s *Service) detectARRType(arrURL, apiKey string) (string, error) {
+	s.logger.Debug("Detecting ARR type", "url", arrURL)
+
+	// Try Radarr first
+	radarrClient := radarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
+	if _, err := radarrClient.GetSystemStatus(); err == nil {
+		s.logger.Debug("Detected Radarr instance", "url", arrURL)
+		return "radarr", nil
+	}
+
+	// Try Sonarr
+	sonarrClient := sonarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
+	if _, err := sonarrClient.GetSystemStatus(); err == nil {
+		s.logger.Debug("Detected Sonarr instance", "url", arrURL)
+		return "sonarr", nil
+	}
+
+	return "", fmt.Errorf("unable to detect ARR type for URL %s - neither Radarr nor Sonarr responded successfully", arrURL)
+}
+
+// RegisterInstance attempts to automatically register an ARR instance
+// If the instance already exists (by URL), it returns nil without error
+func (s *Service) RegisterInstance(arrURL, apiKey string) error {
+	if s.configManager == nil {
+		return fmt.Errorf("config manager not available")
+	}
+
+	s.logger.Info("Attempting to register ARR instance", "url", arrURL)
+
+	// Check if instance already exists
+	if s.instanceExistsByURL(arrURL) {
+		s.logger.Debug("ARR instance already exists, skipping registration", "url", arrURL)
+		return nil
+	}
+
+	// Detect ARR type
+	arrType, err := s.detectARRType(arrURL, apiKey)
+	if err != nil {
+		return fmt.Errorf("failed to detect ARR type: %w", err)
+	}
+
+	// Generate instance name
+	instanceName, err := s.generateInstanceName(arrURL)
+	if err != nil {
+		return fmt.Errorf("failed to generate instance name: %w", err)
+	}
+
+	s.logger.Info("Registering new ARR instance",
+		"name", instanceName,
+		"type", arrType,
+		"url", arrURL)
+
+	// Get current config and make a deep copy
+	currentConfig := s.configManager.GetConfig()
+	newConfig := currentConfig.DeepCopy()
+
+	// Create new instance config
+	enabled := true
+	newInstance := config.ArrsInstanceConfig{
+		Name:    instanceName,
+		URL:     arrURL,
+		APIKey:  apiKey,
+		Enabled: &enabled,
+	}
+
+	// Add to appropriate array
+	switch arrType {
+	case "radarr":
+		newConfig.Arrs.RadarrInstances = append(newConfig.Arrs.RadarrInstances, newInstance)
+	case "sonarr":
+		newConfig.Arrs.SonarrInstances = append(newConfig.Arrs.SonarrInstances, newInstance)
+	default:
+		return fmt.Errorf("unsupported ARR type: %s", arrType)
+	}
+
+	// Update and save configuration
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
+		return fmt.Errorf("failed to update configuration: %w", err)
+	}
+
+	if err := s.configManager.SaveConfig(); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+
+	s.logger.Info("Successfully registered ARR instance",
+		"name", instanceName,
+		"type", arrType,
+		"url", arrURL)
+
+	return nil
 }
 
 // GetInstance returns a specific instance by type and name

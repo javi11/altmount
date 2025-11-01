@@ -46,11 +46,7 @@ export function BytesDisplay({ bytes, mode = "inline" }: BytesDisplayProps) {
 			);
 
 		default:
-			return (
-				<span className="text-base-content/70 text-sm">
-					{humanReadable} ({formattedBytes} bytes)
-				</span>
-			);
+			return <span className="text-base-content/70 text-sm">{humanReadable}</span>;
 	}
 }
 

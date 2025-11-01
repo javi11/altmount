@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -17,20 +17,21 @@ const MountProvider = "altmount"
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV    WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
-	API       APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
-	Auth      AuthConfig       `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database  DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata  MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health    HealthConfig     `yaml:"health" mapstructure:"health" json:"health,omitempty"`
-	RClone    RCloneConfig     `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
-	Import    ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
-	Log       LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
-	SABnzbd   SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs      ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Providers []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
+	WebDAV          WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API             APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
+	Auth            AuthConfig       `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database        DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata        MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming       StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health          HealthConfig     `yaml:"health" mapstructure:"health" json:"health,omitempty"`
+	RClone          RCloneConfig     `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import          ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
+	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
+	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
+	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
+	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -125,8 +126,13 @@ type RCloneConfig struct {
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	MaxValidationGoroutines        int      `yaml:"max_validation_goroutines" mapstructure:"max_validation_goroutines" json:"max_validation_goroutines"`
+	FullSegmentValidation          bool     `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
+	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	ImportCacheSizeMB              int      `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -141,13 +147,14 @@ type LogConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled               *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	AutoRepairEnabled     *bool `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
-	CheckIntervalSeconds  int   `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConcurrentJobs     int   `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	MaxRetries            int   `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
-	MaxSegmentConnections int   `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
-	CheckAllSegments      bool  `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	Enabled               *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	AutoRepairEnabled     *bool   `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
+	LibraryDir            *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CheckIntervalSeconds  int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConcurrentJobs     int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	MaxRetries            int     `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
+	MaxSegmentConnections int     `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
+	CheckAllSegments      bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -244,9 +251,11 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
-	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled        *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir    string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	SymlinkDir     *string           `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
+	SymlinkEnabled *bool             `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
+	Categories     []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
@@ -360,6 +369,22 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.SABnzbd.Enabled = nil
 	}
 
+	// Deep copy SABnzbd.SymlinkDir pointer
+	if c.SABnzbd.SymlinkDir != nil {
+		v := *c.SABnzbd.SymlinkDir
+		copyCfg.SABnzbd.SymlinkDir = &v
+	} else {
+		copyCfg.SABnzbd.SymlinkDir = nil
+	}
+
+	// Deep copy SABnzbd.SymlinkEnabled pointer
+	if c.SABnzbd.SymlinkEnabled != nil {
+		v := *c.SABnzbd.SymlinkEnabled
+		copyCfg.SABnzbd.SymlinkEnabled = &v
+	} else {
+		copyCfg.SABnzbd.SymlinkEnabled = nil
+	}
+
 	// Deep copy SABnzbd Categories slice
 	if c.SABnzbd.Categories != nil {
 		copyCfg.SABnzbd.Categories = make([]SABnzbdCategory, len(c.SABnzbd.Categories))
@@ -469,6 +494,18 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("import queue_processing_interval_seconds must not exceed 300 seconds")
 	}
 
+	if c.Import.MaxValidationGoroutines < 1 {
+		return fmt.Errorf("import max_validation_goroutines must be more than 1")
+	}
+
+	if c.Import.MaxImportConnections <= 0 {
+		return fmt.Errorf("import max_import_connections must be greater than 0")
+	}
+
+	if c.Import.ImportCacheSizeMB <= 0 {
+		return fmt.Errorf("import import_cache_size_mb must be greater than 0")
+	}
+
 	// Validate log level (both old and new config)
 	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
@@ -560,6 +597,16 @@ func (c *Config) Validate() error {
 		}
 		if !filepath.IsAbs(c.SABnzbd.CompleteDir) {
 			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
+		}
+
+		// Validate symlink configuration if enabled
+		if c.SABnzbd.SymlinkEnabled != nil && *c.SABnzbd.SymlinkEnabled {
+			if c.SABnzbd.SymlinkDir == nil || *c.SABnzbd.SymlinkDir == "" {
+				return fmt.Errorf("sabnzbd symlink_dir cannot be empty when symlinks are enabled")
+			}
+			if !filepath.IsAbs(*c.SABnzbd.SymlinkDir) {
+				return fmt.Errorf("sabnzbd symlink_dir must be an absolute path")
+			}
 		}
 
 		// Validate categories if provided
@@ -706,20 +753,15 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 				Username:                       p.Username,
 				Password:                       p.Password,
 				MaxConnections:                 p.MaxConnections,
-				MaxConnectionIdleTimeInSeconds: 300, // Default idle timeout
+				MaxConnectionIdleTimeInSeconds: 90, // Default idle timeout
 				TLS:                            p.TLS,
 				InsecureSSL:                    p.InsecureTLS,
-				MaxConnectionTTLInSeconds:      3600, // Default connection TTL
+				MaxConnectionTTLInSeconds:      90, // Default connection TTL
 				IsBackupProvider:               isBackup,
 			})
 		}
 	}
 	return providers
-}
-
-// GetActualMountPath returns the actual mount path used by rclone, which includes the provider subdirectory
-func (c *Config) GetActualMountPath(provider string) string {
-	return filepath.Join(c.MountPath, provider)
 }
 
 // ChangeCallback represents a function called when configuration changes
@@ -891,6 +933,7 @@ func DefaultConfig(configDir ...string) *Config {
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
+	symlinkEnabled := false // Disabled by default
 	scrapperEnabled := false
 	loginRequired := true // Require login by default
 
@@ -971,12 +1014,12 @@ func DefaultConfig(configDir ...string) *Config {
 			// VFS Cache Settings - matching your command
 			CacheDir:           cachePath, // VFS cache directory (defaults to <rclone_path>/cache)
 			VFSCacheMode:       "full",    // --vfs-cache-mode=full
-			VFSCacheMaxSize:    "50G",  // --vfs-cache-max-size=50G (changed from 100G)
-			VFSCacheMaxAge:     "504h", // --vfs-cache-max-age=504h (changed from 100h)
-			ReadChunkSize:      "32M",  // --vfs-read-chunk-size=32M (changed from 128M)
-			ReadChunkSizeLimit: "2G",   // --vfs-read-chunk-size-limit=2G
-			VFSReadAhead:       "128M", // --vfs-read-ahead=128M (changed from 128k)
-			DirCacheTime:       "10m",  // --dir-cache-time=10m (changed from 5m)
+			VFSCacheMaxSize:    "50G",     // --vfs-cache-max-size=50G (changed from 100G)
+			VFSCacheMaxAge:     "504h",    // --vfs-cache-max-age=504h (changed from 100h)
+			ReadChunkSize:      "32M",     // --vfs-read-chunk-size=32M (changed from 128M)
+			ReadChunkSizeLimit: "2G",      // --vfs-read-chunk-size-limit=2G
+			VFSReadAhead:       "128M",    // --vfs-read-ahead=128M (changed from 128k)
+			DirCacheTime:       "10m",     // --dir-cache-time=10m (changed from 5m)
 
 			// Additional VFS Settings (not specified in your command, using sensible defaults)
 			VFSCacheMinFreeSpace: "1G",
@@ -984,8 +1027,18 @@ func DefaultConfig(configDir ...string) *Config {
 			VFSReadChunkStreams:  4,
 		},
 		Import: ImportConfig{
-			MaxProcessorWorkers:            2, // Default: 2 processor workers
-			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
+			MaxProcessorWorkers:            2,     // Default: 2 processor workers
+			QueueProcessingIntervalSeconds: 5,     // Default: check for work every 5 seconds
+			MaxValidationGoroutines:        5,     // Default: 5 concurrent validation workers
+			FullSegmentValidation:          false, // Default: validate 10 random segments for speed
+			AllowedFileExtensions: []string{ // Default: common video file extensions
+				".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
+				".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264",
+				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
+				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
+			},
+			MaxImportConnections: 10, // Default: 10 max workers for archive processing
+			ImportCacheSizeMB:    64, // Default: 64MB cache for archive analysis
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1002,11 +1055,13 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxConcurrentJobs:     1,
 			MaxRetries:            2,
 			MaxSegmentConnections: 5,
-			CheckAllSegments:      true,
+			CheckAllSegments:      false,
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,
 			CompleteDir:    "/complete",
+			SymlinkDir:     nil,
+			SymlinkEnabled: &symlinkEnabled,
 			Categories:     []SABnzbdCategory{},
 			FallbackHost:   "",
 			FallbackAPIKey: "",
@@ -1108,6 +1163,20 @@ func LoadConfig(configFile string) (*Config, error) {
 	if configFile != "" && (!viper.IsSet("rclone.cache_dir") || config.RClone.CacheDir == "") {
 		configDir := filepath.Dir(configFile)
 		config.RClone.CacheDir = filepath.Join(configDir, "cache")
+	}
+
+	// Check for PORT environment variable override
+	if portEnv := os.Getenv("PORT"); portEnv != "" {
+		port := 0
+		_, err := fmt.Sscanf(portEnv, "%d", &port)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PORT environment variable '%s': must be a number", portEnv)
+		}
+		if port <= 0 || port > 65535 {
+			return nil, fmt.Errorf("invalid PORT environment variable %d: must be between 1 and 65535", port)
+		}
+		config.WebDAV.Port = port
+		fmt.Printf("Using PORT from environment variable: %d\n", port)
 	}
 
 	// Validate configuration

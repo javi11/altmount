@@ -77,3 +77,19 @@ docker-build-ci: build-frontend
 .PHONY: build-frontend
 build-frontend:
 	cd frontend && bun install --frozen-lockfile && bun run build
+
+.PHONY: build-cli
+build-cli: build-frontend
+	@VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \
+	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
+	TIMESTAMP=$$(date -u '+%Y-%m-%dT%H:%M:%SZ'); \
+	echo "Building altmount CLI (version: $$VERSION, commit: $$COMMIT)..."; \
+	CGO_ENABLED=1 $(GO) build \
+		-trimpath \
+		-tags=cli \
+		-ldflags="-s -w -X 'main.Version=$$VERSION' -X 'main.GitCommit=$$COMMIT' -X 'main.Timestamp=$$TIMESTAMP'" \
+		-o altmount \
+		./cmd/altmount/main.go
+
+.PHONY: build
+build: build-cli

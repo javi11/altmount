@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 )
 
 // Mount represents a mount using the rclone RC client
@@ -17,15 +16,7 @@ type Mount struct {
 }
 
 // NewMount creates a new RC-based mount
-func NewMount(provider, customRcloneMount, webdavURL string, rcManager *Manager) *Mount {
-	cfg := rcManager.cfg.GetConfig()
-	var mountPath string
-	if customRcloneMount != "" {
-		mountPath = customRcloneMount
-	} else {
-		mountPath = filepath.Join(cfg.MountPath, provider)
-	}
-
+func NewMount(provider, mountPath, webdavURL string, rcManager *Manager) *Mount {
 	return &Mount{
 		Provider:  provider,
 		LocalPath: mountPath,
@@ -49,7 +40,7 @@ func (m *Mount) Mount(ctx context.Context) error {
 
 	m.logger.InfoContext(ctx, "Creating mount via RC", "provider", m.Provider, "webdav_url", m.WebDAVURL, "mount_path", m.LocalPath)
 
-	if err := m.rcManager.Mount(ctx, m.Provider, m.WebDAVURL); err != nil {
+	if err := m.rcManager.Mount(ctx, m.Provider, m.LocalPath, m.WebDAVURL); err != nil {
 		m.logger.ErrorContext(ctx, "Mount operation failed", "provider", m.Provider)
 		return fmt.Errorf("mount failed for %s", m.Provider)
 	}

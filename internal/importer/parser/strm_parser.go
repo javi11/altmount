@@ -1,4 +1,4 @@
-package importer
+package parser
 
 import (
 	"bufio"
@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
+	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/nxg"
 )
@@ -64,14 +66,6 @@ func (p *StrmParser) ParseStrmFile(r io.Reader, strmPath string) (*ParsedNzb, er
 		Files:         []ParsedFile{*parsedFile},
 		TotalSize:     parsedFile.Size,
 		SegmentsCount: len(parsedFile.Segments),
-		SegmentSize:   0, // Will be set from chunk_size
-	}
-
-	// Extract segment size from the first segment if available
-	if len(parsedFile.Segments) > 0 {
-		// For NXG links, all segments should be the same size except possibly the last one
-		firstSegmentSize := parsedFile.Segments[0].EndOffset - parsedFile.Segments[0].StartOffset + 1
-		parsed.SegmentSize = firstSegmentSize
 	}
 
 	return parsed, nil
@@ -184,7 +178,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 	}
 
 	// Check if this is a RAR file
-	isRarArchive := rarPattern.MatchString(actualFilename)
+	isRarArchive := fileinfo.IsRarFile(actualFilename)
 
 	parsedFile := &ParsedFile{
 		Subject:      fmt.Sprintf("NXG: %s", actualFilename),
@@ -196,6 +190,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 		Encryption:   enc,
 		Password:     password,
 		Salt:         salt,
+		ReleaseDate:  time.Now(), // STRM files don't have release dates, use current time
 	}
 
 	return parsedFile, nil

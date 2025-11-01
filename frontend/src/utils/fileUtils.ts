@@ -178,3 +178,32 @@ export function getCodeLanguage(filename: string): string {
 
 	return languageMap[extension] || "text";
 }
+
+/**
+ * Encodes a WebDAV path for use in URLs by encoding each path segment separately.
+ * This preserves the path structure while properly encoding special characters.
+ *
+ * @param path - The file path to encode (e.g., "/folder/file name.txt")
+ * @returns The encoded path (e.g., "/folder/file%20name.txt")
+ *
+ * @example
+ * encodeWebDAVPath("/#1 HAPPY FAMILY USA (2025)/Season 01/file.mkv")
+ * // Returns: "/%231%20HAPPY%20FAMILY%20USA%20(2025)/Season%2001/file.mkv"
+ */
+export function encodeWebDAVPath(path: string): string {
+	// Handle empty or root path
+	if (!path || path === "/") {
+		return path;
+	}
+
+	// Split by /, encode each segment, then rejoin
+	// Filter out empty segments to handle multiple slashes
+	const segments = path.split("/").filter((segment) => segment.length > 0);
+	const encodedSegments = segments.map((segment) => encodeURIComponent(segment));
+
+	// Preserve leading slash if present
+	const hasLeadingSlash = path.startsWith("/");
+	const encodedPath = encodedSegments.join("/");
+
+	return hasLeadingSlash ? `/${encodedPath}` : encodedPath;
+}

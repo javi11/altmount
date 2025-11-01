@@ -16,17 +16,18 @@ type SegmentLoader interface {
 //   - start and end are inclusive; caller guarantees 0 <= start <= end < filesize (filesize not passed here)
 //   - Each loader Segment indicates:
 //   - Start: offset (in bytes) within the physical segment where valid data for the file begins (can be > 0)
-//   - Size:  full physical segment size (in bytes)
-//     Therefore the usable data length contributed to the logical file by a loader segment is (Size - Start).
+//   - End: offset (in bytes) within the physical segment where valid data for the file ends (inclusive)
+//   - Size: full physical segment size (in bytes) for downloading
+//     Therefore the usable data length contributed to the logical file by a loader segment is (End - Start + 1).
 //   - We build output *segment objects (internal) with Start & End (inclusive) relative to the physical segment
 //     so the reader will skip Start bytes and read up to End+1 bytes.
 //   - First and last returned segments are trimmed so the concatenation of (End-Start+1) bytes across
 //     returned segments equals the requested range length (unless the range lies fully outside available
 //     data, in which case zero segments are returned).
-func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
+func GetSegmentsInRange(start, end int64, ml SegmentLoader) *segmentRange {
 	// Defensive handling of invalid input ranges
 	if start < 0 || end < start {
-		return segmentRange{start: start, end: end, segments: nil}
+		return &segmentRange{start: start, end: end, segments: nil}
 	}
 
 	requestedLen := end - start + 1
@@ -41,9 +42,9 @@ func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
 			break
 		}
 
-		// Usable data inside this segment starts at src.Start (may be >0) and ends at src.Size-1 inclusive.
+		// Usable data inside this segment starts at src.Start (may be >0) and ends at src.End inclusive.
 		// Length contributed to file:
-		usableLen := src.Size - src.Start
+		usableLen := src.End - src.Start + 1
 		if usableLen <= 0 { // nothing useful; skip
 			continue
 		}
@@ -62,9 +63,9 @@ func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
 		}
 
 		// Determine read window inside the physical segment
-		// Start with full usable window (src.Start .. src.Size-1)
+		// Start with full usable window (src.Start .. src.End)
 		readStart := src.Start
-		readEnd := src.Size - 1
+		readEnd := src.End
 
 		// Trim front if request starts inside this segment
 		if start > segFileStart {
@@ -75,7 +76,7 @@ func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
 		// Trim tail if request ends inside this segment
 		if end < segFileEnd {
 			delta := segFileEnd - end
-			readEnd = (src.Size - 1) - delta
+			readEnd = src.End - delta
 		}
 
 		if readStart > readEnd { // safety; shouldn't happen
@@ -95,20 +96,21 @@ func GetSegmentsInRange(start, end int64, ml SegmentLoader) segmentRange {
 		}
 		segments = append(segments, seg)
 
+		logicalFilePos += usableLen
+
 		// If we've satisfied the full request length, stop
 		// (Check by seeing if this segment covered the end)
 		if segFileEnd >= end {
 			break
 		}
 
-		logicalFilePos += usableLen
 		// If we've already accumulated requestedLen bytes across segments we could also break early
 		if int64AccumulatedLen(segments) >= requestedLen { // redundancy safeguard
 			break
 		}
 	}
 
-	return segmentRange{segments: segments, start: start, end: end}
+	return &segmentRange{segments: segments, start: start, end: end}
 }
 
 // int64AccumulatedLen calculates total bytes represented by current slice of segments

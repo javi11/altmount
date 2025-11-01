@@ -17,6 +17,7 @@ type ConfigAPIResponse struct {
 	RClone    RCloneAPIResponse     `json:"rclone"`
 	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers []ProviderAPIResponse `json:"providers"`
+	APIKey    string                `json:"api_key,omitempty"` // User's API key for authentication
 }
 
 // RCloneAPIResponse sanitizes RClone config for API responses
@@ -90,24 +91,29 @@ type ProviderAPIResponse struct {
 
 // ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers            int `json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int `json:"queue_processing_interval_seconds"` // Interval in seconds
+	MaxProcessorWorkers            int      `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int      `json:"queue_processing_interval_seconds"` // Interval in seconds
+	MaxValidationGoroutines        int      `json:"max_validation_goroutines"`
+	FullSegmentValidation          bool     `json:"full_segment_validation"`
+	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
 type SABnzbdAPIResponse struct {
-	Enabled           bool                    `json:"enabled"`
-	CompleteDir       string                  `json:"complete_dir"`
+	Enabled           bool                     `json:"enabled"`
+	CompleteDir       string                   `json:"complete_dir"`
 	Categories        []config.SABnzbdCategory `json:"categories"`
-	FallbackHost      string                  `json:"fallback_host"`
-	FallbackAPIKey    string                  `json:"fallback_api_key"`     // Obfuscated if set
-	FallbackAPIKeySet bool                    `json:"fallback_api_key_set"` // Indicates if API key is set
+	FallbackHost      string                   `json:"fallback_host"`
+	FallbackAPIKey    string                   `json:"fallback_api_key"`     // Obfuscated if set
+	FallbackAPIKeySet bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
+	SymlinkDir        *string                  `json:"symlink_dir,omitempty"`
+	SymlinkEnabled    bool                     `json:"symlink_enabled"`
 }
 
 // Helper functions to create API responses from core config types
 
 // ToConfigAPIResponse converts config.Config to ConfigAPIResponse with sensitive data masked
-func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
+func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	if cfg == nil {
 		return nil
 	}
@@ -192,14 +198,27 @@ func ToConfigAPIResponse(cfg *config.Config) *ConfigAPIResponse {
 		FallbackHost:      cfg.SABnzbd.FallbackHost,
 		FallbackAPIKey:    fallbackAPIKey,
 		FallbackAPIKeySet: cfg.SABnzbd.FallbackAPIKey != "",
+		SymlinkDir:        cfg.SABnzbd.SymlinkDir,
+		SymlinkEnabled:    cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled,
 	}
 
 	return &ConfigAPIResponse{
 		Config:    cfg,
-		Import:    ImportAPIResponse(cfg.Import),
+		Import:    ToImportAPIResponse(cfg.Import),
 		RClone:    rcloneResp,
 		SABnzbd:   sabnzbdResp,
 		Providers: providers,
+		APIKey:    apiKey,
+	}
+}
+
+func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
+	return ImportAPIResponse{
+		MaxProcessorWorkers:            importConfig.MaxProcessorWorkers,
+		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
+		MaxValidationGoroutines:        importConfig.MaxValidationGoroutines,
+		FullSegmentValidation:          importConfig.FullSegmentValidation,
+		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 	}
 }
 
@@ -262,6 +281,7 @@ type QueueItemResponse struct {
 	BatchID      *string                `json:"batch_id"`
 	Metadata     *string                `json:"metadata"`
 	FileSize     *int64                 `json:"file_size"`
+	Percentage   *int                   `json:"percentage,omitempty"` // Progress percentage (0-100), only for items being processed
 }
 
 // QueueListRequest represents request parameters for listing queue items
@@ -287,6 +307,7 @@ type QueueStatsResponse struct {
 type HealthItemResponse struct {
 	ID               int64                 `json:"id"`
 	FilePath         string                `json:"file_path"`
+	LibraryPath      *string               `json:"library_path,omitempty"`
 	Status           database.HealthStatus `json:"status"`
 	LastChecked      time.Time             `json:"last_checked"`
 	LastError        *string               `json:"last_error"`
@@ -310,11 +331,9 @@ type HealthListRequest struct {
 
 // HealthStatsResponse represents health statistics in API responses
 type HealthStatsResponse struct {
-	Pending   int `json:"pending"`
-	Healthy   int `json:"healthy"`
-	Partial   int `json:"partial"`
-	Corrupted int `json:"corrupted"`
 	Total     int `json:"total"`
+	Pending   int `json:"pending"`
+	Corrupted int `json:"corrupted"`
 }
 
 // HealthRetryRequest represents request to retry a corrupted file
@@ -329,8 +348,9 @@ type HealthRepairRequest struct {
 
 // HealthCleanupRequest represents request to cleanup health records
 type HealthCleanupRequest struct {
-	OlderThan *time.Time             `json:"older_than"`
-	Status    *database.HealthStatus `json:"status"`
+	OlderThan   *time.Time             `json:"older_than"`
+	Status      *database.HealthStatus `json:"status"`
+	DeleteFiles bool                   `json:"delete_files"` // Whether to also delete the physical files
 }
 
 // HealthCheckRequest represents request to add file for manual health checking
@@ -492,13 +512,20 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 
 // ToHealthStatsResponse converts health stats map to HealthStatsResponse
 func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResponse {
-	response := &HealthStatsResponse{
-		Healthy:   stats[database.HealthStatusHealthy],
-		Partial:   stats[database.HealthStatusPartial],
-		Corrupted: stats[database.HealthStatusCorrupted],
+	pending := stats[database.HealthStatusPending]
+	corrupted := stats[database.HealthStatusCorrupted]
+
+	// Calculate total from all tracked statuses
+	total := 0
+	for _, count := range stats {
+		total += count
 	}
-	response.Total = response.Healthy + response.Partial + response.Corrupted
-	return response
+
+	return &HealthStatsResponse{
+		Total:     total,
+		Pending:   pending,
+		Corrupted: corrupted,
+	}
 }
 
 // File Metadata API Types
@@ -605,17 +632,32 @@ type ManualImportResponse struct {
 	Message string `json:"message"`
 }
 
+// ProviderStatusResponse represents NNTP provider connection status in API responses
+type ProviderStatusResponse struct {
+	ID                    string    `json:"id"`
+	Host                  string    `json:"host"`
+	Username              string    `json:"username"`
+	UsedConnections       int       `json:"used_connections"`
+	MaxConnections        int       `json:"max_connections"`
+	State                 string    `json:"state"`
+	ErrorCount            int64     `json:"error_count"`
+	LastConnectionAttempt time.Time `json:"last_connection_attempt"`
+	LastSuccessfulConnect time.Time `json:"last_successful_connect"`
+	FailureReason         string    `json:"failure_reason"`
+}
+
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
-	ActiveConnections    int       `json:"active_connections"`
-	TotalBytesDownloaded int64     `json:"total_bytes_downloaded"`
-	DownloadSpeed        float64   `json:"download_speed_bytes_per_sec"`
-	ErrorRate            float64   `json:"error_rate_percent"`
-	CurrentMemoryUsage   int64     `json:"current_memory_usage"`
-	TotalConnections     int64     `json:"total_connections"`
-	CommandSuccessRate   float64   `json:"command_success_rate_percent"`
-	AcquireWaitTimeMs    int64     `json:"acquire_wait_time_ms"`
-	LastUpdated          time.Time `json:"last_updated"`
+	BytesDownloaded          int64                    `json:"bytes_downloaded"`
+	BytesUploaded            int64                    `json:"bytes_uploaded"`
+	ArticlesDownloaded       int64                    `json:"articles_downloaded"`
+	ArticlesPosted           int64                    `json:"articles_posted"`
+	TotalErrors              int64                    `json:"total_errors"`
+	ProviderErrors           map[string]int64         `json:"provider_errors"`
+	DownloadSpeedBytesPerSec float64                  `json:"download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec   float64                  `json:"upload_speed_bytes_per_sec"`
+	Timestamp                time.Time                `json:"timestamp"`
+	Providers                []ProviderStatusResponse `json:"providers"`
 }
 
 type TestProviderResponse struct {

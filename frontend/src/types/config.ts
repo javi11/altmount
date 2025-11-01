@@ -16,6 +16,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	providers: ProviderConfig[];
 	mount_path: string;
+	api_key?: string;
 }
 
 // WebDAV server configuration
@@ -55,6 +56,7 @@ export interface StreamingConfig {
 export interface HealthConfig {
 	enabled: boolean;
 	auto_repair_enabled: boolean;
+	library_dir?: string;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_concurrent_jobs?: number;
 	max_retries?: number;
@@ -121,6 +123,11 @@ export interface RCloneConfig {
 export interface ImportConfig {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
+	max_validation_goroutines: number;
+	full_segment_validation: boolean;
+	allowed_file_extensions: string[];
+	max_import_connections: number;
+	import_cache_size_mb: number;
 }
 
 // Log configuration
@@ -155,6 +162,8 @@ export interface SABnzbdConfig {
 	fallback_host?: string;
 	fallback_api_key?: string; // Obfuscated when returned from API
 	fallback_api_key_set?: boolean; // For display purposes only
+	symlink_dir?: string;
+	symlink_enabled: boolean;
 }
 
 // SABnzbd category configuration
@@ -282,6 +291,9 @@ export interface RCloneUpdateRequest {
 export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
+	max_validation_goroutines?: number;
+	full_segment_validation?: boolean;
+	allowed_file_extensions?: string[];
 }
 
 // Log update request
@@ -315,6 +327,8 @@ export interface SABnzbdUpdateRequest {
 	categories?: SABnzbdCategory[];
 	fallback_host?: string;
 	fallback_api_key?: string;
+	symlink_dir?: string;
+	symlink_enabled?: boolean;
 }
 
 // Configuration validation request
@@ -362,6 +376,8 @@ export interface APIFormData {
 export interface ImportFormData {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
+	max_validation_goroutines: number;
+	full_segment_validation: boolean;
 }
 
 export interface MetadataFormData {
@@ -506,6 +522,8 @@ export interface SABnzbdFormData {
 	categories: SABnzbdCategory[];
 	fallback_host: string;
 	fallback_api_key: string;
+	symlink_dir: string;
+	symlink_enabled: boolean;
 }
 
 // Arrs configuration types

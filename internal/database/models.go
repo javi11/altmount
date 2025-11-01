@@ -12,7 +12,7 @@ const (
 	QueueStatusProcessing QueueStatus = "processing"
 	QueueStatusCompleted  QueueStatus = "completed"
 	QueueStatusFailed     QueueStatus = "failed"
-	QueueStatusRetrying   QueueStatus = "retrying"
+	QueueStatusFallback   QueueStatus = "fallback" // Sent to external SABnzbd as fallback
 )
 
 // QueuePriority represents the priority level of a queued import
@@ -62,10 +62,8 @@ type HealthStatus string
 const (
 	HealthStatusPending         HealthStatus = "pending"          // File has not been checked yet
 	HealthStatusChecking        HealthStatus = "checking"         // File is currently being checked
-	HealthStatusHealthy         HealthStatus = "healthy"          // File is fully available and healthy
-	HealthStatusPartial         HealthStatus = "partial"          // File has some missing segments but is recoverable
 	HealthStatusRepairTriggered HealthStatus = "repair_triggered" // File repair has been triggered in Arrs
-	HealthStatusCorrupted       HealthStatus = "corrupted"        // File is corrupted or permanently unavailable
+	HealthStatusCorrupted       HealthStatus = "corrupted"        // File has missing segments or is corrupted
 )
 
 // FileHealth represents the health tracking of files in the filesystem

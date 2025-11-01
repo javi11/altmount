@@ -10,7 +10,7 @@ CREATE TABLE import_queue (
     relative_path TEXT DEFAULT NULL,
     storage_path TEXT DEFAULT NULL,
     priority INTEGER NOT NULL DEFAULT 1, -- 1=high, 2=normal, 3=low
-    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'retrying')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'fallback')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     started_at DATETIME DEFAULT NULL,

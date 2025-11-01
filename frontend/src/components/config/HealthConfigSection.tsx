@@ -24,7 +24,10 @@ export function HealthConfigSection({
 		setHasChanges(false);
 	}, [config.health]);
 
-	const handleInputChange = (field: keyof HealthConfig, value: string | boolean | number) => {
+	const handleInputChange = (
+		field: keyof HealthConfig,
+		value: string | boolean | number | undefined,
+	) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.health));
@@ -78,6 +81,24 @@ export function HealthConfigSection({
 							automatically DELETED. Disable for manual control.
 						</div>
 					</div>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Library Directory</legend>
+					<input
+						type="text"
+						className="input"
+						value={formData.library_dir || ""}
+						disabled={isReadOnly || !formData.enabled}
+						placeholder="/media/library"
+						onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
+					/>
+					<p className="label text-gray-600 text-sm">
+						Path to your organized media library that contains symlinks pointing to altmount files.
+						When a repair is triggered, the system will search for symlinks in this directory and
+						use the library path for ARR rescan instead of the mount path. Leave empty to use mount
+						paths directly.
+					</p>
 				</fieldset>
 			</div>
 
@@ -153,25 +174,23 @@ export function HealthConfigSection({
 									</p>
 								</fieldset>
 							)}
-
-							{formData.check_all_segments !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Check All Segments</legend>
-									<label className="label cursor-pointer">
-										<span className="label-text">Deep segment checking</span>
-										<input
-											type="checkbox"
-											className="checkbox"
-											checked={formData.check_all_segments}
-											disabled={isReadOnly}
-											onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
-										/>
-									</label>
-									<p className="label text-gray-600 text-sm">
-										Check all file segments (slower but more thorough)
-									</p>
-								</fieldset>
-							)}
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Check All Segments</legend>
+								<label className="label cursor-pointer">
+									<span className="label-text">Deep segment checking</span>
+									<input
+										type="checkbox"
+										className="checkbox"
+										checked={formData.check_all_segments ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+									/>
+								</label>
+								<p className="label text-gray-600 text-sm">
+									When disabled, use a sampling approach for faster processing. Enable for thorough
+									validation of all segments (slower).
+								</p>
+							</fieldset>
 						</div>
 					</div>
 				</details>

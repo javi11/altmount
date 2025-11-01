@@ -125,8 +125,9 @@ func (f *errorHandlingFile) Read(p []byte) (int, error) {
 
 		if errors.As(err, &corruptedErr) {
 			// Corrupted file - log and return 503
-			slog.ErrorContext(f.ctx, "File corrupted due to missing articles",
-				"total_expected", corruptedErr.TotalExpected)
+			slog.ErrorContext(f.ctx, "File corrupted",
+				"total_expected", corruptedErr.TotalExpected,
+				"error", corruptedErr.UnderlyingErr)
 			return n, &HTTPError{
 				StatusCode: http.StatusServiceUnavailable,
 				Message:    "File unavailable due to missing articles",

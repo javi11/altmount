@@ -46,7 +46,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		TokenDuration:     24 * time.Hour, // 24 hours
 		CookieDomain:      "localhost",
-		CookieSecure:      false, // true for production
+		CookieSecure:      false,                // true for production
 		CookieSameSite:    http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
 		DirectAuthEnabled: true,
 		Issuer:            "altmount",
@@ -131,7 +131,6 @@ func (s *Service) SetupProviders(config *Config) error {
 	// Direct authentication provider (username/password)
 	if config.DirectAuthEnabled {
 		s.authService.AddDirectProvider("altmount", &directCredChecker{service: s})
-		s.logger.Info("Direct authentication provider configured")
 	}
 
 	return nil

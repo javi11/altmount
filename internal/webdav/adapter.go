@@ -12,9 +12,9 @@ import (
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/internal/webdav/propfind"
-	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 )
 
@@ -28,17 +28,17 @@ type Handler struct {
 // NewHandler creates a new WebDAV handler that can be used with Fiber adaptor
 func NewHandler(
 	config *Config,
-	fs afero.Fs,
+	fs *nzbfilesystem.NzbFilesystem,
 	tokenService *token.Service, // Optional token service for JWT auth
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
 	configGetter config.ConfigGetter, // Dynamic config access
 ) (*Handler, error) {
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
-	
+
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
-		fileSystem: aferoToWebdavFS(fs),
+		fileSystem: nzbToWebdavFS(fs),
 	}
 
 	webdavHandler := &webdav.Handler{
@@ -181,14 +181,6 @@ func NewHandler(
 		}))
 		// Mount handler at /webdav/
 		mux.Handle(base+"/", h)
-	}
-
-	// Add pprof endpoints for profiling only in debug mode
-	if config.Debug {
-		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/profile", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
-		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
 	}
 
 	return &Handler{

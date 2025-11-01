@@ -6,17 +6,16 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 )
 
 // Mount creates a mount using the rclone RC API with retry logic
-func (m *Manager) Mount(ctx context.Context, provider, webdavURL string) error {
-	return m.mountWithRetry(ctx, provider, webdavURL, 3)
+func (m *Manager) Mount(ctx context.Context, provider, mountPath, webdavURL string) error {
+	return m.mountWithRetry(ctx, provider, mountPath, webdavURL, 3)
 }
 
 // mountWithRetry attempts to mount with retry logic
-func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string, maxRetries int) error {
+func (m *Manager) mountWithRetry(ctx context.Context, provider, mountPath, webdavURL string, maxRetries int) error {
 	if !m.IsReady() {
 		if err := m.WaitForReady(30 * time.Second); err != nil {
 			return fmt.Errorf("rclone RC server not ready: %w", err)
@@ -31,7 +30,7 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string
 			time.Sleep(wait)
 		}
 
-		if err := m.performMount(ctx, provider, webdavURL); err != nil {
+		if err := m.performMount(ctx, provider, mountPath, webdavURL); err != nil {
 			m.logger.ErrorContext(ctx, "Mount attempt failed", "err", err, "provider", provider, "attempt", attempt+1)
 			continue
 		}
@@ -42,14 +41,15 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, webdavURL string
 }
 
 // performMount performs a single mount attempt
-func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) error {
+func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavURL string) error {
 	cfg := m.cfg.GetConfig()
-	mountPath := filepath.Join(cfg.MountPath, provider)
 
 	m.logger.InfoContext(ctx, "Creating mount directory", "provider", provider, "path", mountPath)
 	// Create mount directory
 	if err := os.MkdirAll(mountPath, 0755); err != nil {
-		return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+		}
 	}
 
 	// Check if already mounted
@@ -66,7 +66,7 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 	if exists && !existingMount.Mounted {
 		err := m.forceUnmountPath(mountPath)
 		if err != nil {
-			slog.ErrorContext(ctx, "Failed to force unmount path", "err", err, "provider", provider, "path", mountPath)
+			slog.InfoContext(ctx, "Nothing to unmount", "err", err, "provider", provider, "path", mountPath)
 		}
 	}
 
@@ -81,8 +81,8 @@ func (m *Manager) performMount(ctx context.Context, provider, webdavURL string) 
 		"mountPoint": mountPath,
 	}
 	mountOpt := map[string]interface{}{
-		"AllowNonEmpty": true,
-		"AllowOther":    true,
+		"AllowNonEmpty": cfg.RClone.AllowNonEmpty,
+		"AllowOther":    cfg.RClone.AllowOther,
 		"DebugFUSE":     false,
 		"DeviceName":    provider,
 		"VolumeName":    provider,
@@ -366,9 +366,9 @@ func (m *Manager) createConfig(configName, webdavURL string, user, pass string) 
 // forceUnmountPath attempts to force unmount a path using system commands
 func (m *Manager) forceUnmountPath(mountPath string) error {
 	methods := [][]string{
+		{"fusermount", "-uz", mountPath},
 		{"umount", mountPath},
 		{"umount", "-l", mountPath}, // lazy unmount
-		{"fusermount", "-uz", mountPath},
 		{"fusermount3", "-uz", mountPath},
 	}
 

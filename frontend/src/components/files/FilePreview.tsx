@@ -39,6 +39,8 @@ export function FilePreview({
 	currentPath,
 }: FilePreviewProps) {
 	const modalRef = useRef<HTMLDialogElement>(null);
+	const videoRef = useRef<HTMLVideoElement>(null);
+	const audioRef = useRef<HTMLAudioElement>(null);
 
 	useEffect(() => {
 		const modal = modalRef.current;
@@ -66,6 +68,32 @@ export function FilePreview({
 			document.removeEventListener("keydown", handleKeyDown);
 		};
 	}, [isOpen, onClose]);
+
+	// Cleanup media resources and blob URLs when component unmounts or closes
+	useEffect(() => {
+		if (!isOpen) {
+			// Stop and cleanup video
+			if (videoRef.current) {
+				videoRef.current.pause();
+				videoRef.current.removeAttribute("src");
+				videoRef.current.load(); // Abort any ongoing downloads
+			}
+			// Stop and cleanup audio
+			if (audioRef.current) {
+				audioRef.current.pause();
+				audioRef.current.removeAttribute("src");
+				audioRef.current.load(); // Abort any ongoing downloads
+			}
+
+			// Immediately revoke blob URLs to stop downloads
+			if (blobUrl?.startsWith("blob:")) {
+				URL.revokeObjectURL(blobUrl);
+			}
+			if (streamUrl?.startsWith("blob:")) {
+				URL.revokeObjectURL(streamUrl);
+			}
+		}
+	}, [isOpen, blobUrl, streamUrl]);
 
 	if (!file) return null;
 
@@ -132,6 +160,7 @@ export function FilePreview({
 			return (
 				<div className="flex min-h-[400px] items-center justify-center">
 					<video
+						ref={videoRef}
 						src={videoSrc}
 						controls
 						className="max-h-[70vh] max-w-full rounded-lg"
@@ -151,7 +180,13 @@ export function FilePreview({
 				<div className="flex flex-col items-center justify-center space-y-6 py-16">
 					<Music className="h-16 w-16 text-primary" />
 					<h3 className="font-semibold text-xl">{file.basename}</h3>
-					<audio src={audioSrc} controls className="w-full max-w-md" onError={() => onRetry()}>
+					<audio
+						ref={audioRef}
+						src={audioSrc}
+						controls
+						className="w-full max-w-md"
+						onError={() => onRetry()}
+					>
 						<track kind="captions" src="" label="No captions available" />
 						Your browser does not support audio playback.
 					</audio>

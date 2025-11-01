@@ -63,6 +63,9 @@ type HealthWorker struct {
 	activeChecks   map[string]context.CancelFunc // filePath -> cancel function
 	activeChecksMu sync.RWMutex
 
+	// Symlink finder for library directory lookups
+	symlinkFinder *SymlinkFinder
+
 	// Statistics
 	stats   WorkerStats
 	statsMu sync.RWMutex
@@ -87,6 +90,7 @@ func NewHealthWorker(
 		status:          WorkerStatusStopped,
 		stopChan:        make(chan struct{}),
 		activeChecks:    make(map[string]context.CancelFunc),
+		symlinkFinder:   NewSymlinkFinder(logger),
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -114,16 +118,10 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		s.LastError = nil
 	})
 
-	hw.logger.Info("Starting health worker",
-		"check_interval", hw.getCheckInterval(),
-		"max_concurrent_jobs", hw.getMaxConcurrentJobs())
-
 	// Initialize health system - reset any files stuck in 'checking' status
 	if err := hw.healthRepo.ResetFileAllChecking(); err != nil {
 		hw.logger.Error("Failed to reset checking files during initialization", "error", err)
 		// Don't fail startup for this - just log and continue
-	} else {
-		hw.logger.Info("Health system initialized - reset any files from 'checking' to 'pending' status")
 	}
 
 	// Start the main worker goroutine
@@ -138,7 +136,7 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		s.Status = WorkerStatusRunning
 	})
 
-	hw.logger.Info("Health worker started successfully")
+	hw.logger.Info("Health worker started successfully", "check_interval", hw.getCheckInterval(), "max_concurrent_jobs", hw.getMaxConcurrentJobs())
 	return nil
 }
 
@@ -216,7 +214,7 @@ func (hw *HealthWorker) CancelHealthCheck(filePath string) error {
 	delete(hw.activeChecks, filePath)
 
 	// Update file status to pending to allow retry
-	err := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, nil, nil, nil)
+	err := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, nil, nil, nil, false)
 	if err != nil {
 		hw.logger.Error("Failed to update file status after cancellation", "file_path", filePath, "error", err)
 		return fmt.Errorf("failed to update file status after cancellation: %w", err)
@@ -294,6 +292,7 @@ func (hw *HealthWorker) AddToHealthCheck(filePath string, sourceNzb *string) err
 			nil,
 			sourceNzb,
 			nil,
+			false,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to add file to health database: %w", err)
@@ -309,6 +308,7 @@ func (hw *HealthWorker) AddToHealthCheck(filePath string, sourceNzb *string) err
 				nil,
 				sourceNzb,
 				nil,
+				false,
 			)
 			if err != nil {
 				return fmt.Errorf("failed to update file status to pending: %w", err)
@@ -346,7 +346,7 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 
 			// Set status back to pending if the check failed
 			errorMsg := checkErr.Error()
-			updateErr := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil)
+			updateErr := hw.healthRepo.UpdateFileHealth(filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil, false)
 			if updateErr != nil {
 				hw.logger.Error("Failed to update status after failed check", "file_path", filePath, "error", updateErr)
 			}
@@ -592,7 +592,6 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	totalFiles := len(unhealthyFiles) + len(repairFiles)
 	if totalFiles == 0 {
-		hw.logger.Debug("No unhealthy files found, skipping health check cycle")
 		hw.updateStats(func(s *WorkerStats) {
 			s.CurrentRunStartTime = nil
 			s.CurrentRunFilesChecked = 0
@@ -718,23 +717,40 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 
 	hw.logger.Info("Triggering file repair using direct ARR API approach", "file_path", filePath)
 
+	// Determine which path to use for ARR rescan
+	pathForRescan := filePath
+	librarySymlink, err := hw.symlinkFinder.FindLibrarySymlink(ctx, filePath, cfg)
+	if err != nil {
+		hw.logger.Warn("Error searching for library symlink, using mount path",
+			"mount_path", filePath,
+			"error", err)
+	} else if librarySymlink != "" {
+		pathForRescan = librarySymlink
+		hw.logger.Debug("Using library symlink path for ARR rescan",
+			"mount_path", filePath,
+			"library_path", librarySymlink)
+	} else {
+		hw.logger.Debug("No library symlink found, using mount path for ARR rescan",
+			"mount_path", filePath)
+	}
+
 	// Try to trigger rescan through the ARR service
 	// The service will determine which instance manages this file
-	err := hw.arrsService.TriggerFileRescan(ctx, filePath)
+	err = hw.arrsService.TriggerFileRescan(ctx, pathForRescan)
 	if err != nil {
 		hw.logger.Error("Failed to trigger ARR rescan",
-			"file_path", filePath,
+			"file_path", pathForRescan,
+			"original_path", filePath,
 			"error", err)
 
 		// If we can't trigger repair, mark as corrupted for manual investigation
-		if lastErr := err; lastErr != nil {
-			errMsg := lastErr.Error()
-			return hw.healthRepo.SetCorrupted(filePath, &errMsg)
-		}
-		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
+		errMsg := err.Error()
+		return hw.healthRepo.SetCorrupted(filePath, &errMsg)
 	}
 
 	// ARR rescan was triggered successfully - set repair triggered status
-	hw.logger.Info("Successfully triggered ARR rescan for file repair", "file_path", filePath)
+	hw.logger.Info("Successfully triggered ARR rescan for file repair",
+		"file_path", pathForRescan,
+		"original_path", filePath)
 	return hw.healthRepo.SetRepairTriggered(filePath, errorMsg)
 }

@@ -27,6 +27,7 @@ const (
 	Encryption_NONE    Encryption = 0 // No encryption
 	Encryption_RCLONE  Encryption = 1 // Rclone encryption
 	Encryption_HEADERS Encryption = 2 // Headers encryption
+	Encryption_AES     Encryption = 3 // Generic AES-CBC encryption (for RAR, 7z, etc.)
 )
 
 // Enum value maps for Encryption.
@@ -35,11 +36,13 @@ var (
 		0: "NONE",
 		1: "RCLONE",
 		2: "HEADERS",
+		3: "AES",
 	}
 	Encryption_value = map[string]int32{
 		"NONE":    0,
 		"RCLONE":  1,
 		"HEADERS": 2,
+		"AES":     3,
 	}
 )
 
@@ -75,9 +78,8 @@ type FileStatus int32
 
 const (
 	FileStatus_FILE_STATUS_UNSPECIFIED FileStatus = 0
-	FileStatus_FILE_STATUS_HEALTHY     FileStatus = 1 // All segments available
-	FileStatus_FILE_STATUS_PARTIAL     FileStatus = 2 // Some segments missing
-	FileStatus_FILE_STATUS_CORRUPTED   FileStatus = 3 // No segments available or corrupted
+	FileStatus_FILE_STATUS_HEALTHY     FileStatus = 1 // All segments available and file is complete
+	FileStatus_FILE_STATUS_CORRUPTED   FileStatus = 3 // Segments missing or corrupted
 )
 
 // Enum value maps for FileStatus.
@@ -85,13 +87,11 @@ var (
 	FileStatus_name = map[int32]string{
 		0: "FILE_STATUS_UNSPECIFIED",
 		1: "FILE_STATUS_HEALTHY",
-		2: "FILE_STATUS_PARTIAL",
 		3: "FILE_STATUS_CORRUPTED",
 	}
 	FileStatus_value = map[string]int32{
 		"FILE_STATUS_UNSPECIFIED": 0,
 		"FILE_STATUS_HEALTHY":     1,
-		"FILE_STATUS_PARTIAL":     2,
 		"FILE_STATUS_CORRUPTED":   3,
 	}
 )
@@ -201,10 +201,13 @@ type FileMetadata struct {
 	Status        FileStatus             `protobuf:"varint,3,opt,name=status,proto3,enum=metadata.FileStatus" json:"status,omitempty"`            // Health status of the file
 	CreatedAt     int64                  `protobuf:"varint,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`              // Unix timestamp when metadata was created
 	ModifiedAt    int64                  `protobuf:"varint,5,opt,name=modified_at,json=modifiedAt,proto3" json:"modified_at,omitempty"`           // Unix timestamp when last modified
-	Password      string                 `protobuf:"bytes,6,opt,name=password,proto3" json:"password,omitempty"`                                  // Password for encrypted files (if any)
-	Salt          string                 `protobuf:"bytes,7,opt,name=salt,proto3" json:"salt,omitempty"`                                          // Salt for encrypted files (if any)
+	Password      string                 `protobuf:"bytes,6,opt,name=password,proto3" json:"password,omitempty"`                                  // Password for rclone encrypted files
+	Salt          string                 `protobuf:"bytes,7,opt,name=salt,proto3" json:"salt,omitempty"`                                          // Salt for rclone encrypted files
 	Encryption    Encryption             `protobuf:"varint,8,opt,name=encryption,proto3,enum=metadata.Encryption" json:"encryption,omitempty"`    // Encryption type used for the file
 	SegmentData   []*SegmentData         `protobuf:"bytes,9,rep,name=segment_data,json=segmentData,proto3" json:"segment_data,omitempty"`         // Segment information (lazy-loaded)
+	AesKey        []byte                 `protobuf:"bytes,10,opt,name=aes_key,json=aesKey,proto3" json:"aes_key,omitempty"`                       // AES encryption key (for AES-encrypted archives)
+	AesIv         []byte                 `protobuf:"bytes,11,opt,name=aes_iv,json=aesIv,proto3" json:"aes_iv,omitempty"`                          // AES initialization vector (for AES-encrypted archives)
+	ReleaseDate   int64                  `protobuf:"varint,12,opt,name=release_date,json=releaseDate,proto3" json:"release_date,omitempty"`       // Unix timestamp of the original Usenet post release date
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -302,6 +305,27 @@ func (x *FileMetadata) GetSegmentData() []*SegmentData {
 	return nil
 }
 
+func (x *FileMetadata) GetAesKey() []byte {
+	if x != nil {
+		return x.AesKey
+	}
+	return nil
+}
+
+func (x *FileMetadata) GetAesIv() []byte {
+	if x != nil {
+		return x.AesIv
+	}
+	return nil
+}
+
+func (x *FileMetadata) GetReleaseDate() int64 {
+	if x != nil {
+		return x.ReleaseDate
+	}
+	return 0
+}
+
 var File_internal_metadata_proto_metadata_proto protoreflect.FileDescriptor
 
 const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
@@ -312,7 +336,7 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\fstart_offset\x18\x03 \x01(\x03R\vstartOffset\x12\x1d\n" +
 	"\n" +
 	"end_offset\x18\x04 \x01(\x03R\tendOffset\x12\x0e\n" +
-	"\x02id\x18\x05 \x01(\tR\x02id\"\xe1\x02\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\"\xb4\x03\n" +
 	"\fFileMetadata\x12\x1b\n" +
 	"\tfile_size\x18\x01 \x01(\x03R\bfileSize\x12&\n" +
 	"\x0fsource_nzb_path\x18\x02 \x01(\tR\rsourceNzbPath\x12,\n" +
@@ -326,18 +350,22 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\n" +
 	"encryption\x18\b \x01(\x0e2\x14.metadata.EncryptionR\n" +
 	"encryption\x128\n" +
-	"\fsegment_data\x18\t \x03(\v2\x15.metadata.SegmentDataR\vsegmentData*/\n" +
+	"\fsegment_data\x18\t \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\x12\x17\n" +
+	"\aaes_key\x18\n" +
+	" \x01(\fR\x06aesKey\x12\x15\n" +
+	"\x06aes_iv\x18\v \x01(\fR\x05aesIv\x12!\n" +
+	"\frelease_date\x18\f \x01(\x03R\vreleaseDate*8\n" +
 	"\n" +
 	"Encryption\x12\b\n" +
 	"\x04NONE\x10\x00\x12\n" +
 	"\n" +
 	"\x06RCLONE\x10\x01\x12\v\n" +
-	"\aHEADERS\x10\x02*v\n" +
+	"\aHEADERS\x10\x02\x12\a\n" +
+	"\x03AES\x10\x03*]\n" +
 	"\n" +
 	"FileStatus\x12\x1b\n" +
 	"\x17FILE_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
-	"\x13FILE_STATUS_HEALTHY\x10\x01\x12\x17\n" +
-	"\x13FILE_STATUS_PARTIAL\x10\x02\x12\x19\n" +
+	"\x13FILE_STATUS_HEALTHY\x10\x01\x12\x19\n" +
 	"\x15FILE_STATUS_CORRUPTED\x10\x03B\x04Z\x02./b\x06proto3"
 
 var (
