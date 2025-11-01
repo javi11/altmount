@@ -446,13 +446,13 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	for _, item := range completed {
 		// Calculate category-specific base path for this item
-		itemBasePath := s.calculateItemBasePath(item.Category)
+		itemBasePath := s.calculateItemBasePath()
 		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
 	for _, item := range failed {
 		// Calculate category-specific base path for this item
-		itemBasePath := s.calculateItemBasePath(item.Category)
+		itemBasePath := s.calculateItemBasePath()
 		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
@@ -766,7 +766,7 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 }
 
 // calculateItemBasePath calculates the base path for an item based on its category and symlink configuration
-func (s *Server) calculateItemBasePath(category *string) string {
+func (s *Server) calculateItemBasePath() string {
 	if s.configManager == nil {
 		return ""
 	}

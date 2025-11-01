@@ -111,7 +111,7 @@ func (s *Server) GetProgressBroadcaster() *progress.ProgressBroadcaster {
 
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
-	app.Use("/sabnzbd/api", s.handleSABnzbd)
+	app.Use("/sabnzbd", s.handleSABnzbd)
 
 	api := app.Group(s.config.Prefix)
 	// Import do not need user authentication

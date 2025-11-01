@@ -191,7 +191,7 @@ export function SABnzbdConfigSection({
 					/>
 				</label>
 				<p className="label">
-					When enabled, provides SABnzbd-compatible API endpoints at <code>/sabnzbd/api</code>
+					When enabled, provides SABnzbd-compatible API endpoints at <code>/sabnzbd</code>
 				</p>
 			</fieldset>
 

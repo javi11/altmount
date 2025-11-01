@@ -241,7 +241,7 @@ import TabItem from '@theme/TabItem';
 - **Type**: `SABnzbd`
 - **Host**: `localhost` (or AltMount server IP)
 - **Port**: `8080`
-- **URL Base**: `sabnzbd/api`
+- **URL Base**: `sabnzbd`
 - **API Key**: `AltMountApiKey` (The api key of your altmount instance that you can find in the system settings.)
 - **Category**: `movies`
 - **Recent Priority**: `Default`
@@ -256,7 +256,7 @@ import TabItem from '@theme/TabItem';
 - **Type**: `SABnzbd`
 - **Host**: `localhost` (or AltMount server IP)
 - **Port**: `8080`
-- **URL Base**: `sabnzbd/api`
+- **URL Base**: `sabnzbd`
 - **API Key**: `AltMountApiKey` (The api key of your altmount instance that you can find in the system settings.)
 - **Category**: `tv`
 - **Recent Priority**: `Default`
