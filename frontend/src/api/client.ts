@@ -220,6 +220,16 @@ export class APIClient {
 		});
 	}
 
+	async clearPendingQueue(olderThan?: string) {
+		const searchParams = new URLSearchParams();
+		if (olderThan) searchParams.set("older_than", olderThan);
+
+		const query = searchParams.toString();
+		return this.request<QueueStats>(`/queue/pending${query ? `?${query}` : ""}`, {
+			method: "DELETE",
+		});
+	}
+
 	// Health endpoints
 	async getHealth(params?: {
 		limit?: number;

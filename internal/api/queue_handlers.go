@@ -439,6 +439,31 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 	})
 }
 
+// handleClearPendingQueue handles DELETE /api/queue/pending
+func (s *Server) handleClearPendingQueue(c *fiber.Ctx) error {
+	// Clear pending items
+	count, err := s.queueRepo.ClearPendingQueueItems()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to clear pending queue items",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	response := map[string]interface{}{
+		"removed_count": count,
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
 // handleDeleteQueueBulk handles DELETE /api/queue/bulk
 func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 	// Parse request body

@@ -7,8 +7,6 @@ import {
 	PlayCircle,
 	RefreshCw,
 	Trash2,
-	Wifi,
-	WifiOff,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
@@ -22,6 +20,7 @@ import { useConfirm } from "../contexts/ModalContext";
 import {
 	useClearCompletedQueue,
 	useClearFailedQueue,
+	useClearPendingQueue,
 	useDeleteBulkQueueItems,
 	useDeleteQueueItem,
 	useQueue,
@@ -88,6 +87,7 @@ export function QueuePage() {
 	const retryItem = useRetryQueueItem();
 	const clearCompleted = useClearCompletedQueue();
 	const clearFailed = useClearFailedQueue();
+	const clearPending = useClearPendingQueue();
 	const { confirmDelete, confirmAction } = useConfirm();
 
 	const handleDelete = async (id: number) => {
@@ -156,6 +156,21 @@ export function QueuePage() {
 		);
 		if (confirmed) {
 			await clearFailed.mutateAsync("");
+		}
+	};
+
+	const handleClearPending = async () => {
+		const confirmed = await confirmAction(
+			"Clear Pending Items",
+			"Are you sure you want to clear all pending items? This action cannot be undone.",
+			{
+				type: "info",
+				confirmText: "Clear All",
+				confirmButtonClass: "btn-info",
+			},
+		);
+		if (confirmed) {
+			await clearPending.mutateAsync("");
 		}
 	};
 
@@ -334,22 +349,6 @@ export function QueuePage() {
 							<span className="ml-2 text-sm text-warning">• Auto-refresh paused</span>
 						)}
 					</p>
-					{/* Connection status indicator - only show when there are processing items */}
-					{hasProcessingItems && (
-						<div className="mt-2 flex items-center gap-2">
-							{progressStreamConnected ? (
-								<>
-									<Wifi className="h-4 w-4 text-success" aria-hidden="true" />
-									<span className="text-sm text-success">Live updates</span>
-								</>
-							) : (
-								<>
-									<WifiOff className="h-4 w-4 text-error" aria-hidden="true" />
-									<span className="text-error text-sm">Reconnecting...</span>
-								</>
-							)}
-						</div>
-					)}
 				</div>
 				<div className="flex flex-wrap gap-2">
 					{/* Auto-refresh controls */}
@@ -398,6 +397,17 @@ export function QueuePage() {
 						>
 							<Trash2 className="h-4 w-4" />
 							Clear Completed
+						</button>
+					)}
+					{stats && stats.total_queued > 0 && (
+						<button
+							type="button"
+							className="btn btn-info"
+							onClick={handleClearPending}
+							disabled={clearPending.isPending}
+						>
+							<Trash2 className="h-4 w-4" />
+							Clear Pending
 						</button>
 					)}
 					{stats && stats.total_failed > 0 && (

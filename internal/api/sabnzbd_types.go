@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/progress"
 )
 
 // SABnzbd-compatible API response structures
@@ -231,7 +232,7 @@ func formatSizeMB(bytes int64) string {
 }
 
 // ToSABnzbdQueueSlot converts an AltMount ImportQueueItem to SABnzbd format
-func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueSlot {
+func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroadcaster *progress.ProgressBroadcaster) SABnzbdQueueSlot {
 	if item == nil {
 		return SABnzbdQueueSlot{}
 	}
@@ -284,12 +285,22 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int) SABnzbdQueueS
 		category = *item.Category
 	}
 
-	// Calculate progress percentage (simplified for now)
+	// Calculate progress percentage using real-time progress broadcaster
 	progressPercentage := 0
 	switch item.Status {
 	case database.QueueStatusProcessing:
-		// Could be enhanced with actual progress tracking
-		progressPercentage = 50
+		// Get real-time progress from progress broadcaster
+		if progressBroadcaster != nil {
+			if percentage, exists := progressBroadcaster.GetProgress(int(item.ID)); exists {
+				progressPercentage = percentage
+			} else {
+				// Fallback to 50% if progress not tracked
+				progressPercentage = 50
+			}
+		} else {
+			// Fallback when broadcaster not available
+			progressPercentage = 50
+		}
 	case database.QueueStatusCompleted:
 		progressPercentage = 100
 	}

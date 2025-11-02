@@ -700,13 +700,33 @@ func (r *Repository) ClearCompletedQueueItems() (int, error) {
 // ClearFailedQueueItems removes failed items from the queue
 func (r *Repository) ClearFailedQueueItems() (int, error) {
 	query := `
-		DELETE FROM import_queue 
+		DELETE FROM import_queue
 		WHERE status = 'failed'
 	`
 
 	result, err := r.db.Exec(query)
 	if err != nil {
 		return 0, fmt.Errorf("failed to clear failed queue items: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}
+
+// ClearPendingQueueItems removes pending items from the queue
+func (r *Repository) ClearPendingQueueItems() (int, error) {
+	query := `
+		DELETE FROM import_queue
+		WHERE status = 'pending'
+	`
+
+	result, err := r.db.Exec(query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to clear pending queue items: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()

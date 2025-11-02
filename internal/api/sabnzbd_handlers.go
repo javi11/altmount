@@ -366,7 +366,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 			continue
 		}
 
-		slots = append(slots, ToSABnzbdQueueSlot(item, i))
+		slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
 	}
 
 	response := SABnzbdQueueResponse{
@@ -512,7 +512,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		if err == nil {
 			for i, item := range items {
 				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing {
-					slots = append(slots, ToSABnzbdQueueSlot(item, i))
+					slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
 				}
 			}
 		}
