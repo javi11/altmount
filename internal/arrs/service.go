@@ -17,12 +17,11 @@ import (
 
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"` // "radarr" or "sonarr"
-	URL        string `json:"url"`
-	APIKey     string `json:"api_key"`
-	Enabled    bool   `json:"enabled"`
-	RootFolder string `json:"root_folder"`
+	Name    string `json:"name"`
+	Type    string `json:"type"` // "radarr" or "sonarr"
+	URL     string `json:"url"`
+	APIKey  string `json:"api_key"`
+	Enabled bool   `json:"enabled"`
 }
 
 // ConfigManager interface defines methods needed for configuration management
@@ -58,25 +57,15 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 	cfg := s.configGetter()
 	instances := make([]*ConfigInstance, 0)
 
-	// Get global root path as fallback
-	globalRootPath := cfg.Metadata.RootPath
-
 	// Convert Radarr instances
 	if len(cfg.Arrs.RadarrInstances) > 0 {
 		for _, radarrConfig := range cfg.Arrs.RadarrInstances {
-			// Use instance-specific root folder if set, otherwise use global path
-			rootFolder := globalRootPath
-			if radarrConfig.RootFolder != nil && *radarrConfig.RootFolder != "" {
-				rootFolder = *radarrConfig.RootFolder
-			}
-
 			instance := &ConfigInstance{
-				Name:       radarrConfig.Name,
-				Type:       "radarr",
-				URL:        radarrConfig.URL,
-				APIKey:     radarrConfig.APIKey,
-				Enabled:    radarrConfig.Enabled != nil && *radarrConfig.Enabled,
-				RootFolder: rootFolder,
+				Name:    radarrConfig.Name,
+				Type:    "radarr",
+				URL:     radarrConfig.URL,
+				APIKey:  radarrConfig.APIKey,
+				Enabled: radarrConfig.Enabled != nil && *radarrConfig.Enabled,
 			}
 			instances = append(instances, instance)
 		}
@@ -85,19 +74,12 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 	// Convert Sonarr instances
 	if len(cfg.Arrs.SonarrInstances) > 0 {
 		for _, sonarrConfig := range cfg.Arrs.SonarrInstances {
-			// Use instance-specific root folder if set, otherwise use global path
-			rootFolder := globalRootPath
-			if sonarrConfig.RootFolder != nil && *sonarrConfig.RootFolder != "" {
-				rootFolder = *sonarrConfig.RootFolder
-			}
-
 			instance := &ConfigInstance{
-				Name:       sonarrConfig.Name,
-				Type:       "sonarr",
-				URL:        sonarrConfig.URL,
-				APIKey:     sonarrConfig.APIKey,
-				Enabled:    sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
-				RootFolder: rootFolder,
+				Name:    sonarrConfig.Name,
+				Type:    "sonarr",
+				URL:     sonarrConfig.URL,
+				APIKey:  sonarrConfig.APIKey,
+				Enabled: sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
 			}
 			instances = append(instances, instance)
 		}
@@ -150,20 +132,29 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 func (s *Service) findInstanceForFilePath(filePath string) (instanceType string, instanceName string, err error) {
 	slog.Debug("Finding instance for file path", "file_path", filePath)
 
+	cfg := s.configGetter()
+
+	// Get library directory from health config
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		libraryDir = *cfg.Health.LibraryDir
+	} else {
+		return "", "", fmt.Errorf("Health.LibraryDir is not configured")
+	}
+
+	// Construct candidate path using library directory
+	candidatePath := filepath.Join(libraryDir, filePath)
+
 	// Try each enabled ARR instance to see which one manages this file
 	for _, instance := range s.getConfigInstances() {
 		if !instance.Enabled {
 			continue
 		}
 
-		// Construct full path using instance's root folder
-		fullPath := filepath.Join(instance.RootFolder, filePath)
-
 		slog.Debug("Checking instance for file",
 			"instance_name", instance.Name,
 			"instance_type", instance.Type,
-			"root_folder", instance.RootFolder,
-			"full_path", fullPath)
+			"candidate_path", candidatePath)
 
 		switch instance.Type {
 		case "radarr":
@@ -171,7 +162,7 @@ func (s *Service) findInstanceForFilePath(filePath string) (instanceType string,
 			if err != nil {
 				continue
 			}
-			if s.radarrManagesFile(client, fullPath) {
+			if s.radarrManagesFile(client, candidatePath) {
 				return "radarr", instance.Name, nil
 			}
 
@@ -180,7 +171,7 @@ func (s *Service) findInstanceForFilePath(filePath string) (instanceType string,
 			if err != nil {
 				continue
 			}
-			if s.sonarrManagesFile(client, fullPath) {
+			if s.sonarrManagesFile(client, candidatePath) {
 				return "sonarr", instance.Name, nil
 			}
 		}
@@ -215,14 +206,14 @@ func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error 
 		if err != nil {
 			return fmt.Errorf("failed to create Radarr client: %w", err)
 		}
-		return s.triggerRadarrRescanByPath(ctx, client, filePath, instanceName, instanceConfig.RootFolder)
+		return s.triggerRadarrRescanByPath(ctx, client, filePath, instanceName)
 
 	case "sonarr":
 		client, err := s.getOrCreateSonarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
 		if err != nil {
 			return fmt.Errorf("failed to create Sonarr client: %w", err)
 		}
-		return s.triggerSonarrRescanByPath(ctx, client, filePath, instanceName, instanceConfig.RootFolder)
+		return s.triggerSonarrRescanByPath(ctx, client, filePath, instanceName)
 
 	default:
 		return fmt.Errorf("unsupported instance type: %s", instanceType)
@@ -255,14 +246,24 @@ func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool
 }
 
 // triggerRadarrRescanByPath triggers a rescan in Radarr for the given file path
-func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, instanceName, rootFolder string) error {
-	// Construct full path using instance's root folder
-	fullPath := filepath.Join(rootFolder, strings.TrimPrefix(filePath, "/"))
+func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, instanceName string) error {
+	cfg := s.configGetter()
+
+	// Get library directory from health config
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		libraryDir = *cfg.Health.LibraryDir
+	} else {
+		return fmt.Errorf("Health.LibraryDir is not configured")
+	}
+
+	// Construct full path using library directory
+	fullPath := filepath.Join(libraryDir, strings.TrimPrefix(filePath, "/"))
 
 	s.logger.DebugContext(ctx, "Checking Radarr for file path",
 		"instance", instanceName,
 		"file_path", filePath,
-		"root_folder", rootFolder,
+		"library_dir", libraryDir,
 		"full_path", fullPath)
 
 	// Get all movies to find the one with matching file path
@@ -343,14 +344,24 @@ func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool
 }
 
 // triggerSonarrRescanByPath triggers a rescan in Sonarr for the given file path
-func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.Sonarr, filePath, instanceName, rootFolder string) error {
-	// Construct full path using instance's root folder
-	fullPath := filepath.Join(rootFolder, strings.TrimPrefix(filePath, "/"))
+func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.Sonarr, filePath, instanceName string) error {
+	cfg := s.configGetter()
+
+	// Get library directory from health config
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		libraryDir = *cfg.Health.LibraryDir
+	} else {
+		return fmt.Errorf("Health.LibraryDir is not configured")
+	}
+
+	// Construct full path using library directory
+	fullPath := filepath.Join(libraryDir, strings.TrimPrefix(filePath, "/"))
 
 	s.logger.DebugContext(ctx, "Triggering Sonarr rescan/re-download by path",
 		"instance", instanceName,
 		"file_path", filePath,
-		"root_folder", rootFolder,
+		"library_dir", libraryDir,
 		"full_path", fullPath)
 
 	// Get all series to find the one that contains this file path

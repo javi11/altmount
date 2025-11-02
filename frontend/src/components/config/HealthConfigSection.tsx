@@ -17,12 +17,22 @@ export function HealthConfigSection({
 }: HealthConfigSectionProps) {
 	const [formData, setFormData] = useState<HealthConfig>(config.health);
 	const [hasChanges, setHasChanges] = useState(false);
+	const [validationError, setValidationError] = useState<string>("");
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		setFormData(config.health);
 		setHasChanges(false);
+		setValidationError("");
 	}, [config.health]);
+
+	// Validate form data
+	const validateFormData = (data: HealthConfig): string => {
+		if (data.auto_repair_enabled && !data.library_dir?.trim()) {
+			return "Library Directory is required when Auto-Repair is enabled";
+		}
+		return "";
+	};
 
 	const handleInputChange = (
 		field: keyof HealthConfig,
@@ -31,10 +41,11 @@ export function HealthConfigSection({
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.health));
+		setValidationError(validateFormData(newData));
 	};
 
 	const handleSave = async () => {
-		if (onUpdate && hasChanges) {
+		if (onUpdate && hasChanges && !validationError) {
 			await onUpdate("health", formData);
 			setHasChanges(false);
 		}
@@ -87,17 +98,27 @@ export function HealthConfigSection({
 					<legend className="fieldset-legend">Library Directory</legend>
 					<input
 						type="text"
-						className="input"
+						className={`input ${
+							validationError && formData.auto_repair_enabled ? "input-error border-error" : ""
+						}`}
 						value={formData.library_dir || ""}
 						disabled={isReadOnly || !formData.enabled}
 						placeholder="/media/library"
 						onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
 					/>
+					{validationError && formData.auto_repair_enabled && (
+						<div className="alert alert-error mt-2">
+							<AlertTriangle className="h-4 w-4" />
+							<span className="text-sm">{validationError}</span>
+						</div>
+					)}
 					<p className="label text-gray-600 text-sm">
 						Path to your organized media library that contains symlinks pointing to altmount files.
 						When a repair is triggered, the system will search for symlinks in this directory and
-						use the library path for ARR rescan instead of the mount path. Leave empty to use mount
-						paths directly.
+						use the library path for ARR rescan instead of the mount path.
+						{formData.auto_repair_enabled && (
+							<strong className="text-error"> Required when Auto-Repair is enabled.</strong>
+						)}
 					</p>
 				</fieldset>
 			</div>
@@ -198,11 +219,17 @@ export function HealthConfigSection({
 
 			{/* Save Button */}
 			{onUpdate && !isReadOnly && hasChanges && (
-				<div className="flex justify-end">
+				<div className="flex flex-col items-end gap-2">
+					{validationError && (
+						<div className="alert alert-error">
+							<AlertTriangle className="h-4 w-4" />
+							<span className="text-sm">{validationError}</span>
+						</div>
+					)}
 					<button
 						type="button"
 						className={`btn btn-primary ${isUpdating ? "loading" : ""}`}
-						disabled={isUpdating}
+						disabled={isUpdating || !!validationError}
 						onClick={handleSave}
 					>
 						{isUpdating ? (
