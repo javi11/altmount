@@ -258,10 +258,6 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 				return err
 			}
 
-			if bytesWritten != segment.SegmentSize {
-				b.log.ErrorContext(ctx, "Expected %d bytes, got %d", "expected", segment.SegmentSize, "got", bytesWritten)
-			}
-
 			return nil
 		},
 		retry.Attempts(10),

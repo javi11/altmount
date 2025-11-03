@@ -235,7 +235,6 @@ func setupAPIServer(
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
-	logger *slog.Logger,
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -312,12 +311,8 @@ func startHealthWorker(
 	rcloneClient rclonecli.RcloneRcClient,
 	arrsService *arrs.Service,
 	logger *slog.Logger,
-) (*health.HealthWorker, error) {
-	if cfg.Health.Enabled == nil || !*cfg.Health.Enabled {
-		logger.Info("Health worker is disabled in configuration")
-		return nil, nil
-	}
-
+) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
+	// Health worker initialization - only starts if health system is enabled
 	// Create metadata service for health worker
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
 
@@ -340,13 +335,31 @@ func startHealthWorker(
 		logger,
 	)
 
-	// Start health worker with the main context
-	if err := healthWorker.Start(ctx); err != nil {
-		logger.Error("Failed to start health worker", "error", err)
-		return nil, err
+	// Create library sync worker (always create, but only start if enabled)
+	librarySyncWorker := health.NewLibrarySyncWorker(
+		metadataService,
+		healthRepo,
+		configManager.GetConfigGetter(),
+		logger,
+	)
+
+	// Only start health system if enabled
+	if cfg.Health.Enabled != nil && *cfg.Health.Enabled {
+		// Start health worker with the main context
+		if err := healthWorker.Start(ctx); err != nil {
+			logger.Error("Failed to start health worker", "error", err)
+			return nil, nil, err
+		}
+
+		// Start library sync worker
+		librarySyncWorker.StartLibrarySync(ctx)
+
+		logger.Info("Health system started")
+	} else {
+		logger.Info("Health system disabled - no health monitoring or repairs will occur")
 	}
 
-	return healthWorker, nil
+	return healthWorker, librarySyncWorker, nil
 }
 
 // startMountService starts the RClone mount service if enabled

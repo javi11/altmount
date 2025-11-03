@@ -85,6 +85,7 @@ export interface ScanStatusResponse {
 export const HealthStatus = {
 	PENDING: "pending",
 	CHECKING: "checking",
+	HEALTHY: "healthy",
 	CORRUPTED: "corrupted",
 	REPAIR_TRIGGERED: "repair_triggered",
 } as const;
@@ -111,6 +112,7 @@ export interface FileHealth {
 export interface HealthStats {
 	total: number;
 	pending: number;
+	healthy: number;
 	corrupted: number;
 }
 
@@ -246,6 +248,26 @@ export interface HealthWorkerStatus {
 	last_run_time?: string;
 	next_run_time?: string;
 	last_error?: string;
+}
+
+// Library Sync types
+export interface LibrarySyncProgress {
+	total_files: number;
+	processed_files: number;
+	start_time: string;
+}
+
+export interface LibrarySyncResult {
+	files_added: number;
+	files_deleted: number;
+	duration: number;
+	completed_at: string;
+}
+
+export interface LibrarySyncStatus {
+	is_running: boolean;
+	progress?: LibrarySyncProgress;
+	last_sync_result?: LibrarySyncResult;
 }
 
 // Pool Metrics types

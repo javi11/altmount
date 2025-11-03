@@ -118,6 +118,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		"--rc-no-auth", // We'll handle auth at the application level
 		"--config", filepath.Join(m.rcloneDir, "rclone.conf"),
 		"--log-file", logFile,
+		"--use-cookies",
 	}
 
 	logLevel := cfg.RClone.LogLevel

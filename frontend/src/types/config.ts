@@ -55,12 +55,9 @@ export interface StreamingConfig {
 // Health configuration
 export interface HealthConfig {
 	enabled: boolean;
-	auto_repair_enabled: boolean;
 	library_dir?: string;
 	check_interval_seconds?: number; // Interval in seconds (optional)
-	max_concurrent_jobs?: number;
-	max_retries?: number;
-	max_segment_connections?: number;
+	max_connections_for_repair?: number;
 	check_all_segments?: boolean;
 }
 
@@ -228,12 +225,9 @@ export interface StreamingUpdateRequest {
 
 // Health update request
 export interface HealthUpdateRequest {
-	enabled?: boolean;
 	auto_repair_enabled?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
-	max_concurrent_jobs?: number;
-	max_retries?: number;
-	max_segment_connections?: number;
+	max_connections_for_repair?: number;
 	check_all_segments?: boolean;
 }
 

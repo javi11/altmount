@@ -28,8 +28,8 @@ export function HealthConfigSection({
 
 	// Validate form data
 	const validateFormData = (data: HealthConfig): string => {
-		if (data.auto_repair_enabled && !data.library_dir?.trim()) {
-			return "Library Directory is required when Auto-Repair is enabled";
+		if (data.enabled && !data.library_dir?.trim()) {
+			return "Library Directory is required when Health System is enabled";
 		}
 		return "";
 	};
@@ -53,12 +53,12 @@ export function HealthConfigSection({
 
 	return (
 		<div className="space-y-4">
-			<h3 className="font-semibold text-lg">Health Monitoring Settings</h3>
+			<h3 className="font-semibold text-lg">Health & Repair</h3>
 			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Enable Health Monitoring</legend>
+					<legend className="fieldset-legend">Health System</legend>
 					<label className="label cursor-pointer">
-						<span className="label-text">Monitor file health</span>
+						<span className="label-text">Enable health system</span>
 						<input
 							type="checkbox"
 							className="checkbox"
@@ -67,29 +67,13 @@ export function HealthConfigSection({
 							onChange={(e) => handleInputChange("enabled", e.target.checked)}
 						/>
 					</label>
-					<p className="label text-gray-600 text-sm">
-						Enable automatic health checking of media files
-					</p>
-				</fieldset>
-
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Auto-Repair Corrupted Files</legend>
-					<label className="label cursor-pointer">
-						<span className="label-text">Enable automatic repair</span>
-						<input
-							type="checkbox"
-							className="checkbox"
-							checked={formData.auto_repair_enabled}
-							disabled={isReadOnly || !formData.enabled}
-							onChange={(e) => handleInputChange("auto_repair_enabled", e.target.checked)}
-						/>
-					</label>
 					<div className="alert alert-warning mt-2">
 						<AlertTriangle className="h-4 w-4" />
 						<div className="text-sm">
-							<strong>Warning:</strong> When enabled, corrupted files will automatically trigger
-							re-download through connected ARRs (Radarr/Sonarr), and corrupted files will be
-							automatically DELETED. Disable for manual control.
+							<strong>Warning:</strong> When enabled, the health system will monitor file integrity
+							and automatically trigger re-downloads through connected ARRs (Radarr/Sonarr) for
+							corrupted files. Corrupted files will be automatically DELETED during repair. Disable
+							to turn off all health monitoring.
 						</div>
 					</div>
 				</fieldset>
@@ -99,14 +83,14 @@ export function HealthConfigSection({
 					<input
 						type="text"
 						className={`input ${
-							validationError && formData.auto_repair_enabled ? "input-error border-error" : ""
+							validationError && formData.enabled ? "input-error border-error" : ""
 						}`}
 						value={formData.library_dir || ""}
-						disabled={isReadOnly || !formData.enabled}
+						disabled={isReadOnly}
 						placeholder="/media/library"
 						onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
 					/>
-					{validationError && formData.auto_repair_enabled && (
+					{validationError && formData.enabled && (
 						<div className="alert alert-error mt-2">
 							<AlertTriangle className="h-4 w-4" />
 							<span className="text-sm">{validationError}</span>
@@ -116,106 +100,83 @@ export function HealthConfigSection({
 						Path to your organized media library that contains symlinks pointing to altmount files.
 						When a repair is triggered, the system will search for symlinks in this directory and
 						use the library path for ARR rescan instead of the mount path.
-						{formData.auto_repair_enabled && (
-							<strong className="text-error"> Required when Auto-Repair is enabled.</strong>
+						{formData.enabled && (
+							<strong className="text-error"> Required when Health System is enabled.</strong>
 						)}
 					</p>
 				</fieldset>
 			</div>
 
 			{/* Advanced Settings (Optional) */}
-			{formData.enabled && (
-				<details className="collapse bg-base-200">
-					<summary className="collapse-title font-medium">Advanced Health Settings</summary>
-					<div className="collapse-content">
-						<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-							{formData.max_concurrent_jobs !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Max Concurrent Jobs</legend>
-									<input
-										type="number"
-										className="input"
-										value={formData.max_concurrent_jobs}
-										readOnly={isReadOnly}
-										min={1}
-										max={10}
-										onChange={(e) =>
-											handleInputChange(
-												"max_concurrent_jobs",
-												Number.parseInt(e.target.value, 10) || 1,
-											)
-										}
-									/>
-									<p className="label text-gray-600 text-sm">
-										Maximum number of concurrent health check jobs
-									</p>
-								</fieldset>
-							)}
-
-							{formData.max_retries !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Max Retries</legend>
-									<input
-										type="number"
-										className="input"
-										value={formData.max_retries}
-										readOnly={isReadOnly}
-										min={0}
-										max={5}
-										onChange={(e) =>
-											handleInputChange("max_retries", Number.parseInt(e.target.value, 10) || 0)
-										}
-									/>
-									<p className="label text-gray-600 text-sm">
-										Maximum number of retry attempts for failed checks
-									</p>
-								</fieldset>
-							)}
-
-							{formData.check_interval_seconds !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Check Interval (seconds)</legend>
-									<input
-										type="number"
-										className="input"
-										value={formData.check_interval_seconds}
-										readOnly={isReadOnly}
-										min={5}
-										max={86400}
-										step={1}
-										onChange={(e) =>
-											handleInputChange(
-												"check_interval_seconds",
-												Number.parseInt(e.target.value, 10) || 5,
-											)
-										}
-									/>
-									<p className="label text-gray-600 text-sm">
-										Time between automatic health checks (default: 5 seconds)
-									</p>
-								</fieldset>
-							)}
+			<details className="collapse bg-base-200">
+				<summary className="collapse-title font-medium">Advanced Settings</summary>
+				<div className="collapse-content">
+					<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+						{formData.check_interval_seconds !== undefined && (
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Check All Segments</legend>
-								<label className="label cursor-pointer">
-									<span className="label-text">Deep segment checking</span>
-									<input
-										type="checkbox"
-										className="checkbox"
-										checked={formData.check_all_segments ?? false}
-										disabled={isReadOnly}
-										onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
-									/>
-								</label>
+								<legend className="fieldset-legend">Check Interval (seconds)</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.check_interval_seconds}
+									readOnly={isReadOnly}
+									min={5}
+									max={86400}
+									step={1}
+									onChange={(e) =>
+										handleInputChange(
+											"check_interval_seconds",
+											Number.parseInt(e.target.value, 10) || 5,
+										)
+									}
+								/>
 								<p className="label text-gray-600 text-sm">
-									When disabled, use a sampling approach for faster processing. Enable for thorough
-									validation of all segments (slower).
+									Time between automatic health checks (default: 5 seconds)
 								</p>
 							</fieldset>
-						</div>
+						)}
+						{formData.max_connections_for_repair !== undefined && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Max Connections for Repair</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.max_connections_for_repair}
+									readOnly={isReadOnly}
+									min={1}
+									max={10}
+									onChange={(e) =>
+										handleInputChange(
+											"max_connections_for_repair",
+											Number.parseInt(e.target.value, 10) || 1,
+										)
+									}
+								/>
+								<p className="label text-gray-600 text-sm">
+									Maximum concurrent connections used during repair operations
+								</p>
+							</fieldset>
+						)}
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Check All Segments</legend>
+							<label className="label cursor-pointer">
+								<span className="label-text">Deep segment checking</span>
+								<input
+									type="checkbox"
+									className="checkbox"
+									checked={formData.check_all_segments ?? false}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+								/>
+							</label>
+							<p className="label text-gray-600 text-sm">
+								When disabled, use a sampling approach for faster processing. Enable for thorough
+								validation of all segments (slower).
+							</p>
+						</fieldset>
 					</div>
-				</details>
-			)}
+				</div>
+			</details>
 
 			{/* Save Button */}
 			{onUpdate && !isReadOnly && hasChanges && (
@@ -237,7 +198,7 @@ export function HealthConfigSection({
 						) : (
 							<>
 								<Save className="h-4 w-4" />
-								Save Health Settings
+								Save Settings
 							</>
 						)}
 					</button>

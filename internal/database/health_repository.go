@@ -112,23 +112,19 @@ func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, next_retry_at, source_nzb_path,
-		       error_details, created_at, updated_at
+		       error_details, created_at, updated_at, release_date, scheduled_check_at
 		FROM file_health
-		WHERE status IN ('pending', 'corrupted')
-		  AND retry_count < max_retries
+		WHERE scheduled_check_at IS NOT NULL
+		  AND scheduled_check_at <= datetime('now')
+		  AND retry_count < 1
 		  AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
-		ORDER BY
-		  CASE
-		    WHEN status = 'pending' THEN 0
-		    ELSE 1
-		  END,  -- Prioritize pending files
-		  last_checked ASC
+		ORDER BY scheduled_check_at ASC
 		LIMIT ?
 	`
 
 	rows, err := r.db.Query(query, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query unhealthy files: %w", err)
+		return nil, fmt.Errorf("failed to query files due for check: %w", err)
 	}
 	defer rows.Close()
 
@@ -140,7 +136,8 @@ func (r *HealthRepository) GetUnhealthyFiles(limit int) ([]*FileHealth, error) {
 			&health.LastError, &health.RetryCount, &health.MaxRetries,
 			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.NextRetryAt, &health.SourceNzbPath, &health.ErrorDetails,
-			&health.CreatedAt, &health.UpdatedAt,
+			&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate,
+			&health.ScheduledCheckAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -761,4 +758,162 @@ func (r *HealthRepository) DeleteHealthRecordsByDate(olderThan time.Time, status
 	}
 
 	return int(rowsAffected), nil
+}
+
+// AddHealthCheck adds or updates a health check record
+func (r *HealthRepository) AddHealthCheck(
+	filePath string,
+	releaseDate time.Time,
+	scheduledCheckAt time.Time,
+	sourceNzbPath *string,
+) error {
+	query := `
+		INSERT INTO file_health (
+			file_path, status, last_checked, retry_count, max_retries,
+			repair_retry_count, max_repair_retries, source_nzb_path,
+			release_date, scheduled_check_at,
+			created_at, updated_at
+		)
+		VALUES (?, ?, datetime('now'), 0, 2, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))
+		ON CONFLICT(file_path) DO UPDATE SET
+			release_date = excluded.release_date,
+			scheduled_check_at = excluded.scheduled_check_at,
+			status = excluded.status,
+			updated_at = datetime('now')
+	`
+
+	_, err := r.db.Exec(query, filePath, HealthStatusHealthy, sourceNzbPath, releaseDate, scheduledCheckAt)
+	if err != nil {
+		return fmt.Errorf("failed to add health check: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateScheduledCheckTime updates the scheduled check time and sets status to healthy
+func (r *HealthRepository) UpdateScheduledCheckTime(filePath string, nextCheckTime time.Time) error {
+	query := `
+		UPDATE file_health
+		SET status = ?,
+		    scheduled_check_at = ?,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	result, err := r.db.Exec(query, HealthStatusHealthy, nextCheckTime, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to update scheduled check time: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no automatic health check found for file: %s", filePath)
+	}
+
+	return nil
+}
+
+// GetAllHealthCheckPaths returns all file paths tracked in health system
+func (r *HealthRepository) GetAllHealthCheckPaths() ([]string, error) {
+	query := `
+		SELECT file_path
+		FROM file_health
+		ORDER BY file_path ASC
+	`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query health check paths: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("failed to scan file path: %w", err)
+		}
+		paths = append(paths, path)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate health check paths: %w", err)
+	}
+
+	return paths, nil
+}
+
+// AutomaticHealthCheckRecord represents a batch insert record
+type AutomaticHealthCheckRecord struct {
+	FilePath         string
+	ReleaseDate      time.Time
+	ScheduledCheckAt time.Time
+	SourceNzbPath    *string
+}
+
+// BatchAddAutomaticHealthChecks inserts multiple automatic health checks efficiently
+func (r *HealthRepository) BatchAddAutomaticHealthChecks(records []AutomaticHealthCheckRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	// SQLite has a limit on the number of parameters (typically 999)
+	// Process in batches of 200 records (4 params each = 800 params per batch)
+	const batchSize = 200
+
+	for i := 0; i < len(records); i += batchSize {
+		end := i + batchSize
+		if end > len(records) {
+			end = len(records)
+		}
+
+		batch := records[i:end]
+		if err := r.batchInsertAutomaticHealthChecks(batch); err != nil {
+			return fmt.Errorf("failed to insert batch starting at index %d: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+// batchInsertAutomaticHealthChecks performs a single batch insert
+func (r *HealthRepository) batchInsertAutomaticHealthChecks(records []AutomaticHealthCheckRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	// Build the INSERT query with multiple value sets
+	valueStrings := make([]string, len(records))
+	args := make([]interface{}, 0, len(records)*4)
+
+	for i, record := range records {
+		valueStrings[i] = "(?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
+		args = append(args, record.FilePath, HealthStatusHealthy, record.SourceNzbPath, record.ReleaseDate, record.ScheduledCheckAt)
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO file_health (
+			file_path, status, last_checked, retry_count, max_retries,
+			repair_retry_count, max_repair_retries, source_nzb_path,
+			release_date, scheduled_check_at,
+			created_at, updated_at
+		)
+		VALUES %s
+		ON CONFLICT(file_path) DO UPDATE SET
+			release_date = excluded.release_date,
+			scheduled_check_at = excluded.scheduled_check_at,
+			status = excluded.status,
+			updated_at = datetime('now')
+	`, strings.Join(valueStrings, ","))
+
+	_, err := r.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to batch insert health checks: %w", err)
+	}
+
+	return nil
 }

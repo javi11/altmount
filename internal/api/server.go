@@ -44,6 +44,7 @@ type Server struct {
 	configManager       ConfigManager
 	metadataReader      *metadata.MetadataReader
 	healthWorker        *health.HealthWorker
+	librarySyncWorker   *health.LibrarySyncWorker
 	importerService     *importer.Service
 	poolManager         pool.Manager
 	arrsService         *arrs.Service
@@ -97,6 +98,11 @@ func NewServer(
 // SetHealthWorker sets the health worker reference for the server
 func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 	s.healthWorker = healthWorker
+}
+
+// SetLibrarySyncWorker sets the library sync worker reference for the server
+func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorker) {
+	s.librarySyncWorker = librarySyncWorker
 }
 
 // SetRcloneClient sets the rclone client reference for the server
@@ -174,6 +180,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/:id/cancel", s.handleCancelHealthCheck)
 	api.Get("/health/:id", s.handleGetHealth)
 	api.Delete("/health/:id", s.handleDeleteHealth)
+
+	// Library sync endpoints
+	api.Get("/health/library-sync/status", s.handleGetLibrarySyncStatus)
+	api.Post("/health/library-sync/start", s.handleStartLibrarySync)
+	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
@@ -276,4 +287,38 @@ func (s *Server) checkSystemHealth(_ context.Context) SystemHealthResponse {
 		Timestamp:  time.Now(),
 		Components: components,
 	}
+}
+
+// Library sync handler methods
+func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Library sync worker not available",
+		})
+	}
+
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.logger)
+	return handlers.handleGetLibrarySyncStatus(c)
+}
+
+func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Library sync worker not available",
+		})
+	}
+
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.logger)
+	return handlers.handleStartLibrarySync(c)
+}
+
+func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Library sync worker not available",
+		})
+	}
+
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.logger)
+	return handlers.handleCancelLibrarySync(c)
 }

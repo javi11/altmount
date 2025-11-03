@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
@@ -119,7 +120,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	authService := setupAuthService(repos.UserRepo, logger)
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, logger)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, progressBroadcaster, logger)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, progressBroadcaster)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, logger)
 	if err != nil {
@@ -134,12 +135,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 	webdav.RegisterConfigHandlers(configManager, webdavHandler, logger)
 	api.RegisterLogLevelHandler(configManager, debugMode, logger)
 
-	healthWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, logger)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, logger)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}
 	if healthWorker != nil {
 		apiServer.SetHealthWorker(healthWorker)
+	}
+	if librarySyncWorker != nil {
+		apiServer.SetLibrarySyncWorker(librarySyncWorker)
+	}
+
+	// Register health system config change handler for dynamic enable/disable
+	if healthWorker != nil && librarySyncWorker != nil {
+		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker, ctx, logger)
+		healthController.RegisterConfigChangeHandler(configManager)
 	}
 
 	// ARRs service status logging

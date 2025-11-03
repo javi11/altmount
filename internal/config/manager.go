@@ -147,14 +147,12 @@ type LogConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled               *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	AutoRepairEnabled     *bool   `yaml:"auto_repair_enabled" mapstructure:"auto_repair_enabled" json:"auto_repair_enabled,omitempty"`
-	LibraryDir            *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CheckIntervalSeconds  int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConcurrentJobs     int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	MaxRetries            int     `yaml:"max_retries" mapstructure:"max_retries" json:"max_retries,omitempty"`
-	MaxSegmentConnections int     `yaml:"max_segment_connections" mapstructure:"max_segment_connections" json:"max_segment_connections,omitempty"`
-	CheckAllSegments      bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	Enabled                    *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir                 *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CheckIntervalSeconds       int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConnectionsForRepair    int     `yaml:"max_connections_for_repair" mapstructure:"max_connections_for_repair" json:"max_connections_for_repair,omitempty"`
+	CheckAllSegments           bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	LibrarySyncIntervalMinutes int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -309,6 +307,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.Enabled = &v
 	} else {
 		copyCfg.Health.Enabled = nil
+	}
+
+	// Deep copy Health.LibraryDir pointer
+	if c.Health.LibraryDir != nil {
+		v := *c.Health.LibraryDir
+		copyCfg.Health.LibraryDir = &v
+	} else {
+		copyCfg.Health.LibraryDir = nil
 	}
 
 	// Deep copy RClone.RCEnabled pointer
@@ -542,26 +548,21 @@ func (c *Config) Validate() error {
 
 	// Validate streaming configuration
 
-	// Validate health configuration
-	if *c.Health.Enabled {
-		if c.Health.CheckIntervalSeconds <= 0 {
-			return fmt.Errorf("health check_interval_seconds must be greater than 0")
-		}
-		if c.Health.MaxConcurrentJobs <= 0 {
-			return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
-		}
-		if c.Health.MaxRetries < 0 {
-			return fmt.Errorf("health max_retries must be non-negative")
-		}
-		if c.Health.MaxSegmentConnections <= 0 {
-			return fmt.Errorf("health max_segment_connections must be greater than 0")
-		}
+	// Validate health configuration (always active)
+	if c.Health.CheckIntervalSeconds <= 0 {
+		return fmt.Errorf("health check_interval_seconds must be greater than 0")
+	}
+	if c.Health.MaxConnectionsForRepair <= 0 {
+		return fmt.Errorf("health max_connections_for_repair must be greater than 0")
+	}
+	if c.Health.LibrarySyncIntervalMinutes < 0 {
+		return fmt.Errorf("health library_sync_interval_minutes must be non-negative")
 	}
 
-	// Validate auto-repair configuration - requires library_dir when enabled
-	if c.Health.AutoRepairEnabled != nil && *c.Health.AutoRepairEnabled {
+	// Validate health configuration - requires library_dir when enabled
+	if c.Health.Enabled != nil && *c.Health.Enabled {
 		if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
-			return fmt.Errorf("health library_dir is required when auto_repair is enabled")
+			return fmt.Errorf("health library_dir is required when health system is enabled")
 		}
 		if !filepath.IsAbs(*c.Health.LibraryDir) {
 			return fmt.Errorf("health library_dir must be an absolute path")
@@ -925,8 +926,7 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthCheckEnabled := true
-	autoRepairEnabled := false // Disabled by default for safety
+	healthEnabled := false // Health system disabled by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
@@ -1046,13 +1046,11 @@ func DefaultConfig(configDir ...string) *Config {
 			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:               &healthCheckEnabled,
-			AutoRepairEnabled:     &autoRepairEnabled,
-			CheckIntervalSeconds:  5,
-			MaxConcurrentJobs:     1,
-			MaxRetries:            2,
-			MaxSegmentConnections: 5,
-			CheckAllSegments:      false,
+			Enabled:                    &healthEnabled, // Disabled by default
+			CheckIntervalSeconds:       5,
+			MaxConnectionsForRepair:    5,
+			CheckAllSegments:           false,
+			LibrarySyncIntervalMinutes: 360, // Default: sync every 6 hours
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,

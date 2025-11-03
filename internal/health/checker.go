@@ -83,8 +83,8 @@ func NewHealthChecker(
 	}
 }
 
-func (hc *HealthChecker) getMaxSegmentConnections() int {
-	connections := hc.configGetter().Health.MaxSegmentConnections
+func (hc *HealthChecker) getMaxConnectionsForRepair() int {
+	connections := hc.configGetter().Health.MaxConnectionsForRepair
 	if connections <= 0 {
 		return 5 // Default
 	}
@@ -147,7 +147,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		ctx,
 		fileMeta.SegmentData,
 		hc.poolManager,
-		hc.getMaxSegmentConnections(),
+		hc.getMaxConnectionsForRepair(),
 		hc.getCheckAllSegments(),
 	)
 

@@ -8,6 +8,7 @@ import type {
 	HealthCleanupResponse,
 	HealthStats,
 	HealthWorkerStatus,
+	LibrarySyncStatus,
 	ManualScanRequest,
 	PoolMetrics,
 	QueueItem,
@@ -330,6 +331,22 @@ export class APIClient {
 
 	async getHealthWorkerStatus() {
 		return this.request<HealthWorkerStatus>("/health/worker/status");
+	}
+
+	async getLibrarySyncStatus() {
+		return this.request<LibrarySyncStatus>("/health/library-sync/status");
+	}
+
+	async startLibrarySync() {
+		return this.request<{ message: string }>("/health/library-sync/start", {
+			method: "POST",
+		});
+	}
+
+	async cancelLibrarySync() {
+		return this.request<{ message: string }>("/health/library-sync/cancel", {
+			method: "POST",
+		});
 	}
 
 	async getPoolMetrics() {

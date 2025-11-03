@@ -1,8 +1,10 @@
 import {
 	AlertTriangle,
+	CheckCircle,
 	ChevronDown,
 	ChevronUp,
 	Heart,
+	Loader2,
 	MoreHorizontal,
 	Pause,
 	Play,
@@ -32,6 +34,11 @@ import {
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
 } from "../hooks/useApi";
+import {
+	useCancelLibrarySync,
+	useLibrarySyncStatus,
+	useStartLibrarySync,
+} from "../hooks/useLibrarySync";
 import { formatRelativeTime, truncateText } from "../lib/utils";
 import type { FileHealth } from "../types/api";
 
@@ -86,6 +93,16 @@ export function HealthPage() {
 	const repairHealthItem = useRepairHealthItem();
 	const { confirmDelete, confirmAction } = useConfirm();
 	const { showToast } = useToast();
+
+	// Library sync hooks
+	const {
+		data: librarySyncStatus,
+		error: librarySyncError,
+		isLoading: librarySyncLoading,
+		refetch: refetchLibrarySync,
+	} = useLibrarySyncStatus();
+	const startLibrarySync = useStartLibrarySync();
+	const cancelLibrarySync = useCancelLibrarySync();
 
 	const handleDelete = async (id: number) => {
 		const confirmed = await confirmDelete("health record");
@@ -240,6 +257,43 @@ export function HealthPage() {
 					type: "error",
 				});
 			}
+		}
+	};
+
+	// Library sync handlers
+	const handleStartLibrarySync = async () => {
+		try {
+			await startLibrarySync.mutateAsync();
+			showToast({
+				title: "Library Scan Started",
+				message: "Library scan has been triggered successfully",
+				type: "success",
+			});
+		} catch (err) {
+			console.error("Failed to start library sync:", err);
+			showToast({
+				title: "Failed to Start Scan",
+				message: "Could not start library scan. Please try again.",
+				type: "error",
+			});
+		}
+	};
+
+	const handleCancelLibrarySync = async () => {
+		try {
+			await cancelLibrarySync.mutateAsync();
+			showToast({
+				title: "Library Scan Cancelled",
+				message: "Library scan has been cancelled",
+				type: "info",
+			});
+		} catch (err) {
+			console.error("Failed to cancel library sync:", err);
+			showToast({
+				title: "Failed to Cancel Scan",
+				message: "Could not cancel library scan. Please try again.",
+				type: "error",
+			});
 		}
 	};
 
@@ -515,16 +569,21 @@ export function HealthPage() {
 
 			{/* Stats Cards */}
 			{stats && (
-				<div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+				<div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
 					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Files Tracked</div>
 						<div className="stat-value text-primary">{stats.total}</div>
-						<div className="stat-desc">Issues being monitored</div>
+						<div className="stat-desc">Total in database</div>
 					</div>
 					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Pending</div>
 						<div className="stat-value text-info">{stats.pending || 0}</div>
 						<div className="stat-desc">Awaiting check</div>
+					</div>
+					<div className="stat rounded-box bg-base-100 shadow">
+						<div className="stat-title">Healthy</div>
+						<div className="stat-value text-success">{stats.healthy || 0}</div>
+						<div className="stat-desc">Passed checks</div>
 					</div>
 					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Corrupted</div>
@@ -533,6 +592,149 @@ export function HealthPage() {
 					</div>
 				</div>
 			)}
+
+			{/* Library Scan Status */}
+			<div className="card bg-base-100 shadow-lg">
+				<div className="card-body">
+					<h3 className="card-title">Library Scan Status</h3>
+
+					{/* Loading State */}
+					{librarySyncLoading && (
+						<div className="flex items-center gap-2">
+							<Loader2 className="h-5 w-5 animate-spin text-info" />
+							<span>Loading scan status...</span>
+						</div>
+					)}
+
+					{/* Error State */}
+					{librarySyncError && !librarySyncLoading && (
+						<div className="alert alert-error">
+							<AlertTriangle className="h-5 w-5" />
+							<div>
+								<div className="font-bold">Failed to load library sync status</div>
+								<div className="text-sm">{librarySyncError.message}</div>
+							</div>
+							<button
+								type="button"
+								className="btn btn-ghost btn-sm"
+								onClick={() => refetchLibrarySync()}
+							>
+								<RefreshCw className="h-4 w-4" />
+								Retry
+							</button>
+						</div>
+					)}
+
+					{/* Success State */}
+					{!librarySyncLoading && !librarySyncError && librarySyncStatus && (
+						<>
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="flex-1">
+									<div className="mt-2 flex items-center gap-2">
+										{librarySyncStatus.is_running ? (
+											<>
+												<Loader2 className="h-4 w-4 animate-spin text-info" />
+												<span className="badge badge-info">Running</span>
+											</>
+										) : (
+											<>
+												<CheckCircle className="h-4 w-4 text-success" />
+												<span className="badge badge-success">Idle</span>
+											</>
+										)}
+									</div>
+								</div>
+
+								<div className="flex gap-2">
+									<button
+										type="button"
+										className="btn btn-primary btn-sm"
+										onClick={handleStartLibrarySync}
+										disabled={librarySyncStatus.is_running || startLibrarySync.isPending}
+									>
+										{startLibrarySync.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<Play className="h-4 w-4" />
+										)}
+										Start Scan
+									</button>
+									<button
+										type="button"
+										className="btn btn-error btn-sm"
+										onClick={handleCancelLibrarySync}
+										disabled={!librarySyncStatus.is_running || cancelLibrarySync.isPending}
+									>
+										{cancelLibrarySync.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<X className="h-4 w-4" />
+										)}
+										Cancel
+									</button>
+								</div>
+							</div>
+
+							{/* Progress Bar */}
+							{librarySyncStatus.is_running && librarySyncStatus.progress && (
+								<div className="mt-4">
+									<div className="mb-2 flex justify-between text-sm">
+										<span>
+											Scanning: {librarySyncStatus.progress.processed_files} /{" "}
+											{librarySyncStatus.progress.total_files} files
+										</span>
+										<span>
+											{librarySyncStatus.progress.total_files > 0
+												? Math.round(
+													(librarySyncStatus.progress.processed_files /
+														librarySyncStatus.progress.total_files) *
+													100,
+												)
+												: 0}
+											%
+										</span>
+									</div>
+									<progress
+										className="progress progress-primary w-full"
+										value={librarySyncStatus.progress.processed_files}
+										max={librarySyncStatus.progress.total_files}
+									/>
+									{librarySyncStatus.progress.start_time && (
+										<div className="mt-1 text-gray-600 text-sm">
+											Elapsed: {formatRelativeTime(new Date(librarySyncStatus.progress.start_time))}
+										</div>
+									)}
+								</div>
+							)}
+
+							{/* Last Scan Result */}
+							{!librarySyncStatus.is_running && librarySyncStatus.last_sync_result && (
+								<div className="mt-4 rounded bg-base-200 p-3">
+									<div className="font-semibold text-sm">Last Scan:</div>
+									<div className="mt-1 flex flex-wrap gap-4 text-sm">
+										<span>
+											<strong>Added:</strong> {librarySyncStatus.last_sync_result.files_added}
+										</span>
+										<span>
+											<strong>Deleted:</strong> {librarySyncStatus.last_sync_result.files_deleted}
+										</span>
+										<span>
+											<strong>Duration:</strong>{" "}
+											{(librarySyncStatus.last_sync_result.duration / 1e9).toFixed(2)}s
+										</span>
+										<span>
+											<strong>Completed:</strong>{" "}
+											{formatRelativeTime(
+												new Date(librarySyncStatus.last_sync_result.completed_at),
+											)}
+										</span>
+									</div>
+								</div>
+							)}
+						</>
+					)}
+				</div>
+			</div>
 
 			{/* Filters and Search */}
 			<div className="card bg-base-100 shadow-lg">
@@ -565,6 +767,7 @@ export function HealthPage() {
 								<option value="">All Statuses</option>
 								<option value="pending">Pending</option>
 								<option value="checking">Checking</option>
+								<option value="healthy">Healthy</option>
 								<option value="corrupted">Corrupted</option>
 								<option value="repair_triggered">Repair Triggered</option>
 							</select>

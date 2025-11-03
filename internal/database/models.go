@@ -62,6 +62,7 @@ type HealthStatus string
 const (
 	HealthStatusPending         HealthStatus = "pending"          // File has not been checked yet
 	HealthStatusChecking        HealthStatus = "checking"         // File is currently being checked
+	HealthStatusHealthy         HealthStatus = "healthy"          // File passed health check
 	HealthStatusRepairTriggered HealthStatus = "repair_triggered" // File repair has been triggered in Arrs
 	HealthStatusCorrupted       HealthStatus = "corrupted"        // File has missing segments or is corrupted
 )
@@ -82,6 +83,9 @@ type FileHealth struct {
 	ErrorDetails     *string      `db:"error_details"` // JSON error details
 	CreatedAt        time.Time    `db:"created_at"`
 	UpdatedAt        time.Time    `db:"updated_at"`
+	// Health check scheduling fields
+	ReleaseDate      *time.Time `db:"release_date"`       // Cached from metadata for scheduling
+	ScheduledCheckAt *time.Time `db:"scheduled_check_at"` // Next check time
 }
 
 // User represents a user account in the system

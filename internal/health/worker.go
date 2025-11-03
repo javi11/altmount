@@ -105,12 +105,6 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 	if hw.running {
 		return fmt.Errorf("health worker already running")
 	}
-
-	if !hw.getEnabled() {
-		hw.logger.Info("Health worker is disabled in configuration")
-		return nil
-	}
-
 	hw.running = true
 	hw.status = WorkerStatusStarting
 	hw.updateStats(func(s *WorkerStats) {
@@ -136,7 +130,7 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		s.Status = WorkerStatusRunning
 	})
 
-	hw.logger.Info("Health worker started successfully", "check_interval", hw.getCheckInterval(), "max_concurrent_jobs", hw.getMaxConcurrentJobs())
+	hw.logger.Info("Health worker started successfully", "check_interval", hw.getCheckInterval(), "max_concurrent_jobs", 1)
 	return nil
 }
 
@@ -418,7 +412,7 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event HealthEvent) error {
 	switch event.Type {
 	case EventTypeFileRecovered:
-		// File is now healthy - update metadata and delete from health database
+		// File is now healthy - update metadata
 		hw.logger.Info("File recovered", "file_path", event.FilePath)
 
 		// Update metadata status
@@ -427,12 +421,27 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 			return fmt.Errorf("failed to update metadata status: %w", err)
 		}
 
-		// Delete health record since file is now healthy
-		if err := hw.healthRepo.DeleteHealthRecord(event.FilePath); err != nil {
-			hw.logger.Error("Failed to delete health record for recovered file", "file_path", event.FilePath, "error", err)
-			return fmt.Errorf("failed to delete health record: %w", err)
+		// Get file health record to calculate next scheduled check
+		fileHealth, err := hw.healthRepo.GetFileHealth(event.FilePath)
+		if err != nil {
+			hw.logger.Error("Failed to get file health record", "file_path", event.FilePath, "error", err)
+			return fmt.Errorf("failed to get file health record: %w", err)
 		}
-		hw.logger.Info("Removed health record for recovered file", "file_path", event.FilePath)
+
+		if fileHealth != nil && fileHealth.ReleaseDate != nil {
+			// Reschedule next check based on release date
+			nextCheck := calculateNextCheck(*fileHealth.ReleaseDate, time.Now())
+			if err := hw.healthRepo.UpdateScheduledCheckTime(event.FilePath, nextCheck); err != nil {
+				hw.logger.Error("Failed to reschedule health check", "file_path", event.FilePath, "error", err)
+				return fmt.Errorf("failed to reschedule health check: %w", err)
+			}
+			hw.logger.Info("File recovered and rescheduled for next health check",
+				"file_path", event.FilePath,
+				"next_check", nextCheck)
+		} else {
+			hw.logger.Warn("File recovered but no release date available, cannot schedule next check",
+				"file_path", event.FilePath)
+		}
 
 	case EventTypeFileCorrupted, EventTypeCheckFailed:
 		// Get current health record to check retry counts
@@ -578,14 +587,16 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		s.CurrentRunFilesChecked = 0
 	})
 
-	// Get unhealthy files that need checking
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(hw.getMaxConcurrentJobs())
+	// Get files due for checking (ordered by scheduled_check_at)
+	// Hardcoded to 1 - process one file at a time
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(1)
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
 
 	// Get files that need repair notifications
-	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(hw.getMaxConcurrentJobs())
+	// Hardcoded to 1 - process one file at a time
+	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(1)
 	if err != nil {
 		return fmt.Errorf("failed to get files for repair notification: %w", err)
 	}
@@ -607,7 +618,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		"health_check_files", len(unhealthyFiles),
 		"repair_notification_files", len(repairFiles),
 		"total", totalFiles,
-		"max_concurrent_jobs", hw.getMaxConcurrentJobs())
+		"max_concurrent_jobs", 1)
 
 	// Process files in parallel using conc
 	wg := conc.NewWaitGroup()
@@ -685,10 +696,6 @@ func (hw *HealthWorker) updateStats(updateFunc func(*WorkerStats)) {
 }
 
 // Helper methods to get dynamic health config values
-func (hw *HealthWorker) getEnabled() bool {
-	return *hw.configGetter().Health.Enabled
-}
-
 func (hw *HealthWorker) getCheckInterval() time.Duration {
 	intervalSeconds := hw.configGetter().Health.CheckIntervalSeconds
 	if intervalSeconds <= 0 {
@@ -697,23 +704,11 @@ func (hw *HealthWorker) getCheckInterval() time.Duration {
 	return time.Duration(intervalSeconds) * time.Second
 }
 
-func (hw *HealthWorker) getMaxConcurrentJobs() int {
-	jobs := hw.configGetter().Health.MaxConcurrentJobs
-	if jobs <= 0 {
-		return 1 // Default
-	}
-	return jobs
-}
-
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file
 // It directly queries ARR APIs to find which instance manages the file and triggers repair
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string) error {
-	// Check if auto-repair is enabled in configuration
+	// Check if health system is enabled in configuration
 	cfg := hw.configGetter()
-	if cfg.Health.AutoRepairEnabled == nil || !*cfg.Health.AutoRepairEnabled {
-		hw.logger.Info("Auto-repair is disabled, marking file as corrupted for manual investigation", "file_path", filePath)
-		return hw.healthRepo.SetCorrupted(filePath, errorMsg)
-	}
 
 	hw.logger.Info("Triggering file repair using direct ARR API approach", "file_path", filePath)
 
