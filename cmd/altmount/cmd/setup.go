@@ -334,11 +334,16 @@ func startHealthWorker(
 		logger,
 	)
 
+	// Create symlink finder for library sync
+	symlinkFinder := health.NewSymlinkFinder(logger)
+
 	// Create library sync worker (always create, but only start if enabled)
 	librarySyncWorker := health.NewLibrarySyncWorker(
 		metadataService,
 		healthRepo,
 		configManager.GetConfigGetter(),
+		symlinkFinder,
+		rcloneClient,
 		logger,
 	)
 

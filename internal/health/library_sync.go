@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
 // SyncProgress tracks the progress of an ongoing library sync
@@ -24,10 +25,11 @@ type SyncProgress struct {
 
 // SyncResult stores the results of a completed library sync
 type SyncResult struct {
-	FilesAdded   int           `json:"files_added"`
-	FilesDeleted int           `json:"files_deleted"`
-	Duration     time.Duration `json:"duration"`
-	CompletedAt  time.Time     `json:"completed_at"`
+	FilesAdded      int           `json:"files_added"`
+	FilesDeleted    int           `json:"files_deleted"`
+	MetadataDeleted int           `json:"metadata_deleted"`
+	Duration        time.Duration `json:"duration"`
+	CompletedAt     time.Time     `json:"completed_at"`
 }
 
 // LibrarySyncStatus represents the current status of the library sync worker
@@ -50,6 +52,8 @@ type LibrarySyncWorker struct {
 	progress        *SyncProgress
 	lastSyncResult  *SyncResult
 	manualTrigger   chan struct{}
+	symlinkFinder   *SymlinkFinder
+	rcloneClient    rclonecli.RcloneRcClient
 }
 
 // NewLibrarySyncWorker creates a new library sync worker
@@ -57,12 +61,16 @@ func NewLibrarySyncWorker(
 	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
 	configGetter config.ConfigGetter,
+	symlinkFinder *SymlinkFinder,
+	rcloneClient rclonecli.RcloneRcClient,
 	logger *slog.Logger,
 ) *LibrarySyncWorker {
 	return &LibrarySyncWorker{
 		metadataService: metadataService,
 		healthRepo:      healthRepo,
 		configGetter:    configGetter,
+		symlinkFinder:   symlinkFinder,
+		rcloneClient:    rcloneClient,
 		logger:          logger,
 		manualTrigger:   make(chan struct{}, 1), // Buffered channel for non-blocking sends
 	}
@@ -201,6 +209,7 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 // syncLibrary performs a full library synchronization
 func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	startTime := time.Now()
+	cfg := lsw.configGetter()
 	lsw.logger.Info("Starting library sync")
 
 	// Initialize progress tracking
@@ -327,15 +336,22 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 		}
 	}
 
+	// Additional symlink validation if symlinks are enabled
+	metadataDeletedCount := 0
+	if cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled {
+		metadataDeletedCount = lsw.validateSymlinks(ctx, metadataFiles)
+	}
+
 	duration := time.Since(startTime)
 
 	// Store sync result
 	lsw.progressMu.Lock()
 	lsw.lastSyncResult = &SyncResult{
-		FilesAdded:   addedCount,
-		FilesDeleted: deletedCount,
-		Duration:     duration,
-		CompletedAt:  time.Now(),
+		FilesAdded:      addedCount,
+		FilesDeleted:    deletedCount,
+		MetadataDeleted: metadataDeletedCount,
+		Duration:        duration,
+		CompletedAt:     time.Now(),
 	}
 	lsw.progressMu.Unlock()
 
@@ -344,6 +360,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 		"total_db_records", len(dbPaths),
 		"added", addedCount,
 		"deleted", deletedCount,
+		"metadata_deleted", metadataDeletedCount,
 		"duration", duration)
 }
 
@@ -391,4 +408,132 @@ func (lsw *LibrarySyncWorker) metaPathToVirtualPath(metaPath string) string {
 	virtualPath := strings.TrimSuffix(relativePath, ".meta")
 
 	return virtualPath
+}
+
+// validateSymlinks validates metadata files against library symlinks and deletes orphaned metadata
+func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFiles []string) int {
+	lsw.logger.InfoContext(ctx, "Starting symlink validation for library directory")
+
+	// Get all library symlinks
+	symlinkPaths, err := lsw.getAllLibrarySymlinks(ctx)
+	if err != nil {
+		lsw.logger.ErrorContext(ctx, "Failed to get library symlinks", "error", err)
+		return 0
+	}
+
+	// Build map of virtual paths that have symlinks
+	symlinkSet := make(map[string]struct{}, len(symlinkPaths))
+	for _, path := range symlinkPaths {
+		symlinkSet[path] = struct{}{}
+	}
+
+	deletedCount := 0
+
+	// Check each metadata file
+	for _, metaPath := range metadataFiles {
+		virtualPath := lsw.metaPathToVirtualPath(metaPath)
+
+		// If metadata file doesn't have a library symlink, delete it
+		if _, hasSymlink := symlinkSet[virtualPath]; !hasSymlink {
+			lsw.logger.InfoContext(ctx, "Deleting metadata without library symlink",
+				"virtual_path", virtualPath)
+
+			// Delete metadata file
+			if err := lsw.metadataService.DeleteFileMetadata(virtualPath); err != nil {
+				lsw.logger.ErrorContext(ctx, "Failed to delete metadata file",
+					"virtual_path", virtualPath,
+					"error", err)
+				continue
+			}
+
+			// Delete from database
+			if err := lsw.healthRepo.DeleteHealthRecordsBulk([]string{virtualPath}); err != nil {
+				lsw.logger.ErrorContext(ctx, "Failed to delete health record",
+					"virtual_path", virtualPath,
+					"error", err)
+			}
+
+			// Refresh mount cache for the directory
+			dirPath := filepath.Dir(virtualPath)
+			if err := lsw.rcloneClient.RefreshDir(ctx, "", []string{dirPath}); err != nil {
+				lsw.logger.WarnContext(ctx, "Failed to refresh mount cache",
+					"dir_path", dirPath,
+					"error", err)
+			}
+
+			deletedCount++
+		}
+	}
+
+	lsw.logger.InfoContext(ctx, "Symlink validation completed",
+		"metadata_deleted", deletedCount,
+		"symlinks_found", len(symlinkPaths))
+
+	return deletedCount
+}
+
+// getAllLibrarySymlinks collects all symlinks from library directory that point to the mount
+func (lsw *LibrarySyncWorker) getAllLibrarySymlinks(ctx context.Context) ([]string, error) {
+	cfg := lsw.configGetter()
+
+	// Get library directory
+	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
+		return []string{}, nil
+	}
+
+	libraryDir := *cfg.Health.LibraryDir
+	mountDir := cfg.Metadata.RootPath
+
+	var mountPaths []string
+
+	// Walk the library directory recursively
+	err := filepath.WalkDir(libraryDir, func(path string, d os.DirEntry, err error) error {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // Continue walking despite errors
+		}
+
+		// Skip if not a symlink
+		if d.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+
+		// Read the symlink target
+		target, err := os.Readlink(path)
+		if err != nil {
+			lsw.logger.WarnContext(ctx, "Failed to read symlink", "path", path, "error", err)
+			return nil
+		}
+
+		// Make target absolute if it's relative
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+
+		// Clean the paths for comparison
+		cleanTarget := filepath.Clean(target)
+		cleanMountDir := filepath.Clean(mountDir)
+
+		// Check if this symlink points inside the mount directory
+		if strings.HasPrefix(cleanTarget, cleanMountDir) {
+			// Convert mount path to virtual path
+			virtualPath := lsw.metaPathToVirtualPath(cleanTarget)
+			mountPaths = append(mountPaths, virtualPath)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		lsw.logger.ErrorContext(ctx, "Error during library symlink scan", "error", err)
+		return nil, err
+	}
+
+	return mountPaths, nil
 }
