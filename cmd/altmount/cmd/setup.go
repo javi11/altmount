@@ -312,7 +312,6 @@ func startHealthWorker(
 	arrsService *arrs.Service,
 	logger *slog.Logger,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
-	// Health worker initialization - only starts if health system is enabled
 	// Create metadata service for health worker
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
 
