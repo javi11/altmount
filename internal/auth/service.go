@@ -152,7 +152,7 @@ func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (
 	}
 
 	// Check if user already exists
-	existingUser, err := s.userRepo.GetUserByID(userID)
+	existingUser, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (
 
 	if existingUser == nil {
 		// Check if this is the first user - make them admin
-		userCount, countErr := s.userRepo.GetUserCount()
+		userCount, countErr := s.userRepo.GetUserCount(ctx)
 		if countErr != nil {
 			slog.WarnContext(ctx, "Failed to get user count", "error", countErr)
 		} else if userCount == 0 {
@@ -192,7 +192,7 @@ func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (
 		}
 
 		// Create new user
-		err = s.userRepo.CreateUser(user)
+		err = s.userRepo.CreateUser(ctx, user)
 		if err != nil {
 			return nil, err
 		}
@@ -201,7 +201,7 @@ func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (
 		// Update existing user
 		user.ID = existingUser.ID
 		user.IsAdmin = existingUser.IsAdmin // Preserve admin status
-		err = s.userRepo.UpdateUser(user)
+		err = s.userRepo.UpdateUser(ctx, user)
 		if err != nil {
 			return nil, err
 		}
@@ -209,7 +209,7 @@ func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (
 	}
 
 	// Update last login
-	err = s.userRepo.UpdateLastLogin(userID)
+	err = s.userRepo.UpdateLastLogin(ctx, userID)
 	if err != nil {
 		slog.WarnContext(ctx, "Failed to update last login", "user_id", userID, "error", err)
 	}
@@ -218,7 +218,7 @@ func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (
 }
 
 // GetUserFromToken extracts user information from JWT token
-func (s *Service) GetUserFromToken(tokenStr string) (*database.User, error) {
+func (s *Service) GetUserFromToken(ctx context.Context, tokenStr string) (*database.User, error) {
 	claims, err := s.authService.TokenService().Parse(tokenStr)
 	if err != nil {
 		return nil, err
@@ -229,12 +229,12 @@ func (s *Service) GetUserFromToken(tokenStr string) (*database.User, error) {
 		userID = claims.Subject
 	}
 
-	return s.userRepo.GetUserByID(userID)
+	return s.userRepo.GetUserByID(ctx, userID)
 }
 
 // IsUserAdmin checks if a user has admin privileges
-func (s *Service) IsUserAdmin(userID string) (bool, error) {
-	user, err := s.userRepo.GetUserByID(userID)
+func (s *Service) IsUserAdmin(ctx context.Context, userID string) (bool, error) {
+	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -247,7 +247,7 @@ func (s *Service) IsUserAdmin(userID string) (bool, error) {
 // RegisterUser creates a new user with username and password
 func (s *Service) RegisterUser(ctx context.Context, username, email, password string) (*database.User, error) {
 	// Check if this is the first user
-	userCount, err := s.userRepo.GetUserCount()
+	userCount, err := s.userRepo.GetUserCount(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check user count: %w", err)
 	}
@@ -258,7 +258,7 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 	}
 
 	// Check if user already exists
-	existingUser, err := s.userRepo.GetUserByUsername(username)
+	existingUser, err := s.userRepo.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing user: %w", err)
 	}
@@ -268,7 +268,7 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 
 	// Check email if provided
 	if email != "" {
-		existingUser, err = s.userRepo.GetUserByEmail(email)
+		existingUser, err = s.userRepo.GetUserByEmail(ctx, email)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check existing email: %w", err)
 		}
@@ -299,13 +299,13 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 	}
 
 	// Create the user
-	err = s.userRepo.CreateUser(user)
+	err = s.userRepo.CreateUser(ctx, user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
 	// Generate API key for the first user (admin)
-	apiKey, err := s.userRepo.RegenerateAPIKey(user.UserID)
+	apiKey, err := s.userRepo.RegenerateAPIKey(ctx, user.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate API key for first user: %w", err)
 	}
@@ -320,14 +320,14 @@ func (s *Service) RegisterUser(ctx context.Context, username, email, password st
 // AuthenticateUser verifies username/password and returns user
 func (s *Service) AuthenticateUser(ctx context.Context, username, password string) (*database.User, error) {
 	// Try to find user by username first
-	user, err := s.userRepo.GetUserByUsername(username)
+	user, err := s.userRepo.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 
 	// If not found by username, try by email
 	if user == nil {
-		user, err = s.userRepo.GetUserByEmail(username)
+		user, err = s.userRepo.GetUserByEmail(ctx, username)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user by email: %w", err)
 		}

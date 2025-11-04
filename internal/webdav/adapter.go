@@ -70,7 +70,7 @@ func NewHandler(
 					}
 
 					if userID != "" {
-						user, err := userRepo.GetUserByID(userID)
+						user, err := userRepo.GetUserByID(r.Context(), userID)
 						if err == nil && user != nil {
 							authenticated = true
 						}

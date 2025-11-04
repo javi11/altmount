@@ -14,7 +14,7 @@ import (
 // handleGetSystemStats handles GET /api/system/stats
 func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	// Get queue statistics
-	queueStats, err := s.queueRepo.GetQueueStats()
+	queueStats, err := s.queueRepo.GetQueueStats(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -24,7 +24,7 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	}
 
 	// Get health statistics
-	healthStatsMap, err := s.healthRepo.GetHealthStats()
+	healthStatsMap, err := s.healthRepo.GetHealthStats(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -142,7 +142,7 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 
 	// Clean up queue items
 	if !req.DryRun {
-		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems()
+		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(c.Context())
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"success": false,

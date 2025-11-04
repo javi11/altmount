@@ -239,7 +239,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	lsw.progressMu.Unlock()
 
 	// Get all health check paths from database
-	dbPaths, err := lsw.healthRepo.GetAllHealthCheckPaths()
+	dbPaths, err := lsw.healthRepo.GetAllHealthCheckPaths(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to get automatic health check paths from database", "error", err)
 		return
@@ -311,7 +311,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	deletedCount := 0
 
 	if len(filesToAdd) > 0 {
-		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(filesToAdd); err != nil {
+		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, filesToAdd); err != nil {
 			slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
 				"count", len(filesToAdd),
 				"error", err)
@@ -323,7 +323,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	}
 
 	if len(filesToDelete) > 0 {
-		if err := lsw.healthRepo.DeleteHealthRecordsBulk(filesToDelete); err != nil {
+		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx,filesToDelete); err != nil {
 			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
 				"count", len(filesToDelete),
 				"error", err)
@@ -437,7 +437,7 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 				"mount_path", target)
 
 			// Delete from database
-			if err := lsw.healthRepo.DeleteHealthRecordsBulk([]string{virtualPath}); err != nil {
+			if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx,[]string{virtualPath}); err != nil {
 				slog.ErrorContext(ctx, "Failed to delete health record",
 					"virtual_path", virtualPath,
 					"error", err)

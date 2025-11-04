@@ -1002,7 +1002,7 @@ func (s *Server) getAPIKeyForConfig(c *fiber.Ctx) string {
 
 	// If no authenticated user, try to get first admin user (for non-auth mode)
 	if s.userRepo != nil {
-		users, err := s.userRepo.ListUsers(1, 0)
+		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
 		if err == nil && len(users) > 0 && users[0].APIKey != nil {
 			return *users[0].APIKey
 		}

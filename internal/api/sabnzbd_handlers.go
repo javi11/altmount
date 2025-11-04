@@ -354,7 +354,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	categoryFilter := c.Query("category", "")
 
 	// Get pending and processing items
-	items, err := s.queueRepo.ListQueueItems(nil, "", categoryFilter, 100, 0)
+	items, err := s.queueRepo.ListQueueItems(c.Context(),nil, "", categoryFilter, 100, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get queue")
 	}
@@ -399,7 +399,7 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 	}
 
 	// Delete from queue
-	err = s.queueRepo.RemoveFromQueue(id)
+	err = s.queueRepo.RemoveFromQueue(c.Context(),id)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to delete queue item")
 	}
@@ -428,14 +428,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	// Get completed items
 	completedStatus := database.QueueStatusCompleted
-	completed, err := s.queueRepo.ListQueueItems(&completedStatus, "", categoryFilter, 50, 0)
+	completed, err := s.queueRepo.ListQueueItems(c.Context(),&completedStatus, "", categoryFilter, 50, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items")
 	}
 
 	// Get failed items
 	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(&failedStatus, "", categoryFilter, 50, 0)
+	failed, err := s.queueRepo.ListQueueItems(c.Context(),&failedStatus, "", categoryFilter, 50, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
 	}
@@ -491,7 +491,7 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 	}
 
 	// Delete from queue (history items are still queue items with completed/failed status)
-	err = s.queueRepo.RemoveFromQueue(id)
+	err = s.queueRepo.RemoveFromQueue(c.Context(),id)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to delete history item")
 	}
@@ -508,7 +508,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	// Get queue information
 	var slots []SABnzbdQueueSlot
 	if s.queueRepo != nil {
-		items, err := s.queueRepo.ListQueueItems(nil, "", "", 50, 0)
+		items, err := s.queueRepo.ListQueueItems(c.Context(),nil, "", "", 50, 0)
 		if err == nil {
 			for i, item := range items {
 				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing {

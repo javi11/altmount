@@ -94,7 +94,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	}
 
 	// Update last login
-	err = s.userRepo.UpdateLastLogin(user.UserID)
+	err = s.userRepo.UpdateLastLogin(c.Context(), user.UserID)
 	if err != nil {
 		// Log but don't fail the login
 		slog.WarnContext(c.Context(), "Failed to update last login", "user_id", user.UserID, "error", err)
@@ -178,7 +178,7 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 
 // handleCheckRegistration checks if registration is allowed
 func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
-	userCount, err := s.userRepo.GetUserCount()
+	userCount, err := s.userRepo.GetUserCount(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -308,7 +308,7 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 	}
 
 	pagination := ParsePaginationFiber(c)
-	users, err := s.userRepo.ListUsers(pagination.Limit, pagination.Offset)
+	users, err := s.userRepo.ListUsers(c.Context(), pagination.Limit, pagination.Offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -360,7 +360,7 @@ func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 	}
 
 	// Update admin status
-	err := s.userRepo.SetAdminStatus(userID, req.IsAdmin)
+	err := s.userRepo.SetAdminStatus(c.Context(), userID, req.IsAdmin)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -385,7 +385,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 
 	// If no user in context, try to get first admin user (auth disabled case)
 	if user == nil && s.userRepo != nil {
-		users, err := s.userRepo.ListUsers(1, 0)
+		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
 		if err == nil && len(users) > 0 {
 			user = users[0]
 		}
@@ -400,7 +400,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	}
 
 	// Regenerate API key
-	apiKey, err := s.userRepo.RegenerateAPIKey(user.UserID)
+	apiKey, err := s.userRepo.RegenerateAPIKey(c.Context(), user.UserID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

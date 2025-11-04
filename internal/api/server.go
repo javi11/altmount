@@ -246,12 +246,12 @@ func (s *Server) getSystemInfo() SystemInfoResponse {
 }
 
 // checkSystemHealth performs a basic health check
-func (s *Server) checkSystemHealth(_ context.Context) SystemHealthResponse {
+func (s *Server) checkSystemHealth(ctx context.Context) SystemHealthResponse {
 	components := make(map[string]ComponentHealth)
 	overallStatus := "healthy"
 
 	// Check database connectivity
-	if _, err := s.queueRepo.GetQueueStats(); err != nil {
+	if _, err := s.queueRepo.GetQueueStats(ctx); err != nil {
 		components["database"] = ComponentHealth{
 			Status:  "unhealthy",
 			Message: "Database connection failed",
@@ -266,7 +266,7 @@ func (s *Server) checkSystemHealth(_ context.Context) SystemHealthResponse {
 	}
 
 	// Check health repository
-	if _, err := s.healthRepo.GetHealthStats(); err != nil {
+	if _, err := s.healthRepo.GetHealthStats(ctx); err != nil {
 		components["health_repository"] = ComponentHealth{
 			Status:  "unhealthy",
 			Message: "Health repository failed",

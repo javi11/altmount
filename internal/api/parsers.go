@@ -109,7 +109,7 @@ func (s *Server) validateAPIKey(c *fiber.Ctx, apiKey string) bool {
 		return false
 	}
 
-	user, err := s.userRepo.GetUserByAPIKey(apiKey)
+	user, err := s.userRepo.GetUserByAPIKey(c.Context(), apiKey)
 	if err != nil || user == nil {
 		return false
 	}

@@ -104,7 +104,7 @@ func initializeFilesystem(
 	configGetter config.ConfigGetter,
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
-	if err := healthRepo.ResetFileAllChecking(); err != nil {
+	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
 		slog.ErrorContext(ctx, "failed to reset in progress file health", "err", err)
 	}
 

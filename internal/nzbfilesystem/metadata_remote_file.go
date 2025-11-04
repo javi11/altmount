@@ -893,6 +893,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
 
 		if err := mvf.healthRepository.UpdateFileHealth(
+			context.Background(),
 			mvf.name,
 			dbStatus,
 			&errorMsg,

@@ -110,7 +110,7 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string) HealthE
 	}
 	if fileMeta == nil {
 		// File not found - remove from health database
-		_ = hc.healthRepo.DeleteHealthRecord(filePath)
+		_ = hc.healthRepo.DeleteHealthRecord(ctx, filePath)
 
 		return HealthEvent{
 			Type:      EventTypeFileRemoved,
@@ -197,6 +197,6 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 }
 
 // GetHealthStats returns current health statistics
-func (hc *HealthChecker) GetHealthStats() (map[database.HealthStatus]int, error) {
-	return hc.healthRepo.GetHealthStats()
+func (hc *HealthChecker) GetHealthStats(ctx context.Context) (map[database.HealthStatus]int, error) {
+	return hc.healthRepo.GetHealthStats(ctx)
 }

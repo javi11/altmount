@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -8,32 +9,24 @@ import (
 
 // QueueRepository handles queue-specific database operations
 type QueueRepository struct {
-	db interface {
-		Exec(query string, args ...interface{}) (sql.Result, error)
-		Query(query string, args ...interface{}) (*sql.Rows, error)
-		QueryRow(query string, args ...interface{}) *sql.Row
-	}
+	db DBQuerier
 }
 
 // NewQueueRepository creates a new queue repository
-func NewQueueRepository(db interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
-}) *QueueRepository {
+func NewQueueRepository(db *sql.DB) *QueueRepository {
 	return &QueueRepository{db: db}
 }
 
 // RemoveFromQueue removes an item from the queue
-func (r *QueueRepository) RemoveFromQueue(id int64) error {
+func (r *QueueRepository) RemoveFromQueue(ctx context.Context, id int64) error {
 	query := `DELETE FROM import_queue WHERE id = ?`
-	_, err := r.db.Exec(query, id)
+	_, err := r.db.ExecContext(ctx, query, id)
 
 	return err
 }
 
 // AddToQueue adds a new NZB file to the import queue
-func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
+func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem) error {
 	query := `
 		INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
@@ -51,7 +44,7 @@ func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 		WHERE status NOT IN ('processing', 'pending')
 	`
 
-	result, err := r.db.Exec(query,
+	result, err := r.db.ExecContext(ctx, query,
 		item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
 		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
 	if err != nil {
@@ -69,14 +62,14 @@ func (r *QueueRepository) AddToQueue(item *ImportQueueItem) error {
 	return nil
 }
 
-func (r *QueueRepository) AddStoragePath(itemID int64, storagePath string) error {
+func (r *QueueRepository) AddStoragePath(ctx context.Context, itemID int64, storagePath string) error {
 	query := `
 		UPDATE import_queue
 		SET storage_path = ?, updated_at = datetime('now')
 		WHERE id = ?
 	`
 
-	_, err := r.db.Exec(query, storagePath, itemID)
+	_, err := r.db.ExecContext(ctx, query, storagePath, itemID)
 	if err != nil {
 		return fmt.Errorf("failed to add storage path: %w", err)
 	}
@@ -85,11 +78,11 @@ func (r *QueueRepository) AddStoragePath(itemID int64, storagePath string) error
 }
 
 // IsFileInQueue checks if a file is already in the queue (pending or processing)
-func (r *QueueRepository) IsFileInQueue(filePath string) (bool, error) {
+func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
 	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing') LIMIT 1`
 
 	var exists int
-	err := r.db.QueryRow(query, filePath).Scan(&exists)
+	err := r.db.QueryRowContext(ctx, query, filePath).Scan(&exists)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil
@@ -101,11 +94,11 @@ func (r *QueueRepository) IsFileInQueue(filePath string) (bool, error) {
 }
 
 // ClaimNextQueueItem atomically claims and returns the next available queue item
-func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
+func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueItem, error) {
 	// Use immediate transaction to atomically claim an item
 	var claimedItem *ImportQueueItem
 
-	err := r.withQueueTransaction(func(txRepo *QueueRepository) error {
+	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
 		// First, get the next available item ID within the transaction
 		var itemID int64
 		selectQuery := `
@@ -115,7 +108,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			LIMIT 1
 		`
 
-		err := txRepo.db.QueryRow(selectQuery).Scan(&itemID)
+		err := txRepo.db.QueryRowContext(ctx, selectQuery).Scan(&itemID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				// No items available
@@ -131,7 +124,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 			WHERE id = ? AND status = 'pending'
 		`
 
-		result, err := txRepo.db.Exec(updateQuery, itemID)
+		result, err := txRepo.db.ExecContext(ctx, updateQuery, itemID)
 		if err != nil {
 			return fmt.Errorf("failed to claim queue item %d: %w", itemID, err)
 		}
@@ -155,7 +148,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 		`
 
 		var item ImportQueueItem
-		err = txRepo.db.QueryRow(getQuery, itemID).Scan(
+		err = txRepo.db.QueryRowContext(ctx, getQuery, itemID).Scan(
 			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
@@ -176,7 +169,7 @@ func (r *QueueRepository) ClaimNextQueueItem() (*ImportQueueItem, error) {
 }
 
 // UpdateQueueItemStatus updates the status of a queue item
-func (r *QueueRepository) UpdateQueueItemStatus(id int64, status QueueStatus, errorMessage *string) error {
+func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, status QueueStatus, errorMessage *string) error {
 	now := time.Now()
 	var query string
 	var args []interface{}
@@ -196,7 +189,7 @@ func (r *QueueRepository) UpdateQueueItemStatus(id int64, status QueueStatus, er
 		args = []interface{}{status, errorMessage, now, id}
 	}
 
-	_, err := r.db.Exec(query, args...)
+	_, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update queue item status: %w", err)
 	}
@@ -205,7 +198,7 @@ func (r *QueueRepository) UpdateQueueItemStatus(id int64, status QueueStatus, er
 }
 
 // GetQueueStats returns current queue statistics
-func (r *QueueRepository) GetQueueStats() (*QueueStats, error) {
+func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error) {
 	// Count items by status
 	queries := []struct {
 		status string
@@ -222,7 +215,7 @@ func (r *QueueRepository) GetQueueStats() (*QueueStats, error) {
 
 	for _, q := range queries {
 		var count int
-		err := r.db.QueryRow(q.query).Scan(&count)
+		err := r.db.QueryRowContext(ctx, q.query).Scan(&count)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get count for %s items: %w", q.status, err)
 		}
@@ -241,7 +234,7 @@ func (r *QueueRepository) GetQueueStats() (*QueueStats, error) {
 		FROM import_queue 
 		WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
 	`
-	err := r.db.QueryRow(avgQuery).Scan(&avgProcessingTimeFloat)
+	err := r.db.QueryRowContext(ctx, avgQuery).Scan(&avgProcessingTimeFloat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate average processing time: %w", err)
 	}
@@ -257,12 +250,12 @@ func (r *QueueRepository) GetQueueStats() (*QueueStats, error) {
 }
 
 // AddBatchToQueue adds multiple items to the queue in a single transaction
-func (r *QueueRepository) AddBatchToQueue(items []*ImportQueueItem) error {
+func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQueueItem) error {
 	if len(items) == 0 {
 		return nil
 	}
 
-	return r.withQueueTransaction(func(txRepo *QueueRepository) error {
+	return r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
 		// Prepare batch insert statement
 		query := `
 			INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, created_at, updated_at)
@@ -279,7 +272,7 @@ func (r *QueueRepository) AddBatchToQueue(items []*ImportQueueItem) error {
 
 		now := time.Now()
 		for _, item := range items {
-			result, err := txRepo.db.Exec(query,
+			result, err := txRepo.db.ExecContext(ctx, query,
 				item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
 				item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
 			if err != nil {
@@ -299,7 +292,7 @@ func (r *QueueRepository) AddBatchToQueue(items []*ImportQueueItem) error {
 }
 
 // GetQueueItem retrieves a specific queue item by ID
-func (r *QueueRepository) GetQueueItem(id int64) (*ImportQueueItem, error) {
+func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
@@ -307,7 +300,7 @@ func (r *QueueRepository) GetQueueItem(id int64) (*ImportQueueItem, error) {
 	`
 
 	var item ImportQueueItem
-	err := r.db.QueryRow(query, id).Scan(
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
@@ -323,14 +316,14 @@ func (r *QueueRepository) GetQueueItem(id int64) (*ImportQueueItem, error) {
 }
 
 // withQueueTransaction executes a function within a queue database transaction
-func (r *QueueRepository) withQueueTransaction(fn func(*QueueRepository) error) error {
-	// Cast to *sql.DB to access Begin method
+func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*QueueRepository) error) error {
+	// Cast to *sql.DB to access BeginTx method
 	sqlDB, ok := r.db.(*sql.DB)
 	if !ok {
-		return fmt.Errorf("queue repository not connected to sql.DB")
+		return fmt.Errorf("repository not connected to sql.DB")
 	}
 
-	tx, err := sqlDB.Begin()
+	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin queue transaction: %w", err)
 	}
@@ -354,14 +347,14 @@ func (r *QueueRepository) withQueueTransaction(fn func(*QueueRepository) error) 
 }
 
 // ResetStaleItems resets processing items back to pending on service startup
-func (r *QueueRepository) ResetStaleItems() error {
+func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 	query := `
 		UPDATE import_queue
 		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
 		WHERE status = 'processing'
 	`
 
-	result, err := r.db.Exec(query)
+	result, err := r.db.ExecContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to reset stale queue items: %w", err)
 	}

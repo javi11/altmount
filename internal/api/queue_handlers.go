@@ -72,7 +72,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	}
 
 	// Get total count for pagination
-	totalCount, err := s.queueRepo.CountQueueItems(statusFilter, searchFilter, "")
+	totalCount, err := s.queueRepo.CountQueueItems(c.Context(),statusFilter, searchFilter, "")
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -85,7 +85,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	}
 
 	// Get queue items from repository
-	items, err := s.queueRepo.ListQueueItems(statusFilter, searchFilter, "", pagination.Limit, pagination.Offset)
+	items, err := s.queueRepo.ListQueueItems(c.Context(),statusFilter, searchFilter, "", pagination.Limit, pagination.Offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -157,7 +157,7 @@ func (s *Server) handleGetQueue(c *fiber.Ctx) error {
 	}
 
 	// Get queue item from repository
-	item, err := s.queueRepo.GetQueueItem(id)
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -216,7 +216,7 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 	}
 
 	// Check if item exists first
-	item, err := s.queueRepo.GetQueueItem(id)
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -252,7 +252,7 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 	}
 
 	// Remove from queue
-	err = s.queueRepo.RemoveFromQueue(id)
+	err = s.queueRepo.RemoveFromQueue(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -295,7 +295,7 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	}
 
 	// Check if item exists
-	item, err := s.queueRepo.GetQueueItem(id)
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -331,7 +331,7 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	}
 
 	// Update status to pending for manual retry
-	err = s.queueRepo.UpdateQueueItemStatus(id, database.QueueStatusPending, nil)
+	err = s.queueRepo.UpdateQueueItemStatus(c.Context(),id, database.QueueStatusPending, nil)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -349,7 +349,7 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	}
 
 	// Get updated item
-	updatedItem, err := s.queueRepo.GetQueueItem(id)
+	updatedItem, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -370,7 +370,7 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 
 // handleGetQueueStats handles GET /api/queue/stats
 func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
-	stats, err := s.queueRepo.GetQueueStats()
+	stats, err := s.queueRepo.GetQueueStats(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -392,7 +392,7 @@ func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 // handleClearCompletedQueue handles DELETE /api/queue/completed
 func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 	// Clear completed items
-	count, err := s.queueRepo.ClearCompletedQueueItems()
+	count, err := s.queueRepo.ClearCompletedQueueItems(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -417,7 +417,7 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 // handleClearFailedQueue handles DELETE /api/queue/failed
 func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 	// Clear failed items
-	count, err := s.queueRepo.ClearFailedQueueItems()
+	count, err := s.queueRepo.ClearFailedQueueItems(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -442,7 +442,7 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 // handleClearPendingQueue handles DELETE /api/queue/pending
 func (s *Server) handleClearPendingQueue(c *fiber.Ctx) error {
 	// Clear pending items
-	count, err := s.queueRepo.ClearPendingQueueItems()
+	count, err := s.queueRepo.ClearPendingQueueItems(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -495,7 +495,7 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 	}
 
 	// Remove from queue in bulk (this will check for processing items)
-	result, err := s.queueRepo.RemoveFromQueueBulk(request.IDs)
+	result, err := s.queueRepo.RemoveFromQueueBulk(c.Context(),request.IDs)
 	if err != nil {
 		// Check if the error is about processing items
 		if result != nil && result.ProcessingCount > 0 {
@@ -701,7 +701,7 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 	processedCount := 0
 	notFoundCount := 0
 	for _, id := range request.IDs {
-		item, err := s.queueRepo.GetQueueItem(id)
+		item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"success": false,
@@ -746,7 +746,7 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 	}
 
 	// Restart the queue items
-	err := s.queueRepo.RestartQueueItemsBulk(request.IDs)
+	err := s.queueRepo.RestartQueueItemsBulk(c.Context(),request.IDs)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -797,7 +797,7 @@ func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 	}
 
 	// Get queue item from repository
-	item, err := s.queueRepo.GetQueueItem(id)
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

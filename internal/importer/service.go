@@ -125,7 +125,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	// Reset any stale queue items from processing back to pending
-	if err := s.database.Repository.ResetStaleItems(); err != nil {
+	if err := s.database.Repository.ResetStaleItems(ctx); err != nil {
 		s.log.ErrorContext(ctx, "Failed to reset stale queue items", "error", err)
 		return fmt.Errorf("failed to reset stale queue items: %w", err)
 	}
@@ -207,7 +207,7 @@ func (s *Service) Database() *database.DB {
 
 // GetQueueStats returns current queue statistics from database
 func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {
-	return s.database.Repository.GetQueueStats()
+	return s.database.Repository.GetQueueStats(ctx)
 }
 
 // StartManualScan starts a manual scan of the specified directory
@@ -366,7 +366,7 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 	// Only check queue database during scanning for performance
 	// The processor will check main database for duplicates when processing
-	inQueue, err := s.database.Repository.IsFileInQueue(filePath)
+	inQueue, err := s.database.Repository.IsFileInQueue(context.Background(), filePath)
 	if err != nil {
 		s.log.WarnContext(context.Background(), "Failed to check if file in queue", "file", filePath, "error", err)
 		return false // Assume not in queue on error
@@ -404,7 +404,7 @@ func (s *Service) AddToQueue(filePath string, relativePath *string, category *st
 		CreatedAt:    time.Now(),
 	}
 
-	if err := s.database.Repository.AddToQueue(item); err != nil {
+	if err := s.database.Repository.AddToQueue(context.Background(), item); err != nil {
 		s.log.ErrorContext(context.Background(), "Failed to add file to queue", "file", filePath, "error", err)
 		return nil, err
 	}
@@ -457,7 +457,7 @@ func (s *Service) claimItemWithRetry(ctx context.Context, workerID int) (*databa
 
 	err := retry.Do(
 		func() error {
-			claimedItem, err := s.database.Repository.ClaimNextQueueItem()
+			claimedItem, err := s.database.Repository.ClaimNextQueueItem(ctx)
 			if err != nil {
 				return err
 			}
@@ -566,7 +566,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 // handleProcessingSuccess handles all steps after successful NZB processing
 func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
 	// Add storage path to database
-	if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
+	if err := s.database.Repository.AddStoragePath(ctx, item.ID, resultingPath); err != nil {
 		s.log.ErrorContext(ctx, "Failed to add storage path", "queue_id", item.ID, "error", err)
 		return err
 	}
@@ -587,7 +587,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	}
 
 	// Mark as completed in queue database
-	if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusCompleted, nil); err != nil {
 		s.log.ErrorContext(ctx, "Failed to mark item as completed", "queue_id", item.ID, "error", err)
 		return err
 	}
@@ -611,7 +611,7 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		"error", processingErr)
 
 	// Mark as failed in queue database (no automatic retry)
-	if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
 		s.log.ErrorContext(ctx, "Failed to mark item as failed", "queue_id", item.ID, "error", err)
 	} else {
 		s.log.ErrorContext(ctx, "Item failed",
@@ -634,7 +634,7 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 
 	} else {
 		// Mark item as fallback instead of removing from queue
-		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFallback, nil); err != nil {
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFallback, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to mark item as fallback", "queue_id", item.ID, "error", err)
 		} else {
 			s.log.InfoContext(ctx, "Item marked as fallback after successful SABnzbd transfer",
@@ -784,7 +784,7 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 		s.log.DebugContext(ctx, "Starting background processing of queue item", "item_id", itemID, "background", true)
 
 		// Get the queue item
-		item, err := s.database.Repository.GetQueueItem(itemID)
+		item, err := s.database.Repository.GetQueueItem(ctx, itemID)
 		if err != nil {
 			s.log.ErrorContext(ctx, "Failed to get queue item for background processing", "item_id", itemID, "error", err)
 			return
@@ -796,7 +796,7 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 		}
 
 		// Update status to processing
-		if err := s.database.Repository.UpdateQueueItemStatus(itemID, database.QueueStatusProcessing, nil); err != nil {
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, itemID, database.QueueStatusProcessing, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to update item status to processing", "item_id", itemID, "error", err)
 			return
 		}
