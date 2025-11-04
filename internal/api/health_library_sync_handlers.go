@@ -10,14 +10,12 @@ import (
 // LibrarySyncHandlers holds the library sync-related request handlers
 type LibrarySyncHandlers struct {
 	librarySyncWorker *health.LibrarySyncWorker
-	logger            *slog.Logger
 }
 
 // NewLibrarySyncHandlers creates a new instance of library sync handlers
-func NewLibrarySyncHandlers(librarySyncWorker *health.LibrarySyncWorker, logger *slog.Logger) *LibrarySyncHandlers {
+func NewLibrarySyncHandlers(librarySyncWorker *health.LibrarySyncWorker) *LibrarySyncHandlers {
 	return &LibrarySyncHandlers{
 		librarySyncWorker: librarySyncWorker,
-		logger:            logger,
 	}
 }
 
@@ -32,9 +30,9 @@ func (h *LibrarySyncHandlers) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 
 // handleStartLibrarySync handles POST /api/health/library-sync/start
 func (h *LibrarySyncHandlers) handleStartLibrarySync(c *fiber.Ctx) error {
-	err := h.librarySyncWorker.TriggerManualSync()
+	err := h.librarySyncWorker.TriggerManualSync(c.Context())
 	if err != nil {
-		h.logger.Error("Failed to trigger library sync", "error", err)
+		slog.ErrorContext(c.Context(), "Failed to trigger library sync", "error", err)
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -51,7 +49,7 @@ func (h *LibrarySyncHandlers) handleStartLibrarySync(c *fiber.Ctx) error {
 // handleCancelLibrarySync handles POST /api/health/library-sync/cancel
 func (h *LibrarySyncHandlers) handleCancelLibrarySync(c *fiber.Ctx) error {
 	// Stop the library sync worker
-	h.librarySyncWorker.Stop()
+	h.librarySyncWorker.Stop(c.Context())
 
 	return c.JSON(fiber.Map{
 		"success": true,

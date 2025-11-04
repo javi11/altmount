@@ -133,6 +133,8 @@ type ImportConfig struct {
 	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	ImportCacheSizeMB              int      `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
+	SymlinkDir                     *string  `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
+	SymlinkEnabled                 *bool    `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -149,6 +151,7 @@ type LogConfig struct {
 type HealthConfig struct {
 	Enabled                    *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	LibraryDir                 *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata    *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
 	CheckIntervalSeconds       int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForRepair    int     `yaml:"max_connections_for_repair" mapstructure:"max_connections_for_repair" json:"max_connections_for_repair,omitempty"`
 	CheckAllSegments           bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
@@ -249,11 +252,9 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled        *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CompleteDir    string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
-	SymlinkDir     *string           `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
-	SymlinkEnabled *bool             `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
-	Categories     []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
@@ -317,6 +318,30 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.LibraryDir = nil
 	}
 
+	// Deep copy Health.CleanupOrphanedMetadata pointer
+	if c.Health.CleanupOrphanedMetadata != nil {
+		v := *c.Health.CleanupOrphanedMetadata
+		copyCfg.Health.CleanupOrphanedMetadata = &v
+	} else {
+		copyCfg.Health.CleanupOrphanedMetadata = nil
+	}
+
+	// Deep copy Import.SymlinkDir pointer
+	if c.Import.SymlinkDir != nil {
+		v := *c.Import.SymlinkDir
+		copyCfg.Import.SymlinkDir = &v
+	} else {
+		copyCfg.Import.SymlinkDir = nil
+	}
+
+	// Deep copy Import.SymlinkEnabled pointer
+	if c.Import.SymlinkEnabled != nil {
+		v := *c.Import.SymlinkEnabled
+		copyCfg.Import.SymlinkEnabled = &v
+	} else {
+		copyCfg.Import.SymlinkEnabled = nil
+	}
+
 	// Deep copy RClone.RCEnabled pointer
 	if c.RClone.RCEnabled != nil {
 		v := *c.RClone.RCEnabled
@@ -372,22 +397,6 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.SABnzbd.Enabled = &v
 	} else {
 		copyCfg.SABnzbd.Enabled = nil
-	}
-
-	// Deep copy SABnzbd.SymlinkDir pointer
-	if c.SABnzbd.SymlinkDir != nil {
-		v := *c.SABnzbd.SymlinkDir
-		copyCfg.SABnzbd.SymlinkDir = &v
-	} else {
-		copyCfg.SABnzbd.SymlinkDir = nil
-	}
-
-	// Deep copy SABnzbd.SymlinkEnabled pointer
-	if c.SABnzbd.SymlinkEnabled != nil {
-		v := *c.SABnzbd.SymlinkEnabled
-		copyCfg.SABnzbd.SymlinkEnabled = &v
-	} else {
-		copyCfg.SABnzbd.SymlinkEnabled = nil
 	}
 
 	// Deep copy SABnzbd Categories slice
@@ -499,6 +508,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("import import_cache_size_mb must be greater than 0")
 	}
 
+	// Validate symlink configuration if enabled
+	if c.Import.SymlinkEnabled != nil && *c.Import.SymlinkEnabled {
+		if c.Import.SymlinkDir == nil || *c.Import.SymlinkDir == "" {
+			return fmt.Errorf("import symlink_dir cannot be empty when symlinks are enabled")
+		}
+		if !filepath.IsAbs(*c.Import.SymlinkDir) {
+			return fmt.Errorf("import symlink_dir must be an absolute path")
+		}
+	}
+
 	// Validate log level (both old and new config)
 	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
@@ -569,6 +588,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Validate cleanup orphaned metadata - requires library_dir when enabled
+	if c.Health.CleanupOrphanedMetadata != nil && *c.Health.CleanupOrphanedMetadata {
+		if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
+			return fmt.Errorf("health library_dir is required when cleanup_orphaned_metadata is enabled")
+		}
+		if !filepath.IsAbs(*c.Health.LibraryDir) {
+			return fmt.Errorf("health library_dir must be an absolute path")
+		}
+	}
+
 	// Auto-enable RC when mount is enabled (mount requires RC to function)
 	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
 		if c.RClone.RCEnabled == nil || !*c.RClone.RCEnabled {
@@ -595,16 +624,6 @@ func (c *Config) Validate() error {
 		}
 		if !filepath.IsAbs(c.SABnzbd.CompleteDir) {
 			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
-		}
-
-		// Validate symlink configuration if enabled
-		if c.SABnzbd.SymlinkEnabled != nil && *c.SABnzbd.SymlinkEnabled {
-			if c.SABnzbd.SymlinkDir == nil || *c.SABnzbd.SymlinkDir == "" {
-				return fmt.Errorf("sabnzbd symlink_dir cannot be empty when symlinks are enabled")
-			}
-			if !filepath.IsAbs(*c.SABnzbd.SymlinkDir) {
-				return fmt.Errorf("sabnzbd symlink_dir must be an absolute path")
-			}
 		}
 
 		// Validate categories if provided
@@ -926,13 +945,14 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false // Health system disabled by default
+	healthEnabled := false              // Health system disabled by default
+	cleanupOrphanedMetadata := false    // Cleanup orphaned metadata disabled by default
 	vfsEnabled := false
-	mountEnabled := false // Disabled by default
+	mountEnabled := false               // Disabled by default
 	sabnzbdEnabled := false
-	symlinkEnabled := false // Disabled by default
+	symlinkEnabled := false             // Disabled by default
 	scrapperEnabled := false
-	loginRequired := true // Require login by default
+	loginRequired := true               // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -1034,8 +1054,10 @@ func DefaultConfig(configDir ...string) *Config {
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
-			MaxImportConnections: 10, // Default: 10 max workers for archive processing
-			ImportCacheSizeMB:    64, // Default: 64MB cache for archive analysis
+			MaxImportConnections: 10,   // Default: 10 max workers for archive processing
+			ImportCacheSizeMB:    64,   // Default: 64MB cache for archive analysis
+			SymlinkDir:           nil,  // No default symlink directory
+			SymlinkEnabled:       &symlinkEnabled, // Disabled by default
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1046,7 +1068,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:                    &healthEnabled, // Disabled by default
+			Enabled:                    &healthEnabled,              // Disabled by default
+			CleanupOrphanedMetadata:    &cleanupOrphanedMetadata,   // Disabled by default
 			CheckIntervalSeconds:       5,
 			MaxConnectionsForRepair:    5,
 			CheckAllSegments:           false,
@@ -1055,8 +1078,6 @@ func DefaultConfig(configDir ...string) *Config {
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,
 			CompleteDir:    "/complete",
-			SymlinkDir:     nil,
-			SymlinkEnabled: &symlinkEnabled,
 			Categories:     []SABnzbdCategory{},
 			FallbackHost:   "",
 			FallbackAPIKey: "",

@@ -1,4 +1,4 @@
-package health
+package utils
 
 import (
 	"context"
@@ -15,14 +15,12 @@ import (
 type SymlinkFinder struct {
 	cache   map[string]string // mount path -> library symlink path
 	cacheMu sync.RWMutex
-	logger  *slog.Logger
 }
 
 // NewSymlinkFinder creates a new symlink finder
-func NewSymlinkFinder(logger *slog.Logger) *SymlinkFinder {
+func NewSymlinkFinder() *SymlinkFinder {
 	return &SymlinkFinder{
-		cache:  make(map[string]string),
-		logger: logger,
+		cache: make(map[string]string),
 	}
 }
 
@@ -44,7 +42,7 @@ func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath s
 
 		// Verify the cached symlink still exists
 		if _, err := os.Lstat(cachedPath); err == nil {
-			sf.logger.Debug("Found symlink in cache", "mount_path", mountFilePath, "library_path", cachedPath)
+			slog.DebugContext(ctx, "Found symlink in cache", "mount_path", mountFilePath, "library_path", cachedPath)
 			return cachedPath, nil
 		}
 
@@ -52,7 +50,7 @@ func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath s
 		sf.cacheMu.Lock()
 		delete(sf.cache, mountFilePath)
 		sf.cacheMu.Unlock()
-		sf.logger.Debug("Cached symlink no longer exists, removed from cache", "mount_path", mountFilePath, "cached_path", cachedPath)
+		slog.DebugContext(ctx, "Cached symlink no longer exists, removed from cache", "mount_path", mountFilePath, "cached_path", cachedPath)
 		// Fall through to directory search
 	} else {
 		sf.cacheMu.RUnlock()
@@ -61,7 +59,7 @@ func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath s
 	// Get the mount directory from config to filter symlinks
 	mountDir := cfg.Metadata.RootPath
 
-	sf.logger.Info("Searching for library symlink",
+	slog.InfoContext(ctx, "Searching for library symlink",
 		"mount_path", mountFilePath,
 		"library_dir", libraryDir,
 		"mount_dir", mountDir)
@@ -89,7 +87,7 @@ func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath s
 		// Read the symlink target
 		target, err := os.Readlink(path)
 		if err != nil {
-			sf.logger.Warn("Failed to read symlink", "path", path, "error", err)
+			slog.WarnContext(ctx, "Failed to read symlink", "path", path, "error", err)
 			return nil
 		}
 
@@ -120,7 +118,7 @@ func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath s
 	})
 
 	if err != nil && err != filepath.SkipAll {
-		sf.logger.Error("Error during library symlink search", "error", err)
+		slog.ErrorContext(ctx, "Error during library symlink search", "error", err)
 		return "", err
 	}
 
@@ -132,7 +130,6 @@ func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath s
 		return foundSymlink, nil
 	}
 
-	sf.logger.Info("No matching symlink found in library directory", "mount_path", mountFilePath)
+	slog.InfoContext(ctx, "No matching symlink found in library directory", "mount_path", mountFilePath)
 	return "", nil
 }
-

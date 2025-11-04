@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -14,14 +15,12 @@ type MediaRepository struct {
 		Query(query string, args ...interface{}) (*sql.Rows, error)
 		QueryRow(query string, args ...interface{}) *sql.Row
 	}
-	logger *slog.Logger
 }
 
 // NewMediaRepository creates a new media repository
-func NewMediaRepository(db *sql.DB, logger *slog.Logger) *MediaRepository {
+func NewMediaRepository(db *sql.DB) *MediaRepository {
 	return &MediaRepository{
-		db:     db,
-		logger: logger,
+		db: db,
 	}
 }
 
@@ -44,7 +43,7 @@ type SyncResult struct {
 
 // SyncMediaFiles performs a complete sync operation for an instance
 // This replaces all files for the instance with the provided list
-func (r *MediaRepository) SyncMediaFiles(instanceName, instanceType string, files []MediaFileInput) (*SyncResult, error) {
+func (r *MediaRepository) SyncMediaFiles(ctx context.Context, instanceName, instanceType string, files []MediaFileInput) (*SyncResult, error) {
 	// We need access to the actual *sql.DB for transaction support
 	// Cast the interface to get the actual DB
 	sqlDB, ok := r.db.(*sql.DB)
@@ -61,7 +60,7 @@ func (r *MediaRepository) SyncMediaFiles(instanceName, instanceType string, file
 	result := &SyncResult{}
 	now := time.Now()
 
-	r.logger.Debug("Starting media files sync",
+	slog.DebugContext(ctx, "Starting media files sync",
 		"instance", instanceName,
 		"type", instanceType,
 		"files", len(files))
@@ -140,7 +139,7 @@ func (r *MediaRepository) SyncMediaFiles(instanceName, instanceType string, file
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	r.logger.Debug("Media files sync completed",
+	slog.DebugContext(ctx, "Media files sync completed",
 		"instance", instanceName,
 		"type", instanceType,
 		"added", result.Added,
@@ -256,7 +255,7 @@ func (r *MediaRepository) GetMediaFilesCountByInstance(instanceName, instanceTyp
 
 // CleanupInstanceData removes all media files for a specific instance
 // This can be called when an instance is removed from configuration
-func (r *MediaRepository) CleanupInstanceData(instanceName, instanceType string) error {
+func (r *MediaRepository) CleanupInstanceData(ctx context.Context, instanceName, instanceType string) error {
 	res, err := r.db.Exec(`
 		DELETE FROM media_files 
 		WHERE instance_name = ? AND instance_type = ?`,
@@ -270,7 +269,7 @@ func (r *MediaRepository) CleanupInstanceData(instanceName, instanceType string)
 		return fmt.Errorf("failed to get removed count: %w", err)
 	}
 
-	r.logger.Info("Cleaned up instance data",
+	slog.InfoContext(ctx, "Cleaned up instance data",
 		"instance", instanceName,
 		"type", instanceType,
 		"removed", removed)

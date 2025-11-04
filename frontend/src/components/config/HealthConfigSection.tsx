@@ -31,6 +31,9 @@ export function HealthConfigSection({
 		if (data.enabled && !data.library_dir?.trim()) {
 			return "Library Directory is required when Health System is enabled";
 		}
+		if (data.cleanup_orphaned_metadata && !data.library_dir?.trim()) {
+			return "Library Directory is required when metadata cleanup is enabled";
+		}
 		return "";
 	};
 
@@ -102,6 +105,38 @@ export function HealthConfigSection({
 						use the library path for ARR rescan instead of the mount path.
 						{formData.enabled && (
 							<strong className="text-error"> Required when Health System is enabled.</strong>
+						)}
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Cleanup Settings</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Cleanup orphaned metadata files</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.cleanup_orphaned_metadata ?? false}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("cleanup_orphaned_metadata", e.target.checked)}
+						/>
+					</label>
+					{formData.cleanup_orphaned_metadata && !formData.library_dir?.trim() && (
+						<div className="alert alert-warning mt-2">
+							<AlertTriangle className="h-4 w-4" />
+							<span className="text-sm">
+								Library Directory must be configured to enable metadata cleanup
+							</span>
+						</div>
+					)}
+					<p className="label text-gray-600 text-sm">
+						Automatically delete metadata files that don't have corresponding symlinks in the
+						library directory. This helps prevent storage waste from orphaned metadata files.
+						{formData.cleanup_orphaned_metadata && (
+							<strong className="text-warning">
+								{" "}
+								Requires Library Directory to be configured.
+							</strong>
 						)}
 					</p>
 				</fieldset>

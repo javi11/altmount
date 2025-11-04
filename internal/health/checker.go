@@ -20,7 +20,7 @@ import (
 type EventType string
 
 const (
-	EventTypeFileRecovered EventType = "file_recovered"
+	EventTypeFileHealthy   EventType = "file_healthy"
 	EventTypeFileCorrupted EventType = "file_corrupted"
 	EventTypeCheckFailed   EventType = "check_failed"
 	EventTypeFileRemoved   EventType = "file_removed"
@@ -159,7 +159,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	}
 
 	// All checked segments are available - record will be deleted
-	event.Type = EventTypeFileRecovered
+	event.Type = EventTypeFileHealthy
 	// Status not needed as the record will be deleted from database
 
 	return event
@@ -173,7 +173,7 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 
 	// Only notify on significant status changes (healthy <-> corrupted)
 	switch event.Type {
-	case EventTypeFileRecovered, EventTypeFileCorrupted:
+	case EventTypeFileHealthy, EventTypeFileCorrupted:
 		// Continue with notification
 	default:
 		return // No notification needed for other event types

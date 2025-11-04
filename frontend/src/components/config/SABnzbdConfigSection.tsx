@@ -55,15 +55,6 @@ export function SABnzbdConfigSection({
 				errors.push("Complete directory must be an absolute path (starting with /)");
 			}
 
-			// Validate symlink configuration if enabled
-			if (data.symlink_enabled) {
-				if (!data.symlink_dir?.trim()) {
-					errors.push("Symlink directory is required when symlinks are enabled");
-				} else if (!data.symlink_dir.startsWith("/")) {
-					errors.push("Symlink directory must be an absolute path (starting with /)");
-				}
-			}
-
 			// Validate category names are unique
 			const categoryNames = data.categories.map((cat) => cat.name);
 			const duplicates = categoryNames.filter(
@@ -214,68 +205,6 @@ export function SABnzbdConfigSection({
 							mounted folder.
 						</p>
 					</fieldset>
-
-					{/* Symlink Configuration */}
-					<div className="space-y-4">
-						<div>
-							<h4 className="font-medium">Symlink Configuration</h4>
-							<p className="text-base-content/70 text-sm">
-								Create symlinks to imported files organized by category. This allows applications to
-								access files via symlinks instead of the mount path.
-							</p>
-						</div>
-
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Enable Symlinks</legend>
-							<label className="label cursor-pointer">
-								<span className="label-text">
-									Create category-based symlinks for imported files
-								</span>
-								<input
-									type="checkbox"
-									className="toggle toggle-primary"
-									checked={formData.symlink_enabled}
-									disabled={isReadOnly}
-									onChange={(e) => updateFormData({ symlink_enabled: e.target.checked })}
-								/>
-							</label>
-							<p className="label">
-								When enabled, symlinks will be created in category-specific folders within the
-								symlink directory
-							</p>
-						</fieldset>
-
-						{formData.symlink_enabled && (
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Symlink Directory</legend>
-								<input
-									type="text"
-									className="input"
-									value={formData.symlink_dir || ""}
-									readOnly={isReadOnly}
-									placeholder="/path/to/symlinks"
-									onChange={(e) => updateFormData({ symlink_dir: e.target.value })}
-								/>
-								<p className="label">
-									Absolute path where symlinks will be created. Symlinks will be organized in
-									subdirectories by category (e.g., /symlinks/movies/, /symlinks/tv/)
-								</p>
-							</fieldset>
-						)}
-
-						{formData.symlink_enabled && formData.symlink_dir && (
-							<div className="alert alert-info">
-								<div>
-									<div className="font-bold">Symlinks Enabled</div>
-									<div className="text-sm">
-										Imported files will be available as symlinks in{" "}
-										<code>{formData.symlink_dir}/[category]/</code> and reported to SABnzbd clients
-										using these symlink paths.
-									</div>
-								</div>
-							</div>
-						)}
-					</div>
 
 					{/* Fallback SABnzbd Configuration */}
 					<div className="space-y-4">

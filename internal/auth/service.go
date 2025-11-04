@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -20,7 +21,6 @@ import (
 type Service struct {
 	authService *auth.Service
 	userRepo    *database.UserRepository
-	logger      *slog.Logger
 }
 
 // Config represents authentication service configuration
@@ -92,8 +92,6 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 		config = LoadConfigFromEnv()
 	}
 
-	logger := slog.Default()
-
 	// Create auth service options
 	opts := auth.Opts{
 		SecretReader: token.SecretFunc(func(string) (string, error) {
@@ -120,7 +118,6 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 	service := &Service{
 		authService: authService,
 		userRepo:    userRepo,
-		logger:      logger,
 	}
 
 	return service, nil
@@ -147,7 +144,7 @@ func (s *Service) TokenService() *token.Service {
 }
 
 // CreateOrUpdateUser creates or updates a user based on token claims
-func (s *Service) CreateOrUpdateUser(claims token.Claims) (*database.User, error) {
+func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (*database.User, error) {
 	// Extract user info from claims
 	userID := claims.User.ID
 	if userID == "" {
@@ -188,10 +185,10 @@ func (s *Service) CreateOrUpdateUser(claims token.Claims) (*database.User, error
 		// Check if this is the first user - make them admin
 		userCount, countErr := s.userRepo.GetUserCount()
 		if countErr != nil {
-			s.logger.Warn("Failed to get user count", "error", countErr)
+			slog.WarnContext(ctx, "Failed to get user count", "error", countErr)
 		} else if userCount == 0 {
 			user.IsAdmin = true
-			s.logger.Info("First user registered - granting admin privileges", "user_id", userID)
+			slog.InfoContext(ctx, "First user registered - granting admin privileges", "user_id", userID)
 		}
 
 		// Create new user
@@ -199,7 +196,7 @@ func (s *Service) CreateOrUpdateUser(claims token.Claims) (*database.User, error
 		if err != nil {
 			return nil, err
 		}
-		s.logger.Info("Created new user", "user_id", userID, "is_admin", user.IsAdmin)
+		slog.InfoContext(ctx, "Created new user", "user_id", userID, "is_admin", user.IsAdmin)
 	} else {
 		// Update existing user
 		user.ID = existingUser.ID
@@ -208,13 +205,13 @@ func (s *Service) CreateOrUpdateUser(claims token.Claims) (*database.User, error
 		if err != nil {
 			return nil, err
 		}
-		s.logger.Info("Updated existing user", "user_id", userID)
+		slog.InfoContext(ctx, "Updated existing user", "user_id", userID)
 	}
 
 	// Update last login
 	err = s.userRepo.UpdateLastLogin(userID)
 	if err != nil {
-		s.logger.Warn("Failed to update last login", "user_id", userID, "error", err)
+		slog.WarnContext(ctx, "Failed to update last login", "user_id", userID, "error", err)
 	}
 
 	return user, nil
@@ -248,7 +245,7 @@ func (s *Service) IsUserAdmin(userID string) (bool, error) {
 }
 
 // RegisterUser creates a new user with username and password
-func (s *Service) RegisterUser(username, email, password string) (*database.User, error) {
+func (s *Service) RegisterUser(ctx context.Context, username, email, password string) (*database.User, error) {
 	// Check if this is the first user
 	userCount, err := s.userRepo.GetUserCount()
 	if err != nil {
@@ -316,12 +313,12 @@ func (s *Service) RegisterUser(username, email, password string) (*database.User
 	// Update the user object with the generated API key
 	user.APIKey = &apiKey
 
-	s.logger.Info("First user registered with API key", "username", username, "is_admin", true)
+	slog.InfoContext(ctx, "First user registered with API key", "username", username, "is_admin", true)
 	return user, nil
 }
 
 // AuthenticateUser verifies username/password and returns user
-func (s *Service) AuthenticateUser(username, password string) (*database.User, error) {
+func (s *Service) AuthenticateUser(ctx context.Context, username, password string) (*database.User, error) {
 	// Try to find user by username first
 	user, err := s.userRepo.GetUserByUsername(username)
 	if err != nil {
@@ -363,7 +360,7 @@ func (s *Service) HashPassword(password string) (string, error) {
 }
 
 // CreateClaimsFromUser creates JWT claims from a database user
-func CreateClaimsFromUser(user *database.User) token.Claims {
+func CreateClaimsFromUser(ctx context.Context, user *database.User) token.Claims {
 	// Use username as display name if no name is set
 	displayName := user.UserID
 	if user.Name != nil && *user.Name != "" {
@@ -405,13 +402,11 @@ type directCredChecker struct {
 
 // Check verifies credentials for direct authentication
 func (d *directCredChecker) Check(user, password string) (bool, error) {
-	dbUser, err := d.service.AuthenticateUser(user, password)
+	_, err := d.service.AuthenticateUser(context.Background(), user, password)
 	if err != nil {
-		d.service.logger.Debug("Authentication failed", "user", user, "error", err)
 		return false, err
 	}
 
-	d.service.logger.Debug("Authentication successful", "user", user, "user_id", dbUser.UserID)
 	return true, nil
 }
 

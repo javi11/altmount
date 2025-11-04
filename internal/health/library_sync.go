@@ -13,6 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
@@ -44,7 +45,6 @@ type LibrarySyncWorker struct {
 	metadataService *metadata.MetadataService
 	healthRepo      *database.HealthRepository
 	configGetter    config.ConfigGetter
-	logger          *slog.Logger
 	cancelFunc      context.CancelFunc
 	mu              sync.Mutex
 	running         bool
@@ -52,7 +52,7 @@ type LibrarySyncWorker struct {
 	progress        *SyncProgress
 	lastSyncResult  *SyncResult
 	manualTrigger   chan struct{}
-	symlinkFinder   *SymlinkFinder
+	symlinkFinder   *utils.SymlinkFinder
 	rcloneClient    rclonecli.RcloneRcClient
 }
 
@@ -61,9 +61,8 @@ func NewLibrarySyncWorker(
 	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
 	configGetter config.ConfigGetter,
-	symlinkFinder *SymlinkFinder,
 	rcloneClient rclonecli.RcloneRcClient,
-	logger *slog.Logger,
+	symlinkFinder *utils.SymlinkFinder,
 ) *LibrarySyncWorker {
 	return &LibrarySyncWorker{
 		metadataService: metadataService,
@@ -71,7 +70,6 @@ func NewLibrarySyncWorker(
 		configGetter:    configGetter,
 		symlinkFinder:   symlinkFinder,
 		rcloneClient:    rcloneClient,
-		logger:          logger,
 		manualTrigger:   make(chan struct{}, 1), // Buffered channel for non-blocking sends
 	}
 }
@@ -82,7 +80,7 @@ func (lsw *LibrarySyncWorker) StartLibrarySync(ctx context.Context) {
 	defer lsw.mu.Unlock()
 
 	if lsw.running {
-		lsw.logger.Warn("Library sync worker already running")
+		slog.WarnContext(ctx, "Library sync worker already running")
 		return
 	}
 
@@ -95,12 +93,12 @@ func (lsw *LibrarySyncWorker) StartLibrarySync(ctx context.Context) {
 }
 
 // Stop stops the library sync worker
-func (lsw *LibrarySyncWorker) Stop() {
+func (lsw *LibrarySyncWorker) Stop(ctx context.Context) {
 	lsw.mu.Lock()
 	defer lsw.mu.Unlock()
 
 	if !lsw.running {
-		lsw.logger.Warn("Library sync worker not running")
+		slog.WarnContext(ctx, "Library sync worker not running")
 		return
 	}
 
@@ -109,7 +107,7 @@ func (lsw *LibrarySyncWorker) Stop() {
 		lsw.cancelFunc = nil
 	}
 	lsw.running = false
-	lsw.logger.Info("Library sync worker stopped")
+	slog.InfoContext(ctx, "Library sync worker stopped")
 }
 
 // IsRunning returns whether the library sync worker is currently running
@@ -144,7 +142,7 @@ func (lsw *LibrarySyncWorker) GetStatus() LibrarySyncStatus {
 }
 
 // TriggerManualSync triggers a manual library sync
-func (lsw *LibrarySyncWorker) TriggerManualSync() error {
+func (lsw *LibrarySyncWorker) TriggerManualSync(ctx context.Context) error {
 	lsw.mu.Lock()
 	running := lsw.running
 	lsw.mu.Unlock()
@@ -156,7 +154,7 @@ func (lsw *LibrarySyncWorker) TriggerManualSync() error {
 	// Non-blocking send to trigger channel
 	select {
 	case lsw.manualTrigger <- struct{}{}:
-		lsw.logger.Info("Manual library sync triggered")
+		slog.InfoContext(ctx, "Manual library sync triggered")
 		return nil
 	default:
 		// Channel already has a pending trigger
@@ -176,12 +174,12 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 
 	// Only run if health system is enabled
 	if cfg.Health.Enabled == nil || !*cfg.Health.Enabled {
-		lsw.logger.Info("Library sync disabled (health system is disabled)")
+		slog.InfoContext(ctx, "Library sync disabled (health system is disabled)")
 		return
 	}
 
 	if cfg.Health.LibrarySyncIntervalMinutes <= 0 {
-		lsw.logger.Info("Library sync disabled (interval is 0)")
+		slog.InfoContext(ctx, "Library sync disabled (interval is 0)")
 		return
 	}
 
@@ -189,18 +187,18 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	lsw.logger.Info("Library sync worker started",
+	slog.InfoContext(ctx, "Library sync worker started",
 		"interval_minutes", cfg.Health.LibrarySyncIntervalMinutes)
 
 	for {
 		select {
 		case <-ctx.Done():
-			lsw.logger.Info("Library sync worker stopped by context")
+			slog.InfoContext(ctx, "Library sync worker stopped by context")
 			return
 		case <-ticker.C:
 			lsw.syncLibrary(ctx)
 		case <-lsw.manualTrigger:
-			lsw.logger.Info("Manual library sync trigger received")
+			slog.InfoContext(ctx, "Manual library sync trigger received")
 			lsw.syncLibrary(ctx)
 		}
 	}
@@ -210,7 +208,7 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	startTime := time.Now()
 	cfg := lsw.configGetter()
-	lsw.logger.Info("Starting library sync")
+	slog.InfoContext(ctx, "Starting library sync")
 
 	// Initialize progress tracking
 	lsw.progressMu.Lock()
@@ -231,7 +229,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	// Get all metadata files from filesystem
 	metadataFiles, err := lsw.getAllMetadataFiles(ctx)
 	if err != nil {
-		lsw.logger.Error("Failed to get metadata files", "error", err)
+		slog.ErrorContext(ctx, "Failed to get metadata files", "error", err)
 		return
 	}
 
@@ -243,7 +241,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	// Get all health check paths from database
 	dbPaths, err := lsw.healthRepo.GetAllHealthCheckPaths()
 	if err != nil {
-		lsw.logger.Error("Failed to get automatic health check paths from database", "error", err)
+		slog.ErrorContext(ctx, "Failed to get automatic health check paths from database", "error", err)
 		return
 	}
 
@@ -267,7 +265,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 			// Read metadata to get release date
 			fileMeta, err := lsw.metadataService.ReadFileMetadata(virtualPath)
 			if err != nil {
-				lsw.logger.Error("Failed to read metadata",
+				slog.ErrorContext(ctx, "Failed to read metadata",
 					"virtual_path", virtualPath,
 					"error", err)
 				continue
@@ -314,31 +312,31 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 
 	if len(filesToAdd) > 0 {
 		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(filesToAdd); err != nil {
-			lsw.logger.Error("Failed to batch add automatic health checks",
+			slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
 				"count", len(filesToAdd),
 				"error", err)
 		} else {
 			addedCount = len(filesToAdd)
-			lsw.logger.Info("Added new files to automatic health checks",
+			slog.InfoContext(ctx, "Added new files to automatic health checks",
 				"count", addedCount)
 		}
 	}
 
 	if len(filesToDelete) > 0 {
 		if err := lsw.healthRepo.DeleteHealthRecordsBulk(filesToDelete); err != nil {
-			lsw.logger.Error("Failed to delete orphaned health records",
+			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
 				"count", len(filesToDelete),
 				"error", err)
 		} else {
 			deletedCount = len(filesToDelete)
-			lsw.logger.Info("Deleted orphaned health records",
+			slog.InfoContext(ctx, "Deleted orphaned health records",
 				"count", deletedCount)
 		}
 	}
 
-	// Additional symlink validation if symlinks are enabled
+	// Additional cleanup of orphaned metadata files if enabled
 	metadataDeletedCount := 0
-	if cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled {
+	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
 		metadataDeletedCount = lsw.validateSymlinks(ctx, metadataFiles)
 	}
 
@@ -355,7 +353,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	}
 	lsw.progressMu.Unlock()
 
-	lsw.logger.Info("Library sync completed",
+	slog.InfoContext(ctx, "Library sync completed",
 		"total_metadata_files", len(metadataFiles),
 		"total_db_records", len(dbPaths),
 		"added", addedCount,
@@ -412,12 +410,12 @@ func (lsw *LibrarySyncWorker) metaPathToVirtualPath(metaPath string) string {
 
 // validateSymlinks validates metadata files against library symlinks and deletes orphaned metadata
 func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFiles []string) int {
-	lsw.logger.InfoContext(ctx, "Starting symlink validation for library directory")
+	slog.InfoContext(ctx, "Starting symlink validation for library directory")
 
 	// Get all library symlinks
 	symlinkPaths, err := lsw.getAllLibrarySymlinks(ctx)
 	if err != nil {
-		lsw.logger.ErrorContext(ctx, "Failed to get library symlinks", "error", err)
+		slog.ErrorContext(ctx, "Failed to get library symlinks", "error", err)
 		return 0
 	}
 
@@ -432,31 +430,23 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 	// Check each metadata file
 	for _, metaPath := range metadataFiles {
 		virtualPath := lsw.metaPathToVirtualPath(metaPath)
-
-		// If metadata file doesn't have a library symlink, delete it
-		if _, hasSymlink := symlinkSet[virtualPath]; !hasSymlink {
-			lsw.logger.InfoContext(ctx, "Deleting metadata without library symlink",
-				"virtual_path", virtualPath)
-
-			// Delete metadata file
-			if err := lsw.metadataService.DeleteFileMetadata(virtualPath); err != nil {
-				lsw.logger.ErrorContext(ctx, "Failed to delete metadata file",
-					"virtual_path", virtualPath,
-					"error", err)
-				continue
-			}
+		target := filepath.Clean(filepath.Join(lsw.configGetter().MountPath, virtualPath))
+		if _, hasSymlink := symlinkSet[target]; !hasSymlink {
+			slog.InfoContext(ctx, "Deleting metadata without library symlink",
+				"virtual_path", virtualPath,
+				"mount_path", target)
 
 			// Delete from database
 			if err := lsw.healthRepo.DeleteHealthRecordsBulk([]string{virtualPath}); err != nil {
-				lsw.logger.ErrorContext(ctx, "Failed to delete health record",
+				slog.ErrorContext(ctx, "Failed to delete health record",
 					"virtual_path", virtualPath,
 					"error", err)
 			}
 
 			// Refresh mount cache for the directory
 			dirPath := filepath.Dir(virtualPath)
-			if err := lsw.rcloneClient.RefreshDir(ctx, "", []string{dirPath}); err != nil {
-				lsw.logger.WarnContext(ctx, "Failed to refresh mount cache",
+			if err := lsw.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{dirPath}); err != nil {
+				slog.WarnContext(ctx, "Failed to refresh mount cache",
 					"dir_path", dirPath,
 					"error", err)
 			}
@@ -465,7 +455,7 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 		}
 	}
 
-	lsw.logger.InfoContext(ctx, "Symlink validation completed",
+	slog.InfoContext(ctx, "Symlink validation completed",
 		"metadata_deleted", deletedCount,
 		"symlinks_found", len(symlinkPaths))
 
@@ -478,11 +468,11 @@ func (lsw *LibrarySyncWorker) getAllLibrarySymlinks(ctx context.Context) ([]stri
 
 	// Get library directory
 	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
-		return []string{}, nil
+		return []string{}, fmt.Errorf("library directory is not configured")
 	}
 
 	libraryDir := *cfg.Health.LibraryDir
-	mountDir := cfg.Metadata.RootPath
+	mountDir := cfg.MountPath
 
 	var mountPaths []string
 
@@ -507,7 +497,7 @@ func (lsw *LibrarySyncWorker) getAllLibrarySymlinks(ctx context.Context) ([]stri
 		// Read the symlink target
 		target, err := os.Readlink(path)
 		if err != nil {
-			lsw.logger.WarnContext(ctx, "Failed to read symlink", "path", path, "error", err)
+			slog.WarnContext(ctx, "Failed to read symlink", "path", path, "error", err)
 			return nil
 		}
 
@@ -522,16 +512,14 @@ func (lsw *LibrarySyncWorker) getAllLibrarySymlinks(ctx context.Context) ([]stri
 
 		// Check if this symlink points inside the mount directory
 		if strings.HasPrefix(cleanTarget, cleanMountDir) {
-			// Convert mount path to virtual path
-			virtualPath := lsw.metaPathToVirtualPath(cleanTarget)
-			mountPaths = append(mountPaths, virtualPath)
+			mountPaths = append(mountPaths, cleanTarget)
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		lsw.logger.ErrorContext(ctx, "Error during library symlink scan", "error", err)
+		slog.ErrorContext(ctx, "Error during library symlink scan", "error", err)
 		return nil, err
 	}
 

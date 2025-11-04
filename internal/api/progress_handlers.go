@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -36,7 +37,7 @@ func (s *Server) handleProgressStream(c *fiber.Ctx) error {
 			"data": initialProgress,
 		})
 		if err != nil {
-			s.logger.Error("failed to marshal initial progress", "error", err)
+			slog.ErrorContext(c.Context(), "failed to marshal initial progress", "error", err)
 			return
 		}
 
@@ -65,7 +66,7 @@ func (s *Server) handleProgressStream(c *fiber.Ctx) error {
 					"data": update,
 				})
 				if err != nil {
-					s.logger.Error("failed to marshal progress update", "error", err, "queue_id", update.QueueID)
+					slog.ErrorContext(c.Context(), "failed to marshal progress update", "error", err, "queue_id", update.QueueID)
 					continue
 				}
 

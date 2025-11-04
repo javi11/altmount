@@ -110,6 +110,11 @@ export function HealthTableRow({
 				</span>
 			</td>
 			<td>
+				<span className="text-base-content/70 text-sm">
+					{item.scheduled_check_at ? formatRelativeTime(item.scheduled_check_at) : "Not scheduled"}
+				</span>
+			</td>
+			<td>
 				<span className="text-base-content/70 text-sm">{formatRelativeTime(item.created_at)}</span>
 			</td>
 			<td>

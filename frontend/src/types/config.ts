@@ -56,6 +56,7 @@ export interface StreamingConfig {
 export interface HealthConfig {
 	enabled: boolean;
 	library_dir?: string;
+	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_repair?: number;
 	check_all_segments?: boolean;
@@ -125,6 +126,8 @@ export interface ImportConfig {
 	allowed_file_extensions: string[];
 	max_import_connections: number;
 	import_cache_size_mb: number;
+	symlink_dir?: string;
+	symlink_enabled: boolean;
 }
 
 // Log configuration
@@ -159,8 +162,6 @@ export interface SABnzbdConfig {
 	fallback_host?: string;
 	fallback_api_key?: string; // Obfuscated when returned from API
 	fallback_api_key_set?: boolean; // For display purposes only
-	symlink_dir?: string;
-	symlink_enabled: boolean;
 }
 
 // SABnzbd category configuration
@@ -288,6 +289,8 @@ export interface ImportUpdateRequest {
 	max_validation_goroutines?: number;
 	full_segment_validation?: boolean;
 	allowed_file_extensions?: string[];
+	symlink_dir?: string;
+	symlink_enabled?: boolean;
 }
 
 // Log update request
@@ -321,8 +324,6 @@ export interface SABnzbdUpdateRequest {
 	categories?: SABnzbdCategory[];
 	fallback_host?: string;
 	fallback_api_key?: string;
-	symlink_dir?: string;
-	symlink_enabled?: boolean;
 }
 
 // Configuration validation request
@@ -372,6 +373,8 @@ export interface ImportFormData {
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	max_validation_goroutines: number;
 	full_segment_validation: boolean;
+	symlink_dir: string;
+	symlink_enabled: boolean;
 }
 
 export interface MetadataFormData {
@@ -516,8 +519,6 @@ export interface SABnzbdFormData {
 	categories: SABnzbdCategory[];
 	fallback_host: string;
 	fallback_api_key: string;
-	symlink_dir: string;
-	symlink_enabled: boolean;
 }
 
 // Arrs configuration types

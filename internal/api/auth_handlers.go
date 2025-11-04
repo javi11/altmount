@@ -61,7 +61,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	}
 
 	// Authenticate user
-	user, err := s.authService.AuthenticateUser(req.Username, req.Password)
+	user, err := s.authService.AuthenticateUser(c.Context(), req.Username, req.Password)
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
@@ -71,7 +71,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 
 	// Create JWT token
 	tokenService := s.authService.TokenService()
-	claims := auth.CreateClaimsFromUser(user)
+	claims := auth.CreateClaimsFromUser(c.Context(), user)
 
 	// Generate JWT token string
 	tokenString, err := tokenService.Token(claims)
@@ -145,7 +145,7 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 	}
 
 	// Create user
-	user, err := s.authService.RegisterUser(req.Username, req.Email, req.Password)
+	user, err := s.authService.RegisterUser(c.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
 		if err.Error() == "user registration is currently disabled" {
 			return c.Status(403).JSON(fiber.Map{

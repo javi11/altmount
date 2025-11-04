@@ -55,7 +55,7 @@ export function HealthTable({
 		<div className="card bg-base-100 shadow-lg">
 			<div className="card-body p-0">
 				{isLoading ? (
-					<LoadingTable columns={8} />
+					<LoadingTable columns={9} />
 				) : data && data.length > 0 ? (
 					<div>
 						<table className="table-zebra table">

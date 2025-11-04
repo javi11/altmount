@@ -912,11 +912,11 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	cfg := s.configGetter()
 
 	// Check if symlinks are enabled
-	if cfg.SABnzbd.SymlinkEnabled == nil || !*cfg.SABnzbd.SymlinkEnabled {
+	if cfg.Import.SymlinkEnabled == nil || !*cfg.Import.SymlinkEnabled {
 		return nil // Skip if not enabled
 	}
 
-	if cfg.SABnzbd.SymlinkDir == nil || *cfg.SABnzbd.SymlinkDir == "" {
+	if cfg.Import.SymlinkDir == nil || *cfg.Import.SymlinkDir == "" {
 		return fmt.Errorf("symlink directory not configured")
 	}
 
@@ -1019,14 +1019,14 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
 	cfg := s.configGetter()
 
-	baseDir := filepath.Join(*cfg.SABnzbd.SymlinkDir, filepath.Dir(resultingPath))
+	baseDir := filepath.Join(*cfg.Import.SymlinkDir, filepath.Dir(resultingPath))
 
 	// Ensure category directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
 
-	symlinkPath := filepath.Join(*cfg.SABnzbd.SymlinkDir, resultingPath)
+	symlinkPath := filepath.Join(*cfg.Import.SymlinkDir, resultingPath)
 
 	// Check if symlink already exists
 	if _, err := os.Lstat(symlinkPath); err == nil {

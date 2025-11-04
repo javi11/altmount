@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"log/slog"
 	"runtime"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
@@ -50,7 +50,6 @@ type Server struct {
 	arrsService         *arrs.Service
 	rcloneClient        rclonecli.RcloneRcClient
 	mountService        *rclone.MountService
-	logger              *slog.Logger
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
 }
@@ -69,7 +68,9 @@ func NewServer(
 	importService *importer.Service,
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
-	progressBroadcaster *progress.ProgressBroadcaster) *Server {
+	progressBroadcaster *progress.ProgressBroadcaster,
+	symlinkFinder *utils.SymlinkFinder,
+) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -87,7 +88,6 @@ func NewServer(
 		poolManager:         poolManager,
 		arrsService:         arrsService,
 		mountService:        mountService,
-		logger:              slog.Default(),
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
 	}
@@ -297,7 +297,7 @@ func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 		})
 	}
 
-	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.logger)
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
 	return handlers.handleGetLibrarySyncStatus(c)
 }
 
@@ -308,7 +308,7 @@ func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
 		})
 	}
 
-	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.logger)
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
 	return handlers.handleStartLibrarySync(c)
 }
 
@@ -319,6 +319,6 @@ func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 		})
 	}
 
-	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.logger)
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
 	return handlers.handleCancelLibrarySync(c)
 }

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/utils"
 	"golift.io/starr"
 	"golift.io/starr/radarr"
 	"golift.io/starr/sonarr"
@@ -39,16 +40,17 @@ type Service struct {
 	mu            sync.RWMutex
 	radarrClients map[string]*radarr.Radarr // key: instance name
 	sonarrClients map[string]*sonarr.Sonarr // key: instance name
+	symlinkFinder *utils.SymlinkFinder
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
-func NewService(configGetter config.ConfigGetter, configManager ConfigManager, logger *slog.Logger) *Service {
+func NewService(configGetter config.ConfigGetter, configManager ConfigManager, symlinkFinder *utils.SymlinkFinder) *Service {
 	return &Service{
 		configGetter:  configGetter,
 		configManager: configManager,
-		logger:        logger,
 		radarrClients: make(map[string]*radarr.Radarr),
 		sonarrClients: make(map[string]*sonarr.Sonarr),
+		symlinkFinder: symlinkFinder,
 	}
 }
 
@@ -129,7 +131,7 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 }
 
 // findInstanceForFilePath finds which ARR instance manages the given file path
-func (s *Service) findInstanceForFilePath(filePath string) (instanceType string, instanceName string, err error) {
+func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) (instanceType string, instanceName string, err error) {
 	slog.Debug("Finding instance for file path", "file_path", filePath)
 
 	cfg := s.configGetter()
@@ -162,7 +164,7 @@ func (s *Service) findInstanceForFilePath(filePath string) (instanceType string,
 			if err != nil {
 				continue
 			}
-			if s.radarrManagesFile(client, candidatePath) {
+			if s.radarrManagesFile(ctx, client, candidatePath) {
 				return "radarr", instance.Name, nil
 			}
 
@@ -171,7 +173,7 @@ func (s *Service) findInstanceForFilePath(filePath string) (instanceType string,
 			if err != nil {
 				continue
 			}
-			if s.sonarrManagesFile(client, candidatePath) {
+			if s.sonarrManagesFile(ctx, client, candidatePath) {
 				return "sonarr", instance.Name, nil
 			}
 		}
@@ -182,10 +184,31 @@ func (s *Service) findInstanceForFilePath(filePath string) (instanceType string,
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
 func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error {
+	cfg := s.configGetter()
+
+	pathForRescan := filePath
+
+	if cfg.Import.SymlinkEnabled != nil && *cfg.Import.SymlinkEnabled {
+		librarySymlink, err := s.symlinkFinder.FindLibrarySymlink(ctx, filePath, cfg)
+		if err != nil {
+			slog.WarnContext(ctx, "Error searching for library symlink, using mount path",
+				"mount_path", filePath,
+				"error", err)
+		} else if librarySymlink != "" {
+			pathForRescan = librarySymlink
+			slog.DebugContext(ctx, "Using library symlink path for ARR rescan",
+				"mount_path", filePath,
+				"library_path", librarySymlink)
+		} else {
+			slog.DebugContext(ctx, "No library symlink found, using mount path for ARR rescan",
+				"mount_path", filePath)
+		}
+	}
+
 	// Find which ARR instance manages this file path
-	instanceType, instanceName, err := s.findInstanceForFilePath(filePath)
+	instanceType, instanceName, err := s.findInstanceForFilePath(ctx, pathForRescan)
 	if err != nil {
-		return fmt.Errorf("failed to find ARR instance for file path %s: %w", filePath, err)
+		return fmt.Errorf("failed to find ARR instance for file path %s: %w", pathForRescan, err)
 	}
 
 	// Find the instance configuration
@@ -206,14 +229,14 @@ func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error 
 		if err != nil {
 			return fmt.Errorf("failed to create Radarr client: %w", err)
 		}
-		return s.triggerRadarrRescanByPath(ctx, client, filePath, instanceName)
+		return s.triggerRadarrRescanByPath(ctx, client, pathForRescan, instanceName)
 
 	case "sonarr":
 		client, err := s.getOrCreateSonarrClient(instanceName, instanceConfig.URL, instanceConfig.APIKey)
 		if err != nil {
 			return fmt.Errorf("failed to create Sonarr client: %w", err)
 		}
-		return s.triggerSonarrRescanByPath(ctx, client, filePath, instanceName)
+		return s.triggerSonarrRescanByPath(ctx, client, pathForRescan, instanceName)
 
 	default:
 		return fmt.Errorf("unsupported instance type: %s", instanceType)
@@ -221,27 +244,27 @@ func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error 
 }
 
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
-func (s *Service) radarrManagesFile(client *radarr.Radarr, filePath string) bool {
-	s.logger.Debug("Checking Radarr root folders for file ownership",
+func (s *Service) radarrManagesFile(ctx context.Context, client *radarr.Radarr, filePath string) bool {
+	slog.DebugContext(ctx, "Checking Radarr root folders for file ownership",
 		"file_path", filePath)
 
 	// Get root folders from Radarr (much faster than GetMovie)
 	rootFolders, err := client.GetRootFolders()
 	if err != nil {
-		s.logger.Debug("Failed to get root folders from Radarr for file check", "error", err)
+		slog.DebugContext(ctx, "Failed to get root folders from Radarr for file check", "error", err)
 		return false
 	}
 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
-		s.logger.Debug("Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
+		slog.DebugContext(ctx, "Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
 		if strings.HasPrefix(filePath, folder.Path) {
-			s.logger.Debug("File matches Radarr root folder", "folder_path", folder.Path)
+			slog.DebugContext(ctx, "File matches Radarr root folder", "folder_path", folder.Path)
 			return true
 		}
 	}
 
-	s.logger.Debug("File does not match any Radarr root folders")
+	slog.DebugContext(ctx, "File does not match any Radarr root folders")
 	return false
 }
 
@@ -260,7 +283,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	// Construct full path using library directory
 	fullPath := filepath.Join(libraryDir, strings.TrimPrefix(filePath, "/"))
 
-	s.logger.DebugContext(ctx, "Checking Radarr for file path",
+	slog.DebugContext(ctx, "Checking Radarr for file path",
 		"instance", instanceName,
 		"file_path", filePath,
 		"library_dir", libraryDir,
@@ -284,7 +307,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		return fmt.Errorf("no movie found with file path: %s. Check if the movie has any files", fullPath)
 	}
 
-	s.logger.DebugContext(ctx, "Found matching movie for file",
+	slog.DebugContext(ctx, "Found matching movie for file",
 		"instance", instanceName,
 		"movie_id", targetMovie.ID,
 		"movie_title", targetMovie.Title,
@@ -294,7 +317,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	// Delete the existing file
 	err = client.DeleteMovieFilesContext(ctx, targetMovie.MovieFile.ID)
 	if err != nil {
-		s.logger.Warn("Failed to delete movie file, continuing with rescan",
+		slog.WarnContext(ctx, "Failed to delete movie file, continuing with rescan",
 			"instance", instanceName,
 			"movie_id", targetMovie.ID,
 			"file_id", targetMovie.MovieFile.ID,
@@ -310,7 +333,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		return fmt.Errorf("failed to trigger Radarr rescan for movie ID %d: %w", targetMovie.ID, err)
 	}
 
-	s.logger.DebugContext(ctx, "Successfully triggered Radarr rescan",
+	slog.DebugContext(ctx, "Successfully triggered Radarr rescan",
 		"instance", instanceName,
 		"movie_id", targetMovie.ID,
 		"command_id", response.ID)
@@ -319,27 +342,27 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 }
 
 // sonarrManagesFile checks if Sonarr manages the given file path using root folders (checkrr approach)
-func (s *Service) sonarrManagesFile(client *sonarr.Sonarr, filePath string) bool {
-	s.logger.Debug("Checking Sonarr root folders for file ownership",
+func (s *Service) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, filePath string) bool {
+	slog.DebugContext(ctx, "Checking Sonarr root folders for file ownership",
 		"file_path", filePath)
 
 	// Get root folders from Sonarr (much faster than GetAllSeries)
 	rootFolders, err := client.GetRootFolders()
 	if err != nil {
-		s.logger.Debug("Failed to get root folders from Sonarr for file check", "error", err)
+		slog.DebugContext(ctx, "Failed to get root folders from Sonarr for file check", "error", err)
 		return false
 	}
 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
-		s.logger.Debug("Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
+		slog.DebugContext(ctx, "Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
 		if strings.HasPrefix(filePath, folder.Path) {
-			s.logger.Debug("File matches Sonarr root folder", "folder_path", folder.Path)
+			slog.DebugContext(ctx, "File matches Sonarr root folder", "folder_path", folder.Path)
 			return true
 		}
 	}
 
-	s.logger.Debug("File does not match any Sonarr root folders")
+	slog.DebugContext(ctx, "File does not match any Sonarr root folders")
 	return false
 }
 
@@ -358,7 +381,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	// Construct full path using library directory
 	fullPath := filepath.Join(libraryDir, strings.TrimPrefix(filePath, "/"))
 
-	s.logger.DebugContext(ctx, "Triggering Sonarr rescan/re-download by path",
+	slog.DebugContext(ctx, "Triggering Sonarr rescan/re-download by path",
 		"instance", instanceName,
 		"file_path", filePath,
 		"library_dir", libraryDir,
@@ -383,7 +406,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("no series found containing file path: %s", fullPath)
 	}
 
-	s.logger.Debug("Found matching series for file",
+	slog.DebugContext(ctx, "Found matching series for file",
 		"series_title", targetSeries.Title,
 		"series_path", targetSeries.Path,
 		"file_path", fullPath)
@@ -427,14 +450,14 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("no episodes found with file path: %s", fullPath)
 	}
 
-	s.logger.Debug("Found matching episodes",
+	slog.DebugContext(ctx, "Found matching episodes",
 		"episode_count", len(targetEpisodes),
 		"episode_file_id", targetEpisodeFile.ID)
 
 	// Delete the existing episode file
 	err = client.DeleteEpisodeFileContext(ctx, targetEpisodeFile.ID)
 	if err != nil {
-		s.logger.Warn("Failed to delete episode file",
+		slog.WarnContext(ctx, "Failed to delete episode file",
 			"instance", instanceName,
 			"episode_file_id", targetEpisodeFile.ID,
 			"error", err)
@@ -456,7 +479,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("failed to trigger episode search: %w", err)
 	}
 
-	s.logger.DebugContext(ctx, "Successfully triggered episode search for re-download",
+	slog.DebugContext(ctx, "Successfully triggered episode search for re-download",
 		"instance", instanceName,
 		"series_title", targetSeries.Title,
 		"episode_ids", episodeIDs,
@@ -517,21 +540,41 @@ func (s *Service) instanceExistsByURL(checkURL string) bool {
 
 // detectARRType attempts to detect if a URL points to Radarr or Sonarr
 // Returns "radarr", "sonarr", or an error if neither can be determined
-func (s *Service) detectARRType(arrURL, apiKey string) (string, error) {
-	s.logger.Debug("Detecting ARR type", "url", arrURL)
+func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (string, error) {
+	slog.DebugContext(ctx, "Detecting ARR type", "url", arrURL)
 
 	// Try Radarr first
 	radarrClient := radarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
-	if _, err := radarrClient.GetSystemStatus(); err == nil {
-		s.logger.Debug("Detected Radarr instance", "url", arrURL)
-		return "radarr", nil
+	radarrStatus, err := radarrClient.GetSystemStatus()
+	if err == nil {
+		// Check AppName from the result
+		switch radarrStatus.AppName {
+		case "Radarr":
+			slog.DebugContext(ctx, "Detected Radarr instance", "url", arrURL)
+			return "radarr", nil
+		case "Sonarr":
+			slog.DebugContext(ctx, "Detected Sonarr instance", "url", arrURL)
+			return "sonarr", nil
+		default:
+			slog.DebugContext(ctx, "Unknown AppName from Radarr client", "app_name", radarrStatus.AppName, "url", arrURL)
+		}
 	}
 
 	// Try Sonarr
 	sonarrClient := sonarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
-	if _, err := sonarrClient.GetSystemStatus(); err == nil {
-		s.logger.Debug("Detected Sonarr instance", "url", arrURL)
-		return "sonarr", nil
+	sonarrStatus, err := sonarrClient.GetSystemStatus()
+	if err == nil {
+		// Check AppName from the result
+		switch sonarrStatus.AppName {
+		case "Radarr":
+			slog.DebugContext(ctx, "Detected Radarr instance", "url", arrURL)
+			return "radarr", nil
+		case "Sonarr":
+			slog.DebugContext(ctx, "Detected Sonarr instance", "url", arrURL)
+			return "sonarr", nil
+		default:
+			slog.DebugContext(ctx, "Unknown AppName from Sonarr client", "app_name", sonarrStatus.AppName, "url", arrURL)
+		}
 	}
 
 	return "", fmt.Errorf("unable to detect ARR type for URL %s - neither Radarr nor Sonarr responded successfully", arrURL)
@@ -539,21 +582,21 @@ func (s *Service) detectARRType(arrURL, apiKey string) (string, error) {
 
 // RegisterInstance attempts to automatically register an ARR instance
 // If the instance already exists (by URL), it returns nil without error
-func (s *Service) RegisterInstance(arrURL, apiKey string) error {
+func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) error {
 	if s.configManager == nil {
 		return fmt.Errorf("config manager not available")
 	}
 
-	s.logger.Info("Attempting to register ARR instance", "url", arrURL)
+	slog.InfoContext(ctx, "Attempting to register ARR instance", "url", arrURL)
 
 	// Check if instance already exists
 	if s.instanceExistsByURL(arrURL) {
-		s.logger.Debug("ARR instance already exists, skipping registration", "url", arrURL)
+		slog.DebugContext(ctx, "ARR instance already exists, skipping registration", "url", arrURL)
 		return nil
 	}
 
 	// Detect ARR type
-	arrType, err := s.detectARRType(arrURL, apiKey)
+	arrType, err := s.detectARRType(ctx, arrURL, apiKey)
 	if err != nil {
 		return fmt.Errorf("failed to detect ARR type: %w", err)
 	}
@@ -564,7 +607,7 @@ func (s *Service) RegisterInstance(arrURL, apiKey string) error {
 		return fmt.Errorf("failed to generate instance name: %w", err)
 	}
 
-	s.logger.Info("Registering new ARR instance",
+	slog.InfoContext(ctx, "Registering new ARR instance",
 		"name", instanceName,
 		"type", arrType,
 		"url", arrURL)
@@ -601,7 +644,7 @@ func (s *Service) RegisterInstance(arrURL, apiKey string) error {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	s.logger.Info("Successfully registered ARR instance",
+	slog.InfoContext(ctx, "Successfully registered ARR instance",
 		"name", instanceName,
 		"type", arrType,
 		"url", arrURL)

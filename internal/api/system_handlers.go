@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"syscall"
@@ -190,7 +192,7 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 		}
 	}
 
-	s.logger.Info("System restart requested", "force", req.Force, "user_agent", c.Get("User-Agent"))
+	slog.InfoContext(c.Context(), "System restart requested", "force", req.Force, "user_agent", c.Get("User-Agent"))
 
 	// Prepare response
 	response := SystemRestartResponse{
@@ -205,14 +207,14 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	})
 
 	// Start restart process in a goroutine to allow response to be sent
-	go s.performRestart()
+	go s.performRestart(c.Context())
 
 	return result
 }
 
 // performRestart performs the actual server restart
-func (s *Server) performRestart() {
-	s.logger.Info("Initiating server restart process")
+func (s *Server) performRestart(ctx context.Context) {
+	slog.InfoContext(ctx, "Initiating server restart process")
 
 	// Give a moment for the HTTP response to be sent
 	time.Sleep(100 * time.Millisecond)
@@ -220,28 +222,28 @@ func (s *Server) performRestart() {
 	// Get the current executable path
 	executable, err := os.Executable()
 	if err != nil {
-		s.logger.Error("Failed to get executable path for restart", "error", err)
+		slog.ErrorContext(ctx, "Failed to get executable path for restart", "error", err)
 		return
 	}
 
-	s.logger.Info("Restarting server", "executable", executable, "args", os.Args)
+	slog.InfoContext(ctx, "Restarting server", "executable", executable, "args", os.Args)
 
 	// Use syscall.Exec to replace the current process
 	// This preserves the process ID and is the cleanest way to restart
 	err = syscall.Exec(executable, os.Args, os.Environ())
 	if err != nil {
-		s.logger.Error("Failed to restart using syscall.Exec, trying exec.Command", "error", err)
+		slog.ErrorContext(ctx, "Failed to restart using syscall.Exec, trying exec.Command", "error", err)
 
 		// Fallback: use exec.Command (this creates a new process)
-		cmd := exec.Command(executable, os.Args[1:]...)
+		cmd := exec.CommandContext(ctx, executable, os.Args[1:]...)
 		cmd.Env = os.Environ()
 
 		if err := cmd.Start(); err != nil {
-			s.logger.Error("Failed to restart server using exec.Command", "error", err)
+			slog.ErrorContext(ctx, "Failed to restart server using exec.Command", "error", err)
 			return
 		}
 
-		s.logger.Info("Server restart initiated with new process", "pid", cmd.Process.Pid)
+		slog.InfoContext(ctx, "Server restart initiated with new process", "pid", cmd.Process.Pid)
 
 		// Exit the current process
 		os.Exit(0)

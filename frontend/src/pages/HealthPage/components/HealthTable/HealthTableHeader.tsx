@@ -67,6 +67,7 @@ export function HealthTableHeader({
 				</th>
 				<th>Retries (H/R)</th>
 				<th>Last Check</th>
+				<th>Next Check</th>
 				<th>
 					<button
 						type="button"

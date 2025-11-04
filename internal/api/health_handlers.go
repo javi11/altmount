@@ -234,7 +234,7 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 			// Check if there's actually an active check to cancel
 			if s.healthWorker.IsCheckActive(item.FilePath) {
 				// Cancel the health check before deletion
-				err = s.healthWorker.CancelHealthCheck(item.FilePath)
+				err = s.healthWorker.CancelHealthCheck(c.Context(), item.FilePath)
 				if err != nil {
 					return c.Status(500).JSON(fiber.Map{
 						"success": false,
@@ -313,7 +313,7 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 				// Check if there's actually an active check to cancel
 				if s.healthWorker.IsCheckActive(filePath) {
 					// Cancel the health check before deletion
-					_ = s.healthWorker.CancelHealthCheck(filePath) // Ignore error, proceed with deletion
+					_ = s.healthWorker.CancelHealthCheck(c.Context(), filePath) // Ignore error, proceed with deletion
 				}
 			}
 		}
@@ -753,7 +753,7 @@ func (s *Server) handleGetHealthWorkerStatus(c *fiber.Ctx) error {
 		NextRunTime:            stats.NextRunTime,
 		TotalRunsCompleted:     stats.TotalRunsCompleted,
 		TotalFilesChecked:      stats.TotalFilesChecked,
-		TotalFilesRecovered:    stats.TotalFilesRecovered,
+		TotalFilesHealthy:      stats.TotalFilesHealthy,
 		TotalFilesCorrupted:    stats.TotalFilesCorrupted,
 		CurrentRunStartTime:    stats.CurrentRunStartTime,
 		CurrentRunFilesChecked: stats.CurrentRunFilesChecked,
@@ -942,7 +942,7 @@ func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 			// Check if there's an active check to cancel
 			if s.healthWorker.IsCheckActive(filePath) {
 				// Cancel the health check
-				_ = s.healthWorker.CancelHealthCheck(filePath) // Ignore error, proceed with restart
+				_ = s.healthWorker.CancelHealthCheck(c.Context(), filePath) // Ignore error, proceed with restart
 			}
 		}
 	}
@@ -1034,7 +1034,7 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Cancel the health check (still needs file path)
-	err = s.healthWorker.CancelHealthCheck(item.FilePath)
+	err = s.healthWorker.CancelHealthCheck(c.Context(), item.FilePath)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

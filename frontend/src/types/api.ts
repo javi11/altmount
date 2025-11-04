@@ -100,13 +100,13 @@ export interface FileHealth {
 	last_error?: string;
 	retry_count: number;
 	max_retries: number;
-	next_retry_at?: string;
 	source_nzb_path?: string;
 	error_details?: string;
 	repair_retry_count: number;
 	max_repair_retries: number;
 	created_at: string;
 	updated_at: string;
+	scheduled_check_at?: string;
 }
 
 export interface HealthStats {

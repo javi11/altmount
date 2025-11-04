@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -56,7 +57,7 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 
 	// Method 2: ARR credentials authentication
 	if !authenticated && maUsername != "" && maPassword != "" {
-		if s.validateARRCredentials(maUsername, maPassword) {
+		if s.validateARRCredentials(c, maUsername, maPassword) {
 			authenticated = true
 		}
 	}
@@ -112,38 +113,37 @@ func (s *Server) tryAutoRegisterARR(c *fiber.Ctx) {
 	// URL decode the username parameter (contains ARR URL)
 	arrURL, err := url.QueryUnescape(maUsername)
 	if err != nil {
-		s.logger.Warn("Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
-		return
+		slog.ErrorContext(c.Context(), "Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
 	}
 
 	arrAPIKey := maPassword
 
-	s.logger.Debug("Attempting ARR auto-registration from SABnzbd request",
+	slog.DebugContext(c.Context(), "Attempting ARR auto-registration from SABnzbd request",
 		"arr_url", arrURL)
 
 	// Attempt to register the instance
-	if err := s.arrsService.RegisterInstance(arrURL, arrAPIKey); err != nil {
-		s.logger.Warn("Failed to auto-register ARR instance",
+	if err := s.arrsService.RegisterInstance(c.Context(), arrURL, arrAPIKey); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to auto-register ARR instance",
 			"arr_url", arrURL,
 			"error", err)
 		return
 	}
 
-	s.logger.Info("Successfully auto-registered ARR instance", "arr_url", arrURL)
+	slog.InfoContext(c.Context(), "Successfully auto-registered ARR instance", "arr_url", arrURL)
 }
 
 // validateARRCredentials validates ARR credentials and auto-registers if needed
 // Returns true if credentials are valid (either already registered or newly registered)
-func (s *Server) validateARRCredentials(maUsername, maPassword string) bool {
+func (s *Server) validateARRCredentials(c *fiber.Ctx, maUsername, maPassword string) bool {
 	if s.arrsService == nil {
-		s.logger.Warn("ARR service not available for credential validation")
+		slog.ErrorContext(c.Context(), "ARR service not available for credential validation")
 		return false
 	}
 
 	// URL decode the username parameter (contains ARR URL)
 	arrURL, err := url.QueryUnescape(maUsername)
 	if err != nil {
-		s.logger.Warn("Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
+		slog.ErrorContext(c.Context(), "Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
 		return false
 	}
 
@@ -156,22 +156,22 @@ func (s *Server) validateARRCredentials(maUsername, maPassword string) bool {
 			return true
 		}
 
-		s.logger.Warn("ARR credentials do not match registered instance", "arr_url", arrURL)
+		slog.ErrorContext(c.Context(), "ARR credentials do not match registered instance", "arr_url", arrURL)
 		return false
 	}
 
 	// Step 2: Instance doesn't exist, try to register it
-	s.logger.Debug("ARR instance not found, attempting auto-registration", "arr_url", arrURL)
+	slog.DebugContext(c.Context(), "ARR instance not found, attempting auto-registration", "arr_url", arrURL)
 
-	if err := s.arrsService.RegisterInstance(arrURL, arrAPIKey); err != nil {
-		s.logger.Warn("Failed to auto-register ARR instance",
+	if err := s.arrsService.RegisterInstance(c.Context(), arrURL, arrAPIKey); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to auto-register ARR instance",
 			"arr_url", arrURL,
 			"error", err)
 
 		return false
 	}
 
-	s.logger.Info("Successfully auto-registered and validated ARR instance", "arr_url", arrURL)
+	slog.InfoContext(c.Context(), "Successfully auto-registered and validated ARR instance", "arr_url", arrURL)
 	return true
 }
 
@@ -775,10 +775,10 @@ func (s *Server) calculateItemBasePath() string {
 
 	// Determine if we should use symlink directory or mount path
 	var basePath string
-	if cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled &&
-		cfg.SABnzbd.SymlinkDir != nil && *cfg.SABnzbd.SymlinkDir != "" {
+	if cfg.Import.SymlinkEnabled != nil && *cfg.Import.SymlinkEnabled &&
+		cfg.Import.SymlinkDir != nil && *cfg.Import.SymlinkDir != "" {
 		// Use symlink directory as base when enabled
-		basePath = *cfg.SABnzbd.SymlinkDir
+		basePath = *cfg.Import.SymlinkDir
 	} else {
 		// Fall back to mount path
 		basePath = cfg.MountPath

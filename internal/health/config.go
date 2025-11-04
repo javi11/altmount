@@ -13,7 +13,6 @@ type HealthSystemController struct {
 	healthWorker      *HealthWorker
 	librarySyncWorker *LibrarySyncWorker
 	ctx               context.Context
-	logger            *slog.Logger
 	mu                sync.Mutex
 }
 
@@ -22,13 +21,11 @@ func NewHealthSystemController(
 	healthWorker *HealthWorker,
 	librarySyncWorker *LibrarySyncWorker,
 	ctx context.Context,
-	logger *slog.Logger,
 ) *HealthSystemController {
 	return &HealthSystemController{
 		healthWorker:      healthWorker,
 		librarySyncWorker: librarySyncWorker,
 		ctx:               ctx,
-		logger:            logger,
 	}
 }
 
@@ -49,12 +46,12 @@ func (hsc *HealthSystemController) RegisterConfigChangeHandler(configManager *co
 
 		if newEnabled {
 			// Health system was disabled, now enabled - start workers
-			hsc.logger.Info("Health system enabled via config change, starting workers")
+			slog.InfoContext(hsc.ctx, "Health system enabled via config change, starting workers")
 
 			// Start health worker
 			if !hsc.healthWorker.IsRunning() {
 				if err := hsc.healthWorker.Start(hsc.ctx); err != nil {
-					hsc.logger.Error("Failed to start health worker", "error", err)
+					slog.ErrorContext(hsc.ctx, "Failed to start health worker", "error", err)
 					return
 				}
 			}
@@ -64,25 +61,25 @@ func (hsc *HealthSystemController) RegisterConfigChangeHandler(configManager *co
 				hsc.librarySyncWorker.StartLibrarySync(hsc.ctx)
 			}
 
-			hsc.logger.Info("Health system started successfully")
+			slog.InfoContext(hsc.ctx, "Health system started successfully")
 		} else {
 			// Health system was enabled, now disabled - stop workers
-			hsc.logger.Info("Health system disabled via config change, stopping workers")
+			slog.InfoContext(hsc.ctx, "Health system disabled via config change, stopping workers")
 
 			// Stop library sync worker first
 			if hsc.librarySyncWorker.IsRunning() {
-				hsc.librarySyncWorker.Stop()
+				hsc.librarySyncWorker.Stop(hsc.ctx)
 			}
 
 			// Stop health worker
 			if hsc.healthWorker.IsRunning() {
-				if err := hsc.healthWorker.Stop(); err != nil {
-					hsc.logger.Error("Failed to stop health worker", "error", err)
+				if err := hsc.healthWorker.Stop(hsc.ctx); err != nil {
+					slog.ErrorContext(hsc.ctx, "Failed to stop health worker", "error", err)
 					return
 				}
 			}
 
-			hsc.logger.Info("Health system stopped successfully")
+			slog.InfoContext(hsc.ctx, "Health system stopped successfully")
 		}
 	})
 }

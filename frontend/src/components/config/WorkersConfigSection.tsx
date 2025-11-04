@@ -25,7 +25,10 @@ export function ImportConfigSection({
 		setHasChanges(false);
 	}, [config.import]);
 
-	const handleInputChange = (field: keyof ImportConfig, value: number | boolean | string[]) => {
+	const handleInputChange = (
+		field: keyof ImportConfig,
+		value: number | boolean | string | string[],
+	) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.import));
@@ -169,6 +172,66 @@ export function ImportConfigSection({
 					/>
 					<p className="label">Cache size in MB for archive analysis.</p>
 				</fieldset>
+
+				{/* Symlink Configuration */}
+				<div className="space-y-4">
+					<div>
+						<h4 className="font-medium">Symlink Configuration</h4>
+						<p className="text-base-content/70 text-sm">
+							Create symlinks to imported files organized by category. This allows applications to
+							access files via symlinks instead of the mount path.
+						</p>
+					</div>
+
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Enable Symlinks</legend>
+						<label className="label cursor-pointer">
+							<span className="label-text">Create category-based symlinks for imported files</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.symlink_enabled}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("symlink_enabled", e.target.checked)}
+							/>
+						</label>
+						<p className="label">
+							When enabled, symlinks will be created in category-specific folders within the symlink
+							directory
+						</p>
+					</fieldset>
+
+					{formData.symlink_enabled && (
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Symlink Directory</legend>
+							<input
+								type="text"
+								className="input"
+								value={formData.symlink_dir || ""}
+								readOnly={isReadOnly}
+								placeholder="/path/to/symlinks"
+								onChange={(e) => handleInputChange("symlink_dir", e.target.value)}
+							/>
+							<p className="label">
+								Absolute path where symlinks will be created. Symlinks will be organized in
+								subdirectories by category (e.g., /symlinks/movies/, /symlinks/tv/)
+							</p>
+						</fieldset>
+					)}
+
+					{formData.symlink_enabled && formData.symlink_dir && (
+						<div className="alert alert-info">
+							<div>
+								<div className="font-bold">Symlinks Enabled</div>
+								<div className="text-sm">
+									Imported files will be available as symlinks in{" "}
+									<code>{formData.symlink_dir}/[category]/</code> for easier access by external
+									applications.
+								</div>
+							</div>
+						</div>
+					)}
+				</div>
 
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Full Segment Validation</legend>

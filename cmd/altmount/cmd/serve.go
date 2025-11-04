@@ -21,6 +21,7 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -65,7 +66,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	poolManager := pool.NewManager(ctx)
 
 	// 3. Initialize core services
-	db, err := initializeDatabase(cfg, logger)
+	db, err := initializeDatabase(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -79,7 +80,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	metadataService, metadataReader := initializeMetadata(cfg)
 
 	// 4. Setup network services
-	if err := setupNNTPPool(ctx, cfg, poolManager, logger); err != nil {
+	if err := setupNNTPPool(ctx, cfg, poolManager); err != nil {
 		return err
 	}
 	defer func() {
@@ -91,18 +92,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	mountService := rclone.NewMountService(configManager)
 
-	var rcloneRCClient = setupRCloneClient(cfg, configManager, logger)
+	var rcloneRCClient = setupRCloneClient(ctx, cfg, configManager)
 	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
 		rcloneRCClient = mountService.GetManager()
 	}
 
 	// 5. Initialize importer and filesystem
-	repos := setupRepositories(db, logger)
+	repos := setupRepositories(ctx, db)
 
 	// Create progress broadcaster for WebSocket progress updates
 	progressBroadcaster := progress.NewProgressBroadcaster()
 
-	importerService, err := initializeImporter(cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, ctx, logger)
+	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster)
 	if err != nil {
 		return err
 	}
@@ -113,16 +114,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	fs := initializeFilesystem(metadataService, repos.HealthRepo, poolManager, configManager.GetConfigGetter(), logger)
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, poolManager, configManager.GetConfigGetter())
 
 	// 6. Setup web services
-	app, debugMode := createFiberApp(cfg, logger)
-	authService := setupAuthService(repos.UserRepo, logger)
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, logger)
+	app, debugMode := createFiberApp(ctx, cfg)
+	authService := setupAuthService(ctx, repos.UserRepo)
+	// Create symlink finder for library sync
+	symlinkFinder := utils.NewSymlinkFinder()
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, progressBroadcaster)
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, symlinkFinder)
 
-	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, logger)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, progressBroadcaster, symlinkFinder)
+
+	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager)
 	if err != nil {
 		return err
 	}
@@ -135,7 +139,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	webdav.RegisterConfigHandlers(configManager, webdavHandler, logger)
 	api.RegisterLogLevelHandler(configManager, debugMode, logger)
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, logger)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, symlinkFinder)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}
@@ -148,7 +152,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Register health system config change handler for dynamic enable/disable
 	if healthWorker != nil && librarySyncWorker != nil {
-		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker, ctx, logger)
+		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker, ctx)
 		healthController.RegisterConfigChangeHandler(configManager)
 	}
 
@@ -211,7 +215,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Stop health worker if running
 	if healthWorker != nil {
-		if err := healthWorker.Stop(); err != nil {
+		if err := healthWorker.Stop(ctx); err != nil {
 			logger.Error("Failed to stop health worker", "error", err)
 		} else {
 			logger.Info("Health worker stopped")

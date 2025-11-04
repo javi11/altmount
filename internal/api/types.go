@@ -96,6 +96,8 @@ type ImportAPIResponse struct {
 	MaxValidationGoroutines        int      `json:"max_validation_goroutines"`
 	FullSegmentValidation          bool     `json:"full_segment_validation"`
 	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
+	SymlinkDir                     *string  `json:"symlink_dir,omitempty"`
+	SymlinkEnabled                 bool     `json:"symlink_enabled"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -106,8 +108,6 @@ type SABnzbdAPIResponse struct {
 	FallbackHost      string                   `json:"fallback_host"`
 	FallbackAPIKey    string                   `json:"fallback_api_key"`     // Obfuscated if set
 	FallbackAPIKeySet bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
-	SymlinkDir        *string                  `json:"symlink_dir,omitempty"`
-	SymlinkEnabled    bool                     `json:"symlink_enabled"`
 }
 
 // Helper functions to create API responses from core config types
@@ -198,8 +198,6 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FallbackHost:      cfg.SABnzbd.FallbackHost,
 		FallbackAPIKey:    fallbackAPIKey,
 		FallbackAPIKeySet: cfg.SABnzbd.FallbackAPIKey != "",
-		SymlinkDir:        cfg.SABnzbd.SymlinkDir,
-		SymlinkEnabled:    cfg.SABnzbd.SymlinkEnabled != nil && *cfg.SABnzbd.SymlinkEnabled,
 	}
 
 	return &ConfigAPIResponse{
@@ -219,6 +217,8 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		MaxValidationGoroutines:        importConfig.MaxValidationGoroutines,
 		FullSegmentValidation:          importConfig.FullSegmentValidation,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
+		SymlinkDir:                     importConfig.SymlinkDir,
+		SymlinkEnabled:                 importConfig.SymlinkEnabled != nil && *importConfig.SymlinkEnabled,
 	}
 }
 
@@ -313,13 +313,13 @@ type HealthItemResponse struct {
 	LastError        *string               `json:"last_error"`
 	RetryCount       int                   `json:"retry_count"`
 	MaxRetries       int                   `json:"max_retries"`
-	NextRetryAt      *time.Time            `json:"next_retry_at"`
 	SourceNzbPath    *string               `json:"source_nzb_path"`
 	ErrorDetails     *string               `json:"error_details"`
 	RepairRetryCount int                   `json:"repair_retry_count"`
 	MaxRepairRetries int                   `json:"max_repair_retries"`
 	CreatedAt        time.Time             `json:"created_at"`
 	UpdatedAt        time.Time             `json:"updated_at"`
+	ScheduledCheckAt *time.Time            `json:"scheduled_check_at,omitempty"`
 }
 
 // HealthListRequest represents request parameters for listing health records
@@ -368,7 +368,7 @@ type HealthWorkerStatusResponse struct {
 	NextRunTime            *time.Time `json:"next_run_time,omitempty"`
 	TotalRunsCompleted     int64      `json:"total_runs_completed"`
 	TotalFilesChecked      int64      `json:"total_files_checked"`
-	TotalFilesRecovered    int64      `json:"total_files_recovered"`
+	TotalFilesHealthy      int64      `json:"total_files_healthy"`
 	TotalFilesCorrupted    int64      `json:"total_files_corrupted"`
 	CurrentRunStartTime    *time.Time `json:"current_run_start_time,omitempty"`
 	CurrentRunFilesChecked int        `json:"current_run_files_checked"`
@@ -500,13 +500,13 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 		LastError:        item.LastError,
 		RetryCount:       item.RetryCount,
 		MaxRetries:       item.MaxRetries,
-		NextRetryAt:      item.NextRetryAt,
 		SourceNzbPath:    item.SourceNzbPath,
 		ErrorDetails:     item.ErrorDetails,
 		RepairRetryCount: item.RepairRetryCount,
 		MaxRepairRetries: item.MaxRepairRetries,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
+		ScheduledCheckAt: item.ScheduledCheckAt,
 	}
 }
 
