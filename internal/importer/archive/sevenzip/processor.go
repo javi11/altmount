@@ -144,7 +144,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		return nil, err
 	}
 
-	sz.log.Info("Starting 7zip analysis",
+	sz.log.InfoContext(ctx, "Starting 7zip analysis",
 		"main_file", mainSevenZipFile,
 		"total_parts", len(sortedFiles),
 		"7z_files", len(sevenZipFiles),
@@ -160,7 +160,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		if err != nil {
 			return nil, NewNonRetryableError("failed to open password-protected 7zip archive", err)
 		}
-		sz.log.Info("Using password to unlock 7zip archive")
+		sz.log.InfoContext(ctx, "Using password to unlock 7zip archive")
 	} else {
 		reader, err = sevenzip.OpenReader(mainSevenZipFile, aferoFS)
 		if err != nil {
@@ -179,7 +179,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 		return nil, NewNonRetryableError("no valid files found in 7zip archive. Compressed or encrypted archives are not supported", nil)
 	}
 
-	sz.log.Debug("Successfully analyzed 7zip archive",
+	sz.log.DebugContext(ctx, "Successfully analyzed 7zip archive",
 		"main_file", mainSevenZipFile,
 		"files_found", len(fileInfos))
 
@@ -252,7 +252,7 @@ func (sz *sevenZipProcessor) getFirstSevenZipPart(sevenZipFileNames []string) (s
 		}
 	}
 
-	sz.log.Debug("Selected first 7zip part",
+	sz.log.DebugContext(context.Background(), "Selected first 7zip part",
 		"filename", best.filename,
 		"base_name", best.baseName,
 		"priority", best.priority,
@@ -315,13 +315,13 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 		// Skip directories (7zip lists directories as files with trailing slash)
 		isDirectory := strings.HasSuffix(fi.Name, "/") || fi.Size == 0
 		if isDirectory {
-			sz.log.Debug("Skipping directory in 7zip archive", "path", fi.Name)
+			sz.log.DebugContext(context.Background(), "Skipping directory in 7zip archive", "path", fi.Name)
 			continue
 		}
 
 		// Skip compressed files - they cannot be directly streamed
 		if fi.Compressed {
-			sz.log.Warn("Skipping compressed file in 7zip archive (compression not supported)", "path", fi.Name)
+			sz.log.WarnContext(context.Background(), "Skipping compressed file in 7zip archive (compression not supported)", "path", fi.Name)
 			continue
 		}
 
@@ -336,7 +336,7 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 			// Derive the AES key from the password using the 7-zip algorithm
 			derivedKey, err := sz.deriveAESKey(password, fi)
 			if err != nil {
-				sz.log.Warn("Failed to derive AES key for file",
+				sz.log.WarnContext(context.Background(), "Failed to derive AES key for file",
 					"file", normalizedName,
 					"error", err)
 				continue
@@ -356,7 +356,7 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 		// Map the file's offset and size to segments from the 7z parts
 		segments, err := sz.mapOffsetToSegments(fi, sevenZipFiles)
 		if err != nil {
-			sz.log.Warn("Failed to map segments for file", "error", err, "file", fi.Name)
+			sz.log.WarnContext(context.Background(), "Failed to map segments for file", "error", err, "file", fi.Name)
 			continue
 		}
 
@@ -403,7 +403,7 @@ func (sz *sevenZipProcessor) mapOffsetToSegments(
 	}
 
 	if covered != size {
-		sz.log.Warn("Segment coverage mismatch",
+		sz.log.WarnContext(context.Background(), "Segment coverage mismatch",
 			"file", fi.Name,
 			"expected", size,
 			"covered", covered,

@@ -117,7 +117,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 
 	par2Descriptors, err := par2.GetFileDescriptors(par2Cache, p.poolManager, p.log)
 	if err != nil {
-		p.log.Warn("Failed to extract PAR2 file descriptors", "error", err)
+		p.log.WarnContext(ctx, "Failed to extract PAR2 file descriptors", "error", err)
 	}
 
 	// Extract file information using priority-based filename selection
@@ -129,7 +129,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		// These files can't be properly processed (no PAR2 matching, no yEnc size data, no magic bytes)
 		if data == nil || data.File == nil || data.MissingFirstSegment {
 			if data != nil && data.File != nil {
-				p.log.Warn("Skipping file with missing first segment data",
+				p.log.WarnContext(ctx, "Skipping file with missing first segment data",
 					"subject", data.File.Subject)
 			}
 			continue
@@ -221,7 +221,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		if err != nil {
 			// Log the error but continue with original segment sizes
 			// This ensures processing continues even if yEnc header fetching fails
-			p.log.Warn("Failed to normalize segment sizes with yEnc headers",
+			p.log.WarnContext(ctx, "Failed to normalize segment sizes with yEnc headers",
 				"error", err,
 				"segments", len(info.NzbFile.Segments))
 
@@ -348,7 +348,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
-		p.log.Debug("Failed to get connection pool for first segment fetching", "error", err)
+		p.log.DebugContext(context.Background(), "Failed to get connection pool for first segment fetching", "error", err)
 		return cache
 	}
 
@@ -433,7 +433,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 			// Check if we need to read from additional segments to reach 16KB
 			// This is necessary for PAR2 Hash16k matching when segments are small
 			if bytesRead < maxRead && len(file.Segments) > 1 {
-				p.log.Debug("First segment provided less than 16KB, reading from additional segments",
+				p.log.DebugContext(context.Background(), "First segment provided less than 16KB, reading from additional segments",
 					"file", file.Subject,
 					"first_segment_bytes", bytesRead,
 					"total_segments", len(file.Segments))
@@ -448,7 +448,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					segReader, err := cp.BodyReader(segCtx, segment.ID, nil)
 					if err != nil {
 						segCancel()
-						p.log.Debug("Failed to read additional segment for 16KB completion",
+						p.log.DebugContext(context.Background(), "Failed to read additional segment for 16KB completion",
 							"segment_index", segIdx,
 							"error", err)
 						break // Stop trying, use what we have
@@ -463,7 +463,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					segCancel()
 
 					if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-						p.log.Debug("Error reading from additional segment",
+						p.log.DebugContext(context.Background(), "Error reading from additional segment",
 							"segment_index", segIdx,
 							"error", err)
 						break // Stop trying, use what we have
@@ -473,7 +473,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					copy(buffer[bytesRead:], tempBuffer[:n])
 					bytesRead += n
 
-					p.log.Debug("Read additional bytes from segment",
+					p.log.DebugContext(context.Background(), "Read additional bytes from segment",
 						"segment_index", segIdx,
 						"bytes_read", n,
 						"total_bytes", bytesRead)
@@ -520,7 +520,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 		}
 
 		if len(data.RawBytes) == 0 {
-			p.log.Warn("First segment has no data",
+			p.log.WarnContext(context.Background(), "First segment has no data",
 				"file", data.File.Subject)
 		}
 	}

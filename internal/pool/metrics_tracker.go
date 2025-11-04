@@ -11,15 +11,15 @@ import (
 
 // MetricsSnapshot represents pool metrics at a point in time with calculated values
 type MetricsSnapshot struct {
-	BytesDownloaded        int64             `json:"bytes_downloaded"`
-	BytesUploaded          int64             `json:"bytes_uploaded"`
-	ArticlesDownloaded     int64             `json:"articles_downloaded"`
-	ArticlesPosted         int64             `json:"articles_posted"`
-	TotalErrors            int64             `json:"total_errors"`
-	ProviderErrors         map[string]int64  `json:"provider_errors"`
-	DownloadSpeedBytesPerSec float64         `json:"download_speed_bytes_per_sec"`
-	UploadSpeedBytesPerSec   float64         `json:"upload_speed_bytes_per_sec"`
-	Timestamp              time.Time         `json:"timestamp"`
+	BytesDownloaded          int64            `json:"bytes_downloaded"`
+	BytesUploaded            int64            `json:"bytes_uploaded"`
+	ArticlesDownloaded       int64            `json:"articles_downloaded"`
+	ArticlesPosted           int64            `json:"articles_posted"`
+	TotalErrors              int64            `json:"total_errors"`
+	ProviderErrors           map[string]int64 `json:"provider_errors"`
+	DownloadSpeedBytesPerSec float64          `json:"download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec   float64          `json:"upload_speed_bytes_per_sec"`
+	Timestamp                time.Time        `json:"timestamp"`
 }
 
 // MetricsTracker tracks pool metrics over time and calculates rates
@@ -46,18 +46,14 @@ type metricsample struct {
 }
 
 // NewMetricsTracker creates a new metrics tracker
-func NewMetricsTracker(pool nntppool.UsenetConnectionPool, logger *slog.Logger) *MetricsTracker {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
+func NewMetricsTracker(pool nntppool.UsenetConnectionPool) *MetricsTracker {
 	mt := &MetricsTracker{
 		pool:              pool,
 		samples:           make([]metricsample, 0, 60), // Preallocate for 60 samples
 		sampleInterval:    5 * time.Second,
 		retentionPeriod:   60 * time.Second,
 		calculationWindow: 10 * time.Second, // Use 10s window for more accurate real-time speeds
-		logger:            logger,
+		logger:            slog.Default().With("component", "metrics-tracker"),
 	}
 
 	return mt
@@ -74,7 +70,7 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 	// Start sampling goroutine
 	go mt.samplingLoop(childCtx)
 
-	mt.logger.Info("Metrics tracker started",
+	mt.logger.InfoContext(ctx, "Metrics tracker started",
 		"sample_interval", mt.sampleInterval,
 		"retention_period", mt.retentionPeriod,
 	)
@@ -84,7 +80,7 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 func (mt *MetricsTracker) Stop() {
 	if mt.cancel != nil {
 		mt.cancel()
-		mt.logger.Info("Metrics tracker stopped")
+		mt.logger.InfoContext(context.Background(), "Metrics tracker stopped")
 	}
 }
 

@@ -135,9 +135,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	setupSPARoutes(app)
 
 	// 7. Register config change handlers
-	pool.RegisterConfigHandlers(configManager, poolManager, logger)
-	webdav.RegisterConfigHandlers(configManager, webdavHandler, logger)
-	api.RegisterLogLevelHandler(configManager, debugMode, logger)
+	pool.RegisterConfigHandlers(ctx, configManager, poolManager)
+	webdav.RegisterConfigHandlers(ctx, configManager, webdavHandler)
+	api.RegisterLogLevelHandler(ctx, configManager, debugMode)
 
 	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, symlinkFinder)
 	if err != nil {

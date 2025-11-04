@@ -205,6 +205,6 @@ func (h *Handler) SyncAuthCredentials() {
 	if h.configGetter != nil {
 		currentConfig := h.configGetter()
 		h.authCreds.UpdateCredentials(currentConfig.WebDAV.User, currentConfig.WebDAV.Password)
-		slog.Debug("WebDAV auth credentials synced from config")
+		slog.DebugContext(context.Background(), "WebDAV auth credentials synced from config")
 	}
 }

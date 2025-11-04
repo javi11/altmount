@@ -194,9 +194,9 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 	defer s.mu.Unlock()
 	s.rcloneClient = client
 	if client != nil {
-		s.log.Info("RClone client updated for VFS notifications")
+		s.log.InfoContext(context.Background(), "RClone client updated for VFS notifications")
 	} else {
-		s.log.Info("RClone client disabled")
+		s.log.InfoContext(context.Background(), "RClone client disabled")
 	}
 }
 
@@ -249,7 +249,7 @@ func (s *Service) StartManualScan(scanPath string) error {
 	// Start scanning in goroutine
 	go s.performManualScan(scanCtx, scanPath)
 
-	s.log.Info("Manual scan started", "path", scanPath)
+	s.log.InfoContext(context.Background(), "Manual scan started", "path", scanPath)
 	return nil
 }
 
@@ -279,7 +279,7 @@ func (s *Service) CancelScan() error {
 		s.scanCancel()
 	}
 
-	s.log.Info("Manual scan cancellation requested", "path", s.scanInfo.Path)
+	s.log.InfoContext(context.Background(), "Manual scan cancellation requested", "path", s.scanInfo.Path)
 	return nil
 }
 
@@ -296,19 +296,19 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 		s.scanMu.Unlock()
 	}()
 
-	s.log.Debug("Scanning directory for NZB files", "dir", scanPath)
+	s.log.DebugContext(ctx, "Scanning directory for NZB files", "dir", scanPath)
 
 	err := filepath.WalkDir(scanPath, func(path string, d fs.DirEntry, err error) error {
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
-			s.log.Info("Scan cancelled", "path", scanPath)
+			s.log.InfoContext(ctx, "Scan cancelled", "path", scanPath)
 			return fmt.Errorf("scan cancelled")
 		default:
 		}
 
 		if err != nil {
-			s.log.Warn("Error accessing path", "path", path, "error", err)
+			s.log.WarnContext(ctx, "Error accessing path", "path", path, "error", err)
 			s.scanMu.Lock()
 			errMsg := err.Error()
 			s.scanInfo.LastError = &errMsg
@@ -340,7 +340,7 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 
 		// Add to queue
 		if _, err := s.AddToQueue(path, &scanPath, nil, nil); err != nil {
-			s.log.Error("Failed to add file to queue during scan", "file", path, "error", err)
+			s.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
 		}
 
 		// Update files added counter
@@ -352,14 +352,14 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 	})
 
 	if err != nil && !strings.Contains(err.Error(), "scan cancelled") {
-		s.log.Error("Failed to scan directory", "dir", scanPath, "error", err)
+		s.log.ErrorContext(ctx, "Failed to scan directory", "dir", scanPath, "error", err)
 		s.scanMu.Lock()
 		errMsg := err.Error()
 		s.scanInfo.LastError = &errMsg
 		s.scanMu.Unlock()
 	}
 
-	s.log.Info("Manual scan completed", "path", scanPath, "files_found", s.scanInfo.FilesFound, "files_added", s.scanInfo.FilesAdded)
+	s.log.InfoContext(ctx, "Manual scan completed", "path", scanPath, "files_found", s.scanInfo.FilesFound, "files_added", s.scanInfo.FilesAdded)
 }
 
 // isFileAlreadyInQueue checks if file is already in queue (simplified scanning)
@@ -368,7 +368,7 @@ func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 	// The processor will check main database for duplicates when processing
 	inQueue, err := s.database.Repository.IsFileInQueue(filePath)
 	if err != nil {
-		s.log.Warn("Failed to check if file in queue", "file", filePath, "error", err)
+		s.log.WarnContext(context.Background(), "Failed to check if file in queue", "file", filePath, "error", err)
 		return false // Assume not in queue on error
 	}
 	return inQueue
@@ -379,7 +379,7 @@ func (s *Service) AddToQueue(filePath string, relativePath *string, category *st
 	// Calculate file size before adding to queue
 	var fileSize *int64
 	if size, err := s.CalculateFileSizeOnly(filePath); err != nil {
-		s.log.Warn("Failed to calculate file size", "file", filePath, "error", err)
+		s.log.WarnContext(context.Background(), "Failed to calculate file size", "file", filePath, "error", err)
 		// Continue with NULL file size - don't fail the queue addition
 		fileSize = nil
 	} else {
@@ -405,14 +405,14 @@ func (s *Service) AddToQueue(filePath string, relativePath *string, category *st
 	}
 
 	if err := s.database.Repository.AddToQueue(item); err != nil {
-		s.log.Error("Failed to add file to queue", "file", filePath, "error", err)
+		s.log.ErrorContext(context.Background(), "Failed to add file to queue", "file", filePath, "error", err)
 		return nil, err
 	}
 
 	if fileSize != nil {
-		s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
+		s.log.InfoContext(context.Background(), "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
-		s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
+		s.log.InfoContext(context.Background(), "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
 	}
 
 	return item, nil
@@ -452,7 +452,7 @@ func isDatabaseContentionError(err error) bool {
 }
 
 // claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic using retry-go
-func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.ImportQueueItem, error) {
+func (s *Service) claimItemWithRetry(ctx context.Context, workerID int) (*database.ImportQueueItem, error) {
 	var item *database.ImportQueueItem
 
 	err := retry.Do(
@@ -473,12 +473,12 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 		retry.OnRetry(func(n uint, err error) {
 			// Only log warnings after multiple retries to reduce noise
 			if n >= 2 {
-				log.Warn("Database contention, retrying claim",
+				s.log.WarnContext(ctx, "Database contention, retrying claim",
 					"attempt", n+1,
 					"worker_id", workerID,
 					"error", err)
 			} else {
-				log.Debug("Database contention, retrying claim",
+				s.log.DebugContext(ctx, "Database contention, retrying claim",
 					"attempt", n+1,
 					"worker_id", workerID,
 					"error", err)
@@ -494,20 +494,18 @@ func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.
 		return nil, nil
 	}
 
-	log.Debug("Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
+	s.log.DebugContext(ctx, "Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
 	return item, nil
 }
 
 // processQueueItems gets and processes pending queue items using two-database workflow
 func (s *Service) processQueueItems(ctx context.Context, workerID int) {
-	log := s.log.With("worker_id", workerID)
-
 	// Step 1: Atomically claim next available item from queue database with retry logic
-	item, err := s.claimItemWithRetry(workerID, log)
+	item, err := s.claimItemWithRetry(ctx, workerID)
 	if err != nil {
 		// Only log non-contention errors
 		if !strings.Contains(err.Error(), "database is locked") && !strings.Contains(err.Error(), "database is busy") {
-			log.Error("Failed to claim next queue item", "error", err)
+			s.log.ErrorContext(ctx, "Failed to claim next queue item", "worker_id", workerID, "error", err)
 		}
 		return
 	}
@@ -516,7 +514,7 @@ func (s *Service) processQueueItems(ctx context.Context, workerID int) {
 		return // No work to do
 	}
 
-	log.Debug("Processing claimed queue item", "queue_id", item.ID, "file", item.NzbPath)
+	s.log.DebugContext(ctx, "Processing claimed queue item", "worker_id", workerID, "queue_id", item.ID, "file", item.NzbPath)
 
 	// Step 3: Process the NZB file and write to main database
 	resultingPath, processingErr := s.processNzbItem(ctx, item)
@@ -524,15 +522,15 @@ func (s *Service) processQueueItems(ctx context.Context, workerID int) {
 	// Step 4: Update queue database with results
 	if processingErr != nil {
 		// Handle failure in queue database
-		s.handleProcessingFailure(item, processingErr, log)
+		s.handleProcessingFailure(ctx, item, processingErr)
 	} else {
 		// Handle success (storage path, VFS notification, symlinks, status update)
-		s.handleProcessingSuccess(item, resultingPath, log)
+		s.handleProcessingSuccess(ctx, item, resultingPath)
 	}
 }
 
 // refreshMountPathIfNeeded checks if the mount path exists and refreshes the root directory if not found
-func (s *Service) refreshMountPathIfNeeded(resultingPath string, itemID int64, log *slog.Logger) {
+func (s *Service) refreshMountPathIfNeeded(ctx context.Context, resultingPath string, itemID int64) {
 	if s.rcloneClient == nil {
 		return
 	}
@@ -543,7 +541,7 @@ func (s *Service) refreshMountPathIfNeeded(resultingPath string, itemID int64, l
 			// Refresh the root path if the mount path is not found
 			err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
 			if err != nil {
-				log.Error("Failed to refresh mount path", "queue_id", itemID, "path", mountPath, "error", err)
+				s.log.ErrorContext(ctx, "Failed to refresh mount path", "queue_id", itemID, "path", mountPath, "error", err)
 			}
 		}
 	}
@@ -566,22 +564,22 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing
-func (s *Service) handleProcessingSuccess(item *database.ImportQueueItem, resultingPath string, log *slog.Logger) error {
+func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
 	// Add storage path to database
 	if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
-		log.Error("Failed to add storage path", "queue_id", item.ID, "error", err)
+		s.log.ErrorContext(ctx, "Failed to add storage path", "queue_id", item.ID, "error", err)
 		return err
 	}
 
 	// Refresh mount path if needed
-	s.refreshMountPathIfNeeded(resultingPath, item.ID, log)
+	s.refreshMountPathIfNeeded(ctx, resultingPath, item.ID)
 
 	// Notify rclone VFS about the new import (async, don't fail on error)
-	s.notifyRcloneVFS(resultingPath, log)
+	s.notifyRcloneVFS(ctx, resultingPath)
 
 	// Create category symlink (non-blocking)
 	if err := s.createSymlinks(item, resultingPath); err != nil {
-		log.Warn("Failed to create symlink",
+		s.log.WarnContext(ctx, "Failed to create symlink",
 			"queue_id", item.ID,
 			"path", resultingPath,
 			"error", err)
@@ -590,7 +588,7 @@ func (s *Service) handleProcessingSuccess(item *database.ImportQueueItem, result
 
 	// Mark as completed in queue database
 	if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-		log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
+		s.log.ErrorContext(ctx, "Failed to mark item as completed", "queue_id", item.ID, "error", err)
 		return err
 	}
 
@@ -599,24 +597,24 @@ func (s *Service) handleProcessingSuccess(item *database.ImportQueueItem, result
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
-	log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
+	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }
 
 // handleProcessingFailure handles when processing fails
-func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, processingErr error, log *slog.Logger) {
+func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
 
-	log.Warn("Processing failed",
+	s.log.WarnContext(ctx, "Processing failed",
 		"queue_id", item.ID,
 		"file", item.NzbPath,
 		"error", processingErr)
 
 	// Mark as failed in queue database (no automatic retry)
 	if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
-		log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", err)
+		s.log.ErrorContext(ctx, "Failed to mark item as failed", "queue_id", item.ID, "error", err)
 	} else {
-		log.Error("Item failed",
+		s.log.ErrorContext(ctx, "Item failed",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
 	}
@@ -627,8 +625,8 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 	}
 
 	// Attempt SABnzbd fallback if configured
-	if err := s.attemptSABnzbdFallback(item, log); err != nil {
-		log.Error("Failed to send to external SABnzbd",
+	if err := s.attemptSABnzbdFallback(ctx, item); err != nil {
+		s.log.ErrorContext(ctx, "Failed to send to external SABnzbd",
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"fallback_host", s.configGetter().SABnzbd.FallbackHost,
@@ -637,9 +635,9 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 	} else {
 		// Mark item as fallback instead of removing from queue
 		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFallback, nil); err != nil {
-			log.Error("Failed to mark item as fallback", "queue_id", item.ID, "error", err)
+			s.log.ErrorContext(ctx, "Failed to mark item as fallback", "queue_id", item.ID, "error", err)
 		} else {
-			log.Info("Item marked as fallback after successful SABnzbd transfer",
+			s.log.InfoContext(ctx, "Item marked as fallback after successful SABnzbd transfer",
 				"queue_id", item.ID,
 				"file", item.NzbPath,
 				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
@@ -648,36 +646,36 @@ func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, proces
 }
 
 // attemptSABnzbdFallback attempts to send a failed import to an external SABnzbd instance
-func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *slog.Logger) error {
+func (s *Service) attemptSABnzbdFallback(ctx context.Context, item *database.ImportQueueItem) error {
 	// Get current configuration
 	cfg := s.configGetter()
 
 	// Check if SABnzbd is enabled and fallback is configured
 	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
-		log.Debug("SABnzbd fallback not attempted - SABnzbd API not enabled", "queue_id", item.ID)
+		s.log.DebugContext(ctx, "SABnzbd fallback not attempted - SABnzbd API not enabled", "queue_id", item.ID)
 		return fmt.Errorf("SABnzbd fallback not attempted - SABnzbd API not enabled")
 	}
 
 	if cfg.SABnzbd.FallbackHost == "" {
-		log.Debug("SABnzbd fallback not attempted - no fallback host configured", "queue_id", item.ID)
+		s.log.DebugContext(ctx, "SABnzbd fallback not attempted - no fallback host configured", "queue_id", item.ID)
 		return fmt.Errorf("SABnzbd fallback not attempted - no fallback host configured")
 	}
 
 	if cfg.SABnzbd.FallbackAPIKey == "" {
-		log.Warn("SABnzbd fallback not attempted - no API key configured", "queue_id", item.ID)
+		s.log.WarnContext(ctx, "SABnzbd fallback not attempted - no API key configured", "queue_id", item.ID)
 		return fmt.Errorf("SABnzbd fallback not attempted - no API key configured")
 	}
 
 	// Check if the NZB file still exists
 	if _, err := os.Stat(item.NzbPath); err != nil {
-		log.Warn("SABnzbd fallback not attempted - NZB file not found",
+		s.log.WarnContext(ctx, "SABnzbd fallback not attempted - NZB file not found",
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
 		return err
 	}
 
-	log.Info("Attempting to send failed import to external SABnzbd",
+	s.log.InfoContext(ctx, "Attempting to send failed import to external SABnzbd",
 		"queue_id", item.ID,
 		"file", item.NzbPath,
 		"fallback_host", cfg.SABnzbd.FallbackHost)
@@ -697,7 +695,7 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 		return err
 	}
 
-	log.Info("Successfully sent failed import to external SABnzbd",
+	s.log.InfoContext(ctx, "Successfully sent failed import to external SABnzbd",
 		"queue_id", item.ID,
 		"file", item.NzbPath,
 		"fallback_host", cfg.SABnzbd.FallbackHost,
@@ -743,7 +741,7 @@ func (s *Service) UpdateWorkerCount(count int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.log.Info("Queue worker count update requested - restart required to take effect",
+	s.log.InfoContext(context.Background(), "Queue worker count update requested - restart required to take effect",
 		"current_count", s.config.Workers,
 		"requested_count", count,
 		"running", s.running)
@@ -761,21 +759,21 @@ func (s *Service) GetWorkerCount() int {
 }
 
 // notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
-func (s *Service) notifyRcloneVFS(resultingPath string, log *slog.Logger) {
+func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 	if s.rcloneClient == nil {
 		return // No rclone client configured or RClone RC is disabled
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
+	refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
 	defer cancel()
 
-	err := s.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
+	err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
 	if err != nil {
-		log.Warn("Failed to notify rclone VFS about new import",
+		s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
 			"virtual_dir", resultingPath,
 			"error", err)
 	} else {
-		log.Info("Successfully notified rclone VFS about new import",
+		s.log.InfoContext(ctx, "Successfully notified rclone VFS about new import",
 			"virtual_dir", resultingPath)
 	}
 }
@@ -783,24 +781,23 @@ func (s *Service) notifyRcloneVFS(resultingPath string, log *slog.Logger) {
 // ProcessItemInBackground processes a specific queue item in the background
 func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 	go func() {
-		log := s.log.With("item_id", itemID, "background", true)
-		log.Debug("Starting background processing of queue item")
+		s.log.DebugContext(ctx, "Starting background processing of queue item", "item_id", itemID, "background", true)
 
 		// Get the queue item
 		item, err := s.database.Repository.GetQueueItem(itemID)
 		if err != nil {
-			log.Error("Failed to get queue item for background processing", "error", err)
+			s.log.ErrorContext(ctx, "Failed to get queue item for background processing", "item_id", itemID, "error", err)
 			return
 		}
 
 		if item == nil {
-			log.Warn("Queue item not found for background processing")
+			s.log.WarnContext(ctx, "Queue item not found for background processing", "item_id", itemID)
 			return
 		}
 
 		// Update status to processing
 		if err := s.database.Repository.UpdateQueueItemStatus(itemID, database.QueueStatusProcessing, nil); err != nil {
-			log.Error("Failed to update item status to processing", "error", err)
+			s.log.ErrorContext(ctx, "Failed to update item status to processing", "item_id", itemID, "error", err)
 			return
 		}
 
@@ -810,10 +807,10 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 		// Update queue database with results
 		if processingErr != nil {
 			// Handle failure
-			s.handleProcessingFailure(item, processingErr, log)
+			s.handleProcessingFailure(ctx, item, processingErr)
 		} else {
 			// Handle success (storage path, VFS notification, symlinks, status update)
-			s.handleProcessingSuccess(item, resultingPath, log)
+			s.handleProcessingSuccess(ctx, item, resultingPath)
 		}
 	}()
 }
@@ -951,7 +948,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	// Walk the metadata directory to find all files
 	err = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			s.log.Warn("Error accessing metadata path during symlink creation",
+			s.log.WarnContext(context.Background(), "Error accessing metadata path during symlink creation",
 				"path", path,
 				"error", err)
 			return nil // Continue walking
@@ -970,7 +967,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 		// Calculate relative path from the root metadata directory (not metadataPath)
 		relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
 		if err != nil {
-			s.log.Error("Failed to calculate relative path",
+			s.log.ErrorContext(context.Background(), "Failed to calculate relative path",
 				"path", path,
 				"base", cfg.Metadata.RootPath,
 				"error", err)
@@ -988,7 +985,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 
 		// Create symlink for this file using the helper function
 		if err := s.createSingleSymlink(actualFilePath, fileResultingPath); err != nil {
-			s.log.Error("Failed to create symlink",
+			s.log.ErrorContext(context.Background(), "Failed to create symlink",
 				"path", actualFilePath,
 				"error", err)
 			symlinkErrors = append(symlinkErrors, err)
@@ -1005,7 +1002,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	}
 
 	if len(symlinkErrors) > 0 {
-		s.log.Warn("Some symlinks failed to create",
+		s.log.WarnContext(context.Background(), "Some symlinks failed to create",
 			"queue_id", item.ID,
 			"total_errors", len(symlinkErrors),
 			"successful", symlinkCount)

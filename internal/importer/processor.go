@@ -115,7 +115,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Step 2: Calculate virtual directory
 	virtualDir := filesystem.CalculateVirtualDirectory(filePath, relativePath)
 
-	proc.log.Info("Processing file",
+	proc.log.InfoContext(ctx, "Processing file",
 		"file_path", filePath,
 		"virtual_dir", virtualDir,
 		"type", parsed.Type,
@@ -187,7 +187,6 @@ func (proc *Processor) processSingleFile(
 		proc.maxValidationGoroutines,
 		proc.fullSegmentValidation,
 		proc.allowedFileExtensions,
-		proc.log,
 	)
 	if err != nil {
 		return "", err
@@ -225,7 +224,6 @@ func (proc *Processor) processMultiFile(
 		proc.maxValidationGoroutines,
 		proc.fullSegmentValidation,
 		proc.allowedFileExtensions,
-		proc.log,
 	); err != nil {
 		return "", err
 	}
@@ -264,7 +262,6 @@ func (proc *Processor) processRarArchive(
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
-			proc.log,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -298,7 +295,6 @@ func (proc *Processor) processRarArchive(
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
-			proc.log,
 		)
 		if err != nil {
 			return "", err
@@ -340,7 +336,6 @@ func (proc *Processor) processSevenZipArchive(
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
-			proc.log,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -374,7 +369,6 @@ func (proc *Processor) processSevenZipArchive(
 			proc.maxValidationGoroutines,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
-			proc.log,
 		)
 		if err != nil {
 			return "", err

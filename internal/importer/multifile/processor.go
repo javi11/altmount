@@ -28,7 +28,6 @@ func ProcessRegularFiles(
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
 	allowedFileExtensions []string,
-	log *slog.Logger,
 ) error {
 	if len(files) == 0 {
 		return nil
@@ -36,7 +35,7 @@ func ProcessRegularFiles(
 
 	// Validate file extensions before processing
 	if !utils.HasAllowedFilesInRegular(files, allowedFileExtensions) {
-		log.Warn("No files with allowed extensions found",
+		slog.WarnContext(ctx, "No files with allowed extensions found",
 			"allowed_extensions", allowedFileExtensions,
 			"file_count", len(files))
 		return fmt.Errorf("no files with allowed extensions found (allowed: %v)", allowedFileExtensions)
@@ -91,13 +90,13 @@ func ProcessRegularFiles(
 			return fmt.Errorf("failed to write metadata for file %s: %w", filename, err)
 		}
 
-		log.Debug("Created metadata file",
+		slog.DebugContext(ctx, "Created metadata file",
 			"file", filename,
 			"virtual_path", virtualPath,
 			"size", file.Size)
 	}
 
-	log.Info("Successfully processed regular files",
+	slog.InfoContext(ctx, "Successfully processed regular files",
 		"virtual_dir", virtualDir,
 		"files", len(files))
 

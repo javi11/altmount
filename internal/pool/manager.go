@@ -41,7 +41,7 @@ type manager struct {
 func NewManager(ctx context.Context) Manager {
 	return &manager{
 		ctx:    ctx,
-		logger: slog.Default(),
+		logger: slog.Default().With("component", "pool"),
 	}
 }
 
@@ -64,7 +64,7 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 
 	// Shut down existing pool and metrics tracker if present
 	if m.pool != nil {
-		m.logger.Info("Shutting down existing NNTP connection pool")
+		m.logger.InfoContext(m.ctx, "Shutting down existing NNTP connection pool")
 		if m.metricsTracker != nil {
 			m.metricsTracker.Stop()
 			m.metricsTracker = nil
@@ -75,12 +75,12 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 
 	// Return early if no providers (clear pool scenario)
 	if len(providers) == 0 {
-		m.logger.Info("No NNTP providers configured - pool cleared")
+		m.logger.InfoContext(m.ctx, "No NNTP providers configured - pool cleared")
 		return nil
 	}
 
 	// Create new pool with providers
-	m.logger.Info("Creating NNTP connection pool", "provider_count", len(providers))
+	m.logger.InfoContext(m.ctx, "Creating NNTP connection pool", "provider_count", len(providers))
 	pool, err := nntppool.NewConnectionPool(nntppool.Config{
 		Providers:      providers,
 		Logger:         m.logger,
@@ -95,10 +95,10 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 	m.pool = pool
 
 	// Start metrics tracker
-	m.metricsTracker = NewMetricsTracker(pool, m.logger)
+	m.metricsTracker = NewMetricsTracker(pool)
 	m.metricsTracker.Start(m.ctx)
 
-	m.logger.Info("NNTP connection pool created successfully")
+	m.logger.InfoContext(m.ctx, "NNTP connection pool created successfully")
 	return nil
 }
 
@@ -108,7 +108,7 @@ func (m *manager) ClearPool() error {
 	defer m.mu.Unlock()
 
 	if m.pool != nil {
-		m.logger.Info("Clearing NNTP connection pool")
+		m.logger.InfoContext(m.ctx, "Clearing NNTP connection pool")
 		if m.metricsTracker != nil {
 			m.metricsTracker.Stop()
 			m.metricsTracker = nil

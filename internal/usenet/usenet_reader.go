@@ -65,7 +65,7 @@ func NewUsenetReader(
 	maxDownloadWorkers int,
 	maxCacheSizeMB int,
 ) (io.ReadCloser, error) {
-	log := slog.Default()
+	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
 
 	// Convert MB to bytes
@@ -119,7 +119,7 @@ func (b *usenetReader) Close() error {
 	case <-time.After(30 * time.Second):
 		// Timeout waiting for downloads to complete
 		// This prevents hanging but logs the issue
-		b.log.Warn("Timeout waiting for downloads to complete during close, potential goroutine leak")
+		b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
 		// Still attempt to clear resources
 		_ = b.rg.Clear()
 		b.rg = nil

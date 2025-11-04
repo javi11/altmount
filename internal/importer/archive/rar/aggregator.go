@@ -80,13 +80,12 @@ func ProcessArchive(
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
 	allowedFileExtensions []string,
-	log *slog.Logger,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
 	}
 
-	log.Info("Analyzing RAR archive content", "parts", len(archiveFiles))
+	slog.InfoContext(ctx, "Analyzing RAR archive content", "parts", len(archiveFiles))
 
 	// Analyze RAR content with timeout
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -94,13 +93,13 @@ func ProcessArchive(
 
 	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password, progressTracker)
 	if err != nil {
-		log.Error("Failed to analyze RAR archive content", "error", err)
+		slog.ErrorContext(ctx, "Failed to analyze RAR archive content", "error", err)
 		return err
 	}
 
 	// Validate file extensions before processing
 	if !hasAllowedFiles(rarContents, allowedFileExtensions) {
-		log.Warn("RAR archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
+		slog.WarnContext(ctx, "RAR archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
 		return ErrNoAllowedFiles
 	}
 

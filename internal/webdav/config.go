@@ -1,6 +1,7 @@
 package webdav
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/javi11/altmount/internal/config"
@@ -18,12 +19,12 @@ type Config struct {
 }
 
 // RegisterConfigHandlers registers handlers for WebDAV-related configuration changes
-func RegisterConfigHandlers(configManager *config.Manager, handler *Handler, logger *slog.Logger) {
+func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, handler *Handler) {
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		// Sync WebDAV auth credentials if they changed
 		if oldConfig.WebDAV.User != newConfig.WebDAV.User || oldConfig.WebDAV.Password != newConfig.WebDAV.Password {
 			handler.SyncAuthCredentials()
-			logger.Info("WebDAV auth credentials updated",
+			slog.InfoContext(ctx, "WebDAV auth credentials updated",
 				"old_user", oldConfig.WebDAV.User,
 				"new_user", newConfig.WebDAV.User)
 		}

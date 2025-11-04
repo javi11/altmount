@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -71,7 +72,7 @@ func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 			// Successfully sent update
 		default:
 			// Channel full, skip this subscriber to avoid blocking
-			pb.log.Warn("subscriber channel full, skipping update", "subscriber_id", subID, "queue_id", queueID)
+			pb.log.WarnContext(context.Background(), "subscriber channel full, skipping update", "subscriber_id", subID, "queue_id", queueID)
 		}
 	}
 	pb.subMu.RUnlock()

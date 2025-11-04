@@ -132,7 +132,7 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 
 // findInstanceForFilePath finds which ARR instance manages the given file path
 func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) (instanceType string, instanceName string, err error) {
-	slog.Debug("Finding instance for file path", "file_path", filePath)
+	slog.DebugContext(ctx, "Finding instance for file path", "file_path", filePath)
 
 	cfg := s.configGetter()
 
@@ -153,7 +153,7 @@ func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) 
 			continue
 		}
 
-		slog.Debug("Checking instance for file",
+		slog.DebugContext(ctx, "Checking instance for file",
 			"instance_name", instance.Name,
 			"instance_type", instance.Type,
 			"candidate_path", candidatePath)

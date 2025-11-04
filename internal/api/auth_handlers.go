@@ -97,7 +97,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	err = s.userRepo.UpdateLastLogin(user.UserID)
 	if err != nil {
 		// Log but don't fail the login
-		slog.Warn("Failed to update last login", "user_id", user.UserID, "error", err)
+		slog.WarnContext(c.Context(), "Failed to update last login", "user_id", user.UserID, "error", err)
 	}
 
 	response := AuthResponse{

@@ -80,13 +80,12 @@ func ProcessArchive(
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
 	allowedFileExtensions []string,
-	log *slog.Logger,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
 	}
 
-	log.Info("Analyzing 7zip archive content", "parts", len(archiveFiles))
+	slog.InfoContext(ctx, "Analyzing 7zip archive content", "parts", len(archiveFiles))
 
 	// Analyze 7zip content with timeout
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -94,15 +93,15 @@ func ProcessArchive(
 
 	sevenZipContents, err := sevenZipProcessor.AnalyzeSevenZipContentFromNzb(ctx, archiveFiles, password, progressTracker)
 	if err != nil {
-		log.Error("Failed to analyze 7zip archive content", "error", err)
+		slog.ErrorContext(ctx, "Failed to analyze 7zip archive content", "error", err)
 		return err
 	}
 
-	log.Info("Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
+	slog.InfoContext(ctx, "Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
 
 	// Validate file extensions before processing
 	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions) {
-		log.Warn("7zip archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
+		slog.WarnContext(ctx, "7zip archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
 		return ErrNoAllowedFiles
 	}
 
@@ -110,7 +109,7 @@ func ProcessArchive(
 	for _, sevenZipContent := range sevenZipContents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
-			log.Debug("Skipping directory in 7zip archive", "path", sevenZipContent.InternalPath)
+			slog.DebugContext(ctx, "Skipping directory in 7zip archive", "path", sevenZipContent.InternalPath)
 			continue
 		}
 
@@ -150,7 +149,7 @@ func ProcessArchive(
 			return fmt.Errorf("failed to write metadata for 7zip file %s: %w", sevenZipContent.Filename, err)
 		}
 
-		log.Debug("Created metadata for 7zip extracted file",
+		slog.DebugContext(ctx, "Created metadata for 7zip extracted file",
 			"file", baseFilename,
 			"original_internal_path", sevenZipContent.InternalPath,
 			"virtual_path", virtualFilePath,
@@ -158,7 +157,7 @@ func ProcessArchive(
 			"segments", len(sevenZipContent.Segments))
 	}
 
-	log.Info("Successfully processed 7zip archive files", "files_processed", len(sevenZipContents))
+	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", len(sevenZipContents))
 
 	return nil
 }

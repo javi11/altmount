@@ -59,7 +59,7 @@ func getEffectiveLogLevel(newLevel, legacyLevel string) string {
 }
 
 // RegisterLogLevelHandler registers handler for log level configuration changes
-func RegisterLogLevelHandler(configManager *config.Manager, debugMode *bool, logger *slog.Logger) {
+func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager, debugMode *bool) {
 	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
 		// Determine old and new log levels
 		oldLevel := getEffectiveLogLevel(oldConfig.Log.Level, oldConfig.Log.Level)
@@ -70,7 +70,7 @@ func RegisterLogLevelHandler(configManager *config.Manager, debugMode *bool, log
 			ApplyLogLevel(newLevel)
 			// Update Fiber logger debug mode
 			*debugMode = newLevel == "debug"
-			logger.Info("Log level updated dynamically",
+			slog.InfoContext(ctx, "Log level updated dynamically",
 				"old_level", oldLevel,
 				"new_level", newLevel,
 				"fiber_logging", *debugMode)
@@ -148,7 +148,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	// Ensure SABnzbd category directories exist
 	if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
 		// Log the error but don't fail the update
-		slog.Warn("Failed to create SABnzbd category directories", "error", err)
+		slog.WarnContext(c.Context(), "Failed to create SABnzbd category directories", "error", err)
 	}
 
 	// Save to file
@@ -235,7 +235,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	if section == "sabnzbd" || section == "" {
 		if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
 			// Log the error but don't fail the update
-			slog.Warn("Failed to create SABnzbd category directories", "error", err)
+			slog.WarnContext(c.Context(), "Failed to create SABnzbd category directories", "error", err)
 		}
 	}
 

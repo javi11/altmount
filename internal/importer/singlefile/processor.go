@@ -27,11 +27,10 @@ func ProcessSingleFile(
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
 	allowedFileExtensions []string,
-	log *slog.Logger,
 ) (string, error) {
 	// Validate file extension before processing
 	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions) {
-		log.Warn("File does not match allowed extensions",
+		slog.WarnContext(ctx, "File does not match allowed extensions",
 			"filename", file.Filename,
 			"allowed_extensions", allowedFileExtensions)
 		return "", fmt.Errorf("file '%s' does not match allowed extensions (allowed: %v)", file.Filename, allowedFileExtensions)
@@ -78,7 +77,7 @@ func ProcessSingleFile(
 		return "", fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)
 	}
 
-	log.Info("Successfully processed single file",
+	slog.InfoContext(ctx, "Successfully processed single file",
 		"file", file.Filename,
 		"virtual_path", virtualFilePath,
 		"size", file.Size)

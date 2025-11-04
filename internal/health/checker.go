@@ -140,7 +140,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		return event
 	}
 
-	slog.Info("Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "full_validation", hc.getCheckAllSegments())
+	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "full_validation", hc.getCheckAllSegments())
 
 	// Validate segment availability using shared validation logic
 	checkErr := usenet.ValidateSegmentAvailability(
@@ -191,7 +191,7 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		// Refresh cache asynchronously to avoid blocking health checks
 		err := hc.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
 		if err != nil {
-			slog.Error("Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
+			slog.ErrorContext(ctx, "Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
 		}
 	}()
 }
