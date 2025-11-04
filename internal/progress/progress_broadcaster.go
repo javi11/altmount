@@ -39,6 +39,17 @@ func NewProgressBroadcaster() *ProgressBroadcaster {
 	return pb
 }
 
+func (pb *ProgressBroadcaster) Close() error {
+	pb.subMu.Lock()
+	defer pb.subMu.Unlock()
+	for _, ch := range pb.subscribers {
+		close(ch)
+	}
+	pb.subscribers = make(map[string]chan ProgressUpdate)
+
+	return nil
+}
+
 // UpdateProgress updates the progress for a queue item
 func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 	// Clamp percentage to 0-100 range

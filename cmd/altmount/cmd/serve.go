@@ -102,6 +102,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create progress broadcaster for WebSocket progress updates
 	progressBroadcaster := progress.NewProgressBroadcaster()
+	defer progressBroadcaster.Close()
 
 	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster)
 	if err != nil {
@@ -158,9 +159,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// ARRs service status logging
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
-		logger.Info("Arrs service ready for health monitoring and repair")
+		logger.InfoContext(ctx, "Arrs service ready for health monitoring and repair")
 	} else {
-		logger.Info("Arrs service is disabled in configuration")
+		logger.InfoContext(ctx, "Arrs service is disabled in configuration")
 	}
 
 	// 9. Create HTTP server
@@ -182,7 +183,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	serverErr := make(chan error, 1)
 	go func() {
 		if err := customServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("Custom server error", "error", err)
+			logger.ErrorContext(ctx, "Custom server error", "error", err)
 			serverErr <- err
 		}
 	}()
@@ -194,45 +195,45 @@ func runServe(cmd *cobra.Command, args []string) error {
 		time.Sleep(2 * time.Second)
 
 		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
-			logger.Warn("Mount service failed to start", "err", err)
+			logger.WarnContext(ctx, "Mount service failed to start", "err", err)
 		}
 	}()
 
 	// Wait for shutdown signal or server error
 	select {
 	case sig := <-sigChan:
-		logger.Info("Received shutdown signal", "signal", sig.String())
+		logger.InfoContext(ctx, "Received shutdown signal", "signal", sig.String())
 		cancel() // Cancel context to signal all services to stop
 	case err := <-serverErr:
-		logger.Error("Server error, shutting down", "error", err)
+		logger.ErrorContext(ctx, "Server error, shutting down", "error", err)
 		cancel()
 	case <-ctx.Done():
-		logger.Info("Context cancelled, shutting down")
+		logger.InfoContext(ctx, "Context cancelled, shutting down")
 	}
 
 	// Start graceful shutdown sequence
-	logger.Info("Starting graceful shutdown sequence")
+	logger.InfoContext(ctx, "Starting graceful shutdown sequence")
 
 	// Stop health worker if running
 	if healthWorker != nil {
 		if err := healthWorker.Stop(ctx); err != nil {
-			logger.Error("Failed to stop health worker", "error", err)
+			logger.ErrorContext(ctx, "Failed to stop health worker", "error", err)
 		} else {
-			logger.Info("Health worker stopped")
+			logger.InfoContext(ctx, "Health worker stopped")
 		}
 	}
 
 	// ARRs service cleanup (no background processes to stop)
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
-		logger.Info("Arrs service cleanup completed")
+		logger.InfoContext(ctx, "Arrs service cleanup completed")
 	}
 
 	// Stop RClone mount service if running
 	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
 		if err := mountService.Stop(ctx); err != nil {
-			logger.Error("Failed to stop mount service", "error", err)
+			logger.ErrorContext(ctx, "Failed to stop mount service", "error", err)
 		} else {
-			logger.Info("RClone mount service stopped")
+			logger.InfoContext(ctx, "RClone mount service stopped")
 		}
 	}
 
@@ -240,14 +241,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	logger.Info("Shutting down server...")
+	logger.InfoContext(ctx, "Shutting down server...")
 	if err := customServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("Error shutting down server", "error", err)
+		logger.ErrorContext(ctx, "Error shutting down server", "error", err)
 		return err
 	}
-	logger.Info("Server shutdown completed")
+	logger.InfoContext(ctx, "Server shutdown completed")
 
-	logger.Info("AltMount server shutdown completed successfully")
+	logger.InfoContext(ctx, "AltMount server shutdown completed successfully")
 	return nil
 }
 
