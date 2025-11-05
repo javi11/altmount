@@ -87,7 +87,10 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 
 	// Fetch first segment data for all files in parallel
 	// This cache is used by both PAR2 extraction and file parsing to avoid redundant fetches
-	firstSegmentCache := p.fetchAllFirstSegments(n.Files)
+	firstSegmentCache, err := p.fetchAllFirstSegments(ctx, n.Files)
+	if err != nil {
+		return nil, err
+	}
 
 	// Create a map of first segment ID to PartSize for optimization in normalizeSegmentSizesWithYenc
 	// This avoids redundant fetching of yEnc headers for the first segment
@@ -115,8 +118,12 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		})
 	}
 
-	par2Descriptors, err := par2.GetFileDescriptors(par2Cache, p.poolManager, p.log)
+	par2Descriptors, err := par2.GetFileDescriptors(ctx, par2Cache, p.poolManager)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, NewNonRetryableError("extracting PAR2 file descriptors canceled", err)
+		}
+
 		p.log.WarnContext(ctx, "Failed to extract PAR2 file descriptors", "error", err)
 	}
 
@@ -150,22 +157,29 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		return nil, NewNonRetryableError("NZB file contains no valid files. This can be caused because the file has missing segments in your providers.", nil)
 	}
 
-	concPool := concpool.NewWithResults[fileResult]().WithMaxGoroutines(runtime.NumCPU())
+	concPool := concpool.NewWithResults[fileResult]().WithMaxGoroutines(runtime.NumCPU()).WithContext(ctx)
 
 	// Process files in parallel using conc pool
 	for _, info := range fileInfos {
-		concPool.Go(func() fileResult {
+		concPool.Go(func(ctx context.Context) (fileResult, error) {
 			parsedFile, err := p.parseFile(ctx, n.Meta, parsed.Filename, info, firstSegmentSizeCache)
 
 			return fileResult{
 				parsedFile: parsedFile,
 				err:        err,
-			}
+			}, nil
 		})
 	}
 
 	// Wait for all goroutines to complete and collect results
-	results := concPool.Wait()
+	results, err := concPool.Wait()
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, NewNonRetryableError("parsing canceled", err)
+		}
+
+		return nil, NewNonRetryableError("failed to get file infos", err)
+	}
 
 	// Check for errors and collect valid results
 	var parsedFiles []*ParsedFile
@@ -338,18 +352,18 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 // fetchAllFirstSegments fetches the first segment data for all files in parallel
 // Returns a slice of FirstSegmentData preserving all fetched data
-func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmentData {
+func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.NzbFile) ([]*FirstSegmentData, error) {
 	cache := make([]*FirstSegmentData, 0, len(files))
 
 	// Return empty cache if no pool manager available
 	if p.poolManager == nil || !p.poolManager.HasPool() {
-		return cache
+		return cache, nil
 	}
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
 		p.log.DebugContext(context.Background(), "Failed to get connection pool for first segment fetching", "error", err)
-		return cache
+		return cache, nil
 	}
 
 	// Use conc pool for parallel fetching
@@ -359,11 +373,11 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 		err       error
 	}
 
-	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(runtime.NumCPU())
+	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(runtime.NumCPU()).WithContext(ctx)
 
 	// Fetch first segment of each file in parallel
 	for _, file := range files {
-		concPool.Go(func() fetchResult {
+		concPool.Go(func(ctx context.Context) (fetchResult, error) {
 			// Skip files without segments
 			if len(file.Segments) == 0 {
 				return fetchResult{
@@ -373,13 +387,13 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 						MissingFirstSegment: true,
 					},
 					err: fmt.Errorf("file has no segments"),
-				}
+				}, nil
 			}
 
 			firstSegment := file.Segments[0]
 
 			// Create context with timeout
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
 			defer cancel()
 
 			// Get body reader for the first segment
@@ -392,7 +406,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 						MissingFirstSegment: true,
 					},
 					err: fmt.Errorf("failed to get body reader: %w", err),
-				}
+				}, nil
 			}
 			defer r.Close()
 
@@ -406,7 +420,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 						MissingFirstSegment: true,
 					},
 					err: fmt.Errorf("failed to get yenc headers: %w", err),
-				}
+				}, nil
 			}
 
 			// Read up to 16KB for PAR2 detection and hash matching
@@ -427,13 +441,13 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 						MissingFirstSegment: true,
 					},
 					err: fmt.Errorf("failed to read segment data: %w", err),
-				}
+				}, nil
 			}
 
 			// Check if we need to read from additional segments to reach 16KB
 			// This is necessary for PAR2 Hash16k matching when segments are small
 			if bytesRead < maxRead && len(file.Segments) > 1 {
-				p.log.DebugContext(context.Background(), "First segment provided less than 16KB, reading from additional segments",
+				p.log.DebugContext(ctx, "First segment provided less than 16KB, reading from additional segments",
 					"file", file.Subject,
 					"first_segment_bytes", bytesRead,
 					"total_segments", len(file.Segments))
@@ -443,12 +457,12 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					segment := file.Segments[segIdx]
 
 					// Create a new context for this segment
-					segCtx, segCancel := context.WithTimeout(context.Background(), time.Second*30)
+					segCtx, segCancel := context.WithTimeout(ctx, time.Second*30)
 
 					segReader, err := cp.BodyReader(segCtx, segment.ID, nil)
 					if err != nil {
 						segCancel()
-						p.log.DebugContext(context.Background(), "Failed to read additional segment for 16KB completion",
+						p.log.DebugContext(ctx, "Failed to read additional segment for 16KB completion",
 							"segment_index", segIdx,
 							"error", err)
 						break // Stop trying, use what we have
@@ -463,7 +477,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					segCancel()
 
 					if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-						p.log.DebugContext(context.Background(), "Error reading from additional segment",
+						p.log.DebugContext(ctx, "Error reading from additional segment",
 							"segment_index", segIdx,
 							"error", err)
 						break // Stop trying, use what we have
@@ -473,7 +487,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					copy(buffer[bytesRead:], tempBuffer[:n])
 					bytesRead += n
 
-					p.log.DebugContext(context.Background(), "Read additional bytes from segment",
+					p.log.DebugContext(ctx, "Read additional bytes from segment",
 						"segment_index", segIdx,
 						"bytes_read", n,
 						"total_bytes", bytesRead)
@@ -494,12 +508,19 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 					Headers:  headers,
 					RawBytes: rawBytes,
 				},
-			}
+			}, nil
 		})
 	}
 
 	// Wait for all fetches to complete
-	results := concPool.Wait()
+	results, err := concPool.Wait()
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, NewNonRetryableError("fetching first segments canceled", err)
+		}
+
+		return nil, NewNonRetryableError("failed to fetch first segments", err)
+	}
 
 	// Build cache from all fetches (successful and failed)
 	for _, result := range results {
@@ -525,7 +546,7 @@ func (p *Parser) fetchAllFirstSegments(files []nzbparser.NzbFile) []*FirstSegmen
 		}
 	}
 
-	return cache
+	return cache, nil
 }
 
 // fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment

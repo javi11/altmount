@@ -27,13 +27,16 @@ func NewSymlinkFinder() *SymlinkFinder {
 // FindLibrarySymlink searches for a symlink in the library directory that points to the given file path
 // It checks the cache first, and if not found, performs a recursive search through the library directory
 // Returns the library symlink path if found, empty string otherwise
-func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath string, cfg *config.Config) (string, error) {
+func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, filePath string, cfg *config.Config) (string, error) {
 	// If library_dir is not configured, return empty
 	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
 		return "", nil
 	}
 
 	libraryDir := *cfg.Health.LibraryDir
+	mountDir := cfg.MountPath
+
+	mountFilePath := filepath.Join(mountDir, filePath)
 
 	// Check cache first
 	sf.cacheMu.RLock()
@@ -55,9 +58,6 @@ func (sf *SymlinkFinder) FindLibrarySymlink(ctx context.Context, mountFilePath s
 	} else {
 		sf.cacheMu.RUnlock()
 	}
-
-	// Get the mount directory from config to filter symlinks
-	mountDir := cfg.Metadata.RootPath
 
 	slog.InfoContext(ctx, "Searching for library symlink",
 		"mount_path", mountFilePath,

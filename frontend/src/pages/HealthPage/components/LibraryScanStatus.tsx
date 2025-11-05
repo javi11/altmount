@@ -130,8 +130,8 @@ export function LibraryScanStatus({
 									<span>
 										{status.progress.total_files > 0
 											? Math.round(
-													(status.progress.processed_files / status.progress.total_files) * 100,
-												)
+												(status.progress.processed_files / status.progress.total_files) * 100,
+											)
 											: 0}
 										%
 									</span>
@@ -142,7 +142,7 @@ export function LibraryScanStatus({
 									max={status.progress.total_files}
 								/>
 								{status.progress.start_time && (
-									<div className="mt-1 text-gray-600 text-sm">
+									<div className="mt-1 text-sm">
 										Elapsed: {formatRelativeTime(new Date(status.progress.start_time))}
 									</div>
 								)}

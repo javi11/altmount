@@ -70,24 +70,40 @@ export function HealthConfigSection({
 							onChange={(e) => handleInputChange("enabled", e.target.checked)}
 						/>
 					</label>
-					<div className="alert alert-warning mt-2">
-						<AlertTriangle className="h-4 w-4" />
-						<div className="text-sm">
-							<strong>Warning:</strong> When enabled, the health system will monitor file integrity
-							and automatically trigger re-downloads through connected ARRs (Radarr/Sonarr) for
-							corrupted files. Corrupted files will be automatically DELETED during repair. Disable
-							to turn off all health monitoring.
+					{formData.enabled && (
+						<div className="mt-3 space-y-2">
+							<p className="label font-medium text-sm">How it works:</p>
+							<ol className="ml-2 list-inside list-decimal space-y-1 text-sm">
+								<li>
+									<strong>Periodic sync:</strong> The system periodically syncs with the library
+									directory to discover files.
+								</li>
+								<li>
+									<strong>Smart scheduling:</strong> Each record is checked based on its release
+									date × 2. For example, if a file was released 1 day ago, the next check will be
+									scheduled 1 day after (2 days total).
+								</li>
+								<li>
+									<strong>Health validation:</strong> Files are validated through partial segment
+									checks or full checks. If a file is found to be unhealthy, a repair is
+									automatically triggered.
+								</li>
+								<li>
+									<strong>Automatic repair:</strong> When unhealthy files are detected, the system
+									deletes the file in the ARR application and triggers a redownload to restore file
+									integrity.
+								</li>
+							</ol>
 						</div>
-					</div>
+					)}
 				</fieldset>
 
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Library Directory</legend>
 					<input
 						type="text"
-						className={`input ${
-							validationError && formData.enabled ? "input-error border-error" : ""
-						}`}
+						className={`input ${validationError && formData.enabled ? "input-error border-error" : ""
+							}`}
 						value={formData.library_dir || ""}
 						disabled={isReadOnly}
 						placeholder="/media/library"
@@ -99,7 +115,7 @@ export function HealthConfigSection({
 							<span className="text-sm">{validationError}</span>
 						</div>
 					)}
-					<p className="label text-gray-600 text-sm">
+					<p className="label text-sm">
 						Path to your organized media library that contains symlinks pointing to altmount files.
 						When a repair is triggered, the system will search for symlinks in this directory and
 						use the library path for ARR rescan instead of the mount path.
@@ -129,7 +145,18 @@ export function HealthConfigSection({
 							</span>
 						</div>
 					)}
-					<p className="label text-gray-600 text-sm">
+					{formData.cleanup_orphaned_metadata && formData.library_dir?.trim() && (
+						<div className="alert alert-warning mt-2">
+							<AlertTriangle className="h-4 w-4" />
+							<div className="text-sm">
+								<strong>Important:</strong> When enabled, this feature will automatically DELETE
+								metadata files that don't have corresponding symlinks in the library directory. This
+								helps prevent storage waste from orphaned metadata files, but files will be
+								permanently removed.
+							</div>
+						</div>
+					)}
+					<p className="label text-sm">
 						Automatically delete metadata files that don't have corresponding symlinks in the
 						library directory. This helps prevent storage waste from orphaned metadata files.
 						{formData.cleanup_orphaned_metadata && (
@@ -165,7 +192,7 @@ export function HealthConfigSection({
 										)
 									}
 								/>
-								<p className="label text-gray-600 text-sm">
+								<p className="label text-sm">
 									Time between automatic health checks (default: 5 seconds)
 								</p>
 							</fieldset>
@@ -187,7 +214,7 @@ export function HealthConfigSection({
 										)
 									}
 								/>
-								<p className="label text-gray-600 text-sm">
+								<p className="label text-sm">
 									Maximum concurrent connections used during repair operations
 								</p>
 							</fieldset>
@@ -204,7 +231,7 @@ export function HealthConfigSection({
 									onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
 								/>
 							</label>
-							<p className="label text-gray-600 text-sm">
+							<p className="label text-sm">
 								When disabled, use a sampling approach for faster processing. Enable for thorough
 								validation of all segments (slower).
 							</p>

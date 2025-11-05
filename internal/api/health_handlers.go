@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -159,7 +160,7 @@ func (s *Server) handleGetHealth(c *fiber.Ctx) error {
 	}
 
 	// Get by ID
-	item, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -211,7 +212,7 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 	}
 
 	// Check if the record exists
-	item, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -247,7 +248,7 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 	}
 
 	// Delete the health record from database using ID
-	err = s.healthRepo.DeleteHealthRecordByID(c.Context(),id)
+	err = s.healthRepo.DeleteHealthRecordByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -304,7 +305,7 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	if s.healthWorker != nil {
 		for _, filePath := range req.FilePaths {
 			// Get the record to check status
-			item, err := s.healthRepo.GetFileHealth(c.Context(),filePath)
+			item, err := s.healthRepo.GetFileHealth(c.Context(), filePath)
 			if err != nil {
 				continue // Skip if we can't get the record, will fail in bulk delete anyway
 			}
@@ -320,7 +321,7 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	}
 
 	// Delete health records in bulk
-	err := s.healthRepo.DeleteHealthRecordsBulk(c.Context(),req.FilePaths)
+	err := s.healthRepo.DeleteHealthRecordsBulk(c.Context(), req.FilePaths)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -376,7 +377,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	}
 
 	// Check if item exists
-	item, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -413,18 +414,19 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 		})
 	}
 
-	// Set repair triggered status after successful ARR notification using ID
-	err = s.healthRepo.SetRepairTriggeredByID(c.Context(),id, nil)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update repair status",
-			"details": "ARR repair triggered but failed to update database: " + err.Error(),
-		})
+	// Remove file from health table since repair was successfully triggered to ARR
+	if err := s.healthRepo.DeleteHealthRecord(ctx, item.FilePath); err != nil {
+		slog.ErrorContext(ctx, "Failed to delete health record after repair trigger",
+			"error", err,
+			"file_path", item.FilePath)
+		// Don't fail the repair trigger if deletion fails - just log the error
+	} else {
+		slog.InfoContext(ctx, "Removed file from health table after successful repair trigger",
+			"file_path", item.FilePath)
 	}
 
 	// Get updated item
-	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -446,7 +448,7 @@ func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 	pagination := ParsePaginationFiber(c)
 
 	// Get corrupted files using GetUnhealthyFiles
-	items, err := s.healthRepo.GetUnhealthyFiles(c.Context(),pagination.Limit)
+	items, err := s.healthRepo.GetUnhealthyFiles(c.Context(), pagination.Limit)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -710,7 +712,7 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Add file to health database
-	err := s.healthRepo.AddFileToHealthCheck(c.Context(),req.FilePath, maxRetries, req.SourceNzb)
+	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, maxRetries, req.SourceNzb)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -720,7 +722,7 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Return the health record
-	item, err := s.healthRepo.GetFileHealth(c.Context(),req.FilePath)
+	item, err := s.healthRepo.GetFileHealth(c.Context(), req.FilePath)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -799,7 +801,7 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Check if item exists in health database
-	item, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -825,7 +827,7 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Immediately set status to 'checking' using ID
-	err = s.healthRepo.SetFileCheckingByID(c.Context(),id)
+	err = s.healthRepo.SetFileCheckingByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -855,7 +857,7 @@ func (s *Server) handleDirectHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Get the updated health record with 'checking' status
-	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -948,7 +950,7 @@ func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 	}
 
 	// Reset all items to pending status using bulk method
-	restartedCount, err := s.healthRepo.ResetHealthChecksBulk(c.Context(),req.FilePaths)
+	restartedCount, err := s.healthRepo.ResetHealthChecksBulk(c.Context(), req.FilePaths)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -1008,7 +1010,7 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Check if item exists in health database
-	item, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -1044,7 +1046,7 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Get the updated health record
-	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(),id)
+	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

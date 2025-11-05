@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -260,6 +261,12 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	// Find files to add (in filesystem but not in database)
 	var filesToAdd []database.AutomaticHealthCheckRecord
 	for i, metaPath := range metadataFiles {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		virtualPath := lsw.metaPathToVirtualPath(metaPath)
 		if _, exists := dbPathSet[virtualPath]; !exists {
 			// Read metadata to get release date
@@ -323,7 +330,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	}
 
 	if len(filesToDelete) > 0 {
-		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx,filesToDelete); err != nil {
+		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, filesToDelete); err != nil {
 			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
 				"count", len(filesToDelete),
 				"error", err)
@@ -337,7 +344,15 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	// Additional cleanup of orphaned metadata files if enabled
 	metadataDeletedCount := 0
 	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
-		metadataDeletedCount = lsw.validateSymlinks(ctx, metadataFiles)
+		metadataDeletedCount, err = lsw.validateSymlinks(ctx, metadataFiles)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
+			slog.ErrorContext(ctx, "Failed to validate symlinks", "error", err)
+			return
+		}
 	}
 
 	duration := time.Since(startTime)
@@ -409,14 +424,14 @@ func (lsw *LibrarySyncWorker) metaPathToVirtualPath(metaPath string) string {
 }
 
 // validateSymlinks validates metadata files against library symlinks and deletes orphaned metadata
-func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFiles []string) int {
+func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFiles []string) (int, error) {
 	slog.InfoContext(ctx, "Starting symlink validation for library directory")
 
 	// Get all library symlinks
 	symlinkPaths, err := lsw.getAllLibrarySymlinks(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to get library symlinks", "error", err)
-		return 0
+		return 0, err
 	}
 
 	// Build map of virtual paths that have symlinks
@@ -429,6 +444,12 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 
 	// Check each metadata file
 	for _, metaPath := range metadataFiles {
+		select {
+		case <-ctx.Done():
+			return deletedCount, ctx.Err()
+		default:
+		}
+
 		virtualPath := lsw.metaPathToVirtualPath(metaPath)
 		target := filepath.Clean(filepath.Join(lsw.configGetter().MountPath, virtualPath))
 		if _, hasSymlink := symlinkSet[target]; !hasSymlink {
@@ -437,8 +458,15 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 				"mount_path", target)
 
 			// Delete from database
-			if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx,[]string{virtualPath}); err != nil {
+			if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, []string{virtualPath}); err != nil {
 				slog.ErrorContext(ctx, "Failed to delete health record",
+					"virtual_path", virtualPath,
+					"error", err)
+			}
+
+			// Delete from metadata
+			if err := lsw.metadataService.DeleteFileMetadata(virtualPath); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete metadata",
 					"virtual_path", virtualPath,
 					"error", err)
 			}
@@ -459,7 +487,7 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 		"metadata_deleted", deletedCount,
 		"symlinks_found", len(symlinkPaths))
 
-	return deletedCount
+	return deletedCount, nil
 }
 
 // getAllLibrarySymlinks collects all symlinks from library directory that point to the mount

@@ -1,6 +1,6 @@
 import { Heart } from "lucide-react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
-import { formatRelativeTime, truncateText } from "../../../../lib/utils";
+import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
 import type { FileHealth } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 
@@ -111,7 +111,7 @@ export function HealthTableRow({
 			</td>
 			<td>
 				<span className="text-base-content/70 text-sm">
-					{item.scheduled_check_at ? formatRelativeTime(item.scheduled_check_at) : "Not scheduled"}
+					{item.scheduled_check_at ? formatFutureTime(item.scheduled_check_at) : "Not scheduled"}
 				</span>
 			</td>
 			<td>

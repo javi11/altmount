@@ -190,7 +190,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Convert iterator results to RarContent
 	// Note: AES credentials are extracted per-file, not per-archive
-	Contents, err := rh.convertAggregatedFilesToRarContent(aggregatedFiles, normalizedFiles)
+	Contents, err := rh.convertAggregatedFilesToRarContent(ctx, aggregatedFiles, normalizedFiles)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to convert iterator results to RarContent", err)
 	}
@@ -359,7 +359,7 @@ func (rh *rarProcessor) parseRarFilename(filename string) (base string, part int
 // convertAggregatedFilesToRarContent converts rarlist.AggregatedFile results to RarContent
 // Note: AES credentials are extracted per-file from each file's first part, similar to
 // the reference implementation in github.com/javi11/rardecode/blob/main/examples/rarextract/main.go
-func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []parser.ParsedFile) ([]Content, error) {
+func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, aggregatedFiles []rardecode.ArchiveFileInfo, rarFiles []parser.ParsedFile) ([]Content, error) {
 	// Build quick lookup for rar part parser.ParsedFile by both full path and base name
 	fileIndex := make(map[string]*parser.ParsedFile, len(rarFiles)*2)
 	for i := range rarFiles {
@@ -405,14 +405,14 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 				pf = fileIndex[filepath.Base(part.Path)]
 			}
 			if pf == nil {
-				rh.log.WarnContext(context.Background(), "RAR part not found among parsed NZB files", "part_path", part.Path, "file", af.Name)
+				rh.log.WarnContext(ctx, "RAR part not found among parsed NZB files", "part_path", part.Path, "file", af.Name)
 				continue
 			}
 
 			// Extract the slice of this part's bytes that belong to the aggregated file.
 			sliced, covered, err := slicePartSegments(pf.Segments, part.DataOffset, part.PackedSize)
 			if err != nil {
-				rh.log.ErrorContext(context.Background(), "Failed slicing part segments", "error", err, "part_path", part.Path, "file", af.Name)
+				rh.log.ErrorContext(ctx, "Failed slicing part segments", "error", err, "part_path", part.Path, "file", af.Name)
 				continue
 			}
 
@@ -429,7 +429,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(aggregatedFiles []rar
 			if covered > originalCovered {
 				shortfall := covered - originalCovered
 				lastSeg := sliced[len(sliced)-1]
-				rh.log.WarnContext(context.Background(), "Patched missing segment at end of part",
+				rh.log.WarnContext(ctx, "Patched missing segment at end of part",
 					"file", af.Name,
 					"part_index", partIdx,
 					"part_path", filepath.Base(part.Path),

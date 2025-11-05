@@ -685,6 +685,7 @@ func (s *Service) attemptSABnzbdFallback(ctx context.Context, item *database.Imp
 
 	// Send to external SABnzbd
 	nzoID, err := s.sabnzbdClient.SendNZBFile(
+		ctx,
 		cfg.SABnzbd.FallbackHost,
 		cfg.SABnzbd.FallbackAPIKey,
 		item.NzbPath,

@@ -249,7 +249,7 @@ func (s *Service) radarrManagesFile(ctx context.Context, client *radarr.Radarr, 
 		"file_path", filePath)
 
 	// Get root folders from Radarr (much faster than GetMovie)
-	rootFolders, err := client.GetRootFolders()
+	rootFolders, err := client.GetRootFoldersContext(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "Failed to get root folders from Radarr for file check", "error", err)
 		return false
@@ -290,7 +290,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		"full_path", fullPath)
 
 	// Get all movies to find the one with matching file path
-	movies, err := client.GetMovie(&radarr.GetMovie{})
+	movies, err := client.GetMovieContext(ctx, &radarr.GetMovie{})
 	if err != nil {
 		return fmt.Errorf("failed to get movies from Radarr: %w", err)
 	}
@@ -347,7 +347,7 @@ func (s *Service) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, 
 		"file_path", filePath)
 
 	// Get root folders from Sonarr (much faster than GetAllSeries)
-	rootFolders, err := client.GetRootFolders()
+	rootFolders, err := client.GetRootFoldersContext(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "Failed to get root folders from Sonarr for file check", "error", err)
 		return false
@@ -378,17 +378,13 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("Health.LibraryDir is not configured")
 	}
 
-	// Construct full path using library directory
-	fullPath := filepath.Join(libraryDir, strings.TrimPrefix(filePath, "/"))
-
 	slog.DebugContext(ctx, "Triggering Sonarr rescan/re-download by path",
 		"instance", instanceName,
 		"file_path", filePath,
-		"library_dir", libraryDir,
-		"full_path", fullPath)
+		"library_dir", libraryDir)
 
 	// Get all series to find the one that contains this file path
-	series, err := client.GetAllSeries()
+	series, err := client.GetAllSeriesContext(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get series from Sonarr: %w", err)
 	}
@@ -396,23 +392,23 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	// Find the series that contains this file path
 	var targetSeries *sonarr.Series
 	for _, show := range series {
-		if strings.Contains(fullPath, show.Path) {
+		if strings.Contains(filePath, show.Path) {
 			targetSeries = show
 			break
 		}
 	}
 
 	if targetSeries == nil {
-		return fmt.Errorf("no series found containing file path: %s", fullPath)
+		return fmt.Errorf("no series found containing file path: %s", filePath)
 	}
 
 	slog.DebugContext(ctx, "Found matching series for file",
 		"series_title", targetSeries.Title,
 		"series_path", targetSeries.Path,
-		"file_path", fullPath)
+		"file_path", filePath)
 
 	// Get all episodes for this specific series
-	episodes, err := client.GetSeriesEpisodes(&sonarr.GetEpisode{
+	episodes, err := client.GetSeriesEpisodesContext(ctx, &sonarr.GetEpisode{
 		SeriesID: targetSeries.ID,
 	})
 	if err != nil {
@@ -420,7 +416,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	// Get episode files for this series to find the matching file
-	episodeFiles, err := client.GetSeriesEpisodeFiles(targetSeries.ID)
+	episodeFiles, err := client.GetSeriesEpisodeFilesContext(ctx, targetSeries.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get episode files for series %s: %w", targetSeries.Title, err)
 	}
@@ -428,14 +424,14 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	// Find the episode file with matching path
 	var targetEpisodeFile *sonarr.EpisodeFile
 	for _, episodeFile := range episodeFiles {
-		if episodeFile.Path == fullPath {
+		if episodeFile.Path == filePath {
 			targetEpisodeFile = episodeFile
 			break
 		}
 	}
 
 	if targetEpisodeFile == nil {
-		return fmt.Errorf("no episode file found with path: %s", fullPath)
+		return fmt.Errorf("no episode file found with path: %s", filePath)
 	}
 
 	// Find episodes that use this episode file
@@ -447,7 +443,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	if len(targetEpisodes) == 0 {
-		return fmt.Errorf("no episodes found with file path: %s", fullPath)
+		return fmt.Errorf("no episodes found with file path: %s", filePath)
 	}
 
 	slog.DebugContext(ctx, "Found matching episodes",
@@ -545,7 +541,7 @@ func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 
 	// Try Radarr first
 	radarrClient := radarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
-	radarrStatus, err := radarrClient.GetSystemStatus()
+	radarrStatus, err := radarrClient.GetSystemStatusContext(ctx)
 	if err == nil {
 		// Check AppName from the result
 		switch radarrStatus.AppName {
@@ -562,7 +558,7 @@ func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 
 	// Try Sonarr
 	sonarrClient := sonarr.New(&starr.Config{URL: arrURL, APIKey: apiKey})
-	sonarrStatus, err := sonarrClient.GetSystemStatus()
+	sonarrStatus, err := sonarrClient.GetSystemStatusContext(ctx)
 	if err == nil {
 		// Check AppName from the result
 		switch sonarrStatus.AppName {
@@ -664,11 +660,11 @@ func (s *Service) GetInstance(instanceType, instanceName string) *ConfigInstance
 }
 
 // TestConnection tests the connection to an arrs instance
-func (s *Service) TestConnection(instanceType, url, apiKey string) error {
+func (s *Service) TestConnection(ctx context.Context, instanceType, url, apiKey string) error {
 	switch instanceType {
 	case "radarr":
 		client := radarr.New(&starr.Config{URL: url, APIKey: apiKey})
-		_, err := client.GetSystemStatus()
+		_, err := client.GetSystemStatusContext(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to connect to Radarr: %w", err)
 		}

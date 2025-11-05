@@ -60,7 +60,7 @@ export function LoginPage() {
 					<h2 className="mt-6 font-extrabold text-3xl text-gray-900">
 						{showRegister ? "Create Admin Account" : "Sign in to Altmount"}
 					</h2>
-					<p className="mt-2 text-gray-600 text-sm">
+					<p className="mt-2 text-sm">
 						{hasConnectionError
 							? "Cannot connect to server - please check your connection"
 							: showRegister
@@ -117,7 +117,7 @@ export function LoginPage() {
 					</div>
 				)}
 
-				<div className="text-center text-gray-500 text-xs">
+				<div className="text-center text-xs">
 					{hasConnectionError ? (
 						<div className="space-y-2">
 							<p className="text-red-600">Connection to server failed.</p>

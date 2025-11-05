@@ -286,49 +286,6 @@ func (ms *MetadataService) CreateSegmentData(startOffset, endOffset int64, messa
 	}
 }
 
-// WalkMetadata walks through all metadata files in the filesystem
-func (ms *MetadataService) WalkMetadata(walkFunc func(virtualPath string, metadata *metapb.FileMetadata) error) error {
-	return filepath.WalkDir(ms.rootPath, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip if not a .meta file
-		if d.IsDir() || filepath.Ext(d.Name()) != ".meta" {
-			return nil
-		}
-
-		// Calculate virtual path
-		relPath, err := filepath.Rel(ms.rootPath, path)
-		if err != nil {
-			return err
-		}
-
-		// Remove .meta extension and convert to virtual path
-		virtualName := filepath.Base(relPath)[:len(filepath.Base(relPath))-5]
-		virtualDir := filepath.Dir(relPath)
-		if virtualDir == "." {
-			virtualDir = "/"
-		} else {
-			virtualDir = "/" + filepath.ToSlash(virtualDir)
-		}
-		virtualPath := filepath.Join(virtualDir, virtualName)
-		virtualPath = filepath.ToSlash(virtualPath)
-
-		// Read metadata
-		metadata, err := ms.ReadFileMetadata(virtualPath)
-		if err != nil {
-			return fmt.Errorf("failed to read metadata for %s: %w", virtualPath, err)
-		}
-
-		if metadata != nil {
-			return walkFunc(virtualPath, metadata)
-		}
-
-		return nil
-	})
-}
-
 func (ms *MetadataService) CreateDirectory(name string) error {
 	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
 }

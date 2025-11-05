@@ -497,7 +497,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 	query := fmt.Sprintf(`
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
-		       error_details, created_at, updated_at
+		       error_details, created_at, updated_at, scheduled_check_at
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
@@ -541,7 +541,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 			&health.LastError, &health.RetryCount, &health.MaxRetries,
 			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.SourceNzbPath, &health.ErrorDetails,
-			&health.CreatedAt, &health.UpdatedAt,
+			&health.CreatedAt, &health.UpdatedAt, &health.ScheduledCheckAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan health item: %w", err)

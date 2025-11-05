@@ -175,7 +175,7 @@ func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := s.arrsService.TestConnection(string(req.Type), req.URL, req.APIKey); err != nil {
+	if err := s.arrsService.TestConnection(c.Context(), string(req.Type), req.URL, req.APIKey); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"success": false,
 			"error":   err.Error(),

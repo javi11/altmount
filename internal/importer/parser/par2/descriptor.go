@@ -23,14 +23,14 @@ type FirstSegmentData struct {
 // Similar to C# GetPar2FileDescriptorsStep.GetPar2FileDescriptors
 // Uses cached first segment data and streams through the PAR2 file
 func GetFileDescriptors(
+	ctx context.Context,
 	firstSegmentCache []*FirstSegmentData,
 	poolManager pool.Manager,
-	log *slog.Logger,
 ) (map[[16]byte]*FileDescriptor, error) {
 	descriptors := make(map[[16]byte]*FileDescriptor)
 
 	if poolManager == nil || !poolManager.HasPool() {
-		log.Debug("No pool manager available for PAR2 extraction")
+		slog.DebugContext(ctx, "No pool manager available for PAR2 extraction")
 		return descriptors, nil
 	}
 
@@ -62,7 +62,7 @@ func GetFileDescriptors(
 	}
 
 	// Parse the PAR2 file and extract file descriptors
-	fileDescriptors, err := readFileDescriptors(par2IndexFile, poolManager, log)
+	fileDescriptors, err := readFileDescriptors(ctx, par2IndexFile, poolManager)
 	if err != nil {
 		return descriptors, fmt.Errorf("failed to read PAR2 file descriptors: %w", err)
 	}
@@ -80,9 +80,9 @@ func GetFileDescriptors(
 // Similar to C# Par2.ReadFileDescriptions
 // This function reads ALL segments of the PAR2 file sequentially to find all FileDesc packets
 func readFileDescriptors(
+	ctx context.Context,
 	par2File *nzbparser.NzbFile,
 	poolManager pool.Manager,
-	log *slog.Logger,
 ) ([]FileDescriptor, error) {
 	var descriptors []FileDescriptor
 
@@ -97,7 +97,7 @@ func readFileDescriptors(
 
 	// Create context with timeout (30 seconds per segment should be enough)
 	// For multi-segment files, this gives adequate time
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30*time.Duration(len(par2File.Segments)))
+	ctx, cancel := context.WithTimeout(ctx, time.Second*30*time.Duration(len(par2File.Segments)))
 	defer cancel()
 
 	// Create sequential reader that will read ALL segments of the PAR2 file
@@ -118,6 +118,12 @@ func readFileDescriptors(
 	packetCount := 0
 
 	for packetCount < maxPackets {
+		select {
+		case <-ctx.Done():
+			return descriptors, ctx.Err()
+		default:
+		}
+
 		// Read packet header
 		header, err := packetReader.ReadHeader()
 		if err != nil {
@@ -136,7 +142,7 @@ func readFileDescriptors(
 			// Read and parse the file descriptor
 			desc, err := packetReader.ReadFileDescriptor(header)
 			if err != nil {
-				log.Debug("Failed to read file descriptor", "error", err)
+				slog.DebugContext(ctx, "Failed to read file descriptor", "error", err)
 				// Skip to next packet
 				continue
 			}
@@ -145,7 +151,7 @@ func readFileDescriptors(
 		} else {
 			// Skip non-FileDesc packets
 			if err := packetReader.SkipPacketBody(header); err != nil {
-				log.Debug("Failed to skip packet body", "error", err)
+				slog.DebugContext(ctx, "Failed to skip packet body", "error", err)
 				break
 			}
 		}

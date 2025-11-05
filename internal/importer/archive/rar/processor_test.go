@@ -1,10 +1,11 @@
 package rar
 
 import (
+	"context"
 	"testing"
 
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/importer/parser"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/rardecode/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -56,7 +57,7 @@ func TestConvertAggregatedFilesToRarContentSinglePart(t *testing.T) {
 	rarFiles := []parser.ParsedFile{{Filename: "vol1.rar", Segments: []*metapb.SegmentData{seg("s1", 100)}}}
 	ag := []rardecode.ArchiveFileInfo{{Name: "file.bin", TotalPackedSize: 60, Parts: []rardecode.FilePartInfo{{Path: "vol1.rar", DataOffset: 10, PackedSize: 60}}}}
 
-	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles)
+	out, err := rp.convertAggregatedFilesToRarContent(context.Background(), ag, rarFiles)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	require.Len(t, out[0].Segments, 1)
@@ -80,7 +81,7 @@ func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 		},
 	}}
 
-	out, err := rp.convertAggregatedFilesToRarContent(ag, rarFiles)
+	out, err := rp.convertAggregatedFilesToRarContent(context.Background(), ag, rarFiles)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	got := out[0]

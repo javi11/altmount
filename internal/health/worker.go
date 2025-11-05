@@ -206,7 +206,7 @@ func (hw *HealthWorker) CancelHealthCheck(ctx context.Context, filePath string) 
 	delete(hw.activeChecks, filePath)
 
 	// Update file status to pending to allow retry
-	err := hw.healthRepo.UpdateFileHealth(ctx,filePath, database.HealthStatusPending, nil, nil, nil, false)
+	err := hw.healthRepo.UpdateFileHealth(ctx, filePath, database.HealthStatusPending, nil, nil, nil, false)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to update file status after cancellation", "file_path", filePath, "error", err)
 		return fmt.Errorf("failed to update file status after cancellation: %w", err)
@@ -271,7 +271,7 @@ func (hw *HealthWorker) run(ctx context.Context) {
 // AddToHealthCheck adds a file to the health check list with pending status
 func (hw *HealthWorker) AddToHealthCheck(ctx context.Context, filePath string, sourceNzb *string) error {
 	// Check if file already exists in health database
-	existingHealth, err := hw.healthRepo.GetFileHealth(ctx,filePath)
+	existingHealth, err := hw.healthRepo.GetFileHealth(ctx, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to check existing health record: %w", err)
 	}
@@ -320,17 +320,19 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 
 	// Start health check in background
 	go func() {
-		ctx := context.Background() // Use background context for async operation
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
 		checkErr := hw.performDirectCheck(ctx, filePath)
 		if checkErr != nil {
-			if errors.Is(checkErr, context.Canceled) {
-				slog.InfoContext(ctx, "Background health check canceled", "file_path", filePath)
+			if errors.Is(checkErr, context.DeadlineExceeded) {
+				slog.ErrorContext(ctx, "Background health check timed out after 10 minutes", "file_path", filePath)
 			} else {
 				slog.ErrorContext(ctx, "Background health check failed", "file_path", filePath, "error", checkErr)
 			}
 
 			// Get current health record to preserve source NZB path
-			fileHealth, getErr := hw.healthRepo.GetFileHealth(ctx,filePath)
+			fileHealth, getErr := hw.healthRepo.GetFileHealth(ctx, filePath)
 			var sourceNzb *string
 			if getErr == nil && fileHealth != nil {
 				sourceNzb = fileHealth.SourceNzbPath
@@ -338,7 +340,7 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 
 			// Set status back to pending if the check failed
 			errorMsg := checkErr.Error()
-			updateErr := hw.healthRepo.UpdateFileHealth(ctx,filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil, false)
+			updateErr := hw.healthRepo.UpdateFileHealth(ctx, filePath, database.HealthStatusPending, &errorMsg, sourceNzb, nil, false)
 			if updateErr != nil {
 				slog.ErrorContext(ctx, "Failed to update status after failed check", "file_path", filePath, "error", updateErr)
 			}
@@ -420,7 +422,7 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 		}
 
 		// Get file health record to calculate next scheduled check
-		fileHealth, err := hw.healthRepo.GetFileHealth(ctx,event.FilePath)
+		fileHealth, err := hw.healthRepo.GetFileHealth(ctx, event.FilePath)
 		if err != nil {
 			slog.ErrorContext(ctx, "Failed to get file health record", "file_path", event.FilePath, "error", err)
 			return fmt.Errorf("failed to get file health record: %w", err)
@@ -434,7 +436,7 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 
 			// Mark as healthy and reschedule next check based on release date
 			nextCheck := calculateNextCheck(*releaseDate, time.Now())
-			if err := hw.healthRepo.MarkAsHealthy(ctx,event.FilePath, nextCheck); err != nil {
+			if err := hw.healthRepo.MarkAsHealthy(ctx, event.FilePath, nextCheck); err != nil {
 				slog.ErrorContext(ctx, "Failed to mark file as healthy", "file_path", event.FilePath, "error", err)
 				return fmt.Errorf("failed to mark file as healthy: %w", err)
 			}
@@ -448,7 +450,7 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 
 	case EventTypeFileCorrupted, EventTypeCheckFailed:
 		// Get current health record to check retry counts
-		fileHealth, err := hw.healthRepo.GetFileHealth(ctx,event.FilePath)
+		fileHealth, err := hw.healthRepo.GetFileHealth(ctx, event.FilePath)
 		if err != nil {
 			slog.ErrorContext(ctx, "Failed to get file health record", "file_path", event.FilePath, "error", err)
 			return fmt.Errorf("failed to get file health record: %w", err)
@@ -477,14 +479,14 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 				slog.ErrorContext(ctx, "Repair check failed", "file_path", event.FilePath, "error", event.Error)
 			}
 
-			if err := hw.healthRepo.IncrementRepairRetryCount(ctx,event.FilePath, errorMsg); err != nil {
+			if err := hw.healthRepo.IncrementRepairRetryCount(ctx, event.FilePath, errorMsg); err != nil {
 				slog.ErrorContext(ctx, "Failed to increment repair retry count", "file_path", event.FilePath, "error", err)
 				return fmt.Errorf("failed to increment repair retry count: %w", err)
 			}
 
 			if fileHealth.RepairRetryCount >= fileHealth.MaxRepairRetries-1 {
 				// Max repair retries reached - mark as permanently corrupted
-				if err := hw.healthRepo.MarkAsCorrupted(ctx,event.FilePath, errorMsg); err != nil {
+				if err := hw.healthRepo.MarkAsCorrupted(ctx, event.FilePath, errorMsg); err != nil {
 					slog.ErrorContext(ctx, "Failed to mark file as corrupted after repair retries", "error", err)
 					return fmt.Errorf("failed to mark file as corrupted: %w", err)
 				}
@@ -508,7 +510,7 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 			}
 
 			// Increment health check retry count
-			if err := hw.healthRepo.IncrementRetryCount(ctx,event.FilePath, errorMsg); err != nil {
+			if err := hw.healthRepo.IncrementRetryCount(ctx, event.FilePath, errorMsg); err != nil {
 				slog.ErrorContext(ctx, "Failed to increment retry count", "file_path", event.FilePath, "error", err)
 				return fmt.Errorf("failed to increment retry count: %w", err)
 			}
@@ -551,7 +553,7 @@ func (hw *HealthWorker) processRepairNotification(ctx context.Context, fileHealt
 		slog.WarnContext(ctx, "Repair trigger failed, will retry later", "file_path", fileHealth.FilePath, "error", err)
 
 		errorMsg := err.Error()
-		retryErr := hw.healthRepo.IncrementRepairRetryCount(ctx,fileHealth.FilePath, &errorMsg)
+		retryErr := hw.healthRepo.IncrementRepairRetryCount(ctx, fileHealth.FilePath, &errorMsg)
 		if retryErr != nil {
 			return fmt.Errorf("failed to increment repair retry count after trigger failure: %w", retryErr)
 		}
@@ -592,14 +594,14 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	// Get files due for checking (ordered by scheduled_check_at)
 	// Hardcoded to 1 - process one file at a time
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx,1)
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, 1)
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
 
 	// Get files that need repair notifications
 	// Hardcoded to 1 - process one file at a time
-	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(ctx,1)
+	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(ctx, 1)
 	if err != nil {
 		return fmt.Errorf("failed to get files for repair notification: %w", err)
 	}
@@ -632,7 +634,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fileHealth.FilePath)
 
 			// Set checking status
-			err := hw.healthRepo.SetFileChecking(ctx,fileHealth.FilePath)
+			err := hw.healthRepo.SetFileChecking(ctx, fileHealth.FilePath)
 			if err != nil {
 				slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fileHealth.FilePath, "error", err)
 				return
@@ -726,12 +728,24 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 
 		// If we can't trigger repair, mark as corrupted for manual investigation
 		errMsg := err.Error()
-		return hw.healthRepo.SetCorrupted(ctx,filePath, &errMsg)
+		return hw.healthRepo.SetCorrupted(ctx, filePath, &errMsg)
 	}
 
 	// ARR rescan was triggered successfully - set repair triggered status
 	slog.InfoContext(ctx, "Successfully triggered ARR rescan for file repair",
 		"file_path", pathForRescan,
 		"original_path", filePath)
-	return hw.healthRepo.SetRepairTriggered(ctx,filePath, errorMsg)
+
+	// Remove file from health table since repair was successfully triggered to ARR
+	if err := hw.healthRepo.DeleteHealthRecord(ctx, filePath); err != nil {
+		slog.ErrorContext(ctx, "Failed to delete health record after repair trigger",
+			"error", err,
+			"file_path", filePath)
+		// Don't fail the repair trigger if deletion fails - just log the error
+	} else {
+		slog.InfoContext(ctx, "Removed file from health table after successful repair trigger",
+			"file_path", filePath)
+	}
+
+	return nil
 }

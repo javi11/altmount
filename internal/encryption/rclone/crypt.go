@@ -178,7 +178,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 	}
 
 	n, err = r.rd.Read(p)
- if err != nil {
+	if err != nil {
 		for _, noRetryError := range noRetryErrors {
 			if errors.Is(err, noRetryError) {
 				return n, &usenet.DataCorruptionError{
