@@ -198,25 +198,25 @@ export function HealthConfigSection({
 								</p>
 							</fieldset>
 						)}
-						{formData.max_connections_for_repair !== undefined && (
+						{formData.max_connections_for_health_checks !== undefined && (
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Max Connections for Repair</legend>
+								<legend className="fieldset-legend">Max Connections for Health Checks</legend>
 								<input
 									type="number"
 									className="input"
-									value={formData.max_connections_for_repair}
+									value={formData.max_connections_for_health_checks}
 									readOnly={isReadOnly}
 									min={1}
 									max={10}
 									onChange={(e) =>
 										handleInputChange(
-											"max_connections_for_repair",
+											"max_connections_for_health_checks",
 											Number.parseInt(e.target.value, 10) || 1,
 										)
 									}
 								/>
 								<p className="label text-sm">
-									Maximum concurrent connections used during repair operations
+									Maximum concurrent connections used during health check operations
 								</p>
 							</fieldset>
 						)}

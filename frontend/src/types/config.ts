@@ -59,7 +59,7 @@ export interface HealthConfig {
 	library_dir?: string;
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
-	max_connections_for_repair?: number;
+	max_connections_for_health_checks?: number;
 	check_all_segments?: boolean;
 }
 
@@ -229,7 +229,7 @@ export interface StreamingUpdateRequest {
 export interface HealthUpdateRequest {
 	auto_repair_enabled?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
-	max_connections_for_repair?: number;
+	max_connections_for_health_checks?: number;
 	check_all_segments?: boolean;
 }
 

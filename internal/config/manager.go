@@ -153,7 +153,7 @@ type HealthConfig struct {
 	LibraryDir                 *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
 	CleanupOrphanedMetadata    *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
 	CheckIntervalSeconds       int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForRepair    int     `yaml:"max_connections_for_repair" mapstructure:"max_connections_for_repair" json:"max_connections_for_repair,omitempty"`
+	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
 	CheckAllSegments           bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 	LibrarySyncIntervalMinutes int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 }
@@ -575,8 +575,8 @@ func (c *Config) Validate() error {
 	if c.Health.CheckIntervalSeconds <= 0 {
 		return fmt.Errorf("health check_interval_seconds must be greater than 0")
 	}
-	if c.Health.MaxConnectionsForRepair <= 0 {
-		return fmt.Errorf("health max_connections_for_repair must be greater than 0")
+	if c.Health.MaxConnectionsForHealthChecks <= 0 {
+		return fmt.Errorf("health max_connections_for_health_checks must be greater than 0")
 	}
 	if c.Health.LibrarySyncIntervalMinutes < 0 {
 		return fmt.Errorf("health library_sync_interval_minutes must be non-negative")
@@ -1073,12 +1073,12 @@ func DefaultConfig(configDir ...string) *Config {
 			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:                    &healthEnabled,           // Disabled by default
-			CleanupOrphanedMetadata:    &cleanupOrphanedMetadata, // Disabled by default
-			CheckIntervalSeconds:       5,
-			MaxConnectionsForRepair:    5,
-			CheckAllSegments:           false,
-			LibrarySyncIntervalMinutes: 360, // Default: sync every 6 hours
+			Enabled:                       &healthEnabled,           // Disabled by default
+			CleanupOrphanedMetadata:       &cleanupOrphanedMetadata, // Disabled by default
+			CheckIntervalSeconds:          5,
+			MaxConnectionsForHealthChecks: 5,
+			CheckAllSegments:              false,
+			LibrarySyncIntervalMinutes:    360, // Default: sync every 6 hours
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,
