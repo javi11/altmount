@@ -61,6 +61,7 @@ export interface HealthConfig {
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
 	check_all_segments?: boolean;
+	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 }
 
 // RClone configuration (sanitized)
@@ -126,6 +127,7 @@ export interface ImportConfig {
 	allowed_file_extensions: string[];
 	max_import_connections: number;
 	import_cache_size_mb: number;
+	segment_sample_percentage: number; // Percentage of segments to check (1-100)
 	symlink_dir?: string;
 	symlink_enabled: boolean;
 }

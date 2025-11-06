@@ -97,6 +97,7 @@ type ImportAPIResponse struct {
 	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
 	MaxImportConnections           int      `json:"max_import_connections"`
 	ImportCacheSizeMB              int      `json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int      `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
 	SymlinkDir                     *string  `json:"symlink_dir,omitempty"`
 	SymlinkEnabled                 bool     `json:"symlink_enabled"`
 }
@@ -219,6 +220,7 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 		MaxImportConnections:           importConfig.MaxImportConnections,
 		ImportCacheSizeMB:              importConfig.ImportCacheSizeMB,
+		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
 		SymlinkDir:                     importConfig.SymlinkDir,
 		SymlinkEnabled:                 importConfig.SymlinkEnabled != nil && *importConfig.SymlinkEnabled,
 	}

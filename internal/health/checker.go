@@ -95,6 +95,14 @@ func (hc *HealthChecker) getCheckAllSegments() bool {
 	return hc.configGetter().Health.CheckAllSegments
 }
 
+func (hc *HealthChecker) getSegmentSamplePercentage() int {
+	percentage := hc.configGetter().Health.SegmentSamplePercentage
+	if percentage < 1 || percentage > 100 {
+		return 5 // Default: 5%
+	}
+	return percentage
+}
+
 // CheckFile checks the health of a specific file
 func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string) HealthEvent {
 	// Get file metadata
@@ -140,7 +148,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		return event
 	}
 
-	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "full_validation", hc.getCheckAllSegments())
+	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "full_validation", hc.getCheckAllSegments(), "sample_percentage", hc.getSegmentSamplePercentage())
 
 	// Validate segment availability using shared validation logic
 	checkErr := usenet.ValidateSegmentAvailability(
@@ -149,6 +157,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		hc.poolManager,
 		hc.getMaxConnectionsForHealthChecks(),
 		hc.getCheckAllSegments(),
+		hc.getSegmentSamplePercentage(),
 	)
 
 	if checkErr != nil {

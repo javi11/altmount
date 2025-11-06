@@ -15,11 +15,11 @@ import (
 // It uses a strategic sampling approach for efficiency when fullValidation is false:
 // - Validates first 3 segments (DMCA/takedown detection)
 // - Validates last 2 segments (incomplete upload detection)
-// - Validates 7 random middle segments (general integrity check)
-// This approach catches ~95% of incomplete files while validating only ~12 segments.
+// - Validates random middle segments based on samplePercentage (general integrity check)
+// The samplePercentage parameter controls how many segments to check (1-100%).
 //
-// For fullValidation=true, all segments are validated.
-// For files with ≤12 segments, all segments are always validated.
+// For fullValidation=true, all segments are validated regardless of samplePercentage.
+// A minimum of 5 segments are always validated for statistical validity when sampling.
 //
 // Returns an error if any segment is unreachable or if the pool is unavailable.
 func ValidateSegmentAvailability(
@@ -28,6 +28,7 @@ func ValidateSegmentAvailability(
 	poolManager pool.Manager,
 	maxConnections int,
 	fullValidation bool,
+	samplePercentage int,
 ) error {
 	if len(segments) == 0 {
 		return nil
@@ -44,7 +45,7 @@ func ValidateSegmentAvailability(
 	}
 
 	// Select which segments to validate
-	segmentsToValidate := selectSegmentsForValidation(segments, fullValidation)
+	segmentsToValidate := selectSegmentsForValidation(segments, fullValidation, samplePercentage)
 
 	// Validate segments concurrently with connection limit
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConnections)
@@ -70,50 +71,74 @@ func ValidateSegmentAvailability(
 	return nil
 }
 
-// selectSegmentsForValidation determines which segments to validate based on validation mode.
+// selectSegmentsForValidation determines which segments to validate based on validation mode and sample percentage.
 // For full validation, returns all segments. For sampling, uses a strategic approach that:
 // - Validates first 3 segments (DMCA/takedown detection)
 // - Validates last 2 segments (incomplete upload detection)
-// - Validates 7 random middle segments (general integrity check)
-// This approach catches ~95% of incomplete files while validating only ~12 segments.
-func selectSegmentsForValidation(segments []*metapb.SegmentData, fullValidation bool) []*metapb.SegmentData {
+// - Validates random middle segments based on samplePercentage (general integrity check)
+// A minimum of 5 segments are always validated for statistical validity when sampling.
+func selectSegmentsForValidation(segments []*metapb.SegmentData, fullValidation bool, samplePercentage int) []*metapb.SegmentData {
 	if fullValidation {
 		return segments
 	}
 
 	totalSegments := len(segments)
-	if totalSegments <= 12 {
-		// For small files, validate all segments
+
+	// Calculate target number of segments based on percentage
+	targetSamples := (totalSegments * samplePercentage) / 100
+
+	// Enforce minimum of 5 segments for statistical validity
+	if targetSamples < 5 {
+		targetSamples = 5
+	}
+
+	// If target samples equals or exceeds total segments, validate all
+	if targetSamples >= totalSegments {
 		return segments
 	}
 
 	var toValidate []*metapb.SegmentData
 
 	// 1. First 3 segments (DMCA/takedown detection)
-	for i := 0; i < 3; i++ {
+	firstCount := 3
+	if firstCount > totalSegments {
+		firstCount = totalSegments
+	}
+	for i := 0; i < firstCount; i++ {
 		toValidate = append(toValidate, segments[i])
 	}
 
 	// 2. Last 2 segments (incomplete upload detection)
-	for i := totalSegments - 2; i < totalSegments; i++ {
-		toValidate = append(toValidate, segments[i])
+	lastCount := 2
+	if firstCount+lastCount > totalSegments {
+		lastCount = totalSegments - firstCount
+	}
+	if lastCount > 0 {
+		for i := totalSegments - lastCount; i < totalSegments; i++ {
+			toValidate = append(toValidate, segments[i])
+		}
 	}
 
-	// 3. Random middle segments (7 samples for general validation)
-	middleStart := 3
-	middleEnd := totalSegments - 2
+	// 3. Random middle segments to reach target sample size
+	middleStart := firstCount
+	middleEnd := totalSegments - lastCount
 	middleRange := middleEnd - middleStart
 
 	if middleRange > 0 {
-		randomSamples := 7
-		if middleRange < randomSamples {
+		// Calculate how many middle segments we need to reach target
+		currentCount := len(toValidate)
+		randomSamples := targetSamples - currentCount
+
+		if randomSamples > middleRange {
 			randomSamples = middleRange
 		}
 
-		// Random sampling without replacement from middle section
-		perm := rand.Perm(middleRange)
-		for i := 0; i < randomSamples; i++ {
-			toValidate = append(toValidate, segments[middleStart+perm[i]])
+		if randomSamples > 0 {
+			// Random sampling without replacement from middle section
+			perm := rand.Perm(middleRange)
+			for i := 0; i < randomSamples; i++ {
+				toValidate = append(toValidate, segments[middleStart+perm[i]])
+			}
 		}
 	}
 

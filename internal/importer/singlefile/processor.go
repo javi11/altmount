@@ -26,6 +26,7 @@ func ProcessSingleFile(
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
+	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 ) (string, error) {
 	// Validate file extension before processing
@@ -50,6 +51,7 @@ func ProcessSingleFile(
 		poolManager,
 		maxValidationGoroutines,
 		fullSegmentValidation,
+		segmentSamplePercentage,
 	); err != nil {
 		return "", err
 	}

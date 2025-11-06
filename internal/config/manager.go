@@ -133,6 +133,7 @@ type ImportConfig struct {
 	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	ImportCacheSizeMB              int      `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int      `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	SymlinkDir                     *string  `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
 	SymlinkEnabled                 *bool    `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
 }
@@ -149,13 +150,14 @@ type LogConfig struct {
 
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled                    *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	LibraryDir                 *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata    *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds       int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	Enabled                       *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir                    *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata       *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	CheckAllSegments           bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
-	LibrarySyncIntervalMinutes int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
+	CheckAllSegments              bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
+	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -512,6 +514,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("import import_cache_size_mb must be greater than 0")
 	}
 
+	if c.Import.SegmentSamplePercentage < 1 || c.Import.SegmentSamplePercentage > 100 {
+		return fmt.Errorf("import segment_sample_percentage must be between 1 and 100")
+	}
+
 	// Validate symlink configuration if enabled
 	if c.Import.SymlinkEnabled != nil && *c.Import.SymlinkEnabled {
 		if c.Import.SymlinkDir == nil || *c.Import.SymlinkDir == "" {
@@ -580,6 +586,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.LibrarySyncIntervalMinutes < 0 {
 		return fmt.Errorf("health library_sync_interval_minutes must be non-negative")
+	}
+	if c.Health.SegmentSamplePercentage < 1 || c.Health.SegmentSamplePercentage > 100 {
+		return fmt.Errorf("health segment_sample_percentage must be between 1 and 100")
 	}
 
 	// Validate health configuration - requires library_dir when enabled
@@ -1052,17 +1061,18 @@ func DefaultConfig(configDir ...string) *Config {
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2,     // Default: 2 processor workers
 			QueueProcessingIntervalSeconds: 5,     // Default: check for work every 5 seconds
-			FullSegmentValidation:          false, // Default: validate 10 random segments for speed
+			FullSegmentValidation:          false, // Default: use sampling for faster imports
 			AllowedFileExtensions: []string{ // Default: common video file extensions
 				".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
 				".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264",
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
-			MaxImportConnections: 5,               // Default: 5 concurrent NNTP connections for validation and archive processing
-			ImportCacheSizeMB:    64,              // Default: 64MB cache for archive analysis
-			SymlinkDir:           nil,             // No default symlink directory
-			SymlinkEnabled:       &symlinkEnabled, // Disabled by default
+			MaxImportConnections:    5,                // Default: 5 concurrent NNTP connections for validation and archive processing
+			ImportCacheSizeMB:       64,               // Default: 64MB cache for archive analysis
+			SegmentSamplePercentage: 5,                // Default: 5% segment sampling
+			SymlinkDir:              nil,              // No default symlink directory
+			SymlinkEnabled:          &symlinkEnabled,  // Disabled by default
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1078,6 +1088,7 @@ func DefaultConfig(configDir ...string) *Config {
 			CheckIntervalSeconds:          5,
 			MaxConnectionsForHealthChecks: 5,
 			CheckAllSegments:              false,
+			SegmentSamplePercentage:       5,   // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:    360, // Default: sync every 6 hours
 		},
 		SABnzbd: SABnzbdConfig{

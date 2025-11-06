@@ -79,6 +79,7 @@ func ProcessArchive(
 	progressTracker *progress.Tracker,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
+	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 ) error {
 	if len(archiveFiles) == 0 {
@@ -131,6 +132,7 @@ func ProcessArchive(
 			poolManager,
 			maxValidationGoroutines,
 			fullSegmentValidation,
+			segmentSamplePercentage,
 		); err != nil {
 			return err
 		}

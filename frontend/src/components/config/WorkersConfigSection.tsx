@@ -228,6 +228,31 @@ export function ImportConfigSection({
 					</p>
 				</fieldset>
 
+				{!formData.full_segment_validation && (
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Segment Sample Percentage</legend>
+						<input
+							type="number"
+							className="input"
+							value={formData.segment_sample_percentage}
+							readOnly={isReadOnly}
+							min={1}
+							max={100}
+							step={1}
+							onChange={(e) =>
+								handleInputChange(
+									"segment_sample_percentage",
+									Number.parseInt(e.target.value, 10) || 5,
+								)
+							}
+						/>
+						<p className="label">
+							Percentage of segments to check when sampling is enabled (1-100%, default: 5%). Lower
+							percentages are faster but less thorough.
+						</p>
+					</fieldset>
+				)}
+
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Allowed File Extensions</legend>
 

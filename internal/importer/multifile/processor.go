@@ -27,6 +27,7 @@ func ProcessRegularFiles(
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
+	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 ) error {
 	if len(files) == 0 {
@@ -63,6 +64,7 @@ func ProcessRegularFiles(
 			poolManager,
 			maxValidationGoroutines,
 			fullSegmentValidation,
+			segmentSamplePercentage,
 		); err != nil {
 			return err
 		}

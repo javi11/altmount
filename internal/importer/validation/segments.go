@@ -23,6 +23,7 @@ func ValidateSegmentsForFile(
 	poolManager pool.Manager,
 	maxGoroutines int,
 	fullValidation bool,
+	samplePercentage int,
 ) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments provided for file %s", filename)
@@ -71,7 +72,7 @@ func ValidateSegmentsForFile(
 	}
 
 	// Validate segment availability using shared validation logic
-	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, fullValidation); err != nil {
+	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, fullValidation, samplePercentage); err != nil {
 		return err
 	}
 

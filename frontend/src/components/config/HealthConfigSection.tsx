@@ -237,6 +237,30 @@ export function HealthConfigSection({
 								validation of all segments (slower).
 							</p>
 						</fieldset>
+						{formData.segment_sample_percentage !== undefined && !formData.check_all_segments && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Segment Sample Percentage</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.segment_sample_percentage}
+									readOnly={isReadOnly}
+									min={1}
+									max={100}
+									step={1}
+									onChange={(e) =>
+										handleInputChange(
+											"segment_sample_percentage",
+											Number.parseInt(e.target.value, 10) || 5,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									Percentage of segments to check when sampling is enabled (1-100%, default: 5%).
+									Lower percentages are faster but less thorough.
+								</p>
+							</fieldset>
+						)}
 					</div>
 				</div>
 			</details>
