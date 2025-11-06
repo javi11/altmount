@@ -30,6 +30,12 @@ export function MetadataConfigSection({
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
 	};
 
+	const handleCheckboxChange = (field: keyof MetadataConfig, value: boolean) => {
+		const newData = { ...formData, [field]: value };
+		setFormData(newData);
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
+	};
+
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
 			await onUpdate("metadata", formData);
@@ -53,6 +59,26 @@ export function MetadataConfigSection({
 						required
 					/>
 					<p className="label">Directory path where file metadata will be stored (required)</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Deletion Options</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Delete original NZB when metadata is removed</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.delete_source_nzb_on_removal ?? false}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleCheckboxChange("delete_source_nzb_on_removal", e.target.checked)
+							}
+						/>
+					</label>
+					<p className="label">
+						When enabled, the original NZB file will be permanently deleted when its metadata is
+						removed
+					</p>
 				</fieldset>
 			</div>
 

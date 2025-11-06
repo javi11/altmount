@@ -130,8 +130,8 @@ export function LibraryScanStatus({
 									<span>
 										{status.progress.total_files > 0
 											? Math.round(
-												(status.progress.processed_files / status.progress.total_files) * 100,
-											)
+													(status.progress.processed_files / status.progress.total_files) * 100,
+												)
 											: 0}
 										%
 									</span>

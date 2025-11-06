@@ -187,8 +187,12 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		return false, nil
 	}
 
-	// Use MetadataService's file delete operation
-	return true, mrf.metadataService.DeleteFileMetadata(normalizedName)
+	// Check if we should delete the source NZB file
+	cfg := mrf.configGetter()
+	deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+
+	// Use MetadataService's file delete operation with optional NZB deletion
+	return true, mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)
 }
 
 // RenameFile renames a virtual file or directory in the metadata

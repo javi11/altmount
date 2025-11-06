@@ -96,6 +96,8 @@ type ImportAPIResponse struct {
 	MaxValidationGoroutines        int      `json:"max_validation_goroutines"`
 	FullSegmentValidation          bool     `json:"full_segment_validation"`
 	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
+	MaxImportConnections           int      `json:"max_import_connections"`
+	ImportCacheSizeMB              int      `json:"import_cache_size_mb"`
 	SymlinkDir                     *string  `json:"symlink_dir,omitempty"`
 	SymlinkEnabled                 bool     `json:"symlink_enabled"`
 }
@@ -217,6 +219,8 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		MaxValidationGoroutines:        importConfig.MaxValidationGoroutines,
 		FullSegmentValidation:          importConfig.FullSegmentValidation,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
+		MaxImportConnections:           importConfig.MaxImportConnections,
+		ImportCacheSizeMB:              importConfig.ImportCacheSizeMB,
 		SymlinkDir:                     importConfig.SymlinkDir,
 		SymlinkEnabled:                 importConfig.SymlinkEnabled != nil && *importConfig.SymlinkEnabled,
 	}

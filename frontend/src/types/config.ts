@@ -44,6 +44,7 @@ export interface DatabaseConfig {
 // Metadata configuration
 export interface MetadataConfig {
 	root_path: string;
+	delete_source_nzb_on_removal?: boolean;
 }
 
 // Streaming configuration
@@ -216,6 +217,7 @@ export interface DatabaseUpdateRequest {
 // Metadata update request
 export interface MetadataUpdateRequest {
 	root_path?: string;
+	delete_source_nzb_on_removal?: boolean;
 }
 
 // Streaming update request
@@ -379,6 +381,7 @@ export interface ImportFormData {
 
 export interface MetadataFormData {
 	root_path: string;
+	delete_source_nzb_on_removal?: boolean;
 }
 
 export interface StreamingFormData {

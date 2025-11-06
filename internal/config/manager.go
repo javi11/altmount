@@ -58,7 +58,8 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	RootPath                  string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	DeleteSourceNzbOnRemoval *bool  `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
 }
 
 // StreamingConfig represents streaming and chunking configuration
@@ -324,6 +325,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.CleanupOrphanedMetadata = &v
 	} else {
 		copyCfg.Health.CleanupOrphanedMetadata = nil
+	}
+
+	// Deep copy Metadata.DeleteSourceNzbOnRemoval pointer
+	if c.Metadata.DeleteSourceNzbOnRemoval != nil {
+		v := *c.Metadata.DeleteSourceNzbOnRemoval
+		copyCfg.Metadata.DeleteSourceNzbOnRemoval = &v
+	} else {
+		copyCfg.Metadata.DeleteSourceNzbOnRemoval = nil
 	}
 
 	// Deep copy Import.SymlinkDir pointer
@@ -770,10 +779,10 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 				Username:                       p.Username,
 				Password:                       p.Password,
 				MaxConnections:                 p.MaxConnections,
-				MaxConnectionIdleTimeInSeconds: 90, // Default idle timeout
+				MaxConnectionIdleTimeInSeconds: 60, // Default idle timeout
 				TLS:                            p.TLS,
 				InsecureSSL:                    p.InsecureTLS,
-				MaxConnectionTTLInSeconds:      90, // Default connection TTL
+				MaxConnectionTTLInSeconds:      60, // Default connection TTL
 				IsBackupProvider:               isBackup,
 			})
 		}
@@ -945,14 +954,15 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false              // Health system disabled by default
-	cleanupOrphanedMetadata := false    // Cleanup orphaned metadata disabled by default
+	healthEnabled := false           // Health system disabled by default
+	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
+	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
-	mountEnabled := false               // Disabled by default
+	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
-	symlinkEnabled := false             // Disabled by default
+	symlinkEnabled := false // Disabled by default
 	scrapperEnabled := false
-	loginRequired := true               // Require login by default
+	loginRequired := true // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -994,7 +1004,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Path: dbPath,
 		},
 		Metadata: MetadataConfig{
-			RootPath: metadataPath,
+			RootPath:                  metadataPath,
+			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
 		},
 		Streaming: StreamingConfig{
 			MaxDownloadWorkers: 15, // Default: 15 download workers
@@ -1054,9 +1065,9 @@ func DefaultConfig(configDir ...string) *Config {
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
-			MaxImportConnections: 10,   // Default: 10 max workers for archive processing
-			ImportCacheSizeMB:    64,   // Default: 64MB cache for archive analysis
-			SymlinkDir:           nil,  // No default symlink directory
+			MaxImportConnections: 5,               // Default: 5 max workers for archive processing
+			ImportCacheSizeMB:    64,              // Default: 64MB cache for archive analysis
+			SymlinkDir:           nil,             // No default symlink directory
 			SymlinkEnabled:       &symlinkEnabled, // Disabled by default
 		},
 		Log: LogConfig{
@@ -1068,8 +1079,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:                    &healthEnabled,              // Disabled by default
-			CleanupOrphanedMetadata:    &cleanupOrphanedMetadata,   // Disabled by default
+			Enabled:                    &healthEnabled,           // Disabled by default
+			CleanupOrphanedMetadata:    &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:       5,
 			MaxConnectionsForRepair:    5,
 			CheckAllSegments:           false,

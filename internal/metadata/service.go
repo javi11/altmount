@@ -1,7 +1,9 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,13 +214,43 @@ func (ms *MetadataService) UpdateFileStatus(virtualPath string, status metapb.Fi
 
 // DeleteFileMetadata deletes a metadata file
 func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
+	return ms.DeleteFileMetadataWithSourceNzb(context.Background(), virtualPath, false)
+}
+
+// DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
+func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
 
+	// If we need to delete the source NZB, read the metadata first
+	var sourceNzbPath string
+	if deleteSourceNzb {
+		metadata, err := ms.ReadFileMetadata(virtualPath)
+		if err == nil && metadata != nil && metadata.SourceNzbPath != "" {
+			sourceNzbPath = metadata.SourceNzbPath
+		}
+	}
+
+	// Delete the metadata file
 	err := os.Remove(metadataPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete metadata file: %w", err)
+	}
+
+	// Optionally delete the source NZB file (error-tolerant)
+	if deleteSourceNzb && sourceNzbPath != "" {
+		if err := os.Remove(sourceNzbPath); err != nil {
+			if !os.IsNotExist(err) {
+				slog.DebugContext(ctx, "Failed to delete source NZB file",
+					"nzb_path", sourceNzbPath,
+					"error", err)
+			}
+		} else {
+			slog.DebugContext(ctx, "Deleted source NZB file",
+				"nzb_path", sourceNzbPath,
+				"virtual_path", virtualPath)
+		}
 	}
 
 	return nil
