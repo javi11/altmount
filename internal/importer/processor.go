@@ -32,7 +32,7 @@ type Processor struct {
 	rarProcessor            rar.Processor
 	sevenZipProcessor       sevenzip.Processor
 	poolManager             pool.Manager // Pool manager for dynamic pool access
-	maxValidationGoroutines int          // Maximum concurrent goroutines for segment validation
+	maxImportConnections    int          // Maximum concurrent NNTP connections for validation and archive processing
 	fullSegmentValidation   bool         // Whether to validate all segments or just a random sample
 	allowedFileExtensions   []string     // Allowed file extensions for validation (empty = allow all)
 	log                     *slog.Logger
@@ -45,19 +45,19 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxValidationGoroutines int, fullSegmentValidation bool, allowedFileExtensions []string, maxImportConnections int, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, fullSegmentValidation bool, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
 	return &Processor{
-		parser:                  parser.NewParser(poolManager),
-		strmParser:              parser.NewStrmParser(),
-		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
-		poolManager:             poolManager,
-		maxValidationGoroutines: maxValidationGoroutines,
-		fullSegmentValidation:   fullSegmentValidation,
-		allowedFileExtensions:   allowedFileExtensions,
-		log:                     slog.Default().With("component", "nzb-processor"),
-		broadcaster:             broadcaster,
+		parser:                parser.NewParser(poolManager),
+		strmParser:            parser.NewStrmParser(),
+		metadataService:       metadataService,
+		rarProcessor:          rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
+		sevenZipProcessor:     sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
+		poolManager:           poolManager,
+		maxImportConnections:  maxImportConnections,
+		fullSegmentValidation: fullSegmentValidation,
+		allowedFileExtensions: allowedFileExtensions,
+		log:                   slog.Default().With("component", "nzb-processor"),
+		broadcaster:           broadcaster,
 
 		// Initialize pre-compiled regex patterns for RAR file sorting
 		rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
@@ -184,7 +184,7 @@ func (proc *Processor) processSingleFile(
 		nzbPath,
 		proc.metadataService,
 		proc.poolManager,
-		proc.maxValidationGoroutines,
+		proc.maxImportConnections,
 		proc.fullSegmentValidation,
 		proc.allowedFileExtensions,
 	)
@@ -221,7 +221,7 @@ func (proc *Processor) processMultiFile(
 		nzbPath,
 		proc.metadataService,
 		proc.poolManager,
-		proc.maxValidationGoroutines,
+		proc.maxImportConnections,
 		proc.fullSegmentValidation,
 		proc.allowedFileExtensions,
 	); err != nil {
@@ -259,7 +259,7 @@ func (proc *Processor) processRarArchive(
 			parsed.Path,
 			proc.metadataService,
 			proc.poolManager,
-			proc.maxValidationGoroutines,
+			proc.maxImportConnections,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
 		); err != nil {
@@ -292,7 +292,7 @@ func (proc *Processor) processRarArchive(
 			proc.metadataService,
 			proc.poolManager,
 			progressTracker,
-			proc.maxValidationGoroutines,
+			proc.maxImportConnections,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
 		)
@@ -333,7 +333,7 @@ func (proc *Processor) processSevenZipArchive(
 			parsed.Path,
 			proc.metadataService,
 			proc.poolManager,
-			proc.maxValidationGoroutines,
+			proc.maxImportConnections,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
 		); err != nil {
@@ -366,7 +366,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.metadataService,
 			proc.poolManager,
 			progressTracker,
-			proc.maxValidationGoroutines,
+			proc.maxImportConnections,
 			proc.fullSegmentValidation,
 			proc.allowedFileExtensions,
 		)

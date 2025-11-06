@@ -122,7 +122,6 @@ export interface RCloneConfig {
 export interface ImportConfig {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
-	max_validation_goroutines: number;
 	full_segment_validation: boolean;
 	allowed_file_extensions: string[];
 	max_import_connections: number;
@@ -288,7 +287,6 @@ export interface RCloneUpdateRequest {
 export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
-	max_validation_goroutines?: number;
 	full_segment_validation?: boolean;
 	allowed_file_extensions?: string[];
 	symlink_dir?: string;
@@ -373,7 +371,6 @@ export interface APIFormData {
 export interface ImportFormData {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
-	max_validation_goroutines: number;
 	full_segment_validation: boolean;
 	symlink_dir: string;
 	symlink_enabled: boolean;

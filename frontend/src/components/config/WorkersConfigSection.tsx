@@ -116,28 +116,6 @@ export function ImportConfigSection({
 				</fieldset>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Validation Goroutines</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_validation_goroutines}
-						readOnly={isReadOnly}
-						min={1}
-						max={15}
-						onChange={(e) =>
-							handleInputChange(
-								"max_validation_goroutines",
-								Number.parseInt(e.target.value, 10) || 3,
-							)
-						}
-					/>
-					<p className="label">
-						Number of concurrent workers for validating segment availability. Higher values increase
-						validation speed but use more network connections.
-					</p>
-				</fieldset>
-
-				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Max Import Connections</legend>
 					<input
 						type="number"
@@ -145,15 +123,14 @@ export function ImportConfigSection({
 						value={formData.max_import_connections}
 						readOnly={isReadOnly}
 						min={1}
-						max={50}
 						onChange={(e) =>
 							handleInputChange("max_import_connections", Number.parseInt(e.target.value, 10) || 10)
 						}
 					/>
 					<p className="label">
-						Maximum concurrent connections for archive processing (RAR, 7zip). Higher values can
-						increase processing speed but use more memory and network resources but it can also
-						overload and slow down the system.
+						Maximum concurrent connections for each active processor worker. Example: If you have 2
+						processor workers and you set this to 5, each worker will have a maximum of 5 concurrent
+						connections.
 					</p>
 				</fieldset>
 

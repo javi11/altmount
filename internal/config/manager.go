@@ -58,7 +58,7 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath                  string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	RootPath                 string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
 	DeleteSourceNzbOnRemoval *bool  `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
 }
 
@@ -129,7 +129,6 @@ type RCloneConfig struct {
 type ImportConfig struct {
 	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	MaxValidationGoroutines        int      `yaml:"max_validation_goroutines" mapstructure:"max_validation_goroutines" json:"max_validation_goroutines"`
 	FullSegmentValidation          bool     `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
 	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
@@ -503,10 +502,6 @@ func (c *Config) Validate() error {
 
 	if c.Import.QueueProcessingIntervalSeconds > 300 {
 		return fmt.Errorf("import queue_processing_interval_seconds must not exceed 300 seconds")
-	}
-
-	if c.Import.MaxValidationGoroutines < 1 {
-		return fmt.Errorf("import max_validation_goroutines must be more than 1")
 	}
 
 	if c.Import.MaxImportConnections <= 0 {
@@ -954,8 +949,8 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false           // Health system disabled by default
-	cleanupOrphanedMetadata := false // Cleanup orphaned metadata disabled by default
+	healthEnabled := false            // Health system disabled by default
+	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
 	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
@@ -1004,7 +999,7 @@ func DefaultConfig(configDir ...string) *Config {
 			Path: dbPath,
 		},
 		Metadata: MetadataConfig{
-			RootPath:                  metadataPath,
+			RootPath:                 metadataPath,
 			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
 		},
 		Streaming: StreamingConfig{
@@ -1057,7 +1052,6 @@ func DefaultConfig(configDir ...string) *Config {
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2,     // Default: 2 processor workers
 			QueueProcessingIntervalSeconds: 5,     // Default: check for work every 5 seconds
-			MaxValidationGoroutines:        5,     // Default: 5 concurrent validation workers
 			FullSegmentValidation:          false, // Default: validate 10 random segments for speed
 			AllowedFileExtensions: []string{ // Default: common video file extensions
 				".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
@@ -1065,7 +1059,7 @@ func DefaultConfig(configDir ...string) *Config {
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
-			MaxImportConnections: 5,               // Default: 5 max workers for archive processing
+			MaxImportConnections: 5,               // Default: 5 concurrent NNTP connections for validation and archive processing
 			ImportCacheSizeMB:    64,              // Default: 64MB cache for archive analysis
 			SymlinkDir:           nil,             // No default symlink directory
 			SymlinkEnabled:       &symlinkEnabled, // Disabled by default

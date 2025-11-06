@@ -84,16 +84,15 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		config.Workers = 2
 	}
 
-	// Get the initial config to pass max validation goroutines and full validation setting
+	// Get the initial config to pass import settings
 	currentConfig := configGetter()
-	maxValidationGoroutines := currentConfig.Import.MaxValidationGoroutines
+	maxImportConnections := currentConfig.Import.MaxImportConnections
 	fullSegmentValidation := currentConfig.Import.FullSegmentValidation
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
-	maxImportConnections := currentConfig.Import.MaxImportConnections
 	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxValidationGoroutines, fullSegmentValidation, allowedFileExtensions, maxImportConnections, importCacheSizeMB, broadcaster)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, fullSegmentValidation, allowedFileExtensions, importCacheSizeMB, broadcaster)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -624,47 +623,33 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
+	cfg := s.configGetter()
 	// Attempt SABnzbd fallback if configured
-	if err := s.attemptSABnzbdFallback(ctx, item); err != nil {
-		s.log.ErrorContext(ctx, "Failed to send to external SABnzbd",
-			"queue_id", item.ID,
-			"file", item.NzbPath,
-			"fallback_host", s.configGetter().SABnzbd.FallbackHost,
-			"error", err)
-
-	} else {
-		// Mark item as fallback instead of removing from queue
-		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFallback, nil); err != nil {
-			s.log.ErrorContext(ctx, "Failed to mark item as fallback", "queue_id", item.ID, "error", err)
-		} else {
-			s.log.InfoContext(ctx, "Item marked as fallback after successful SABnzbd transfer",
+	if cfg.SABnzbd.FallbackHost != "" && cfg.SABnzbd.FallbackAPIKey != "" {
+		if err := s.attemptSABnzbdFallback(ctx, item); err != nil {
+			s.log.ErrorContext(ctx, "Failed to send to external SABnzbd",
 				"queue_id", item.ID,
 				"file", item.NzbPath,
-				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+				"fallback_host", s.configGetter().SABnzbd.FallbackHost,
+				"error", err)
+
+		} else {
+			// Mark item as fallback instead of removing from queue
+			if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFallback, nil); err != nil {
+				s.log.ErrorContext(ctx, "Failed to mark item as fallback", "queue_id", item.ID, "error", err)
+			} else {
+				s.log.DebugContext(ctx, "Item marked as fallback after successful SABnzbd transfer",
+					"queue_id", item.ID,
+					"file", item.NzbPath,
+					"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+			}
 		}
 	}
 }
 
 // attemptSABnzbdFallback attempts to send a failed import to an external SABnzbd instance
 func (s *Service) attemptSABnzbdFallback(ctx context.Context, item *database.ImportQueueItem) error {
-	// Get current configuration
 	cfg := s.configGetter()
-
-	// Check if SABnzbd is enabled and fallback is configured
-	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
-		s.log.DebugContext(ctx, "SABnzbd fallback not attempted - SABnzbd API not enabled", "queue_id", item.ID)
-		return fmt.Errorf("SABnzbd fallback not attempted - SABnzbd API not enabled")
-	}
-
-	if cfg.SABnzbd.FallbackHost == "" {
-		s.log.DebugContext(ctx, "SABnzbd fallback not attempted - no fallback host configured", "queue_id", item.ID)
-		return fmt.Errorf("SABnzbd fallback not attempted - no fallback host configured")
-	}
-
-	if cfg.SABnzbd.FallbackAPIKey == "" {
-		s.log.WarnContext(ctx, "SABnzbd fallback not attempted - no API key configured", "queue_id", item.ID)
-		return fmt.Errorf("SABnzbd fallback not attempted - no API key configured")
-	}
 
 	// Check if the NZB file still exists
 	if _, err := os.Stat(item.NzbPath); err != nil {

@@ -135,10 +135,6 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		// Skip files with missing first segment data
 		// These files can't be properly processed (no PAR2 matching, no yEnc size data, no magic bytes)
 		if data == nil || data.File == nil || data.MissingFirstSegment {
-			if data != nil && data.File != nil {
-				p.log.WarnContext(ctx, "Skipping file with missing first segment data",
-					"subject", data.File.Subject)
-			}
 			continue
 		}
 

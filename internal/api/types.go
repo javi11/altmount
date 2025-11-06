@@ -93,7 +93,6 @@ type ProviderAPIResponse struct {
 type ImportAPIResponse struct {
 	MaxProcessorWorkers            int      `json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int      `json:"queue_processing_interval_seconds"` // Interval in seconds
-	MaxValidationGoroutines        int      `json:"max_validation_goroutines"`
 	FullSegmentValidation          bool     `json:"full_segment_validation"`
 	AllowedFileExtensions          []string `json:"allowed_file_extensions"`
 	MaxImportConnections           int      `json:"max_import_connections"`
@@ -216,7 +215,6 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 	return ImportAPIResponse{
 		MaxProcessorWorkers:            importConfig.MaxProcessorWorkers,
 		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
-		MaxValidationGoroutines:        importConfig.MaxValidationGoroutines,
 		FullSegmentValidation:          importConfig.FullSegmentValidation,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 		MaxImportConnections:           importConfig.MaxImportConnections,
