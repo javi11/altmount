@@ -71,6 +71,10 @@ type Service struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 
+	// Cancellation tracking for processing items
+	cancelFuncs map[int64]context.CancelFunc
+	cancelMu    sync.RWMutex
+
 	// Manual scan state
 	scanMu     sync.RWMutex
 	scanInfo   ScanInfo
@@ -109,6 +113,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
+		cancelFuncs:     make(map[int64]context.CancelFunc),
 		scanInfo:        ScanInfo{Status: ScanStatusIdle},
 	}
 
@@ -516,8 +521,23 @@ func (s *Service) processQueueItems(ctx context.Context, workerID int) {
 
 	s.log.DebugContext(ctx, "Processing claimed queue item", "worker_id", workerID, "queue_id", item.ID, "file", item.NzbPath)
 
-	// Step 3: Process the NZB file and write to main database
-	resultingPath, processingErr := s.processNzbItem(ctx, item)
+	// Create cancellable context for this item
+	itemCtx, cancel := context.WithCancel(ctx)
+
+	// Register cancel function
+	s.cancelMu.Lock()
+	s.cancelFuncs[item.ID] = cancel
+	s.cancelMu.Unlock()
+
+	// Clean up after processing
+	defer func() {
+		s.cancelMu.Lock()
+		delete(s.cancelFuncs, item.ID)
+		s.cancelMu.Unlock()
+	}()
+
+	// Step 3: Process the NZB file and write to main database using cancellable context
+	resultingPath, processingErr := s.processNzbItem(itemCtx, item)
 
 	// Step 4: Update queue database with results
 	if processingErr != nil {
@@ -605,10 +625,18 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
 
-	s.log.WarnContext(ctx, "Processing failed",
-		"queue_id", item.ID,
-		"file", item.NzbPath,
-		"error", processingErr)
+	// Check if the error was due to cancellation
+	if strings.Contains(errorMessage, "context canceled") || strings.Contains(errorMessage, "processing cancelled") {
+		errorMessage = "Processing cancelled by user request"
+		s.log.InfoContext(ctx, "Processing cancelled by user",
+			"queue_id", item.ID,
+			"file", item.NzbPath)
+	} else {
+		s.log.WarnContext(ctx, "Processing failed",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"error", processingErr)
+	}
 
 	// Mark as failed in queue database (no automatic retry)
 	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
@@ -745,6 +773,21 @@ func (s *Service) GetWorkerCount() int {
 	return s.config.Workers
 }
 
+// CancelProcessing cancels a processing queue item by cancelling its context
+func (s *Service) CancelProcessing(itemID int64) error {
+	s.cancelMu.RLock()
+	cancel, exists := s.cancelFuncs[itemID]
+	s.cancelMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("item %d is not currently processing", itemID)
+	}
+
+	s.log.InfoContext(context.Background(), "Cancelling processing for queue item", "item_id", itemID)
+	cancel()
+	return nil
+}
+
 // notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
 func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 	if s.rcloneClient == nil {
@@ -788,8 +831,23 @@ func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 			return
 		}
 
-		// Process the NZB file
-		resultingPath, processingErr := s.processNzbItem(ctx, item)
+		// Create cancellable context for this item
+		itemCtx, cancel := context.WithCancel(ctx)
+
+		// Register cancel function
+		s.cancelMu.Lock()
+		s.cancelFuncs[item.ID] = cancel
+		s.cancelMu.Unlock()
+
+		// Clean up after processing
+		defer func() {
+			s.cancelMu.Lock()
+			delete(s.cancelFuncs, item.ID)
+			s.cancelMu.Unlock()
+		}()
+
+		// Process the NZB file using cancellable context
+		resultingPath, processingErr := s.processNzbItem(itemCtx, item)
 
 		// Update queue database with results
 		if processingErr != nil {

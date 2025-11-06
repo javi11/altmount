@@ -197,6 +197,25 @@ export class APIClient {
 		});
 	}
 
+	async cancelQueueItem(id: number) {
+		return this.request<{ message: string; id: number }>(`/queue/${id}/cancel`, {
+			method: "POST",
+		});
+	}
+
+	async cancelBulkQueueItems(ids: number[]) {
+		return this.request<{
+			cancelled_count: number;
+			not_processing_count: number;
+			not_found_count: number;
+			results: Record<string, string>;
+			message: string;
+		}>("/queue/bulk/cancel", {
+			method: "POST",
+			body: JSON.stringify({ ids }),
+		});
+	}
+
 	async getQueueStats() {
 		return this.request<QueueStats>("/queue/stats");
 	}

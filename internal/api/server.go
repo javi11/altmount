@@ -160,10 +160,12 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/queue/pending", s.handleClearPendingQueue)
 	api.Delete("/queue/bulk", s.handleDeleteQueueBulk)
 	api.Post("/queue/bulk/restart", s.handleRestartQueueBulk)
+	api.Post("/queue/bulk/cancel", s.handleCancelQueueBulk)
 	api.Post("/queue/upload", s.handleUploadToQueue)
 	api.Get("/queue/:id", s.handleGetQueue)
 	api.Delete("/queue/:id", s.handleDeleteQueue)
 	api.Post("/queue/:id/retry", s.handleRetryQueue)
+	api.Post("/queue/:id/cancel", s.handleCancelQueue)
 	api.Get("/queue/:id/download", s.handleDownloadNZB)
 
 	// Health endpoints

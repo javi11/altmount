@@ -368,6 +368,102 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	})
 }
 
+// handleCancelQueue handles POST /api/queue/{id}/cancel
+func (s *Server) handleCancelQueue(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Queue item ID is required",
+				"details": "",
+			},
+		})
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid queue item ID",
+				"details": "ID must be a valid integer",
+			},
+		})
+	}
+
+	// Check if item exists
+	item, err := s.queueRepo.GetQueueItem(c.Context(), id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to check queue item",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	if item == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "Queue item not found",
+				"details": "",
+			},
+		})
+	}
+
+	// Only allow cancellation of processing items
+	if item.Status != database.QueueStatusProcessing {
+		return c.Status(409).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "CONFLICT",
+				"message": "Can only cancel items that are currently processing",
+				"details": "Current status: " + string(item.Status),
+			},
+		})
+	}
+
+	// Request cancellation
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Importer service not available",
+				"details": "",
+			},
+		})
+	}
+
+	err = s.importerService.CancelProcessing(id)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "Item is not currently processing",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	return c.Status(202).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"message": "Cancellation requested",
+			"id":      id,
+		},
+	})
+}
+
 // handleGetQueueStats handles GET /api/queue/stats
 func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 	stats, err := s.queueRepo.GetQueueStats(c.Context())
@@ -764,6 +860,96 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 	}
 
 	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleCancelQueueBulk handles POST /api/queue/bulk/cancel
+func (s *Server) handleCancelQueueBulk(c *fiber.Ctx) error {
+	// Parse request body
+	var request struct {
+		IDs []int64 `json:"ids"`
+	}
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid request body",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Validate IDs
+	if len(request.IDs) == 0 {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "No IDs provided",
+				"details": "At least one ID is required",
+			},
+		})
+	}
+
+	// Check importer service availability
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Importer service not available",
+				"details": "",
+			},
+		})
+	}
+
+	// Cancel each item and track results
+	results := make(map[string]interface{})
+	cancelledCount := 0
+	notProcessingCount := 0
+	notFoundCount := 0
+
+	for _, id := range request.IDs {
+		item, err := s.queueRepo.GetQueueItem(c.Context(), id)
+		if err != nil {
+			results[fmt.Sprintf("%d", id)] = "Error checking status"
+			continue
+		}
+
+		if item == nil {
+			notFoundCount++
+			results[fmt.Sprintf("%d", id)] = "Not found"
+			continue
+		}
+
+		if item.Status != database.QueueStatusProcessing {
+			notProcessingCount++
+			results[fmt.Sprintf("%d", id)] = fmt.Sprintf("Cannot cancel (status: %s)", item.Status)
+			continue
+		}
+
+		err = s.importerService.CancelProcessing(id)
+		if err != nil {
+			results[fmt.Sprintf("%d", id)] = err.Error()
+		} else {
+			cancelledCount++
+			results[fmt.Sprintf("%d", id)] = "Cancellation requested"
+		}
+	}
+
+	response := map[string]interface{}{
+		"cancelled_count":      cancelledCount,
+		"not_processing_count": notProcessingCount,
+		"not_found_count":      notFoundCount,
+		"results":              results,
+		"message":              fmt.Sprintf("Cancellation requested for %d items", cancelledCount),
+	}
+
+	return c.Status(202).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
 	})

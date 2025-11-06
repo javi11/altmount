@@ -79,6 +79,30 @@ export const useRetryQueueItem = () => {
 	});
 };
 
+export const useCancelQueueItem = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: number) => apiClient.cancelQueueItem(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue-stats"] });
+		},
+	});
+};
+
+export const useBulkCancelQueueItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (ids: number[]) => apiClient.cancelBulkQueueItems(ids),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue-stats"] });
+		},
+	});
+};
+
 export const useClearCompletedQueue = () => {
 	const queryClient = useQueryClient();
 

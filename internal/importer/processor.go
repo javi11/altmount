@@ -75,6 +75,16 @@ func (proc *Processor) updateProgress(queueID int, percentage int) {
 	}
 }
 
+// checkCancellation checks if processing should be cancelled
+func (proc *Processor) checkCancellation(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("processing cancelled: %w", ctx.Err())
+	default:
+		return nil
+	}
+}
+
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
 func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int) (string, error) {
 	// Update progress: starting
@@ -114,6 +124,11 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	// Update progress: parsing complete
 	proc.updateProgress(queueID, 10)
 
+	// Check for cancellation after parsing
+	if err := proc.checkCancellation(ctx); err != nil {
+		return "", err
+	}
+
 	// Step 2: Calculate virtual directory
 	virtualDir := filesystem.CalculateVirtualDirectory(filePath, relativePath)
 
@@ -126,6 +141,11 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	// Step 3: Separate files by type (regular, archive, PAR2)
 	regularFiles, archiveFiles, _ := filesystem.SeparateFiles(parsed.Files, parsed.Type)
+
+	// Check for cancellation before main processing
+	if err := proc.checkCancellation(ctx); err != nil {
+		return "", err
+	}
 
 	// Step 4: Process based on file type
 	var result string

@@ -7,6 +7,7 @@ import {
 	PlayCircle,
 	RefreshCw,
 	Trash2,
+	XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
@@ -18,6 +19,8 @@ import { PathDisplay } from "../components/ui/PathDisplay";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
+	useBulkCancelQueueItems,
+	useCancelQueueItem,
 	useClearCompletedQueue,
 	useClearFailedQueue,
 	useClearPendingQueue,
@@ -85,6 +88,8 @@ export function QueuePage() {
 	const deleteBulk = useDeleteBulkQueueItems();
 	const restartBulk = useRestartBulkQueueItems();
 	const retryItem = useRetryQueueItem();
+	const cancelItem = useCancelQueueItem();
+	const cancelBulk = useBulkCancelQueueItems();
 	const clearCompleted = useClearCompletedQueue();
 	const clearFailed = useClearFailedQueue();
 	const clearPending = useClearPendingQueue();
@@ -99,6 +104,21 @@ export function QueuePage() {
 
 	const handleRetry = async (id: number) => {
 		await retryItem.mutateAsync(id);
+	};
+
+	const handleCancel = async (id: number) => {
+		const confirmed = await confirmAction(
+			"Cancel Processing",
+			"Are you sure you want to cancel this processing item? The item will be marked as failed and can be retried later.",
+			{
+				type: "warning",
+				confirmText: "Cancel Item",
+				confirmButtonClass: "btn-warning",
+			},
+		);
+		if (confirmed) {
+			await cancelItem.mutateAsync(id);
+		}
 	};
 
 	const handleDownload = async (id: number) => {
@@ -249,6 +269,30 @@ export function QueuePage() {
 				setSelectedItems(new Set());
 			} catch (error) {
 				console.error("Failed to restart selected items:", error);
+			}
+		}
+	};
+
+	const handleBulkCancel = async () => {
+		if (selectedItems.size === 0) return;
+
+		const confirmed = await confirmAction(
+			"Cancel Selected Items",
+			`Are you sure you want to cancel ${selectedItems.size} selected items? They will be marked as failed and can be retried later.`,
+			{
+				type: "warning",
+				confirmText: "Cancel Selected",
+				confirmButtonClass: "btn-warning",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const itemIds = Array.from(selectedItems);
+				await cancelBulk.mutateAsync(itemIds);
+				setSelectedItems(new Set());
+			} catch (error) {
+				console.error("Failed to cancel selected items:", error);
 			}
 		}
 	};
@@ -524,6 +568,15 @@ export function QueuePage() {
 								</button>
 								<button
 									type="button"
+									className="btn btn-warning btn-sm"
+									onClick={handleBulkCancel}
+									disabled={cancelBulk.isPending}
+								>
+									<XCircle className="h-4 w-4" />
+									{cancelBulk.isPending ? "Cancelling..." : "Cancel Selected"}
+								</button>
+								<button
+									type="button"
 									className="btn btn-error btn-sm"
 									onClick={handleBulkDelete}
 									disabled={deleteBulk.isPending}
@@ -668,6 +721,19 @@ export function QueuePage() {
 															>
 																<PlayCircle className="h-4 w-4" />
 																{item.status === QueueStatus.PENDING ? "Process" : "Retry"}
+															</button>
+														</li>
+													)}
+													{item.status === QueueStatus.PROCESSING && (
+														<li>
+															<button
+																type="button"
+																onClick={() => handleCancel(item.id)}
+																disabled={cancelItem.isPending}
+																className="text-warning"
+															>
+																<XCircle className="h-4 w-4" />
+																Cancel
 															</button>
 														</li>
 													)}
