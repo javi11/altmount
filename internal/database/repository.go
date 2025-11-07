@@ -363,7 +363,7 @@ func (r *Repository) RemoveFromQueue(ctx context.Context, id int64) error {
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("queue item not found")
+		return sql.ErrNoRows
 	}
 
 	return nil

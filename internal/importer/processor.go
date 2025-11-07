@@ -296,14 +296,17 @@ func (proc *Processor) processRarArchive(
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
 
-		// Create progress tracker for 50-90% range
-		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 90)
+		// Create progress tracker for 50-80% range (archive analysis)
+		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
 
 		// Get release date from first archive file
 		var releaseDate int64
 		if len(archiveFiles) > 0 {
 			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
+
+		// Create progress tracker for 80-100% range (validation and metadata)
+		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 100)
 
 		// Process archive with unified aggregator
 		err := rar.ProcessArchive(
@@ -316,7 +319,8 @@ func (proc *Processor) processRarArchive(
 			proc.rarProcessor,
 			proc.metadataService,
 			proc.poolManager,
-			progressTracker,
+			archiveProgressTracker,
+			validationProgressTracker,
 			proc.maxImportConnections,
 			proc.fullSegmentValidation,
 			proc.segmentSamplePercentage,
@@ -325,7 +329,7 @@ func (proc *Processor) processRarArchive(
 		if err != nil {
 			return "", err
 		}
-		proc.updateProgress(queueID, 90)
+		// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
 	}
 
 	return nzbFolder, nil
@@ -372,14 +376,17 @@ func (proc *Processor) processSevenZipArchive(
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
 
-		// Create progress tracker for 50-90% range
-		progressTracker := proc.broadcaster.CreateTracker(queueID, 50, 90)
+		// Create progress tracker for 50-80% range (archive analysis)
+		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
 
 		// Get release date from first archive file
 		var releaseDate int64
 		if len(archiveFiles) > 0 {
 			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
+
+		// Create progress tracker for 80-100% range (validation and metadata)
+		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 100)
 
 		// Process archive with unified aggregator
 		err := sevenzip.ProcessArchive(
@@ -392,7 +399,8 @@ func (proc *Processor) processSevenZipArchive(
 			proc.sevenZipProcessor,
 			proc.metadataService,
 			proc.poolManager,
-			progressTracker,
+			archiveProgressTracker,
+			validationProgressTracker,
 			proc.maxImportConnections,
 			proc.fullSegmentValidation,
 			proc.segmentSamplePercentage,
@@ -401,7 +409,7 @@ func (proc *Processor) processSevenZipArchive(
 		if err != nil {
 			return "", err
 		}
-		proc.updateProgress(queueID, 90)
+		// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
 	}
 
 	return nzbFolder, nil

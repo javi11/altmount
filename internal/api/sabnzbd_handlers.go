@@ -1,6 +1,8 @@
 package api
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -498,7 +500,13 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 	// Delete from queue (history items are still queue items with completed/failed status)
 	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Failed to delete history item")
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
+				Status: true,
+			})
+		}
+
+		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
 	}
 
 	response := SABnzbdDeleteResponse{

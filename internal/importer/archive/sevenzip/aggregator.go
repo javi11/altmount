@@ -23,6 +23,50 @@ var (
 	ErrNoAllowedFiles = errors.New("archive contains no files with allowed extensions")
 )
 
+// calculateTotalSegments counts all segments across all 7zip archive contents
+func calculateTotalSegments(sevenZipContents []Content) int {
+	total := 0
+	for _, content := range sevenZipContents {
+		if !content.IsDirectory {
+			total += len(content.Segments)
+		}
+	}
+	return total
+}
+
+// calculateSegmentsToValidate calculates the actual number of segments that will be validated
+// based on the validation mode (full or sampling) and sample percentage.
+// This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
+func calculateSegmentsToValidate(sevenZipContents []Content, fullValidation bool, samplePercentage int) int {
+	total := 0
+	for _, content := range sevenZipContents {
+		if content.IsDirectory {
+			continue
+		}
+
+		segmentCount := len(content.Segments)
+		if fullValidation {
+			// Full validation mode: all segments will be validated
+			total += segmentCount
+		} else {
+			// Sampling mode: first 3 + last 2 + random middle samples
+			// Minimum 5 segments always validated for statistical validity
+			minSegments := 5
+			if segmentCount <= minSegments {
+				total += segmentCount
+			} else {
+				// Fixed segments: first 3 + last 2 = 5 segments
+				fixedSegments := 5
+				// Middle segments: based on sample percentage
+				middleSegmentCount := segmentCount - fixedSegments
+				sampledMiddle := (middleSegmentCount * samplePercentage) / 100
+				total += fixedSegments + sampledMiddle
+			}
+		}
+	}
+	return total
+}
+
 // hasAllowedFiles checks if any files within 7zip archive contents match allowed extensions
 // If allowedExtensions is empty, returns true (all files allowed)
 func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) bool {
@@ -76,7 +120,8 @@ func ProcessArchive(
 	sevenZipProcessor Processor,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
-	progressTracker *progress.Tracker,
+	archiveProgressTracker *progress.Tracker,
+	validationProgressTracker *progress.Tracker,
 	maxValidationGoroutines int,
 	fullSegmentValidation bool,
 	segmentSamplePercentage int,
@@ -92,7 +137,7 @@ func ProcessArchive(
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	sevenZipContents, err := sevenZipProcessor.AnalyzeSevenZipContentFromNzb(ctx, archiveFiles, password, progressTracker)
+	sevenZipContents, err := sevenZipProcessor.AnalyzeSevenZipContentFromNzb(ctx, archiveFiles, password, archiveProgressTracker)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to analyze 7zip archive content", "error", err)
 		return err
@@ -106,7 +151,19 @@ func ProcessArchive(
 		return ErrNoAllowedFiles
 	}
 
-	// Process extracted files
+	// Calculate total segments to validate for accurate progress tracking
+	// This accounts for sampling mode if enabled
+	totalSegmentsToValidate := calculateSegmentsToValidate(sevenZipContents, fullSegmentValidation, segmentSamplePercentage)
+	validatedSegmentsCount := 0
+
+	slog.InfoContext(ctx, "Starting 7zip archive validation",
+		"total_files", len(sevenZipContents),
+		"total_segments_to_validate", totalSegmentsToValidate,
+		"full_validation", fullSegmentValidation,
+		"sample_percentage", segmentSamplePercentage)
+
+	// Process extracted files with segment-based progress tracking
+	// 80-95% for validation loop, 95-100% for metadata finalization
 	for _, sevenZipContent := range sevenZipContents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
@@ -146,6 +203,32 @@ func ProcessArchive(
 			_ = metadataService.DeleteFileMetadata(virtualFilePath)
 		}
 
+		// Calculate segments validated for this file
+		segmentCount := len(sevenZipContent.Segments)
+		var fileSegmentsValidated int
+		if fullSegmentValidation {
+			fileSegmentsValidated = segmentCount
+		} else {
+			// Sampling mode: calculate same as helper function
+			minSegments := 5
+			if segmentCount <= minSegments {
+				fileSegmentsValidated = segmentCount
+			} else {
+				fixedSegments := 5
+				middleSegmentCount := segmentCount - fixedSegments
+				sampledMiddle := (middleSegmentCount * segmentSamplePercentage) / 100
+				fileSegmentsValidated = fixedSegments + sampledMiddle
+			}
+		}
+
+		// Update segment-based progress (80-95% range for validation)
+		validatedSegmentsCount += fileSegmentsValidated
+		if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
+			// Map validated segments to 80-95% overall progress
+			progressPercent := 80 + (validatedSegmentsCount * 15 / totalSegmentsToValidate)
+			validationProgressTracker.Update(progressPercent, 95)
+		}
+
 		// Write file metadata to disk
 		if err := metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
 			return fmt.Errorf("failed to write metadata for 7zip file %s: %w", sevenZipContent.Filename, err)
@@ -156,7 +239,18 @@ func ProcessArchive(
 			"original_internal_path", sevenZipContent.InternalPath,
 			"virtual_path", virtualFilePath,
 			"size", sevenZipContent.Size,
-			"segments", len(sevenZipContent.Segments))
+			"segments", len(sevenZipContent.Segments),
+			"validated_segments", fileSegmentsValidated)
+	}
+
+	// Ensure progress is at 95% before metadata finalization phase
+	if validationProgressTracker != nil {
+		validationProgressTracker.Update(95, 95)
+	}
+
+	// Update progress to 100% after all metadata written (95-100% for finalization)
+	if validationProgressTracker != nil {
+		validationProgressTracker.Update(100, 100)
 	}
 
 	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", len(sevenZipContents))
