@@ -19,6 +19,7 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
+	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/usenet"
 )
 
@@ -88,6 +89,8 @@ func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []
 func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	name = path.Clean(name)
 
+	ctx := slogutil.With(ufs.ctx, "file_name", name)
+
 	// Find the corresponding RAR file
 	file, ok := ufs.files[name]
 	if !ok {
@@ -102,7 +105,7 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 		name:           name,
 		file:           &file,
 		poolManager:    ufs.poolManager,
-		ctx:            ufs.ctx,
+		ctx:            ctx,
 		maxWorkers:     ufs.maxWorkers,
 		maxCacheSizeMB: ufs.maxCacheSizeMB,
 		size:           file.Size,

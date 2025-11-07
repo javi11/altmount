@@ -578,6 +578,9 @@ func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 
 // RegisterInstance attempts to automatically register an ARR instance
 // If the instance already exists (by URL), it returns nil without error
+// Also creates the appropriate category in SABnzbd configuration based on ARR type:
+// - Radarr instances get "movies" category
+// - Sonarr instances get "tv" category
 func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) error {
 	if s.configManager == nil {
 		return fmt.Errorf("config manager not available")
@@ -597,6 +600,17 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 		return fmt.Errorf("failed to detect ARR type: %w", err)
 	}
 
+	// Determine category based on ARR type
+	var category string
+	switch arrType {
+	case "radarr":
+		category = "movies"
+	case "sonarr":
+		category = "tv"
+	default:
+		return fmt.Errorf("unsupported ARR type: %s", arrType)
+	}
+
 	// Generate instance name
 	instanceName, err := s.generateInstanceName(arrURL)
 	if err != nil {
@@ -606,7 +620,8 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 	slog.InfoContext(ctx, "Registering new ARR instance",
 		"name", instanceName,
 		"type", arrType,
-		"url", arrURL)
+		"url", arrURL,
+		"category", category)
 
 	// Get current config and make a deep copy
 	currentConfig := s.configManager.GetConfig()
@@ -627,9 +642,10 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 		newConfig.Arrs.RadarrInstances = append(newConfig.Arrs.RadarrInstances, newInstance)
 	case "sonarr":
 		newConfig.Arrs.SonarrInstances = append(newConfig.Arrs.SonarrInstances, newInstance)
-	default:
-		return fmt.Errorf("unsupported ARR type: %s", arrType)
 	}
+
+	// Create category for this ARR type
+	s.ensureCategoryExistsInConfig(ctx, newConfig, category)
 
 	// Update and save configuration
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
@@ -643,9 +659,79 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 	slog.InfoContext(ctx, "Successfully registered ARR instance",
 		"name", instanceName,
 		"type", arrType,
-		"url", arrURL)
+		"url", arrURL,
+		"category", category)
 
 	return nil
+}
+
+// ensureCategoryExists ensures a category exists in the current configuration
+func (s *Service) ensureCategoryExists(ctx context.Context, category string) {
+	if s.configManager == nil {
+		return
+	}
+
+	// Use default category if empty
+	if category == "" {
+		category = "default"
+	}
+
+	currentConfig := s.configManager.GetConfig()
+	newConfig := currentConfig.DeepCopy()
+
+	s.ensureCategoryExistsInConfig(ctx, newConfig, category)
+
+	// Update and save configuration
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
+		slog.ErrorContext(ctx, "Failed to update config for category", "category", category, "error", err)
+		return
+	}
+
+	if err := s.configManager.SaveConfig(); err != nil {
+		slog.ErrorContext(ctx, "Failed to save config for category", "category", category, "error", err)
+		return
+	}
+
+	slog.InfoContext(ctx, "Successfully ensured category exists", "category", category)
+}
+
+// ensureCategoryExistsInConfig ensures a category exists in the provided config
+func (s *Service) ensureCategoryExistsInConfig(ctx context.Context, cfg *config.Config, category string) {
+	// Use default category if empty
+	if category == "" {
+		category = "default"
+	}
+
+	// Check if category already exists
+	for _, existingCategory := range cfg.SABnzbd.Categories {
+		if existingCategory.Name == category {
+			slog.DebugContext(ctx, "Category already exists, skipping creation", "category", category)
+			return
+		}
+	}
+
+	// Calculate next order number
+	nextOrder := 0
+	for _, existingCategory := range cfg.SABnzbd.Categories {
+		if existingCategory.Order >= nextOrder {
+			nextOrder = existingCategory.Order + 1
+		}
+	}
+
+	// Create new category with default values
+	newCategory := config.SABnzbdCategory{
+		Name:     category,
+		Order:    nextOrder,
+		Priority: 0,
+		Dir:      category, // Use category name as directory
+	}
+
+	cfg.SABnzbd.Categories = append(cfg.SABnzbd.Categories, newCategory)
+
+	slog.InfoContext(ctx, "Created new category",
+		"category", category,
+		"order", nextOrder,
+		"dir", category)
 }
 
 // GetInstance returns a specific instance by type and name

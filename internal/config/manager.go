@@ -1068,11 +1068,11 @@ func DefaultConfig(configDir ...string) *Config {
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
-			MaxImportConnections:    5,                // Default: 5 concurrent NNTP connections for validation and archive processing
-			ImportCacheSizeMB:       64,               // Default: 64MB cache for archive analysis
-			SegmentSamplePercentage: 5,                // Default: 5% segment sampling
-			SymlinkDir:              nil,              // No default symlink directory
-			SymlinkEnabled:          &symlinkEnabled,  // Disabled by default
+			MaxImportConnections:    5,               // Default: 5 concurrent NNTP connections for validation and archive processing
+			ImportCacheSizeMB:       64,              // Default: 64MB cache for archive analysis
+			SegmentSamplePercentage: 2,               // Default: 2% segment sampling
+			SymlinkDir:              nil,             // No default symlink directory
+			SymlinkEnabled:          &symlinkEnabled, // Disabled by default
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/nntppool/v2"
 	"github.com/javi11/nntppool/v2/pkg/nntpcli"
 	"github.com/javi11/nzbparser"
@@ -64,6 +65,8 @@ func NewParser(poolManager pool.Manager) *Parser {
 
 // ParseFile parses an NZB file from a reader
 func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*ParsedNzb, error) {
+	ctx = slogutil.With(ctx, "nzb_path", nzbPath)
+
 	n, err := nzbparser.Parse(r)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to parse NZB XML", err)
@@ -374,6 +377,8 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	// Fetch first segment of each file in parallel
 	for _, file := range files {
 		concPool.Go(func(ctx context.Context) (fetchResult, error) {
+			ctx = slogutil.With(ctx, "file", file.Filename)
+
 			// Skip files without segments
 			if len(file.Segments) == 0 {
 				return fetchResult{
