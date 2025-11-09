@@ -65,6 +65,7 @@ func ProcessRegularFiles(
 			maxValidationGoroutines,
 			fullSegmentValidation,
 			segmentSamplePercentage,
+			nil, // No progress callback for multi-file imports
 		); err != nil {
 			return err
 		}

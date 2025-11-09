@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
@@ -21,6 +23,9 @@ import (
 // For fullValidation=true, all segments are validated regardless of samplePercentage.
 // A minimum of 5 segments are always validated for statistical validity when sampling.
 //
+// The optional progressTracker updates progress after each segment validation completes,
+// providing real-time progress updates during concurrent validation.
+//
 // Returns an error if any segment is unreachable or if the pool is unavailable.
 func ValidateSegmentAvailability(
 	ctx context.Context,
@@ -29,6 +34,7 @@ func ValidateSegmentAvailability(
 	maxConnections int,
 	fullValidation bool,
 	samplePercentage int,
+	progressTracker progress.ProgressTracker,
 ) error {
 	if len(segments) == 0 {
 		return nil
@@ -46,6 +52,10 @@ func ValidateSegmentAvailability(
 
 	// Select which segments to validate
 	segmentsToValidate := selectSegmentsForValidation(segments, fullValidation, samplePercentage)
+	totalToValidate := len(segmentsToValidate)
+
+	// Atomic counter for progress tracking (thread-safe for concurrent validation)
+	var validatedCount int32
 
 	// Validate segments concurrently with connection limit
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConnections)
@@ -58,6 +68,12 @@ func ValidateSegmentAvailability(
 			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
 			if err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
+			}
+
+			// Update progress after successful validation
+			if progressTracker != nil {
+				count := atomic.AddInt32(&validatedCount, 1)
+				progressTracker.Update(int(count), totalToValidate)
 			}
 
 			return nil

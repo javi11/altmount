@@ -179,7 +179,18 @@ func ProcessArchive(
 		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
-		// Validate segments
+		// Create offset tracker for real-time segment-level progress
+		// This maps individual file segment progress (0→N) to cumulative progress across all files
+		var offsetTracker *progress.OffsetTracker
+		if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
+			offsetTracker = progress.NewOffsetTracker(
+				validationProgressTracker,
+				validatedSegmentsCount,       // Segments already validated in previous files
+				totalSegmentsToValidate,      // Total segments across all files
+			)
+		}
+
+		// Validate segments with real-time progress updates
 		if err := validation.ValidateSegmentsForFile(
 			ctx,
 			baseFilename,
@@ -190,20 +201,12 @@ func ProcessArchive(
 			maxValidationGoroutines,
 			fullSegmentValidation,
 			segmentSamplePercentage,
+			offsetTracker, // Real-time segment progress with cumulative offset
 		); err != nil {
 			return err
 		}
 
-		// Create file metadata using the 7zip handler's helper function
-		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate)
-
-		// Delete old metadata if exists (simple collision handling)
-		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
-		if _, err := os.Stat(metadataPath); err == nil {
-			_ = metadataService.DeleteFileMetadata(virtualFilePath)
-		}
-
-		// Calculate segments validated for this file
+		// Calculate and track segments validated for this file (for next file's offset)
 		segmentCount := len(sevenZipContent.Segments)
 		var fileSegmentsValidated int
 		if fullSegmentValidation {
@@ -221,12 +224,16 @@ func ProcessArchive(
 			}
 		}
 
-		// Update segment-based progress (80-95% range for validation)
+		// Update cumulative segment count for next file's offset
 		validatedSegmentsCount += fileSegmentsValidated
-		if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
-			// Map validated segments to 80-95% overall progress
-			progressPercent := 80 + (validatedSegmentsCount * 15 / totalSegmentsToValidate)
-			validationProgressTracker.Update(progressPercent, 95)
+
+		// Create file metadata using the 7zip handler's helper function
+		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate)
+
+		// Delete old metadata if exists (simple collision handling)
+		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
+		if _, err := os.Stat(metadataPath); err == nil {
+			_ = metadataService.DeleteFileMetadata(virtualFilePath)
 		}
 
 		// Write file metadata to disk
@@ -243,14 +250,15 @@ func ProcessArchive(
 			"validated_segments", fileSegmentsValidated)
 	}
 
-	// Ensure progress is at 95% before metadata finalization phase
-	if validationProgressTracker != nil {
-		validationProgressTracker.Update(95, 95)
+	// Ensure validation progress is at 95% (end of validation range)
+	if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
+		validationProgressTracker.Update(totalSegmentsToValidate, totalSegmentsToValidate)
 	}
 
-	// Update progress to 100% after all metadata written (95-100% for finalization)
+	// Update progress to 100% after all metadata written (95-100% for metadata finalization)
+	// Use UpdateAbsolute since validationProgressTracker is limited to 80-95% range
 	if validationProgressTracker != nil {
-		validationProgressTracker.Update(100, 100)
+		validationProgressTracker.UpdateAbsolute(100)
 	}
 
 	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", len(sevenZipContents))

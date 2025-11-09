@@ -158,6 +158,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		hc.getMaxConnectionsForHealthChecks(),
 		hc.getCheckAllSegments(),
 		hc.getSegmentSamplePercentage(),
+		nil, // No progress callback for health checks
 	)
 
 	if checkErr != nil {

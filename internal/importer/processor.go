@@ -305,8 +305,8 @@ func (proc *Processor) processRarArchive(
 			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
 
-		// Create progress tracker for 80-100% range (validation and metadata)
-		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 100)
+		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
+		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
 
 		// Process archive with unified aggregator
 		err := rar.ProcessArchive(
@@ -385,8 +385,8 @@ func (proc *Processor) processSevenZipArchive(
 			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
 
-		// Create progress tracker for 80-100% range (validation and metadata)
-		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 100)
+		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
+		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
 
 		// Process archive with unified aggregator
 		err := sevenzip.ProcessArchive(

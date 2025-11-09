@@ -1070,7 +1070,7 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 			MaxImportConnections:    5,               // Default: 5 concurrent NNTP connections for validation and archive processing
 			ImportCacheSizeMB:       64,              // Default: 64MB cache for archive analysis
-			SegmentSamplePercentage: 2,               // Default: 2% segment sampling
+			SegmentSamplePercentage: 1,               // Default: 1% segment sampling
 			SymlinkDir:              nil,             // No default symlink directory
 			SymlinkEnabled:          &symlinkEnabled, // Disabled by default
 		},

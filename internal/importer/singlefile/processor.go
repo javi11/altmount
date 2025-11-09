@@ -52,6 +52,7 @@ func ProcessSingleFile(
 		maxValidationGoroutines,
 		fullSegmentValidation,
 		segmentSamplePercentage,
+		nil, // No progress callback for single file imports
 	); err != nil {
 		return "", err
 	}

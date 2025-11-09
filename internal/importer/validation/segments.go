@@ -7,6 +7,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/usenet"
 )
 
@@ -14,6 +15,9 @@ import (
 // and reachability checks. It validates that segments are structurally sound, accessible via
 // the Usenet connection pool, and that their total size matches the expected file size (accounting
 // for encryption overhead).
+//
+// The optional progressTracker is passed through to segment availability validation for real-time
+// progress updates during concurrent validation.
 func ValidateSegmentsForFile(
 	ctx context.Context,
 	filename string,
@@ -24,6 +28,7 @@ func ValidateSegmentsForFile(
 	maxGoroutines int,
 	fullValidation bool,
 	samplePercentage int,
+	progressTracker progress.ProgressTracker,
 ) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments provided for file %s", filename)
@@ -72,7 +77,7 @@ func ValidateSegmentsForFile(
 	}
 
 	// Validate segment availability using shared validation logic
-	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, fullValidation, samplePercentage); err != nil {
+	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, fullValidation, samplePercentage, progressTracker); err != nil {
 		return err
 	}
 
