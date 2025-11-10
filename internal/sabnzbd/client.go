@@ -94,27 +94,13 @@ func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath s
 		return "", fmt.Errorf("failed to copy file data: %w", err)
 	}
 
-	// Add category if provided
-	if category != nil && *category != "" {
-		if err := writer.WriteField("cat", *category); err != nil {
-			return "", fmt.Errorf("failed to write category field: %w", err)
-		}
-	}
-
-	// Add priority if provided
-	if priority != nil && *priority != "" {
-		if err := writer.WriteField("priority", *priority); err != nil {
-			return "", fmt.Errorf("failed to write priority field: %w", err)
-		}
-	}
-
 	// Close the multipart writer
 	if err := writer.Close(); err != nil {
 		return "", fmt.Errorf("failed to close multipart writer: %w", err)
 	}
 
 	// Build the request URL
-	requestURL, err := c.buildAddFileURL(host, apiKey)
+	requestURL, err := c.buildAddFileURL(host, apiKey, category, priority)
 	if err != nil {
 		return "", fmt.Errorf("failed to build request URL: %w", err)
 	}
@@ -169,7 +155,7 @@ func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath s
 }
 
 // buildAddFileURL constructs the SABnzbd API URL for adding files
-func (c *SABnzbdClient) buildAddFileURL(host, apiKey string) (string, error) {
+func (c *SABnzbdClient) buildAddFileURL(host, apiKey string, category *string, priority *string) (string, error) {
 	// Parse the host URL to ensure it's valid
 	baseURL, err := url.Parse(host)
 	if err != nil {
@@ -181,6 +167,14 @@ func (c *SABnzbdClient) buildAddFileURL(host, apiKey string) (string, error) {
 	params.Add("mode", "addfile")
 	params.Add("apikey", apiKey)
 	params.Add("output", "json")
+
+	if category != nil && *category != "" {
+		params.Add("cat", *category)
+	}
+
+	if priority != nil && *priority != "" {
+		params.Add("priority", *priority)
+	}
 
 	// Construct the full URL
 	fullURL := fmt.Sprintf("%s/api?%s", baseURL.String(), params.Encode())
