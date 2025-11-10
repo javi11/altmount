@@ -79,6 +79,7 @@ func getFileInfo(
 		Is7z:          is7z,
 		YencHeaders:   file.Headers,
 		First16KB:     file.First16KB,
+		OriginalIndex: file.OriginalIndex,
 	}
 }
 

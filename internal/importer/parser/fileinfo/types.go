@@ -28,13 +28,15 @@ type FileInfo struct {
 	IsPar2Archive bool                 // Whether this is a PAR2 archive (detected by extension)
 	YencHeaders   *nntpcli.YencHeaders // yEnc headers from first segment
 	First16KB     []byte               // First 16KB of the file (for magic byte detection)
+	OriginalIndex int                  // Original position in the parsed NZB file list
 }
 
 // NzbFileWithFirstSegment represents an NZB file with its first segment data
 // Similar to C# FetchFirstSegmentsStep.NzbFileWithFirstSegment
 type NzbFileWithFirstSegment struct {
-	NzbFile     *nzbparser.NzbFile
-	Headers     *nntpcli.YencHeaders
-	First16KB   []byte
-	ReleaseDate time.Time
+	NzbFile       *nzbparser.NzbFile
+	Headers       *nntpcli.YencHeaders
+	First16KB     []byte
+	ReleaseDate   time.Time
+	OriginalIndex int // Original position in the parsed NZB file list
 }

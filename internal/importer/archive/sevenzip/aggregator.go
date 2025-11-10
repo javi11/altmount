@@ -185,8 +185,8 @@ func ProcessArchive(
 		if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
 			offsetTracker = progress.NewOffsetTracker(
 				validationProgressTracker,
-				validatedSegmentsCount,       // Segments already validated in previous files
-				totalSegmentsToValidate,      // Total segments across all files
+				validatedSegmentsCount,  // Segments already validated in previous files
+				totalSegmentsToValidate, // Total segments across all files
 			)
 		}
 

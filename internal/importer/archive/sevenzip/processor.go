@@ -501,28 +501,59 @@ func extractBaseFilenameSevenZip(filename string) string {
 
 // renameSevenZipFilesAndSort renames all 7z files to have the same base name and sorts them
 func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.ParsedFile {
-	// Get the base name of the first 7zip file
-	firstFileBase := extractBaseFilenameSevenZip(sevenZipFiles[0].Filename)
+	// Check if ALL files have no extension - if so, we'll add .XXX extensions
+	allFilesNoExt := true
+	for _, file := range sevenZipFiles {
+		if hasExtension(file.Filename) {
+			allFilesNoExt = false
+			break
+		}
+	}
 
-	// Rename all files to match the base name of the first file while preserving original part naming
-	for i := range sevenZipFiles {
-		originalFileName := sevenZipFiles[i].Filename
+	// Get base filename from first file if all files have no extension
+	baseFilename := ""
+	if allFilesNoExt {
+		// Sort files alphabetically to ensure consistent base filename selection
+		sort.Slice(sevenZipFiles, func(i, j int) bool {
+			return sevenZipFiles[i].Filename < sevenZipFiles[j].Filename
+		})
+		// Use the first file's name as the base for all parts
+		if len(sevenZipFiles) > 0 {
+			baseFilename = sevenZipFiles[0].Filename
+		}
+	} else {
+		// Get the base name of the first 7zip file (for existing extension handling)
+		firstFileBase := extractBaseFilenameSevenZip(sevenZipFiles[0].Filename)
 
-		// Try to extract the part suffix from the original filename
-		partSuffix := getPartSuffixSevenZip(originalFileName)
+		// Rename all files to match the base name of the first file while preserving original part naming
+		for i := range sevenZipFiles {
+			originalFileName := sevenZipFiles[i].Filename
 
-		// Construct new filename with first file's base name and original part suffix
-		sevenZipFiles[i].Filename = firstFileBase + partSuffix
+			// Try to extract the part suffix from the original filename
+			partSuffix := getPartSuffixSevenZip(originalFileName)
+
+			// Construct new filename with first file's base name and original part suffix
+			sevenZipFiles[i].Filename = firstFileBase + partSuffix
+		}
+	}
+
+	// Apply normalization with unified base filename support
+	normalizedFiles := make([]parser.ParsedFile, len(sevenZipFiles))
+	for i, file := range sevenZipFiles {
+		normalizedFiles[i] = file
+		// Use OriginalIndex to preserve part numbering from original NZB order
+		// Pass total file count for zero-padding and base filename for unified naming
+		normalizedFiles[i].Filename = normalize7zPartFilename(file.Filename, file.OriginalIndex, allFilesNoExt, len(sevenZipFiles), baseFilename)
 	}
 
 	// Sort files by part number
-	sort.Slice(sevenZipFiles, func(i, j int) bool {
-		partI := extractSevenZipPartNumber(sevenZipFiles[i].Filename)
-		partJ := extractSevenZipPartNumber(sevenZipFiles[j].Filename)
+	sort.Slice(normalizedFiles, func(i, j int) bool {
+		partI := extractSevenZipPartNumber(normalizedFiles[i].Filename)
+		partJ := extractSevenZipPartNumber(normalizedFiles[j].Filename)
 		return partI < partJ
 	})
 
-	return sevenZipFiles
+	return normalizedFiles
 }
 
 // getPartSuffixSevenZip extracts the part suffix from a 7z filename

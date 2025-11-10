@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -114,10 +115,33 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	// Normalize RAR part filenames (e.g., part010 -> part10) for consistent processing
+	// Check if ALL files have no extension - if so, we'll add .partXX.rar extensions
+	allFilesNoExt := true
+	for _, file := range rarFiles {
+		if hasExtension(file.Filename) {
+			allFilesNoExt = false
+			break
+		}
+	}
+
+	// Get base filename from first file if all files have no extension
+	baseFilename := ""
+	if allFilesNoExt {
+		slices.SortFunc(rarFiles, func(a, b parser.ParsedFile) int {
+			return strings.Compare(a.Filename, b.Filename)
+		})
+		// Use the first file's name as the base for all parts
+		if len(rarFiles) > 0 {
+			baseFilename = rarFiles[0].Filename
+		}
+	}
+
 	normalizedFiles := make([]parser.ParsedFile, len(rarFiles))
 	for i, file := range rarFiles {
 		normalizedFiles[i] = file
-		normalizedFiles[i].Filename = normalizeRarPartFilename(file.Filename)
+		// Use OriginalIndex to preserve part numbering from original NZB order
+		// Pass total file count for zero-padding and base filename for unified naming
+		normalizedFiles[i].Filename = normalizeRarPartFilename(file.Filename, file.OriginalIndex, allFilesNoExt, len(rarFiles), baseFilename)
 	}
 
 	// Create Usenet filesystem for RAR access - this enables the iterator to access

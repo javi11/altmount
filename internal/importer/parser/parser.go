@@ -41,6 +41,7 @@ type FirstSegmentData struct {
 	Headers             nntpcli.YencHeaders // yEnc headers (FileName, FileSize, PartSize)
 	RawBytes            []byte              // Up to 16KB of raw data for PAR2 detection (may be less if segment is smaller)
 	MissingFirstSegment bool                // True if first segment download failed (article not found, etc.)
+	OriginalIndex       int                 // Original position in the parsed NZB file list
 }
 
 // Parser handles NZB file parsing
@@ -142,10 +143,11 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		}
 
 		filesWithFirstSegment = append(filesWithFirstSegment, &fileinfo.NzbFileWithFirstSegment{
-			NzbFile:     data.File,
-			Headers:     &data.Headers,
-			First16KB:   data.RawBytes,
-			ReleaseDate: time.Unix(int64(data.File.Date), 0),
+			NzbFile:       data.File,
+			Headers:       &data.Headers,
+			First16KB:     data.RawBytes,
+			ReleaseDate:   time.Unix(int64(data.File.Date), 0),
+			OriginalIndex: data.OriginalIndex,
 		})
 	}
 
@@ -182,9 +184,10 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 
 	// Check for errors and collect valid results
 	var parsedFiles []*ParsedFile
-	for i, result := range results {
+	for _, result := range results {
 		if result.err != nil {
-			return nil, fmt.Errorf("failed to parse file %s: %w", fileInfos[i].NzbFile.Subject, result.err)
+			slog.InfoContext(ctx, "Failed to parse file", "error", result.err)
+			continue
 		}
 		parsedFiles = append(parsedFiles, result.parsedFile)
 	}
@@ -205,6 +208,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	}
 
 	// Aggregate results in the original order
+	// Note: OriginalIndex is already set from the original n.Files order during parsing
 	for _, parsedFile := range parsedFiles {
 		parsed.Files = append(parsed.Files, *parsedFile)
 		parsed.TotalSize += parsedFile.Size
@@ -239,7 +243,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 				"segments", len(info.NzbFile.Segments))
 
 			if errors.Is(err, nntppool.ErrArticleNotFoundInProviders) {
-				return nil, NewNonRetryableError("failed to fetch yEnc headers: missing articles in all providers", err)
+				return nil, NewNonRetryableError(fmt.Sprintf("failed to fetch yEnc headers: missing articles in all providers: %s", info.NzbFile.Subject), err)
 			}
 		}
 	}
@@ -344,6 +348,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		Salt:          salt,
 		ReleaseDate:   info.ReleaseDate,
 		IsPar2Archive: info.IsPar2Archive,
+		OriginalIndex: info.OriginalIndex,
 	}
 
 	return parsedFile, nil
@@ -375,23 +380,28 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(runtime.NumCPU()).WithContext(ctx)
 
 	// Fetch first segment of each file in parallel
-	for _, file := range files {
+	for idx, file := range files {
+		// Capture the index and file for the goroutine
+		originalIndex := idx
+		fileToFetch := file
+
 		concPool.Go(func(ctx context.Context) (fetchResult, error) {
-			ctx = slogutil.With(ctx, "file", file.Filename)
+			ctx = slogutil.With(ctx, "file", fileToFetch.Filename)
 
 			// Skip files without segments
-			if len(file.Segments) == 0 {
+			if len(fileToFetch.Segments) == 0 {
 				return fetchResult{
-					segmentID: file.Subject,
+					segmentID: fileToFetch.Subject,
 					data: &FirstSegmentData{
-						File:                &file,
+						File:                &fileToFetch,
 						MissingFirstSegment: true,
+						OriginalIndex:       originalIndex,
 					},
 					err: fmt.Errorf("file has no segments"),
 				}, nil
 			}
 
-			firstSegment := file.Segments[0]
+			firstSegment := fileToFetch.Segments[0]
 
 			// Create context with timeout
 			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
@@ -403,8 +413,9 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				return fetchResult{
 					segmentID: firstSegment.ID,
 					data: &FirstSegmentData{
-						File:                &file,
+						File:                &fileToFetch,
 						MissingFirstSegment: true,
+						OriginalIndex:       originalIndex,
 					},
 					err: fmt.Errorf("failed to get body reader: %w", err),
 				}, nil
@@ -417,8 +428,9 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				return fetchResult{
 					segmentID: firstSegment.ID,
 					data: &FirstSegmentData{
-						File:                &file,
+						File:                &fileToFetch,
 						MissingFirstSegment: true,
+						OriginalIndex:       originalIndex,
 					},
 					err: fmt.Errorf("failed to get yenc headers: %w", err),
 				}, nil
@@ -438,8 +450,9 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				return fetchResult{
 					segmentID: firstSegment.ID,
 					data: &FirstSegmentData{
-						File:                &file,
+						File:                &fileToFetch,
 						MissingFirstSegment: true,
+						OriginalIndex:       originalIndex,
 					},
 					err: fmt.Errorf("failed to read segment data: %w", err),
 				}, nil
@@ -447,15 +460,15 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 
 			// Check if we need to read from additional segments to reach 16KB
 			// This is necessary for PAR2 Hash16k matching when segments are small
-			if bytesRead < maxRead && len(file.Segments) > 1 {
+			if bytesRead < maxRead && len(fileToFetch.Segments) > 1 {
 				p.log.DebugContext(ctx, "First segment provided less than 16KB, reading from additional segments",
-					"file", file.Subject,
+					"file", fileToFetch.Subject,
 					"first_segment_bytes", bytesRead,
-					"total_segments", len(file.Segments))
+					"total_segments", len(fileToFetch.Segments))
 
 				// Read from subsequent segments until we have 16KB or run out of segments
-				for segIdx := 1; segIdx < len(file.Segments) && bytesRead < maxRead; segIdx++ {
-					segment := file.Segments[segIdx]
+				for segIdx := 1; segIdx < len(fileToFetch.Segments) && bytesRead < maxRead; segIdx++ {
+					segment := fileToFetch.Segments[segIdx]
 
 					// Create a new context for this segment
 					segCtx, segCancel := context.WithTimeout(ctx, time.Second*30)
@@ -505,9 +518,10 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			return fetchResult{
 				segmentID: firstSegment.ID,
 				data: &FirstSegmentData{
-					File:     &file,
-					Headers:  headers,
-					RawBytes: rawBytes,
+					File:          &fileToFetch,
+					Headers:       headers,
+					RawBytes:      rawBytes,
+					OriginalIndex: originalIndex,
 				},
 			}, nil
 		})
