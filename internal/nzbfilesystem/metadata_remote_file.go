@@ -85,17 +85,20 @@ func (mrf *MetadataRemoteFile) getGlobalSalt() string {
 }
 
 // OpenFile opens a virtual file backed by metadata
-func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r utils.PathWithArgs) (bool, afero.File, error) {
+func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool, afero.File, error) {
 	// Forbid COPY operations - nzbfilesystem is read-only
-	if r.IsCopy() {
+	if isCopy, ok := ctx.Value(utils.IsCopy).(bool); ok && isCopy {
 		return false, nil, os.ErrPermission
 	}
 
 	// Normalize the path to handle trailing slashes consistently
 	normalizedName := normalizePath(name)
 
-	// Extract showCorrupted flag from args
-	showCorrupted := r.ShowCorrupted()
+	// Extract showCorrupted flag from context
+	showCorrupted := false
+	if sc, ok := ctx.Value(utils.ShowCorrupted).(bool); ok {
+		showCorrupted = sc
+	}
 
 	// Check if this is a directory first
 	if mrf.metadataService.DirectoryExists(normalizedName) {
@@ -150,7 +153,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		fileMeta:         fileMeta,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
-		args:             r,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
 		maxWorkers:       mrf.getMaxDownloadWorkers(),
@@ -477,7 +479,6 @@ type MetadataVirtualFile struct {
 	fileMeta         *metapb.FileMetadata
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
-	args             utils.PathWithArgs
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
 	maxWorkers       int
@@ -749,15 +750,18 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 	// If this is the first read, check for HTTP range header and save original end
 	if !mvf.readerInitialized && mvf.originalRangeEnd == 0 {
-		rangeHeader, err := mvf.args.Range()
-		if err == nil && rangeHeader != nil {
-			mvf.originalRangeEnd = rangeHeader.End
-			return rangeHeader.Start, rangeHeader.End
-		} else {
-			// No range header, set unbounded
-			mvf.originalRangeEnd = -1
-			return 0, -1
+		// Extract range from context
+		if rangeStr, ok := mvf.ctx.Value(utils.RangeKey).(string); ok && rangeStr != "" {
+			rangeHeader, err := utils.ParseRangeHeader(rangeStr)
+			if err == nil && rangeHeader != nil {
+				mvf.originalRangeEnd = rangeHeader.End
+				return rangeHeader.Start, rangeHeader.End
+			}
 		}
+
+		// No range header, set unbounded
+		mvf.originalRangeEnd = -1
+		return 0, -1
 	}
 
 	// For subsequent reads, use current position and respect original range

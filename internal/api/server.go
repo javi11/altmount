@@ -14,6 +14,7 @@ import (
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
@@ -43,6 +44,7 @@ type Server struct {
 	userRepo            *database.UserRepository
 	configManager       ConfigManager
 	metadataReader      *metadata.MetadataReader
+	nzbFilesystem       *nzbfilesystem.NzbFilesystem
 	healthWorker        *health.HealthWorker
 	librarySyncWorker   *health.LibrarySyncWorker
 	importerService     *importer.Service
@@ -64,6 +66,7 @@ func NewServer(
 	userRepo *database.UserRepository,
 	configManager ConfigManager,
 	metadataReader *metadata.MetadataReader,
+	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	poolManager pool.Manager,
 	importService *importer.Service,
 	arrsService *arrs.Service,
@@ -84,6 +87,7 @@ func NewServer(
 		userRepo:            userRepo,
 		configManager:       configManager,
 		metadataReader:      metadataReader,
+		nzbFilesystem:       nzbFilesystem,
 		importerService:     importService, // Will be set later via SetImporterService
 		poolManager:         poolManager,
 		arrsService:         arrsService,
@@ -190,6 +194,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
+	// Note: /files/stream is handled by StreamHandler at HTTP server level
 
 	api.Post("/import/scan", s.handleStartManualScan)
 	api.Get("/import/scan/status", s.handleGetScanStatus)

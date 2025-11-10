@@ -386,3 +386,40 @@ func (r *UserRepository) GetUserByAPIKey(ctx context.Context, apiKey string) (*U
 
 	return &user, nil
 }
+
+// GetAllUsers retrieves all users with API keys for authentication purposes
+func (r *UserRepository) GetAllUsers(ctx context.Context) ([]*User, error) {
+	query := `
+		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
+		FROM users
+		WHERE api_key IS NOT NULL AND api_key != ''
+		ORDER BY created_at
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*User
+	for rows.Next() {
+		var user User
+		err := rows.Scan(
+			&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
+			&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
+			&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, &user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating users: %w", err)
+	}
+
+	return users, nil
+}

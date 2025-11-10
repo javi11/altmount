@@ -104,7 +104,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	progressBroadcaster := progress.NewProgressBroadcaster()
 	defer progressBroadcaster.Close()
 
-	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster)
+	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, repos.UserRepo)
 	if err != nil {
 		return err
 	}
@@ -125,12 +125,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, symlinkFinder)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, poolManager, importerService, arrsService, mountService, progressBroadcaster, symlinkFinder)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, symlinkFinder)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager)
 	if err != nil {
 		return err
 	}
+
+	// Create stream handler for file streaming
+	streamHandler := setupStreamHandler(fs, repos.UserRepo)
 
 	// Setup SPA routes
 	setupSPARoutes(app)
@@ -165,7 +168,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 9. Create HTTP server
-	customServer := createHTTPServer(app, webdavHandler, cfg.WebDAV.Port, cfg.ProfilerEnabled)
+	customServer := createHTTPServer(app, webdavHandler, streamHandler, cfg.WebDAV.Port, cfg.ProfilerEnabled)
 
 	logger.Info("AltMount server started",
 		"port", cfg.WebDAV.Port,

@@ -210,6 +210,67 @@ export function ImportConfigSection({
 					)}
 				</div>
 
+				{/* STRM Configuration */}
+				<div className="space-y-4">
+					<div>
+						<h4 className="font-medium">STRM Configuration</h4>
+						<p className="text-base-content/70 text-sm">
+							Generate STRM files with HTTP streaming URLs for imported files. STRM files can be
+							used by media players like Kodi, Plex, or VLC for direct streaming with full seek
+							support.
+						</p>
+					</div>
+
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Enable STRM Files</legend>
+						<label className="label cursor-pointer">
+							<span className="label-text">Create STRM files for imported files</span>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.strm_enabled}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("strm_enabled", e.target.checked)}
+							/>
+						</label>
+						<p className="label">
+							When enabled, .strm files containing HTTP streaming URLs will be created for each
+							imported file
+						</p>
+					</fieldset>
+
+					{formData.strm_enabled && (
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">STRM Directory</legend>
+							<input
+								type="text"
+								className="input"
+								value={formData.strm_dir || ""}
+								readOnly={isReadOnly}
+								placeholder="/path/to/strm/files"
+								onChange={(e) => handleInputChange("strm_dir", e.target.value)}
+							/>
+							<p className="label">
+								Absolute path where STRM files will be created. STRM files will be organized in the
+								same directory structure as the imported files.
+							</p>
+						</fieldset>
+					)}
+
+					{formData.strm_enabled && formData.strm_dir && (
+						<div className="alert alert-info">
+							<div>
+								<div className="font-bold">STRM Files Enabled</div>
+								<div className="text-sm">
+									STRM files will be created in <code>{formData.strm_dir}/</code> with HTTP
+									streaming URLs. These files support full Range request support for seeking in
+									video players.
+								</div>
+							</div>
+						</div>
+					)}
+				</div>
+
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Full Segment Validation</legend>
 					<label className="label cursor-pointer">

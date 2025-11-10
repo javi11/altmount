@@ -130,6 +130,8 @@ export interface ImportConfig {
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
 	symlink_dir?: string;
 	symlink_enabled: boolean;
+	strm_dir?: string;
+	strm_enabled: boolean;
 }
 
 // Log configuration

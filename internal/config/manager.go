@@ -136,6 +136,8 @@ type ImportConfig struct {
 	SegmentSamplePercentage        int      `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	SymlinkDir                     *string  `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
 	SymlinkEnabled                 *bool    `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
+	StrmDir                        *string  `yaml:"strm_dir" mapstructure:"strm_dir" json:"strm_dir,omitempty"`
+	StrmEnabled                    *bool    `yaml:"strm_enabled" mapstructure:"strm_enabled" json:"strm_enabled,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -352,6 +354,22 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Import.SymlinkEnabled = nil
 	}
 
+	// Deep copy Import.StrmDir pointer
+	if c.Import.StrmDir != nil {
+		v := *c.Import.StrmDir
+		copyCfg.Import.StrmDir = &v
+	} else {
+		copyCfg.Import.StrmDir = nil
+	}
+
+	// Deep copy Import.StrmEnabled pointer
+	if c.Import.StrmEnabled != nil {
+		v := *c.Import.StrmEnabled
+		copyCfg.Import.StrmEnabled = &v
+	} else {
+		copyCfg.Import.StrmEnabled = nil
+	}
+
 	// Deep copy RClone.RCEnabled pointer
 	if c.RClone.RCEnabled != nil {
 		v := *c.RClone.RCEnabled
@@ -525,6 +543,16 @@ func (c *Config) Validate() error {
 		}
 		if !filepath.IsAbs(*c.Import.SymlinkDir) {
 			return fmt.Errorf("import symlink_dir must be an absolute path")
+		}
+	}
+
+	// Validate STRM configuration if enabled
+	if c.Import.StrmEnabled != nil && *c.Import.StrmEnabled {
+		if c.Import.StrmDir == nil || *c.Import.StrmDir == "" {
+			return fmt.Errorf("import strm_dir cannot be empty when STRM is enabled")
+		}
+		if !filepath.IsAbs(*c.Import.StrmDir) {
+			return fmt.Errorf("import strm_dir must be an absolute path")
 		}
 	}
 
@@ -965,6 +993,7 @@ func DefaultConfig(configDir ...string) *Config {
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	symlinkEnabled := false // Disabled by default
+	strmEnabled := false    // Disabled by default
 	scrapperEnabled := false
 	loginRequired := true // Require login by default
 
@@ -1073,6 +1102,8 @@ func DefaultConfig(configDir ...string) *Config {
 			SegmentSamplePercentage: 1,               // Default: 1% segment sampling
 			SymlinkDir:              nil,             // No default symlink directory
 			SymlinkEnabled:          &symlinkEnabled, // Disabled by default
+			StrmDir:                 nil,             // No default STRM directory
+			StrmEnabled:             &strmEnabled,    // Disabled by default
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
