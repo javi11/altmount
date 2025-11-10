@@ -667,6 +667,9 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 
 	// Get optional category from form
 	category := c.FormValue("category")
+	if category == "" {
+		category = "general"
+	}
 
 	// Get optional priority from form
 	priorityStr := c.FormValue("priority")
