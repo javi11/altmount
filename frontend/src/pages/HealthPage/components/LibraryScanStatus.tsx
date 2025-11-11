@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle, Loader2, Play, RefreshCw, X } from "lucide-react";
-import { formatRelativeTime } from "../../../lib/utils";
+import { formatFutureTime, formatRelativeTime } from "../../../lib/utils";
 
 interface LibrarySyncProgress {
 	processed_files: number;
@@ -26,6 +26,7 @@ interface LibraryScanStatusProps {
 	error: Error | null;
 	isStartPending: boolean;
 	isCancelPending: boolean;
+	syncIntervalMinutes?: number;
 	onStart: () => void;
 	onCancel: () => void;
 	onRetry: () => void;
@@ -37,10 +38,29 @@ export function LibraryScanStatus({
 	error,
 	isStartPending,
 	isCancelPending,
+	syncIntervalMinutes,
 	onStart,
 	onCancel,
 	onRetry,
 }: LibraryScanStatusProps) {
+	// Calculate next sync time
+	const calculateNextSyncTime = (): Date | null => {
+		if (
+			!status ||
+			status.is_running ||
+			!status.last_sync_result ||
+			!syncIntervalMinutes ||
+			syncIntervalMinutes === 0
+		) {
+			return null;
+		}
+
+		const lastSyncTime = new Date(status.last_sync_result.completed_at);
+		const nextSyncTime = new Date(lastSyncTime.getTime() + syncIntervalMinutes * 60 * 1000);
+		return nextSyncTime;
+	};
+
+	const nextSyncTime = calculateNextSyncTime();
 	return (
 		<div className="card bg-base-100 shadow-lg">
 			<div className="card-body">
@@ -130,8 +150,8 @@ export function LibraryScanStatus({
 									<span>
 										{status.progress.total_files > 0
 											? Math.round(
-													(status.progress.processed_files / status.progress.total_files) * 100,
-												)
+												(status.progress.processed_files / status.progress.total_files) * 100,
+											)
 											: 0}
 										%
 									</span>
@@ -168,6 +188,27 @@ export function LibraryScanStatus({
 										<strong>Completed:</strong>{" "}
 										{formatRelativeTime(new Date(status.last_sync_result.completed_at))}
 									</span>
+								</div>
+							</div>
+						)}
+
+						{/* Next Sync Information */}
+						{!status.is_running && (
+							<div className="mt-4 rounded bg-base-200 p-3">
+								<div className="font-semibold text-sm">Next Scan:</div>
+								<div className="mt-1 text-sm">
+									{nextSyncTime ? (
+										<span>
+											<strong>Scheduled:</strong> {formatFutureTime(nextSyncTime)} (
+											{nextSyncTime.toLocaleString()})
+										</span>
+									) : (
+										<span className="text-base-content/70">
+											{syncIntervalMinutes === 0
+												? "Automatic sync disabled (interval set to 0)"
+												: "Automatic sync not configured"}
+										</span>
+									)}
 								</div>
 							</div>
 						)}

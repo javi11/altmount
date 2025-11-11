@@ -61,6 +61,29 @@ export interface HealthConfig {
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
+	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
+	check_all_segments?: boolean; // Whether to check all segments or use sampling
+}
+
+// Library sync types
+export interface LibrarySyncProgress {
+	total_files: number;
+	processed_files: number;
+	start_time: string;
+}
+
+export interface LibrarySyncResult {
+	files_added: number;
+	files_deleted: number;
+	metadata_deleted: number;
+	duration: string;
+	completed_at: string;
+}
+
+export interface LibrarySyncStatus {
+	is_running: boolean;
+	progress?: LibrarySyncProgress;
+	last_sync_result?: LibrarySyncResult;
 }
 
 // RClone configuration (sanitized)
@@ -233,6 +256,8 @@ export interface HealthUpdateRequest {
 	auto_repair_enabled?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
+	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
+	check_all_segments?: boolean; // Whether to check all segments or use sampling
 }
 
 // RClone update request

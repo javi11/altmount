@@ -14,6 +14,7 @@ import {
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
 } from "../hooks/useApi";
+import { useConfig } from "../hooks/useConfig";
 import {
 	useCancelLibrarySync,
 	useLibrarySyncStatus,
@@ -73,6 +74,9 @@ export function HealthPage() {
 	const repairHealthItem = useRepairHealthItem();
 	const { confirmDelete, confirmAction } = useConfirm();
 	const { showToast } = useToast();
+
+	// Config hook
+	const { data: config } = useConfig();
 
 	// Library sync hooks
 	const {
@@ -460,6 +464,7 @@ export function HealthPage() {
 				error={librarySyncError}
 				isStartPending={startLibrarySync.isPending}
 				isCancelPending={cancelLibrarySync.isPending}
+				syncIntervalMinutes={config?.health.library_sync_interval_minutes}
 				onStart={handleStartLibrarySync}
 				onCancel={handleCancelLibrarySync}
 				onRetry={refetchLibrarySync}

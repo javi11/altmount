@@ -257,7 +257,30 @@ export function HealthConfigSection({
 								/>
 								<p className="label text-sm">
 									Percentage of segments to check when sampling is enabled (1-100%, default: 5%).
-									Lower percentages are faster but less thorough.
+								</p>
+							</fieldset>
+						)}
+						{formData.library_sync_interval_minutes !== undefined && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Library Sync Interval (minutes)</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.library_sync_interval_minutes}
+									readOnly={isReadOnly}
+									min={0}
+									max={1440}
+									step={30}
+									onChange={(e) =>
+										handleInputChange(
+											"library_sync_interval_minutes",
+											Number.parseInt(e.target.value, 10) || 0,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									How often to sync the library directory to discover new files (0-1440 minutes).
+									Set to 0 to disable automatic sync. Default: 360 minutes (6 hours).
 								</p>
 							</fieldset>
 						)}
