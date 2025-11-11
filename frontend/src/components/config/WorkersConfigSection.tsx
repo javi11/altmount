@@ -235,47 +235,27 @@ export function ImportConfigSection({
 				</div>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Full Segment Validation</legend>
-					<label className="label cursor-pointer">
-						<span className="label-text">Validate all segments (slower but thorough)</span>
-						<input
-							type="checkbox"
-							className="checkbox"
-							checked={formData.full_segment_validation}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("full_segment_validation", e.target.checked)}
-						/>
-					</label>
+					<legend className="fieldset-legend">Segment Sample Percentage</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.segment_sample_percentage}
+						readOnly={isReadOnly}
+						min={1}
+						max={100}
+						step={1}
+						onChange={(e) =>
+							handleInputChange(
+								"segment_sample_percentage",
+								Number.parseInt(e.target.value, 10) || 5,
+							)
+						}
+					/>
 					<p className="label">
-						When disabled, use a sampling approach for faster processing. Enable for thorough
-						validation of all segments (slower).
+						Percentage of segments to check (1-100%, default: 5%). Set to 100% for thorough
+						validation of all segments.
 					</p>
 				</fieldset>
-
-				{!formData.full_segment_validation && (
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Segment Sample Percentage</legend>
-						<input
-							type="number"
-							className="input"
-							value={formData.segment_sample_percentage}
-							readOnly={isReadOnly}
-							min={1}
-							max={100}
-							step={1}
-							onChange={(e) =>
-								handleInputChange(
-									"segment_sample_percentage",
-									Number.parseInt(e.target.value, 10) || 5,
-								)
-							}
-						/>
-						<p className="label">
-							Percentage of segments to check when sampling is enabled (1-100%, default: 5%). Lower
-							percentages are faster but less thorough.
-						</p>
-					</fieldset>
-				)}
 
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Allowed File Extensions</legend>

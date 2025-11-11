@@ -37,7 +37,7 @@ func calculateTotalSegments(sevenZipContents []Content) int {
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
 // based on the validation mode (full or sampling) and sample percentage.
 // This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
-func calculateSegmentsToValidate(sevenZipContents []Content, fullValidation bool, samplePercentage int) int {
+func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage int) int {
 	total := 0
 	for _, content := range sevenZipContents {
 		if content.IsDirectory {
@@ -45,7 +45,7 @@ func calculateSegmentsToValidate(sevenZipContents []Content, fullValidation bool
 		}
 
 		segmentCount := len(content.Segments)
-		if fullValidation {
+		if samplePercentage == 100 {
 			// Full validation mode: all segments will be validated
 			total += segmentCount
 		} else {
@@ -123,7 +123,6 @@ func ProcessArchive(
 	archiveProgressTracker *progress.Tracker,
 	validationProgressTracker *progress.Tracker,
 	maxValidationGoroutines int,
-	fullSegmentValidation bool,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 ) error {
@@ -153,13 +152,12 @@ func ProcessArchive(
 
 	// Calculate total segments to validate for accurate progress tracking
 	// This accounts for sampling mode if enabled
-	totalSegmentsToValidate := calculateSegmentsToValidate(sevenZipContents, fullSegmentValidation, segmentSamplePercentage)
+	totalSegmentsToValidate := calculateSegmentsToValidate(sevenZipContents, segmentSamplePercentage)
 	validatedSegmentsCount := 0
 
 	slog.InfoContext(ctx, "Starting 7zip archive validation",
 		"total_files", len(sevenZipContents),
 		"total_segments_to_validate", totalSegmentsToValidate,
-		"full_validation", fullSegmentValidation,
 		"sample_percentage", segmentSamplePercentage)
 
 	// Process extracted files with segment-based progress tracking
@@ -199,17 +197,18 @@ func ProcessArchive(
 			metapb.Encryption_NONE,
 			poolManager,
 			maxValidationGoroutines,
-			fullSegmentValidation,
 			segmentSamplePercentage,
 			offsetTracker, // Real-time segment progress with cumulative offset
 		); err != nil {
-			return err
+			slog.WarnContext(ctx, "Skipping 7zip file due to validation error", "error", err, "file", baseFilename)
+
+			continue
 		}
 
 		// Calculate and track segments validated for this file (for next file's offset)
 		segmentCount := len(sevenZipContent.Segments)
 		var fileSegmentsValidated int
-		if fullSegmentValidation {
+		if segmentSamplePercentage == 100 {
 			fileSegmentsValidated = segmentCount
 		} else {
 			// Sampling mode: calculate same as helper function

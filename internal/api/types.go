@@ -91,15 +91,14 @@ type ProviderAPIResponse struct {
 
 // ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers            int                    `json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int                    `json:"queue_processing_interval_seconds"` // Interval in seconds
-	FullSegmentValidation          bool                   `json:"full_segment_validation"`
-	AllowedFileExtensions          []string               `json:"allowed_file_extensions"`
-	MaxImportConnections           int                    `json:"max_import_connections"`
-	ImportCacheSizeMB              int                    `json:"import_cache_size_mb"`
-	SegmentSamplePercentage        int                    `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
-	ImportStrategy                 config.ImportStrategy  `json:"import_strategy"`
-	ImportDir                      *string                `json:"import_dir,omitempty"`
+	MaxProcessorWorkers            int                   `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
+	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
+	MaxImportConnections           int                   `json:"max_import_connections"`
+	ImportCacheSizeMB              int                   `json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
+	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
+	ImportDir                      *string               `json:"import_dir,omitempty"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -216,7 +215,6 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 	return ImportAPIResponse{
 		MaxProcessorWorkers:            importConfig.MaxProcessorWorkers,
 		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
-		FullSegmentValidation:          importConfig.FullSegmentValidation,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 		MaxImportConnections:           importConfig.MaxImportConnections,
 		ImportCacheSizeMB:              importConfig.ImportCacheSizeMB,

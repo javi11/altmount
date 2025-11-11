@@ -25,7 +25,6 @@ func ProcessSingleFile(
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
-	fullSegmentValidation bool,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 ) (string, error) {
@@ -50,7 +49,6 @@ func ProcessSingleFile(
 		file.Encryption,
 		poolManager,
 		maxValidationGoroutines,
-		fullSegmentValidation,
 		segmentSamplePercentage,
 		nil, // No progress callback for single file imports
 	); err != nil {

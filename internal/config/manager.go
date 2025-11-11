@@ -138,7 +138,6 @@ const (
 type ImportConfig struct {
 	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	FullSegmentValidation          bool           `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
 	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
@@ -164,7 +163,6 @@ type HealthConfig struct {
 	CleanupOrphanedMetadata       *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
 	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	CheckAllSegments              bool    `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
 	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 }
@@ -1069,20 +1067,19 @@ func DefaultConfig(configDir ...string) *Config {
 			VFSReadChunkStreams:  4,
 		},
 		Import: ImportConfig{
-			MaxProcessorWorkers:            2,     // Default: 2 processor workers
-			QueueProcessingIntervalSeconds: 5,     // Default: check for work every 5 seconds
-			FullSegmentValidation:          false, // Default: use sampling for faster imports
+			MaxProcessorWorkers:            2, // Default: 2 processor workers
+			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
 			AllowedFileExtensions: []string{ // Default: common video file extensions
 				".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
 				".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264",
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
-			MaxImportConnections:    5,                    // Default: 5 concurrent NNTP connections for validation and archive processing
-			ImportCacheSizeMB:       64,                   // Default: 64MB cache for archive analysis
-			SegmentSamplePercentage: 1,                    // Default: 1% segment sampling
-			ImportStrategy:          ImportStrategyNone,   // Default: no import strategy (direct import)
-			ImportDir:               nil,                  // No default import directory
+			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
+			ImportCacheSizeMB:       64,                 // Default: 64MB cache for archive analysis
+			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
+			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
+			ImportDir:               nil,                // No default import directory
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1097,7 +1094,6 @@ func DefaultConfig(configDir ...string) *Config {
 			CleanupOrphanedMetadata:       &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:          5,
 			MaxConnectionsForHealthChecks: 5,
-			CheckAllSegments:              false,
 			SegmentSamplePercentage:       5,   // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:    360, // Default: sync every 6 hours
 		},

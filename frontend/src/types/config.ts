@@ -60,7 +60,6 @@ export interface HealthConfig {
 	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
-	check_all_segments?: boolean;
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 }
 
@@ -126,7 +125,6 @@ export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 export interface ImportConfig {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
-	full_segment_validation: boolean;
 	allowed_file_extensions: string[];
 	max_import_connections: number;
 	import_cache_size_mb: number;
@@ -235,7 +233,6 @@ export interface HealthUpdateRequest {
 	auto_repair_enabled?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
-	check_all_segments?: boolean;
 }
 
 // RClone update request
@@ -292,7 +289,6 @@ export interface RCloneUpdateRequest {
 export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
-	full_segment_validation?: boolean;
 	allowed_file_extensions?: string[];
 	import_strategy?: ImportStrategy;
 	import_dir?: string;
@@ -376,7 +372,6 @@ export interface APIFormData {
 export interface ImportFormData {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
-	full_segment_validation: boolean;
 	import_strategy: ImportStrategy;
 	import_dir: string;
 }

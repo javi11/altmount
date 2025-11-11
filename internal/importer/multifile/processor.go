@@ -26,7 +26,6 @@ func ProcessRegularFiles(
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
 	maxValidationGoroutines int,
-	fullSegmentValidation bool,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 ) error {
@@ -63,7 +62,6 @@ func ProcessRegularFiles(
 			file.Encryption,
 			poolManager,
 			maxValidationGoroutines,
-			fullSegmentValidation,
 			segmentSamplePercentage,
 			nil, // No progress callback for multi-file imports
 		); err != nil {

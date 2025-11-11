@@ -94,13 +94,12 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	// Get the initial config to pass import settings
 	currentConfig := configGetter()
 	maxImportConnections := currentConfig.Import.MaxImportConnections
-	fullSegmentValidation := currentConfig.Import.FullSegmentValidation
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, fullSegmentValidation, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, broadcaster)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, broadcaster)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
