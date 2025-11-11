@@ -150,119 +150,82 @@ export function ImportConfigSection({
 					<p className="label">Cache size in MB for archive analysis.</p>
 				</fieldset>
 
-				{/* Symlink Configuration */}
+				{/* Import Strategy Configuration */}
 				<div className="space-y-4">
 					<div>
-						<h4 className="font-medium">Symlink Configuration</h4>
+						<h4 className="font-medium">Import Strategy</h4>
 						<p className="text-base-content/70 text-sm">
-							Create symlinks to imported files organized by category. This allows applications to
-							access files via symlinks instead of the mount path.
+							Choose how imported files should be made available to external applications. Symlinks
+							and STRM files cannot be enabled simultaneously.
 						</p>
 					</div>
 
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Enable Symlinks</legend>
-						<label className="label cursor-pointer">
-							<span className="label-text">Create category-based symlinks for imported files</span>
-							<input
-								type="checkbox"
-								className="toggle toggle-primary"
-								checked={formData.symlink_enabled}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("symlink_enabled", e.target.checked)}
-							/>
-						</label>
+						<legend className="fieldset-legend">Strategy Type</legend>
+						<select
+							className="select"
+							value={formData.import_strategy}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("import_strategy", e.target.value)}
+						>
+							<option value="NONE">None (Direct Import)</option>
+							<option value="SYMLINK">Symlinks</option>
+							<option value="STRM">STRM Files</option>
+						</select>
 						<p className="label">
-							When enabled, symlinks will be created in category-specific folders within the symlink
-							directory
+							{formData.import_strategy === "NONE" &&
+								"Files are imported directly without additional organization"}
+							{formData.import_strategy === "SYMLINK" &&
+								"Create category-based symlinks for easier access by external applications"}
+							{formData.import_strategy === "STRM" &&
+								"Generate STRM files with HTTP streaming URLs for media players"}
 						</p>
 					</fieldset>
 
-					{formData.symlink_enabled && (
+					{formData.import_strategy !== "NONE" && (
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Symlink Directory</legend>
+							<legend className="fieldset-legend">
+								{formData.import_strategy === "SYMLINK" ? "Symlink Directory" : "STRM Directory"}
+							</legend>
 							<input
 								type="text"
 								className="input"
-								value={formData.symlink_dir || ""}
+								value={formData.import_dir || ""}
 								readOnly={isReadOnly}
-								placeholder="/path/to/symlinks"
-								onChange={(e) => handleInputChange("symlink_dir", e.target.value)}
+								placeholder={
+									formData.import_strategy === "SYMLINK"
+										? "/path/to/symlinks"
+										: "/path/to/strm/files"
+								}
+								onChange={(e) => handleInputChange("import_dir", e.target.value)}
 							/>
 							<p className="label">
-								Absolute path where symlinks will be created. Symlinks will be organized in
-								subdirectories by category (e.g., /symlinks/movies/, /symlinks/tv/)
+								{formData.import_strategy === "SYMLINK"
+									? "Absolute path where symlinks will be created. Symlinks will be organized in subdirectories by category (e.g., /symlinks/movies/, /symlinks/tv/)"
+									: "Absolute path where STRM files will be created. STRM files will be organized in the same directory structure as the imported files."}
 							</p>
 						</fieldset>
 					)}
 
-					{formData.symlink_enabled && formData.symlink_dir && (
+					{formData.import_strategy === "SYMLINK" && formData.import_dir && (
 						<div className="alert alert-info">
 							<div>
 								<div className="font-bold">Symlinks Enabled</div>
 								<div className="text-sm">
 									Imported files will be available as symlinks in{" "}
-									<code>{formData.symlink_dir}/[category]/</code> for easier access by external
+									<code>{formData.import_dir}/[category]/</code> for easier access by external
 									applications.
 								</div>
 							</div>
 						</div>
 					)}
-				</div>
 
-				{/* STRM Configuration */}
-				<div className="space-y-4">
-					<div>
-						<h4 className="font-medium">STRM Configuration</h4>
-						<p className="text-base-content/70 text-sm">
-							Generate STRM files with HTTP streaming URLs for imported files. STRM files can be
-							used by media players like Kodi, Plex, or VLC for direct streaming with full seek
-							support.
-						</p>
-					</div>
-
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Enable STRM Files</legend>
-						<label className="label cursor-pointer">
-							<span className="label-text">Create STRM files for imported files</span>
-							<input
-								type="checkbox"
-								className="toggle toggle-primary"
-								checked={formData.strm_enabled}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("strm_enabled", e.target.checked)}
-							/>
-						</label>
-						<p className="label">
-							When enabled, .strm files containing HTTP streaming URLs will be created for each
-							imported file
-						</p>
-					</fieldset>
-
-					{formData.strm_enabled && (
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">STRM Directory</legend>
-							<input
-								type="text"
-								className="input"
-								value={formData.strm_dir || ""}
-								readOnly={isReadOnly}
-								placeholder="/path/to/strm/files"
-								onChange={(e) => handleInputChange("strm_dir", e.target.value)}
-							/>
-							<p className="label">
-								Absolute path where STRM files will be created. STRM files will be organized in the
-								same directory structure as the imported files.
-							</p>
-						</fieldset>
-					)}
-
-					{formData.strm_enabled && formData.strm_dir && (
+					{formData.import_strategy === "STRM" && formData.import_dir && (
 						<div className="alert alert-info">
 							<div>
 								<div className="font-bold">STRM Files Enabled</div>
 								<div className="text-sm">
-									STRM files will be created in <code>{formData.strm_dir}/</code> with HTTP
+									STRM files will be created in <code>{formData.import_dir}/</code> with HTTP
 									streaming URLs. These files support full Range request support for seeking in
 									video players.
 								</div>

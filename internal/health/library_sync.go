@@ -41,6 +41,18 @@ type LibrarySyncStatus struct {
 	LastSyncResult *SyncResult   `json:"last_sync_result,omitempty"`
 }
 
+// LibraryFiles holds both symlinks and STRM files found in the library directory
+type LibraryFiles struct {
+	SymlinkPaths []string           // List of cleaned symlink target paths pointing to mount
+	StrmPaths    map[string]struct{} // Set of virtual paths (without .strm extension) that have .strm files
+}
+
+// ImportDirFiles holds both regular files and STRM files found in the import directory
+type ImportDirFiles struct {
+	RegularFiles map[string]struct{} // Set of virtual paths for regular files
+	StrmFiles    map[string]struct{} // Set of virtual paths with .strm files (without .strm extension)
+}
+
 // LibrarySyncWorker manages automatic health check library synchronization
 type LibrarySyncWorker struct {
 	metadataService *metadata.MetadataService
@@ -344,14 +356,52 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	// Additional cleanup of orphaned metadata files if enabled
 	metadataDeletedCount := 0
 	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
-		metadataDeletedCount, err = lsw.validateSymlinks(ctx, metadataFiles)
+		// Get all library files (symlinks and .strm) in one pass
+		libraryFiles, err := lsw.getAllLibraryFiles(ctx)
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
+			if !errors.Is(err, context.Canceled) {
+				slog.ErrorContext(ctx, "Failed to get library files", "error", err)
+			}
+			return
+		}
+
+		// Get all import_dir files (regular and .strm) in one pass
+		importDirFiles, err := lsw.getAllImportDirFiles(ctx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				slog.ErrorContext(ctx, "Failed to get import directory files", "error", err)
+			}
+			return
+		}
+
+		// Only validate symlinks if SYMLINK strategy is enabled
+		if cfg.Import.ImportStrategy == config.ImportStrategySYMLINK {
+			metadataDeletedCount, err = lsw.validateSymlinks(ctx, metadataFiles, libraryFiles.SymlinkPaths, importDirFiles)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+
+				slog.ErrorContext(ctx, "Failed to validate symlinks", "error", err)
 				return
 			}
+		}
 
-			slog.ErrorContext(ctx, "Failed to validate symlinks", "error", err)
-			return
+		// Also validate STRM files if STRM is enabled
+		if cfg.Import.ImportStrategy == config.ImportStrategySTRM {
+			strmDeletedCount, err := lsw.validateStrmFiles(ctx, metadataFiles, libraryFiles.StrmPaths, importDirFiles)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+
+				slog.ErrorContext(ctx, "Failed to validate STRM files", "error", err)
+				// Don't return here - log error but continue
+			} else if strmDeletedCount > 0 {
+				slog.InfoContext(ctx, "Deleted metadata without STRM files",
+					"count", strmDeletedCount)
+				metadataDeletedCount += strmDeletedCount
+			}
 		}
 	}
 
@@ -424,15 +474,8 @@ func (lsw *LibrarySyncWorker) metaPathToVirtualPath(metaPath string) string {
 }
 
 // validateSymlinks validates metadata files against library symlinks and deletes orphaned metadata
-func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFiles []string) (int, error) {
+func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFiles []string, symlinkPaths []string, importDirFiles *ImportDirFiles) (int, error) {
 	slog.InfoContext(ctx, "Starting symlink validation for library directory")
-
-	// Get all library symlinks
-	symlinkPaths, err := lsw.getAllLibrarySymlinks(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to get library symlinks", "error", err)
-		return 0, err
-	}
 
 	// Build map of virtual paths that have symlinks
 	symlinkSet := make(map[string]struct{}, len(symlinkPaths))
@@ -451,8 +494,35 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 		}
 
 		virtualPath := lsw.metaPathToVirtualPath(metaPath)
-		target := filepath.Clean(filepath.Join(lsw.configGetter().MountPath, virtualPath))
-		if _, hasSymlink := symlinkSet[target]; !hasSymlink {
+		mountPath := filepath.Join(lsw.configGetter().MountPath, virtualPath)
+
+		// Check if the file in mount path is actually a symlink
+		// Use Lstat to not follow symlinks
+		fileInfo, err := os.Lstat(mountPath)
+		if err != nil {
+			// File doesn't exist in mount - skip (might be managed differently)
+			continue
+		}
+
+		// Skip if not a symlink - this file is not managed as a symlink
+		if fileInfo.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+
+		// Check if this symlink exists in the library directory
+		target := filepath.Clean(mountPath)
+		_, inLibrary := symlinkSet[target]
+
+		// Check if file exists in import_dir (as regular or .strm)
+		inImportDir := false
+		if importDirFiles != nil {
+			_, hasRegular := importDirFiles.RegularFiles[virtualPath]
+			_, hasStrm := importDirFiles.StrmFiles[virtualPath]
+			inImportDir = hasRegular || hasStrm
+		}
+
+		// Only delete if missing from BOTH library and import_dir
+		if !inLibrary && !inImportDir {
 			slog.InfoContext(ctx, "Deleting metadata without library symlink",
 				"virtual_path", virtualPath,
 				"mount_path", target)
@@ -490,21 +560,24 @@ func (lsw *LibrarySyncWorker) validateSymlinks(ctx context.Context, metadataFile
 	return deletedCount, nil
 }
 
-// getAllLibrarySymlinks collects all symlinks from library directory that point to the mount
-func (lsw *LibrarySyncWorker) getAllLibrarySymlinks(ctx context.Context) ([]string, error) {
+// getAllLibraryFiles collects both symlinks and .strm files from library directory in a single pass
+func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context) (*LibraryFiles, error) {
 	cfg := lsw.configGetter()
 
 	// Get library directory
 	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
-		return []string{}, fmt.Errorf("library directory is not configured")
+		return nil, fmt.Errorf("library directory is not configured")
 	}
 
 	libraryDir := *cfg.Health.LibraryDir
 	mountDir := cfg.MountPath
 
-	var mountPaths []string
+	result := &LibraryFiles{
+		SymlinkPaths: []string{},
+		StrmPaths:    make(map[string]struct{}),
+	}
 
-	// Walk the library directory recursively
+	// Walk the library directory recursively once
 	err := filepath.WalkDir(libraryDir, func(path string, d os.DirEntry, err error) error {
 		// Check context cancellation
 		select {
@@ -517,39 +590,232 @@ func (lsw *LibrarySyncWorker) getAllLibrarySymlinks(ctx context.Context) ([]stri
 			return nil // Continue walking despite errors
 		}
 
-		// Skip if not a symlink
-		if d.Type()&os.ModeSymlink == 0 {
-			return nil
+		// Check if it's a symlink
+		if d.Type()&os.ModeSymlink != 0 {
+			// Read the symlink target
+			target, err := os.Readlink(path)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to read symlink", "path", path, "error", err)
+				return nil
+			}
+
+			// Make target absolute if it's relative
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+
+			// Clean the paths for comparison
+			cleanTarget := filepath.Clean(target)
+			cleanMountDir := filepath.Clean(mountDir)
+
+			// Check if this symlink points inside the mount directory
+			if strings.HasPrefix(cleanTarget, cleanMountDir) {
+				result.SymlinkPaths = append(result.SymlinkPaths, cleanTarget)
+			}
 		}
 
-		// Read the symlink target
-		target, err := os.Readlink(path)
-		if err != nil {
-			slog.WarnContext(ctx, "Failed to read symlink", "path", path, "error", err)
-			return nil
-		}
+		// Check if it's a .strm file
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".strm") {
+			// Get relative path from library_dir
+			relativePath, err := filepath.Rel(libraryDir, path)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to get relative path for STRM file",
+					"path", path,
+					"error", err)
+				return nil
+			}
 
-		// Make target absolute if it's relative
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(path), target)
-		}
+			// Remove .strm extension to get virtual path
+			virtualPath := strings.TrimSuffix(relativePath, ".strm")
 
-		// Clean the paths for comparison
-		cleanTarget := filepath.Clean(target)
-		cleanMountDir := filepath.Clean(mountDir)
+			// Normalize path separators
+			virtualPath = filepath.ToSlash(virtualPath)
 
-		// Check if this symlink points inside the mount directory
-		if strings.HasPrefix(cleanTarget, cleanMountDir) {
-			mountPaths = append(mountPaths, cleanTarget)
+			result.StrmPaths[virtualPath] = struct{}{}
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		slog.ErrorContext(ctx, "Error during library symlink scan", "error", err)
+		slog.ErrorContext(ctx, "Error during library file scan", "error", err)
 		return nil, err
 	}
 
-	return mountPaths, nil
+	return result, nil
+}
+
+// getAllImportDirFiles collects both regular files and .strm files from import directory in a single pass
+func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*ImportDirFiles, error) {
+	cfg := lsw.configGetter()
+
+	// Get import directory
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		// No import directory configured - return empty result
+		return &ImportDirFiles{
+			RegularFiles: make(map[string]struct{}),
+			StrmFiles:    make(map[string]struct{}),
+		}, nil
+	}
+
+	importDir := *cfg.Import.ImportDir
+
+	// Check if directory exists
+	if _, err := os.Stat(importDir); os.IsNotExist(err) {
+		slog.WarnContext(ctx, "Import directory does not exist", "import_dir", importDir)
+		return &ImportDirFiles{
+			RegularFiles: make(map[string]struct{}),
+			StrmFiles:    make(map[string]struct{}),
+		}, nil
+	}
+
+	result := &ImportDirFiles{
+		RegularFiles: make(map[string]struct{}),
+		StrmFiles:    make(map[string]struct{}),
+	}
+
+	// Walk the import directory recursively once
+	err := filepath.WalkDir(importDir, func(path string, d os.DirEntry, err error) error {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // Continue walking despite errors
+		}
+
+		// Skip directories
+		if d.IsDir() {
+			return nil
+		}
+
+		// Get relative path from import_dir
+		relativePath, err := filepath.Rel(importDir, path)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to get relative path for import file",
+				"path", path,
+				"error", err)
+			return nil
+		}
+
+		// Normalize path separators
+		virtualPath := filepath.ToSlash(relativePath)
+
+		// Check if it's a .strm file
+		if strings.HasSuffix(d.Name(), ".strm") {
+			// STRM file - add without .strm extension
+			result.StrmFiles[strings.TrimSuffix(virtualPath, ".strm")] = struct{}{}
+		} else {
+			// Regular file
+			result.RegularFiles[virtualPath] = struct{}{}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		slog.ErrorContext(ctx, "Error during import directory file scan", "error", err)
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// virtualPathToStrmPath converts a virtual path to its corresponding STRM path
+// Example: "Movies/Example.mkv" -> "Movies/Example.mkv.strm"
+func virtualPathToStrmPath(virtualPath string) string {
+	// Keep original filename and add .strm extension (matches creation logic)
+	return virtualPath + ".strm"
+}
+
+// validateStrmFiles validates metadata files against STRM files and deletes orphaned metadata
+func (lsw *LibrarySyncWorker) validateStrmFiles(ctx context.Context, metadataFiles []string, strmPaths map[string]struct{}, importDirFiles *ImportDirFiles) (int, error) {
+	slog.InfoContext(ctx, "Starting STRM file validation")
+
+	deletedCount := 0
+
+	// Check each metadata file
+	for _, metaPath := range metadataFiles {
+		select {
+		case <-ctx.Done():
+			return deletedCount, ctx.Err()
+		default:
+		}
+
+		virtualPath := lsw.metaPathToVirtualPath(metaPath)
+
+		// Convert virtual path to expected STRM path
+		strmVirtualPath := virtualPathToStrmPath(virtualPath)
+
+		// Check if this file should be managed as a STRM file
+		// A file is managed as STRM if a .strm file exists (or should exist) for it
+		cfg := lsw.configGetter()
+		if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+			// No STRM directory configured - skip STRM validation
+			continue
+		}
+
+		strmFilePath := filepath.Join(*cfg.Import.ImportDir, strmVirtualPath)
+
+		// Check if .strm file exists
+		if _, err := os.Stat(strmFilePath); os.IsNotExist(err) {
+			// .strm file doesn't exist - check if this file is in the STRM path set
+			// If it's not in the set, it means it's not managed as a STRM file - skip it
+			if _, inStrmSet := strmPaths[strmVirtualPath]; !inStrmSet {
+				// This file is not managed as a STRM file - skip
+				continue
+			}
+		}
+
+		// Check if STRM file exists in library
+		_, inLibrary := strmPaths[strmVirtualPath]
+
+		// Check if file exists in import_dir (as regular or .strm)
+		inImportDir := false
+		if importDirFiles != nil {
+			_, hasRegular := importDirFiles.RegularFiles[virtualPath]
+			_, hasStrm := importDirFiles.StrmFiles[virtualPath]
+			inImportDir = hasRegular || hasStrm
+		}
+
+		// Only delete if missing from BOTH library and import_dir
+		if !inLibrary && !inImportDir {
+			slog.InfoContext(ctx, "Deleting metadata without STRM file",
+				"virtual_path", virtualPath,
+				"expected_strm_path", strmVirtualPath)
+
+			// Delete from database
+			if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, []string{virtualPath}); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete health record",
+					"virtual_path", virtualPath,
+					"error", err)
+			}
+
+			// Delete from metadata
+			if err := lsw.metadataService.DeleteFileMetadata(virtualPath); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete metadata",
+					"virtual_path", virtualPath,
+					"error", err)
+			}
+
+			// Refresh mount cache for the directory
+			dirPath := filepath.Dir(virtualPath)
+			if err := lsw.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{dirPath}); err != nil {
+				slog.WarnContext(ctx, "Failed to refresh mount cache",
+					"dir_path", dirPath,
+					"error", err)
+			}
+
+			deletedCount++
+		}
+	}
+
+	slog.InfoContext(ctx, "STRM file validation completed",
+		"metadata_deleted", deletedCount,
+		"strm_files_found", len(strmPaths))
+
+	return deletedCount, nil
 }

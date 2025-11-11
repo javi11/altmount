@@ -967,11 +967,11 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	cfg := s.configGetter()
 
 	// Check if symlinks are enabled
-	if cfg.Import.SymlinkEnabled == nil || !*cfg.Import.SymlinkEnabled {
+	if cfg.Import.ImportStrategy != config.ImportStrategySYMLINK {
 		return nil // Skip if not enabled
 	}
 
-	if cfg.Import.SymlinkDir == nil || *cfg.Import.SymlinkDir == "" {
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
 		return fmt.Errorf("symlink directory not configured")
 	}
 
@@ -1074,14 +1074,14 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
 	cfg := s.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.SymlinkDir, filepath.Dir(resultingPath))
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(resultingPath))
 
 	// Ensure category directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
 
-	symlinkPath := filepath.Join(*cfg.Import.SymlinkDir, resultingPath)
+	symlinkPath := filepath.Join(*cfg.Import.ImportDir, resultingPath)
 
 	// Check if symlink already exists
 	if _, err := os.Lstat(symlinkPath); err == nil {
@@ -1104,11 +1104,11 @@ func (s *Service) createStrmFiles(item *database.ImportQueueItem, resultingPath 
 	cfg := s.configGetter()
 
 	// Check if STRM is enabled
-	if cfg.Import.StrmEnabled == nil || !*cfg.Import.StrmEnabled {
+	if cfg.Import.ImportStrategy != config.ImportStrategySTRM {
 		return nil // Skip if not enabled
 	}
 
-	if cfg.Import.StrmDir == nil || *cfg.Import.StrmDir == "" {
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
 		return fmt.Errorf("STRM directory not configured")
 	}
 
@@ -1202,21 +1202,18 @@ func (s *Service) createSingleStrmFile(virtualPath string, port int) error {
 	ctx := context.Background()
 	cfg := s.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.StrmDir, filepath.Dir(virtualPath))
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath))
 
 	// Ensure directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create STRM directory: %w", err)
 	}
 
-	// Remove extension from original file and add .strm
+	// Keep original filename and add .strm extension
 	filename := filepath.Base(virtualPath)
-	if idx := strings.LastIndex(filename, "."); idx != -1 {
-		filename = filename[:idx]
-	}
 	filename = filename + ".strm"
 
-	strmPath := filepath.Join(*cfg.Import.StrmDir, filepath.Dir(virtualPath), filename)
+	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath), filename)
 
 	// Get first admin user's API key for authentication
 	users, err := s.userRepo.GetAllUsers(ctx)

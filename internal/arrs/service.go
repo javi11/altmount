@@ -188,7 +188,7 @@ func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error 
 
 	pathForRescan := filePath
 
-	if cfg.Import.SymlinkEnabled != nil && *cfg.Import.SymlinkEnabled {
+	if cfg.Import.ImportStrategy == config.ImportStrategySYMLINK {
 		librarySymlink, err := s.symlinkFinder.FindLibrarySymlink(ctx, filePath, cfg)
 		if err != nil {
 			slog.WarnContext(ctx, "Error searching for library symlink, using mount path",

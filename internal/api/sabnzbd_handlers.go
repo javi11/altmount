@@ -778,7 +778,7 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	return nil
 }
 
-// calculateItemBasePath calculates the base path for an item based on its category and symlink configuration
+// calculateItemBasePath calculates the base path for an item based on the import strategy configuration
 func (s *Server) calculateItemBasePath() string {
 	if s.configManager == nil {
 		return ""
@@ -786,12 +786,12 @@ func (s *Server) calculateItemBasePath() string {
 
 	cfg := s.configManager.GetConfig()
 
-	// Determine if we should use symlink directory or mount path
+	// Determine if we should use import directory or mount path
 	var basePath string
-	if cfg.Import.SymlinkEnabled != nil && *cfg.Import.SymlinkEnabled &&
-		cfg.Import.SymlinkDir != nil && *cfg.Import.SymlinkDir != "" {
-		// Use symlink directory as base when enabled
-		basePath = *cfg.Import.SymlinkDir
+	if cfg.Import.ImportStrategy != config.ImportStrategyNone &&
+		cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		// Use import directory as base when import strategy is enabled
+		basePath = *cfg.Import.ImportDir
 	} else {
 		// Fall back to mount path
 		basePath = cfg.MountPath

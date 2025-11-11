@@ -125,19 +125,26 @@ type RCloneConfig struct {
 	UseMmap            bool `yaml:"use_mmap" mapstructure:"use_mmap" json:"use_mmap"`
 }
 
+// ImportStrategy represents the import strategy type
+type ImportStrategy string
+
+const (
+	ImportStrategyNone    ImportStrategy = "NONE"
+	ImportStrategySYMLINK ImportStrategy = "SYMLINK"
+	ImportStrategySTRM    ImportStrategy = "STRM"
+)
+
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	FullSegmentValidation          bool     `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
-	AllowedFileExtensions          []string `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	MaxImportConnections           int      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
-	ImportCacheSizeMB              int      `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
-	SegmentSamplePercentage        int      `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	SymlinkDir                     *string  `yaml:"symlink_dir" mapstructure:"symlink_dir" json:"symlink_dir,omitempty"`
-	SymlinkEnabled                 *bool    `yaml:"symlink_enabled" mapstructure:"symlink_enabled" json:"symlink_enabled,omitempty"`
-	StrmDir                        *string  `yaml:"strm_dir" mapstructure:"strm_dir" json:"strm_dir,omitempty"`
-	StrmEnabled                    *bool    `yaml:"strm_enabled" mapstructure:"strm_enabled" json:"strm_enabled,omitempty"`
+	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	FullSegmentValidation          bool           `yaml:"full_segment_validation" mapstructure:"full_segment_validation" json:"full_segment_validation"`
+	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -338,36 +345,12 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Metadata.DeleteSourceNzbOnRemoval = nil
 	}
 
-	// Deep copy Import.SymlinkDir pointer
-	if c.Import.SymlinkDir != nil {
-		v := *c.Import.SymlinkDir
-		copyCfg.Import.SymlinkDir = &v
+	// Deep copy Import.ImportDir pointer
+	if c.Import.ImportDir != nil {
+		v := *c.Import.ImportDir
+		copyCfg.Import.ImportDir = &v
 	} else {
-		copyCfg.Import.SymlinkDir = nil
-	}
-
-	// Deep copy Import.SymlinkEnabled pointer
-	if c.Import.SymlinkEnabled != nil {
-		v := *c.Import.SymlinkEnabled
-		copyCfg.Import.SymlinkEnabled = &v
-	} else {
-		copyCfg.Import.SymlinkEnabled = nil
-	}
-
-	// Deep copy Import.StrmDir pointer
-	if c.Import.StrmDir != nil {
-		v := *c.Import.StrmDir
-		copyCfg.Import.StrmDir = &v
-	} else {
-		copyCfg.Import.StrmDir = nil
-	}
-
-	// Deep copy Import.StrmEnabled pointer
-	if c.Import.StrmEnabled != nil {
-		v := *c.Import.StrmEnabled
-		copyCfg.Import.StrmEnabled = &v
-	} else {
-		copyCfg.Import.StrmEnabled = nil
+		copyCfg.Import.ImportDir = nil
 	}
 
 	// Deep copy RClone.RCEnabled pointer
@@ -536,23 +519,23 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("import segment_sample_percentage must be between 1 and 100")
 	}
 
-	// Validate symlink configuration if enabled
-	if c.Import.SymlinkEnabled != nil && *c.Import.SymlinkEnabled {
-		if c.Import.SymlinkDir == nil || *c.Import.SymlinkDir == "" {
-			return fmt.Errorf("import symlink_dir cannot be empty when symlinks are enabled")
-		}
-		if !filepath.IsAbs(*c.Import.SymlinkDir) {
-			return fmt.Errorf("import symlink_dir must be an absolute path")
-		}
+	// Validate import strategy
+	validStrategies := map[ImportStrategy]bool{
+		ImportStrategyNone:    true,
+		ImportStrategySYMLINK: true,
+		ImportStrategySTRM:    true,
+	}
+	if !validStrategies[c.Import.ImportStrategy] {
+		return fmt.Errorf("import_strategy must be one of: NONE, SYMLINK, STRM")
 	}
 
-	// Validate STRM configuration if enabled
-	if c.Import.StrmEnabled != nil && *c.Import.StrmEnabled {
-		if c.Import.StrmDir == nil || *c.Import.StrmDir == "" {
-			return fmt.Errorf("import strm_dir cannot be empty when STRM is enabled")
+	// Validate import directory when strategy requires it
+	if c.Import.ImportStrategy == ImportStrategySYMLINK || c.Import.ImportStrategy == ImportStrategySTRM {
+		if c.Import.ImportDir == nil || *c.Import.ImportDir == "" {
+			return fmt.Errorf("import_dir cannot be empty when import strategy is %s", c.Import.ImportStrategy)
 		}
-		if !filepath.IsAbs(*c.Import.StrmDir) {
-			return fmt.Errorf("import strm_dir must be an absolute path")
+		if !filepath.IsAbs(*c.Import.ImportDir) {
+			return fmt.Errorf("import_dir must be an absolute path")
 		}
 	}
 
@@ -990,10 +973,8 @@ func DefaultConfig(configDir ...string) *Config {
 	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
 	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
-	mountEnabled := false // Disabled by default
+	mountEnabled := false   // Disabled by default
 	sabnzbdEnabled := false
-	symlinkEnabled := false // Disabled by default
-	strmEnabled := false    // Disabled by default
 	scrapperEnabled := false
 	loginRequired := true // Require login by default
 
@@ -1097,13 +1078,11 @@ func DefaultConfig(configDir ...string) *Config {
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
-			MaxImportConnections:    5,               // Default: 5 concurrent NNTP connections for validation and archive processing
-			ImportCacheSizeMB:       64,              // Default: 64MB cache for archive analysis
-			SegmentSamplePercentage: 1,               // Default: 1% segment sampling
-			SymlinkDir:              nil,             // No default symlink directory
-			SymlinkEnabled:          &symlinkEnabled, // Disabled by default
-			StrmDir:                 nil,             // No default STRM directory
-			StrmEnabled:             &strmEnabled,    // Disabled by default
+			MaxImportConnections:    5,                    // Default: 5 concurrent NNTP connections for validation and archive processing
+			ImportCacheSizeMB:       64,                   // Default: 64MB cache for archive analysis
+			SegmentSamplePercentage: 1,                    // Default: 1% segment sampling
+			ImportStrategy:          ImportStrategyNone,   // Default: no import strategy (direct import)
+			ImportDir:               nil,                  // No default import directory
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

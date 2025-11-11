@@ -119,6 +119,9 @@ export interface RCloneConfig {
 	use_mmap: boolean;
 }
 
+// Import strategy type
+export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
+
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
@@ -128,10 +131,8 @@ export interface ImportConfig {
 	max_import_connections: number;
 	import_cache_size_mb: number;
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
-	symlink_dir?: string;
-	symlink_enabled: boolean;
-	strm_dir?: string;
-	strm_enabled: boolean;
+	import_strategy: ImportStrategy;
+	import_dir?: string;
 }
 
 // Log configuration
@@ -293,8 +294,8 @@ export interface ImportUpdateRequest {
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
 	full_segment_validation?: boolean;
 	allowed_file_extensions?: string[];
-	symlink_dir?: string;
-	symlink_enabled?: boolean;
+	import_strategy?: ImportStrategy;
+	import_dir?: string;
 }
 
 // Log update request
@@ -376,8 +377,8 @@ export interface ImportFormData {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	full_segment_validation: boolean;
-	symlink_dir: string;
-	symlink_enabled: boolean;
+	import_strategy: ImportStrategy;
+	import_dir: string;
 }
 
 export interface MetadataFormData {
