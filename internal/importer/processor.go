@@ -33,7 +33,6 @@ type Processor struct {
 	sevenZipProcessor       sevenzip.Processor
 	poolManager             pool.Manager // Pool manager for dynamic pool access
 	maxImportConnections    int          // Maximum concurrent NNTP connections for validation and archive processing
-	fullSegmentValidation   bool         // Whether to validate all segments or just a random sample
 	segmentSamplePercentage int          // Percentage of segments to check when sampling (1-100)
 	allowedFileExtensions   []string     // Allowed file extensions for validation (empty = allow all)
 	log                     *slog.Logger
@@ -46,7 +45,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, fullSegmentValidation bool, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -55,7 +54,6 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
 		poolManager:             poolManager,
 		maxImportConnections:    maxImportConnections,
-		fullSegmentValidation:   fullSegmentValidation,
 		segmentSamplePercentage: segmentSamplePercentage,
 		allowedFileExtensions:   allowedFileExtensions,
 		log:                     slog.Default().With("component", "nzb-processor"),
@@ -207,7 +205,6 @@ func (proc *Processor) processSingleFile(
 		proc.metadataService,
 		proc.poolManager,
 		proc.maxImportConnections,
-		proc.fullSegmentValidation,
 		proc.segmentSamplePercentage,
 		proc.allowedFileExtensions,
 	)
@@ -245,7 +242,6 @@ func (proc *Processor) processMultiFile(
 		proc.metadataService,
 		proc.poolManager,
 		proc.maxImportConnections,
-		proc.fullSegmentValidation,
 		proc.segmentSamplePercentage,
 		proc.allowedFileExtensions,
 	); err != nil {
@@ -284,7 +280,6 @@ func (proc *Processor) processRarArchive(
 			proc.metadataService,
 			proc.poolManager,
 			proc.maxImportConnections,
-			proc.fullSegmentValidation,
 			proc.segmentSamplePercentage,
 			proc.allowedFileExtensions,
 		); err != nil {
@@ -322,7 +317,6 @@ func (proc *Processor) processRarArchive(
 			archiveProgressTracker,
 			validationProgressTracker,
 			proc.maxImportConnections,
-			proc.fullSegmentValidation,
 			proc.segmentSamplePercentage,
 			proc.allowedFileExtensions,
 		)
@@ -364,7 +358,6 @@ func (proc *Processor) processSevenZipArchive(
 			proc.metadataService,
 			proc.poolManager,
 			proc.maxImportConnections,
-			proc.fullSegmentValidation,
 			proc.segmentSamplePercentage,
 			proc.allowedFileExtensions,
 		); err != nil {
@@ -402,7 +395,6 @@ func (proc *Processor) processSevenZipArchive(
 			archiveProgressTracker,
 			validationProgressTracker,
 			proc.maxImportConnections,
-			proc.fullSegmentValidation,
 			proc.segmentSamplePercentage,
 			proc.allowedFileExtensions,
 		)

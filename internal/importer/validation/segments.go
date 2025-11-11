@@ -26,7 +26,6 @@ func ValidateSegmentsForFile(
 	encryption metapb.Encryption,
 	poolManager pool.Manager,
 	maxGoroutines int,
-	fullValidation bool,
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 ) error {
@@ -77,7 +76,7 @@ func ValidateSegmentsForFile(
 	}
 
 	// Validate segment availability using shared validation logic
-	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, fullValidation, samplePercentage, progressTracker); err != nil {
+	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, samplePercentage, progressTracker); err != nil {
 		return err
 	}
 

@@ -32,7 +32,6 @@ func ValidateSegmentAvailability(
 	segments []*metapb.SegmentData,
 	poolManager pool.Manager,
 	maxConnections int,
-	fullValidation bool,
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 ) error {
@@ -51,7 +50,7 @@ func ValidateSegmentAvailability(
 	}
 
 	// Select which segments to validate
-	segmentsToValidate := selectSegmentsForValidation(segments, fullValidation, samplePercentage)
+	segmentsToValidate := selectSegmentsForValidation(segments, samplePercentage)
 	totalToValidate := len(segmentsToValidate)
 
 	// Atomic counter for progress tracking (thread-safe for concurrent validation)
@@ -93,8 +92,8 @@ func ValidateSegmentAvailability(
 // - Validates last 2 segments (incomplete upload detection)
 // - Validates random middle segments based on samplePercentage (general integrity check)
 // A minimum of 5 segments are always validated for statistical validity when sampling.
-func selectSegmentsForValidation(segments []*metapb.SegmentData, fullValidation bool, samplePercentage int) []*metapb.SegmentData {
-	if fullValidation {
+func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentage int) []*metapb.SegmentData {
+	if samplePercentage == 100 {
 		return segments
 	}
 

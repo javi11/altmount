@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/utils"
 	"golang.org/x/net/webdav"
 )
 
@@ -25,30 +24,9 @@ func (fs *fileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) 
 }
 
 func (fs *fileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	// Build path with args from context values
-	pa := utils.NewPathWithArgs(name)
-
-	if r, ok := ctx.Value(utils.RangeKey).(string); ok && r != "" {
-		pa.SetRange(r)
-	}
-
-	if s, ok := ctx.Value(utils.ContentLengthKey).(string); ok && s != "" {
-		pa.SetFileSize(s)
-	}
-
-	if isCopy, ok := ctx.Value(utils.IsCopy).(bool); ok && isCopy {
-		pa.SetIsCopy()
-	}
-
-	if origin, ok := ctx.Value(utils.Origin).(string); ok && origin != "" {
-		pa.SetOrigin(origin)
-	}
-
-	if showCorrupted, ok := ctx.Value(utils.ShowCorrupted).(bool); ok && showCorrupted {
-		pa.SetShowCorrupted()
-	}
-
-	return fs.nzbFs.OpenFile(ctx, pa.String(), flag, perm)
+	// Context values are now passed directly through the context
+	// No need to encode them into the path string
+	return fs.nzbFs.OpenFile(ctx, name, flag, perm)
 }
 
 func (fs *fileSystem) RemoveAll(ctx context.Context, name string) error {

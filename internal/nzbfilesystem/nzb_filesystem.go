@@ -30,16 +30,10 @@ func (nfs *NzbFilesystem) Name() string {
 
 // Open opens a file for reading
 func (nfs *NzbFilesystem) Open(ctx context.Context, name string) (afero.File, error) {
-	// Parse path with args
-	pr, err := utils.NewPathWithArgsFromString(name)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx = slogutil.With(ctx, "file_name", pr.Path)
+	ctx = slogutil.With(ctx, "file_name", name)
 
 	// Try to open with NZB remote file
-	ok, file, err := nfs.remoteFile.OpenFile(ctx, pr.Path, pr)
+	ok, file, err := nfs.remoteFile.OpenFile(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -58,15 +52,9 @@ func (nfs *NzbFilesystem) OpenFile(ctx context.Context, name string, flag int, p
 		return nil, os.ErrPermission
 	}
 
-	// Parse path to check for COPY operations
-	pr, err := utils.NewPathWithArgsFromString(name)
-	if err != nil {
-		return nil, err
-	}
-
-	// If this is a COPY operation, we need to handle it carefully
+	// Check for COPY operations from context
 	// Block COPY operations entirely - they should use MOVE instead
-	if pr.IsCopy() {
+	if isCopy, ok := ctx.Value(utils.IsCopy).(bool); ok && isCopy {
 		return nil, os.ErrPermission
 	}
 

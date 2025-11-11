@@ -26,7 +26,7 @@ var (
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
 // based on the validation mode (full or sampling) and sample percentage.
 // This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
-func calculateSegmentsToValidate(rarContents []Content, fullValidation bool, samplePercentage int) int {
+func calculateSegmentsToValidate(rarContents []Content, samplePercentage int) int {
 	total := 0
 	for _, content := range rarContents {
 		if content.IsDirectory {
@@ -34,7 +34,7 @@ func calculateSegmentsToValidate(rarContents []Content, fullValidation bool, sam
 		}
 
 		segmentCount := len(content.Segments)
-		if fullValidation {
+		if samplePercentage == 100 {
 			// Full validation mode: all segments will be validated
 			total += segmentCount
 		} else {
@@ -112,7 +112,6 @@ func ProcessArchive(
 	archiveProgressTracker *progress.Tracker,
 	validationProgressTracker *progress.Tracker,
 	maxValidationGoroutines int,
-	fullSegmentValidation bool,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 ) error {
@@ -140,13 +139,12 @@ func ProcessArchive(
 
 	// Calculate total segments to validate for accurate progress tracking
 	// This accounts for sampling mode if enabled
-	totalSegmentsToValidate := calculateSegmentsToValidate(rarContents, fullSegmentValidation, segmentSamplePercentage)
+	totalSegmentsToValidate := calculateSegmentsToValidate(rarContents, segmentSamplePercentage)
 	validatedSegmentsCount := 0
 
 	slog.InfoContext(ctx, "Starting RAR archive validation",
 		"total_files", len(rarContents),
 		"total_segments_to_validate", totalSegmentsToValidate,
-		"full_validation", fullSegmentValidation,
 		"sample_percentage", segmentSamplePercentage)
 
 	// Process extracted files with segment-based progress tracking
@@ -172,8 +170,8 @@ func ProcessArchive(
 		if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
 			offsetTracker = progress.NewOffsetTracker(
 				validationProgressTracker,
-				validatedSegmentsCount,       // Segments already validated in previous files
-				totalSegmentsToValidate,      // Total segments across all files
+				validatedSegmentsCount,  // Segments already validated in previous files
+				totalSegmentsToValidate, // Total segments across all files
 			)
 		}
 
@@ -186,17 +184,18 @@ func ProcessArchive(
 			metapb.Encryption_NONE,
 			poolManager,
 			maxValidationGoroutines,
-			fullSegmentValidation,
 			segmentSamplePercentage,
 			offsetTracker, // Real-time segment progress with cumulative offset
 		); err != nil {
-			return err
+			slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", baseFilename)
+
+			continue
 		}
 
 		// Calculate and track segments validated for this file (for next file's offset)
 		segmentCount := len(rarContent.Segments)
 		var fileSegmentsValidated int
-		if fullSegmentValidation {
+		if segmentSamplePercentage == 100 {
 			fileSegmentsValidated = segmentCount
 		} else {
 			// Sampling mode: calculate same as helper function

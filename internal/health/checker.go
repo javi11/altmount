@@ -50,7 +50,6 @@ type HealthConfig struct {
 	// Health check settings
 	MaxRetries            int          // Maximum retries before marking as permanently corrupted
 	MaxSegmentConnections int          // Maximum concurrent connections for segment checking
-	CheckAllSegments      bool         // Whether to check all segments or just first one
 	EventHandler          EventHandler // Optional event handler for notifications
 }
 
@@ -89,10 +88,6 @@ func (hc *HealthChecker) getMaxConnectionsForHealthChecks() int {
 		return 5 // Default
 	}
 	return connections
-}
-
-func (hc *HealthChecker) getCheckAllSegments() bool {
-	return hc.configGetter().Health.CheckAllSegments
 }
 
 func (hc *HealthChecker) getSegmentSamplePercentage() int {
@@ -148,7 +143,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		return event
 	}
 
-	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "full_validation", hc.getCheckAllSegments(), "sample_percentage", hc.getSegmentSamplePercentage())
+	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", hc.getSegmentSamplePercentage())
 
 	// Validate segment availability using shared validation logic
 	checkErr := usenet.ValidateSegmentAvailability(
@@ -156,7 +151,6 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		fileMeta.SegmentData,
 		hc.poolManager,
 		hc.getMaxConnectionsForHealthChecks(),
-		hc.getCheckAllSegments(),
 		hc.getSegmentSamplePercentage(),
 		nil, // No progress callback for health checks
 	)

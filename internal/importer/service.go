@@ -3,6 +3,8 @@ package importer
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -62,6 +64,7 @@ type Service struct {
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
+	userRepo        *database.UserRepository      // User repository for API key lookup
 	log             *slog.Logger
 
 	// Runtime state
@@ -82,7 +85,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, broadcaster *progress.ProgressBroadcaster) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -91,13 +94,12 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	// Get the initial config to pass import settings
 	currentConfig := configGetter()
 	maxImportConnections := currentConfig.Import.MaxImportConnections
-	fullSegmentValidation := currentConfig.Import.FullSegmentValidation
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, fullSegmentValidation, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, broadcaster)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, broadcaster)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -110,6 +112,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		configGetter:    configGetter,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
 		broadcaster:     broadcaster,
+		userRepo:        userRepo,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -606,6 +609,15 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		// Don't fail the import, just log the warning
 	}
 
+	// Create STRM files (non-blocking)
+	if err := s.createStrmFiles(item, resultingPath); err != nil {
+		s.log.WarnContext(ctx, "Failed to create STRM file",
+			"queue_id", item.ID,
+			"path", resultingPath,
+			"error", err)
+		// Don't fail the import, just log the warning
+	}
+
 	// Mark as completed in queue database
 	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusCompleted, nil); err != nil {
 		s.log.ErrorContext(ctx, "Failed to mark item as completed", "queue_id", item.ID, "error", err)
@@ -954,11 +966,11 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	cfg := s.configGetter()
 
 	// Check if symlinks are enabled
-	if cfg.Import.SymlinkEnabled == nil || !*cfg.Import.SymlinkEnabled {
+	if cfg.Import.ImportStrategy != config.ImportStrategySYMLINK {
 		return nil // Skip if not enabled
 	}
 
-	if cfg.Import.SymlinkDir == nil || *cfg.Import.SymlinkDir == "" {
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
 		return fmt.Errorf("symlink directory not configured")
 	}
 
@@ -1061,14 +1073,14 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
 	cfg := s.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.SymlinkDir, filepath.Dir(resultingPath))
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(resultingPath))
 
 	// Ensure category directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
 
-	symlinkPath := filepath.Join(*cfg.Import.SymlinkDir, resultingPath)
+	symlinkPath := filepath.Join(*cfg.Import.ImportDir, resultingPath)
 
 	// Check if symlink already exists
 	if _, err := os.Lstat(symlinkPath); err == nil {
@@ -1084,4 +1096,170 @@ func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
 	}
 
 	return nil
+}
+
+// createStrmFiles creates STRM files for an imported file or directory
+func (s *Service) createStrmFiles(item *database.ImportQueueItem, resultingPath string) error {
+	cfg := s.configGetter()
+
+	// Check if STRM is enabled
+	if cfg.Import.ImportStrategy != config.ImportStrategySTRM {
+		return nil // Skip if not enabled
+	}
+
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		return fmt.Errorf("STRM directory not configured")
+	}
+
+	// Check the metadata directory to determine if this is a file or directory
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	fileInfo, err := os.Stat(metadataPath)
+
+	// If stat fails, check if it's a .meta file (single file case)
+	if err != nil {
+		// Try checking for .meta file
+		metaFile := metadataPath + ".meta"
+		if _, metaErr := os.Stat(metaFile); metaErr == nil {
+			// It's a single file
+			return s.createSingleStrmFile(resultingPath, cfg.WebDAV.Port)
+		}
+		return fmt.Errorf("failed to stat metadata path: %w", err)
+	}
+
+	if !fileInfo.IsDir() {
+		// Single file - create one STRM file
+		return s.createSingleStrmFile(resultingPath, cfg.WebDAV.Port)
+	}
+
+	// Directory - walk through and create STRM files for all files
+	var strmErrors []error
+	strmCount := 0
+
+	// Walk the metadata directory to find all files
+	err = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.log.WarnContext(context.Background(), "Error accessing metadata path during STRM creation",
+				"path", path,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Skip directories, we only create STRM files for files (.meta files)
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only process .meta files
+		if !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		// Calculate relative path from the root metadata directory
+		relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+		if err != nil {
+			s.log.ErrorContext(context.Background(), "Failed to calculate relative path",
+				"path", path,
+				"base", cfg.Metadata.RootPath,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Remove .meta extension to get the actual filename
+		relPath = strings.TrimSuffix(relPath, ".meta")
+
+		// Create STRM file for this file
+		if err := s.createSingleStrmFile(relPath, cfg.WebDAV.Port); err != nil {
+			s.log.ErrorContext(context.Background(), "Failed to create STRM file",
+				"path", relPath,
+				"error", err)
+			strmErrors = append(strmErrors, err)
+			return nil // Continue walking
+		}
+
+		strmCount++
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	if len(strmErrors) > 0 {
+		s.log.WarnContext(context.Background(), "Some STRM files failed to create",
+			"queue_id", item.ID,
+			"total_errors", len(strmErrors),
+			"successful", strmCount)
+		// Don't fail the import, just log the warning
+	}
+
+	return nil
+}
+
+// createSingleStrmFile creates a STRM file for a single file with authentication
+func (s *Service) createSingleStrmFile(virtualPath string, port int) error {
+	ctx := context.Background()
+	cfg := s.configGetter()
+
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath))
+
+	// Ensure directory exists
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create STRM directory: %w", err)
+	}
+
+	// Keep original filename and add .strm extension
+	filename := filepath.Base(virtualPath)
+	filename = filename + ".strm"
+
+	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath), filename)
+
+	// Get first admin user's API key for authentication
+	users, err := s.userRepo.GetAllUsers(ctx)
+	if err != nil || len(users) == 0 {
+		return fmt.Errorf("no users with API keys found for STRM generation: %w", err)
+	}
+
+	// Find first admin user with an API key
+	var adminAPIKey string
+	for _, user := range users {
+		if user.IsAdmin && user.APIKey != nil && *user.APIKey != "" {
+			adminAPIKey = *user.APIKey
+			break
+		}
+	}
+
+	if adminAPIKey == "" {
+		return fmt.Errorf("no admin user with API key found for STRM generation")
+	}
+
+	// Hash the API key with SHA256
+	hashedKey := hashAPIKey(adminAPIKey)
+
+	// Generate streaming URL with download_key
+	// URL encode the path to handle special characters
+	encodedPath := strings.ReplaceAll(virtualPath, " ", "%20")
+	streamURL := fmt.Sprintf("http://localhost:%d/api/files/stream?path=%s&download_key=%s",
+		port, encodedPath, hashedKey)
+
+	// Check if STRM file already exists with the same content
+	if existingContent, err := os.ReadFile(strmPath); err == nil {
+		if string(existingContent) == streamURL {
+			// File exists with correct content, skip
+			return nil
+		}
+	}
+
+	// Write the STRM file
+	if err := os.WriteFile(strmPath, []byte(streamURL), 0644); err != nil {
+		return fmt.Errorf("failed to write STRM file: %w", err)
+	}
+
+	return nil
+}
+
+// hashAPIKey generates a SHA256 hash of the API key for secure comparison
+func hashAPIKey(apiKey string) string {
+	hash := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(hash[:])
 }

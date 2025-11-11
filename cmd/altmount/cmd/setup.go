@@ -69,6 +69,7 @@ func initializeImporter(
 	rcloneClient rclonecli.RcloneRcClient,
 	configGetter config.ConfigGetter,
 	broadcaster *progress.ProgressBroadcaster,
+	userRepo *database.UserRepository,
 ) (*importer.Service, error) {
 	// Set defaults for workers if not configured
 	maxProcessorWorkers := cfg.Import.MaxProcessorWorkers
@@ -80,7 +81,7 @@ func initializeImporter(
 		Workers: maxProcessorWorkers,
 	}
 
-	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, broadcaster)
+	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, broadcaster, userRepo)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to create importer service", "err", err)
 		return nil, err
@@ -223,6 +224,14 @@ func setupAuthService(ctx context.Context, userRepo *database.UserRepository) *a
 	return authService
 }
 
+// setupStreamHandler creates the HTTP stream handler for file streaming
+func setupStreamHandler(
+	nzbFilesystem *nzbfilesystem.NzbFilesystem,
+	userRepo *database.UserRepository,
+) *api.StreamHandler {
+	return api.NewStreamHandler(nzbFilesystem, userRepo)
+}
+
 // setupAPIServer creates and configures the API server
 func setupAPIServer(
 	app *fiber.App,
@@ -230,6 +239,7 @@ func setupAPIServer(
 	authService *auth.Service,
 	configManager *config.Manager,
 	metadataReader *metadata.MetadataReader,
+	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	poolManager pool.Manager,
 	importerService *importer.Service,
 	arrsService *arrs.Service,
@@ -250,6 +260,7 @@ func setupAPIServer(
 		repos.UserRepo,
 		configManager,
 		metadataReader,
+		nzbFilesystem,
 		poolManager,
 		importerService,
 		arrsService,
@@ -378,20 +389,29 @@ func startMountService(ctx context.Context, cfg *config.Config, mountService *rc
 }
 
 // createHTTPServer creates the HTTP server with routing
-func createHTTPServer(app *fiber.App, webdavHandler *webdav.Handler, port int, profilerEnabled bool) *http.Server {
+func createHTTPServer(app *fiber.App, webdavHandler *webdav.Handler, streamHandler *api.StreamHandler, port int, profilerEnabled bool) *http.Server {
 	// Mount WebDAV handler directly (no Fiber adapter needed)
 	webdavHTTPHandler := webdavHandler.GetHTTPHandler()
+
+	// Mount stream handler directly (no Fiber adapter needed)
+	streamHTTPHandler := streamHandler.GetHTTPHandler()
 
 	// Convert Fiber app to HTTP handler for all other routes
 	fiberHTTPHandler := adaptor.FiberApp(app)
 
-	// Create a handler that routes between WebDAV and Fiber
+	// Create a handler that routes between WebDAV, Stream, and Fiber
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
 		// Route profiler requests if enabled
 		if profilerEnabled && strings.HasPrefix(path, "/debug/pprof") {
 			http.DefaultServeMux.ServeHTTP(w, r)
+			return
+		}
+
+		// Route stream requests directly to stream handler
+		if strings.HasPrefix(path, "/api/files/stream") {
+			streamHTTPHandler.ServeHTTP(w, r)
 			return
 		}
 
