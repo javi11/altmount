@@ -220,6 +220,174 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 	}
 }
 
+// syncMaps holds the metadata and database record maps used during synchronization
+type syncMaps struct {
+	metaFileSet map[string]string                                  // mount relative path -> metadata file path
+	dbPathSet   map[string]database.AutomaticHealthCheckRecord // mount relative path -> health check record
+}
+
+// syncCounts holds the results of database synchronization operations
+type syncCounts struct {
+	added   int
+	deleted int
+}
+
+// cleanupCounts holds the results of cleanup operations
+type cleanupCounts struct {
+	metadataDeleted     int
+	libraryFilesDeleted int
+	libraryDirsDeleted  int
+}
+
+// findFilesToDelete identifies database records that no longer have corresponding metadata files
+// or library files. filesInUse can be nil for metadata-only sync.
+func (lsw *LibrarySyncWorker) findFilesToDelete(
+	ctx context.Context,
+	dbRecords []database.AutomaticHealthCheckRecord,
+	metaFileSet map[string]string,
+	filesInUse map[string]string,
+) []string {
+	var filesToDelete []string
+
+	for _, dbRecord := range dbRecords {
+		select {
+		case <-ctx.Done():
+			return filesToDelete
+		default:
+		}
+
+		// Check if metadata file exists
+		if _, exists := metaFileSet[dbRecord.FilePath]; !exists {
+			filesToDelete = append(filesToDelete, dbRecord.FilePath)
+			continue
+		}
+
+		// Check if file is in use (only for full sync, not metadata-only)
+		if filesInUse != nil {
+			if _, exists := filesInUse[dbRecord.FilePath]; !exists {
+				filesToDelete = append(filesToDelete, dbRecord.FilePath)
+			}
+		}
+	}
+
+	return filesToDelete
+}
+
+// recordSyncResult stores the sync result and logs completion information
+func (lsw *LibrarySyncWorker) recordSyncResult(
+	ctx context.Context,
+	startTime time.Time,
+	dbCounts syncCounts,
+	cleanup cleanupCounts,
+	totalMetadataFiles int,
+	totalDbRecords int,
+) {
+	duration := time.Since(startTime)
+
+	// Store sync result
+	lsw.progressMu.Lock()
+	lsw.lastSyncResult = &SyncResult{
+		FilesAdded:          dbCounts.added,
+		FilesDeleted:        dbCounts.deleted,
+		MetadataDeleted:     cleanup.metadataDeleted,
+		LibraryFilesDeleted: cleanup.libraryFilesDeleted,
+		LibraryDirsDeleted:  cleanup.libraryDirsDeleted,
+		Duration:            duration,
+		CompletedAt:         time.Now(),
+	}
+	lsw.progressMu.Unlock()
+
+	// Log completion
+	slog.InfoContext(ctx, "Library sync completed",
+		"total_metadata_files", totalMetadataFiles,
+		"total_db_records", totalDbRecords,
+		"added", dbCounts.added,
+		"deleted", dbCounts.deleted,
+		"metadata_deleted", cleanup.metadataDeleted,
+		"library_files_deleted", cleanup.libraryFilesDeleted,
+		"library_dirs_deleted", cleanup.libraryDirsDeleted,
+		"duration", duration)
+}
+
+// syncDatabaseRecords performs batch add and delete operations on the health check database
+// Returns the number of records added and deleted
+func (lsw *LibrarySyncWorker) syncDatabaseRecords(
+	ctx context.Context,
+	filesToAdd []database.AutomaticHealthCheckRecord,
+	filesToDelete []string,
+) syncCounts {
+	counts := syncCounts{}
+
+	// Batch add new files
+	if len(filesToAdd) > 0 {
+		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, filesToAdd); err != nil {
+			slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
+				"count", len(filesToAdd),
+				"error", err)
+		} else {
+			counts.added = len(filesToAdd)
+			slog.InfoContext(ctx, "Added new files to automatic health checks",
+				"count", counts.added)
+		}
+	}
+
+	// Batch delete orphaned files
+	if len(filesToDelete) > 0 {
+		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, filesToDelete); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
+				"count", len(filesToDelete),
+				"error", err)
+		} else {
+			counts.deleted = len(filesToDelete)
+			slog.InfoContext(ctx, "Deleted orphaned health records",
+				"count", counts.deleted)
+		}
+	}
+
+	return counts
+}
+
+// buildSyncMaps constructs the lookup maps for metadata files and database records
+func (lsw *LibrarySyncWorker) buildSyncMaps(metadataFiles []string, dbRecords []database.AutomaticHealthCheckRecord) syncMaps {
+	// Convert metadata files to map for efficient lookup
+	metaFileSet := make(map[string]string, len(metadataFiles))
+	for _, path := range metadataFiles {
+		mountRelativePath := lsw.metaPathToMountRelativePath(path)
+		metaFileSet[mountRelativePath] = path
+	}
+
+	// Convert database records to map for efficient lookup
+	dbPathSet := make(map[string]database.AutomaticHealthCheckRecord, len(dbRecords))
+	for _, record := range dbRecords {
+		// Use mount relative path as the key
+		dbPathSet[record.FilePath] = record
+	}
+
+	return syncMaps{
+		metaFileSet: metaFileSet,
+		dbPathSet:   dbPathSet,
+	}
+}
+
+// initializeProgressTracking initializes progress tracking for a sync operation
+// and returns a cleanup function to be called when sync completes
+func (lsw *LibrarySyncWorker) initializeProgressTracking(startTime time.Time) func() {
+	lsw.progressMu.Lock()
+	lsw.progress = &SyncProgress{
+		TotalFiles:     0, // Will be updated once we know the total
+		ProcessedFiles: atomic.Int32{},
+		StartTime:      startTime,
+	}
+	lsw.progressMu.Unlock()
+
+	// Return cleanup function
+	return func() {
+		lsw.progressMu.Lock()
+		lsw.progress = nil
+		lsw.progressMu.Unlock()
+	}
+}
+
 // syncLibrary performs a full library synchronization
 func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	startTime := time.Now()
@@ -234,20 +402,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	}
 
 	// Initialize progress tracking
-	lsw.progressMu.Lock()
-	lsw.progress = &SyncProgress{
-		TotalFiles:     0, // Will be updated once we know the total
-		ProcessedFiles: atomic.Int32{},
-		StartTime:      startTime,
-	}
-	lsw.progressMu.Unlock()
-
-	// Clear progress and set result when done
-	defer func() {
-		lsw.progressMu.Lock()
-		lsw.progress = nil
-		lsw.progressMu.Unlock()
-	}()
+	defer lsw.initializeProgressTracking(startTime)()
 
 	// Parallelize filesystem walks for better performance
 	var metadataFiles []string
@@ -313,18 +468,10 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 		return
 	}
 
-	// Convert to maps for efficient lookup
-	metaFileSet := make(map[string]string, len(metadataFiles))
-	for _, path := range metadataFiles {
-		mountRelativePath := lsw.metaPathToMountRelativePath(path)
-		metaFileSet[mountRelativePath] = path
-	}
-
-	dbPathSet := make(map[string]database.AutomaticHealthCheckRecord, len(dbRecords))
-	for _, record := range dbRecords {
-		// Use mount relative path as the key
-		dbPathSet[record.FilePath] = record
-	}
+	// Build lookup maps for efficient searching
+	syncMaps := lsw.buildSyncMaps(metadataFiles, dbRecords)
+	metaFileSet := syncMaps.metaFileSet
+	dbPathSet := syncMaps.dbPathSet
 
 	// Find files to add (in filesystem but not in database)
 	var filesToAdd []database.AutomaticHealthCheckRecord
@@ -454,76 +601,19 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 		}
 	}
 
-	// Find files to delete (in database but not in filesystem)
-	var filesToDelete []string
-	for _, dbRecord := range dbRecords {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if _, exists := metaFileSet[dbRecord.FilePath]; !exists {
-			filesToDelete = append(filesToDelete, dbRecord.FilePath)
-		}
-
-		if _, exists := filesInUse[dbRecord.FilePath]; !exists {
-			filesToDelete = append(filesToDelete, dbRecord.FilePath)
-		}
-	}
+	// Find files to delete (in database but not in filesystem or not in use)
+	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, filesInUse)
 
 	// Perform batch operations
-	addedCount := 0
-	deletedCount := 0
+	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete)
 
-	if len(filesToAdd) > 0 {
-		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, filesToAdd); err != nil {
-			slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
-				"count", len(filesToAdd),
-				"error", err)
-		} else {
-			addedCount = len(filesToAdd)
-			slog.InfoContext(ctx, "Added new files to automatic health checks",
-				"count", addedCount)
-		}
+	// Record sync results
+	cleanup := cleanupCounts{
+		metadataDeleted:     metadataDeletedCount,
+		libraryFilesDeleted: libraryFilesDeletedCount,
+		libraryDirsDeleted:  libraryDirsDeletedCount,
 	}
-
-	if len(filesToDelete) > 0 {
-		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, filesToDelete); err != nil {
-			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
-				"count", len(filesToDelete),
-				"error", err)
-		} else {
-			deletedCount = len(filesToDelete)
-			slog.InfoContext(ctx, "Deleted orphaned health records",
-				"count", deletedCount)
-		}
-	}
-
-	duration := time.Since(startTime)
-
-	// Store sync result
-	lsw.progressMu.Lock()
-	lsw.lastSyncResult = &SyncResult{
-		FilesAdded:          addedCount,
-		FilesDeleted:        deletedCount,
-		MetadataDeleted:     metadataDeletedCount,
-		LibraryFilesDeleted: libraryFilesDeletedCount,
-		LibraryDirsDeleted:  libraryDirsDeletedCount,
-		Duration:            duration,
-		CompletedAt:         time.Now(),
-	}
-	lsw.progressMu.Unlock()
-
-	slog.InfoContext(ctx, "Library sync completed",
-		"total_metadata_files", len(metadataFiles),
-		"total_db_records", len(dbRecords),
-		"added", addedCount,
-		"deleted", deletedCount,
-		"metadata_deleted", metadataDeletedCount,
-		"library_files_deleted", libraryFilesDeletedCount,
-		"library_dirs_deleted", libraryDirsDeletedCount,
-		"duration", duration)
+	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
 }
 
 // getAllMetadataFiles collects all .meta files from the filesystem
@@ -844,20 +934,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	slog.InfoContext(ctx, "Starting metadata-only sync")
 
 	// Initialize progress tracking
-	lsw.progressMu.Lock()
-	lsw.progress = &SyncProgress{
-		TotalFiles:     0, // Will be updated once we know the total
-		ProcessedFiles: atomic.Int32{},
-		StartTime:      startTime,
-	}
-	lsw.progressMu.Unlock()
-
-	// Clear progress and set result when done
-	defer func() {
-		lsw.progressMu.Lock()
-		lsw.progress = nil
-		lsw.progressMu.Unlock()
-	}()
+	defer lsw.initializeProgressTracking(startTime)()
 
 	// Get all metadata files from filesystem
 	metadataFiles, err := lsw.getAllMetadataFiles(ctx)
@@ -880,18 +957,10 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		return
 	}
 
-	// Convert to maps for efficient lookup
-	metaFileSet := make(map[string]string, len(metadataFiles))
-	for _, path := range metadataFiles {
-		mountRelativePath := lsw.metaPathToMountRelativePath(path)
-		metaFileSet[mountRelativePath] = path
-	}
-
-	dbPathSet := make(map[string]database.AutomaticHealthCheckRecord, len(dbRecords))
-	for _, record := range dbRecords {
-		// Use mount relative path as the key
-		dbPathSet[record.FilePath] = record
-	}
+	// Build lookup maps for efficient searching
+	syncMaps := lsw.buildSyncMaps(metadataFiles, dbRecords)
+	metaFileSet := syncMaps.metaFileSet
+	dbPathSet := syncMaps.dbPathSet
 
 	// Find files to add (in filesystem but not in database)
 	var filesToAdd []database.AutomaticHealthCheckRecord
@@ -964,66 +1033,17 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	p.Wait()
 
 	// Find files to delete (in database but not in filesystem)
-	var filesToDelete []string
-	for _, dbRecord := range dbRecords {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if _, exists := metaFileSet[dbRecord.FilePath]; !exists {
-			filesToDelete = append(filesToDelete, dbRecord.FilePath)
-		}
-	}
+	// Pass nil for filesInUse since metadata-only sync doesn't check library usage
+	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, nil)
 
 	// Perform batch operations
-	addedCount := 0
-	deletedCount := 0
+	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete)
 
-	if len(filesToAdd) > 0 {
-		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, filesToAdd); err != nil {
-			slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
-				"count", len(filesToAdd),
-				"error", err)
-		} else {
-			addedCount = len(filesToAdd)
-			slog.InfoContext(ctx, "Added new files to automatic health checks",
-				"count", addedCount)
-		}
+	// Record sync results (no cleanup operations for metadata-only sync)
+	cleanup := cleanupCounts{
+		metadataDeleted:     0,
+		libraryFilesDeleted: 0,
+		libraryDirsDeleted:  0,
 	}
-
-	if len(filesToDelete) > 0 {
-		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, filesToDelete); err != nil {
-			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
-				"count", len(filesToDelete),
-				"error", err)
-		} else {
-			deletedCount = len(filesToDelete)
-			slog.InfoContext(ctx, "Deleted orphaned health records",
-				"count", deletedCount)
-		}
-	}
-
-	duration := time.Since(startTime)
-
-	// Store sync result
-	lsw.progressMu.Lock()
-	lsw.lastSyncResult = &SyncResult{
-		FilesAdded:          addedCount,
-		FilesDeleted:        deletedCount,
-		MetadataDeleted:     0, // No metadata cleanup for NONE strategy
-		LibraryFilesDeleted: 0, // No library file cleanup for NONE strategy
-		LibraryDirsDeleted:  0, // No directory cleanup for NONE strategy
-		Duration:            duration,
-		CompletedAt:         time.Now(),
-	}
-	lsw.progressMu.Unlock()
-
-	slog.InfoContext(ctx, "Metadata-only sync completed",
-		"total_metadata_files", len(metadataFiles),
-		"total_db_records", len(dbRecords),
-		"added", addedCount,
-		"deleted", deletedCount,
-		"duration", duration)
+	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
 }
