@@ -57,8 +57,8 @@ export function HealthTableRow({
 				</div>
 			</td>
 			<td>
-				<div className="tooltip text-sm" data-tip={item.source_nzb_path}>
-					{truncateText(item.source_nzb_path?.split("/").pop() || "", 40)}
+				<div className="tooltip text-sm" data-tip={item.library_path}>
+					{truncateText(item.library_path?.split("/").pop() || "", 40)}
 				</div>
 			</td>
 			<td>

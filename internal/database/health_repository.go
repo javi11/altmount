@@ -105,7 +105,8 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
-		       error_details, created_at, updated_at, release_date, scheduled_check_at
+		       error_details, created_at, updated_at, release_date, scheduled_check_at,
+			   library_path
 		FROM file_health
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
@@ -130,6 +131,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 			&health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate,
 			&health.ScheduledCheckAt,
+			&health.LibraryPath,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -497,7 +499,8 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 	query := fmt.Sprintf(`
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
-		       error_details, created_at, updated_at, scheduled_check_at
+		       error_details, created_at, updated_at, scheduled_check_at,
+			   library_path
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
@@ -542,6 +545,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt, &health.ScheduledCheckAt,
+			&health.LibraryPath,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan health item: %w", err)

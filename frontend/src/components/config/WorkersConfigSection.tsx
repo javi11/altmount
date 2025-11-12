@@ -174,7 +174,7 @@ export function ImportConfigSection({
 						</select>
 						<p className="label">
 							{formData.import_strategy === "NONE" &&
-								"Files are imported directly without additional organization"}
+								"Files will be only exposed via the WebDAV mount point"}
 							{formData.import_strategy === "SYMLINK" &&
 								"Create category-based symlinks for easier access by external applications"}
 							{formData.import_strategy === "STRM" &&
@@ -201,8 +201,8 @@ export function ImportConfigSection({
 							/>
 							<p className="label">
 								{formData.import_strategy === "SYMLINK"
-									? "Absolute path where symlinks will be created. Symlinks will be organized in subdirectories by category (e.g., /symlinks/movies/, /symlinks/tv/)"
-									: "Absolute path where STRM files will be created. STRM files will be organized in the same directory structure as the imported files."}
+									? "Absolute path where symlinks will be created."
+									: "Absolute path where STRM files will be created."}
 							</p>
 						</fieldset>
 					)}
@@ -213,8 +213,7 @@ export function ImportConfigSection({
 								<div className="font-bold">Symlinks Enabled</div>
 								<div className="text-sm">
 									Imported files will be available as symlinks in{" "}
-									<code>{formData.import_dir}/[category]/</code> for easier access by external
-									applications.
+									<code>{formData.import_dir}/</code> for easier access by external applications.
 								</div>
 							</div>
 						</div>

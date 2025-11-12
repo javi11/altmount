@@ -101,6 +101,7 @@ export interface FileHealth {
 	retry_count: number;
 	max_retries: number;
 	source_nzb_path?: string;
+	library_path?: string;
 	error_details?: string;
 	repair_retry_count: number;
 	max_repair_retries: number;
