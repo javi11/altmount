@@ -226,6 +226,13 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	cfg := lsw.configGetter()
 	slog.InfoContext(ctx, "Starting library sync")
 
+	// Check import strategy - if NONE, only sync DB with metadata files
+	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
+		slog.InfoContext(ctx, "Import strategy is NONE, performing metadata-only sync")
+		lsw.syncMetadataOnly(ctx, startTime)
+		return
+	}
+
 	// Initialize progress tracking
 	lsw.progressMu.Lock()
 	lsw.progress = &SyncProgress{
@@ -827,4 +834,196 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 		"deleted_count", deletedCount)
 
 	return deletedCount, nil
+}
+
+// syncMetadataOnly performs a simplified sync for NONE import strategy
+// It only synchronizes database records with metadata files, skipping all
+// library directory scanning and cleanup operations
+func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime time.Time) {
+	cfg := lsw.configGetter()
+	slog.InfoContext(ctx, "Starting metadata-only sync")
+
+	// Initialize progress tracking
+	lsw.progressMu.Lock()
+	lsw.progress = &SyncProgress{
+		TotalFiles:     0, // Will be updated once we know the total
+		ProcessedFiles: atomic.Int32{},
+		StartTime:      startTime,
+	}
+	lsw.progressMu.Unlock()
+
+	// Clear progress and set result when done
+	defer func() {
+		lsw.progressMu.Lock()
+		lsw.progress = nil
+		lsw.progressMu.Unlock()
+	}()
+
+	// Get all metadata files from filesystem
+	metadataFiles, err := lsw.getAllMetadataFiles(ctx)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			slog.ErrorContext(ctx, "Failed to get metadata files", "error", err)
+		}
+		return
+	}
+
+	// Update total files count
+	lsw.progressMu.Lock()
+	lsw.progress.TotalFiles = len(metadataFiles)
+	lsw.progressMu.Unlock()
+
+	// Get all health check paths from database
+	dbRecords, err := lsw.healthRepo.GetAllHealthCheckRecords(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to get automatic health check paths from database", "error", err)
+		return
+	}
+
+	// Convert to maps for efficient lookup
+	metaFileSet := make(map[string]string, len(metadataFiles))
+	for _, path := range metadataFiles {
+		mountRelativePath := lsw.metaPathToMountRelativePath(path)
+		metaFileSet[mountRelativePath] = path
+	}
+
+	dbPathSet := make(map[string]database.AutomaticHealthCheckRecord, len(dbRecords))
+	for _, record := range dbRecords {
+		// Use mount relative path as the key
+		dbPathSet[record.FilePath] = record
+	}
+
+	// Find files to add (in filesystem but not in database)
+	var filesToAdd []database.AutomaticHealthCheckRecord
+	var filesToAddMu sync.Mutex
+
+	// Get concurrency setting (default to 10 if not set)
+	concurrency := cfg.Health.LibrarySyncConcurrency
+	if concurrency <= 0 {
+		concurrency = 10
+	}
+
+	// Create a worker pool for parallel metadata reading
+	p := pool.New().WithMaxGoroutines(concurrency)
+
+	for mountRelativePath := range metaFileSet {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Capture loop variable for goroutine
+		path := mountRelativePath
+
+		p.Go(func() {
+			// Check if needs to be added
+			if _, exists := dbPathSet[path]; !exists {
+				// Read metadata to get release date
+				fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to read metadata",
+						"mount_relative_path", path,
+						"error", err)
+					return
+				}
+
+				if fileMeta == nil {
+					return
+				}
+
+				// Convert Unix timestamp to time.Time
+				releaseDate := time.Unix(fileMeta.ReleaseDate, 0)
+
+				// Calculate initial check time
+				scheduledCheckAt := calculateInitialCheck(releaseDate)
+
+				// For NONE strategy, library path is always nil
+				// since files are accessed directly via mount
+				var libraryPath *string = nil
+
+				// Protect shared slice with mutex
+				filesToAddMu.Lock()
+				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
+					FilePath:         path,
+					LibraryPath:      libraryPath,
+					ReleaseDate:      releaseDate,
+					ScheduledCheckAt: scheduledCheckAt,
+					SourceNzbPath:    &fileMeta.SourceNzbPath,
+				})
+				filesToAddMu.Unlock()
+			}
+
+			if lsw.progress != nil {
+				lsw.progress.ProcessedFiles.Add(1)
+			}
+		})
+	}
+
+	// Wait for all workers to complete
+	p.Wait()
+
+	// Find files to delete (in database but not in filesystem)
+	var filesToDelete []string
+	for _, dbRecord := range dbRecords {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if _, exists := metaFileSet[dbRecord.FilePath]; !exists {
+			filesToDelete = append(filesToDelete, dbRecord.FilePath)
+		}
+	}
+
+	// Perform batch operations
+	addedCount := 0
+	deletedCount := 0
+
+	if len(filesToAdd) > 0 {
+		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, filesToAdd); err != nil {
+			slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
+				"count", len(filesToAdd),
+				"error", err)
+		} else {
+			addedCount = len(filesToAdd)
+			slog.InfoContext(ctx, "Added new files to automatic health checks",
+				"count", addedCount)
+		}
+	}
+
+	if len(filesToDelete) > 0 {
+		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, filesToDelete); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
+				"count", len(filesToDelete),
+				"error", err)
+		} else {
+			deletedCount = len(filesToDelete)
+			slog.InfoContext(ctx, "Deleted orphaned health records",
+				"count", deletedCount)
+		}
+	}
+
+	duration := time.Since(startTime)
+
+	// Store sync result
+	lsw.progressMu.Lock()
+	lsw.lastSyncResult = &SyncResult{
+		FilesAdded:          addedCount,
+		FilesDeleted:        deletedCount,
+		MetadataDeleted:     0, // No metadata cleanup for NONE strategy
+		LibraryFilesDeleted: 0, // No library file cleanup for NONE strategy
+		LibraryDirsDeleted:  0, // No directory cleanup for NONE strategy
+		Duration:            duration,
+		CompletedAt:         time.Now(),
+	}
+	lsw.progressMu.Unlock()
+
+	slog.InfoContext(ctx, "Metadata-only sync completed",
+		"total_metadata_files", len(metadataFiles),
+		"total_db_records", len(dbRecords),
+		"added", addedCount,
+		"deleted", deletedCount,
+		"duration", duration)
 }
