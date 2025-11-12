@@ -6,11 +6,14 @@ webdav:
   port: 8080
   user: 'usenet'
   password: 'usenet'
-  debug: false
 
 # REST API configuration
 api:
   prefix: '/api' # API endpoint prefix
+
+# Authentication configuration
+auth:
+  login_required: true # Require login to access WebDAV and API (default: true)
 
 # Database configuration
 database:
@@ -19,6 +22,7 @@ database:
 # Metadata filesystem configuration
 metadata:
   root_path: '/config/metadata' # Directory to store metadata files (required)
+  delete_source_nzb_on_removal: false # Delete source NZB file when metadata is removed (default: false)
 
 # Streaming and download configuration
 streaming:
@@ -37,10 +41,12 @@ rclone:
   salt: '' # Encryption salt (optional)
 
   # RC (Remote Control) server configuration
-  rc_enabled: false # Enable RC server connection (for cache refresh and mount operations)
-                    # NOTE: RC will be automatically enabled when mount_enabled is set to true
-  rc_url: '' # External RC server URL (optional, e.g., "http://localhost:5573")
-             # If empty, will start internal RC server on rc_port
+  rc_enabled:
+    false # Enable RC server connection (for cache refresh and mount operations)
+    # NOTE: RC will be automatically enabled when mount_enabled is set to true
+  rc_url:
+    '' # External RC server URL (optional, e.g., "http://localhost:5573")
+    # If empty, will start internal RC server on rc_port
   rc_port: 5573 # Port for internal RC server (changed from 5572 to match production defaults)
   rc_user: 'admin' # RC authentication username
   rc_pass: 'admin' # RC authentication password
@@ -95,12 +101,56 @@ rclone:
 import:
   max_processor_workers: 2 # Number of NZB processor workers
   queue_processing_interval_seconds: 5 # Queue processing interval in seconds
+  # Allowed file extensions for import (video formats)
+  allowed_file_extensions:
+    - '.mp4'
+    - '.mkv'
+    - '.avi'
+    - '.mov'
+    - '.wmv'
+    - '.flv'
+    - '.webm'
+    - '.m4v'
+    - '.mpg'
+    - '.mpeg'
+    - '.m2ts'
+    - '.ts'
+    - '.vob'
+    - '.3gp'
+    - '.3g2'
+    - '.h264'
+    - '.h265'
+    - '.hevc'
+    - '.ogv'
+    - '.ogm'
+    - '.strm'
+    - '.iso'
+    - '.img'
+    - '.divx'
+    - '.xvid'
+    - '.rm'
+    - '.rmvb'
+    - '.asf'
+    - '.asx'
+    - '.wtv'
+    - '.mk3d'
+    - '.dvr-ms'
+  max_import_connections: 5 # Number of concurrent NNTP connections for validation and archive processing
+  import_cache_size_mb: 64 # Cache size in MB for archive analysis
+  segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
+  import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
+  import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
 
 # Health monitoring configuration
 health:
-  enabled: true # Enable health monitoring service
-  auto_repair_enabled: false # Enable automatic repair of corrupted files via ARRs (default: false)
-  check_interval_seconds: 300 # Health check interval in seconds (default: 300 = 5 minutes)
+  enabled: false # Enable health monitoring service (default: false)
+  library_dir: '' # Library directory to monitor (required when health is enabled, must be absolute path)
+  cleanup_orphaned_metadata: false # Clean up metadata for files that no longer exist in library (default: false)
+  check_interval_seconds: 5 # Health check interval in seconds (default: 5)
+  max_connections_for_health_checks: 5 # Number of NNTP connections for health checks (default: 5)
+  segment_sample_percentage: 5 # Percentage of segments to sample for health validation (1-100, default: 5)
+  library_sync_interval_minutes: 360 # Library synchronization interval in minutes (default: 360 = 6 hours)
+  library_sync_concurrency: 1 # Number of concurrent library sync operations (default: 1)
 
 # WebDAV mount path configuration
 mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. Must be an absolute path starting with /
@@ -108,7 +158,7 @@ mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. 
 # SABnzbd-compatible API configuration
 sabnzbd:
   enabled: false # Enable SABnzbd-compatible API
-  complete_dir: '/altmount/completed' # The complete directory where the files will be "downloaded".
+  complete_dir: '/complete' # The complete directory where the files will be "downloaded"
   categories: # Download categories (optional)
     - name: 'movies'
       order: 1
@@ -118,10 +168,14 @@ sabnzbd:
       order: 2
       priority: 0
       dir: 'tv'
+  # Fallback configuration for sending failed imports to external SABnzbd
+  fallback_host: '' # External SABnzbd URL (e.g., "http://localhost:8080")
+  fallback_api_key: '' # External SABnzbd API key
 
 # Radarr/Sonarr arrs configuration
 arrs:
   enabled: false # Enable arrs service
+  max_workers: 5 # Number of concurrent workers (default: 5)
   radarr_instances: [] # Radarr instances (configured via UI)
   sonarr_instances: [] # Sonarr instances (configured via UI)
   # Example instance configuration (use the web UI instead):
@@ -148,11 +202,14 @@ log:
 # Global log level (legacy - use log.level instead)
 log_level: 'info'
 
+# Profiler configuration
+profiler_enabled: false # Enable performance profiling (default: false)
+
 # NNTP Providers Configuration
 # Configure multiple providers for redundancy and load balancing
 providers:
   # Primary provider with SSL
-  - name: 'primary-ssl'
+  - id: 1 # Auto-generated hash ID based on host:port@username (leave empty for auto-generation)
     host: 'ssl-news.provider.com' # Replace with your provider's SSL hostname
     port: 563
     username: 'your_username' # Replace with your username
@@ -160,9 +217,11 @@ providers:
     max_connections: 20
     tls: true
     insecure_tls: false
+    enabled: true # Enable/disable this provider (default: true)
+    is_backup_provider: false # Mark as backup provider (default: false)
 
   # Backup provider without SSL
-  - name: 'backup-standard'
+  - id: 2 # Auto-generated hash ID (leave empty for auto-generation)
     host: 'news.provider.com' # Replace with your provider's standard hostname
     port: 119
     username: 'your_username' # Replace with your username
@@ -170,9 +229,12 @@ providers:
     max_connections: 10
     tls: false
     insecure_tls: false
+    enabled: true
+    is_backup_provider: true # This is a backup provider
+
 
   # Secondary provider (optional)
-  # - name: "secondary-provider"
+  # - id: '' # Auto-generated
   #   host: "news.otherprovider.com"
   #   port: 563
   #   username: "other_username"
@@ -180,41 +242,60 @@ providers:
   #   max_connections: 15
   #   tls: true
   #   insecure_tls: false
+  #   enabled: true
+  #   is_backup_provider: false
 # Configuration Notes:
 #
-# 1. REST API:
+# 1. Authentication:
+#    - Controls access to WebDAV and API endpoints
+#    - Set login_required to false to allow anonymous access
+#    - When enabled, uses WebDAV credentials for authentication
+#
+# 2. REST API:
 #    - Provides HTTP endpoints for queue, health, and configuration management
 #    - Available at http://server:port/api/ when enabled
-#    - Optional authentication using same credentials as WebDAV
+#    - Authentication controlled by auth.login_required setting
 #    - Supports JSON responses with pagination and filtering
 #
-# 2. Architecture:
+# 3. Architecture:
 #    - Uses filesystem-based metadata instead of main database
 #    - Queue database still used for processing workflows and scraper data
 #    - Better performance and scalability than database approach
 #
-# 3. NNTP Providers:
+# 4. NNTP Providers:
 #    - At least one provider must be configured for download functionality
 #    - Multiple providers provide redundancy and load balancing
 #    - SSL/TLS is recommended when available (port 563)
 #    - Standard unencrypted connections typically use port 119
+#    - Provider IDs are auto-generated based on host:port@username
+#    - Mark backup providers with is_backup_provider flag
 #
-# 4. Max Connections:
+# 5. Max Connections:
 #    - Set based on your provider's limits
 #    - More connections = faster downloads but higher resource usage
 #    - Typical range: 10-50 connections per provider
 #
-# 5. Workers:
+# 6. Workers:
 #    - Download workers: Number of concurrent download threads (streaming section)
 #    - Import processor workers: Number of NZB processing threads
+#    - Import connections: NNTP connections for validation and archive processing
+#    - Health check connections: NNTP connections for file health validation
+#    - ARRs max workers: Concurrent workers for ARR operations
 #    - Adjust based on your system resources and provider limits
 #
-# 6. Streaming Configuration:
+# 7. Streaming Configuration:
 #    - Max Range Size: Maximum size for a single HTTP range request
 #    - Streaming Chunk Size: Size of chunks when streaming files
 #    - Max Download Workers: Number of concurrent download workers
+#    - Max Cache Size: Cache size in MB for ahead download chunks
 #
-# 7. RClone Integration:
+# 8. Import Configuration:
+#    - Allowed file extensions: List of supported video file formats
+#    - Import strategy: NONE (direct), SYMLINK (create symlinks), STRM (create .strm files)
+#    - Import directory required when using SYMLINK or STRM strategy
+#    - Segment sampling: Percentage of segments to validate for integrity
+#
+# 9. RClone Integration:
 #    - Enable RClone mount for WebDAV filesystem mounting
 #    - RC (Remote Control) server provides full control over mount operations
 #    - Automatic health monitoring and recovery
@@ -223,38 +304,43 @@ providers:
 #    - RC server runs on configurable port with authentication
 #    - Legacy VFS configuration maintained for backward compatibility
 #
-# 8. Health Monitoring:
-#    - Provides system health checks and monitoring
-#    - Monitors database, metadata, providers, and VFS status
-#    - Accessible via REST API endpoints
-#    - Auto-repair: When enabled, automatically triggers ARRs to re-download corrupted files
+# 10. Health Monitoring:
+#     - Provides system health checks and monitoring
+#     - Monitors database, metadata, providers, and VFS status
+#     - Accessible via REST API endpoints
+#     - Library directory required when health is enabled
+#     - Cleanup orphaned metadata: Remove metadata for files no longer in library
+#     - Library sync: Periodically synchronize library state
+#     - Segment sampling: Percentage of segments to validate for health checks
 #
-# 9. SABnzbd Compatibility:
-#    - Provides SABnzbd-compatible API endpoints
-#    - Configure mount directory where WebDAV will be accessible
-#    - Optional download categories for organization
-#    - Enable for integration with existing download clients
+# 11. SABnzbd Compatibility:
+#     - Provides SABnzbd-compatible API endpoints
+#     - Configure mount directory where WebDAV will be accessible
+#     - Optional download categories for organization
+#     - Enable for integration with existing download clients
+#     - Fallback to external SABnzbd for failed imports
 #
-# 10. Mount Path:
+# 12. Mount Path:
 #     - Global WebDAV mount path configuration
 #     - Used by ARRs service to strip mount prefix from file paths
 #     - Must be an absolute path when ARRs is enabled
 #     - Example: '/mnt/altmount' or '/mnt/unionfs'
 #
-# 11. Scraper Service:
+# 13. ARRs Service:
 #     - Automatically index files from Radarr and Sonarr instances
 #     - Configure multiple instances of each service type
 #     - Customizable scrape intervals (default 24 hours)
 #     - Manage instances through the web interface
 #     - Indexes movie and TV episode file paths for fast searching
+#     - Max workers controls concurrent ARR operations
 #
-# 12. Paths:
+# 14. Paths:
 #     - Use absolute paths for production deployments
 #     - Relative paths are relative to the working directory
 #     - Ensure the application has read/write access to all paths
 #     - Metadata directory will be created automatically
 #
-# 13. Logging Configuration:
+# 15. Logging Configuration:
 #     - Log file defaults to same directory as config file (e.g., "altmount.log")
 #     - Set 'file' to custom path for different location (e.g., "./logs/altmount.log")
 #     - Leave 'file' empty to log to console only
@@ -262,8 +348,13 @@ providers:
 #     - Old files are automatically compressed when 'compress: true'
 #     - Supports backward compatibility with top-level 'log_level'
 #
-# 14. Security:
+# 16. Security:
 #     - Store credentials securely
 #     - Consider using environment variables for sensitive data
 #     - Use strong passwords for WebDAV authentication
 #     - API keys for Radarr/Sonarr should be kept secure
+#     - Provider passwords are masked in API responses
+#
+# 17. Performance:
+#     - Enable profiler_enabled for performance analysis and optimization
+#     - Monitor resource usage and adjust worker counts accordingly

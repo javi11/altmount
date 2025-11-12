@@ -21,11 +21,6 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
-const (
-	defaultRadarrCategory = "movies"
-	defaultSonarrCategory = "tv"
-)
-
 var defaultCategory = config.SABnzbdCategory{
 	Name:     "default",
 	Order:    0,

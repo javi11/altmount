@@ -13,7 +13,6 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
-	"github.com/javi11/altmount/internal/utils"
 	"github.com/sourcegraph/conc"
 )
 
@@ -62,9 +61,6 @@ type HealthWorker struct {
 	// Active checks tracking for cancellation
 	activeChecks   map[string]context.CancelFunc // filePath -> cancel function
 	activeChecksMu sync.RWMutex
-
-	// Library item finder for library directory lookups (supports both symlinks and STRM files)
-	symlinkFinder *utils.LibraryItemFinder
 
 	// Statistics
 	stats   WorkerStats
