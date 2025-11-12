@@ -63,8 +63,8 @@ type HealthWorker struct {
 	activeChecks   map[string]context.CancelFunc // filePath -> cancel function
 	activeChecksMu sync.RWMutex
 
-	// Symlink finder for library directory lookups
-	symlinkFinder *utils.SymlinkFinder
+	// Library item finder for library directory lookups (supports both symlinks and STRM files)
+	symlinkFinder *utils.LibraryItemFinder
 
 	// Statistics
 	stats   WorkerStats
@@ -88,7 +88,6 @@ func NewHealthWorker(
 		status:          WorkerStatusStopped,
 		stopChan:        make(chan struct{}),
 		activeChecks:    make(map[string]context.CancelFunc),
-		symlinkFinder:   utils.NewSymlinkFinder(),
 		stats: WorkerStats{
 			Status: WorkerStatusStopped,
 		},
@@ -714,16 +713,28 @@ func (hw *HealthWorker) getCheckInterval() time.Duration {
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string) error {
 	slog.InfoContext(ctx, "Triggering file repair using direct ARR API approach", "file_path", filePath)
 
-	// Determine which path to use for ARR rescan
-	pathForRescan := filePath
+	healthRecord, err := hw.healthRepo.GetFileHealth(ctx, filePath)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to get health record for library path lookup",
+			"file_path", filePath,
+			"error", err)
 
-	// Try to trigger rescan through the ARR service
-	// The service will determine which instance manages this file
-	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan)
+		return fmt.Errorf("failed to get health record for library path lookup: %w", err)
+	}
+
+	if healthRecord.LibraryPath == nil || *healthRecord.LibraryPath == "" {
+		slog.ErrorContext(ctx, "No library path found for file",
+			"file_path", filePath)
+
+		return fmt.Errorf("no library path found for file: %s, trigger a manual library sync to fix this", filePath)
+	}
+
+	// Step 4: Trigger rescan through the ARR service
+	err = hw.arrsService.TriggerFileRescan(ctx, *healthRecord.LibraryPath)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
-			"file_path", pathForRescan,
-			"original_path", filePath,
+			"file_path", filePath,
+			"library_path", *healthRecord.LibraryPath,
 			"error", err)
 
 		// If we can't trigger repair, mark as corrupted for manual investigation
@@ -733,19 +744,8 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 
 	// ARR rescan was triggered successfully - set repair triggered status
 	slog.InfoContext(ctx, "Successfully triggered ARR rescan for file repair",
-		"file_path", pathForRescan,
-		"original_path", filePath)
-
-	// Remove file from health table since repair was successfully triggered to ARR
-	if err := hw.healthRepo.DeleteHealthRecord(ctx, filePath); err != nil {
-		slog.ErrorContext(ctx, "Failed to delete health record after repair trigger",
-			"error", err,
-			"file_path", filePath)
-		// Don't fail the repair trigger if deletion fails - just log the error
-	} else {
-		slog.InfoContext(ctx, "Removed file from health table after successful repair trigger",
-			"file_path", filePath)
-	}
+		"file_path", filePath,
+		"library_path", *healthRecord.LibraryPath)
 
 	return nil
 }

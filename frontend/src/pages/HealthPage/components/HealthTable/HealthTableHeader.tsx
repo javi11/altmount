@@ -49,7 +49,7 @@ export function HealthTableHeader({
 							))}
 					</button>
 				</th>
-				<th>Source NZB</th>
+				<th>Library Path</th>
 				<th>
 					<button
 						type="button"

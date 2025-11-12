@@ -18,7 +18,6 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
-	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
@@ -72,7 +71,6 @@ func NewServer(
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
-	symlinkFinder *utils.SymlinkFinder,
 ) *Server {
 	if config == nil {
 		config = DefaultConfig()

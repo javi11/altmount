@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -393,10 +394,31 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 		})
 	}
 
-	// Trigger repair through ARR service using direct file path approach
-	// The service will automatically determine which ARR instance manages this file
+	// Determine the path to use for ARR rescan
+	// Step 1: Try to use library_path from database if available
+	// Step 2: If not in DB, search for library item using FindLibraryItem
+	// Step 3: Determine final path (library path or mount path fallback)
+	// Step 4: Trigger rescan with resolved path
 	ctx := c.Context()
-	err = s.arrsService.TriggerFileRescan(ctx, item.FilePath)
+	cfg := s.configManager.GetConfig()
+
+	var libraryPath string
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
+		libraryPath = *item.LibraryPath
+	}
+
+	// Determine final path for ARR rescan
+	pathForRescan := libraryPath
+	if pathForRescan == "" {
+		// Fallback to mount path if no library path found
+		pathForRescan = filepath.Join(cfg.MountPath, item.FilePath)
+		slog.InfoContext(ctx, "Using mount path fallback for manual repair",
+			"file_path", item.FilePath,
+			"mount_path", pathForRescan)
+	}
+
+	// Trigger rescan with the resolved path
+	err = s.arrsService.TriggerFileRescan(ctx, pathForRescan)
 	if err != nil {
 		// Check if this is a "no ARR instance found" error
 		if strings.Contains(err.Error(), "no ARR instance found") {
@@ -409,7 +431,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 		// Handle other errors as internal server errors
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
-			"message": "Failed to trigger repair in ARR instance",
+			"message": "Failed to trigger repair in ARR instance, you might need to trigger a manual library sync",
 			"details": err.Error(),
 		})
 	}

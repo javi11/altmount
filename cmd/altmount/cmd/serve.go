@@ -21,7 +21,6 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/spf13/cobra"
 )
@@ -120,12 +119,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
 	authService := setupAuthService(ctx, repos.UserRepo)
-	// Create symlink finder for library sync
-	symlinkFinder := utils.NewSymlinkFinder()
 
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, symlinkFinder)
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, symlinkFinder)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager)
 	if err != nil {
@@ -143,7 +140,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	webdav.RegisterConfigHandlers(ctx, configManager, webdavHandler)
 	api.RegisterLogLevelHandler(ctx, configManager, debugMode)
 
-	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService, symlinkFinder)
+	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService)
 	if err != nil {
 		logger.Warn("Health worker initialization failed", "err", err)
 	}

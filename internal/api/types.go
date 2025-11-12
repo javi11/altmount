@@ -497,6 +497,7 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 	return &HealthItemResponse{
 		ID:               item.ID,
 		FilePath:         item.FilePath,
+		LibraryPath:      item.LibraryPath,
 		Status:           item.Status,
 		LastChecked:      item.LastChecked,
 		LastError:        item.LastError,
