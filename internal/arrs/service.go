@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/utils"
 	"golift.io/starr"
 	"golift.io/starr/radarr"
 	"golift.io/starr/sonarr"
@@ -36,21 +34,18 @@ type ConfigManager interface {
 type Service struct {
 	configGetter  config.ConfigGetter
 	configManager ConfigManager
-	logger        *slog.Logger
 	mu            sync.RWMutex
 	radarrClients map[string]*radarr.Radarr // key: instance name
 	sonarrClients map[string]*sonarr.Sonarr // key: instance name
-	symlinkFinder *utils.SymlinkFinder
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
-func NewService(configGetter config.ConfigGetter, configManager ConfigManager, symlinkFinder *utils.SymlinkFinder) *Service {
+func NewService(configGetter config.ConfigGetter, configManager ConfigManager) *Service {
 	return &Service{
 		configGetter:  configGetter,
 		configManager: configManager,
 		radarrClients: make(map[string]*radarr.Radarr),
 		sonarrClients: make(map[string]*sonarr.Sonarr),
-		symlinkFinder: symlinkFinder,
 	}
 }
 
@@ -134,19 +129,6 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) (instanceType string, instanceName string, err error) {
 	slog.DebugContext(ctx, "Finding instance for file path", "file_path", filePath)
 
-	cfg := s.configGetter()
-
-	// Get library directory from health config
-	libraryDir := ""
-	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-		libraryDir = *cfg.Health.LibraryDir
-	} else {
-		return "", "", fmt.Errorf("Health.LibraryDir is not configured")
-	}
-
-	// Construct candidate path using library directory
-	candidatePath := filepath.Join(libraryDir, filePath)
-
 	// Try each enabled ARR instance to see which one manages this file
 	for _, instance := range s.getConfigInstances() {
 		if !instance.Enabled {
@@ -156,7 +138,7 @@ func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) 
 		slog.DebugContext(ctx, "Checking instance for file",
 			"instance_name", instance.Name,
 			"instance_type", instance.Type,
-			"candidate_path", candidatePath)
+			"file_path", filePath)
 
 		switch instance.Type {
 		case "radarr":
@@ -164,7 +146,7 @@ func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) 
 			if err != nil {
 				continue
 			}
-			if s.radarrManagesFile(ctx, client, candidatePath) {
+			if s.radarrManagesFile(ctx, client, filePath) {
 				return "radarr", instance.Name, nil
 			}
 
@@ -173,7 +155,7 @@ func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) 
 			if err != nil {
 				continue
 			}
-			if s.sonarrManagesFile(ctx, client, candidatePath) {
+			if s.sonarrManagesFile(ctx, client, filePath) {
 				return "sonarr", instance.Name, nil
 			}
 		}
@@ -183,27 +165,10 @@ func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) 
 }
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
-func (s *Service) TriggerFileRescan(ctx context.Context, filePath string) error {
-	cfg := s.configGetter()
-
-	pathForRescan := filePath
-
-	if cfg.Import.ImportStrategy == config.ImportStrategySYMLINK {
-		librarySymlink, err := s.symlinkFinder.FindLibrarySymlink(ctx, filePath, cfg)
-		if err != nil {
-			slog.WarnContext(ctx, "Error searching for library symlink, using mount path",
-				"mount_path", filePath,
-				"error", err)
-		} else if librarySymlink != "" {
-			pathForRescan = librarySymlink
-			slog.DebugContext(ctx, "Using library symlink path for ARR rescan",
-				"mount_path", filePath,
-				"library_path", librarySymlink)
-		} else {
-			slog.DebugContext(ctx, "No library symlink found, using mount path for ARR rescan",
-				"mount_path", filePath)
-		}
-	}
+// The pathForRescan should be the library path (symlink or .strm file) if available,
+// otherwise the mount path. It's the caller's responsibility to find the appropriate path.
+func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string) error {
+	slog.InfoContext(ctx, "Triggering ARR rescan", "path", pathForRescan)
 
 	// Find which ARR instance manages this file path
 	instanceType, instanceName, err := s.findInstanceForFilePath(ctx, pathForRescan)
@@ -270,24 +235,9 @@ func (s *Service) radarrManagesFile(ctx context.Context, client *radarr.Radarr, 
 
 // triggerRadarrRescanByPath triggers a rescan in Radarr for the given file path
 func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.Radarr, filePath, instanceName string) error {
-	cfg := s.configGetter()
-
-	// Get library directory from health config
-	libraryDir := ""
-	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
-		libraryDir = *cfg.Health.LibraryDir
-	} else {
-		return fmt.Errorf("Health.LibraryDir is not configured")
-	}
-
-	// Construct full path using library directory
-	fullPath := filepath.Join(libraryDir, strings.TrimPrefix(filePath, "/"))
-
 	slog.DebugContext(ctx, "Checking Radarr for file path",
 		"instance", instanceName,
-		"file_path", filePath,
-		"library_dir", libraryDir,
-		"full_path", fullPath)
+		"file_path", filePath)
 
 	// Get all movies to find the one with matching file path
 	movies, err := client.GetMovieContext(ctx, &radarr.GetMovie{})
@@ -297,14 +247,18 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 
 	var targetMovie *radarr.Movie
 	for _, movie := range movies {
-		if movie.HasFile && movie.MovieFile != nil && movie.MovieFile.Path == fullPath {
+		if movie.HasFile && movie.MovieFile != nil && movie.MovieFile.Path == filePath {
 			targetMovie = movie
 			break
 		}
 	}
 
 	if targetMovie == nil {
-		return fmt.Errorf("no movie found with file path: %s. Check if the movie has any files", fullPath)
+		slog.DebugContext(ctx, "No movie found with file path",
+			"instance", instanceName,
+			"file_path", filePath)
+
+		return fmt.Errorf("no movie found with file path: %s. Check if the movie has any files", filePath)
 	}
 
 	slog.DebugContext(ctx, "Found matching movie for file",
@@ -312,7 +266,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		"movie_id", targetMovie.ID,
 		"movie_title", targetMovie.Title,
 		"movie_path", targetMovie.Path,
-		"file_path", fullPath)
+		"file_path", filePath)
 
 	// Delete the existing file
 	err = client.DeleteMovieFilesContext(ctx, targetMovie.MovieFile.ID)
@@ -663,36 +617,6 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 		"category", category)
 
 	return nil
-}
-
-// ensureCategoryExists ensures a category exists in the current configuration
-func (s *Service) ensureCategoryExists(ctx context.Context, category string) {
-	if s.configManager == nil {
-		return
-	}
-
-	// Use default category if empty
-	if category == "" {
-		category = "default"
-	}
-
-	currentConfig := s.configManager.GetConfig()
-	newConfig := currentConfig.DeepCopy()
-
-	s.ensureCategoryExistsInConfig(ctx, newConfig, category)
-
-	// Update and save configuration
-	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		slog.ErrorContext(ctx, "Failed to update config for category", "category", category, "error", err)
-		return
-	}
-
-	if err := s.configManager.SaveConfig(); err != nil {
-		slog.ErrorContext(ctx, "Failed to save config for category", "category", category, "error", err)
-		return
-	}
-
-	slog.InfoContext(ctx, "Successfully ensured category exists", "category", category)
 }
 
 // ensureCategoryExistsInConfig ensures a category exists in the provided config

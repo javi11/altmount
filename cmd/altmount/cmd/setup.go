@@ -24,7 +24,6 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
-	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/internal/webdav"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -245,7 +244,6 @@ func setupAPIServer(
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
-	symlinkFinder *utils.SymlinkFinder,
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -266,7 +264,6 @@ func setupAPIServer(
 		arrsService,
 		mountService,
 		progressBroadcaster,
-		symlinkFinder,
 	)
 
 	apiServer.SetupRoutes(app)
@@ -321,7 +318,6 @@ func startHealthWorker(
 	configManager *config.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 	arrsService *arrs.Service,
-	symlinkFinder *utils.SymlinkFinder,
 ) (*health.HealthWorker, *health.LibrarySyncWorker, error) {
 	// Create metadata service for health worker
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
@@ -350,7 +346,6 @@ func startHealthWorker(
 		healthRepo,
 		configManager.GetConfigGetter(),
 		rcloneClient,
-		symlinkFinder,
 	)
 
 	// Only start health system if enabled

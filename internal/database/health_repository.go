@@ -47,7 +47,7 @@ func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string
 // GetFileHealth retrieves health record for a specific file
 func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (*FileHealth, error) {
 	query := `
-		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
+		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date
 		FROM file_health
@@ -56,7 +56,7 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 
 	var health FileHealth
 	err := r.db.QueryRowContext(ctx, query, filePath).Scan(
-		&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
+		&health.ID, &health.FilePath, &health.LibraryPath, &health.Status, &health.LastChecked,
 		&health.LastError, &health.RetryCount, &health.MaxRetries,
 		&health.RepairRetryCount, &health.MaxRepairRetries,
 		&health.SourceNzbPath, &health.ErrorDetails,
@@ -75,7 +75,7 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 // GetFileHealthByID retrieves health record for a specific file by ID
 func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*FileHealth, error) {
 	query := `
-		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
+		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date
 		FROM file_health
@@ -84,7 +84,7 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 
 	var health FileHealth
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&health.ID, &health.FilePath, &health.Status, &health.LastChecked,
+		&health.ID, &health.FilePath, &health.LibraryPath, &health.Status, &health.LastChecked,
 		&health.LastError, &health.RetryCount, &health.MaxRetries,
 		&health.RepairRetryCount, &health.MaxRepairRetries,
 		&health.SourceNzbPath, &health.ErrorDetails,
@@ -820,10 +820,12 @@ func (r *HealthRepository) MarkAsHealthy(ctx context.Context, filePath string, n
 	return nil
 }
 
-// GetAllHealthCheckPaths returns all file paths tracked in health system
-func (r *HealthRepository) GetAllHealthCheckPaths(ctx context.Context) ([]string, error) {
+// GetAllHealthCheckRecords returns all health check records tracked in health system
+func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]AutomaticHealthCheckRecord, error) {
 	query := `
-		SELECT file_path
+		SELECT file_path, library_path, 
+			   release_date, scheduled_check_at,
+			   source_nzb_path
 		FROM file_health
 		ORDER BY file_path ASC
 	`
@@ -834,25 +836,39 @@ func (r *HealthRepository) GetAllHealthCheckPaths(ctx context.Context) ([]string
 	}
 	defer rows.Close()
 
-	var paths []string
+	var records []AutomaticHealthCheckRecord
 	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
+		var (
+			path             string
+			libraryPath      *string
+			releaseDate      time.Time
+			scheduledCheckAt time.Time
+			sourceNzbPath    *string
+		)
+
+		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAt, &sourceNzbPath); err != nil {
 			return nil, fmt.Errorf("failed to scan file path: %w", err)
 		}
-		paths = append(paths, path)
+		records = append(records, AutomaticHealthCheckRecord{
+			FilePath:         path,
+			LibraryPath:      libraryPath,
+			ReleaseDate:      releaseDate,
+			ScheduledCheckAt: scheduledCheckAt,
+			SourceNzbPath:    sourceNzbPath,
+		})
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate health check paths: %w", err)
 	}
 
-	return paths, nil
+	return records, nil
 }
 
 // AutomaticHealthCheckRecord represents a batch insert record
 type AutomaticHealthCheckRecord struct {
 	FilePath         string
+	LibraryPath      *string
 	ReleaseDate      time.Time
 	ScheduledCheckAt time.Time
 	SourceNzbPath    *string
@@ -891,22 +907,23 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 
 	// Build the INSERT query with multiple value sets
 	valueStrings := make([]string, len(records))
-	args := make([]interface{}, 0, len(records)*4)
+	args := make([]interface{}, 0, len(records)*5)
 
 	for i, record := range records {
-		valueStrings[i] = "(?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
-		args = append(args, record.FilePath, HealthStatusHealthy, record.SourceNzbPath, record.ReleaseDate, record.ScheduledCheckAt)
+		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
+		args = append(args, record.FilePath, record.LibraryPath, HealthStatusHealthy, record.SourceNzbPath, record.ReleaseDate, record.ScheduledCheckAt)
 	}
 
 	query := fmt.Sprintf(`
 		INSERT INTO file_health (
-			file_path, status, last_checked, retry_count, max_retries,
+			file_path, library_path, status, last_checked, retry_count, max_retries,
 			repair_retry_count, max_repair_retries, source_nzb_path,
 			release_date, scheduled_check_at,
 			created_at, updated_at
 		)
 		VALUES %s
 		ON CONFLICT(file_path) DO UPDATE SET
+			library_path = excluded.library_path,
 			release_date = excluded.release_date,
 			scheduled_check_at = excluded.scheduled_check_at,
 			status = excluded.status,
