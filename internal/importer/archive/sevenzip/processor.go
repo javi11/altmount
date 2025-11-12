@@ -522,6 +522,14 @@ func renameSevenZipFilesAndSort(sevenZipFiles []parser.ParsedFile) []parser.Pars
 			baseFilename = sevenZipFiles[0].Filename
 		}
 	} else {
+		// Sort files by part number BEFORE extracting base filename
+		// This ensures we use the correct first part's base name
+		sort.Slice(sevenZipFiles, func(i, j int) bool {
+			partI := extractSevenZipPartNumber(sevenZipFiles[i].Filename)
+			partJ := extractSevenZipPartNumber(sevenZipFiles[j].Filename)
+			return partI < partJ
+		})
+
 		// Get the base name of the first 7zip file (for existing extension handling)
 		firstFileBase := extractBaseFilenameSevenZip(sevenZipFiles[0].Filename)
 

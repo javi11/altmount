@@ -44,22 +44,6 @@ type UsenetFileSystem struct {
 	totalFiles      int
 }
 
-// UsenetFile implements fs.File and io.Seeker for reading individual RAR parts from Usenet
-// The Seeker interface allows rardecode.OpenReader to efficiently seek within RAR parts
-type UsenetFile struct {
-	name           string
-	file           *parser.ParsedFile
-	poolManager    pool.Manager
-	ctx            context.Context
-	maxWorkers     int
-	maxCacheSizeMB int
-	size           int64
-	reader         io.ReadCloser
-	position       int64
-	closed         bool
-	ufs            *UsenetFileSystem
-}
-
 // UsenetFileInfo implements fs.FileInfo for RAR part files
 type UsenetFileInfo struct {
 	name string
@@ -134,6 +118,22 @@ func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 		name: filepath.Base(file.Filename),
 		size: file.Size,
 	}, nil
+}
+
+// UsenetFile implements fs.File and io.Seeker for reading individual RAR parts from Usenet
+// The Seeker interface allows rardecode.OpenReader to efficiently seek within RAR parts
+type UsenetFile struct {
+	name           string
+	file           *parser.ParsedFile
+	poolManager    pool.Manager
+	ctx            context.Context
+	maxWorkers     int
+	maxCacheSizeMB int
+	size           int64
+	reader         io.ReadCloser
+	position       int64
+	closed         bool
+	ufs            *UsenetFileSystem
 }
 
 // UsenetFile methods implementing fs.File interface

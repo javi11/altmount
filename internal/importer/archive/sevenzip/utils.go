@@ -22,12 +22,12 @@ func hasExtension(filename string) bool {
 	return ext != ""
 }
 
-// normalize7zPartFilename normalizes 7zip part numbers by removing leading zeros
+// normalize7zPartFilename normalizes 7zip part filenames while preserving original number formatting
 // If allFilesNoExt is true, uses baseFilename for all parts with .XXX extension
 // where XXX is the 0-based part number (index) with zero-padding based on totalFiles
 // Examples:
-//   - "movie.7z.010" -> "movie.7z.10"
-//   - "archive.001" -> "archive.1"
+//   - "movie.7z.001" -> "movie.7z.001" (preserves leading zeros)
+//   - "archive.01" -> "archive.01" (preserves 2-digit format)
 //   - "movie.7z" -> "movie.7z" (no change for non-part files)
 //   - Files ["abc", "def", "xyz"] with allFilesNoExt=true, baseFilename="abc", totalFiles=3:
 //   - index=0 -> "abc.001"
@@ -48,18 +48,20 @@ func normalize7zPartFilename(filename string, index int, allFilesNoExt bool, tot
 	// Pattern 1: filename.7z.###
 	if matches := sevenZipPartPatternNumber.FindStringSubmatch(filename); len(matches) > 1 {
 		partNumStr := matches[1]
+		// Validate it's a valid number (used for sorting logic elsewhere)
 		if num := archive.ParseInt(partNumStr); num >= 0 {
-			// Replace the .7z.### part with normalized version (no leading zeros)
-			return sevenZipPartPatternNumber.ReplaceAllString(filename, ".7z."+archive.FormatInt(num))
+			// Keep original format with leading zeros preserved
+			return sevenZipPartPatternNumber.ReplaceAllString(filename, ".7z."+partNumStr)
 		}
 	}
 
 	// Pattern 2: filename.###
 	if matches := numericPatternNumber.FindStringSubmatch(filename); len(matches) > 1 {
 		partNumStr := matches[1]
+		// Validate it's a valid number (used for sorting logic elsewhere)
 		if num := archive.ParseInt(partNumStr); num >= 0 {
-			// Replace the numeric extension with normalized version
-			return numericPatternNumber.ReplaceAllString(filename, "."+archive.FormatInt(num))
+			// Keep original format with leading zeros preserved
+			return numericPatternNumber.ReplaceAllString(filename, "."+partNumStr)
 		}
 	}
 
