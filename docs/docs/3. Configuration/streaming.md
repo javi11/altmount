@@ -35,5 +35,3 @@ With streaming optimized:
 1. **[Set up Health Monitoring](../3. Configuration/health-monitoring.md)** - Monitor performance
 
 ---
-
-For advanced streaming scenarios and troubleshooting, see the [Troubleshooting Guide](../5.%20Troubleshooting/performance.md).
