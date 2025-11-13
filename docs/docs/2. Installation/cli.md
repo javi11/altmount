@@ -150,8 +150,6 @@ Edit the `config.yaml` file with your settings. At minimum, you need to configur
      root_path: "./metadata"
    ```
 
-For detailed configuration options, see the [Configuration Guide](../3. Configuration/basic.md).
-
 ## Running AltMount
 
 ### Basic Usage
@@ -224,4 +222,3 @@ Verify the installation and rclone mount:
 ## Next Steps
 
 - [Configure NNTP Providers](../3. Configuration/providers.md)
-- [Set up Radarr/Sonarr Integration](../3. Configuration/integration.md)

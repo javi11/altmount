@@ -199,7 +199,6 @@ ERROR Provider "primary": failed to resolve host
 
 With providers configured:
 
-1. **[Set up ARR Integration](integration.md)** - Connect your media applications
-2. **[Configure Streaming](streaming.md)** - Optimize download performance
+1. **[Configure Streaming](streaming.md)** - Optimize download performance
 
 ---

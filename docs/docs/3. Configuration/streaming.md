@@ -32,8 +32,7 @@ On higher values you can see the performance improvement but also the memory usa
 
 With streaming optimized:
 
-1. **[Configure ARR Integration](integration.md)** - Set up automated downloads
-2. **[Set up Health Monitoring](../3. Configuration/health-monitoring.md)** - Monitor performance
+1. **[Set up Health Monitoring](../3. Configuration/health-monitoring.md)** - Monitor performance
 
 ---
 

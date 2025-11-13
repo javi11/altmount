@@ -512,11 +512,28 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 					return
 				}
 
+				// Use CreatedAt if ReleaseDate is missing
+				releaseDate := fileMeta.ReleaseDate
+				if releaseDate == 0 {
+					releaseDate = fileMeta.CreatedAt
+					// Update metadata file with the CreatedAt as release date
+					fileMeta.ReleaseDate = releaseDate
+					if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
+						slog.ErrorContext(ctx, "Failed to update metadata with release date",
+							"path", path,
+							"error", err)
+					} else {
+						slog.InfoContext(ctx, "Set release date from CreatedAt",
+							"path", path,
+							"release_date", time.Unix(releaseDate, 0))
+					}
+				}
+
 				// Convert Unix timestamp to time.Time
-				releaseDate := time.Unix(fileMeta.ReleaseDate, 0)
+				releaseDateAsTime := time.Unix(releaseDate, 0)
 
 				// Calculate initial check time
-				scheduledCheckAt := calculateInitialCheck(releaseDate)
+				scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
 
 				// Look up library path from our map
 				var libraryPath *string
@@ -533,7 +550,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
 					FilePath:         path,
 					LibraryPath:      libraryPath,
-					ReleaseDate:      releaseDate,
+					ReleaseDate:      releaseDateAsTime,
 					ScheduledCheckAt: scheduledCheckAt,
 					SourceNzbPath:    &fileMeta.SourceNzbPath,
 				})
@@ -1001,11 +1018,28 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 					return
 				}
 
+				// Use CreatedAt if ReleaseDate is missing
+				releaseDate := fileMeta.ReleaseDate
+				if releaseDate == 0 {
+					releaseDate = fileMeta.CreatedAt
+					// Update metadata file with the CreatedAt as release date
+					fileMeta.ReleaseDate = releaseDate
+					if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
+						slog.ErrorContext(ctx, "Failed to update metadata with release date",
+							"path", path,
+							"error", err)
+					} else {
+						slog.InfoContext(ctx, "Set release date from CreatedAt",
+							"path", path,
+							"release_date", time.Unix(releaseDate, 0))
+					}
+				}
+
 				// Convert Unix timestamp to time.Time
-				releaseDate := time.Unix(fileMeta.ReleaseDate, 0)
+				releaseDateAsTime := time.Unix(releaseDate, 0)
 
 				// Calculate initial check time
-				scheduledCheckAt := calculateInitialCheck(releaseDate)
+				scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
 
 				// For NONE strategy, library path is always nil
 				// since files are accessed directly via mount
@@ -1016,7 +1050,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
 					FilePath:         path,
 					LibraryPath:      libraryPath,
-					ReleaseDate:      releaseDate,
+					ReleaseDate:      releaseDateAsTime,
 					ScheduledCheckAt: scheduledCheckAt,
 					SourceNzbPath:    &fileMeta.SourceNzbPath,
 				})

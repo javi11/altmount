@@ -23,17 +23,6 @@ var (
 	ErrNoAllowedFiles = errors.New("archive contains no files with allowed extensions")
 )
 
-// calculateTotalSegments counts all segments across all 7zip archive contents
-func calculateTotalSegments(sevenZipContents []Content) int {
-	total := 0
-	for _, content := range sevenZipContents {
-		if !content.IsDirectory {
-			total += len(content.Segments)
-		}
-	}
-	return total
-}
-
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
 // based on the validation mode (full or sampling) and sample percentage.
 // This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
