@@ -63,3 +63,9 @@ var ErrNoRetryable = &NonRetryableError{
 	message: "no retryable errors found",
 	cause:   nil,
 }
+
+// ErrNoVideoFiles indicates that an import contains no video files
+var ErrNoVideoFiles = &NonRetryableError{
+	message: "import contains no video files",
+	cause:   nil,
+}

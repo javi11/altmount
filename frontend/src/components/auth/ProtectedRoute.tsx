@@ -38,8 +38,8 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 				<div className="w-full max-w-md space-y-4 text-center">
 					<div className="text-6xl">🚫</div>
 					<h2 className="font-bold text-2xl text-gray-900">Access Denied</h2>
-					<p className="text-gray-600">You need administrator privileges to access this page.</p>
-					<p className="text-gray-500 text-sm">
+					<p>You need administrator privileges to access this page.</p>
+					<p className="text-sm">
 						Current user: {user?.name} ({user?.provider})
 					</p>
 				</div>

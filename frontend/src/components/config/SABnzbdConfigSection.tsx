@@ -132,8 +132,9 @@ export function SABnzbdConfigSection({
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges && validationErrors.length === 0) {
-			// Include fallback_api_key in the update if it was changed
-			const updateData: SABnzbdConfig & { fallback_api_key?: string } = { ...formData };
+			// Remove fallback_api_key from formData to prevent sending placeholder
+			const { fallback_api_key: _, ...configWithoutApiKey } = formData;
+			const updateData: SABnzbdConfig & { fallback_api_key?: string } = configWithoutApiKey;
 			// Only include API key if user entered a new value (not empty and not obfuscated placeholder)
 			if (fallbackApiKey && fallbackApiKey !== "********") {
 				updateData.fallback_api_key = fallbackApiKey;
@@ -181,7 +182,7 @@ export function SABnzbdConfigSection({
 					/>
 				</label>
 				<p className="label">
-					When enabled, provides SABnzbd-compatible API endpoints at <code>/sabnzbd/api</code>
+					When enabled, provides SABnzbd-compatible API endpoints at <code>/sabnzbd</code>
 				</p>
 			</fieldset>
 
@@ -200,7 +201,8 @@ export function SABnzbdConfigSection({
 							onChange={(e) => handleCompleteDirChange(e.target.value)}
 						/>
 						<p className="label">
-							Absolute path to the directory where the full imports will be stored, relative to the mounted folder.
+							Absolute path to the directory where the full imports will be stored, relative to the
+							mounted folder.
 						</p>
 					</fieldset>
 

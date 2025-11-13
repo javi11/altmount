@@ -9,11 +9,14 @@ interface PoolMetricsCardProps {
 
 export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 	const { data: poolMetrics, isLoading, error } = usePoolMetrics();
-	console.log(poolMetrics);
 
-	// Helper function to format percentage
-	const formatPercentage = (value: number) => {
-		return `${value.toFixed(1)}%`;
+	// Helper function to format speed
+	const formatSpeed = (bytesPerSec: number) => {
+		if (bytesPerSec === 0) return "0 B/s";
+		const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+		const index = Math.floor(Math.log(bytesPerSec) / Math.log(1024));
+		const value = bytesPerSec / 1024 ** index;
+		return `${value.toFixed(1)} ${units[index]}`;
 	};
 
 	if (error) {
@@ -38,13 +41,13 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 				<div className="flex items-center justify-between">
 					<div>
 						<h2 className="card-title font-medium text-base-content/70 text-sm">
-							Active Connections
+							Articles Downloaded
 						</h2>
 						{isLoading ? (
 							<LoadingSpinner size="sm" />
 						) : poolMetrics ? (
 							<div className="font-bold text-2xl text-primary">
-								{poolMetrics.active_connections}
+								{poolMetrics.articles_downloaded.toLocaleString()}
 							</div>
 						) : (
 							<div className="font-bold text-2xl text-base-content/50">--</div>
@@ -59,38 +62,36 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 						<div className="flex items-center justify-between text-sm">
 							<span className="text-base-content/70">Downloaded</span>
 							<span className="font-medium">
-								<BytesDisplay bytes={poolMetrics.total_bytes_downloaded} />
+								<BytesDisplay bytes={poolMetrics.bytes_downloaded} />
 							</span>
 						</div>
 
-						{/* Success Rate */}
+						{/* Download Speed */}
 						<div className="flex items-center justify-between text-sm">
-							<span className="text-base-content/70">Success Rate</span>
+							<span className="text-base-content/70">Download Speed</span>
 							<span
-								className={`font-medium ${poolMetrics.command_success_rate_percent >= 95 ? "text-success" : poolMetrics.command_success_rate_percent >= 90 ? "text-warning" : "text-error"}`}
+								className={`font-medium ${poolMetrics.download_speed_bytes_per_sec > 0 ? "text-success" : "text-base-content"}`}
 							>
-								{formatPercentage(poolMetrics.command_success_rate_percent)}
+								{formatSpeed(poolMetrics.download_speed_bytes_per_sec)}
 							</span>
 						</div>
 
-						{/* Error Rate - Only show if > 0 */}
-						{poolMetrics.error_rate_percent > 0 && (
+						{/* Upload Speed - Only show if > 0 */}
+						{poolMetrics.upload_speed_bytes_per_sec > 0 && (
 							<div className="flex items-center justify-between text-sm">
-								<span className="text-base-content/70">Error Rate</span>
-								<span className="font-medium text-error">
-									{formatPercentage(poolMetrics.error_rate_percent)}
+								<span className="text-base-content/70">Upload Speed</span>
+								<span className="font-medium text-info">
+									{formatSpeed(poolMetrics.upload_speed_bytes_per_sec)}
 								</span>
 							</div>
 						)}
 
-						{/* Connection Wait Time - Only show if > 100ms */}
-						{poolMetrics.acquire_wait_time_ms > 100 && (
+						{/* Total Errors - Only show if > 0 */}
+						{poolMetrics.total_errors > 0 && (
 							<div className="flex items-center justify-between text-sm">
-								<span className="text-base-content/70">Avg Wait Time</span>
-								<span
-									className={`font-medium ${poolMetrics.acquire_wait_time_ms > 1000 ? "text-warning" : "text-base-content"}`}
-								>
-									{poolMetrics.acquire_wait_time_ms}ms
+								<span className="text-base-content/70">Total Errors</span>
+								<span className="font-medium text-error">
+									{poolMetrics.total_errors.toLocaleString()}
 								</span>
 							</div>
 						)}

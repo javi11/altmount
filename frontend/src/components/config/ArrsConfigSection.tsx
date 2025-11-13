@@ -16,7 +16,6 @@ interface NewInstanceForm {
 	url: string;
 	api_key: string;
 	enabled: boolean;
-	root_folder: string;
 }
 
 const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
@@ -25,7 +24,6 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 	url: "",
 	api_key: "",
 	enabled: true,
-	root_folder: "",
 };
 
 export function ArrsConfigSection({
@@ -146,7 +144,6 @@ export function ArrsConfigSection({
 				url: newInstance.url,
 				api_key: newInstance.api_key,
 				enabled: newInstance.enabled,
-				root_folder: newInstance.root_folder || undefined,
 			},
 		];
 
@@ -331,25 +328,6 @@ export function ArrsConfigSection({
 									onChange={(e) => setNewInstance((prev) => ({ ...prev, api_key: e.target.value }))}
 									placeholder="API key from settings"
 								/>
-							</fieldset>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Root Folder (Optional)</legend>
-								<input
-									type="text"
-									className="input"
-									value={newInstance.root_folder}
-									onChange={(e) =>
-										setNewInstance((prev) => ({ ...prev, root_folder: e.target.value }))
-									}
-									placeholder="/media"
-								/>
-								<p className="label">
-									Optional: Root folder path as seen by this Arr instance. Use this if your Arr sees
-									files at a different path due to mergefs/unionfs. For example, if your mount is at{" "}
-									<code>/mnt/altmount</code> but your Arr uses <code>/media</code>, enter{" "}
-									<code>/media</code> here. Leave empty to use the global mount path.
-								</p>
 							</fieldset>
 
 							<label className="label cursor-pointer">

@@ -7,8 +7,9 @@ import {
 	PlayCircle,
 	RefreshCw,
 	Trash2,
+	XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
 import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
@@ -18,8 +19,11 @@ import { PathDisplay } from "../components/ui/PathDisplay";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
+	useBulkCancelQueueItems,
+	useCancelQueueItem,
 	useClearCompletedQueue,
 	useClearFailedQueue,
+	useClearPendingQueue,
 	useDeleteBulkQueueItems,
 	useDeleteQueueItem,
 	useQueue,
@@ -27,6 +31,7 @@ import {
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
 } from "../hooks/useApi";
+import { useProgressStream } from "../hooks/useProgressStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
 import { type QueueItem, QueueStatus } from "../types/api";
 
@@ -59,13 +64,35 @@ export function QueuePage() {
 	const meta = queueResponse?.meta;
 	const totalPages = meta?.total ? Math.ceil(meta.total / pageSize) : 0;
 
+	// Check if there are any processing items
+	const hasProcessingItems = useMemo(() => {
+		return queueData?.some((item) => item.status === QueueStatus.PROCESSING) ?? false;
+	}, [queueData]);
+
+	// Real-time progress stream (only enabled when there are processing items)
+	const { progress: liveProgress } = useProgressStream({
+		enabled: hasProcessingItems,
+	});
+
+	// Enrich queue data with live progress
+	const enrichedQueueData = useMemo(() => {
+		if (!queueData) return undefined;
+		return queueData.map((item) => ({
+			...item,
+			percentage: liveProgress[item.id] ?? item.percentage,
+		}));
+	}, [queueData, liveProgress]);
+
 	const { data: stats } = useQueueStats();
 	const deleteItem = useDeleteQueueItem();
 	const deleteBulk = useDeleteBulkQueueItems();
 	const restartBulk = useRestartBulkQueueItems();
 	const retryItem = useRetryQueueItem();
+	const cancelItem = useCancelQueueItem();
+	const cancelBulk = useBulkCancelQueueItems();
 	const clearCompleted = useClearCompletedQueue();
 	const clearFailed = useClearFailedQueue();
+	const clearPending = useClearPendingQueue();
 	const { confirmDelete, confirmAction } = useConfirm();
 
 	const handleDelete = async (id: number) => {
@@ -77,6 +104,49 @@ export function QueuePage() {
 
 	const handleRetry = async (id: number) => {
 		await retryItem.mutateAsync(id);
+	};
+
+	const handleCancel = async (id: number) => {
+		const confirmed = await confirmAction(
+			"Cancel Processing",
+			"Are you sure you want to cancel this processing item? The item will be marked as failed and can be retried later.",
+			{
+				type: "warning",
+				confirmText: "Cancel Item",
+				confirmButtonClass: "btn-warning",
+			},
+		);
+		if (confirmed) {
+			await cancelItem.mutateAsync(id);
+		}
+	};
+
+	const handleDownload = async (id: number) => {
+		try {
+			const response = await fetch(`/api/queue/${id}/download`);
+			if (!response.ok) {
+				throw new Error("Failed to download NZB file");
+			}
+
+			// Get filename from Content-Disposition header or use default
+			const contentDisposition = response.headers.get("Content-Disposition");
+			const filenameMatch = contentDisposition?.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/);
+			const filename = filenameMatch?.[1] || `queue-${id}.nzb`;
+
+			// Create blob and trigger download
+			const blob = await response.blob();
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			window.URL.revokeObjectURL(url);
+			document.body.removeChild(a);
+		} catch (error) {
+			console.error("Failed to download NZB:", error);
+			// TODO: Show error toast notification
+		}
 	};
 
 	const handleClearCompleted = async () => {
@@ -109,6 +179,21 @@ export function QueuePage() {
 		}
 	};
 
+	const handleClearPending = async () => {
+		const confirmed = await confirmAction(
+			"Clear Pending Items",
+			"Are you sure you want to clear all pending items? This action cannot be undone.",
+			{
+				type: "info",
+				confirmText: "Clear All",
+				confirmButtonClass: "btn-info",
+			},
+		);
+		if (confirmed) {
+			await clearPending.mutateAsync("");
+		}
+	};
+
 	const toggleAutoRefresh = () => {
 		setAutoRefreshEnabled(!autoRefreshEnabled);
 		setNextRefreshTime(null);
@@ -133,8 +218,8 @@ export function QueuePage() {
 	};
 
 	const handleSelectAll = (checked: boolean) => {
-		if (checked && queueData) {
-			setSelectedItems(new Set(queueData.map((item) => item.id)));
+		if (checked && enrichedQueueData) {
+			setSelectedItems(new Set(enrichedQueueData.map((item) => item.id)));
 		} else {
 			setSelectedItems(new Set());
 		}
@@ -184,6 +269,30 @@ export function QueuePage() {
 				setSelectedItems(new Set());
 			} catch (error) {
 				console.error("Failed to restart selected items:", error);
+			}
+		}
+	};
+
+	const handleBulkCancel = async () => {
+		if (selectedItems.size === 0) return;
+
+		const confirmed = await confirmAction(
+			"Cancel Selected Items",
+			`Are you sure you want to cancel ${selectedItems.size} selected items? They will be marked as failed and can be retried later.`,
+			{
+				type: "warning",
+				confirmText: "Cancel Selected",
+				confirmButtonClass: "btn-warning",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const itemIds = Array.from(selectedItems);
+				await cancelBulk.mutateAsync(itemIds);
+				setSelectedItems(new Set());
+			} catch (error) {
+				console.error("Failed to cancel selected items:", error);
 			}
 		}
 	};
@@ -334,6 +443,17 @@ export function QueuePage() {
 							Clear Completed
 						</button>
 					)}
+					{stats && stats.total_queued > 0 && (
+						<button
+							type="button"
+							className="btn btn-info"
+							onClick={handleClearPending}
+							disabled={clearPending.isPending}
+						>
+							<Trash2 className="h-4 w-4" />
+							Clear Pending
+						</button>
+					)}
 					{stats && stats.total_failed > 0 && (
 						<button
 							type="button"
@@ -413,7 +533,6 @@ export function QueuePage() {
 								<option value={QueueStatus.PROCESSING}>Processing</option>
 								<option value={QueueStatus.COMPLETED}>Completed</option>
 								<option value={QueueStatus.FAILED}>Failed</option>
-								<option value={QueueStatus.RETRYING}>Retrying</option>
 							</select>
 						</fieldset>
 					</div>
@@ -446,6 +565,15 @@ export function QueuePage() {
 								>
 									<RefreshCw className="h-4 w-4" />
 									{restartBulk.isPending ? "Restarting..." : "Restart Selected"}
+								</button>
+								<button
+									type="button"
+									className="btn btn-warning btn-sm"
+									onClick={handleBulkCancel}
+									disabled={cancelBulk.isPending}
+								>
+									<XCircle className="h-4 w-4" />
+									{cancelBulk.isPending ? "Cancelling..." : "Cancel Selected"}
 								</button>
 								<button
 									type="button"
@@ -495,7 +623,7 @@ export function QueuePage() {
 								</tr>
 							</thead>
 							<tbody>
-								{queueData.map((item: QueueItem) => (
+								{enrichedQueueData?.map((item: QueueItem) => (
 									<tr
 										key={item.id}
 										className={`hover ${selectedItems.has(item.id) ? "bg-base-200" : ""}`}
@@ -515,7 +643,7 @@ export function QueuePage() {
 												<Download className="h-4 w-4 text-primary" />
 												<div>
 													<div className="font-bold">
-														<PathDisplay path={item.nzb_path} maxLength={40} showFileName={true} />
+														<PathDisplay path={item.nzb_path} maxLength={90} showFileName={true} />
 													</div>
 													<div className="text-base-content/70 text-sm">ID: {item.id}</div>
 												</div>
@@ -539,21 +667,30 @@ export function QueuePage() {
 											)}
 										</td>
 										<td>
-											{(item.status === QueueStatus.FAILED ||
-												item.status === QueueStatus.RETRYING) &&
-											item.error_message ? (
-												<div
-													className="tooltip tooltip-top"
-													data-tip={truncateText(item.error_message, 200)}
-												>
-													<div className="flex items-center gap-1">
-														<StatusBadge status={item.status} />
-														<AlertCircle className="h-3 w-3 text-error" />
+											<div className="flex flex-col gap-1">
+												{item.status === QueueStatus.FAILED && item.error_message ? (
+													<div
+														className="tooltip tooltip-top"
+														data-tip={truncateText(item.error_message, 200)}
+													>
+														<div className="flex items-center gap-1">
+															<StatusBadge status={item.status} />
+															<AlertCircle className="h-3 w-3 text-error" />
+														</div>
 													</div>
-												</div>
-											) : (
-												<StatusBadge status={item.status} />
-											)}
+												) : item.status === QueueStatus.PROCESSING && item.percentage != null ? (
+													<div className="flex items-center gap-2">
+														<progress
+															className="progress progress-primary w-24"
+															value={item.percentage}
+															max={100}
+														/>
+														<span className="text-xs">{item.percentage}%</span>
+													</div>
+												) : (
+													<StatusBadge status={item.status} />
+												)}
+											</div>
 										</td>
 										<td>
 											<span
@@ -587,6 +724,25 @@ export function QueuePage() {
 															</button>
 														</li>
 													)}
+													{item.status === QueueStatus.PROCESSING && (
+														<li>
+															<button
+																type="button"
+																onClick={() => handleCancel(item.id)}
+																disabled={cancelItem.isPending}
+																className="text-warning"
+															>
+																<XCircle className="h-4 w-4" />
+																Cancel
+															</button>
+														</li>
+													)}
+													<li>
+														<button type="button" onClick={() => handleDownload(item.id)}>
+															<Download className="h-4 w-4" />
+															Download NZB
+														</button>
+													</li>
 													{item.status !== QueueStatus.PROCESSING && (
 														<li>
 															<button

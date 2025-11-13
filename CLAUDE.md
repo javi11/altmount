@@ -134,6 +134,7 @@ Always use DaisyUI components over custom CSS when available:
 ### DaisyUI Component Patterns
 
 #### Buttons
+
 ```tsx
 // Basic buttons
 <button type="button" className="btn">Default</button>
@@ -152,6 +153,7 @@ Always use DaisyUI components over custom CSS when available:
 ```
 
 #### Cards
+
 ```tsx
 <div className="card bg-base-100 shadow-lg">
   <div className="card-body">
@@ -168,6 +170,7 @@ Always use DaisyUI components over custom CSS when available:
 ```
 
 #### Menus
+
 ```tsx
 <ul className="menu bg-base-200 rounded-box">
   <li>
@@ -187,6 +190,7 @@ Always use DaisyUI components over custom CSS when available:
 ```
 
 #### Forms
+
 ```tsx
 // ✅ Good: Use DaisyUI fieldset for form inputs
 <fieldset className="fieldset">
@@ -228,6 +232,7 @@ Always use DaisyUI components over custom CSS when available:
 ```
 
 #### Alerts
+
 ```tsx
 <div className="alert alert-success">
   <CheckIcon className="h-6 w-6" />
@@ -269,6 +274,7 @@ Always use DaisyUI components over custom CSS when available:
 ## HTML Standards & Accessibility
 
 ### Button Standards
+
 ```tsx
 // ✅ Always specify button type
 <button type="button" onClick={handleClick}>Click Me</button>
@@ -289,6 +295,7 @@ Always use DaisyUI components over custom CSS when available:
 ```
 
 ### Form Standards
+
 ```tsx
 // ✅ Good: Proper form structure with fieldset
 <form onSubmit={handleSubmit}>
@@ -342,6 +349,7 @@ Always use DaisyUI components over custom CSS when available:
 ```
 
 ### Accessibility Guidelines
+
 ```tsx
 // ✅ Good: Accessible navigation
 <nav aria-label="Main navigation">
@@ -371,6 +379,7 @@ Always use DaisyUI components over custom CSS when available:
 ```
 
 ### Semantic HTML
+
 ```tsx
 // ✅ Good: Semantic structure
 <main>
@@ -419,7 +428,7 @@ interface UsrProf {
 
 ### File Organization
 
-```
+```text
 src/
 ├── components/
 │   ├── ui/              # Reusable UI components
@@ -490,6 +499,7 @@ import { Button, Modal } from '../ui';
 ```
 
 **Why we forbid barrel exports:**
+
 - **Build Performance**: Barrel exports can cause unnecessary bundling and slower builds
 - **Tree Shaking Issues**: Can prevent proper dead code elimination
 - **Circular Dependencies**: More prone to circular dependency issues
@@ -510,12 +520,12 @@ function useApi<T>(url: string) {
     try {
       setIsLoading(true);
       setError(null);
-      
+
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const result = await response.json();
       setData(result);
     } catch (err) {
@@ -547,6 +557,60 @@ function ErrorBoundary({ children }: { children: React.ReactNode }) {
   );
 }
 ```
+
+### Logging and Debugging
+
+**Philosophy**: Log only what's necessary for debugging critical issues. Avoid excessive debug logging that clutters the console and impacts performance.
+
+```tsx
+// ✅ Good: Log critical errors and important state changes
+function processImportQueue(items: ImportItem[]) {
+  try {
+    const results = items.map(processItem);
+    console.info(`Processed ${results.length} import items`);
+    return results;
+  } catch (err) {
+    console.error('Failed to process import queue:', err);
+    throw err;
+  }
+}
+
+// ✅ Good: Conditional debug logging
+const DEBUG = import.meta.env.DEV;
+
+function fetchData(url: string) {
+  if (DEBUG) {
+    console.debug('Fetching:', url);
+  }
+  // ... fetch logic
+}
+
+// ❌ Avoid: Excessive debug logs everywhere
+function updateState(newValue: string) {
+  console.log('updateState called');
+  console.log('newValue:', newValue);
+  console.log('previous state:', state);
+  setState(newValue);
+  console.log('state updated');
+  console.log('new state:', newValue);
+}
+
+// ❌ Avoid: Logging every render or effect
+useEffect(() => {
+  console.log('Component rendered');
+  console.log('Current props:', props);
+  console.log('Current state:', state);
+}, [props, state]);
+```
+
+**Logging Guidelines**:
+
+- **Critical Errors**: Always log with `console.error()`
+- **Important Events**: Use `console.info()` for significant operations
+- **Development Only**: Use conditional `console.debug()` for detailed debugging
+- **Production**: Avoid verbose logging in production builds
+- **Performance**: Don't log in hot paths (loops, renders, frequent callbacks)
+- **Privacy**: Never log sensitive data (passwords, tokens, PII)
 
 ## Icons and Assets
 
@@ -590,6 +654,7 @@ function NavigationMenu() {
 ```
 
 **Icon Guidelines:**
+
 - **Consistent sizing**: Use `h-4 w-4` for small icons, `h-5 w-5` for medium, `h-6 w-6` for larger
 - **Accessibility**: Add `aria-hidden="true"` for decorative icons
 - **Semantic naming**: Import icons with descriptive names that match their usage
@@ -697,16 +762,19 @@ function App() {
 ## Development Workflow
 
 ### Before Committing
+
 1. **Run type checking**: `bun run check` (TypeScript validation, linting, formatting, and code quality)
 2. **Test build**: `bun run build` (TypeScript compilation + Vite build)
 3. **Review changes**: Ensure code follows these standards
 
 **Command Reference:**
+
 - `bun run check` - Comprehensive validation (TypeScript + linting + formatting)
 - `bun run lint` - Linting-only checks when needed
 - `bun run build` - Production build validation
 
 ### Code Review Checklist
+
 - [ ] Components use TypeScript interfaces
 - [ ] DaisyUI components used where appropriate
 - [ ] Buttons have `type` attribute
@@ -719,6 +787,7 @@ function App() {
 ## Tools and Extensions
 
 ### Recommended VS Code Extensions
+
 - **ES7+ React/Redux/React-Native snippets**
 - **TypeScript Importer**
 - **Tailwind CSS IntelliSense**
@@ -726,6 +795,7 @@ function App() {
 - **Bracket Pair Colorizer**
 
 ### Useful Snippets
+
 ```json
 // .vscode/settings.json
 {
@@ -735,6 +805,120 @@ function App() {
   }
 }
 ```
+
+---
+
+## Backend Development Standards (Go)
+
+### Logging Guidelines
+
+**Philosophy**: Log only what's necessary for debugging critical issues and monitoring production health. Avoid excessive debug logging that clutters logs and impacts performance.
+
+**IMPORTANT**: Always use the imported `slog` package with context methods (`InfoContext`, `ErrorContext`, etc.) for proper context propagation and structured logging.
+
+```go
+import (
+    "context"
+    "log/slog"
+)
+
+// ✅ Good: Use slog with context methods
+func ProcessImportQueue(ctx context.Context, items []ImportItem) error {
+    slog.InfoContext(ctx, "Processing import queue",
+        "item_count", len(items))
+
+    for _, item := range items {
+        if err := processItem(ctx, item); err != nil {
+            slog.ErrorContext(ctx, "Failed to process import item",
+                "error", err,
+                "item_id", item.ID)
+            return err
+        }
+    }
+
+    return nil
+}
+
+// ✅ Good: Log at appropriate levels with context
+func StartServer(ctx context.Context, port int) error {
+    slog.InfoContext(ctx, "Starting server", "port", port)
+    // ... server logic
+}
+
+// ✅ Good: Log with structured context from HTTP requests
+func HandleWebhook(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    slog.DebugContext(ctx, "Received webhook",
+        "method", r.Method,
+        "path", r.URL.Path)
+    // ... handler logic
+}
+
+// ❌ Avoid: Excessive debug logs everywhere
+func UpdateConfig(ctx context.Context, cfg Config) error {
+    slog.DebugContext(ctx, "UpdateConfig called")
+    slog.DebugContext(ctx, "Config value", "config", cfg)
+    slog.DebugContext(ctx, "Validating config")
+
+    if err := validateConfig(cfg); err != nil {
+        slog.DebugContext(ctx, "Validation failed")
+        return err
+    }
+
+    slog.DebugContext(ctx, "Saving config")
+    if err := saveConfig(cfg); err != nil {
+        slog.DebugContext(ctx, "Save failed")
+        return err
+    }
+
+    slog.DebugContext(ctx, "Config updated successfully")
+    return nil
+}
+
+// ❌ Avoid: Logging in hot paths or loops
+func ProcessFiles(ctx context.Context, files []File) {
+    for _, file := range files {
+        slog.DebugContext(ctx, "Processing file", "file", file.Name)
+        // ... process file
+        slog.DebugContext(ctx, "File processed", "file", file.Name)
+    }
+}
+
+// ❌ Avoid: Using slog without context methods
+func BadExample(ctx context.Context) {
+    // Don't do this - use InfoContext instead
+    slog.Info("Starting operation")
+}
+```
+
+**Go Logging Guidelines**:
+
+- **Error Level**: Critical errors that require immediate attention
+- **Warn Level**: Concerning situations that aren't errors but need monitoring
+- **Info Level**: Important business events (server start, config changes, major operations)
+- **Debug Level**: Detailed information for troubleshooting (use sparingly)
+
+**Best Practices**:
+
+- **Always use `slog` with context methods**: `InfoContext`, `ErrorContext`, `WarnContext`, `DebugContext`
+- Use structured logging with key-value pairs for contextual fields
+- Log errors once at the source, not at every layer
+- Don't log in tight loops or high-frequency operations
+- Include relevant context (IDs, counts, durations) but keep it concise
+- Never log sensitive data (passwords, tokens, API keys, PII)
+- Use appropriate log levels - don't make everything Info or Debug
+- Pass context through function calls to maintain request tracing
+
+**When to Log**:
+
+- ✅ Application lifecycle events (startup, shutdown)
+- ✅ Critical errors and failures
+- ✅ Important business operations (imports completed, files processed)
+- ✅ External service interactions (API calls, webhook receipts)
+- ❌ Every function entry/exit
+- ❌ Variable values at every step
+- ❌ Routine operations in loops
+- ❌ Successful validation steps
 
 ---
 

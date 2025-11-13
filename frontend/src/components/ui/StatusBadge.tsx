@@ -1,4 +1,4 @@
-import { FileClock, FileScan, FileWarning, FileX, Heart, Wrench } from "lucide-react";
+import { CheckCircle, FileClock, FileScan, FileX, Wrench } from "lucide-react";
 import { cn, getStatusColor } from "../../lib/utils";
 
 interface StatusBadgeProps {
@@ -13,11 +13,10 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
 }
 
 const icons = {
-	healthy: <Heart className="inline-block" />,
-	partial: <FileWarning className="inline-block" />,
 	corrupted: <FileX className="inline-block" />,
 	pending: <FileClock className="inline-block" />,
 	checking: <FileScan className="inline-block" />,
+	healthy: <CheckCircle className="inline-block" />,
 	repair_triggered: <Wrench className="inline-block" />,
 };
 

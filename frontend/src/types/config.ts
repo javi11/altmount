@@ -16,6 +16,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	providers: ProviderConfig[];
 	mount_path: string;
+	api_key?: string;
 }
 
 // WebDAV server configuration
@@ -43,6 +44,7 @@ export interface DatabaseConfig {
 // Metadata configuration
 export interface MetadataConfig {
 	root_path: string;
+	delete_source_nzb_on_removal?: boolean;
 }
 
 // Streaming configuration
@@ -54,12 +56,34 @@ export interface StreamingConfig {
 // Health configuration
 export interface HealthConfig {
 	enabled: boolean;
-	auto_repair_enabled: boolean;
+	library_dir?: string;
+	cleanup_orphaned_metadata?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
-	max_concurrent_jobs?: number;
-	max_retries?: number;
-	max_segment_connections?: number;
-	check_all_segments?: boolean;
+	max_connections_for_health_checks?: number;
+	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
+	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
+	check_all_segments?: boolean; // Whether to check all segments or use sampling
+}
+
+// Library sync types
+export interface LibrarySyncProgress {
+	total_files: number;
+	processed_files: number;
+	start_time: string;
+}
+
+export interface LibrarySyncResult {
+	files_added: number;
+	files_deleted: number;
+	metadata_deleted: number;
+	duration: string;
+	completed_at: string;
+}
+
+export interface LibrarySyncStatus {
+	is_running: boolean;
+	progress?: LibrarySyncProgress;
+	last_sync_result?: LibrarySyncResult;
 }
 
 // RClone configuration (sanitized)
@@ -117,10 +141,19 @@ export interface RCloneConfig {
 	use_mmap: boolean;
 }
 
+// Import strategy type
+export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
+
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
+	allowed_file_extensions: string[];
+	max_import_connections: number;
+	import_cache_size_mb: number;
+	segment_sample_percentage: number; // Percentage of segments to check (1-100)
+	import_strategy: ImportStrategy;
+	import_dir?: string;
 }
 
 // Log configuration
@@ -209,6 +242,7 @@ export interface DatabaseUpdateRequest {
 // Metadata update request
 export interface MetadataUpdateRequest {
 	root_path?: string;
+	delete_source_nzb_on_removal?: boolean;
 }
 
 // Streaming update request
@@ -219,13 +253,11 @@ export interface StreamingUpdateRequest {
 
 // Health update request
 export interface HealthUpdateRequest {
-	enabled?: boolean;
 	auto_repair_enabled?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
-	max_concurrent_jobs?: number;
-	max_retries?: number;
-	max_segment_connections?: number;
-	check_all_segments?: boolean;
+	max_connections_for_health_checks?: number;
+	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
+	check_all_segments?: boolean; // Whether to check all segments or use sampling
 }
 
 // RClone update request
@@ -282,6 +314,9 @@ export interface RCloneUpdateRequest {
 export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
+	allowed_file_extensions?: string[];
+	import_strategy?: ImportStrategy;
+	import_dir?: string;
 }
 
 // Log update request
@@ -362,10 +397,13 @@ export interface APIFormData {
 export interface ImportFormData {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
+	import_strategy: ImportStrategy;
+	import_dir: string;
 }
 
 export interface MetadataFormData {
 	root_path: string;
+	delete_source_nzb_on_removal?: boolean;
 }
 
 export interface StreamingFormData {
@@ -525,7 +563,6 @@ export interface ArrsInstanceConfig {
 	api_key: string;
 	enabled: boolean;
 	sync_interval_hours: number;
-	root_folder?: string;
 }
 
 // Database-backed arrs instance (includes real ID from database)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/encryption"
+	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -29,7 +31,8 @@ type MetadataRemoteFile struct {
 	healthRepository *database.HealthRepository
 	poolManager      pool.Manager        // Pool manager for dynamic pool access
 	configGetter     config.ConfigGetter // Dynamic config access
-	rcloneCipher     encryption.Cipher   // For rclone encryption/decryption
+	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
+	aesCipher        *aes.AesCipher      // For AES encryption/decryption
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -51,12 +54,16 @@ func NewMetadataRemoteFile(
 
 	rcloneCipher, _ := rclone.NewRcloneCipher(rcloneConfig)
 
+	// Initialize AES cipher for encrypted archives
+	aesCipher := aes.NewAesCipher()
+
 	return &MetadataRemoteFile{
 		metadataService:  metadataService,
 		healthRepository: healthRepository,
 		poolManager:      poolManager,
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
+		aesCipher:        aesCipher,
 	}
 }
 
@@ -78,17 +85,20 @@ func (mrf *MetadataRemoteFile) getGlobalSalt() string {
 }
 
 // OpenFile opens a virtual file backed by metadata
-func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r utils.PathWithArgs) (bool, afero.File, error) {
+func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool, afero.File, error) {
 	// Forbid COPY operations - nzbfilesystem is read-only
-	if r.IsCopy() {
+	if isCopy, ok := ctx.Value(utils.IsCopy).(bool); ok && isCopy {
 		return false, nil, os.ErrPermission
 	}
 
 	// Normalize the path to handle trailing slashes consistently
 	normalizedName := normalizePath(name)
 
-	// Extract showCorrupted flag from args
-	showCorrupted := r.ShowCorrupted()
+	// Extract showCorrupted flag from context
+	showCorrupted := false
+	if sc, ok := ctx.Value(utils.ShowCorrupted).(bool); ok {
+		showCorrupted = sc
+	}
 
 	// Check if this is a directory first
 	if mrf.metadataService.DirectoryExists(normalizedName) {
@@ -131,7 +141,10 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 	}
 
 	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
-		return false, nil, ErrFileIsCorrupted
+		return false, nil, &CorruptedFileError{
+			TotalExpected: fileMeta.FileSize,
+			UnderlyingErr: ErrNoNzbData,
+		}
 	}
 
 	// Create a metadata-based virtual file handle
@@ -140,12 +153,12 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string, r util
 		fileMeta:         fileMeta,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
-		args:             r,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
 		maxWorkers:       mrf.getMaxDownloadWorkers(),
 		maxCacheSizeMB:   mrf.getMaxCacheSizeMB(),
 		rcloneCipher:     mrf.rcloneCipher,
+		aesCipher:        mrf.aesCipher,
 		globalPassword:   mrf.getGlobalPassword(),
 		globalSalt:       mrf.getGlobalSalt(),
 	}
@@ -176,8 +189,12 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		return false, nil
 	}
 
-	// Use MetadataService's file delete operation
-	return true, mrf.metadataService.DeleteFileMetadata(normalizedName)
+	// Check if we should delete the source NZB file
+	cfg := mrf.configGetter()
+	deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+
+	// Use MetadataService's file delete operation with optional NZB deletion
+	return true, mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)
 }
 
 // RenameFile renames a virtual file or directory in the metadata
@@ -226,7 +243,7 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 }
 
 // Stat returns file information for a path using metadata
-func (mrf *MetadataRemoteFile) Stat(name string) (bool, fs.FileInfo, error) {
+func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.FileInfo, error) {
 	// Normalize the path
 	normalizedName := normalizePath(name)
 
@@ -306,19 +323,11 @@ func (msl *MetadataSegmentLoader) GetSegment(index int) (segment usenet.Segment,
 
 	seg := msl.segments[index]
 
-	// Important: range builder only knows (Start, Size) and assumes usable bytes are [Start, Size-1].
-	// Our metadata may have a trimmed EndOffset (< SegmentSize-1). Provide a synthetic Size = EndOffset+1
-	// so usable length becomes (EndOffset - StartOffset + 1) and no extra tail bytes are exposed.
-	size := seg.SegmentSize
-	if seg.EndOffset > 0 && seg.EndOffset < seg.SegmentSize-1 {
-		size = seg.EndOffset + 1
-	}
-
-	// Keep original start offset (could be >0 due to RAR processing) and size
 	return usenet.Segment{
 		Id:    seg.Id,
 		Start: seg.StartOffset,
-		Size:  size,
+		End:   seg.EndOffset,
+		Size:  seg.SegmentSize,
 	}, []string{}, true // Empty groups for now - could be stored in metadata if needed
 }
 
@@ -470,12 +479,12 @@ type MetadataVirtualFile struct {
 	fileMeta         *metapb.FileMetadata
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
-	args             utils.PathWithArgs
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
 	maxWorkers       int
 	maxCacheSizeMB   int // Maximum cache size in MB for ahead downloads
-	rcloneCipher     encryption.Cipher
+	rcloneCipher     *rclone.RcloneCrypt
+	aesCipher        *aes.AesCipher
 	globalPassword   string
 	globalSalt       string
 
@@ -531,25 +540,15 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 			}
 		}
 
-		var articleErr *usenet.ArticleNotFoundError
+		var dataCorruptionErr *usenet.DataCorruptionError
 		// Handle UsenetReader errors the same way as VirtualFile
-		if errors.As(err, &articleErr) {
+		if errors.As(err, &dataCorruptionErr) {
 			// Update file health status and database tracking
-			mvf.updateFileHealthOnError(articleErr, articleErr.BytesRead > 0 || totalRead > 0)
-
-			if articleErr.BytesRead > 0 || totalRead > 0 {
-				// Some content was read - return partial content error
-				return totalRead, &PartialContentError{
-					BytesRead:     articleErr.BytesRead,
-					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: articleErr,
-				}
-			} else {
-				// No content read - return corrupted file error
-				return totalRead, &CorruptedFileError{
-					TotalExpected: mvf.fileMeta.FileSize,
-					UnderlyingErr: articleErr,
-				}
+			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
+			// No content read - return corrupted file error
+			return totalRead, &CorruptedFileError{
+				TotalExpected: mvf.fileMeta.FileSize,
+				UnderlyingErr: dataCorruptionErr,
 			}
 		}
 
@@ -717,6 +716,10 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	// Get request range from args or use default range starting from current position
 	start, end := mvf.getRequestRange()
 
+	if end == -1 {
+		end = mvf.fileMeta.FileSize - 1
+	}
+
 	// Track the current reader's range for progressive reading
 	mvf.currentRangeStart = start
 	mvf.currentRangeEnd = end
@@ -747,15 +750,18 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 	// If this is the first read, check for HTTP range header and save original end
 	if !mvf.readerInitialized && mvf.originalRangeEnd == 0 {
-		rangeHeader, err := mvf.args.Range()
-		if err == nil && rangeHeader != nil {
-			mvf.originalRangeEnd = rangeHeader.End
-			return rangeHeader.Start, rangeHeader.End
-		} else {
-			// No range header, set unbounded
-			mvf.originalRangeEnd = -1
-			return 0, -1
+		// Extract range from context
+		if rangeStr, ok := mvf.ctx.Value(utils.RangeKey).(string); ok && rangeStr != "" {
+			rangeHeader, err := utils.ParseRangeHeader(rangeStr)
+			if err == nil && rangeHeader != nil {
+				mvf.originalRangeEnd = rangeHeader.End
+				return rangeHeader.Start, rangeHeader.End
+			}
 		}
+
+		// No range header, set unbounded
+		mvf.originalRangeEnd = -1
+		return 0, -1
 	}
 
 	// For subsequent reads, use current position and respect original range
@@ -777,19 +783,23 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, ErrNoNzbData
 	}
 
-	// Get connection pool dynamically from pool manager
-	cp, err := mvf.poolManager.GetPool()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get connection pool: %w", err)
-	}
-
-	if end == -1 {
-		end = mvf.fileMeta.FileSize - 1
-	}
-
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 	rg := usenet.GetSegmentsInRange(start, end, loader)
-	return usenet.NewUsenetReader(ctx, cp, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
+
+	if !rg.HasSegments() {
+		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download", "start", start, "end", end)
+
+		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
+			UnderlyingErr: ErrNoNzbData,
+		}, true)
+
+		return nil, &CorruptedFileError{
+			TotalExpected: mvf.fileMeta.FileSize,
+			UnderlyingErr: ErrNoNzbData,
+		}
+	}
+
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
@@ -798,61 +808,77 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 		return nil, ErrNoEncryptionParams
 	}
 
-	var cipher encryption.Cipher
 	switch mvf.fileMeta.Encryption {
 	case metapb.Encryption_RCLONE:
 		if mvf.rcloneCipher == nil {
 			return nil, ErrNoCipherConfig
 		}
-		cipher = mvf.rcloneCipher
+
+		// Get password and salt from metadata, with global fallback
+		password := mvf.fileMeta.Password
+		if password == "" {
+			password = mvf.globalPassword
+		}
+		salt := mvf.fileMeta.Salt
+		if salt == "" {
+			salt = mvf.globalSalt
+		}
+
+		// Wrap with rclone decryption
+		decryptedReader, err := mvf.rcloneCipher.Open(
+			mvf.ctx,
+			&utils.RangeHeader{Start: start, End: end},
+			mvf.fileMeta.FileSize,
+			password,
+			salt,
+			func(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+				return mvf.createUsenetReader(ctx, start, end)
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf(ErrMsgFailedCreateDecryptReader, err)
+		}
+		return decryptedReader, nil
+
+	case metapb.Encryption_AES:
+		// AES encryption for RAR archives
+		if mvf.aesCipher == nil {
+			return nil, ErrNoCipherConfig
+		}
+		if len(mvf.fileMeta.AesKey) == 0 {
+			return nil, fmt.Errorf("missing AES key in metadata")
+		}
+		if len(mvf.fileMeta.AesIv) == 0 {
+			return nil, fmt.Errorf("missing AES IV in metadata")
+		}
+
+		// Wrap with AES decryption - pass key and IV directly
+		decryptedReader, err := mvf.aesCipher.Open(
+			mvf.ctx,
+			&utils.RangeHeader{Start: start, End: end},
+			mvf.fileMeta.FileSize,
+			mvf.fileMeta.AesKey,
+			mvf.fileMeta.AesIv,
+			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
+				// Create usenet reader first for encrypted data
+				return mvf.createUsenetReader(ctx, s, e)
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
+		}
+		return decryptedReader, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.fileMeta.Encryption)
 	}
-
-	// Get password and salt from metadata, with global fallback
-	password := mvf.fileMeta.Password
-	if password == "" {
-		password = mvf.globalPassword
-	}
-
-	salt := mvf.fileMeta.Salt
-	if salt == "" {
-		salt = mvf.globalSalt
-	}
-
-	decryptedReader, err := cipher.Open(
-		mvf.ctx,
-		&utils.RangeHeader{
-			Start: start,
-			End:   end,
-		},
-		mvf.fileMeta.FileSize,
-		password,
-		salt,
-		func(ctx context.Context, start, end int64) (io.ReadCloser, error) {
-			return mvf.createUsenetReader(ctx, start, end)
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf(ErrMsgFailedCreateDecryptReader, err)
-	}
-
-	return decryptedReader, nil
 }
 
 // updateFileHealthOnError updates both metadata and database health status when corruption is detected
-func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.ArticleNotFoundError, hasPartialContent bool) {
-	// Determine the appropriate status
-	var metadataStatus metapb.FileStatus
-	var dbStatus database.HealthStatus
-
-	if hasPartialContent {
-		metadataStatus = metapb.FileStatus_FILE_STATUS_PARTIAL
-		dbStatus = database.HealthStatusPartial
-	} else {
-		metadataStatus = metapb.FileStatus_FILE_STATUS_CORRUPTED
-		dbStatus = database.HealthStatusCorrupted
-	}
+func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	// Any file with missing segments or corruption is marked as corrupted
+	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
+	dbStatus := database.HealthStatusCorrupted
 
 	// Update metadata status (non-blocking)
 	go func() {
@@ -864,7 +890,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 
 	// Update database health tracking (non-blocking)
 	go func() {
-		errorMsg := articleErr.Error()
+		errorMsg := dataCorruptionErr.Error()
 		sourceNzbPath := &mvf.fileMeta.SourceNzbPath
 		if *sourceNzbPath == "" {
 			sourceNzbPath = nil
@@ -875,11 +901,13 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(articleErr *usenet.Artic
 			1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
 
 		if err := mvf.healthRepository.UpdateFileHealth(
+			context.Background(),
 			mvf.name,
 			dbStatus,
 			&errorMsg,
 			sourceNzbPath,
 			&errorDetails,
+			noRetry,
 		); err != nil {
 			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
 		}
@@ -907,4 +935,12 @@ func (mrf *MetadataRemoteFile) isValidEmptyDirectory(normalizedPath string) bool
 
 	// Recursively check if parent could be a valid empty directory
 	return mrf.isValidEmptyDirectory(parentDir)
+}
+
+func (mrf *MetadataRemoteFile) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
+}
+
+func (mrf *MetadataRemoteFile) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
+	return mrf.metadataService.CreateDirectory(name)
 }

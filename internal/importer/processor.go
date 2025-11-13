@@ -9,19 +9,34 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/javi11/altmount/internal/importer/archive/rar"
+	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
+	"github.com/javi11/altmount/internal/importer/filesystem"
+	"github.com/javi11/altmount/internal/importer/multifile"
+	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/singlefile"
 	"github.com/javi11/altmount/internal/metadata"
-	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
+)
+
+const (
+	strmFileExtension = ".strm"
 )
 
 // Processor handles the processing and storage of parsed NZB files using metadata storage
 type Processor struct {
-	parser          *Parser
-	strmParser      *StrmParser
-	metadataService *metadata.MetadataService
-	rarProcessor    RarProcessor
-	poolManager     pool.Manager // Pool manager for dynamic pool access
-	log             *slog.Logger
+	parser                  *parser.Parser
+	strmParser              *parser.StrmParser
+	metadataService         *metadata.MetadataService
+	rarProcessor            rar.Processor
+	sevenZipProcessor       sevenzip.Processor
+	poolManager             pool.Manager // Pool manager for dynamic pool access
+	maxImportConnections    int          // Maximum concurrent NNTP connections for validation and archive processing
+	segmentSamplePercentage int          // Percentage of segments to check when sampling (1-100)
+	allowedFileExtensions   []string     // Allowed file extensions for validation (empty = allow all)
+	log                     *slog.Logger
+	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
 
 	// Pre-compiled regex patterns for RAR file sorting
 	rarPartPattern    *regexp.Regexp // pattern.part###.rar
@@ -30,14 +45,19 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
 	return &Processor{
-		parser:          NewParser(poolManager),
-		strmParser:      NewStrmParser(),
-		metadataService: metadataService,
-		rarProcessor:    NewRarProcessor(poolManager, 10, 64), // 10 max workers, 64MB cache for RAR analysis
-		poolManager:     poolManager,
-		log:             slog.Default().With("component", "nzb-processor"),
+		parser:                  parser.NewParser(poolManager),
+		strmParser:              parser.NewStrmParser(),
+		metadataService:         metadataService,
+		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
+		poolManager:             poolManager,
+		maxImportConnections:    maxImportConnections,
+		segmentSamplePercentage: segmentSamplePercentage,
+		allowedFileExtensions:   allowedFileExtensions,
+		log:                     slog.Default().With("component", "nzb-processor"),
+		broadcaster:             broadcaster,
 
 		// Initialize pre-compiled regex patterns for RAR file sorting
 		rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
@@ -46,19 +66,38 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 	}
 }
 
-// ProcessNzbFileWithRelativePath processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, error) {
-	// Open and parse the file
+// updateProgress emits a progress update if broadcaster is available
+func (proc *Processor) updateProgress(queueID int, percentage int) {
+	if proc.broadcaster != nil {
+		proc.broadcaster.UpdateProgress(queueID, percentage)
+	}
+}
+
+// checkCancellation checks if processing should be cancelled
+func (proc *Processor) checkCancellation(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("processing cancelled: %w", ctx.Err())
+	default:
+		return nil
+	}
+}
+
+// ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int) (string, error) {
+	// Update progress: starting
+	proc.updateProgress(queueID, 0)
+	// Step 1: Open and parse the file
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", NewNonRetryableError("failed to open file", err)
 	}
 	defer file.Close()
 
-	var parsed *ParsedNzb
+	var parsed *parser.ParsedNzb
 
 	// Determine file type and parse accordingly
-	if strings.HasSuffix(strings.ToLower(filePath), ".strm") {
+	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
 		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
 		if err != nil {
 			return "", NewNonRetryableError("failed to parse STRM file", err)
@@ -69,7 +108,7 @@ func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, er
 			return "", NewNonRetryableError("STRM validation failed", err)
 		}
 	} else {
-		parsed, err = proc.parser.ParseFile(file, filePath)
+		parsed, err = proc.parser.ParseFile(ctx, file, filePath)
 		if err != nil {
 			return "", NewNonRetryableError("failed to parse NZB file", err)
 		}
@@ -80,484 +119,290 @@ func (proc *Processor) ProcessNzbFile(filePath, relativePath string) (string, er
 		}
 	}
 
-	// Calculate the relative virtual directory path for this file
-	virtualDir := proc.calculateVirtualDirectory(filePath, relativePath)
+	// Update progress: parsing complete
+	proc.updateProgress(queueID, 10)
 
-	proc.log.Info("Processing file",
+	// Check for cancellation after parsing
+	if err := proc.checkCancellation(ctx); err != nil {
+		return "", err
+	}
+
+	// Step 2: Calculate virtual directory
+	virtualDir := filesystem.CalculateVirtualDirectory(filePath, relativePath)
+
+	proc.log.InfoContext(ctx, "Processing file",
 		"file_path", filePath,
 		"virtual_dir", virtualDir,
 		"type", parsed.Type,
 		"total_size", parsed.TotalSize,
 		"files", len(parsed.Files))
 
-	// Process based on file type
+	// Step 3: Separate files by type (regular, archive, PAR2)
+	regularFiles, archiveFiles, _ := filesystem.SeparateFiles(parsed.Files, parsed.Type)
+
+	// Check for cancellation before main processing
+	if err := proc.checkCancellation(ctx); err != nil {
+		return "", err
+	}
+
+	// Step 4: Process based on file type
+	var result string
 	switch parsed.Type {
-	case NzbTypeSingleFile:
-		return proc.processSingleFileWithDir(parsed, virtualDir)
-	case NzbTypeMultiFile:
-		return proc.processMultiFileWithDir(parsed, virtualDir)
-	case NzbTypeRarArchive:
-		return proc.processRarArchiveWithDir(parsed, virtualDir)
-	case NzbTypeStrm:
-		return proc.processStrmFileWithDir(parsed, virtualDir)
+	case parser.NzbTypeSingleFile:
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+
+	case parser.NzbTypeMultiFile:
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, parsed.Path)
+
+	case parser.NzbTypeRarArchive:
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID)
+
+	case parser.NzbType7zArchive:
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID)
+
+	case parser.NzbTypeStrm:
+		proc.updateProgress(queueID, 30)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
 	}
-}
 
-// processSingleFileWithDir handles NZBs with a single file in a specific virtual directory
-func (proc *Processor) processSingleFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
-	regularFiles, _ := proc.separatePar2Files(parsed.Files)
-
-	file := regularFiles[0] // Single file NZB, take the first regular file
-
-	// Create the directory structure if needed
-	if err := proc.ensureDirectoryExists(virtualDir); err != nil {
-		return "", fmt.Errorf("failed to create directory structure: %w", err)
+	// Update progress: complete
+	if err == nil {
+		proc.updateProgress(queueID, 100)
 	}
 
-	// Create virtual file path
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
-	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
-	// Create file metadata using simplified schema
-	fileMeta := proc.metadataService.CreateFileMetadata(
-		file.Size,
-		parsed.Path,
-		metapb.FileStatus_FILE_STATUS_HEALTHY,
-		file.Segments,
-		file.Encryption,
-		file.Password,
-		file.Salt,
+	return result, err
+}
+
+// processSingleFile handles single file imports
+func (proc *Processor) processSingleFile(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	nzbPath string,
+) (string, error) {
+	if len(regularFiles) == 0 {
+		return "", fmt.Errorf("no regular files to process")
+	}
+
+	// Ensure directory exists
+	if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+		return "", err
+	}
+
+	// Process the single file
+	result, err := singlefile.ProcessSingleFile(
+		ctx,
+		virtualDir,
+		regularFiles[0],
+		nzbPath,
+		proc.metadataService,
+		proc.poolManager,
+		proc.maxImportConnections,
+		proc.segmentSamplePercentage,
+		proc.allowedFileExtensions,
 	)
-
-	// Write file metadata to disk
-	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-		return "", fmt.Errorf("failed to write metadata for single file %s: %w", file.Filename, err)
+	if err != nil {
+		return "", err
 	}
 
-	// Store additional metadata if needed
-	if len(file.Groups) > 0 {
-		proc.log.Debug("Groups metadata", "file", file.Filename, "groups", strings.Join(file.Groups, ","))
-	}
-
-	proc.log.Info("Successfully processed single file NZB",
-		"file", file.Filename,
-		"virtual_path", virtualFilePath,
-		"size", file.Size)
-
-	return virtualFilePath, nil
+	return result, nil
 }
 
-// processMultiFileWithDir handles NZBs with multiple files in a specific virtual directory
-func (proc *Processor) processMultiFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
-	// Create a folder named after the NZB file for multi-file imports
-	nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
-	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
-	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
-
-	// Create directory structure based on common path prefixes within the NZB virtual directory
-	dirStructure := proc.analyzeDirectoryStructureWithBase(parsed.Files, nzbVirtualDir)
-
-	// Create directories first using real filesystem
-	for _, dir := range dirStructure.directories {
-		if err := proc.ensureDirectoryExists(dir.path); err != nil {
-			return "", fmt.Errorf("failed to create directory %s: %w", dir.path, err)
-		}
+// processMultiFile handles multi-file imports
+func (proc *Processor) processMultiFile(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	nzbPath string,
+) (string, error) {
+	// Create NZB folder
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	if err != nil {
+		return "", err
 	}
 
-	regularFiles, _ := proc.separatePar2Files(parsed.Files)
-
-	// Create file entries
-	for _, file := range regularFiles {
-		parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, nzbVirtualDir)
-
-		// Ensure parent directory exists
-		if err := proc.ensureDirectoryExists(parentPath); err != nil {
-			return "", fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
-		}
-
-		// Create virtual file path
-		virtualPath := filepath.Join(parentPath, filename)
-		virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
-
-		// Create file metadata using simplified schema
-		fileMeta := proc.metadataService.CreateFileMetadata(
-			file.Size,
-			parsed.Path,
-			metapb.FileStatus_FILE_STATUS_HEALTHY,
-			file.Segments,
-			file.Encryption,
-			file.Password,
-			file.Salt,
-		)
-
-		// Write file metadata to disk
-		if err := proc.metadataService.WriteFileMetadata(virtualPath, fileMeta); err != nil {
-			return "", fmt.Errorf("failed to write metadata for file %s: %w", filename, err)
-		}
-
-		// Store additional metadata if needed
-		if len(file.Groups) > 0 {
-			proc.log.Debug("Groups metadata", "file", filename, "groups", strings.Join(file.Groups, ","))
-		}
-
-		proc.log.Debug("Created metadata file",
-			"file", filename,
-			"virtual_path", virtualPath,
-			"size", file.Size)
+	// Create directories for files
+	if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+		return "", err
 	}
 
-	proc.log.Info("Successfully processed multi-file NZB",
-		"virtual_dir", nzbVirtualDir,
-		"files", len(regularFiles),
-		"directories", len(dirStructure.directories))
+	// Process all regular files
+	if err := multifile.ProcessRegularFiles(
+		ctx,
+		nzbFolder,
+		regularFiles,
+		nzbPath,
+		proc.metadataService,
+		proc.poolManager,
+		proc.maxImportConnections,
+		proc.segmentSamplePercentage,
+		proc.allowedFileExtensions,
+	); err != nil {
+		return "", err
+	}
 
-	return nzbVirtualDir, nil
+	return nzbFolder, nil
 }
 
-// processRarArchiveWithDir handles NZBs containing RAR archives and regular files in a specific virtual directory
-func (proc *Processor) processRarArchiveWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
-	// Create a folder named after the NZB file for multi-file imports
-	nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
-	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
-	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
+// processRarArchive handles RAR archive imports
+func (proc *Processor) processRarArchive(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	archiveFiles []parser.ParsedFile,
+	parsed *parser.ParsedNzb,
+	queueID int,
+) (string, error) {
+	// Create NZB folder
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
+	if err != nil {
+		return "", err
+	}
 
-	// Separate RAR files from regular files
-	regularFiles, rarFiles := proc.separateRarFiles(parsed.Files)
-
-	// Filter out PAR2 files from regular files
-	regularFiles, _ = proc.separatePar2Files(regularFiles)
-
-	// Process regular files first (non-RAR files like MKV, MP4, etc.)
+	// Process regular files first if any
 	if len(regularFiles) > 0 {
-		proc.log.Info("Processing regular files in RAR archive NZB",
-			"virtual_dir", nzbVirtualDir,
-			"regular_files", len(regularFiles))
-
-		// Create directory structure for regular files
-		dirStructure := proc.analyzeDirectoryStructureWithBase(regularFiles, nzbVirtualDir)
-
-		// Create directories first
-		for _, dir := range dirStructure.directories {
-			if err := proc.ensureDirectoryExists(dir.path); err != nil {
-				return "", fmt.Errorf("failed to create directory %s: %w", dir.path, err)
-			}
-		}
-
-		// Process each regular file
-		for _, file := range regularFiles {
-			parentPath, filename := proc.determineFileLocationWithBase(file, dirStructure, nzbVirtualDir)
-
-			// Ensure parent directory exists
-			if err := proc.ensureDirectoryExists(parentPath); err != nil {
-				return "", fmt.Errorf("failed to create parent directory %s: %w", parentPath, err)
-			}
-
-			// Create virtual file path
-			virtualPath := filepath.Join(parentPath, filename)
-			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
-
-			// Create file metadata
-			fileMeta := proc.metadataService.CreateFileMetadata(
-				file.Size,
-				parsed.Path,
-				metapb.FileStatus_FILE_STATUS_HEALTHY,
-				file.Segments,
-				file.Encryption,
-				file.Password,
-				file.Salt,
-			)
-
-			// Write file metadata to disk
-			if err := proc.metadataService.WriteFileMetadata(virtualPath, fileMeta); err != nil {
-				return "", fmt.Errorf("failed to write metadata for regular file %s: %w", filename, err)
-			}
-
-			proc.log.Debug("Created metadata for regular file",
-				"file", filename,
-				"virtual_path", virtualPath,
-				"size", file.Size)
-		}
-
-		proc.log.Info("Successfully processed regular files",
-			"virtual_dir", nzbVirtualDir,
-			"files_processed", len(regularFiles))
-	}
-
-	// Process RAR archives if any exist
-	if len(rarFiles) > 0 {
-		// Create directory for the single RAR archive content
-		nzbBaseName := strings.TrimSuffix(parsed.Filename, filepath.Ext(parsed.Filename))
-		rarDirPath := filepath.Join(nzbVirtualDir, nzbBaseName)
-		rarDirPath = strings.ReplaceAll(rarDirPath, string(filepath.Separator), "/")
-
-		// Ensure RAR archive directory exists
-		if err := proc.ensureDirectoryExists(rarDirPath); err != nil {
-			return "", fmt.Errorf("failed to create RAR directory %s: %w", rarDirPath, err)
-		}
-
-		proc.log.Info("Processing RAR archive with content analysis",
-			"archive", nzbBaseName,
-			"parts", len(rarFiles),
-			"rar_dir", rarDirPath)
-
-		// Analyze RAR content using the new RAR handler
-		ctx := context.Background()
-		rarContents, err := proc.rarProcessor.AnalyzeRarContentFromNzb(ctx, rarFiles)
-		if err != nil {
-			proc.log.Error("Failed to analyze RAR archive content",
-				"archive", nzbBaseName,
-				"error", err)
-
+		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
 			return "", err
 		}
 
-		proc.log.Info("Successfully analyzed RAR archive content",
-			"archive", nzbBaseName,
-			"files_in_archive", len(rarContents))
-
-		// Process each file found in the RAR archive
-		for _, rarContent := range rarContents {
-			// Skip directories
-			if rarContent.IsDirectory {
-				proc.log.Debug("Skipping directory in RAR archive", "path", rarContent.InternalPath)
-				continue
-			}
-
-			// Determine the virtual file path for this extracted file
-			// The file path should be relative to the RAR directory
-			virtualFilePath := filepath.Join(rarDirPath, rarContent.InternalPath)
-			virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
-
-			// Ensure parent directory exists for nested files
-			parentDir := filepath.Dir(virtualFilePath)
-			if err := proc.ensureDirectoryExists(parentDir); err != nil {
-				return "", fmt.Errorf("failed to create parent directory %s for RAR file: %w", parentDir, err)
-			}
-
-			// Create file metadata using the RAR handler's helper function
-			fileMeta := proc.rarProcessor.CreateFileMetadataFromRarContent(
-				rarContent,
-				parsed.Path,
-			)
-
-			// Write file metadata to disk
-			if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-				return "", fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
-			}
-
-			proc.log.Debug("Created metadata for RAR extracted file",
-				"file", rarContent.Filename,
-				"internal_path", rarContent.InternalPath,
-				"virtual_path", virtualFilePath,
-				"size", rarContent.Size,
-				"segments", len(rarContent.Segments))
-		}
-
-		proc.log.Info("Successfully processed RAR archive with content analysis",
-			"archive", nzbBaseName,
-			"files_processed", len(rarContents))
-	}
-
-	return nzbVirtualDir, nil
-}
-
-// DirectoryStructure represents the analyzed directory structure
-type DirectoryStructure struct {
-	directories []DirectoryInfo
-	commonRoot  string
-}
-
-// DirectoryInfo represents information about a directory
-type DirectoryInfo struct {
-	path   string
-	name   string
-	parent *string
-}
-
-// determineFileLocationWithBase determines where a file should be placed in the virtual structure within a base directory
-func (proc *Processor) determineFileLocationWithBase(file ParsedFile, _ *DirectoryStructure, baseDir string) (parentPath, filename string) {
-	dir := filepath.Dir(file.Filename)
-	name := filepath.Base(file.Filename)
-
-	if dir == "." || dir == "/" {
-		return baseDir, name
-	}
-
-	virtualPath := filepath.Join(baseDir, dir)
-	virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
-	return virtualPath, name
-}
-
-// analyzeDirectoryStructureWithBase analyzes files to determine directory structure within a base directory
-func (proc *Processor) analyzeDirectoryStructureWithBase(files []ParsedFile, baseDir string) *DirectoryStructure {
-	// Simple implementation: group files by common prefixes in their filenames within the base directory
-	pathMap := make(map[string]bool)
-
-	for _, file := range files {
-		dir := filepath.Dir(file.Filename)
-		if dir != "." && dir != "/" {
-			// Add the directory path within the base directory
-			virtualPath := filepath.Join(baseDir, dir)
-			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
-			pathMap[virtualPath] = true
+		if err := multifile.ProcessRegularFiles(
+			ctx,
+			nzbFolder,
+			regularFiles,
+			parsed.Path,
+			proc.metadataService,
+			proc.poolManager,
+			proc.maxImportConnections,
+			proc.segmentSamplePercentage,
+			proc.allowedFileExtensions,
+		); err != nil {
+			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
 
-	var dirs []DirectoryInfo
-	for path := range pathMap {
-		parent := filepath.Dir(path)
-		if parent == "." || parent == "/" {
-			parent = baseDir
+	// Analyze and process RAR archive
+	if len(archiveFiles) > 0 {
+		proc.updateProgress(queueID, 50)
+
+		// Create progress tracker for 50-80% range (archive analysis)
+		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
+
+		// Get release date from first archive file
+		var releaseDate int64
+		if len(archiveFiles) > 0 {
+			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
 
-		dirs = append(dirs, DirectoryInfo{
-			path:   path,
-			name:   filepath.Base(path),
-			parent: stringPtr(parent),
-		})
+		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
+		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
+
+		// Process archive with unified aggregator
+		err := rar.ProcessArchive(
+			ctx,
+			nzbFolder,
+			archiveFiles,
+			parsed.GetPassword(),
+			releaseDate,
+			parsed.Path,
+			proc.rarProcessor,
+			proc.metadataService,
+			proc.poolManager,
+			archiveProgressTracker,
+			validationProgressTracker,
+			proc.maxImportConnections,
+			proc.segmentSamplePercentage,
+			proc.allowedFileExtensions,
+		)
+		if err != nil {
+			return "", err
+		}
+		// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
 	}
 
-	return &DirectoryStructure{
-		directories: dirs,
-		commonRoot:  baseDir,
-	}
+	return nzbFolder, nil
 }
 
-// calculateVirtualDirectory determines the virtual directory path based on NZB file location relative to watch root
-func (proc *Processor) calculateVirtualDirectory(nzbPath, relativePath string) string {
-	if relativePath == "" {
-		// No watch root specified, place in root directory
-		return "/"
-	}
-
-	// Clean paths for consistent comparison
-	nzbPath = filepath.Clean(nzbPath)
-	relativePath = filepath.Clean(relativePath)
-
-	// Get relative path from watch root to NZB file
-	relPath, err := filepath.Rel(relativePath, nzbPath)
+// processSevenZipArchive handles 7zip archive imports
+func (proc *Processor) processSevenZipArchive(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	archiveFiles []parser.ParsedFile,
+	parsed *parser.ParsedNzb,
+	queueID int,
+) (string, error) {
+	// Create NZB folder
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
 	if err != nil {
-		// If we can't get relative path, default to root
-		return "/"
+		return "", err
 	}
 
-	// Get directory of NZB file (without filename)
-	relDir := filepath.Dir(relPath)
+	// Process regular files first if any
+	if len(regularFiles) > 0 {
+		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+			return "", err
+		}
 
-	// Convert to virtual path
-	if relDir == "." || relDir == "" {
-		// NZB is directly in watch root
-		return "/"
-	}
-
-	// Ensure virtual path starts with / and uses forward slashes
-	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
-	return filepath.Clean(virtualPath)
-}
-
-// ensureDirectoryExists creates directory structure in the metadata filesystem
-func (proc *Processor) ensureDirectoryExists(virtualDir string) error {
-	if virtualDir == "/" {
-		// Root directory always exists
-		return nil
-	}
-
-	// Get the actual filesystem path for this virtual directory
-	metadataDir := proc.metadataService.GetMetadataDirectoryPath(virtualDir)
-
-	// Create the directory structure using os.MkdirAll
-	if err := os.MkdirAll(metadataDir, 0755); err != nil {
-		return fmt.Errorf("failed to create metadata directory %s: %w", metadataDir, err)
-	}
-
-	return nil
-}
-
-// Helper function to create string pointer
-func stringPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-// isPar2File checks if a filename is a PAR2 repair file
-func (proc *Processor) isPar2File(filename string) bool {
-	lower := strings.ToLower(filename)
-	return strings.HasSuffix(lower, ".par2")
-}
-
-// separatePar2Files separates PAR2 files from regular files
-func (proc *Processor) separatePar2Files(files []ParsedFile) ([]ParsedFile, []ParsedFile) {
-	var regularFiles []ParsedFile
-	var par2Files []ParsedFile
-
-	for _, file := range files {
-		if proc.isPar2File(file.Filename) {
-			par2Files = append(par2Files, file)
-		} else {
-			regularFiles = append(regularFiles, file)
+		if err := multifile.ProcessRegularFiles(
+			ctx,
+			nzbFolder,
+			regularFiles,
+			parsed.Path,
+			proc.metadataService,
+			proc.poolManager,
+			proc.maxImportConnections,
+			proc.segmentSamplePercentage,
+			proc.allowedFileExtensions,
+		); err != nil {
+			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
 	}
 
-	return regularFiles, par2Files
-}
+	// Analyze and process 7zip archive
+	if len(archiveFiles) > 0 {
+		proc.updateProgress(queueID, 50)
 
-// separateRarFiles separates RAR files from regular files
-func (proc *Processor) separateRarFiles(files []ParsedFile) ([]ParsedFile, []ParsedFile) {
-	var regularFiles []ParsedFile
-	var rarFiles []ParsedFile
+		// Create progress tracker for 50-80% range (archive analysis)
+		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
 
-	for _, file := range files {
-		if file.IsRarArchive {
-			rarFiles = append(rarFiles, file)
-		} else {
-			regularFiles = append(regularFiles, file)
+		// Get release date from first archive file
+		var releaseDate int64
+		if len(archiveFiles) > 0 {
+			releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		}
+
+		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
+		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
+
+		// Process archive with unified aggregator
+		err := sevenzip.ProcessArchive(
+			ctx,
+			nzbFolder,
+			archiveFiles,
+			parsed.GetPassword(),
+			releaseDate,
+			parsed.Path,
+			proc.sevenZipProcessor,
+			proc.metadataService,
+			proc.poolManager,
+			archiveProgressTracker,
+			validationProgressTracker,
+			proc.maxImportConnections,
+			proc.segmentSamplePercentage,
+			proc.allowedFileExtensions,
+		)
+		if err != nil {
+			return "", err
+		}
+		// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
 	}
 
-	return regularFiles, rarFiles
-}
-
-// processStrmFileWithDir handles STRM files (single file from NXG link) in a specific virtual directory
-func (proc *Processor) processStrmFileWithDir(parsed *ParsedNzb, virtualDir string) (string, error) {
-	if len(parsed.Files) != 1 {
-		return "", NewNonRetryableError(fmt.Sprintf("STRM file should contain exactly one file, got %d", len(parsed.Files)), nil)
-	}
-
-	file := parsed.Files[0]
-
-	// Create the directory structure if needed
-	if err := proc.ensureDirectoryExists(virtualDir); err != nil {
-		return "", fmt.Errorf("failed to create directory structure: %w", err)
-	}
-
-	// Create virtual file path
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
-	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
-
-	// Create file metadata using simplified schema
-	fileMeta := proc.metadataService.CreateFileMetadata(
-		file.Size,
-		parsed.Path,
-		metapb.FileStatus_FILE_STATUS_HEALTHY,
-		file.Segments,
-		file.Encryption,
-		file.Password,
-		file.Salt,
-	)
-
-	// Write file metadata to disk
-	if err := proc.metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {
-		return "", fmt.Errorf("failed to write metadata for STRM file %s: %w", file.Filename, err)
-	}
-
-	proc.log.Info("Successfully processed STRM file",
-		"file", file.Filename,
-		"virtual_path", virtualFilePath,
-		"size", file.Size,
-		"segments", len(file.Segments))
-
-	return virtualDir, nil
+	return nzbFolder, nil
 }

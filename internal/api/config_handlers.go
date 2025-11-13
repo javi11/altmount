@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
 )
 
 // ConfigManager interface defines methods for configuration management
@@ -46,6 +47,37 @@ func ApplyLogLevel(level string) {
 	}
 }
 
+// getEffectiveLogLevel returns the effective log level, preferring new config over legacy
+func getEffectiveLogLevel(newLevel, legacyLevel string) string {
+	if newLevel != "" {
+		return newLevel
+	}
+	if legacyLevel != "" {
+		return legacyLevel
+	}
+	return "info"
+}
+
+// RegisterLogLevelHandler registers handler for log level configuration changes
+func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager, debugMode *bool) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		// Determine old and new log levels
+		oldLevel := getEffectiveLogLevel(oldConfig.Log.Level, oldConfig.Log.Level)
+		newLevel := getEffectiveLogLevel(newConfig.Log.Level, newConfig.Log.Level)
+
+		// Apply log level change if it changed
+		if oldLevel != newLevel {
+			ApplyLogLevel(newLevel)
+			// Update Fiber logger debug mode
+			*debugMode = newLevel == "debug"
+			slog.InfoContext(ctx, "Log level updated dynamically",
+				"old_level", oldLevel,
+				"new_level", newLevel,
+				"fiber_logging", *debugMode)
+		}
+	})
+}
+
 // handleGetConfig returns the current configuration
 func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
@@ -65,7 +97,10 @@ func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 		})
 	}
 
-	response := ToConfigAPIResponse(config)
+	// Get API key from authenticated user or first admin user
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(config, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -113,7 +148,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	// Ensure SABnzbd category directories exist
 	if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
 		// Log the error but don't fail the update
-		slog.Warn("Failed to create SABnzbd category directories", "error", err)
+		slog.WarnContext(c.Context(), "Failed to create SABnzbd category directories", "error", err)
 	}
 
 	// Save to file
@@ -128,7 +163,10 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	// Try to start RC server if RClone is enabled but RC is not running
 	s.startRCServerIfNeeded(c.Context())
 
-	response := ToConfigAPIResponse(&newConfig)
+	// Get API key for response
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(&newConfig, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -197,7 +235,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	if section == "sabnzbd" || section == "" {
 		if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
 			// Log the error but don't fail the update
-			slog.Warn("Failed to create SABnzbd category directories", "error", err)
+			slog.WarnContext(c.Context(), "Failed to create SABnzbd category directories", "error", err)
 		}
 	}
 
@@ -215,7 +253,10 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		s.startRCServerIfNeeded(c.Context())
 	}
 
-	response := ToConfigAPIResponse(&newConfig)
+	// Get API key for response
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(&newConfig, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -241,7 +282,11 @@ func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 	}
 
 	config := s.configManager.GetConfig()
-	response := ToConfigAPIResponse(config)
+
+	// Get API key for response
+	apiKey := s.getAPIKeyForConfig(c)
+
+	response := ToConfigAPIResponse(config, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -945,4 +990,23 @@ func (s *Server) ensureSABnzbdCategoryDirectories(cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// getAPIKeyForConfig retrieves the API key for config responses
+func (s *Server) getAPIKeyForConfig(c *fiber.Ctx) string {
+	// Try to get user from context (if authenticated)
+	user := auth.GetUserFromContext(c)
+	if user != nil && user.APIKey != nil {
+		return *user.APIKey
+	}
+
+	// If no authenticated user, try to get first admin user (for non-auth mode)
+	if s.userRepo != nil {
+		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
+		if err == nil && len(users) > 0 && users[0].APIKey != nil {
+			return *users[0].APIKey
+		}
+	}
+
+	return ""
 }

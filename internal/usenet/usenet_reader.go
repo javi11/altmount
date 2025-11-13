@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/nntppool"
+	"github.com/javi11/nntppool/v2"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -22,16 +24,17 @@ var (
 	_ io.ReadCloser = &usenetReader{}
 )
 
-type ArticleNotFoundError struct {
+type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
+	NoRetry       bool
 }
 
-func (e *ArticleNotFoundError) Error() string {
+func (e *DataCorruptionError) Error() string {
 	return e.UnderlyingErr.Error()
 }
 
-func (e *ArticleNotFoundError) Unwrap() error {
+func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
@@ -39,12 +42,13 @@ type usenetReader struct {
 	log                *slog.Logger
 	wg                 sync.WaitGroup
 	cancel             context.CancelFunc
-	rg                 segmentRange
+	rg                 *segmentRange
 	maxDownloadWorkers int
 	maxCacheSize       int64 // Maximum cache size in bytes
 	init               chan any
 	initDownload       sync.Once
 	totalBytesRead     int64
+	poolGetter         func() (nntppool.UsenetConnectionPool, error) // Dynamic pool getter
 
 	// Dynamic download tracking
 	nextToDownload      int          // Index of next segment to download
@@ -56,12 +60,12 @@ type usenetReader struct {
 
 func NewUsenetReader(
 	ctx context.Context,
-	cp nntppool.UsenetConnectionPool,
-	rg segmentRange,
+	poolGetter func() (nntppool.UsenetConnectionPool, error),
+	rg *segmentRange,
 	maxDownloadWorkers int,
 	maxCacheSizeMB int,
 ) (io.ReadCloser, error) {
-	log := slog.Default()
+	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
 
 	// Convert MB to bytes
@@ -77,6 +81,7 @@ func NewUsenetReader(
 		init:                make(chan any, 1),
 		maxDownloadWorkers:  maxDownloadWorkers,
 		maxCacheSize:        maxCacheSize,
+		poolGetter:          poolGetter,
 		nextToDownload:      0,
 		downloadingSegments: make(map[int]bool),
 	}
@@ -87,7 +92,7 @@ func NewUsenetReader(
 	ur.wg.Add(1)
 	go func() {
 		defer ur.wg.Done()
-		ur.downloadManager(ctx, cp)
+		ur.downloadManager(ctx)
 	}()
 
 	return ur, nil
@@ -97,11 +102,28 @@ func (b *usenetReader) Close() error {
 	b.cancel()
 	close(b.init)
 
+	// Wait synchronously with timeout to prevent goroutine leaks
+	// Use a separate goroutine to detect when cleanup completes
+	done := make(chan struct{})
 	go func() {
 		b.wg.Wait()
-		_ = b.rg.Clear()
-		b.rg = segmentRange{}
+		close(done)
 	}()
+
+	// Wait for cleanup with reasonable timeout
+	select {
+	case <-done:
+		// Cleanup completed successfully
+		_ = b.rg.Clear()
+		b.rg = nil
+	case <-time.After(30 * time.Second):
+		// Timeout waiting for downloads to complete
+		// This prevents hanging but logs the issue
+		b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
+		// Still attempt to clear resources
+		_ = b.rg.Clear()
+		b.rg = nil
+	}
 
 	return nil
 }
@@ -128,13 +150,13 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 		if b.isArticleNotFoundError(err) {
 			if totalRead > 0 {
 				// We read some data before failing - this is partial content
-				return 0, &ArticleNotFoundError{
+				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     totalRead,
 				}
 			} else {
 				// No data read at all - this is corrupted/missing
-				return 0, &ArticleNotFoundError{
+				return 0, &DataCorruptionError{
 					UnderlyingErr: err,
 					BytesRead:     0,
 				}
@@ -173,7 +195,7 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 					if b.isArticleNotFoundError(err) {
 						if totalRead > 0 {
 							// Return what we have read so far and the article error
-							return n, &ArticleNotFoundError{
+							return n, &DataCorruptionError{
 								UnderlyingErr: err,
 								BytesRead:     totalRead,
 							}
@@ -184,7 +206,7 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 			} else {
 				// Check if this is an article not found error
 				if b.isArticleNotFoundError(err) {
-					return n, &ArticleNotFoundError{
+					return n, &DataCorruptionError{
 						UnderlyingErr: err,
 						BytesRead:     totalRead,
 					}
@@ -202,9 +224,65 @@ func (b *usenetReader) isArticleNotFoundError(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFoundInProviders)
 }
 
+// isPoolUnavailableError checks if the error indicates the pool is unavailable or shutdown
+func (b *usenetReader) isPoolUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection pool is shutdown") ||
+		strings.Contains(errStr, "connection pool not available") ||
+		strings.Contains(errStr, "NNTP connection pool not available")
+}
+
+// downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
+func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
+	return retry.Do(
+		func() error {
+			// Get current pool
+			cp, err := b.poolGetter()
+			if err != nil {
+				return err
+			}
+
+			// Attempt download
+			bytesWritten, err := cp.Body(ctx, segment.Id, segment.Writer(), segment.groups)
+			if err != nil {
+				if strings.Contains(err.Error(), "data corruption detected") {
+					return &DataCorruptionError{
+						UnderlyingErr: err,
+						BytesRead:     bytesWritten,
+					}
+				}
+
+				return err
+			}
+
+			return nil
+		},
+		retry.Attempts(10),
+		retry.Delay(50*time.Millisecond),
+		retry.MaxDelay(2*time.Second),
+		retry.DelayType(retry.BackOffDelay),
+		retry.RetryIf(func(err error) bool {
+			if b.isArticleNotFoundError(err) {
+				return false
+			}
+			// Only retry if error is pool-related
+			return b.isPoolUnavailableError(err)
+		}),
+		retry.OnRetry(func(n uint, err error) {
+			b.log.DebugContext(ctx, "Pool unavailable, retrying segment download",
+				"attempt", n+1,
+				"segment_id", segment.Id,
+				"error", err)
+		}),
+		retry.Context(ctx),
+	)
+}
+
 func (b *usenetReader) downloadManager(
 	ctx context.Context,
-	cp nntppool.UsenetConnectionPool,
 ) {
 	select {
 	case _, ok := <-b.init:
@@ -218,8 +296,6 @@ func (b *usenetReader) downloadManager(
 		}
 
 		if len(b.rg.segments) == 0 {
-			b.log.Debug("No segments to download")
-
 			return
 		}
 
@@ -257,10 +333,22 @@ func (b *usenetReader) downloadManager(
 			b.mu.Lock()
 			segmentsToQueue := []int{}
 			for i := b.nextToDownload; i < targetDownload; i++ {
+				// Check for context cancellation frequently during segment selection
+				select {
+				case <-ctx.Done():
+					b.mu.Unlock()
+					return
+				default:
+				}
+
 				if !b.downloadingSegments[i] {
 					b.downloadingSegments[i] = true
 					segmentsToQueue = append(segmentsToQueue, i)
 				}
+			}
+			// Update nextToDownload to reflect we've checked up to targetDownload
+			if targetDownload > b.nextToDownload {
+				b.nextToDownload = targetDownload
 			}
 			b.mu.Unlock()
 
@@ -278,34 +366,21 @@ func (b *usenetReader) downloadManager(
 
 					// Set the item ready to read
 					ctx = slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
-					_, err := cp.Body(ctx, s.Id, s.Writer(), s.groups)
+					err := b.downloadSegmentWithRetry(ctx, s)
 
 					// Mark download complete
 					b.mu.Lock()
-					if segmentIdx >= b.nextToDownload {
-						b.nextToDownload = segmentIdx + 1
-					}
 					delete(b.downloadingSegments, segmentIdx)
 					b.downloadCond.Signal()
 					b.mu.Unlock()
 
-					if !errors.Is(err, context.Canceled) {
+					if err != nil {
 						cErr := w.CloseWithError(err)
 						if cErr != nil {
 							b.log.ErrorContext(ctx, "Error closing segment buffer:", "error", cErr)
 						}
 
-						if err != nil && !errors.Is(err, context.Canceled) {
-							b.log.DebugContext(ctx, "Error downloading segment:", "error", err)
-							return err
-						}
-
-						return nil
-					}
-
-					err = w.Close()
-					if err != nil {
-						b.log.ErrorContext(ctx, "Error closing segment writer:", "error", err)
+						return err
 					}
 
 					return nil
@@ -333,6 +408,10 @@ func (b *usenetReader) downloadManager(
 
 		// Wait for all downloads to complete
 		if err := pool.Wait(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
 			b.log.DebugContext(ctx, "Error downloading segments:", "error", err)
 			return
 		}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
@@ -16,7 +17,7 @@ type NzbFilesystem struct {
 }
 
 // NewNzbFilesystem creates a new filesystem backed directly by metadata
-func NewNzbFilesystem(remoteFile *MetadataRemoteFile) afero.Fs {
+func NewNzbFilesystem(remoteFile *MetadataRemoteFile) *NzbFilesystem {
 	return &NzbFilesystem{
 		remoteFile: remoteFile,
 	}
@@ -28,17 +29,11 @@ func (nfs *NzbFilesystem) Name() string {
 }
 
 // Open opens a file for reading
-func (nfs *NzbFilesystem) Open(name string) (afero.File, error) {
-	ctx := context.Background()
-
-	// Parse path with args
-	pr, err := utils.NewPathWithArgsFromString(name)
-	if err != nil {
-		return nil, err
-	}
+func (nfs *NzbFilesystem) Open(ctx context.Context, name string) (afero.File, error) {
+	ctx = slogutil.With(ctx, "file_name", name)
 
 	// Try to open with NZB remote file
-	ok, file, err := nfs.remoteFile.OpenFile(ctx, pr.Path, pr)
+	ok, file, err := nfs.remoteFile.OpenFile(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -51,30 +46,24 @@ func (nfs *NzbFilesystem) Open(name string) (afero.File, error) {
 }
 
 // OpenFile opens a file with specified flags and permissions
-func (nfs *NzbFilesystem) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+func (nfs *NzbFilesystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (afero.File, error) {
 	// Only allow read operations
 	if flag != os.O_RDONLY {
 		return nil, os.ErrPermission
 	}
 
-	// Parse path to check for COPY operations
-	pr, err := utils.NewPathWithArgsFromString(name)
-	if err != nil {
-		return nil, err
-	}
-
-	// If this is a COPY operation, we need to handle it carefully
+	// Check for COPY operations from context
 	// Block COPY operations entirely - they should use MOVE instead
-	if pr.IsCopy() {
+	if isCopy, ok := ctx.Value(utils.IsCopy).(bool); ok && isCopy {
 		return nil, os.ErrPermission
 	}
 
-	return nfs.Open(name)
+	return nfs.Open(ctx, name)
 }
 
 // Stat returns file information
-func (nfs *NzbFilesystem) Stat(name string) (fs.FileInfo, error) {
-	ok, info, err := nfs.remoteFile.Stat(name)
+func (nfs *NzbFilesystem) Stat(ctx context.Context, name string) (fs.FileInfo, error) {
+	ok, info, err := nfs.remoteFile.Stat(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -87,10 +76,9 @@ func (nfs *NzbFilesystem) Stat(name string) (fs.FileInfo, error) {
 }
 
 // Remove removes a file (not supported)
-func (nfs *NzbFilesystem) Remove(name string) error {
-	ctx := context.Background()
+func (nfs *NzbFilesystem) Remove(ctx context.Context, name string) error {
 	defer func() {
-		_ = nfs.remoteFile.healthRepository.DeleteHealthRecord(name)
+		_ = nfs.remoteFile.healthRepository.DeleteHealthRecord(ctx, name)
 	}()
 
 	ok, err := nfs.remoteFile.RemoveFile(ctx, name)
@@ -106,13 +94,12 @@ func (nfs *NzbFilesystem) Remove(name string) error {
 }
 
 // RemoveAll removes a file and any children (not supported)
-func (nfs *NzbFilesystem) RemoveAll(name string) error {
-	return nfs.Remove(name)
+func (nfs *NzbFilesystem) RemoveAll(ctx context.Context, name string) error {
+	return nfs.Remove(ctx, name)
 }
 
 // Rename renames a file (not supported)
-func (nfs *NzbFilesystem) Rename(oldName, newName string) error {
-	ctx := context.Background()
+func (nfs *NzbFilesystem) Rename(ctx context.Context, oldName, newName string) error {
 	ok, err := nfs.remoteFile.RenameFile(ctx, oldName, newName)
 	if err != nil {
 		return err
@@ -131,13 +118,13 @@ func (nfs *NzbFilesystem) Create(name string) (afero.File, error) {
 }
 
 // Mkdir creates a directory (not supported - read-only filesystem)
-func (nfs *NzbFilesystem) Mkdir(name string, perm os.FileMode) error {
-	return os.ErrPermission
+func (nfs *NzbFilesystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+	return nfs.remoteFile.Mkdir(ctx, name, perm)
 }
 
 // MkdirAll creates a directory and all parent directories (not supported)
-func (nfs *NzbFilesystem) MkdirAll(name string, perm os.FileMode) error {
-	return os.ErrPermission
+func (nfs *NzbFilesystem) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
+	return nfs.remoteFile.MkdirAll(ctx, name, perm)
 }
 
 // Chmod changes file permissions (not supported)

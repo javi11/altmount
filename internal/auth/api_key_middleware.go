@@ -51,7 +51,7 @@ func APIKeyMiddleware(userRepo *database.UserRepository) fiber.Handler {
 		}
 
 		// Validate API key
-		user, err := userRepo.GetUserByAPIKey(apiKey)
+		user, err := userRepo.GetUserByAPIKey(c.Context(), apiKey)
 		if err != nil || user == nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"success": false,
@@ -95,7 +95,7 @@ func OptionalAPIKeyMiddleware(userRepo *database.UserRepository) fiber.Handler {
 		}
 
 		// Validate API key
-		user, err := userRepo.GetUserByAPIKey(apiKey)
+		user, err := userRepo.GetUserByAPIKey(c.Context(), apiKey)
 		if err != nil || user == nil {
 			// Invalid API key, continue without auth
 			return c.Next()

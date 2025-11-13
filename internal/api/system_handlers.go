@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"syscall"
@@ -12,7 +14,7 @@ import (
 // handleGetSystemStats handles GET /api/system/stats
 func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	// Get queue statistics
-	queueStats, err := s.queueRepo.GetQueueStats()
+	queueStats, err := s.queueRepo.GetQueueStats(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -22,7 +24,7 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	}
 
 	// Get health statistics
-	healthStatsMap, err := s.healthRepo.GetHealthStats()
+	healthStatsMap, err := s.healthRepo.GetHealthStats(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -140,7 +142,7 @@ func (s *Server) handleSystemCleanup(c *fiber.Ctx) error {
 
 	// Clean up queue items
 	if !req.DryRun {
-		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(*req.QueueOlderThan)
+		queueItemsRemoved, err = s.queueRepo.ClearCompletedQueueItems(c.Context())
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"success": false,
@@ -190,7 +192,7 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 		}
 	}
 
-	s.logger.Info("System restart requested", "force", req.Force, "user_agent", c.Get("User-Agent"))
+	slog.InfoContext(c.Context(), "System restart requested", "force", req.Force, "user_agent", c.Get("User-Agent"))
 
 	// Prepare response
 	response := SystemRestartResponse{
@@ -205,14 +207,14 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	})
 
 	// Start restart process in a goroutine to allow response to be sent
-	go s.performRestart()
+	go s.performRestart(c.Context())
 
 	return result
 }
 
 // performRestart performs the actual server restart
-func (s *Server) performRestart() {
-	s.logger.Info("Initiating server restart process")
+func (s *Server) performRestart(ctx context.Context) {
+	slog.InfoContext(ctx, "Initiating server restart process")
 
 	// Give a moment for the HTTP response to be sent
 	time.Sleep(100 * time.Millisecond)
@@ -220,28 +222,28 @@ func (s *Server) performRestart() {
 	// Get the current executable path
 	executable, err := os.Executable()
 	if err != nil {
-		s.logger.Error("Failed to get executable path for restart", "error", err)
+		slog.ErrorContext(ctx, "Failed to get executable path for restart", "error", err)
 		return
 	}
 
-	s.logger.Info("Restarting server", "executable", executable, "args", os.Args)
+	slog.InfoContext(ctx, "Restarting server", "executable", executable, "args", os.Args)
 
 	// Use syscall.Exec to replace the current process
 	// This preserves the process ID and is the cleanest way to restart
 	err = syscall.Exec(executable, os.Args, os.Environ())
 	if err != nil {
-		s.logger.Error("Failed to restart using syscall.Exec, trying exec.Command", "error", err)
+		slog.ErrorContext(ctx, "Failed to restart using syscall.Exec, trying exec.Command", "error", err)
 
 		// Fallback: use exec.Command (this creates a new process)
-		cmd := exec.Command(executable, os.Args[1:]...)
+		cmd := exec.CommandContext(ctx, executable, os.Args[1:]...)
 		cmd.Env = os.Environ()
 
 		if err := cmd.Start(); err != nil {
-			s.logger.Error("Failed to restart server using exec.Command", "error", err)
+			slog.ErrorContext(ctx, "Failed to restart server using exec.Command", "error", err)
 			return
 		}
 
-		s.logger.Info("Server restart initiated with new process", "pid", cmd.Process.Pid)
+		slog.InfoContext(ctx, "Server restart initiated with new process", "pid", cmd.Process.Pid)
 
 		// Exit the current process
 		os.Exit(0)
@@ -262,15 +264,16 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Check if pool is available
 	if !s.poolManager.HasPool() {
 		response := PoolMetricsResponse{
-			ActiveConnections:    0,
-			TotalBytesDownloaded: 0,
-			DownloadSpeed:        0.0,
-			ErrorRate:            0.0,
-			CurrentMemoryUsage:   0,
-			TotalConnections:     0,
-			CommandSuccessRate:   0.0,
-			AcquireWaitTimeMs:    0,
-			LastUpdated:          time.Now(),
+			BytesDownloaded:          0,
+			BytesUploaded:            0,
+			ArticlesDownloaded:       0,
+			ArticlesPosted:           0,
+			TotalErrors:              0,
+			ProviderErrors:           make(map[string]int64),
+			DownloadSpeedBytesPerSec: 0.0,
+			UploadSpeedBytesPerSec:   0.0,
+			Timestamp:                time.Now(),
+			Providers:                []ProviderStatusResponse{},
 		}
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,
@@ -278,7 +281,17 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get the pool
+	// Get metrics from the pool manager (includes calculated speeds)
+	metrics, err := s.poolManager.GetMetrics()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to get NNTP pool metrics",
+			"details": err.Error(),
+		})
+	}
+
+	// Get the pool to fetch provider information
 	pool, err := s.poolManager.GetPool()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -288,20 +301,46 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get metrics snapshot from the pool
-	snapshot := pool.GetMetricsSnapshot()
+	// Get provider information from pool
+	providersInfo := pool.GetProvidersInfo()
 
-	// Map nntppool metrics to our response format
+	// Map provider info to response format
+	providers := make([]ProviderStatusResponse, 0, len(providersInfo))
+	for _, providerInfo := range providersInfo {
+		// Get error count for this provider from metrics
+		errorCount := int64(0)
+		if metrics.ProviderErrors != nil {
+			if count, exists := metrics.ProviderErrors[providerInfo.ID()]; exists {
+				errorCount = count
+			}
+		}
+
+		providers = append(providers, ProviderStatusResponse{
+			ID:                    providerInfo.ID(),
+			Host:                  providerInfo.Host,
+			Username:              providerInfo.Username,
+			UsedConnections:       providerInfo.UsedConnections,
+			MaxConnections:        providerInfo.MaxConnections,
+			State:                 providerInfo.State.String(),
+			ErrorCount:            errorCount,
+			LastConnectionAttempt: providerInfo.LastConnectionAttempt,
+			LastSuccessfulConnect: providerInfo.LastSuccessfulConnect,
+			FailureReason:         providerInfo.FailureReason,
+		})
+	}
+
+	// Map pool metrics to API response format
 	response := PoolMetricsResponse{
-		ActiveConnections:    int(snapshot.ActiveConnections),
-		TotalBytesDownloaded: snapshot.TotalBytesDownloaded,
-		DownloadSpeed:        snapshot.DownloadSpeed,
-		ErrorRate:            snapshot.ErrorRate,
-		CurrentMemoryUsage:   int64(snapshot.CurrentMemoryUsage),
-		TotalConnections:     int64(snapshot.TotalConnections),
-		CommandSuccessRate:   snapshot.CommandSuccessRate,
-		AcquireWaitTimeMs:    int64(snapshot.AverageAcquireWaitTime.Milliseconds()),
-		LastUpdated:          time.Now(),
+		BytesDownloaded:          metrics.BytesDownloaded,
+		BytesUploaded:            metrics.BytesUploaded,
+		ArticlesDownloaded:       metrics.ArticlesDownloaded,
+		ArticlesPosted:           metrics.ArticlesPosted,
+		TotalErrors:              metrics.TotalErrors,
+		ProviderErrors:           metrics.ProviderErrors,
+		DownloadSpeedBytesPerSec: metrics.DownloadSpeedBytesPerSec,
+		UploadSpeedBytesPerSec:   metrics.UploadSpeedBytesPerSec,
+		Timestamp:                metrics.Timestamp,
+		Providers:                providers,
 	}
 
 	return c.Status(200).JSON(fiber.Map{

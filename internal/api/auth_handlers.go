@@ -61,7 +61,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	}
 
 	// Authenticate user
-	user, err := s.authService.AuthenticateUser(req.Username, req.Password)
+	user, err := s.authService.AuthenticateUser(c.Context(), req.Username, req.Password)
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
@@ -71,7 +71,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 
 	// Create JWT token
 	tokenService := s.authService.TokenService()
-	claims := auth.CreateClaimsFromUser(user)
+	claims := auth.CreateClaimsFromUser(c.Context(), user)
 
 	// Generate JWT token string
 	tokenString, err := tokenService.Token(claims)
@@ -94,10 +94,10 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	}
 
 	// Update last login
-	err = s.userRepo.UpdateLastLogin(user.UserID)
+	err = s.userRepo.UpdateLastLogin(c.Context(), user.UserID)
 	if err != nil {
 		// Log but don't fail the login
-		slog.Warn("Failed to update last login", "user_id", user.UserID, "error", err)
+		slog.WarnContext(c.Context(), "Failed to update last login", "user_id", user.UserID, "error", err)
 	}
 
 	response := AuthResponse{
@@ -145,7 +145,7 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 	}
 
 	// Create user
-	user, err := s.authService.RegisterUser(req.Username, req.Email, req.Password)
+	user, err := s.authService.RegisterUser(c.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
 		if err.Error() == "user registration is currently disabled" {
 			return c.Status(403).JSON(fiber.Map{
@@ -178,7 +178,7 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 
 // handleCheckRegistration checks if registration is allowed
 func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
-	userCount, err := s.userRepo.GetUserCount()
+	userCount, err := s.userRepo.GetUserCount(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -308,7 +308,7 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 	}
 
 	pagination := ParsePaginationFiber(c)
-	users, err := s.userRepo.ListUsers(pagination.Limit, pagination.Offset)
+	users, err := s.userRepo.ListUsers(c.Context(), pagination.Limit, pagination.Offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -360,7 +360,7 @@ func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 	}
 
 	// Update admin status
-	err := s.userRepo.SetAdminStatus(userID, req.IsAdmin)
+	err := s.userRepo.SetAdminStatus(c.Context(), userID, req.IsAdmin)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -380,16 +380,27 @@ func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 
 // handleRegenerateAPIKey regenerates API key for the authenticated user
 func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
+	// Try to get user from context (auth enabled case)
 	user := auth.GetUserFromContext(c)
+
+	// If no user in context, try to get first admin user (auth disabled case)
+	if user == nil && s.userRepo != nil {
+		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
+		if err == nil && len(users) > 0 {
+			user = users[0]
+		}
+	}
+
+	// If still no user, return error
 	if user == nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "Not authenticated",
+			"message": "No user found",
 		})
 	}
 
 	// Regenerate API key
-	apiKey, err := s.userRepo.RegenerateAPIKey(user.UserID)
+	apiKey, err := s.userRepo.RegenerateAPIKey(c.Context(), user.UserID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

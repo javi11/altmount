@@ -17,21 +17,38 @@ export function HealthConfigSection({
 }: HealthConfigSectionProps) {
 	const [formData, setFormData] = useState<HealthConfig>(config.health);
 	const [hasChanges, setHasChanges] = useState(false);
+	const [validationError, setValidationError] = useState<string>("");
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		setFormData(config.health);
 		setHasChanges(false);
+		setValidationError("");
 	}, [config.health]);
 
-	const handleInputChange = (field: keyof HealthConfig, value: string | boolean | number) => {
+	// Validate form data
+	const validateFormData = (data: HealthConfig): string => {
+		if (data.enabled && !data.library_dir?.trim()) {
+			return "Library Directory is required when Health System is enabled";
+		}
+		if (data.cleanup_orphaned_metadata && !data.library_dir?.trim()) {
+			return "Library Directory is required when metadata cleanup is enabled";
+		}
+		return "";
+	};
+
+	const handleInputChange = (
+		field: keyof HealthConfig,
+		value: string | boolean | number | undefined,
+	) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.health));
+		setValidationError(validateFormData(newData));
 	};
 
 	const handleSave = async () => {
-		if (onUpdate && hasChanges) {
+		if (onUpdate && hasChanges && !validationError) {
 			await onUpdate("health", formData);
 			setHasChanges(false);
 		}
@@ -39,12 +56,12 @@ export function HealthConfigSection({
 
 	return (
 		<div className="space-y-4">
-			<h3 className="font-semibold text-lg">Health Monitoring Settings</h3>
+			<h3 className="font-semibold text-lg">Health & Repair</h3>
 			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Enable Health Monitoring</legend>
+					<legend className="fieldset-legend">Health System</legend>
 					<label className="label cursor-pointer">
-						<span className="label-text">Monitor file health</span>
+						<span className="label-text">Enable health system</span>
 						<input
 							type="checkbox"
 							className="checkbox"
@@ -53,137 +70,237 @@ export function HealthConfigSection({
 							onChange={(e) => handleInputChange("enabled", e.target.checked)}
 						/>
 					</label>
-					<p className="label text-gray-600 text-sm">
-						Enable automatic health checking of media files
+					{formData.enabled && (
+						<div className="mt-3 space-y-2">
+							<p className="label font-medium text-sm">How it works:</p>
+							<ol className="ml-2 list-inside list-decimal space-y-1 text-sm">
+								<li>
+									<strong>Periodic sync:</strong> The system periodically syncs with the library
+									directory to discover files.
+								</li>
+								<li>
+									<strong>Smart scheduling:</strong> Each record is checked based on its release
+									date × 2. For example, if a file was released 1 day ago, the next check will be
+									scheduled 1 day after (2 days total).
+								</li>
+								<li>
+									<strong>Health validation:</strong> Files are validated through partial segment
+									checks or full checks. If a file is found to be unhealthy, a repair is
+									automatically triggered.
+								</li>
+								<li>
+									<strong>Automatic repair:</strong> When unhealthy files are detected, the system
+									deletes the file in the ARR application and triggers a redownload to restore file
+									integrity.
+								</li>
+							</ol>
+						</div>
+					)}
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Library Directory</legend>
+					<input
+						type="text"
+						className={`input ${
+							validationError && formData.enabled ? "input-error border-error" : ""
+						}`}
+						value={formData.library_dir || ""}
+						disabled={isReadOnly}
+						placeholder="/media/library"
+						onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
+					/>
+					{validationError && formData.enabled && (
+						<div className="alert alert-error mt-2">
+							<AlertTriangle className="h-4 w-4" />
+							<span className="text-sm">{validationError}</span>
+						</div>
+					)}
+					<p className="label text-sm">
+						Path to your organized media library that contains symlinks pointing to altmount files.
+						When a repair is triggered, the system will search for symlinks in this directory and
+						use the library path for ARR rescan instead of the mount path.
+						{formData.enabled && (
+							<strong className="text-error"> Required when Health System is enabled.</strong>
+						)}
 					</p>
 				</fieldset>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Auto-Repair Corrupted Files</legend>
+					<legend className="fieldset-legend">Cleanup Settings</legend>
 					<label className="label cursor-pointer">
-						<span className="label-text">Enable automatic repair</span>
+						<span className="label-text">Cleanup orphaned metadata files</span>
 						<input
 							type="checkbox"
 							className="checkbox"
-							checked={formData.auto_repair_enabled}
-							disabled={isReadOnly || !formData.enabled}
-							onChange={(e) => handleInputChange("auto_repair_enabled", e.target.checked)}
+							checked={formData.cleanup_orphaned_metadata ?? false}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("cleanup_orphaned_metadata", e.target.checked)}
 						/>
 					</label>
-					<div className="alert alert-warning mt-2">
-						<AlertTriangle className="h-4 w-4" />
-						<div className="text-sm">
-							<strong>Warning:</strong> When enabled, corrupted files will automatically trigger
-							re-download through connected ARRs (Radarr/Sonarr), and corrupted files will be
-							automatically DELETED. Disable for manual control.
+					{formData.cleanup_orphaned_metadata && !formData.library_dir?.trim() && (
+						<div className="alert alert-warning mt-2">
+							<AlertTriangle className="h-4 w-4" />
+							<span className="text-sm">
+								Library Directory must be configured to enable metadata cleanup
+							</span>
 						</div>
-					</div>
+					)}
+					{formData.cleanup_orphaned_metadata && formData.library_dir?.trim() && (
+						<div className="alert alert-warning mt-2">
+							<AlertTriangle className="h-4 w-4" />
+							<div className="text-sm">
+								<strong>Important:</strong> When enabled, this feature will automatically DELETE
+								metadata files that don't have corresponding symlinks in the library directory. This
+								helps prevent storage waste from orphaned metadata files, but files will be
+								permanently removed.
+							</div>
+						</div>
+					)}
+					<p className="label text-sm">
+						Automatically delete metadata files that don't have corresponding symlinks in the
+						library directory. This helps prevent storage waste from orphaned metadata files.
+						{formData.cleanup_orphaned_metadata && (
+							<strong className="text-warning">
+								{" "}
+								Requires Library Directory to be configured.
+							</strong>
+						)}
+					</p>
 				</fieldset>
 			</div>
 
 			{/* Advanced Settings (Optional) */}
-			{formData.enabled && (
-				<details className="collapse bg-base-200">
-					<summary className="collapse-title font-medium">Advanced Health Settings</summary>
-					<div className="collapse-content">
-						<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-							{formData.max_concurrent_jobs !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Max Concurrent Jobs</legend>
-									<input
-										type="number"
-										className="input"
-										value={formData.max_concurrent_jobs}
-										readOnly={isReadOnly}
-										min={1}
-										max={10}
-										onChange={(e) =>
-											handleInputChange(
-												"max_concurrent_jobs",
-												Number.parseInt(e.target.value, 10) || 1,
-											)
-										}
-									/>
-									<p className="label text-gray-600 text-sm">
-										Maximum number of concurrent health check jobs
-									</p>
-								</fieldset>
-							)}
-
-							{formData.max_retries !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Max Retries</legend>
-									<input
-										type="number"
-										className="input"
-										value={formData.max_retries}
-										readOnly={isReadOnly}
-										min={0}
-										max={5}
-										onChange={(e) =>
-											handleInputChange("max_retries", Number.parseInt(e.target.value, 10) || 0)
-										}
-									/>
-									<p className="label text-gray-600 text-sm">
-										Maximum number of retry attempts for failed checks
-									</p>
-								</fieldset>
-							)}
-
-							{formData.check_interval_seconds !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Check Interval (seconds)</legend>
-									<input
-										type="number"
-										className="input"
-										value={formData.check_interval_seconds}
-										readOnly={isReadOnly}
-										min={5}
-										max={86400}
-										step={1}
-										onChange={(e) =>
-											handleInputChange(
-												"check_interval_seconds",
-												Number.parseInt(e.target.value, 10) || 5,
-											)
-										}
-									/>
-									<p className="label text-gray-600 text-sm">
-										Time between automatic health checks (default: 5 seconds)
-									</p>
-								</fieldset>
-							)}
-
-							{formData.check_all_segments !== undefined && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Check All Segments</legend>
-									<label className="label cursor-pointer">
-										<span className="label-text">Deep segment checking</span>
-										<input
-											type="checkbox"
-											className="checkbox"
-											checked={formData.check_all_segments}
-											disabled={isReadOnly}
-											onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
-										/>
-									</label>
-									<p className="label text-gray-600 text-sm">
-										Check all file segments (slower but more thorough)
-									</p>
-								</fieldset>
-							)}
-						</div>
+			<details className="collapse bg-base-200">
+				<summary className="collapse-title font-medium">Advanced Settings</summary>
+				<div className="collapse-content">
+					<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+						{formData.check_interval_seconds !== undefined && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Check Interval (seconds)</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.check_interval_seconds}
+									readOnly={isReadOnly}
+									min={5}
+									max={86400}
+									step={1}
+									onChange={(e) =>
+										handleInputChange(
+											"check_interval_seconds",
+											Number.parseInt(e.target.value, 10) || 5,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									Time between automatic health checks (default: 5 seconds)
+								</p>
+							</fieldset>
+						)}
+						{formData.max_connections_for_health_checks !== undefined && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Max Connections for Health Checks</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.max_connections_for_health_checks}
+									readOnly={isReadOnly}
+									min={1}
+									max={10}
+									onChange={(e) =>
+										handleInputChange(
+											"max_connections_for_health_checks",
+											Number.parseInt(e.target.value, 10) || 1,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									Maximum concurrent connections used during health check operations
+								</p>
+							</fieldset>
+						)}
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Check All Segments</legend>
+							<label className="label cursor-pointer">
+								<span className="label-text">Deep segment checking</span>
+								<input
+									type="checkbox"
+									className="checkbox"
+									checked={formData.check_all_segments ?? false}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+								/>
+							</label>
+							<p className="label text-sm">
+								When disabled, use a sampling approach for faster processing. Enable for thorough
+								validation of all segments (slower).
+							</p>
+						</fieldset>
+						{formData.segment_sample_percentage !== undefined && !formData.check_all_segments && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Segment Sample Percentage</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.segment_sample_percentage}
+									readOnly={isReadOnly}
+									min={1}
+									max={100}
+									step={1}
+									onChange={(e) =>
+										handleInputChange(
+											"segment_sample_percentage",
+											Number.parseInt(e.target.value, 10) || 5,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									Percentage of segments to check when sampling is enabled (1-100%, default: 5%).
+								</p>
+							</fieldset>
+						)}
+						{formData.library_sync_interval_minutes !== undefined && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Library Sync Interval (minutes)</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.library_sync_interval_minutes}
+									readOnly={isReadOnly}
+									min={0}
+									max={1440}
+									step={30}
+									onChange={(e) =>
+										handleInputChange(
+											"library_sync_interval_minutes",
+											Number.parseInt(e.target.value, 10) || 0,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									How often to sync the library directory to discover new files (0-1440 minutes).
+									Set to 0 to disable automatic sync. Default: 360 minutes (6 hours).
+								</p>
+							</fieldset>
+						)}
 					</div>
-				</details>
-			)}
+				</div>
+			</details>
 
 			{/* Save Button */}
 			{onUpdate && !isReadOnly && hasChanges && (
-				<div className="flex justify-end">
+				<div className="flex flex-col items-end gap-2">
+					{validationError && (
+						<div className="alert alert-error">
+							<AlertTriangle className="h-4 w-4" />
+							<span className="text-sm">{validationError}</span>
+						</div>
+					)}
 					<button
 						type="button"
 						className={`btn btn-primary ${isUpdating ? "loading" : ""}`}
-						disabled={isUpdating}
+						disabled={isUpdating || !!validationError}
 						onClick={handleSave}
 					>
 						{isUpdating ? (
@@ -191,7 +308,7 @@ export function HealthConfigSection({
 						) : (
 							<>
 								<Save className="h-4 w-4" />
-								Save Health Settings
+								Save Settings
 							</>
 						)}
 					</button>

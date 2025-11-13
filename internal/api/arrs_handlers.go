@@ -1,6 +1,8 @@
 package api
 
 import (
+	"log/slog"
+
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -78,16 +80,16 @@ type TestConnectionRequest struct {
 // handleListArrsInstances returns all arrs instances
 func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		s.logger.Error("Arrs service is not available")
+		slog.ErrorContext(c.Context(), "Arrs service is not available")
 		return c.Status(503).JSON(fiber.Map{
 			"success": false,
 			"message": "Arrs not available",
 		})
 	}
 
-	s.logger.Debug("Listing arrs instances")
+	slog.DebugContext(c.Context(), "Listing arrs instances")
 	instances := s.arrsService.GetAllInstances()
-	s.logger.Debug("Found arrs instances", "count", len(instances))
+	slog.DebugContext(c.Context(), "Found arrs instances", "count", len(instances))
 
 	response := make([]*ArrsInstanceResponse, len(instances))
 	for i, instance := range instances {
@@ -108,7 +110,7 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 // handleGetArrsInstance returns a single arrs instance by type and name
 func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		s.logger.Error("Arrs service is not available")
+		slog.ErrorContext(c.Context(), "Arrs service is not available")
 		return c.Status(503).JSON(fiber.Map{
 			"success": false,
 			"message": "Arrs not available",
@@ -125,10 +127,10 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 		})
 	}
 
-	s.logger.Debug("Getting arrs instance", "type", instanceType, "name", instanceName)
+	slog.DebugContext(c.Context(), "Getting arrs instance", "type", instanceType, "name", instanceName)
 	instance := s.arrsService.GetInstance(instanceType, instanceName)
 	if instance == nil {
-		s.logger.Debug("Arrs instance not found", "type", instanceType, "name", instanceName)
+		slog.DebugContext(c.Context(), "Arrs instance not found", "type", instanceType, "name", instanceName)
 		return c.Status(404).JSON(fiber.Map{
 			"success": false,
 			"message": "Instance not found",
@@ -173,7 +175,7 @@ func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := s.arrsService.TestConnection(string(req.Type), req.URL, req.APIKey); err != nil {
+	if err := s.arrsService.TestConnection(c.Context(), string(req.Type), req.URL, req.APIKey); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"success": false,
 			"error":   err.Error(),

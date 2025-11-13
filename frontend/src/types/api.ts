@@ -19,7 +19,6 @@ export const QueueStatus = {
 	PROCESSING: "processing",
 	COMPLETED: "completed",
 	FAILED: "failed",
-	RETRYING: "retrying",
 } as const;
 
 export type QueueStatus = (typeof QueueStatus)[keyof typeof QueueStatus];
@@ -42,6 +41,12 @@ export interface QueueItem {
 	batch_id?: string;
 	metadata?: string;
 	file_size?: number;
+	percentage?: number; // Progress percentage (0-100), only present for items being processed
+}
+
+export interface ProgressUpdate {
+	id: number;
+	percentage: number;
 }
 
 export interface QueueStats {
@@ -81,7 +86,6 @@ export const HealthStatus = {
 	PENDING: "pending",
 	CHECKING: "checking",
 	HEALTHY: "healthy",
-	PARTIAL: "partial",
 	CORRUPTED: "corrupted",
 	REPAIR_TRIGGERED: "repair_triggered",
 } as const;
@@ -96,20 +100,20 @@ export interface FileHealth {
 	last_error?: string;
 	retry_count: number;
 	max_retries: number;
-	next_retry_at?: string;
 	source_nzb_path?: string;
+	library_path?: string;
 	error_details?: string;
 	repair_retry_count: number;
 	max_repair_retries: number;
 	created_at: string;
 	updated_at: string;
+	scheduled_check_at?: string;
 }
 
 export interface HealthStats {
 	total: number;
 	pending: number;
 	healthy: number;
-	partial: number;
 	corrupted: number;
 }
 
@@ -124,6 +128,16 @@ export interface HealthRepairRequest {
 export interface HealthCleanupRequest {
 	older_than?: string;
 	status?: HealthStatus;
+	delete_files?: boolean;
+}
+
+export interface HealthCleanupResponse {
+	records_deleted: number;
+	files_deleted?: number;
+	older_than: string;
+	status_filter?: HealthStatus;
+	file_deletion_errors?: string[];
+	warning?: string;
 }
 
 // System types
@@ -163,7 +177,7 @@ export interface SegmentInfo {
 export interface FileMetadata {
 	file_size: number;
 	source_nzb_path: string;
-	status: "healthy" | "partial" | "corrupted" | "unspecified";
+	status: "corrupted" | "unspecified";
 	segment_count: number;
 	available_segments?: number;
 	encryption: "none" | "rclone";
@@ -237,17 +251,51 @@ export interface HealthWorkerStatus {
 	last_error?: string;
 }
 
+// Library Sync types
+export interface LibrarySyncProgress {
+	total_files: number;
+	processed_files: number;
+	start_time: string;
+}
+
+export interface LibrarySyncResult {
+	files_added: number;
+	files_deleted: number;
+	duration: number;
+	completed_at: string;
+}
+
+export interface LibrarySyncStatus {
+	is_running: boolean;
+	progress?: LibrarySyncProgress;
+	last_sync_result?: LibrarySyncResult;
+}
+
 // Pool Metrics types
+export interface ProviderStatus {
+	id: string;
+	host: string;
+	username: string;
+	used_connections: number;
+	max_connections: number;
+	state: string;
+	error_count: number;
+	last_connection_attempt: string;
+	last_successful_connect: string;
+	failure_reason: string;
+}
+
 export interface PoolMetrics {
-	active_connections: number;
-	total_bytes_downloaded: number;
+	bytes_downloaded: number;
+	bytes_uploaded: number;
+	articles_downloaded: number;
+	articles_posted: number;
+	total_errors: number;
+	provider_errors: Record<string, number>;
 	download_speed_bytes_per_sec: number;
-	error_rate_percent: number;
-	current_memory_usage: number;
-	total_connections: number;
-	command_success_rate_percent: number;
-	acquire_wait_time_ms: number;
-	last_updated: string;
+	upload_speed_bytes_per_sec: number;
+	timestamp: string;
+	providers: ProviderStatus[];
 }
 
 // SABnzbd API response types

@@ -2,7 +2,6 @@ package health
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -13,15 +12,15 @@ import (
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/pkg/rclonecli"
-	concpool "github.com/sourcegraph/conc/pool"
 )
 
 // EventType represents the type of health event
 type EventType string
 
 const (
-	EventTypeFileRecovered EventType = "file_recovered"
+	EventTypeFileHealthy   EventType = "file_healthy"
 	EventTypeFileCorrupted EventType = "file_corrupted"
 	EventTypeCheckFailed   EventType = "check_failed"
 	EventTypeFileRemoved   EventType = "file_removed"
@@ -51,7 +50,6 @@ type HealthConfig struct {
 	// Health check settings
 	MaxRetries            int          // Maximum retries before marking as permanently corrupted
 	MaxSegmentConnections int          // Maximum concurrent connections for segment checking
-	CheckAllSegments      bool         // Whether to check all segments or just first one
 	EventHandler          EventHandler // Optional event handler for notifications
 }
 
@@ -84,16 +82,20 @@ func NewHealthChecker(
 	}
 }
 
-func (hc *HealthChecker) getMaxSegmentConnections() int {
-	connections := hc.configGetter().Health.MaxSegmentConnections
+func (hc *HealthChecker) getMaxConnectionsForHealthChecks() int {
+	connections := hc.configGetter().Health.MaxConnectionsForHealthChecks
 	if connections <= 0 {
 		return 5 // Default
 	}
 	return connections
 }
 
-func (hc *HealthChecker) getCheckAllSegments() bool {
-	return hc.configGetter().Health.CheckAllSegments
+func (hc *HealthChecker) getSegmentSamplePercentage() int {
+	percentage := hc.configGetter().Health.SegmentSamplePercentage
+	if percentage < 1 || percentage > 100 {
+		return 5 // Default: 5%
+	}
+	return percentage
 }
 
 // CheckFile checks the health of a specific file
@@ -111,7 +113,7 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string) HealthE
 	}
 	if fileMeta == nil {
 		// File not found - remove from health database
-		_ = hc.healthRepo.DeleteHealthRecord(filePath)
+		_ = hc.healthRepo.DeleteHealthRecord(ctx, filePath)
 
 		return HealthEvent{
 			Type:      EventTypeFileRemoved,
@@ -141,85 +143,30 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		return event
 	}
 
-	var segmentsToCheck []*metapb.SegmentData
-	if hc.getCheckAllSegments() {
-		// Check all segments
-		segmentsToCheck = fileMeta.SegmentData
-	} else {
-		// Check only first segment (faster, default behavior)
-		segmentsToCheck = []*metapb.SegmentData{fileMeta.SegmentData[0]}
-	}
+	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", hc.getSegmentSamplePercentage())
 
-	slog.Info("Checking segments", "file_path", filePath, "segments_to_check", len(segmentsToCheck))
-
-	// Check segments with configurable concurrency
-	checkErr := hc.checkSegments(ctx, segmentsToCheck)
+	// Validate segment availability using shared validation logic
+	checkErr := usenet.ValidateSegmentAvailability(
+		ctx,
+		fileMeta.SegmentData,
+		hc.poolManager,
+		hc.getMaxConnectionsForHealthChecks(),
+		hc.getSegmentSamplePercentage(),
+		nil, // No progress callback for health checks
+	)
 
 	if checkErr != nil {
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("corrupted file some segments are missing")
+		event.Error = fmt.Errorf("corrupted file some segments are missing: %w", checkErr)
 		return event
 	}
 
-	// All checked segments are available
-	event.Type = EventTypeFileRecovered
-	event.Status = database.HealthStatusHealthy
+	// All checked segments are available - record will be deleted
+	event.Type = EventTypeFileHealthy
+	// Status not needed as the record will be deleted from database
 
 	return event
-}
-
-// checkSegments checks multiple segments concurrently with connection limit
-func (hc *HealthChecker) checkSegments(ctx context.Context, segments []*metapb.SegmentData) (err error) {
-	totalCount := len(segments)
-	if totalCount == 0 {
-		return nil
-	}
-
-	// Create pool with concurrency limit and context cancellation
-	p := concpool.NewWithResults[bool]().
-		WithMaxGoroutines(hc.getMaxSegmentConnections()).
-		WithContext(ctx).
-		WithCancelOnError()
-
-	// Check all segments concurrently using pool
-	for _, segment := range segments {
-		p.Go(func(ctx context.Context) (bool, error) {
-			return hc.checkSingleSegment(ctx, segment.Id)
-		})
-	}
-
-	// Wait for all checks to complete and collect results
-	_, err = p.Wait()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// checkSingleSegment checks if a single segment exists
-func (hc *HealthChecker) checkSingleSegment(ctx context.Context, segmentID string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// Get current pool from manager
-	usenetPool, err := hc.poolManager.GetPool()
-	if err != nil {
-		return false, fmt.Errorf("failed to get usenet pool: %w", err)
-	}
-
-	responseCode, err := usenetPool.Stat(ctx, segmentID, []string{})
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return false, nil
-		}
-
-		return false, fmt.Errorf("failed to check article %s: %w", segmentID, err)
-	}
-
-	// NNTP response codes: 223 = article exists, other codes indicate issues
-	return responseCode == 223, nil
 }
 
 // NotifyRcloneVFS notifies rclone VFS about a file status change (async, non-blocking)
@@ -230,7 +177,7 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 
 	// Only notify on significant status changes (healthy <-> corrupted)
 	switch event.Type {
-	case EventTypeFileRecovered, EventTypeFileCorrupted:
+	case EventTypeFileHealthy, EventTypeFileCorrupted:
 		// Continue with notification
 	default:
 		return // No notification needed for other event types
@@ -248,12 +195,12 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		// Refresh cache asynchronously to avoid blocking health checks
 		err := hc.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
 		if err != nil {
-			slog.Error("Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
+			slog.ErrorContext(ctx, "Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
 		}
 	}()
 }
 
 // GetHealthStats returns current health statistics
-func (hc *HealthChecker) GetHealthStats() (map[database.HealthStatus]int, error) {
-	return hc.healthRepo.GetHealthStats()
+func (hc *HealthChecker) GetHealthStats(ctx context.Context) (map[database.HealthStatus]int, error) {
+	return hc.healthRepo.GetHealthStats(ctx)
 }

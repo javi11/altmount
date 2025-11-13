@@ -8,14 +8,14 @@ enum Encryption {
   NONE = 0; // No encryption
   RCLONE = 1;      // Rclone encryption
   HEADERS = 2;        // Headers encryption
+  AES = 3;         // Generic AES-CBC encryption (for RAR, 7z, etc.)
 }
 
 // FileStatus represents the health status of a file
 enum FileStatus {
   FILE_STATUS_UNSPECIFIED = 0;
-  FILE_STATUS_HEALTHY = 1;     // All segments available
-  FILE_STATUS_PARTIAL = 2;     // Some segments missing
-  FILE_STATUS_CORRUPTED = 3;   // No segments available or corrupted
+  FILE_STATUS_HEALTHY = 1;     // All segments available and file is complete
+  FILE_STATUS_CORRUPTED = 3;   // Segments missing or corrupted
 }
 
 // SegmentData contains Usenet segment information with byte offsets
@@ -34,8 +34,11 @@ message FileMetadata {
   FileStatus status = 3;        // Health status of the file
   int64 created_at = 4;         // Unix timestamp when metadata was created
   int64 modified_at = 5;        // Unix timestamp when last modified
-  string password = 6;          // Password for encrypted files (if any)
-  string salt = 7;              // Salt for encrypted files (if any)
+  string password = 6;          // Password for rclone encrypted files
+  string salt = 7;              // Salt for rclone encrypted files
   Encryption encryption = 8;    // Encryption type used for the file
   repeated SegmentData segment_data = 9;  // Segment information (lazy-loaded)
+  bytes aes_key = 10;           // AES encryption key (for AES-encrypted archives)
+  bytes aes_iv = 11;            // AES initialization vector (for AES-encrypted archives)
+  int64 release_date = 12;      // Unix timestamp of the original Usenet post release date
 }

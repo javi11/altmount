@@ -180,7 +180,7 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 	}
 
 	// Check if file is already in queue
-	inQueue, err := s.queueRepo.IsFileInQueue(req.FilePath)
+	inQueue, err := s.queueRepo.IsFileInQueue(c.Context(),req.FilePath)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -208,9 +208,9 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		RelativePath: req.RelativePath,
 	}
 
-	slog.Debug("Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath)
+	slog.DebugContext(c.Context(), "Adding file to queue", "file", req.FilePath, "relative_path", req.RelativePath)
 
-	err = s.queueRepo.AddToQueue(item)
+	err = s.queueRepo.AddToQueue(c.Context(),item)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -219,7 +219,7 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		})
 	}
 
-	slog.Debug("File added to queue", "file", req.FilePath, "queue_id", item.ID)
+	slog.DebugContext(c.Context(), "File added to queue", "file", req.FilePath, "queue_id", item.ID)
 
 	// Return success response
 	response := ManualImportResponse{

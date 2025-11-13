@@ -59,7 +59,7 @@ export function Sidebar() {
 			case "/queue":
 				return queueStats ? queueStats.total_processing + queueStats.total_failed : 0;
 			case "/health":
-				return healthStats ? healthStats.corrupted + healthStats.partial : 0;
+				return healthStats ? healthStats.corrupted : 0;
 			default:
 				return 0;
 		}

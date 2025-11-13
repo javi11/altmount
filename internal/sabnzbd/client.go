@@ -2,6 +2,7 @@ package sabnzbd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,15 +30,28 @@ func NewSABnzbdClient() *SABnzbdClient {
 
 // SABnzbdAPIResponse represents a response from SABnzbd API
 type SABnzbdAPIResponse struct {
-	Status bool    `json:"status"`
-	Error  *string `json:"error,omitempty"`
+	Status bool     `json:"status"`
+	Error  *string  `json:"error,omitempty"`
 	NzoIds []string `json:"nzo_ids,omitempty"`
 }
 
+// Priority constants for SABnzbd downloads
+const (
+	PriorityDefault = "-100" // Default priority
+	PriorityPaused  = "-2"   // Paused download
+	PriorityLow     = "-1"   // Low priority
+	PriorityNormal  = "0"    // Normal priority
+	PriorityHigh    = "1"    // High priority
+	PriorityForce   = "2"    // Force priority
+)
+
 // SendNZBFile sends an NZB file to an external SABnzbd instance
 // Returns the NZO ID assigned by SABnzbd, or an error
-// Priority should be "0" (low), "1" (normal), or "2" (high)
-func (c *SABnzbdClient) SendNZBFile(host, apiKey, nzbPath string, category *string, priority *string) (string, error) {
+// Priority values: "-100" (default), "-2" (paused), "-1" (low), "0" (normal), "1" (high), "2" (force)
+func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath string, category *string, priority *string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	// Validate inputs
 	if host == "" {
 		return "", fmt.Errorf("SABnzbd host cannot be empty")
@@ -106,7 +120,7 @@ func (c *SABnzbdClient) SendNZBFile(host, apiKey, nzbPath string, category *stri
 	}
 
 	// Create the HTTP request
-	req, err := http.NewRequest("POST", requestURL, body)
+	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, body)
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}

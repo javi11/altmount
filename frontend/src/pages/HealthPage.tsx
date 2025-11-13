@@ -1,27 +1,9 @@
-import {
-	AlertTriangle,
-	ChevronDown,
-	ChevronUp,
-	Heart,
-	MoreHorizontal,
-	Pause,
-	Play,
-	PlayCircle,
-	RefreshCw,
-	Shield,
-	Trash2,
-	Wrench,
-	X,
-} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
-import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
-import { HealthBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import { useToast } from "../contexts/ToastContext";
 import {
-	useAddHealthCheck,
 	useCancelHealthCheck,
 	useCleanupHealth,
 	useDeleteBulkHealthItems,
@@ -29,31 +11,42 @@ import {
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
-	useHealthWorkerStatus,
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
 } from "../hooks/useApi";
-import { formatRelativeTime, truncateText } from "../lib/utils";
-import type { FileHealth } from "../types/api";
+import { useConfig } from "../hooks/useConfig";
+import {
+	useCancelLibrarySync,
+	useLibrarySyncStatus,
+	useStartLibrarySync,
+} from "../hooks/useLibrarySync";
+import { BulkActionsToolbar } from "./HealthPage/components/BulkActionsToolbar";
+import { CleanupModal } from "./HealthPage/components/CleanupModal";
+import { HealthFilters } from "./HealthPage/components/HealthFilters";
+import { HealthPageHeader } from "./HealthPage/components/HealthPageHeader";
+import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
+import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
+import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
+import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
+import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
 
 export function HealthPage() {
 	const [page, setPage] = useState(0);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState("");
-	const [showAddHealthModal, setShowAddHealthModal] = useState(false);
-	const [healthCheckForm, setHealthCheckForm] = useState({
-		file_path: "",
-		source_nzb_path: "",
-		priority: false,
+	const [showCleanupModal, setShowCleanupModal] = useState(false);
+	const [cleanupConfig, setCleanupConfig] = useState<CleanupConfig>({
+		older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+		delete_files: false,
 	});
 	const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-	const [refreshInterval, setRefreshInterval] = useState(5000); // 5 seconds default
+	const [refreshInterval, setRefreshInterval] = useState(5000);
 	const [nextRefreshTime, setNextRefreshTime] = useState<Date | null>(null);
 	const [userInteracting, setUserInteracting] = useState(false);
 	const [countdown, setCountdown] = useState(0);
 	const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-	const [sortBy, setSortBy] = useState<"file_path" | "created_at" | "status">("created_at");
-	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+	const [sortBy, setSortBy] = useState<SortBy>("created_at");
+	const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
 	const pageSize = 20;
 	const {
@@ -72,17 +65,28 @@ export function HealthPage() {
 	});
 
 	const { data: stats } = useHealthStats();
-	const { data: workerStatus } = useHealthWorkerStatus();
 	const deleteItem = useDeleteHealthItem();
 	const deleteBulkItems = useDeleteBulkHealthItems();
 	const restartBulkItems = useRestartBulkHealthItems();
 	const cleanupHealth = useCleanupHealth();
-	const addHealthCheck = useAddHealthCheck();
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
 	const { confirmDelete, confirmAction } = useConfirm();
 	const { showToast } = useToast();
+
+	// Config hook
+	const { data: config } = useConfig();
+
+	// Library sync hooks
+	const {
+		data: librarySyncStatus,
+		error: librarySyncError,
+		isLoading: librarySyncLoading,
+		refetch: refetchLibrarySync,
+	} = useLibrarySyncStatus();
+	const startLibrarySync = useStartLibrarySync();
+	const cancelLibrarySync = useCancelLibrarySync();
 
 	const handleDelete = async (id: number) => {
 		const confirmed = await confirmDelete("health record");
@@ -91,43 +95,48 @@ export function HealthPage() {
 		}
 	};
 
-	const handleCleanup = async () => {
-		const confirmed = await confirmAction(
-			"Cleanup Old Health Records",
-			"Are you sure you want to cleanup old health records? This will remove records older than 7 days.",
-			{
-				type: "warning",
-				confirmText: "Cleanup",
-				confirmButtonClass: "btn-warning",
-			},
-		);
-		if (confirmed) {
-			await cleanupHealth.mutateAsync({
-				older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-			});
-		}
+	const handleCleanup = () => {
+		setCleanupConfig({
+			older_than: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+			delete_files: false,
+		});
+		setShowCleanupModal(true);
 	};
 
-	const handleAddHealthCheck = async () => {
-		if (!healthCheckForm.file_path.trim() || !healthCheckForm.source_nzb_path?.trim()) {
-			showToast({
-				type: "warning",
-				title: "Missing Required Fields",
-				message: "Please fill in both file path and source NZB path",
-			});
-			return;
-		}
-
+	const handleCleanupConfirm = async () => {
 		try {
-			await addHealthCheck.mutateAsync(healthCheckForm);
-			setShowAddHealthModal(false);
-			setHealthCheckForm({
-				file_path: "",
-				source_nzb_path: "",
-				priority: false,
+			const data = await cleanupHealth.mutateAsync({
+				older_than: new Date(cleanupConfig.older_than).toISOString(),
+				delete_files: cleanupConfig.delete_files,
 			});
-		} catch (err) {
-			console.error("Failed to add health check:", err);
+
+			setShowCleanupModal(false);
+
+			let message = `Successfully deleted ${data.records_deleted} health record${data.records_deleted !== 1 ? "s" : ""}`;
+			if (cleanupConfig.delete_files && data.files_deleted !== undefined) {
+				message += ` and ${data.files_deleted} file${data.files_deleted !== 1 ? "s" : ""}`;
+			}
+
+			showToast({
+				title: "Cleanup Successful",
+				message,
+				type: "success",
+			});
+
+			if (data.warning && data.file_deletion_errors) {
+				showToast({
+					title: "Warning",
+					message: data.warning,
+					type: "warning",
+				});
+			}
+		} catch (error) {
+			console.error("Failed to cleanup health records:", error);
+			showToast({
+				title: "Cleanup Failed",
+				message: "Failed to cleanup health records",
+				type: "error",
+			});
 		}
 	};
 
@@ -186,7 +195,6 @@ export function HealthPage() {
 				};
 				console.error("Failed to trigger repair:", err);
 
-				// Check for 404 Not Found (file not in ARR)
 				if (error.code === "NOT_FOUND") {
 					showToast({
 						title: "File Not Found in ARR",
@@ -197,7 +205,6 @@ export function HealthPage() {
 					return;
 				}
 
-				// Get error message from response or direct error
 				const errorMessage = error.message || "Unknown error";
 
 				showToast({
@@ -206,6 +213,42 @@ export function HealthPage() {
 					type: "error",
 				});
 			}
+		}
+	};
+
+	const handleStartLibrarySync = async () => {
+		try {
+			await startLibrarySync.mutateAsync();
+			showToast({
+				title: "Library Scan Started",
+				message: "Library scan has been triggered successfully",
+				type: "success",
+			});
+		} catch (err) {
+			console.error("Failed to start library sync:", err);
+			showToast({
+				title: "Failed to Start Scan",
+				message: "Could not start library scan. Please try again.",
+				type: "error",
+			});
+		}
+	};
+
+	const handleCancelLibrarySync = async () => {
+		try {
+			await cancelLibrarySync.mutateAsync();
+			showToast({
+				title: "Library Scan Cancelled",
+				message: "Library scan has been cancelled",
+				type: "info",
+			});
+		} catch (err) {
+			console.error("Failed to cancel library sync:", err);
+			showToast({
+				title: "Failed to Cancel Scan",
+				message: "Could not cancel library scan. Please try again.",
+				type: "error",
+			});
 		}
 	};
 
@@ -219,7 +262,6 @@ export function HealthPage() {
 		setNextRefreshTime(null);
 	};
 
-	// Multi-select handlers
 	const handleSelectItem = (filePath: string, checked: boolean) => {
 		setSelectedItems((prev) => {
 			const newSet = new Set(prev);
@@ -308,46 +350,35 @@ export function HealthPage() {
 		}
 	};
 
-	// Clear selection when page changes or filters change
 	const clearSelection = useCallback(() => {
 		setSelectedItems(new Set());
 	}, []);
 
-	// Handle sorting
-	const handleSort = (column: "file_path" | "created_at" | "status") => {
+	const handleSort = (column: SortBy) => {
 		if (sortBy === column) {
-			// Toggle sort order
 			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
 		} else {
-			// New column, default to ascending for file_path and status, descending for created_at
 			setSortBy(column);
 			setSortOrder(column === "created_at" ? "desc" : "asc");
 		}
-		setPage(0); // Reset to first page when sorting changes
-		clearSelection(); // Clear selection when sorting changes
+		setPage(0);
+		clearSelection();
 	};
 
-	// Pause auto-refresh during user interactions
 	const handleUserInteractionStart = () => {
 		setUserInteracting(true);
 	};
 
 	const handleUserInteractionEnd = () => {
-		// Resume auto-refresh after a short delay
 		const timer = setTimeout(() => {
 			setUserInteracting(false);
-		}, 2000); // 2 second delay before resuming auto-refresh
+		}, 2000);
 
 		return () => clearTimeout(timer);
 	};
 
 	const data = healthResponse?.data;
 	const meta = healthResponse?.meta;
-
-	// Helper functions for select all checkbox state
-	const isAllSelected =
-		data && data.length > 0 && data.every((item) => selectedItems.has(item.file_path));
-	const isIndeterminate = data && selectedItems.size > 0 && !isAllSelected;
 
 	// Update next refresh time when auto-refresh is enabled
 	useEffect(() => {
@@ -356,10 +387,8 @@ export function HealthPage() {
 			return;
 		}
 
-		// Set initial next refresh time
 		setNextRefreshTime(new Date(Date.now() + refreshInterval));
 
-		// Reset the timer every time React Query refetches
 		const interval = setInterval(() => {
 			setNextRefreshTime(new Date(Date.now() + refreshInterval));
 		}, refreshInterval);
@@ -378,13 +407,11 @@ export function HealthPage() {
 			const remaining = Math.max(0, Math.ceil((nextRefreshTime.getTime() - Date.now()) / 1000));
 			setCountdown(remaining);
 
-			// If countdown reaches 0, reset to the full interval (handles any sync issues)
 			if (remaining === 0) {
 				setNextRefreshTime(new Date(Date.now() + refreshInterval));
 			}
 		};
 
-		// Initial countdown update
 		updateCountdown();
 		const timer = setInterval(updateCountdown, 1000);
 
@@ -399,10 +426,9 @@ export function HealthPage() {
 	}, [searchTerm, statusFilter]);
 
 	// Clear selection when page, search, or filter changes
-	// biome-ignore lint/correctness/useExhaustiveDependencies: needs to be cleared when status filter changes
 	useEffect(() => {
 		clearSelection();
-	}, [clearSelection, statusFilter]);
+	}, [clearSelection]);
 
 	if (error) {
 		return (
@@ -415,471 +441,74 @@ export function HealthPage() {
 
 	return (
 		<div className="space-y-6">
-			{/* Header */}
-			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h1 className="font-bold text-3xl">Health Monitoring</h1>
-					<p className="text-base-content/70">
-						Monitor file integrity status - view all files being health checked
-						{autoRefreshEnabled && !userInteracting && countdown > 0 && (
-							<span className="ml-2 text-info text-sm">• Auto-refresh in {countdown}s</span>
-						)}
-						{userInteracting && autoRefreshEnabled && (
-							<span className="ml-2 text-sm text-warning">• Auto-refresh paused</span>
-						)}
-					</p>
-				</div>
-				<div className="flex flex-wrap gap-2">
-					{/* Auto-refresh controls */}
-					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							className={`btn btn-sm ${autoRefreshEnabled ? "btn-success" : "btn-outline"}`}
-							onClick={toggleAutoRefresh}
-							title={autoRefreshEnabled ? "Disable auto-refresh" : "Enable auto-refresh"}
-						>
-							{autoRefreshEnabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-							Auto
-						</button>
+			<HealthPageHeader
+				autoRefreshEnabled={autoRefreshEnabled}
+				refreshInterval={refreshInterval}
+				countdown={countdown}
+				userInteracting={userInteracting}
+				isLoading={isLoading}
+				isCleanupPending={cleanupHealth.isPending}
+				onToggleAutoRefresh={toggleAutoRefresh}
+				onRefreshIntervalChange={handleRefreshIntervalChange}
+				onRefresh={() => refetch()}
+				onCleanup={handleCleanup}
+				onUserInteractionStart={handleUserInteractionStart}
+				onUserInteractionEnd={handleUserInteractionEnd}
+			/>
 
-						{autoRefreshEnabled && (
-							<select
-								className="select select-sm"
-								value={refreshInterval}
-								onChange={(e) => handleRefreshIntervalChange(Number(e.target.value))}
-								onFocus={handleUserInteractionStart}
-								onBlur={handleUserInteractionEnd}
-							>
-								<option value={5000}>5s</option>
-								<option value={10000}>10s</option>
-								<option value={30000}>30s</option>
-								<option value={60000}>60s</option>
-							</select>
-						)}
-					</div>
+			<HealthStatsCards stats={stats} />
 
-					<button
-						type="button"
-						className="btn btn-outline"
-						onClick={() => refetch()}
-						disabled={isLoading}
-					>
-						<RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-						Refresh
-					</button>
-					<button
-						type="button"
-						className="btn btn-warning"
-						onClick={handleCleanup}
-						disabled={cleanupHealth.isPending}
-					>
-						<Trash2 className="h-4 w-4" />
-						Cleanup Old Records
-					</button>
-				</div>
-			</div>
+			<LibraryScanStatus
+				status={librarySyncStatus}
+				isLoading={librarySyncLoading}
+				error={librarySyncError}
+				isStartPending={startLibrarySync.isPending}
+				isCancelPending={cancelLibrarySync.isPending}
+				syncIntervalMinutes={config?.health.library_sync_interval_minutes}
+				onStart={handleStartLibrarySync}
+				onCancel={handleCancelLibrarySync}
+				onRetry={refetchLibrarySync}
+			/>
 
-			{/* Stats Cards */}
-			{stats && (
-				<div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-					<div className="stat rounded-box bg-base-100 shadow">
-						<div className="stat-title">Files Tracked</div>
-						<div className="stat-value text-primary">{stats.total}</div>
-						<div className="stat-desc">Issues being monitored</div>
-					</div>
-					<div className="stat rounded-box bg-base-100 shadow">
-						<div className="stat-title">Pending</div>
-						<div className="stat-value text-info">{stats.pending || 0}</div>
-						<div className="stat-desc">Awaiting check</div>
-					</div>
-					<div className="stat rounded-box bg-base-100 shadow">
-						<div className="stat-title">Partial</div>
-						<div className="stat-value text-warning">{stats.partial}</div>
-						<div className="stat-desc">Need attention</div>
-					</div>
-					<div className="stat rounded-box bg-base-100 shadow">
-						<div className="stat-title">Corrupted</div>
-						<div className="stat-value text-error">{stats.corrupted}</div>
-						<div className="stat-desc">Require action</div>
-					</div>
-				</div>
-			)}
+			<HealthFilters
+				searchTerm={searchTerm}
+				statusFilter={statusFilter}
+				onSearchChange={setSearchTerm}
+				onStatusFilterChange={setStatusFilter}
+				onUserInteractionStart={handleUserInteractionStart}
+				onUserInteractionEnd={handleUserInteractionEnd}
+			/>
 
-			{/* Health Worker Status */}
-			{workerStatus && (
-				<div className="card bg-base-100 shadow-lg">
-					<div className="card-body">
-						<div className="flex items-center justify-between">
-							<h2 className="card-title">Health Worker Status</h2>
-							<div
-								className={`badge ${workerStatus.status === "running" ? "badge-success" : "badge-error"}`}
-							>
-								{workerStatus.status === "running" ? "Running" : "Stopped"}
-							</div>
-						</div>
+			<BulkActionsToolbar
+				selectedCount={selectedItems.size}
+				isRestartPending={restartBulkItems.isPending}
+				isDeletePending={deleteBulkItems.isPending}
+				onClearSelection={() => setSelectedItems(new Set())}
+				onBulkRestart={handleBulkRestart}
+				onBulkDelete={handleBulkDelete}
+			/>
 
-						<div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
-							<div className="stat">
-								<div className="stat-title">Manual Checks</div>
-								<div className="stat-value text-info">{workerStatus.pending_manual_checks}</div>
-								<div className="stat-desc">Pending checks</div>
-							</div>
-							<div className="stat">
-								<div className="stat-title">Files Checked</div>
-								<div className="stat-value text-success">{workerStatus.total_files_checked}</div>
-								<div className="stat-desc">Total checked</div>
-							</div>
-							<div className="stat">
-								<div className="stat-title">Corrupted</div>
-								<div className="stat-value text-error">{workerStatus.total_files_corrupted}</div>
-								<div className="stat-desc">Files corrupted</div>
-							</div>
-							<div className="stat">
-								<div className="stat-title">Runs</div>
-								<div className="stat-value text-sm">{workerStatus.total_runs_completed}</div>
-								<div className="stat-desc">Cycles completed</div>
-							</div>
-						</div>
+			<HealthTable
+				data={data}
+				isLoading={isLoading}
+				selectedItems={selectedItems}
+				sortBy={sortBy}
+				sortOrder={sortOrder}
+				searchTerm={searchTerm}
+				statusFilter={statusFilter}
+				isCancelPending={cancelHealthCheck.isPending}
+				isDirectCheckPending={directHealthCheck.isPending}
+				isRepairPending={repairHealthItem.isPending}
+				isDeletePending={deleteItem.isPending}
+				onSelectItem={handleSelectItem}
+				onSelectAll={handleSelectAll}
+				onSort={handleSort}
+				onCancelCheck={handleCancelCheck}
+				onManualCheck={handleManualCheck}
+				onRepair={handleRepair}
+				onDelete={handleDelete}
+			/>
 
-						{workerStatus.last_run_time && (
-							<div className="mt-2 text-base-content/70 text-sm">
-								Last run: {formatRelativeTime(workerStatus.last_run_time)}
-							</div>
-						)}
-					</div>
-				</div>
-			)}
-
-			{/* Filters and Search */}
-			<div className="card bg-base-100 shadow-lg">
-				<div className="card-body">
-					<div className="flex flex-col gap-4 sm:flex-row">
-						{/* Search */}
-						<fieldset className="fieldset flex-1">
-							<legend className="fieldset-legend">Search Files</legend>
-							<input
-								type="text"
-								placeholder="Search files..."
-								className="input"
-								value={searchTerm}
-								onChange={(e) => setSearchTerm(e.target.value)}
-								onFocus={handleUserInteractionStart}
-								onBlur={handleUserInteractionEnd}
-							/>
-						</fieldset>
-
-						{/* Status Filter */}
-						<fieldset className="fieldset sm:w-48">
-							<legend className="fieldset-legend">Status</legend>
-							<select
-								className="select"
-								value={statusFilter}
-								onChange={(e) => setStatusFilter(e.target.value)}
-								onFocus={handleUserInteractionStart}
-								onBlur={handleUserInteractionEnd}
-							>
-								<option value="">All Statuses</option>
-								<option value="pending">Pending</option>
-								<option value="checking">Checking</option>
-								<option value="healthy">Healthy</option>
-								<option value="partial">Partial</option>
-								<option value="corrupted">Corrupted</option>
-								<option value="repair_triggered">Repair Triggered</option>
-							</select>
-						</fieldset>
-					</div>
-				</div>
-			</div>
-
-			{/* Bulk Actions Toolbar */}
-			{selectedItems.size > 0 && (
-				<div className="card bg-base-100 shadow-lg">
-					<div className="card-body">
-						<div className="flex items-center justify-between">
-							<div className="flex items-center gap-4">
-								<span className="font-semibold text-sm">
-									{selectedItems.size} record{selectedItems.size !== 1 ? "s" : ""} selected
-								</span>
-								<button
-									type="button"
-									className="btn btn-ghost btn-sm"
-									onClick={() => setSelectedItems(new Set())}
-								>
-									Clear Selection
-								</button>
-							</div>
-							<div className="flex items-center gap-2">
-								<button
-									type="button"
-									className="btn btn-info btn-sm"
-									onClick={handleBulkRestart}
-									disabled={restartBulkItems.isPending}
-								>
-									<RefreshCw className="h-4 w-4" />
-									Restart Checks
-								</button>
-								<button
-									type="button"
-									className="btn btn-error btn-sm"
-									onClick={handleBulkDelete}
-									disabled={deleteBulkItems.isPending}
-								>
-									<Trash2 className="h-4 w-4" />
-									Delete Selected
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>
-			)}
-
-			{/* Health Table */}
-			<div className="card bg-base-100 shadow-lg">
-				<div className="card-body p-0">
-					{isLoading ? (
-						<LoadingTable columns={8} />
-					) : data && data.length > 0 ? (
-						<div>
-							<table className="table-zebra table">
-								<thead>
-									<tr>
-										<th className="w-12">
-											<label className="cursor-pointer">
-												<input
-													type="checkbox"
-													className="checkbox"
-													checked={isAllSelected}
-													ref={(input) => {
-														if (input) input.indeterminate = Boolean(isIndeterminate);
-													}}
-													onChange={(e) => handleSelectAll(e.target.checked)}
-												/>
-											</label>
-										</th>
-										<th>
-											<button
-												type="button"
-												className="flex items-center gap-1 hover:text-primary"
-												onClick={() => handleSort("file_path")}
-											>
-												File Path
-												{sortBy === "file_path" &&
-													(sortOrder === "asc" ? (
-														<ChevronUp className="h-4 w-4" />
-													) : (
-														<ChevronDown className="h-4 w-4" />
-													))}
-											</button>
-										</th>
-										<th>Source NZB</th>
-										<th>
-											<button
-												type="button"
-												className="flex items-center gap-1 hover:text-primary"
-												onClick={() => handleSort("status")}
-											>
-												Status
-												{sortBy === "status" &&
-													(sortOrder === "asc" ? (
-														<ChevronUp className="h-4 w-4" />
-													) : (
-														<ChevronDown className="h-4 w-4" />
-													))}
-											</button>
-										</th>
-										<th>Retries (H/R)</th>
-										<th>Last Check</th>
-										<th>
-											<button
-												type="button"
-												className="flex items-center gap-1 hover:text-primary"
-												onClick={() => handleSort("created_at")}
-											>
-												Created At
-												{sortBy === "created_at" &&
-													(sortOrder === "asc" ? (
-														<ChevronUp className="h-4 w-4" />
-													) : (
-														<ChevronDown className="h-4 w-4" />
-													))}
-											</button>
-										</th>
-										<th>Actions</th>
-									</tr>
-								</thead>
-								<tbody>
-									{data.map((item: FileHealth) => (
-										<tr
-											key={item.id}
-											className={`hover ${selectedItems.has(item.file_path) ? "bg-base-200" : ""}`}
-										>
-											<td>
-												<label className="cursor-pointer">
-													<input
-														type="checkbox"
-														className="checkbox"
-														checked={selectedItems.has(item.file_path)}
-														onChange={(e) => handleSelectItem(item.file_path, e.target.checked)}
-													/>
-												</label>
-											</td>
-											<td>
-												<div className="flex items-center space-x-3">
-													<Heart className="h-4 w-4 text-primary" />
-													<div>
-														<div className="font-bold">
-															{truncateText(item.file_path.split("/").pop() || "", 40)}
-														</div>
-														<div
-															className="tooltip text-base-content/70 text-sm"
-															data-tip={item.file_path}
-														>
-															{truncateText(item.file_path, 60)}
-														</div>
-													</div>
-												</div>
-											</td>
-											<td>
-												<div className="tooltip text-sm" data-tip={item.source_nzb_path}>
-													{truncateText(item.source_nzb_path?.split("/").pop() || "", 40)}
-												</div>
-											</td>
-											<td>
-												<div className="flex items-center gap-2">
-													<HealthBadge status={item.status} />
-												</div>
-												{/* Show last_error for repair failures and general errors */}
-												{item.last_error && (
-													<div className="mt-1">
-														<div
-															className="tooltip tooltip-bottom text-left"
-															data-tip={item.last_error}
-														>
-															<div className="cursor-help text-error text-xs">
-																{truncateText(item.last_error, 50)}
-															</div>
-														</div>
-													</div>
-												)}
-												{/* Show error_details for additional technical details */}
-												{item.error_details && item.error_details !== item.last_error && (
-													<div className="mt-1">
-														<div
-															className="tooltip tooltip-bottom text-left"
-															data-tip={item.error_details}
-														>
-															<div className="cursor-help text-warning text-xs">
-																Technical: {truncateText(item.error_details, 40)}
-															</div>
-														</div>
-													</div>
-												)}
-											</td>
-											<td>
-												<div className="flex flex-col gap-1">
-													<span
-														className={`badge badge-sm ${item.retry_count > 0 ? "badge-warning" : "badge-ghost"}`}
-														title="Health check retries"
-													>
-														H: {item.retry_count}/{item.max_retries}
-													</span>
-													{(item.status === "repair_triggered" || item.repair_retry_count > 0) && (
-														<span
-															className={`badge badge-sm ${item.repair_retry_count > 0 ? "badge-info" : "badge-ghost"}`}
-															title="Repair retries"
-														>
-															R: {item.repair_retry_count}/{item.max_repair_retries}
-														</span>
-													)}
-												</div>
-											</td>
-											<td>
-												<span className="text-base-content/70 text-sm">
-													{item.last_checked ? formatRelativeTime(item.last_checked) : "Never"}
-												</span>
-											</td>
-											<td>
-												<span className="text-base-content/70 text-sm">
-													{formatRelativeTime(item.created_at)}
-												</span>
-											</td>
-											<td>
-												<div className="dropdown dropdown-end">
-													<button tabIndex={0} type="button" className="btn btn-ghost btn-sm">
-														<MoreHorizontal className="h-4 w-4" />
-													</button>
-													<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
-														{item.status === "checking" ? (
-															<li>
-																<button
-																	type="button"
-																	onClick={() => handleCancelCheck(item.id)}
-																	disabled={cancelHealthCheck.isPending}
-																	className="text-warning"
-																>
-																	<X className="h-4 w-4" />
-																	Cancel Check
-																</button>
-															</li>
-														) : (
-															<li>
-																<button
-																	type="button"
-																	onClick={() => handleManualCheck(item.id)}
-																	disabled={directHealthCheck.isPending}
-																>
-																	<PlayCircle className="h-4 w-4" />
-																	Retry Check
-																</button>
-															</li>
-														)}
-														<li>
-															<button
-																type="button"
-																onClick={() => handleRepair(item.id)}
-																disabled={repairHealthItem.isPending}
-																className="text-info"
-															>
-																<Wrench className="h-4 w-4" />
-																Trigger Repair
-															</button>
-														</li>
-														<li>
-															<button
-																type="button"
-																onClick={() => handleDelete(item.id)}
-																disabled={deleteItem.isPending}
-																className="text-error"
-															>
-																<Trash2 className="h-4 w-4" />
-																Delete Record
-															</button>
-														</li>
-													</ul>
-												</div>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-					) : (
-						<div className="flex flex-col items-center justify-center py-12">
-							<Shield className="mb-4 h-12 w-12 text-base-content/30" />
-							<h3 className="font-semibold text-base-content/70 text-lg">
-								No health records found
-							</h3>
-							<p className="text-base-content/50">
-								{searchTerm || statusFilter
-									? "Try adjusting your filters"
-									: "No files are currently being health checked"}
-							</p>
-						</div>
-					)}
-				</div>
-			</div>
-
-			{/* Pagination */}
 			{meta?.total && meta.total > pageSize && (
 				<Pagination
 					currentPage={page + 1}
@@ -891,123 +520,16 @@ export function HealthPage() {
 				/>
 			)}
 
-			{/* Health Status Alert */}
-			{stats && stats.corrupted > 0 && (
-				<div className="alert alert-error">
-					<AlertTriangle className="h-6 w-6" />
-					<div>
-						<div className="font-bold">File Integrity Issues Detected</div>
-						<div className="text-sm">
-							{stats.corrupted} corrupted files require immediate attention.
-							{stats.partial > 0 && ` ${stats.partial} files have partial issues.`}
-						</div>
-					</div>
-				</div>
-			)}
+			<HealthStatusAlert stats={stats} />
 
-			{/* Add Health Check Modal */}
-			{showAddHealthModal && (
-				<div className="modal modal-open">
-					<div className="modal-box">
-						<div className="mb-4 flex items-center justify-between">
-							<h3 className="font-bold text-lg">Add Manual Health Check</h3>
-							<button
-								type="button"
-								className="btn btn-sm btn-circle btn-ghost"
-								onClick={() => setShowAddHealthModal(false)}
-							>
-								✕
-							</button>
-						</div>
-
-						<div className="space-y-4">
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">File Path</legend>
-								<input
-									type="text"
-									className="input"
-									placeholder="/path/to/file.mkv"
-									value={healthCheckForm.file_path}
-									onChange={(e) =>
-										setHealthCheckForm((prev) => ({
-											...prev,
-											file_path: e.target.value,
-										}))
-									}
-								/>
-								<p className="label text-base-content/70 text-sm">
-									Full path to the file that needs health checking
-								</p>
-							</fieldset>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Source NZB Path</legend>
-								<input
-									type="text"
-									className="input"
-									placeholder="/path/to/source.nzb"
-									value={healthCheckForm.source_nzb_path}
-									onChange={(e) =>
-										setHealthCheckForm((prev) => ({
-											...prev,
-											source_nzb_path: e.target.value,
-										}))
-									}
-								/>
-								<p className="label text-base-content/70 text-sm">
-									Path to the original NZB file used for this download
-								</p>
-							</fieldset>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Priority</legend>
-								<label className="label cursor-pointer">
-									<span className="label-text">Process with high priority</span>
-									<input
-										type="checkbox"
-										className="checkbox"
-										checked={healthCheckForm.priority}
-										onChange={(e) =>
-											setHealthCheckForm((prev) => ({
-												...prev,
-												priority: e.target.checked,
-											}))
-										}
-									/>
-								</label>
-								<p className="label text-base-content/70 text-sm">
-									Priority checks are processed before normal queue items
-								</p>
-							</fieldset>
-						</div>
-
-						<div className="modal-action">
-							<button
-								type="button"
-								className="btn btn-ghost"
-								onClick={() => setShowAddHealthModal(false)}
-							>
-								Cancel
-							</button>
-							<button
-								type="button"
-								className="btn btn-primary"
-								onClick={handleAddHealthCheck}
-								disabled={addHealthCheck.isPending}
-							>
-								{addHealthCheck.isPending ? (
-									<>
-										<span className="loading loading-spinner loading-sm" />
-										Adding...
-									</>
-								) : (
-									"Add Health Check"
-								)}
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
+			<CleanupModal
+				show={showCleanupModal}
+				config={cleanupConfig}
+				isPending={cleanupHealth.isPending}
+				onClose={() => setShowCleanupModal(false)}
+				onConfigChange={setCleanupConfig}
+				onConfirm={handleCleanupConfirm}
+			/>
 		</div>
 	);
 }

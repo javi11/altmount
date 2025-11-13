@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"log/slog"
 	"runtime"
 	"time"
 
@@ -15,7 +14,9 @@ import (
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -34,22 +35,24 @@ func DefaultConfig() *Config {
 
 // Server represents the API server
 type Server struct {
-	config          *Config
-	queueRepo       *database.Repository
-	healthRepo      *database.HealthRepository
-	mediaRepo       *database.MediaRepository
-	authService     *auth.Service
-	userRepo        *database.UserRepository
-	configManager   ConfigManager
-	metadataReader  *metadata.MetadataReader
-	healthWorker    *health.HealthWorker
-	importerService *importer.Service
-	poolManager     pool.Manager
-	arrsService     *arrs.Service
-	rcloneClient    rclonecli.RcloneRcClient
-	mountService    *rclone.MountService
-	logger          *slog.Logger
-	startTime       time.Time
+	config              *Config
+	queueRepo           *database.Repository
+	healthRepo          *database.HealthRepository
+	mediaRepo           *database.MediaRepository
+	authService         *auth.Service
+	userRepo            *database.UserRepository
+	configManager       ConfigManager
+	metadataReader      *metadata.MetadataReader
+	nzbFilesystem       *nzbfilesystem.NzbFilesystem
+	healthWorker        *health.HealthWorker
+	librarySyncWorker   *health.LibrarySyncWorker
+	importerService     *importer.Service
+	poolManager         pool.Manager
+	arrsService         *arrs.Service
+	rcloneClient        rclonecli.RcloneRcClient
+	mountService        *rclone.MountService
+	startTime           time.Time
+	progressBroadcaster *progress.ProgressBroadcaster
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -62,29 +65,33 @@ func NewServer(
 	userRepo *database.UserRepository,
 	configManager ConfigManager,
 	metadataReader *metadata.MetadataReader,
+	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	poolManager pool.Manager,
 	importService *importer.Service,
 	arrsService *arrs.Service,
-	mountService *rclone.MountService) *Server {
+	mountService *rclone.MountService,
+	progressBroadcaster *progress.ProgressBroadcaster,
+) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
 	server := &Server{
-		config:          config,
-		queueRepo:       queueRepo,
-		healthRepo:      healthRepo,
-		mediaRepo:       mediaRepo,
-		authService:     authService,
-		userRepo:        userRepo,
-		configManager:   configManager,
-		metadataReader:  metadataReader,
-		importerService: importService, // Will be set later via SetImporterService
-		poolManager:     poolManager,
-		arrsService:     arrsService,
-		mountService:    mountService,
-		logger:          slog.Default(),
-		startTime:       time.Now(),
+		config:              config,
+		queueRepo:           queueRepo,
+		healthRepo:          healthRepo,
+		mediaRepo:           mediaRepo,
+		authService:         authService,
+		userRepo:            userRepo,
+		configManager:       configManager,
+		metadataReader:      metadataReader,
+		nzbFilesystem:       nzbFilesystem,
+		importerService:     importService, // Will be set later via SetImporterService
+		poolManager:         poolManager,
+		arrsService:         arrsService,
+		mountService:        mountService,
+		startTime:           time.Now(),
+		progressBroadcaster: progressBroadcaster,
 	}
 
 	return server
@@ -95,14 +102,24 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 	s.healthWorker = healthWorker
 }
 
+// SetLibrarySyncWorker sets the library sync worker reference for the server
+func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorker) {
+	s.librarySyncWorker = librarySyncWorker
+}
+
 // SetRcloneClient sets the rclone client reference for the server
 func (s *Server) SetRcloneClient(rcloneClient rclonecli.RcloneRcClient) {
 	s.rcloneClient = rcloneClient
 }
 
+// GetProgressBroadcaster returns the progress broadcaster for use by the importer service
+func (s *Server) GetProgressBroadcaster() *progress.ProgressBroadcaster {
+	return s.progressBroadcaster
+}
+
 // SetupFiberRoutes configures API routes directly on the Fiber app
 func (s *Server) SetupRoutes(app *fiber.App) {
-	app.Use("/sabnzbd/api", s.handleSABnzbd)
+	app.Use("/sabnzbd", s.handleSABnzbd)
 
 	api := app.Group(s.config.Prefix)
 	// Import do not need user authentication
@@ -139,14 +156,19 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
 	api.Get("/queue/stats", s.handleGetQueueStats)
+	api.Get("/queue/progress/stream", s.handleProgressStream) // SSE endpoint for real-time progress
 	api.Delete("/queue/completed", s.handleClearCompletedQueue)
 	api.Delete("/queue/failed", s.handleClearFailedQueue)
+	api.Delete("/queue/pending", s.handleClearPendingQueue)
 	api.Delete("/queue/bulk", s.handleDeleteQueueBulk)
 	api.Post("/queue/bulk/restart", s.handleRestartQueueBulk)
+	api.Post("/queue/bulk/cancel", s.handleCancelQueueBulk)
 	api.Post("/queue/upload", s.handleUploadToQueue)
 	api.Get("/queue/:id", s.handleGetQueue)
 	api.Delete("/queue/:id", s.handleDeleteQueue)
 	api.Post("/queue/:id/retry", s.handleRetryQueue)
+	api.Post("/queue/:id/cancel", s.handleCancelQueue)
+	api.Get("/queue/:id/download", s.handleDownloadNZB)
 
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)
@@ -163,8 +185,14 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/health/:id", s.handleGetHealth)
 	api.Delete("/health/:id", s.handleDeleteHealth)
 
+	// Library sync endpoints
+	api.Get("/health/library-sync/status", s.handleGetLibrarySyncStatus)
+	api.Post("/health/library-sync/start", s.handleStartLibrarySync)
+	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
+
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
+	// Note: /files/stream is handled by StreamHandler at HTTP server level
 
 	api.Post("/import/scan", s.handleStartManualScan)
 	api.Get("/import/scan/status", s.handleGetScanStatus)
@@ -223,12 +251,12 @@ func (s *Server) getSystemInfo() SystemInfoResponse {
 }
 
 // checkSystemHealth performs a basic health check
-func (s *Server) checkSystemHealth(_ context.Context) SystemHealthResponse {
+func (s *Server) checkSystemHealth(ctx context.Context) SystemHealthResponse {
 	components := make(map[string]ComponentHealth)
 	overallStatus := "healthy"
 
 	// Check database connectivity
-	if _, err := s.queueRepo.GetQueueStats(); err != nil {
+	if _, err := s.queueRepo.GetQueueStats(ctx); err != nil {
 		components["database"] = ComponentHealth{
 			Status:  "unhealthy",
 			Message: "Database connection failed",
@@ -243,7 +271,7 @@ func (s *Server) checkSystemHealth(_ context.Context) SystemHealthResponse {
 	}
 
 	// Check health repository
-	if _, err := s.healthRepo.GetHealthStats(); err != nil {
+	if _, err := s.healthRepo.GetHealthStats(ctx); err != nil {
 		components["health_repository"] = ComponentHealth{
 			Status:  "unhealthy",
 			Message: "Health repository failed",
@@ -264,4 +292,38 @@ func (s *Server) checkSystemHealth(_ context.Context) SystemHealthResponse {
 		Timestamp:  time.Now(),
 		Components: components,
 	}
+}
+
+// Library sync handler methods
+func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Library sync worker not available",
+		})
+	}
+
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	return handlers.handleGetLibrarySyncStatus(c)
+}
+
+func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Library sync worker not available",
+		})
+	}
+
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	return handlers.handleStartLibrarySync(c)
+}
+
+func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Library sync worker not available",
+		})
+	}
+
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	return handlers.handleCancelLibrarySync(c)
 }

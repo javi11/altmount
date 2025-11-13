@@ -39,8 +39,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 		// Validate status
 		switch status {
 		case database.QueueStatusPending, database.QueueStatusProcessing,
-			database.QueueStatusCompleted, database.QueueStatusFailed,
-			database.QueueStatusRetrying:
+			database.QueueStatusCompleted, database.QueueStatusFailed:
 			statusFilter = &status
 		default:
 			return c.Status(400).JSON(fiber.Map{
@@ -48,7 +47,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 				"error": fiber.Map{
 					"code":    "VALIDATION_ERROR",
 					"message": "Invalid status filter",
-					"details": "Valid values: pending, processing, completed, failed, retrying",
+					"details": "Valid values: pending, processing, completed, failed",
 				},
 			})
 		}
@@ -73,7 +72,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	}
 
 	// Get total count for pagination
-	totalCount, err := s.queueRepo.CountQueueItems(statusFilter, searchFilter, "")
+	totalCount, err := s.queueRepo.CountQueueItems(c.Context(),statusFilter, searchFilter, "")
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -86,7 +85,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	}
 
 	// Get queue items from repository
-	items, err := s.queueRepo.ListQueueItems(statusFilter, searchFilter, "", pagination.Limit, pagination.Offset)
+	items, err := s.queueRepo.ListQueueItems(c.Context(),statusFilter, searchFilter, "", pagination.Limit, pagination.Offset)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -158,7 +157,7 @@ func (s *Server) handleGetQueue(c *fiber.Ctx) error {
 	}
 
 	// Get queue item from repository
-	item, err := s.queueRepo.GetQueueItem(id)
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -217,7 +216,7 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 	}
 
 	// Check if item exists first
-	item, err := s.queueRepo.GetQueueItem(id)
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -253,7 +252,7 @@ func (s *Server) handleDeleteQueue(c *fiber.Ctx) error {
 	}
 
 	// Remove from queue
-	err = s.queueRepo.RemoveFromQueue(id)
+	err = s.queueRepo.RemoveFromQueue(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -296,7 +295,7 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	}
 
 	// Check if item exists
-	item, err := s.queueRepo.GetQueueItem(id)
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -331,8 +330,8 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 		})
 	}
 
-	// Update status to retrying
-	err = s.queueRepo.UpdateQueueItemStatus(id, database.QueueStatusRetrying, nil)
+	// Update status to pending for manual retry
+	err = s.queueRepo.UpdateQueueItemStatus(c.Context(),id, database.QueueStatusPending, nil)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -346,11 +345,11 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 
 	// Trigger background processing immediately
 	if s.importerService != nil {
-		s.importerService.ProcessItemInBackground(id)
+		s.importerService.ProcessItemInBackground(c.Context(), id)
 	}
 
 	// Get updated item
-	updatedItem, err := s.queueRepo.GetQueueItem(id)
+	updatedItem, err := s.queueRepo.GetQueueItem(c.Context(),id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -369,9 +368,105 @@ func (s *Server) handleRetryQueue(c *fiber.Ctx) error {
 	})
 }
 
+// handleCancelQueue handles POST /api/queue/{id}/cancel
+func (s *Server) handleCancelQueue(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Queue item ID is required",
+				"details": "",
+			},
+		})
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid queue item ID",
+				"details": "ID must be a valid integer",
+			},
+		})
+	}
+
+	// Check if item exists
+	item, err := s.queueRepo.GetQueueItem(c.Context(), id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to check queue item",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	if item == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "Queue item not found",
+				"details": "",
+			},
+		})
+	}
+
+	// Only allow cancellation of processing items
+	if item.Status != database.QueueStatusProcessing {
+		return c.Status(409).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "CONFLICT",
+				"message": "Can only cancel items that are currently processing",
+				"details": "Current status: " + string(item.Status),
+			},
+		})
+	}
+
+	// Request cancellation
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Importer service not available",
+				"details": "",
+			},
+		})
+	}
+
+	err = s.importerService.CancelProcessing(id)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "Item is not currently processing",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	return c.Status(202).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"message": "Cancellation requested",
+			"id":      id,
+		},
+	})
+}
+
 // handleGetQueueStats handles GET /api/queue/stats
 func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
-	stats, err := s.queueRepo.GetQueueStats()
+	stats, err := s.queueRepo.GetQueueStats(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -392,27 +487,8 @@ func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 
 // handleClearCompletedQueue handles DELETE /api/queue/completed
 func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
-	// Parse older_than parameter
-	olderThan, err := ParseTimeParamFiber(c, "older_than")
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"error": fiber.Map{
-				"code":    "VALIDATION_ERROR",
-				"message": "Invalid older_than parameter",
-				"details": err.Error(),
-			},
-		})
-	}
-
-	// Default to 24 hours ago if not specified
-	if olderThan == nil {
-		defaultTime := time.Now().Add(-24 * time.Hour)
-		olderThan = &defaultTime
-	}
-
 	// Clear completed items
-	count, err := s.queueRepo.ClearCompletedQueueItems(*olderThan)
+	count, err := s.queueRepo.ClearCompletedQueueItems(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -426,7 +502,6 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 
 	response := map[string]interface{}{
 		"removed_count": count,
-		"older_than":    olderThan.Format(time.RFC3339),
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -437,27 +512,8 @@ func (s *Server) handleClearCompletedQueue(c *fiber.Ctx) error {
 
 // handleClearFailedQueue handles DELETE /api/queue/failed
 func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
-	// Parse older_than parameter
-	olderThan, err := ParseTimeParamFiber(c, "older_than")
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"error": fiber.Map{
-				"code":    "VALIDATION_ERROR",
-				"message": "Invalid older_than parameter",
-				"details": err.Error(),
-			},
-		})
-	}
-
-	// Default to 24 hours ago if not specified
-	if olderThan == nil {
-		defaultTime := time.Now().Add(-24 * time.Hour)
-		olderThan = &defaultTime
-	}
-
 	// Clear failed items
-	count, err := s.queueRepo.ClearFailedQueueItems(*olderThan)
+	count, err := s.queueRepo.ClearFailedQueueItems(c.Context())
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -471,7 +527,31 @@ func (s *Server) handleClearFailedQueue(c *fiber.Ctx) error {
 
 	response := map[string]interface{}{
 		"removed_count": count,
-		"older_than":    olderThan.Format(time.RFC3339),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleClearPendingQueue handles DELETE /api/queue/pending
+func (s *Server) handleClearPendingQueue(c *fiber.Ctx) error {
+	// Clear pending items
+	count, err := s.queueRepo.ClearPendingQueueItems(c.Context())
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to clear pending queue items",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	response := map[string]interface{}{
+		"removed_count": count,
 	}
 
 	return c.Status(200).JSON(fiber.Map{
@@ -511,7 +591,7 @@ func (s *Server) handleDeleteQueueBulk(c *fiber.Ctx) error {
 	}
 
 	// Remove from queue in bulk (this will check for processing items)
-	result, err := s.queueRepo.RemoveFromQueueBulk(request.IDs)
+	result, err := s.queueRepo.RemoveFromQueueBulk(c.Context(),request.IDs)
 	if err != nil {
 		// Check if the error is about processing items
 		if result != nil && result.ProcessingCount > 0 {
@@ -648,7 +728,19 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 		categoryPtr = &category
 	}
 
-	item, err := s.importerService.AddToQueue(tempFile, &uploadDir, categoryPtr, &priority)
+	// Build base path from CompleteDir for manually uploaded files
+	// The category will be appended to this by the processor
+	var basePath *string
+	if s.configManager != nil {
+		completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+		if completeDir != "" {
+			basePath = &completeDir
+		}
+	}
+
+	// For manually uploaded files, pass CompleteDir as the base path (not the temp upload directory)
+	// The category will be appended to this by processNzbItem in the service
+	item, err := s.importerService.AddToQueue(tempFile, basePath, categoryPtr, &priority)
 	if err != nil {
 		// Clean up temp file on error
 		os.Remove(tempFile)
@@ -705,7 +797,7 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 	processedCount := 0
 	notFoundCount := 0
 	for _, id := range request.IDs {
-		item, err := s.queueRepo.GetQueueItem(id)
+		item, err := s.queueRepo.GetQueueItem(c.Context(),id)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"success": false,
@@ -750,7 +842,7 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 	}
 
 	// Restart the queue items
-	err := s.queueRepo.RestartQueueItemsBulk(request.IDs)
+	err := s.queueRepo.RestartQueueItemsBulk(c.Context(),request.IDs)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -771,4 +863,166 @@ func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 		"success": true,
 		"data":    response,
 	})
+}
+
+// handleCancelQueueBulk handles POST /api/queue/bulk/cancel
+func (s *Server) handleCancelQueueBulk(c *fiber.Ctx) error {
+	// Parse request body
+	var request struct {
+		IDs []int64 `json:"ids"`
+	}
+
+	if err := c.BodyParser(&request); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid request body",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Validate IDs
+	if len(request.IDs) == 0 {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "No IDs provided",
+				"details": "At least one ID is required",
+			},
+		})
+	}
+
+	// Check importer service availability
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Importer service not available",
+				"details": "",
+			},
+		})
+	}
+
+	// Cancel each item and track results
+	results := make(map[string]interface{})
+	cancelledCount := 0
+	notProcessingCount := 0
+	notFoundCount := 0
+
+	for _, id := range request.IDs {
+		item, err := s.queueRepo.GetQueueItem(c.Context(), id)
+		if err != nil {
+			results[fmt.Sprintf("%d", id)] = "Error checking status"
+			continue
+		}
+
+		if item == nil {
+			notFoundCount++
+			results[fmt.Sprintf("%d", id)] = "Not found"
+			continue
+		}
+
+		if item.Status != database.QueueStatusProcessing {
+			notProcessingCount++
+			results[fmt.Sprintf("%d", id)] = fmt.Sprintf("Cannot cancel (status: %s)", item.Status)
+			continue
+		}
+
+		err = s.importerService.CancelProcessing(id)
+		if err != nil {
+			results[fmt.Sprintf("%d", id)] = err.Error()
+		} else {
+			cancelledCount++
+			results[fmt.Sprintf("%d", id)] = "Cancellation requested"
+		}
+	}
+
+	response := map[string]interface{}{
+		"cancelled_count":      cancelledCount,
+		"not_processing_count": notProcessingCount,
+		"not_found_count":      notFoundCount,
+		"results":              results,
+		"message":              fmt.Sprintf("Cancellation requested for %d items", cancelledCount),
+	}
+
+	return c.Status(202).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleDownloadNZB handles GET /api/queue/{id}/download
+func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Queue item ID is required",
+				"details": "",
+			},
+		})
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid queue item ID",
+				"details": "ID must be a valid integer",
+			},
+		})
+	}
+
+	// Get queue item from repository
+	item, err := s.queueRepo.GetQueueItem(c.Context(),id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to retrieve queue item",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	if item == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "Queue item not found",
+				"details": "",
+			},
+		})
+	}
+
+	// Check if NZB file exists
+	if _, err := os.Stat(item.NzbPath); os.IsNotExist(err) {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "NOT_FOUND",
+				"message": "NZB file not found",
+				"details": "The NZB file no longer exists on disk",
+			},
+		})
+	}
+
+	// Set headers for file download
+	filename := filepath.Base(item.NzbPath)
+	c.Set("Content-Type", "application/x-nzb")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	// Send the file
+	return c.SendFile(item.NzbPath)
 }

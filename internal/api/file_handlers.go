@@ -92,8 +92,6 @@ func (s *Server) convertFileStatusToString(status metapb.FileStatus) string {
 	switch status {
 	case metapb.FileStatus_FILE_STATUS_HEALTHY:
 		return "healthy"
-	case metapb.FileStatus_FILE_STATUS_PARTIAL:
-		return "partial"
 	case metapb.FileStatus_FILE_STATUS_CORRUPTED:
 		return "corrupted"
 	default:
@@ -115,12 +113,12 @@ func (s *Server) convertEncryptionToString(encryption metapb.Encryption) string 
 
 // NZB XML structures for export
 type nzbFile struct {
-	XMLName  xml.Name      `xml:"file"`
-	Poster   string        `xml:"poster,attr"`
-	Date     string        `xml:"date,attr"`
-	Subject  string        `xml:"subject,attr"`
-	Groups   nzbGroups     `xml:"groups"`
-	Segments []nzbSegment  `xml:"segments>segment"`
+	XMLName  xml.Name     `xml:"file"`
+	Poster   string       `xml:"poster,attr"`
+	Date     string       `xml:"date,attr"`
+	Subject  string       `xml:"subject,attr"`
+	Groups   nzbGroups    `xml:"groups"`
+	Segments []nzbSegment `xml:"segments>segment"`
 }
 
 type nzbGroups struct {

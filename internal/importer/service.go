@@ -3,6 +3,8 @@ package importer
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,11 +18,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/progress"
+	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
 )
@@ -56,9 +60,11 @@ type Service struct {
 	database        *database.DB              // Database for processing queue
 	metadataService *metadata.MetadataService // Metadata service for file processing
 	processor       *Processor
-	rcloneClient    rclonecli.RcloneRcClient  // Optional rclone client for VFS notifications
-	configGetter    config.ConfigGetter       // Config getter for dynamic configuration access
-	sabnzbdClient   *sabnzbd.SABnzbdClient    // SABnzbd client for fallback
+	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
+	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
+	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
+	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
+	userRepo        *database.UserRepository      // User repository for API key lookup
 	log             *slog.Logger
 
 	// Runtime state
@@ -68,6 +74,10 @@ type Service struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 
+	// Cancellation tracking for processing items
+	cancelFuncs map[int64]context.CancelFunc
+	cancelMu    sync.RWMutex
+
 	// Manual scan state
 	scanMu     sync.RWMutex
 	scanInfo   ScanInfo
@@ -75,14 +85,21 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
 	}
 
+	// Get the initial config to pass import settings
+	currentConfig := configGetter()
+	maxImportConnections := currentConfig.Import.MaxImportConnections
+	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
+	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
+	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
+
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, broadcaster)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -94,9 +111,12 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
+		broadcaster:     broadcaster,
+		userRepo:        userRepo,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
+		cancelFuncs:     make(map[int64]context.CancelFunc),
 		scanInfo:        ScanInfo{Status: ScanStatusIdle},
 	}
 
@@ -112,11 +132,8 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("service is already started")
 	}
 
-	s.log.InfoContext(ctx, "Starting NZB import service",
-		"workers", s.config.Workers)
-
-	// Reset any stale queue items from processing/retrying back to pending
-	if err := s.database.Repository.ResetStaleItems(); err != nil {
+	// Reset any stale queue items from processing back to pending
+	if err := s.database.Repository.ResetStaleItems(ctx); err != nil {
 		s.log.ErrorContext(ctx, "Failed to reset stale queue items", "error", err)
 		return fmt.Errorf("failed to reset stale queue items: %w", err)
 	}
@@ -128,7 +145,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	s.running = true
-	s.log.InfoContext(ctx, "NZB import service started successfully")
+	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
 	return nil
 }
@@ -185,9 +202,9 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 	defer s.mu.Unlock()
 	s.rcloneClient = client
 	if client != nil {
-		s.log.Info("RClone client updated for VFS notifications")
+		s.log.InfoContext(context.Background(), "RClone client updated for VFS notifications")
 	} else {
-		s.log.Info("RClone client disabled")
+		s.log.InfoContext(context.Background(), "RClone client disabled")
 	}
 }
 
@@ -198,7 +215,7 @@ func (s *Service) Database() *database.DB {
 
 // GetQueueStats returns current queue statistics from database
 func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {
-	return s.database.Repository.GetQueueStats()
+	return s.database.Repository.GetQueueStats(ctx)
 }
 
 // StartManualScan starts a manual scan of the specified directory
@@ -240,7 +257,7 @@ func (s *Service) StartManualScan(scanPath string) error {
 	// Start scanning in goroutine
 	go s.performManualScan(scanCtx, scanPath)
 
-	s.log.Info("Manual scan started", "path", scanPath)
+	s.log.InfoContext(context.Background(), "Manual scan started", "path", scanPath)
 	return nil
 }
 
@@ -270,7 +287,7 @@ func (s *Service) CancelScan() error {
 		s.scanCancel()
 	}
 
-	s.log.Info("Manual scan cancellation requested", "path", s.scanInfo.Path)
+	s.log.InfoContext(context.Background(), "Manual scan cancellation requested", "path", s.scanInfo.Path)
 	return nil
 }
 
@@ -287,19 +304,19 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 		s.scanMu.Unlock()
 	}()
 
-	s.log.Debug("Scanning directory for NZB files", "dir", scanPath)
+	s.log.DebugContext(ctx, "Scanning directory for NZB files", "dir", scanPath)
 
 	err := filepath.WalkDir(scanPath, func(path string, d fs.DirEntry, err error) error {
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
-			s.log.Info("Scan cancelled", "path", scanPath)
+			s.log.InfoContext(ctx, "Scan cancelled", "path", scanPath)
 			return fmt.Errorf("scan cancelled")
 		default:
 		}
 
 		if err != nil {
-			s.log.Warn("Error accessing path", "path", path, "error", err)
+			s.log.WarnContext(ctx, "Error accessing path", "path", path, "error", err)
 			s.scanMu.Lock()
 			errMsg := err.Error()
 			s.scanInfo.LastError = &errMsg
@@ -331,7 +348,7 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 
 		// Add to queue
 		if _, err := s.AddToQueue(path, &scanPath, nil, nil); err != nil {
-			s.log.Error("Failed to add file to queue during scan", "file", path, "error", err)
+			s.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
 		}
 
 		// Update files added counter
@@ -343,23 +360,23 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 	})
 
 	if err != nil && !strings.Contains(err.Error(), "scan cancelled") {
-		s.log.Error("Failed to scan directory", "dir", scanPath, "error", err)
+		s.log.ErrorContext(ctx, "Failed to scan directory", "dir", scanPath, "error", err)
 		s.scanMu.Lock()
 		errMsg := err.Error()
 		s.scanInfo.LastError = &errMsg
 		s.scanMu.Unlock()
 	}
 
-	s.log.Info("Manual scan completed", "path", scanPath, "files_found", s.scanInfo.FilesFound, "files_added", s.scanInfo.FilesAdded)
+	s.log.InfoContext(ctx, "Manual scan completed", "path", scanPath, "files_found", s.scanInfo.FilesFound, "files_added", s.scanInfo.FilesAdded)
 }
 
 // isFileAlreadyInQueue checks if file is already in queue (simplified scanning)
 func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 	// Only check queue database during scanning for performance
 	// The processor will check main database for duplicates when processing
-	inQueue, err := s.database.Repository.IsFileInQueue(filePath)
+	inQueue, err := s.database.Repository.IsFileInQueue(context.Background(), filePath)
 	if err != nil {
-		s.log.Warn("Failed to check if file in queue", "file", filePath, "error", err)
+		s.log.WarnContext(context.Background(), "Failed to check if file in queue", "file", filePath, "error", err)
 		return false // Assume not in queue on error
 	}
 	return inQueue
@@ -370,7 +387,7 @@ func (s *Service) AddToQueue(filePath string, relativePath *string, category *st
 	// Calculate file size before adding to queue
 	var fileSize *int64
 	if size, err := s.CalculateFileSizeOnly(filePath); err != nil {
-		s.log.Warn("Failed to calculate file size", "file", filePath, "error", err)
+		s.log.WarnContext(context.Background(), "Failed to calculate file size", "file", filePath, "error", err)
 		// Continue with NULL file size - don't fail the queue addition
 		fileSize = nil
 	} else {
@@ -395,15 +412,15 @@ func (s *Service) AddToQueue(filePath string, relativePath *string, category *st
 		CreatedAt:    time.Now(),
 	}
 
-	if err := s.database.Repository.AddToQueue(item); err != nil {
-		s.log.Error("Failed to add file to queue", "file", filePath, "error", err)
+	if err := s.database.Repository.AddToQueue(context.Background(), item); err != nil {
+		s.log.ErrorContext(context.Background(), "Failed to add file to queue", "file", filePath, "error", err)
 		return nil, err
 	}
 
 	if fileSize != nil {
-		s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
+		s.log.InfoContext(context.Background(), "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
-		s.log.Info("Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
+		s.log.InfoContext(context.Background(), "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
 	}
 
 	return item, nil
@@ -418,7 +435,6 @@ func (s *Service) workerLoop(workerID int) {
 	// Get processing interval from configuration
 	processingIntervalSeconds := s.configGetter().Import.QueueProcessingIntervalSeconds
 	processingInterval := time.Duration(processingIntervalSeconds) * time.Second
-	log.Info("Queue worker started", "processing_interval", processingInterval)
 
 	ticker := time.NewTicker(processingInterval)
 	defer ticker.Stop()
@@ -426,7 +442,7 @@ func (s *Service) workerLoop(workerID int) {
 	for {
 		select {
 		case <-ticker.C:
-			s.processQueueItems(workerID)
+			s.processQueueItems(s.ctx, workerID)
 		case <-s.ctx.Done():
 			log.Info("Queue worker stopped")
 			return
@@ -434,69 +450,70 @@ func (s *Service) workerLoop(workerID int) {
 	}
 }
 
-// claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic
-func (s *Service) claimItemWithRetry(workerID int, log *slog.Logger) (*database.ImportQueueItem, error) {
-	const maxRetries = 5
-	const baseDelay = 10 * time.Millisecond
-	const maxDelay = 500 * time.Millisecond
+// isDatabaseContentionError checks if an error is a retryable database contention error
+func isDatabaseContentionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "database is locked") ||
+		strings.Contains(err.Error(), "database is busy")
+}
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		item, err := s.database.Repository.ClaimNextQueueItem()
-		if err == nil {
-			if item == nil {
-				return nil, nil
+// claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic using retry-go
+func (s *Service) claimItemWithRetry(ctx context.Context, workerID int) (*database.ImportQueueItem, error) {
+	var item *database.ImportQueueItem
+
+	err := retry.Do(
+		func() error {
+			claimedItem, err := s.database.Repository.ClaimNextQueueItem(ctx)
+			if err != nil {
+				return err
 			}
 
-			log.Debug("Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
-
-			return item, nil
-		}
-
-		// Check if this is a database contention error
-		if strings.Contains(err.Error(), "database is locked") ||
-			strings.Contains(err.Error(), "database is busy") {
-
-			if attempt == maxRetries-1 {
-				// Final attempt failed, return the error
-				return nil, fmt.Errorf("failed to claim queue item after %d attempts: %w", maxRetries, err)
+			item = claimedItem
+			return nil
+		},
+		retry.Attempts(5),
+		retry.Delay(10*time.Millisecond),
+		retry.MaxDelay(500*time.Millisecond),
+		retry.DelayType(retry.BackOffDelay),
+		retry.RetryIf(isDatabaseContentionError),
+		retry.OnRetry(func(n uint, err error) {
+			// Only log warnings after multiple retries to reduce noise
+			if n >= 2 {
+				s.log.WarnContext(ctx, "Database contention, retrying claim",
+					"attempt", n+1,
+					"worker_id", workerID,
+					"error", err)
+			} else {
+				s.log.DebugContext(ctx, "Database contention, retrying claim",
+					"attempt", n+1,
+					"worker_id", workerID,
+					"error", err)
 			}
+		}),
+	)
 
-			// Calculate backoff delay with jitter
-			delay := time.Duration(attempt+1) * baseDelay
-			if delay > maxDelay {
-				delay = maxDelay
-			}
-
-			// Add random jitter (0-50% of delay) to prevent thundering herd
-			jitter := time.Duration(float64(delay) * (0.5 * float64(workerID%10) / 10.0))
-			delay += jitter
-
-			log.Debug("Database contention, retrying claim",
-				"attempt", attempt+1,
-				"delay", delay,
-				"worker_id", workerID)
-
-			time.Sleep(delay)
-			continue
-		}
-
-		// Non-contention error, return immediately
+	if err != nil {
 		return nil, fmt.Errorf("failed to claim queue item: %w", err)
 	}
 
-	return nil, fmt.Errorf("failed to claim queue item after %d attempts", maxRetries)
+	if item == nil {
+		return nil, nil
+	}
+
+	s.log.DebugContext(ctx, "Next item in processing queue", "queue_id", item.ID, "file", item.NzbPath)
+	return item, nil
 }
 
 // processQueueItems gets and processes pending queue items using two-database workflow
-func (s *Service) processQueueItems(workerID int) {
-	log := s.log.With("worker_id", workerID)
-
+func (s *Service) processQueueItems(ctx context.Context, workerID int) {
 	// Step 1: Atomically claim next available item from queue database with retry logic
-	item, err := s.claimItemWithRetry(workerID, log)
+	item, err := s.claimItemWithRetry(ctx, workerID)
 	if err != nil {
 		// Only log non-contention errors
 		if !strings.Contains(err.Error(), "database is locked") && !strings.Contains(err.Error(), "database is busy") {
-			log.Error("Failed to claim next queue item", "error", err)
+			s.log.ErrorContext(ctx, "Failed to claim next queue item", "worker_id", workerID, "error", err)
 		}
 		return
 	}
@@ -505,106 +522,186 @@ func (s *Service) processQueueItems(workerID int) {
 		return // No work to do
 	}
 
-	log.Debug("Processing claimed queue item", "queue_id", item.ID, "file", item.NzbPath)
+	s.log.DebugContext(ctx, "Processing claimed queue item", "worker_id", workerID, "queue_id", item.ID, "file", item.NzbPath)
 
-	// Step 3: Process the NZB file and write to main database
-	var (
-		processingErr error
-		resultingPath string
-	)
-	if item.RelativePath != nil {
-		resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
-	} else {
-		resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, "")
-	}
+	// Create cancellable context for this item
+	itemCtx, cancel := context.WithCancel(ctx)
+
+	// Register cancel function
+	s.cancelMu.Lock()
+	s.cancelFuncs[item.ID] = cancel
+	s.cancelMu.Unlock()
+
+	// Clean up after processing
+	defer func() {
+		s.cancelMu.Lock()
+		delete(s.cancelFuncs, item.ID)
+		s.cancelMu.Unlock()
+	}()
+
+	// Step 3: Process the NZB file and write to main database using cancellable context
+	resultingPath, processingErr := s.processNzbItem(itemCtx, item)
 
 	// Step 4: Update queue database with results
 	if processingErr != nil {
 		// Handle failure in queue database
-		s.handleProcessingFailure(item, processingErr, log)
+		s.handleProcessingFailure(ctx, item, processingErr)
 	} else {
-		if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
-			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
-		}
+		// Handle success (storage path, VFS notification, symlinks, status update)
+		s.handleProcessingSuccess(ctx, item, resultingPath)
+	}
+}
 
-		// Mark as completed in queue database
-		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-			log.Error("Failed to mark item as completed", "queue_id", item.ID, "error", err)
-		} else {
-			log.Info("Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
+// refreshMountPathIfNeeded checks if the mount path exists and refreshes the root directory if not found
+func (s *Service) refreshMountPathIfNeeded(ctx context.Context, resultingPath string, itemID int64) {
+	if s.rcloneClient == nil {
+		return
+	}
 
-			// Notify rclone VFS about the new import (async, don't fail on error)
-			s.notifyRcloneVFS(item, log)
+	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
+	if _, err := os.Stat(mountPath); err != nil {
+		if os.IsNotExist(err) {
+			// Refresh the root path if the mount path is not found
+			err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
+			if err != nil {
+				s.log.ErrorContext(ctx, "Failed to refresh mount path", "queue_id", itemID, "path", mountPath, "error", err)
+			}
 		}
 	}
 }
 
+// processNzbItem processes the NZB file for a queue item
+func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
+	// Determine the base path, incorporating category if present
+	basePath := ""
+	if item.RelativePath != nil {
+		basePath = *item.RelativePath
+	}
+
+	// If category is specified, append it to the base path
+	if item.Category != nil && *item.Category != "" {
+		basePath = filepath.Join(basePath, *item.Category)
+	}
+
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID))
+}
+
+// handleProcessingSuccess handles all steps after successful NZB processing
+func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error {
+	// Add storage path to database
+	if err := s.database.Repository.AddStoragePath(ctx, item.ID, resultingPath); err != nil {
+		s.log.ErrorContext(ctx, "Failed to add storage path", "queue_id", item.ID, "error", err)
+		return err
+	}
+
+	// Refresh mount path if needed
+	s.refreshMountPathIfNeeded(ctx, resultingPath, item.ID)
+
+	// Notify rclone VFS about the new import (async, don't fail on error)
+	s.notifyRcloneVFS(ctx, resultingPath)
+
+	// Create category symlink (non-blocking)
+	if err := s.createSymlinks(item, resultingPath); err != nil {
+		s.log.WarnContext(ctx, "Failed to create symlink",
+			"queue_id", item.ID,
+			"path", resultingPath,
+			"error", err)
+		// Don't fail the import, just log the warning
+	}
+
+	// Create STRM files (non-blocking)
+	if err := s.createStrmFiles(item, resultingPath); err != nil {
+		s.log.WarnContext(ctx, "Failed to create STRM file",
+			"queue_id", item.ID,
+			"path", resultingPath,
+			"error", err)
+		// Don't fail the import, just log the warning
+	}
+
+	// Mark as completed in queue database
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusCompleted, nil); err != nil {
+		s.log.ErrorContext(ctx, "Failed to mark item as completed", "queue_id", item.ID, "error", err)
+		return err
+	}
+
+	// Clear progress tracking
+	if s.broadcaster != nil {
+		s.broadcaster.ClearProgress(int(item.ID))
+	}
+
+	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
+	return nil
+}
+
 // handleProcessingFailure handles when processing fails
-func (s *Service) handleProcessingFailure(item *database.ImportQueueItem, processingErr error, log *slog.Logger) {
+func (s *Service) handleProcessingFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) {
 	errorMessage := processingErr.Error()
 
-	log.Warn("Processing failed",
-		"queue_id", item.ID,
-		"file", item.NzbPath,
-		"error", processingErr,
-		"retry_count", item.RetryCount,
-		"max_retries", item.MaxRetries)
-
-	// Check if we should retry
-	if !IsNonRetryable(processingErr) && item.RetryCount < item.MaxRetries {
-		// Mark for retry in queue database
-		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusRetrying, &errorMessage); err != nil {
-			log.Error("Failed to mark item for retry", "queue_id", item.ID, "error", err)
-		} else {
-			log.Info("Item marked for retry", "queue_id", item.ID, "retry_count", item.RetryCount+1)
-		}
+	// Check if the error was due to cancellation
+	if strings.Contains(errorMessage, "context canceled") || strings.Contains(errorMessage, "processing cancelled") {
+		errorMessage = "Processing cancelled by user request"
+		s.log.InfoContext(ctx, "Processing cancelled by user",
+			"queue_id", item.ID,
+			"file", item.NzbPath)
 	} else {
-		// Max retries exceeded, mark as failed in queue database
-		if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
-			log.Error("Failed to mark item as failed", "queue_id", item.ID, "error", err)
-		} else {
-			log.Error("Item failed permanently after max retries",
+		s.log.WarnContext(ctx, "Processing failed",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"error", processingErr)
+	}
+
+	// Mark as failed in queue database (no automatic retry)
+	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+		s.log.ErrorContext(ctx, "Failed to mark item as failed", "queue_id", item.ID, "error", err)
+	} else {
+		s.log.ErrorContext(ctx, "Item failed",
+			"queue_id", item.ID,
+			"file", item.NzbPath)
+	}
+
+	// Clear progress tracking
+	if s.broadcaster != nil {
+		s.broadcaster.ClearProgress(int(item.ID))
+	}
+
+	cfg := s.configGetter()
+	// Attempt SABnzbd fallback if configured
+	if cfg.SABnzbd.FallbackHost != "" && cfg.SABnzbd.FallbackAPIKey != "" {
+		if err := s.attemptSABnzbdFallback(ctx, item); err != nil {
+			s.log.ErrorContext(ctx, "Failed to send to external SABnzbd",
 				"queue_id", item.ID,
 				"file", item.NzbPath,
-				"retry_count", item.RetryCount)
-		}
+				"fallback_host", s.configGetter().SABnzbd.FallbackHost,
+				"error", err)
 
-		// Attempt SABnzbd fallback if configured
-		s.attemptSABnzbdFallback(item, log)
+		} else {
+			// Mark item as fallback instead of removing from queue
+			if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFallback, nil); err != nil {
+				s.log.ErrorContext(ctx, "Failed to mark item as fallback", "queue_id", item.ID, "error", err)
+			} else {
+				s.log.DebugContext(ctx, "Item marked as fallback after successful SABnzbd transfer",
+					"queue_id", item.ID,
+					"file", item.NzbPath,
+					"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+			}
+		}
 	}
 }
 
 // attemptSABnzbdFallback attempts to send a failed import to an external SABnzbd instance
-func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *slog.Logger) {
-	// Get current configuration
+func (s *Service) attemptSABnzbdFallback(ctx context.Context, item *database.ImportQueueItem) error {
 	cfg := s.configGetter()
-
-	// Check if SABnzbd is enabled and fallback is configured
-	if cfg.SABnzbd.Enabled == nil || !*cfg.SABnzbd.Enabled {
-		log.Debug("SABnzbd fallback not attempted - SABnzbd API not enabled", "queue_id", item.ID)
-		return
-	}
-
-	if cfg.SABnzbd.FallbackHost == "" {
-		log.Debug("SABnzbd fallback not attempted - no fallback host configured", "queue_id", item.ID)
-		return
-	}
-
-	if cfg.SABnzbd.FallbackAPIKey == "" {
-		log.Warn("SABnzbd fallback not attempted - no API key configured", "queue_id", item.ID)
-		return
-	}
 
 	// Check if the NZB file still exists
 	if _, err := os.Stat(item.NzbPath); err != nil {
-		log.Warn("SABnzbd fallback not attempted - NZB file not found",
+		s.log.WarnContext(ctx, "SABnzbd fallback not attempted - NZB file not found",
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
-		return
+		return err
 	}
 
-	log.Info("Attempting to send failed import to external SABnzbd",
+	s.log.InfoContext(ctx, "Attempting to send failed import to external SABnzbd",
 		"queue_id", item.ID,
 		"file", item.NzbPath,
 		"fallback_host", cfg.SABnzbd.FallbackHost)
@@ -614,27 +711,24 @@ func (s *Service) attemptSABnzbdFallback(item *database.ImportQueueItem, log *sl
 
 	// Send to external SABnzbd
 	nzoID, err := s.sabnzbdClient.SendNZBFile(
+		ctx,
 		cfg.SABnzbd.FallbackHost,
 		cfg.SABnzbd.FallbackAPIKey,
 		item.NzbPath,
 		item.Category,
 		&priority,
 	)
-
 	if err != nil {
-		log.Error("Failed to send to external SABnzbd",
-			"queue_id", item.ID,
-			"file", item.NzbPath,
-			"fallback_host", cfg.SABnzbd.FallbackHost,
-			"error", err)
-		return
+		return err
 	}
 
-	log.Info("Successfully sent failed import to external SABnzbd",
+	s.log.InfoContext(ctx, "Successfully sent failed import to external SABnzbd",
 		"queue_id", item.ID,
 		"file", item.NzbPath,
 		"fallback_host", cfg.SABnzbd.FallbackHost,
 		"sabnzbd_nzo_id", nzoID)
+
+	return nil
 }
 
 // ServiceStats holds statistics about the service
@@ -674,7 +768,7 @@ func (s *Service) UpdateWorkerCount(count int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.log.Info("Queue worker count update requested - restart required to take effect",
+	s.log.InfoContext(context.Background(), "Queue worker count update requested - restart required to take effect",
 		"current_count", s.config.Workers,
 		"requested_count", count,
 		"running", s.running)
@@ -691,127 +785,89 @@ func (s *Service) GetWorkerCount() int {
 	return s.config.Workers
 }
 
+// CancelProcessing cancels a processing queue item by cancelling its context
+func (s *Service) CancelProcessing(itemID int64) error {
+	s.cancelMu.RLock()
+	cancel, exists := s.cancelFuncs[itemID]
+	s.cancelMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("item %d is not currently processing", itemID)
+	}
+
+	s.log.InfoContext(context.Background(), "Cancelling processing for queue item", "item_id", itemID)
+	cancel()
+	return nil
+}
+
 // notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
-func (s *Service) notifyRcloneVFS(item *database.ImportQueueItem, log *slog.Logger) {
+func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 	if s.rcloneClient == nil {
 		return // No rclone client configured or RClone RC is disabled
 	}
 
-	// Calculate the virtual directory path for VFS notification
-	var virtualDir string
-	if item.RelativePath != nil {
-		// Calculate virtual directory based on NZB file location relative to watch root
-		virtualDir = s.calculateVirtualDirectory(item.NzbPath, *item.RelativePath)
-	} else {
-		// Default to root if no watch root specified
-		virtualDir = "/"
-	}
+	refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
+	defer cancel()
 
-	// Run VFS notification in background (async)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
-		defer cancel()
-
-		err := s.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
-		if err != nil {
-			log.Warn("Failed to notify rclone VFS about new import",
-				"queue_id", item.ID,
-				"file", item.NzbPath,
-				"virtual_dir", virtualDir,
-				"error", err)
-		} else {
-			log.Info("Successfully notified rclone VFS about new import",
-				"queue_id", item.ID,
-				"virtual_dir", virtualDir)
-		}
-	}()
-}
-
-// calculateVirtualDirectory calculates the virtual directory for VFS notification
-func (s *Service) calculateVirtualDirectory(nzbPath, relativePath string) string {
-	if relativePath == "" {
-		return "/"
-	}
-
-	// Clean paths for consistent comparison
-	nzbPath = filepath.Clean(nzbPath)
-	relativePath = filepath.Clean(relativePath)
-
-	// Get relative path from watch root to NZB file
-	relPath, err := filepath.Rel(relativePath, nzbPath)
+	err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
 	if err != nil {
-		// If we can't get relative path, default to root
-		return "/"
+		s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
+			"virtual_dir", resultingPath,
+			"error", err)
+	} else {
+		s.log.InfoContext(ctx, "Successfully notified rclone VFS about new import",
+			"virtual_dir", resultingPath)
 	}
-
-	// Get directory of NZB file (without filename)
-	relDir := filepath.Dir(relPath)
-
-	// Convert to virtual path
-	if relDir == "." || relDir == "" {
-		// NZB is directly in watch root
-		return "/"
-	}
-
-	// Ensure virtual path starts with / and uses forward slashes
-	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
-	return filepath.Clean(virtualPath)
 }
 
 // ProcessItemInBackground processes a specific queue item in the background
-func (s *Service) ProcessItemInBackground(itemID int64) {
+func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
 	go func() {
-		log := s.log.With("item_id", itemID, "background", true)
-		log.Debug("Starting background processing of queue item")
+		s.log.DebugContext(ctx, "Starting background processing of queue item", "item_id", itemID, "background", true)
 
 		// Get the queue item
-		item, err := s.database.Repository.GetQueueItem(itemID)
+		item, err := s.database.Repository.GetQueueItem(ctx, itemID)
 		if err != nil {
-			log.Error("Failed to get queue item for background processing", "error", err)
+			s.log.ErrorContext(ctx, "Failed to get queue item for background processing", "item_id", itemID, "error", err)
 			return
 		}
 
 		if item == nil {
-			log.Warn("Queue item not found for background processing")
+			s.log.WarnContext(ctx, "Queue item not found for background processing", "item_id", itemID)
 			return
 		}
 
 		// Update status to processing
-		if err := s.database.Repository.UpdateQueueItemStatus(itemID, database.QueueStatusProcessing, nil); err != nil {
-			log.Error("Failed to update item status to processing", "error", err)
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, itemID, database.QueueStatusProcessing, nil); err != nil {
+			s.log.ErrorContext(ctx, "Failed to update item status to processing", "item_id", itemID, "error", err)
 			return
 		}
 
-		// Process the NZB file
-		var (
-			processingErr error
-			resultingPath string
-		)
-		if item.RelativePath != nil {
-			resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, *item.RelativePath)
-		} else {
-			resultingPath, processingErr = s.processor.ProcessNzbFile(item.NzbPath, "")
-		}
+		// Create cancellable context for this item
+		itemCtx, cancel := context.WithCancel(ctx)
+
+		// Register cancel function
+		s.cancelMu.Lock()
+		s.cancelFuncs[item.ID] = cancel
+		s.cancelMu.Unlock()
+
+		// Clean up after processing
+		defer func() {
+			s.cancelMu.Lock()
+			delete(s.cancelFuncs, item.ID)
+			s.cancelMu.Unlock()
+		}()
+
+		// Process the NZB file using cancellable context
+		resultingPath, processingErr := s.processNzbItem(itemCtx, item)
 
 		// Update queue database with results
 		if processingErr != nil {
 			// Handle failure
-			s.handleProcessingFailure(item, processingErr, log)
+			s.handleProcessingFailure(ctx, item, processingErr)
 		} else {
-			// Handle success
-			if err := s.database.Repository.AddStoragePath(item.ID, resultingPath); err != nil {
-				log.Error("Failed to add storage path", "error", err)
-			}
-
-			// Mark as completed
-			if err := s.database.Repository.UpdateQueueItemStatus(item.ID, database.QueueStatusCompleted, nil); err != nil {
-				log.Error("Failed to mark item as completed", "error", err)
-			} else {
-				log.Info("Successfully processed queue item in background", "resulting_path", resultingPath)
-
-				// Notify rclone VFS about the new import (async, don't fail on error)
-				s.notifyRcloneVFS(item, log)
-			}
+			// Handle success (storage path, VFS notification, symlinks, status update)
+			s.handleProcessingSuccess(ctx, item, resultingPath)
 		}
 	}()
 }
@@ -903,4 +959,307 @@ func (s *Service) convertPriorityToSABnzbd(priority database.QueuePriority) stri
 	default:
 		return "1" // Normal
 	}
+}
+
+// createSymlinks creates symlinks for an imported file or directory in the category folder
+func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath string) error {
+	cfg := s.configGetter()
+
+	// Check if symlinks are enabled
+	if cfg.Import.ImportStrategy != config.ImportStrategySYMLINK {
+		return nil // Skip if not enabled
+	}
+
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		return fmt.Errorf("symlink directory not configured")
+	}
+
+	// Get the actual metadata/mount path (where the content actually lives)
+	actualPath := filepath.Join(cfg.MountPath, resultingPath)
+
+	// Check the metadata directory to determine if this is a file or directory
+	// (Don't use os.Stat on mount path as it might not be immediately available)
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	fileInfo, err := os.Stat(metadataPath)
+
+	// If stat fails, check if it's a .meta file (single file case)
+	if err != nil {
+		// Try checking for .meta file
+		metaFile := metadataPath + ".meta"
+		if _, metaErr := os.Stat(metaFile); metaErr == nil {
+			// It's a single file
+			return s.createSingleSymlink(actualPath, resultingPath)
+		}
+		return fmt.Errorf("failed to stat metadata path: %w", err)
+	}
+
+	if !fileInfo.IsDir() {
+		// Single file - create one symlink
+		return s.createSingleSymlink(actualPath, resultingPath)
+	}
+
+	// Directory - walk through and create symlinks for all files
+	var symlinkErrors []error
+	symlinkCount := 0
+
+	// Walk the metadata directory to find all files
+	err = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.log.WarnContext(context.Background(), "Error accessing metadata path during symlink creation",
+				"path", path,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Skip directories, we only create symlinks for files (.meta files)
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only process .meta files
+		if !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		// Calculate relative path from the root metadata directory (not metadataPath)
+		relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+		if err != nil {
+			s.log.ErrorContext(context.Background(), "Failed to calculate relative path",
+				"path", path,
+				"base", cfg.Metadata.RootPath,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Remove .meta extension to get the actual filename
+		relPath = strings.TrimSuffix(relPath, ".meta")
+
+		// Build the actual file path in the mount (mount root + virtual path)
+		actualFilePath := filepath.Join(cfg.MountPath, relPath)
+
+		// The relPath already IS the full virtual path from root, so use it directly
+		fileResultingPath := relPath
+
+		// Create symlink for this file using the helper function
+		if err := s.createSingleSymlink(actualFilePath, fileResultingPath); err != nil {
+			s.log.ErrorContext(context.Background(), "Failed to create symlink",
+				"path", actualFilePath,
+				"error", err)
+			symlinkErrors = append(symlinkErrors, err)
+			return nil // Continue walking
+		}
+
+		symlinkCount++
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	if len(symlinkErrors) > 0 {
+		s.log.WarnContext(context.Background(), "Some symlinks failed to create",
+			"queue_id", item.ID,
+			"total_errors", len(symlinkErrors),
+			"successful", symlinkCount)
+		// Don't fail the import, just log the warning
+	}
+
+	return nil
+}
+
+// createSingleSymlink creates a symlink for a single file
+func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
+	cfg := s.configGetter()
+
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(resultingPath))
+
+	// Ensure category directory exists
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create symlink category directory: %w", err)
+	}
+
+	symlinkPath := filepath.Join(*cfg.Import.ImportDir, resultingPath)
+
+	// Check if symlink already exists
+	if _, err := os.Lstat(symlinkPath); err == nil {
+		// Symlink exists, remove it first
+		if err := os.Remove(symlinkPath); err != nil {
+			return fmt.Errorf("failed to remove existing symlink: %w", err)
+		}
+	}
+
+	// Create the symlink
+	if err := os.Symlink(actualPath, symlinkPath); err != nil {
+		return fmt.Errorf("failed to create symlink: %w", err)
+	}
+
+	return nil
+}
+
+// createStrmFiles creates STRM files for an imported file or directory
+func (s *Service) createStrmFiles(item *database.ImportQueueItem, resultingPath string) error {
+	cfg := s.configGetter()
+
+	// Check if STRM is enabled
+	if cfg.Import.ImportStrategy != config.ImportStrategySTRM {
+		return nil // Skip if not enabled
+	}
+
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		return fmt.Errorf("STRM directory not configured")
+	}
+
+	// Check the metadata directory to determine if this is a file or directory
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	fileInfo, err := os.Stat(metadataPath)
+
+	// If stat fails, check if it's a .meta file (single file case)
+	if err != nil {
+		// Try checking for .meta file
+		metaFile := metadataPath + ".meta"
+		if _, metaErr := os.Stat(metaFile); metaErr == nil {
+			// It's a single file
+			return s.createSingleStrmFile(resultingPath, cfg.WebDAV.Port)
+		}
+		return fmt.Errorf("failed to stat metadata path: %w", err)
+	}
+
+	if !fileInfo.IsDir() {
+		// Single file - create one STRM file
+		return s.createSingleStrmFile(resultingPath, cfg.WebDAV.Port)
+	}
+
+	// Directory - walk through and create STRM files for all files
+	var strmErrors []error
+	strmCount := 0
+
+	// Walk the metadata directory to find all files
+	err = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			s.log.WarnContext(context.Background(), "Error accessing metadata path during STRM creation",
+				"path", path,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Skip directories, we only create STRM files for files (.meta files)
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only process .meta files
+		if !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		// Calculate relative path from the root metadata directory
+		relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+		if err != nil {
+			s.log.ErrorContext(context.Background(), "Failed to calculate relative path",
+				"path", path,
+				"base", cfg.Metadata.RootPath,
+				"error", err)
+			return nil // Continue walking
+		}
+
+		// Remove .meta extension to get the actual filename
+		relPath = strings.TrimSuffix(relPath, ".meta")
+
+		// Create STRM file for this file
+		if err := s.createSingleStrmFile(relPath, cfg.WebDAV.Port); err != nil {
+			s.log.ErrorContext(context.Background(), "Failed to create STRM file",
+				"path", relPath,
+				"error", err)
+			strmErrors = append(strmErrors, err)
+			return nil // Continue walking
+		}
+
+		strmCount++
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk directory: %w", err)
+	}
+
+	if len(strmErrors) > 0 {
+		s.log.WarnContext(context.Background(), "Some STRM files failed to create",
+			"queue_id", item.ID,
+			"total_errors", len(strmErrors),
+			"successful", strmCount)
+		// Don't fail the import, just log the warning
+	}
+
+	return nil
+}
+
+// createSingleStrmFile creates a STRM file for a single file with authentication
+func (s *Service) createSingleStrmFile(virtualPath string, port int) error {
+	ctx := context.Background()
+	cfg := s.configGetter()
+
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath))
+
+	// Ensure directory exists
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create STRM directory: %w", err)
+	}
+
+	// Keep original filename and add .strm extension
+	filename := filepath.Base(virtualPath)
+	filename = filename + ".strm"
+
+	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath), filename)
+
+	// Get first admin user's API key for authentication
+	users, err := s.userRepo.GetAllUsers(ctx)
+	if err != nil || len(users) == 0 {
+		return fmt.Errorf("no users with API keys found for STRM generation: %w", err)
+	}
+
+	// Find first admin user with an API key
+	var adminAPIKey string
+	for _, user := range users {
+		if user.IsAdmin && user.APIKey != nil && *user.APIKey != "" {
+			adminAPIKey = *user.APIKey
+			break
+		}
+	}
+
+	if adminAPIKey == "" {
+		return fmt.Errorf("no admin user with API key found for STRM generation")
+	}
+
+	// Hash the API key with SHA256
+	hashedKey := hashAPIKey(adminAPIKey)
+
+	// Generate streaming URL with download_key
+	// URL encode the path to handle special characters
+	encodedPath := strings.ReplaceAll(virtualPath, " ", "%20")
+	streamURL := fmt.Sprintf("http://localhost:%d/api/files/stream?path=%s&download_key=%s",
+		port, encodedPath, hashedKey)
+
+	// Check if STRM file already exists with the same content
+	if existingContent, err := os.ReadFile(strmPath); err == nil {
+		if string(existingContent) == streamURL {
+			// File exists with correct content, skip
+			return nil
+		}
+	}
+
+	// Write the STRM file
+	if err := os.WriteFile(strmPath, []byte(streamURL), 0644); err != nil {
+		return fmt.Errorf("failed to write STRM file: %w", err)
+	}
+
+	return nil
+}
+
+// hashAPIKey generates a SHA256 hash of the API key for secure comparison
+func hashAPIKey(apiKey string) string {
+	hash := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(hash[:])
 }

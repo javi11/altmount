@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -10,33 +11,25 @@ import (
 
 // UserRepository handles user database operations
 type UserRepository struct {
-	db interface {
-		Exec(query string, args ...interface{}) (sql.Result, error)
-		Query(query string, args ...interface{}) (*sql.Rows, error)
-		QueryRow(query string, args ...interface{}) *sql.Row
-	}
+	db *sql.DB
 }
 
 // NewUserRepository creates a new user repository
-func NewUserRepository(db interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
-}) *UserRepository {
+func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
 // GetUserByID retrieves a user by their unique user ID
-func (r *UserRepository) GetUserByID(userID string) (*User, error) {
+func (r *UserRepository) GetUserByID(ctx context.Context, userID string) (*User, error) {
 	query := `
-		SELECT id, user_id, email, name, avatar_url, provider, provider_id, 
+		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
 		       password_hash, api_key, is_admin, created_at, updated_at, last_login
-		FROM users 
+		FROM users
 		WHERE user_id = ?
 	`
 
 	var user User
-	err := r.db.QueryRow(query, userID).Scan(
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
 		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
@@ -52,16 +45,16 @@ func (r *UserRepository) GetUserByID(userID string) (*User, error) {
 }
 
 // GetUserByProvider retrieves a user by provider and provider ID
-func (r *UserRepository) GetUserByProvider(provider, providerID string) (*User, error) {
+func (r *UserRepository) GetUserByProvider(ctx context.Context, provider, providerID string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
 		       password_hash, api_key, is_admin, created_at, updated_at, last_login
-		FROM users 
+		FROM users
 		WHERE provider = ? AND provider_id = ?
 	`
 
 	var user User
-	err := r.db.QueryRow(query, provider, providerID).Scan(
+	err := r.db.QueryRowContext(ctx, query, provider, providerID).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
 		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
@@ -77,13 +70,13 @@ func (r *UserRepository) GetUserByProvider(provider, providerID string) (*User, 
 }
 
 // CreateUser creates a new user account
-func (r *UserRepository) CreateUser(user *User) error {
+func (r *UserRepository) CreateUser(ctx context.Context, user *User) error {
 	query := `
 		INSERT INTO users (user_id, email, name, avatar_url, provider, provider_id, password_hash, api_key, is_admin)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	result, err := r.db.Exec(query,
+	result, err := r.db.ExecContext(ctx, query,
 		user.UserID, user.Email, user.Name, user.AvatarURL,
 		user.Provider, user.ProviderID, user.PasswordHash, user.APIKey, user.IsAdmin,
 	)
@@ -104,14 +97,14 @@ func (r *UserRepository) CreateUser(user *User) error {
 }
 
 // UpdateUser updates an existing user's information
-func (r *UserRepository) UpdateUser(user *User) error {
+func (r *UserRepository) UpdateUser(ctx context.Context, user *User) error {
 	query := `
-		UPDATE users 
+		UPDATE users
 		SET email = ?, name = ?, avatar_url = ?, updated_at = datetime('now')
 		WHERE user_id = ?
 	`
 
-	result, err := r.db.Exec(query, user.Email, user.Name, user.AvatarURL, user.UserID)
+	result, err := r.db.ExecContext(ctx, query, user.Email, user.Name, user.AvatarURL, user.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
@@ -129,14 +122,14 @@ func (r *UserRepository) UpdateUser(user *User) error {
 }
 
 // UpdateLastLogin updates the user's last login timestamp
-func (r *UserRepository) UpdateLastLogin(userID string) error {
+func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID string) error {
 	query := `
-		UPDATE users 
+		UPDATE users
 		SET last_login = datetime('now')
 		WHERE user_id = ?
 	`
 
-	result, err := r.db.Exec(query, userID)
+	result, err := r.db.ExecContext(ctx, query, userID)
 	if err != nil {
 		return fmt.Errorf("failed to update last login: %w", err)
 	}
@@ -154,14 +147,14 @@ func (r *UserRepository) UpdateLastLogin(userID string) error {
 }
 
 // SetAdminStatus updates a user's admin status
-func (r *UserRepository) SetAdminStatus(userID string, isAdmin bool) error {
+func (r *UserRepository) SetAdminStatus(ctx context.Context, userID string, isAdmin bool) error {
 	query := `
-		UPDATE users 
+		UPDATE users
 		SET is_admin = ?, updated_at = datetime('now')
 		WHERE user_id = ?
 	`
 
-	result, err := r.db.Exec(query, isAdmin, userID)
+	result, err := r.db.ExecContext(ctx, query, isAdmin, userID)
 	if err != nil {
 		return fmt.Errorf("failed to set admin status: %w", err)
 	}
@@ -179,16 +172,16 @@ func (r *UserRepository) SetAdminStatus(userID string, isAdmin bool) error {
 }
 
 // ListUsers returns a list of all users with pagination
-func (r *UserRepository) ListUsers(limit, offset int) ([]*User, error) {
+func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
 		       password_hash, api_key, is_admin, created_at, updated_at, last_login
-		FROM users 
+		FROM users
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
 	`
 
-	rows, err := r.db.Query(query, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list users: %w", err)
 	}
@@ -216,11 +209,11 @@ func (r *UserRepository) ListUsers(limit, offset int) ([]*User, error) {
 }
 
 // GetUserCount returns the total number of users
-func (r *UserRepository) GetUserCount() (int, error) {
+func (r *UserRepository) GetUserCount(ctx context.Context) (int, error) {
 	query := `SELECT COUNT(*) FROM users`
 
 	var count int
-	err := r.db.QueryRow(query).Scan(&count)
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get user count: %w", err)
 	}
@@ -229,10 +222,10 @@ func (r *UserRepository) GetUserCount() (int, error) {
 }
 
 // DeleteUser deletes a user by their user ID
-func (r *UserRepository) DeleteUser(userID string) error {
+func (r *UserRepository) DeleteUser(ctx context.Context, userID string) error {
 	query := `DELETE FROM users WHERE user_id = ?`
 
-	result, err := r.db.Exec(query, userID)
+	result, err := r.db.ExecContext(ctx, query, userID)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
@@ -250,16 +243,16 @@ func (r *UserRepository) DeleteUser(userID string) error {
 }
 
 // GetUserByEmail retrieves a user by their email address for direct authentication
-func (r *UserRepository) GetUserByEmail(email string) (*User, error) {
+func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
 		       password_hash, api_key, is_admin, created_at, updated_at, last_login
-		FROM users 
+		FROM users
 		WHERE email = ? AND provider = 'direct'
 	`
 
 	var user User
-	err := r.db.QueryRow(query, email).Scan(
+	err := r.db.QueryRowContext(ctx, query, email).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
 		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
@@ -275,16 +268,16 @@ func (r *UserRepository) GetUserByEmail(email string) (*User, error) {
 }
 
 // GetUserByUsername retrieves a user by their username (user_id) for direct authentication
-func (r *UserRepository) GetUserByUsername(username string) (*User, error) {
+func (r *UserRepository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
 		       password_hash, api_key, is_admin, created_at, updated_at, last_login
-		FROM users 
+		FROM users
 		WHERE user_id = ? AND provider = 'direct'
 	`
 
 	var user User
-	err := r.db.QueryRow(query, username).Scan(
+	err := r.db.QueryRowContext(ctx, query, username).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
 		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
@@ -300,14 +293,14 @@ func (r *UserRepository) GetUserByUsername(username string) (*User, error) {
 }
 
 // UpdatePassword updates a user's password hash
-func (r *UserRepository) UpdatePassword(userID string, passwordHash string) error {
+func (r *UserRepository) UpdatePassword(ctx context.Context, userID string, passwordHash string) error {
 	query := `
-		UPDATE users 
+		UPDATE users
 		SET password_hash = ?, updated_at = datetime('now')
 		WHERE user_id = ?
 	`
 
-	result, err := r.db.Exec(query, passwordHash, userID)
+	result, err := r.db.ExecContext(ctx, query, passwordHash, userID)
 	if err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
 	}
@@ -338,7 +331,7 @@ func (r *UserRepository) generateAPIKey() (string, error) {
 }
 
 // RegenerateAPIKey generates and updates a new API key for the user
-func (r *UserRepository) RegenerateAPIKey(userID string) (string, error) {
+func (r *UserRepository) RegenerateAPIKey(ctx context.Context, userID string) (string, error) {
 	// Generate new API key
 	apiKey, err := r.generateAPIKey()
 	if err != nil {
@@ -347,12 +340,12 @@ func (r *UserRepository) RegenerateAPIKey(userID string) (string, error) {
 
 	// Update user's API key in database
 	query := `
-		UPDATE users 
+		UPDATE users
 		SET api_key = ?, updated_at = datetime('now')
 		WHERE user_id = ?
 	`
 
-	result, err := r.db.Exec(query, apiKey, userID)
+	result, err := r.db.ExecContext(ctx, query, apiKey, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to update API key: %w", err)
 	}
@@ -370,16 +363,16 @@ func (r *UserRepository) RegenerateAPIKey(userID string) (string, error) {
 }
 
 // GetUserByAPIKey retrieves a user by their API key
-func (r *UserRepository) GetUserByAPIKey(apiKey string) (*User, error) {
+func (r *UserRepository) GetUserByAPIKey(ctx context.Context, apiKey string) (*User, error) {
 	query := `
 		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
 		       password_hash, api_key, is_admin, created_at, updated_at, last_login
-		FROM users 
+		FROM users
 		WHERE api_key = ?
 	`
 
 	var user User
-	err := r.db.QueryRow(query, apiKey).Scan(
+	err := r.db.QueryRowContext(ctx, query, apiKey).Scan(
 		&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
 		&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
 		&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
@@ -392,4 +385,41 @@ func (r *UserRepository) GetUserByAPIKey(apiKey string) (*User, error) {
 	}
 
 	return &user, nil
+}
+
+// GetAllUsers retrieves all users with API keys for authentication purposes
+func (r *UserRepository) GetAllUsers(ctx context.Context) ([]*User, error) {
+	query := `
+		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
+		       password_hash, api_key, is_admin, created_at, updated_at, last_login
+		FROM users
+		WHERE api_key IS NOT NULL AND api_key != ''
+		ORDER BY created_at
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*User
+	for rows.Next() {
+		var user User
+		err := rows.Scan(
+			&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
+			&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
+			&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, &user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating users: %w", err)
+	}
+
+	return users, nil
 }

@@ -106,5 +106,3 @@ Common HTTP status codes:
 - `500`: Internal Server Error - Server error during processing
 
 ---
-
-For integration with ARR applications, see the [ARR Integration Guide](../3. Configuration/integration.md).

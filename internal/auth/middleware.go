@@ -54,7 +54,7 @@ func JWTMiddleware(tokenService *token.Service, userRepo *database.UserRepositor
 			return c.Next()
 		}
 
-		user, err := userRepo.GetUserByID(userID)
+		user, err := userRepo.GetUserByID(c.Context(), userID)
 		if err != nil || user == nil {
 			// User not found in database, continue without user context
 			return c.Next()
@@ -116,7 +116,7 @@ func RequireAuth(tokenService *token.Service, userRepo *database.UserRepository)
 			})
 		}
 
-		user, err := userRepo.GetUserByID(userID)
+		user, err := userRepo.GetUserByID(c.Context(), userID)
 		if err != nil || user == nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"success": false,

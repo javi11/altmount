@@ -4,6 +4,7 @@ import { webdavClient } from "../services/webdavClient";
 import type { WebDAVFile } from "../types/webdav";
 import {
 	createBlobUrl,
+	encodeWebDAVPath,
 	getFileTypeInfo,
 	isAudioFile,
 	isTextFile,
@@ -53,9 +54,9 @@ export function useFilePreview() {
 				throw new Error("File type not supported for preview");
 			}
 
-			// For video and audio files, use direct streaming URL
+			// For video and audio files, use direct streaming URL with proper encoding
 			if (isVideoFile(file.basename, file.mime) || isAudioFile(file.basename, file.mime)) {
-				const streamUrl = `/webdav${path}`;
+				const streamUrl = `/webdav${encodeWebDAVPath(path)}`;
 				return { content: null, shouldGetAsText: false, fileInfo, streamUrl };
 			}
 

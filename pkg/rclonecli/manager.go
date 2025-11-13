@@ -58,14 +58,14 @@ type RCResponse struct {
 // NewManager creates a new rclone RC manager
 func NewManager(cfm *config.Manager) *Manager {
 	cfg := cfm.GetConfig()
+	logger := slog.Default().With("component", "rclone")
 
 	rcPort := fmt.Sprintf("%d", cfg.RClone.RCPort)
 	rcloneDir := filepath.Join(cfg.RClone.Path, "rclone")
 
 	// Ensure config directory exists
 	if err := os.MkdirAll(rcloneDir, 0755); err != nil {
-		_logger := slog.With("component", "rclone")
-		_logger.Error("Failed to create rclone config directory", "err", err)
+		logger.ErrorContext(context.Background(), "Failed to create rclone config directory", "err", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,7 +75,7 @@ func NewManager(cfm *config.Manager) *Manager {
 		rcPort:      rcPort,
 		rcloneDir:   rcloneDir,
 		mounts:      make(map[string]*MountInfo),
-		logger:      slog.With("component", "rclone"),
+		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
@@ -118,6 +118,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		"--rc-no-auth", // We'll handle auth at the application level
 		"--config", filepath.Join(m.rcloneDir, "rclone.conf"),
 		"--log-file", logFile,
+		"--use-cookies",
 	}
 
 	logLevel := cfg.RClone.LogLevel
@@ -328,7 +329,10 @@ func (m *Manager) waitForServer() {
 
 // pingServer checks if the RC server is responding
 func (m *Manager) pingServer() bool {
-	req := RCRequest{Command: "core/version"}
+	req := RCRequest{
+		Command: "core/version",
+		Args:    map[string]interface{}{},
+	}
 	_, err := m.makeRequest(req, true)
 	return err == nil
 }

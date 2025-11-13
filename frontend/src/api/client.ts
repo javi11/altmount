@@ -4,8 +4,11 @@ import type {
 	FileHealth,
 	FileMetadata,
 	HealthCheckRequest,
+	HealthCleanupRequest,
+	HealthCleanupResponse,
 	HealthStats,
 	HealthWorkerStatus,
+	LibrarySyncStatus,
 	ManualScanRequest,
 	PoolMetrics,
 	QueueItem,
@@ -194,6 +197,25 @@ export class APIClient {
 		});
 	}
 
+	async cancelQueueItem(id: number) {
+		return this.request<{ message: string; id: number }>(`/queue/${id}/cancel`, {
+			method: "POST",
+		});
+	}
+
+	async cancelBulkQueueItems(ids: number[]) {
+		return this.request<{
+			cancelled_count: number;
+			not_processing_count: number;
+			not_found_count: number;
+			results: Record<string, string>;
+			message: string;
+		}>("/queue/bulk/cancel", {
+			method: "POST",
+			body: JSON.stringify({ ids }),
+		});
+	}
+
 	async getQueueStats() {
 		return this.request<QueueStats>("/queue/stats");
 	}
@@ -214,6 +236,16 @@ export class APIClient {
 
 		const query = searchParams.toString();
 		return this.request<QueueStats>(`/queue/failed${query ? `?${query}` : ""}`, {
+			method: "DELETE",
+		});
+	}
+
+	async clearPendingQueue(olderThan?: string) {
+		const searchParams = new URLSearchParams();
+		if (olderThan) searchParams.set("older_than", olderThan);
+
+		const query = searchParams.toString();
+		return this.request<QueueStats>(`/queue/pending${query ? `?${query}` : ""}`, {
 			method: "DELETE",
 		});
 	}
@@ -302,8 +334,8 @@ export class APIClient {
 		return this.request<HealthStats>("/health/stats");
 	}
 
-	async cleanupHealth(params?: { older_than?: string; status?: string }) {
-		return this.request<HealthStats>("/health/cleanup", {
+	async cleanupHealth(params?: HealthCleanupRequest) {
+		return this.request<HealthCleanupResponse>("/health/cleanup", {
 			method: "DELETE",
 			body: JSON.stringify(params),
 		});
@@ -318,6 +350,22 @@ export class APIClient {
 
 	async getHealthWorkerStatus() {
 		return this.request<HealthWorkerStatus>("/health/worker/status");
+	}
+
+	async getLibrarySyncStatus() {
+		return this.request<LibrarySyncStatus>("/health/library-sync/status");
+	}
+
+	async startLibrarySync() {
+		return this.request<{ message: string }>("/health/library-sync/start", {
+			method: "POST",
+		});
+	}
+
+	async cancelLibrarySync() {
+		return this.request<{ message: string }>("/health/library-sync/cancel", {
+			method: "POST",
+		});
 	}
 
 	async getPoolMetrics() {
@@ -545,7 +593,7 @@ export class APIClient {
 		const formData = new FormData();
 		formData.append("nzbfile", file);
 
-		const url = `/sabnzbd/api/?mode=addfile&apikey=${encodeURIComponent(apiKey)}`;
+		const url = `/sabnzbd?mode=addfile&apikey=${encodeURIComponent(apiKey)}`;
 
 		const response = await fetch(url, {
 			method: "POST",

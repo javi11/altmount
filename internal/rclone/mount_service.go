@@ -54,8 +54,7 @@ func (s *MountService) Mount(ctx context.Context) error {
 	cfg := s.cfm.GetConfig()
 
 	if s.mount != nil && s.mount.IsMounted() {
-		actualMountPath := cfg.GetActualMountPath(config.MountProvider)
-		return fmt.Errorf("already mounted at %s", actualMountPath)
+		return fmt.Errorf("already mounted at %s", cfg.MountPath)
 	}
 	if cfg.MountPath == "" {
 		return fmt.Errorf("mount point not configured")
@@ -68,15 +67,14 @@ func (s *MountService) Mount(ctx context.Context) error {
 	if s.mount != nil {
 		s.mount.Unmount(ctx)
 	} else {
-		s.mount = rclonecli.NewMount(config.MountProvider, "", webdavURL, s.manager)
+		s.mount = rclonecli.NewMount(config.MountProvider, cfg.MountPath, webdavURL, s.manager)
 	}
 
 	if err := s.mount.Mount(ctx); err != nil {
 		return fmt.Errorf("failed to mount: %w", err)
 	}
 
-	actualMountPath := cfg.GetActualMountPath(config.MountProvider)
-	slog.InfoContext(ctx, "RClone mount started", "mount_point", actualMountPath)
+	slog.InfoContext(ctx, "RClone mount started", "mount_point", cfg.MountPath)
 
 	return nil
 }

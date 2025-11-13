@@ -1,8 +1,11 @@
 package api
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
@@ -34,15 +38,38 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 		}
 	}
 
-	// Check for API key authentication
+	// Extract authentication parameters
 	apiKey := c.Query("apikey")
-	if apiKey == "" {
-		return s.writeSABnzbdErrorFiber(c, "API key required")
+	maUsername := c.Query("ma_username") // ARR URL
+	maPassword := c.Query("ma_password") // ARR API key
+
+	// Determine authentication method
+	authenticated := false
+
+	// Method 1: Traditional API key authentication
+	if apiKey != "" {
+		if s.validateAPIKey(c, apiKey) {
+			authenticated = true
+			// Still try auto-registration if ARR credentials provided
+			if maUsername != "" && maPassword != "" {
+				s.tryAutoRegisterARR(c)
+			}
+		}
 	}
 
-	// Validate API key using existing authentication system
-	if !s.validateAPIKey(c, apiKey) {
-		return s.writeSABnzbdErrorFiber(c, "Invalid API key")
+	// Method 2: ARR credentials authentication
+	if !authenticated && maUsername != "" && maPassword != "" {
+		if s.validateARRCredentials(c, maUsername, maPassword) {
+			authenticated = true
+		}
+	}
+
+	// Check if authenticated by either method
+	if !authenticated {
+		if apiKey != "" {
+			return s.writeSABnzbdErrorFiber(c, "Invalid API key")
+		}
+		return s.writeSABnzbdErrorFiber(c, "Authentication required: provide either apikey or ma_username+ma_password")
 	}
 
 	// Get mode parameter to determine which API method to call
@@ -65,6 +92,89 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	default:
 		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Unknown mode: %s", mode))
 	}
+}
+
+// tryAutoRegisterARR attempts to auto-register an ARR instance from SABnzbd request parameters
+// It extracts ma_username (ARR URL) and ma_password (ARR API key) from the query parameters
+// This method logs errors but does not fail the SABnzbd request if registration fails
+func (s *Server) tryAutoRegisterARR(c *fiber.Ctx) {
+	// Check if arrsService is available
+	if s.arrsService == nil {
+		return
+	}
+
+	// Extract ma_username (ARR URL) and ma_password (ARR API key)
+	maUsername := c.Query("ma_username")
+	maPassword := c.Query("ma_password")
+
+	// Both parameters must be present
+	if maUsername == "" || maPassword == "" {
+		return
+	}
+
+	// URL decode the username parameter (contains ARR URL)
+	arrURL, err := url.QueryUnescape(maUsername)
+	if err != nil {
+		slog.ErrorContext(c.Context(), "Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
+	}
+
+	arrAPIKey := maPassword
+
+	slog.DebugContext(c.Context(), "Attempting ARR auto-registration from SABnzbd request",
+		"arr_url", arrURL)
+
+	// Attempt to register the instance (category is auto-assigned based on ARR type)
+	if err := s.arrsService.RegisterInstance(c.Context(), arrURL, arrAPIKey); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to auto-register ARR instance",
+			"arr_url", arrURL,
+			"error", err)
+		return
+	}
+
+	slog.InfoContext(c.Context(), "Successfully auto-registered ARR instance", "arr_url", arrURL)
+}
+
+// validateARRCredentials validates ARR credentials and auto-registers if needed
+// Returns true if credentials are valid (either already registered or newly registered)
+func (s *Server) validateARRCredentials(c *fiber.Ctx, maUsername, maPassword string) bool {
+	if s.arrsService == nil {
+		slog.ErrorContext(c.Context(), "ARR service not available for credential validation")
+		return false
+	}
+
+	// URL decode the username parameter (contains ARR URL)
+	arrURL, err := url.QueryUnescape(maUsername)
+	if err != nil {
+		slog.ErrorContext(c.Context(), "Failed to decode ma_username parameter", "error", err, "raw_value", maUsername)
+		return false
+	}
+
+	arrAPIKey := maPassword
+
+	// Step 1: Check if instance exists and credentials match
+	if instance := s.findARRInstanceByURL(arrURL); instance != nil {
+		// Instance exists, verify credentials match
+		if instance.APIKey == arrAPIKey {
+			return true
+		}
+
+		slog.ErrorContext(c.Context(), "ARR credentials do not match registered instance", "arr_url", arrURL)
+		return false
+	}
+
+	// Step 2: Instance doesn't exist, try to register it
+	slog.DebugContext(c.Context(), "ARR instance not found, attempting auto-registration", "arr_url", arrURL)
+
+	if err := s.arrsService.RegisterInstance(c.Context(), arrURL, arrAPIKey); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to auto-register ARR instance",
+			"arr_url", arrURL,
+			"error", err)
+
+		return false
+	}
+
+	slog.InfoContext(c.Context(), "Successfully auto-registered and validated ARR instance", "arr_url", arrURL)
+	return true
 }
 
 // handleSABnzbdAddFile handles file upload for NZB files
@@ -123,8 +233,9 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	}
 
 	// Add the file to the processing queue using centralized method
+	// Pass completeDir as the base path (not tempDir) so files are placed in the correct location
 	priority := s.parseSABnzbdPriority(c.FormValue("priority"))
-	item, err := s.importerService.AddToQueue(tempFile, &tempDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(tempFile, &completeDir, &validatedCategory, &priority)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -213,8 +324,9 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	}
 
 	// Add the file to the processing queue using centralized method
+	// Pass completeDir as the base path (not tempDir) so files are placed in the correct location
 	priority := s.parseSABnzbdPriority(c.Query("priority"))
-	item, err := s.importerService.AddToQueue(tempFile, &tempDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(tempFile, &completeDir, &validatedCategory, &priority)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -244,7 +356,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	categoryFilter := c.Query("category", "")
 
 	// Get pending and processing items
-	items, err := s.queueRepo.ListQueueItems(nil, "", categoryFilter, 100, 0)
+	items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", categoryFilter, 100, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get queue")
 	}
@@ -252,7 +364,11 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	// Convert to SABnzbd format
 	slots := make([]SABnzbdQueueSlot, 0, len(items))
 	for i, item := range items {
-		slots = append(slots, ToSABnzbdQueueSlot(item, i))
+		if item.Status == database.QueueStatusFallback {
+			continue
+		}
+
+		slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
 	}
 
 	response := SABnzbdQueueResponse{
@@ -285,7 +401,7 @@ func (s *Server) handleSABnzbdQueueDelete(c *fiber.Ctx) error {
 	}
 
 	// Delete from queue
-	err = s.queueRepo.RemoveFromQueue(id)
+	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to delete queue item")
 	}
@@ -314,14 +430,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	// Get completed items
 	completedStatus := database.QueueStatusCompleted
-	completed, err := s.queueRepo.ListQueueItems(&completedStatus, "", categoryFilter, 50, 0)
+	completed, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, 50, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items")
 	}
 
 	// Get failed items
 	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(&failedStatus, "", categoryFilter, 50, 0)
+	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, 50, 0)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
 	}
@@ -329,14 +445,17 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Combine and convert to SABnzbd format
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
+
 	for _, item := range completed {
-		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
+		// Calculate category-specific base path for this item
+		itemBasePath := s.calculateItemBasePath()
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
 	for _, item := range failed {
-		actualMountPath := s.configManager.GetConfig().GetActualMountPath(config.MountProvider)
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, actualMountPath))
+		// Calculate category-specific base path for this item
+		itemBasePath := s.calculateItemBasePath()
+		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
 		index++
 	}
 
@@ -374,9 +493,15 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 	}
 
 	// Delete from queue (history items are still queue items with completed/failed status)
-	err = s.queueRepo.RemoveFromQueue(id)
+	err = s.queueRepo.RemoveFromQueue(c.Context(), id)
 	if err != nil {
-		return s.writeSABnzbdErrorFiber(c, "Failed to delete history item")
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.writeSABnzbdResponseFiber(c, SABnzbdDeleteResponse{
+				Status: true,
+			})
+		}
+
+		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Failed to delete history item: %v", err))
 	}
 
 	response := SABnzbdDeleteResponse{
@@ -391,11 +516,11 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	// Get queue information
 	var slots []SABnzbdQueueSlot
 	if s.queueRepo != nil {
-		items, err := s.queueRepo.ListQueueItems(nil, "", "", 50, 0)
+		items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", "", 50, 0)
 		if err == nil {
 			for i, item := range items {
-				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing || item.Status == database.QueueStatusRetrying {
-					slots = append(slots, ToSABnzbdQueueSlot(item, i))
+				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing {
+					slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
 				}
 			}
 		}
@@ -445,7 +570,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 
 		// Build misc configuration
 		sabnzbdConfig.Misc = SABnzbdMiscConfig{
-			CompleteDir:            filepath.Join(cfg.GetActualMountPath(config.MountProvider), cfg.SABnzbd.CompleteDir),
+			CompleteDir:            filepath.Join(cfg.MountPath, cfg.SABnzbd.CompleteDir),
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",
@@ -636,13 +761,60 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	// Create in mount path
 	mountDir := filepath.Join(config.Metadata.RootPath, config.SABnzbd.CompleteDir, categoryPath)
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
-		return fmt.Errorf("failed to create mount directory: %w", err)
+		return fmt.Errorf("failed to create category mount directory: %w", err)
 	}
 
 	// Create in temp path
 	tempDir := filepath.Join(os.TempDir(), config.SABnzbd.CompleteDir, categoryPath)
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	return nil
+}
+
+// calculateItemBasePath calculates the base path for an item based on the import strategy configuration
+func (s *Server) calculateItemBasePath() string {
+	if s.configManager == nil {
+		return ""
+	}
+
+	cfg := s.configManager.GetConfig()
+
+	// Determine if we should use import directory or mount path
+	var basePath string
+	if cfg.Import.ImportStrategy != config.ImportStrategyNone &&
+		cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		// Use import directory as base when import strategy is enabled
+		basePath = *cfg.Import.ImportDir
+	} else {
+		// Fall back to mount path
+		basePath = cfg.MountPath
+	}
+
+	// Return base path with category folder
+	return basePath
+}
+
+// normalizeURL normalizes a URL for comparison by removing trailing slashes
+func normalizeURL(rawURL string) string {
+	return strings.TrimSuffix(rawURL, "/")
+}
+
+// findARRInstanceByURL finds an ARR instance by URL
+func (s *Server) findARRInstanceByURL(checkURL string) *arrs.ConfigInstance {
+	if s.arrsService == nil {
+		return nil
+	}
+
+	normalizedCheck := normalizeURL(checkURL)
+	instances := s.arrsService.GetAllInstances()
+
+	for _, instance := range instances {
+		normalizedInstance := normalizeURL(instance.URL)
+		if normalizedInstance == normalizedCheck {
+			return instance
+		}
 	}
 
 	return nil

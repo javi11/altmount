@@ -1,9 +1,12 @@
 package metadata
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -25,14 +28,17 @@ func NewMetadataService(rootPath string) *MetadataService {
 // truncateFilename truncates the filename if it's too long to prevent filesystem issues
 // when creating .meta files. Keeps filename under 250 characters.
 func (ms *MetadataService) truncateFilename(filename string) string {
+	fileExt := filepath.Ext(filename)
+	filename = strings.TrimSuffix(filename, fileExt)
+
 	const maxLen = 250 // Leave room for .meta extension
 
 	if len(filename) <= maxLen {
-		return filename
+		return filename + fileExt
 	}
 
 	// Simply truncate to maxLen
-	return filename[:maxLen]
+	return filename[:maxLen] + fileExt
 }
 
 // WriteFileMetadata writes file metadata to disk
@@ -160,6 +166,7 @@ func (ms *MetadataService) CreateFileMetadata(
 	encryption metapb.Encryption,
 	password string,
 	salt string,
+	releaseDate int64,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -173,6 +180,7 @@ func (ms *MetadataService) CreateFileMetadata(
 		SegmentData:   segmentData,
 		CreatedAt:     now,
 		ModifiedAt:    now,
+		ReleaseDate:   releaseDate,
 	}
 }
 
@@ -206,13 +214,43 @@ func (ms *MetadataService) UpdateFileStatus(virtualPath string, status metapb.Fi
 
 // DeleteFileMetadata deletes a metadata file
 func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
+	return ms.DeleteFileMetadataWithSourceNzb(context.Background(), virtualPath, false)
+}
+
+// DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
+func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
 
+	// If we need to delete the source NZB, read the metadata first
+	var sourceNzbPath string
+	if deleteSourceNzb {
+		metadata, err := ms.ReadFileMetadata(virtualPath)
+		if err == nil && metadata != nil && metadata.SourceNzbPath != "" {
+			sourceNzbPath = metadata.SourceNzbPath
+		}
+	}
+
+	// Delete the metadata file
 	err := os.Remove(metadataPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete metadata file: %w", err)
+	}
+
+	// Optionally delete the source NZB file (error-tolerant)
+	if deleteSourceNzb && sourceNzbPath != "" {
+		if err := os.Remove(sourceNzbPath); err != nil {
+			if !os.IsNotExist(err) {
+				slog.DebugContext(ctx, "Failed to delete source NZB file",
+					"nzb_path", sourceNzbPath,
+					"error", err)
+			}
+		} else {
+			slog.DebugContext(ctx, "Deleted source NZB file",
+				"nzb_path", sourceNzbPath,
+				"virtual_path", virtualPath)
+		}
 	}
 
 	return nil
@@ -280,45 +318,10 @@ func (ms *MetadataService) CreateSegmentData(startOffset, endOffset int64, messa
 	}
 }
 
-// WalkMetadata walks through all metadata files in the filesystem
-func (ms *MetadataService) WalkMetadata(walkFunc func(virtualPath string, metadata *metapb.FileMetadata) error) error {
-	return filepath.WalkDir(ms.rootPath, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+func (ms *MetadataService) CreateDirectory(name string) error {
+	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
+}
 
-		// Skip if not a .meta file
-		if d.IsDir() || filepath.Ext(d.Name()) != ".meta" {
-			return nil
-		}
-
-		// Calculate virtual path
-		relPath, err := filepath.Rel(ms.rootPath, path)
-		if err != nil {
-			return err
-		}
-
-		// Remove .meta extension and convert to virtual path
-		virtualName := filepath.Base(relPath)[:len(filepath.Base(relPath))-5]
-		virtualDir := filepath.Dir(relPath)
-		if virtualDir == "." {
-			virtualDir = "/"
-		} else {
-			virtualDir = "/" + filepath.ToSlash(virtualDir)
-		}
-		virtualPath := filepath.Join(virtualDir, virtualName)
-		virtualPath = filepath.ToSlash(virtualPath)
-
-		// Read metadata
-		metadata, err := ms.ReadFileMetadata(virtualPath)
-		if err != nil {
-			return fmt.Errorf("failed to read metadata for %s: %w", virtualPath, err)
-		}
-
-		if metadata != nil {
-			return walkFunc(virtualPath, metadata)
-		}
-
-		return nil
-	})
+func (ms *MetadataService) CreateDirectoryAll(name string) error {
+	return os.MkdirAll(filepath.Join(ms.rootPath, name), 0755)
 }
