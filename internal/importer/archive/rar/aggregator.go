@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
@@ -99,6 +100,7 @@ func isAllowedFile(filename string, allowedExtensions []string) bool {
 
 // ProcessArchive analyzes and processes RAR archive files, creating metadata for all extracted files.
 // This function handles the complete workflow: analysis → file processing → metadata creation.
+// The depth parameter tracks nesting level (0 = top-level, 1 = nested).
 func ProcessArchive(
 	ctx context.Context,
 	virtualDir string,
@@ -114,18 +116,19 @@ func ProcessArchive(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
+	depth int,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
 	}
 
-	slog.InfoContext(ctx, "Analyzing RAR archive content", "parts", len(archiveFiles))
+	slog.InfoContext(ctx, "Analyzing RAR archive content", "parts", len(archiveFiles), "depth", depth)
 
 	// Analyze RAR content with timeout
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password, archiveProgressTracker)
+	rarContents, err := rarProcessor.AnalyzeRarContentFromNzb(ctx, archiveFiles, password, archiveProgressTracker, depth)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to analyze RAR archive content", "error", err)
 		return err
@@ -135,6 +138,14 @@ func ProcessArchive(
 	if !hasAllowedFiles(rarContents, allowedFileExtensions) {
 		slog.WarnContext(ctx, "RAR archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
 		return ErrNoAllowedFiles
+	}
+
+	// Process nested RAR archives if depth allows (max depth = 1)
+	if archive.ShouldProcessNested(depth) {
+		if err := processNestedRarArchives(ctx, rarContents, virtualDir, password, releaseDate, nzbPath, rarProcessor, metadataService, poolManager, archiveProgressTracker, validationProgressTracker, maxValidationGoroutines, segmentSamplePercentage, allowedFileExtensions, depth); err != nil {
+			slog.WarnContext(ctx, "Failed to process nested RAR archives", "error", err)
+			// Don't fail the entire process, just log the error and continue
+		}
 	}
 
 	// Calculate total segments to validate for accurate progress tracking
@@ -248,6 +259,110 @@ func ProcessArchive(
 	}
 
 	slog.InfoContext(ctx, "Successfully processed RAR archive files", "files_processed", len(rarContents))
+
+	return nil
+}
+
+// processNestedRarArchives detects and processes RAR part files within extracted RAR contents
+func processNestedRarArchives(
+	ctx context.Context,
+	rarContents []Content,
+	virtualDir string,
+	password string,
+	releaseDate int64,
+	nzbPath string,
+	rarProcessor Processor,
+	metadataService *metadata.MetadataService,
+	poolManager pool.Manager,
+	archiveProgressTracker *progress.Tracker,
+	validationProgressTracker *progress.Tracker,
+	maxValidationGoroutines int,
+	segmentSamplePercentage int,
+	allowedFileExtensions []string,
+	currentDepth int,
+) error {
+	// Extract filenames from contents
+	filenames := make([]string, 0, len(rarContents))
+	contentMap := make(map[string]Content)
+
+	for _, content := range rarContents {
+		if content.IsDirectory {
+			continue
+		}
+
+		// Use flattened filename (base name only)
+		normalizedPath := strings.ReplaceAll(content.InternalPath, "\\", "/")
+		baseFilename := filepath.Base(normalizedPath)
+
+		filenames = append(filenames, baseFilename)
+		contentMap[baseFilename] = content
+	}
+
+	// Group RAR part files
+	rarGroups := archive.GroupRarParts(filenames)
+
+	if len(rarGroups) == 0 {
+		slog.DebugContext(ctx, "No nested RAR archives found")
+		return nil
+	}
+
+	slog.InfoContext(ctx, "Found nested RAR archives", "groups", len(rarGroups), "depth", currentDepth)
+
+	// Process each RAR group
+	for _, group := range rarGroups {
+		slog.InfoContext(ctx, "Processing nested RAR group", "base_name", group.BaseName, "parts", len(group.Files))
+
+		// Convert Content to ParsedFile format for recursive processing
+		nestedFiles := make([]parser.ParsedFile, 0, len(group.Files))
+
+		for i, filename := range group.Files {
+			content, ok := contentMap[filename]
+			if !ok {
+				slog.WarnContext(ctx, "Nested RAR file not found in content map", "filename", filename)
+				continue
+			}
+
+			nestedFiles = append(nestedFiles, parser.ParsedFile{
+				Filename:      filename,
+				Segments:      content.Segments,
+				OriginalIndex: i,
+				AesKey:        content.AesKey,
+				AesIV:         content.AesIV,
+				Size:          content.Size,
+				IsRarArchive:  true,
+			})
+		}
+
+		if len(nestedFiles) == 0 {
+			slog.WarnContext(ctx, "No valid nested RAR files found for group", "base_name", group.BaseName)
+			continue
+		}
+
+		// Recursively process nested RAR with incremented depth
+		if err := ProcessArchive(
+			ctx,
+			virtualDir,
+			nestedFiles,
+			"",
+			releaseDate,
+			nzbPath,
+			rarProcessor,
+			metadataService,
+			poolManager,
+			archiveProgressTracker,
+			validationProgressTracker,
+			maxValidationGoroutines,
+			segmentSamplePercentage,
+			allowedFileExtensions,
+			currentDepth+1,
+		); err != nil {
+			slog.ErrorContext(ctx, "Failed to process nested RAR archive", "base_name", group.BaseName, "error", err)
+			// Continue processing other groups even if one fails
+			continue
+		}
+
+		slog.InfoContext(ctx, "Successfully processed nested RAR archive", "base_name", group.BaseName)
+	}
 
 	return nil
 }

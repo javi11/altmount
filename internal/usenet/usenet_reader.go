@@ -408,7 +408,7 @@ func (b *usenetReader) downloadManager(
 
 		// Wait for all downloads to complete
 		if err := pool.Wait(); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				return
 			}
 

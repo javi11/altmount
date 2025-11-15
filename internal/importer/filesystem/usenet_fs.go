@@ -15,12 +15,14 @@ import (
 
 	"github.com/spf13/afero"
 
+	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/usenet"
+	"github.com/javi11/altmount/internal/utils"
 )
 
 // Compile-time interface checks
@@ -42,6 +44,7 @@ type UsenetFileSystem struct {
 	progressTracker *progress.Tracker
 	filesCompleted  int32 // atomic counter
 	totalFiles      int
+	aesCipher       *aes.AesCipher // For AES decryption of encrypted RAR files
 }
 
 // UsenetFileInfo implements fs.FileInfo for RAR part files
@@ -51,7 +54,7 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int, progressTracker *progress.Tracker) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int, progressTracker *progress.Tracker, aesCipher *aes.AesCipher) *UsenetFileSystem {
 	filesMap := make(map[string]parser.ParsedFile)
 	for _, file := range files {
 		filesMap[file.Filename] = file
@@ -66,6 +69,7 @@ func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []
 		progressTracker: progressTracker,
 		filesCompleted:  0,
 		totalFiles:      len(files),
+		aesCipher:       aesCipher,
 	}
 }
 
@@ -96,6 +100,9 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 		position:       0,
 		closed:         false,
 		ufs:            ufs,
+		aesCipher:      ufs.aesCipher,
+		aesKey:         file.AesKey,
+		aesIV:          file.AesIV,
 	}, nil
 }
 
@@ -134,6 +141,9 @@ type UsenetFile struct {
 	position       int64
 	closed         bool
 	ufs            *UsenetFileSystem
+	aesCipher      *aes.AesCipher // AES cipher for decryption
+	aesKey         []byte         // AES encryption key
+	aesIV          []byte         // AES initialization vector
 }
 
 // UsenetFile methods implementing fs.File interface
@@ -258,6 +268,32 @@ func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
 
 // createUsenetReader creates a Usenet reader for the specified range
 func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+	// Check if this file has AES encryption
+	if len(uf.aesKey) > 0 && uf.aesCipher != nil {
+		// Wrap with AES decryption (similar to metadata_remote_file.go)
+		decryptedReader, err := uf.aesCipher.Open(
+			ctx,
+			&utils.RangeHeader{Start: start, End: end},
+			uf.size,
+			uf.aesKey,
+			uf.aesIV,
+			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
+				// Create the underlying usenet reader for encrypted data
+				return uf.createPlainUsenetReader(ctx, s, e)
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
+		}
+		return decryptedReader, nil
+	}
+
+	// No encryption, return plain usenet reader
+	return uf.createPlainUsenetReader(ctx, start, end)
+}
+
+// createPlainUsenetReader creates a plain Usenet reader without encryption
+func (uf *UsenetFile) createPlainUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	// Filter segments for this specific file
 	loader := dbSegmentLoader{segs: uf.file.Segments}
 

@@ -51,6 +51,8 @@ type ParsedFile struct {
 	Encryption    metapb.Encryption // Encryption type (e.g., "rclone"), nil if not encrypted
 	Password      string            // Password from NZB meta, nil if not encrypted
 	Salt          string            // Salt from NZB meta, nil if not encrypted
+	AesKey        []byte            // AES encryption key for encrypted RAR files
+	AesIV         []byte            // AES initialization vector for encrypted RAR files
 	ReleaseDate   time.Time         // Release date from the Usenet post
 	OriginalIndex int               // Original position in the parsed NZB file list
 }

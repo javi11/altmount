@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -109,7 +110,7 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 // AnalyzeRarContentFromNzb analyzes a RAR archive directly from NZB data without downloading
 // This implementation uses NewArchiveIterator with UsenetFileSystem to analyze RAR structure and stream data from Usenet
 // Returns an array of files to be added to the metadata with all the info and segments for each file
-func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker) ([]Content, error) {
+func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker, depth int) ([]Content, error) {
 	if rh.poolManager == nil {
 		return nil, NewNonRetryableError("no pool manager available", nil)
 	}
@@ -144,9 +145,13 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 		normalizedFiles[i].Filename = normalizeRarPartFilename(file.Filename, file.OriginalIndex, allFilesNoExt, len(rarFiles), baseFilename)
 	}
 
+	// Create AES cipher for encrypted nested RAR files
+	// This allows transparent decryption of AES-encrypted RAR parts
+	aesCipher := aes.NewAesCipher()
+
 	// Create Usenet filesystem for RAR access - this enables the iterator to access
 	// RAR part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, rh.maxWorkers, rh.maxCacheSizeMB, progressTracker)
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, rh.maxWorkers, rh.maxCacheSizeMB, progressTracker, aesCipher)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(normalizedFiles))
@@ -164,7 +169,8 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	rh.log.InfoContext(ctx, "Starting RAR analysis",
 		"main_file", mainRarFile,
 		"total_parts", len(normalizedFiles),
-		"has_password", password != "")
+		"has_password", password != "",
+		"depth", depth)
 
 	// Build options with password if provided
 	opts := []rardecode.Option{rardecode.FileSystem(ufs), rardecode.SkipCheck}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -128,9 +129,13 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// Rename 7zip files to match the first file's base name and sort
 	sortedFiles := renameSevenZipFilesAndSort(sevenZipFiles)
 
+	// Create AES cipher for encrypted nested archives
+	// This allows transparent decryption of AES-encrypted archive parts
+	aesCipher := aes.NewAesCipher()
+
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
 	// 7zip part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB, progressTracker)
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB, progressTracker, aesCipher)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))

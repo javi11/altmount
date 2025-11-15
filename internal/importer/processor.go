@@ -319,6 +319,7 @@ func (proc *Processor) processRarArchive(
 			proc.maxImportConnections,
 			proc.segmentSamplePercentage,
 			proc.allowedFileExtensions,
+			0, // depth: 0 for top-level archives
 		)
 		if err != nil {
 			return "", err
@@ -390,6 +391,7 @@ func (proc *Processor) processSevenZipArchive(
 			releaseDate,
 			parsed.Path,
 			proc.sevenZipProcessor,
+			proc.rarProcessor, // needed for nested RAR processing
 			proc.metadataService,
 			proc.poolManager,
 			archiveProgressTracker,
@@ -397,6 +399,7 @@ func (proc *Processor) processSevenZipArchive(
 			proc.maxImportConnections,
 			proc.segmentSamplePercentage,
 			proc.allowedFileExtensions,
+			0, // depth: 0 for top-level archives
 		)
 		if err != nil {
 			return "", err

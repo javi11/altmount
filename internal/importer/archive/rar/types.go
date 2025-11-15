@@ -14,7 +14,8 @@ type Processor interface {
 	// without downloading. Returns an array of Content with file metadata and segments.
 	// password parameter is used to unlock password-protected RAR archives.
 	// progressTracker is used to report progress during analysis.
-	AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker) ([]Content, error)
+	// depth parameter tracks nesting level (0 = top-level, 1 = nested).
+	AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker, depth int) ([]Content, error)
 	// CreateFileMetadataFromRarContent creates FileMetadata from Content for the metadata
 	// system. This is used to convert Content into the protobuf format used by the metadata system.
 	CreateFileMetadataFromRarContent(content Content, sourceNzbPath string, releaseDate int64) *metapb.FileMetadata
