@@ -226,7 +226,7 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 
 // syncMaps holds the metadata and database record maps used during synchronization
 type syncMaps struct {
-	metaFileSet map[string]string                                  // mount relative path -> metadata file path
+	metaFileSet map[string]string                              // mount relative path -> metadata file path
 	dbPathSet   map[string]database.AutomaticHealthCheckRecord // mount relative path -> health check record
 }
 
@@ -594,7 +594,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
 					FilePath:         path,
 					LibraryPath:      libraryPath,
-					ReleaseDate:      releaseDateAsTime,
+					ReleaseDate:      &releaseDateAsTime,
 					ScheduledCheckAt: scheduledCheckAt,
 					SourceNzbPath:    &fileMeta.SourceNzbPath,
 				})
@@ -1372,7 +1372,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
 					FilePath:         path,
 					LibraryPath:      libraryPath,
-					ReleaseDate:      releaseDateAsTime,
+					ReleaseDate:      &releaseDateAsTime,
 					ScheduledCheckAt: scheduledCheckAt,
 					SourceNzbPath:    &fileMeta.SourceNzbPath,
 				})

@@ -845,7 +845,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 		var (
 			path             string
 			libraryPath      *string
-			releaseDate      time.Time
+			releaseDate      *time.Time
 			scheduledCheckAt time.Time
 			sourceNzbPath    *string
 		)
@@ -873,7 +873,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 type AutomaticHealthCheckRecord struct {
 	FilePath         string
 	LibraryPath      *string
-	ReleaseDate      time.Time
+	ReleaseDate      *time.Time
 	ScheduledCheckAt time.Time
 	SourceNzbPath    *string
 }
