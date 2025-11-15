@@ -812,10 +812,13 @@ type ConfigGetter func() *Config
 
 // Manager manages configuration state and persistence
 type Manager struct {
-	current    *Config
-	configFile string
-	mutex      sync.RWMutex
-	callbacks  []ChangeCallback
+	current              *Config
+	configFile           string
+	mutex                sync.RWMutex
+	callbacks            []ChangeCallback
+	needsLibrarySync     bool
+	previousMountPath    string
+	librarySyncMutex     sync.RWMutex
 }
 
 // NewManager creates a new configuration manager
@@ -846,6 +849,15 @@ func (m *Manager) UpdateConfig(config *Config) error {
 	if m.current != nil {
 		oldConfig = m.current.DeepCopy()
 	}
+
+	// Detect mount_path changes
+	if oldConfig != nil && oldConfig.MountPath != config.MountPath {
+		m.librarySyncMutex.Lock()
+		m.needsLibrarySync = true
+		m.previousMountPath = oldConfig.MountPath
+		m.librarySyncMutex.Unlock()
+	}
+
 	m.current = config
 	callbacks := make([]ChangeCallback, len(m.callbacks))
 	copy(callbacks, m.callbacks)
@@ -942,6 +954,28 @@ func (m *Manager) SaveConfig() error {
 	}
 
 	return SaveToFile(config, m.configFile)
+}
+
+// NeedsLibrarySync returns whether a library sync is needed due to configuration changes
+func (m *Manager) NeedsLibrarySync() bool {
+	m.librarySyncMutex.RLock()
+	defer m.librarySyncMutex.RUnlock()
+	return m.needsLibrarySync
+}
+
+// GetPreviousMountPath returns the previous mount path before the last change
+func (m *Manager) GetPreviousMountPath() string {
+	m.librarySyncMutex.RLock()
+	defer m.librarySyncMutex.RUnlock()
+	return m.previousMountPath
+}
+
+// ClearLibrarySyncFlag clears the library sync needed flag
+func (m *Manager) ClearLibrarySyncFlag() {
+	m.librarySyncMutex.Lock()
+	defer m.librarySyncMutex.Unlock()
+	m.needsLibrarySync = false
+	m.previousMountPath = ""
 }
 
 // isRunningInDocker detects if the application is running inside a Docker container

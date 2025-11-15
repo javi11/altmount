@@ -36,6 +36,7 @@ type SyncResult struct {
 	MetadataDeleted     int           `json:"metadata_deleted"`
 	LibraryFilesDeleted int           `json:"library_files_deleted"`
 	LibraryDirsDeleted  int           `json:"library_dirs_deleted"`
+	SymlinksUpdated     int           `json:"symlinks_updated"`
 	Duration            time.Duration `json:"duration"`
 	CompletedAt         time.Time     `json:"completed_at"`
 }
@@ -58,6 +59,7 @@ type LibrarySyncWorker struct {
 	metadataService *metadata.MetadataService
 	healthRepo      *database.HealthRepository
 	configGetter    config.ConfigGetter
+	configManager   *config.Manager
 	cancelFunc      context.CancelFunc
 	mu              sync.Mutex
 	running         bool
@@ -73,12 +75,14 @@ func NewLibrarySyncWorker(
 	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
 	configGetter config.ConfigGetter,
+	configManager *config.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 ) *LibrarySyncWorker {
 	return &LibrarySyncWorker{
 		metadataService: metadataService,
 		healthRepo:      healthRepo,
 		configGetter:    configGetter,
+		configManager:   configManager,
 		rcloneClient:    rcloneClient,
 		manualTrigger:   make(chan struct{}, 1), // Buffered channel for non-blocking sends
 	}
@@ -237,6 +241,7 @@ type cleanupCounts struct {
 	metadataDeleted     int
 	libraryFilesDeleted int
 	libraryDirsDeleted  int
+	symlinksUpdated     int
 }
 
 // findFilesToDelete identifies database records that no longer have corresponding metadata files
@@ -292,6 +297,7 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 		MetadataDeleted:     cleanup.metadataDeleted,
 		LibraryFilesDeleted: cleanup.libraryFilesDeleted,
 		LibraryDirsDeleted:  cleanup.libraryDirsDeleted,
+		SymlinksUpdated:     cleanup.symlinksUpdated,
 		Duration:            duration,
 		CompletedAt:         time.Now(),
 	}
@@ -306,6 +312,7 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 		"metadata_deleted", cleanup.metadataDeleted,
 		"library_files_deleted", cleanup.libraryFilesDeleted,
 		"library_dirs_deleted", cleanup.libraryDirsDeleted,
+		"symlinks_updated", cleanup.symlinksUpdated,
 		"duration", duration)
 }
 
@@ -407,6 +414,16 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	cfg := lsw.configGetter()
 	slog.InfoContext(ctx, "Starting library sync")
 
+	// Determine mount paths for symlink updates
+	var oldMountPath, newMountPath string
+	if lsw.configManager != nil && lsw.configManager.NeedsLibrarySync() && !dryRun {
+		oldMountPath = lsw.configManager.GetPreviousMountPath()
+		newMountPath = cfg.MountPath
+		slog.InfoContext(ctx, "Will update symlinks during filesystem walk",
+			"old_mount", oldMountPath,
+			"new_mount", newMountPath)
+	}
+
 	// Check import strategy - if NONE, only sync DB with metadata files
 	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
 		slog.InfoContext(ctx, "Import strategy is NONE, performing metadata-only sync")
@@ -420,6 +437,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	var metadataFiles []string
 	var libraryFiles *UsedFiles
 	var importDirFiles *UsedFiles
+	var librarySymlinksUpdated, importSymlinksUpdated int
 
 	fsWalkPool := pool.New().WithErrors().WithMaxGoroutines(3)
 
@@ -434,22 +452,26 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	})
 
 	// Get all library files (symlinks and .strm) to capture library paths
+	// Also updates symlinks inline if mount path has changed
 	fsWalkPool.Go(func() error {
-		files, err := lsw.getAllLibraryFiles(ctx)
+		files, updated, err := lsw.getAllLibraryFiles(ctx, oldMountPath, newMountPath)
 		if err != nil {
 			return fmt.Errorf("failed to get library files: %w", err)
 		}
 		libraryFiles = files
+		librarySymlinksUpdated = updated
 		return nil
 	})
 
 	// Get all import directory files
+	// Also updates symlinks inline if mount path has changed
 	fsWalkPool.Go(func() error {
-		files, err := lsw.getAllImportDirFiles(ctx)
+		files, updated, err := lsw.getAllImportDirFiles(ctx, oldMountPath, newMountPath)
 		if err != nil {
 			return fmt.Errorf("failed to get import directory files: %w", err)
 		}
 		importDirFiles = files
+		importSymlinksUpdated = updated
 		return nil
 	})
 
@@ -458,6 +480,16 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			slog.ErrorContext(ctx, "Failed to walk filesystem", "error", err)
 		}
 		return nil
+	}
+
+	// Log and clear mount path change flag if symlinks were updated
+	totalSymlinksUpdated := librarySymlinksUpdated + importSymlinksUpdated
+	if totalSymlinksUpdated > 0 && lsw.configManager != nil {
+		lsw.configManager.ClearLibrarySyncFlag()
+		slog.InfoContext(ctx, "Completed mount path symlink updates during filesystem walk",
+			"library_symlinks", librarySymlinksUpdated,
+			"import_symlinks", importSymlinksUpdated,
+			"total_updated", totalSymlinksUpdated)
 	}
 
 	// Update total files count
@@ -697,6 +729,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		metadataDeleted:     metadataDeletedCount,
 		libraryFilesDeleted: libraryFilesDeletedCount,
 		libraryDirsDeleted:  libraryDirsDeletedCount,
+		symlinksUpdated:     totalSymlinksUpdated,
 	}
 	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
 	return nil
@@ -812,12 +845,13 @@ func (lsw *LibrarySyncWorker) metaPathToMountRelativePath(metaPath string) strin
 }
 
 // getAllLibraryFiles collects both symlinks and .strm files from library directory in a single pass
-func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context) (*UsedFiles, error) {
+// If oldMountPath and newMountPath are provided, it also updates symlinks pointing to the old path
+func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPath, newMountPath string) (*UsedFiles, int, error) {
 	cfg := lsw.configGetter()
 
 	// Get library directory
 	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
-		return nil, fmt.Errorf("library directory is not configured")
+		return nil, 0, fmt.Errorf("library directory is not configured")
 	}
 
 	libraryDir := *cfg.Health.LibraryDir
@@ -827,6 +861,11 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context) (*UsedFile
 		Symlinks:  make(map[string]string),
 		StrmFiles: make(map[string]string),
 	}
+
+	symlinkUpdates := 0
+	shouldUpdateSymlinks := oldMountPath != "" && newMountPath != "" && oldMountPath != newMountPath
+	oldMountPathClean := filepath.Clean(oldMountPath)
+	newMountPathClean := filepath.Clean(newMountPath)
 
 	// Walk the library directory recursively once
 	err := filepath.WalkDir(libraryDir, func(path string, d os.DirEntry, err error) error {
@@ -858,6 +897,43 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context) (*UsedFile
 			// Clean the paths for comparison
 			cleanTarget := filepath.Clean(target)
 			cleanMountDir := filepath.Clean(mountDir)
+
+			// Update symlink if it points to the old mount path
+			if shouldUpdateSymlinks && strings.HasPrefix(cleanTarget, oldMountPathClean) {
+				// Extract the relative path within the mount
+				relativePath := strings.TrimPrefix(cleanTarget, oldMountPathClean)
+				relativePath = strings.TrimPrefix(relativePath, string(filepath.Separator))
+
+				// Create new target path
+				newTarget := filepath.Join(newMountPathClean, relativePath)
+
+				// Remove the old symlink
+				if err := os.Remove(path); err != nil {
+					slog.WarnContext(ctx, "Failed to remove old symlink during mount path update",
+						"path", path,
+						"error", err)
+					return nil
+				}
+
+				// Create new symlink pointing to new mount path
+				if err := os.Symlink(newTarget, path); err != nil {
+					slog.ErrorContext(ctx, "Failed to create updated symlink",
+						"path", path,
+						"old_target", cleanTarget,
+						"new_target", newTarget,
+						"error", err)
+					return nil
+				}
+
+				slog.InfoContext(ctx, "Updated symlink to new mount path",
+					"path", path,
+					"old_target", cleanTarget,
+					"new_target", newTarget)
+
+				symlinkUpdates++
+				// Update cleanTarget to the new target for storage
+				cleanTarget = newTarget
+			}
 
 			// Check if this symlink points inside the mount directory
 			if strings.HasPrefix(cleanTarget, cleanMountDir) {
@@ -909,14 +985,14 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context) (*UsedFile
 
 	if err != nil {
 		slog.ErrorContext(ctx, "Error during library file scan", "error", err)
-		return nil, err
+		return nil, 0, err
 	}
 
-	return result, nil
+	return result, symlinkUpdates, nil
 }
 
 // getAllImportDirFiles collects both regular files and .strm files from import directory in a single pass
-func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*UsedFiles, error) {
+func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMountPath, newMountPath string) (*UsedFiles, int, error) {
 	cfg := lsw.configGetter()
 
 	// Get import directory
@@ -925,7 +1001,7 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*UsedFi
 		return &UsedFiles{
 			Symlinks:  make(map[string]string),
 			StrmFiles: make(map[string]string),
-		}, nil
+		}, 0, nil
 	}
 
 	importDir := *cfg.Import.ImportDir
@@ -936,13 +1012,19 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*UsedFi
 		return &UsedFiles{
 			Symlinks:  make(map[string]string),
 			StrmFiles: make(map[string]string),
-		}, nil
+		}, 0, nil
 	}
 
 	result := &UsedFiles{
 		Symlinks:  make(map[string]string),
 		StrmFiles: make(map[string]string),
 	}
+
+	symlinkUpdates := 0
+	shouldUpdateSymlinks := oldMountPath != "" && newMountPath != "" && oldMountPath != newMountPath
+	oldMountPathClean := filepath.Clean(oldMountPath)
+	newMountPathClean := filepath.Clean(newMountPath)
+	mountDir := cfg.MountPath
 
 	// Walk the import directory recursively once
 	err := filepath.WalkDir(importDir, func(path string, d os.DirEntry, err error) error {
@@ -990,6 +1072,53 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*UsedFi
 				target = filepath.Join(filepath.Dir(path), target)
 			}
 
+			// Clean the paths for comparison
+			cleanTarget := filepath.Clean(target)
+			cleanMountDir := filepath.Clean(mountDir)
+
+			// Update symlink if it points to the old mount path
+			if shouldUpdateSymlinks && strings.HasPrefix(cleanTarget, oldMountPathClean) {
+				// Extract the relative path within the mount
+				relativePath := strings.TrimPrefix(cleanTarget, oldMountPathClean)
+				relativePath = strings.TrimPrefix(relativePath, string(filepath.Separator))
+
+				// Create new target path
+				newTarget := filepath.Join(newMountPathClean, relativePath)
+
+				// Remove the old symlink
+				if err := os.Remove(path); err != nil {
+					slog.WarnContext(ctx, "Failed to remove old symlink during mount path update",
+						"path", path,
+						"error", err)
+				} else {
+					// Create new symlink pointing to new mount path
+					if err := os.Symlink(newTarget, path); err != nil {
+						slog.ErrorContext(ctx, "Failed to create updated symlink during mount path update",
+							"path", path,
+							"old_target", cleanTarget,
+							"new_target", newTarget,
+							"error", err)
+					} else {
+						symlinkUpdates++
+						slog.DebugContext(ctx, "Updated symlink for new mount path",
+							"path", path,
+							"old_target", cleanTarget,
+							"new_target", newTarget)
+						// Update the target for further processing
+						cleanTarget = newTarget
+					}
+				}
+			}
+
+			// Validate that the symlink points to mount directory
+			if !strings.HasPrefix(cleanTarget, cleanMountDir) {
+				slog.WarnContext(ctx, "Symlink in import directory does not point to mount directory",
+					"path", path,
+					"target", cleanTarget,
+					"mount_dir", cleanMountDir)
+				return nil
+			}
+
 			// Store symlink with relative path as key
 			result.Symlinks[virtualPath] = path
 		} else if strings.HasSuffix(d.Name(), ".strm") {
@@ -1003,10 +1132,10 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*UsedFi
 
 	if err != nil {
 		slog.ErrorContext(ctx, "Error during import directory file scan", "error", err)
-		return nil, err
+		return nil, 0, err
 	}
 
-	return result, nil
+	return result, symlinkUpdates, nil
 }
 
 // removeEmptyDirectoriesFromPath removes empty directories from the specified path
@@ -1283,6 +1412,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		metadataDeleted:     0,
 		libraryFilesDeleted: 0,
 		libraryDirsDeleted:  0,
+		symlinksUpdated:     0,
 	}
 	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
 	return nil

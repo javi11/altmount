@@ -10,12 +10,14 @@ import (
 // LibrarySyncHandlers holds the library sync-related request handlers
 type LibrarySyncHandlers struct {
 	librarySyncWorker *health.LibrarySyncWorker
+	configManager     ConfigManager
 }
 
 // NewLibrarySyncHandlers creates a new instance of library sync handlers
-func NewLibrarySyncHandlers(librarySyncWorker *health.LibrarySyncWorker) *LibrarySyncHandlers {
+func NewLibrarySyncHandlers(librarySyncWorker *health.LibrarySyncWorker, configManager ConfigManager) *LibrarySyncHandlers {
 	return &LibrarySyncHandlers{
 		librarySyncWorker: librarySyncWorker,
+		configManager:     configManager,
 	}
 }
 
@@ -84,5 +86,25 @@ func (h *LibrarySyncHandlers) handleDryRunLibrarySync(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    apiResult,
+	})
+}
+
+// handleGetSyncNeeded handles GET /api/health/library-sync/needed
+// Returns whether a library sync is needed due to configuration changes
+func (h *LibrarySyncHandlers) handleGetSyncNeeded(c *fiber.Ctx) error {
+	needsSync := false
+	reason := ""
+
+	if h.configManager != nil && h.configManager.NeedsLibrarySync() {
+		needsSync = true
+		reason = "mount_path_changed"
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"needs_sync": needsSync,
+			"reason":     reason,
+		},
 	})
 }
