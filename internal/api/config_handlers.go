@@ -24,6 +24,9 @@ type ConfigManager interface {
 	OnConfigChange(callback config.ChangeCallback)
 	ReloadConfig() error
 	SaveConfig() error
+	NeedsLibrarySync() bool
+	GetPreviousMountPath() string
+	ClearLibrarySyncFlag()
 }
 
 // parseLogLevel converts string log level to slog.Level

@@ -345,6 +345,7 @@ func startHealthWorker(
 		metadataService,
 		healthRepo,
 		configManager.GetConfigGetter(),
+		configManager,
 		rcloneClient,
 	)
 

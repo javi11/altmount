@@ -187,6 +187,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	// Library sync endpoints
 	api.Get("/health/library-sync/status", s.handleGetLibrarySyncStatus)
+	api.Get("/health/library-sync/needed", s.handleGetSyncNeeded)
 	api.Post("/health/library-sync/start", s.handleStartLibrarySync)
 	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
 	api.Post("/health/library-sync/dry-run", s.handleDryRunLibrarySync)
@@ -303,7 +304,7 @@ func (s *Server) handleGetLibrarySyncStatus(c *fiber.Ctx) error {
 		})
 	}
 
-	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleGetLibrarySyncStatus(c)
 }
 
@@ -314,7 +315,7 @@ func (s *Server) handleStartLibrarySync(c *fiber.Ctx) error {
 		})
 	}
 
-	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleStartLibrarySync(c)
 }
 
@@ -325,7 +326,7 @@ func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 		})
 	}
 
-	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleCancelLibrarySync(c)
 }
 
@@ -336,6 +337,11 @@ func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
 		})
 	}
 
-	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleDryRunLibrarySync(c)
+}
+
+func (s *Server) handleGetSyncNeeded(c *fiber.Ctx) error {
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
+	return handlers.handleGetSyncNeeded(c)
 }

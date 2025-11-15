@@ -32,8 +32,10 @@ import { RestartRequiredBanner } from "../components/ui/RestartRequiredBanner";
 import { useConfirm } from "../contexts/ModalContext";
 import {
 	useConfig,
+	useLibrarySyncNeeded,
 	useReloadConfig,
 	useRestartServer,
+	useTriggerLibrarySync,
 	useUpdateConfigSection,
 } from "../hooks/useConfig";
 import type {
@@ -71,6 +73,8 @@ export function ConfigurationPage() {
 	const reloadConfig = useReloadConfig();
 	const restartServer = useRestartServer();
 	const updateConfigSection = useUpdateConfigSection();
+	const { data: syncNeeded } = useLibrarySyncNeeded();
+	const triggerLibrarySync = useTriggerLibrarySync();
 	const { confirmAction } = useConfirm();
 	const navigate = useNavigate();
 	const { section } = useParams<{ section: string }>();
@@ -365,6 +369,32 @@ export function ConfigurationPage() {
 				onDismiss={handleDismissRestartBanner}
 				isDismissed={isRestartBannerDismissed}
 			/>
+
+			{/* Library Sync Needed Banner */}
+			{syncNeeded?.needs_sync && (
+				<div className="alert alert-warning">
+					<AlertTriangle className="h-6 w-6" />
+					<div className="flex-1">
+						<div className="font-bold">Library Sync Required</div>
+						<div className="text-sm">
+							Mount path has been updated. Run Library Sync to update existing symlinks.
+						</div>
+					</div>
+					<button
+						type="button"
+						className="btn btn-primary btn-sm"
+						onClick={() => triggerLibrarySync.mutate()}
+						disabled={triggerLibrarySync.isPending}
+					>
+						{triggerLibrarySync.isPending ? (
+							<LoadingSpinner size="sm" />
+						) : (
+							<RefreshCw className="h-4 w-4" />
+						)}
+						{triggerLibrarySync.isPending ? "Starting..." : "Run Library Sync"}
+					</button>
+				</div>
+			)}
 
 			{/* Success/Error Messages */}
 			{reloadConfig.isSuccess && (

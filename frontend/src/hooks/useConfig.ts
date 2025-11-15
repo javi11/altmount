@@ -95,3 +95,58 @@ export function useRestartServer() {
 		},
 	});
 }
+
+// Hook to check if library sync is needed
+export function useLibrarySyncNeeded() {
+	return useQuery({
+		queryKey: ["library-sync", "needed"],
+		queryFn: async () => {
+			const response = await fetch("/api/health/library-sync/needed");
+			if (!response.ok) {
+				throw new Error("Failed to check library sync status");
+			}
+			const data = await response.json();
+			return data.data as { needs_sync: boolean; reason: string };
+		},
+		refetchInterval: 10000, // Poll every 10 seconds
+		staleTime: 5000,
+	});
+}
+
+// Hook to trigger library sync
+export function useTriggerLibrarySync() {
+	const queryClient = useQueryClient();
+	const { showToast } = useToast();
+
+	return useMutation({
+		mutationFn: async () => {
+			const response = await fetch("/api/health/library-sync/start", {
+				method: "POST",
+			});
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || "Failed to trigger library sync");
+			}
+			return response.json();
+		},
+		onSuccess: () => {
+			// Invalidate the sync needed query
+			queryClient.invalidateQueries({ queryKey: ["library-sync", "needed"] });
+
+			showToast({
+				type: "success",
+				title: "Library Sync Started",
+				message: "Library sync has been triggered successfully",
+			});
+		},
+		onError: (error: Error) => {
+			console.error("Failed to trigger library sync:", error);
+
+			showToast({
+				type: "error",
+				title: "Sync Failed",
+				message: error.message,
+			});
+		},
+	});
+}
