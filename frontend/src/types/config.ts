@@ -57,7 +57,7 @@ export interface StreamingConfig {
 export interface HealthConfig {
 	enabled: boolean;
 	library_dir?: string;
-	cleanup_orphaned_metadata?: boolean;
+	cleanup_orphaned_files?: boolean; // Clean up orphaned library files and metadata
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
@@ -84,6 +84,15 @@ export interface LibrarySyncStatus {
 	is_running: boolean;
 	progress?: LibrarySyncProgress;
 	last_sync_result?: LibrarySyncResult;
+}
+
+// Dry run result for library sync
+export interface DryRunSyncResult {
+	orphaned_metadata_count: number; // Number of orphaned metadata files
+	orphaned_library_files: number; // Number of orphaned library files (symlinks/STRM)
+	orphaned_directories: number; // Number of empty directories
+	database_records_to_clean: number; // Number of database records to clean
+	would_cleanup: boolean; // Whether cleanup would occur based on config
 }
 
 // RClone configuration (sanitized)

@@ -189,6 +189,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/health/library-sync/status", s.handleGetLibrarySyncStatus)
 	api.Post("/health/library-sync/start", s.handleStartLibrarySync)
 	api.Post("/health/library-sync/cancel", s.handleCancelLibrarySync)
+	api.Post("/health/library-sync/dry-run", s.handleDryRunLibrarySync)
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
@@ -326,4 +327,15 @@ func (s *Server) handleCancelLibrarySync(c *fiber.Ctx) error {
 
 	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
 	return handlers.handleCancelLibrarySync(c)
+}
+
+func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
+	if s.librarySyncWorker == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Library sync worker not available",
+		})
+	}
+
+	handlers := NewLibrarySyncHandlers(s.librarySyncWorker)
+	return handlers.handleDryRunLibrarySync(c)
 }

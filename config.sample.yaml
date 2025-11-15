@@ -145,7 +145,7 @@ import:
 health:
   enabled: false # Enable health monitoring service (default: false)
   library_dir: '' # Library directory to monitor (required when health is enabled, must be absolute path)
-  cleanup_orphaned_metadata: false # Clean up metadata for files that no longer exist in library (default: false)
+  cleanup_orphaned_files: false # Clean up orphaned files, metadata, and empty directories (when false, no cleanup occurs; when true, deletes orphaned library files, metadata files, and removes empty directories from library, import, and metadata paths, default: false)
   check_interval_seconds: 5 # Health check interval in seconds (default: 5)
   max_connections_for_health_checks: 5 # Number of NNTP connections for health checks (default: 5)
   segment_sample_percentage: 5 # Percentage of segments to sample for health validation (1-100, default: 5)

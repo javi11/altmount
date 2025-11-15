@@ -1,6 +1,6 @@
-import { AlertTriangle, Save } from "lucide-react";
+import { AlertTriangle, Save, TestTube } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ConfigResponse, HealthConfig } from "../../types/config";
+import type { ConfigResponse, DryRunSyncResult, HealthConfig } from "../../types/config";
 
 interface HealthConfigSectionProps {
 	config: ConfigResponse;
@@ -18,6 +18,8 @@ export function HealthConfigSection({
 	const [formData, setFormData] = useState<HealthConfig>(config.health);
 	const [hasChanges, setHasChanges] = useState(false);
 	const [validationError, setValidationError] = useState<string>("");
+	const [dryRunLoading, setDryRunLoading] = useState(false);
+	const [dryRunResult, setDryRunResult] = useState<DryRunSyncResult | null>(null);
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -31,10 +33,45 @@ export function HealthConfigSection({
 		if (data.enabled && !data.library_dir?.trim()) {
 			return "Library Directory is required when Health System is enabled";
 		}
-		if (data.cleanup_orphaned_metadata && !data.library_dir?.trim()) {
-			return "Library Directory is required when metadata cleanup is enabled";
+		if (data.cleanup_orphaned_files && !data.library_dir?.trim()) {
+			return "Library Directory is required when file cleanup is enabled";
 		}
 		return "";
+	};
+
+	// Handle dry run
+	const handleDryRun = async () => {
+		if (!formData.library_dir?.trim()) {
+			return;
+		}
+
+		setDryRunLoading(true);
+		setDryRunResult(null);
+
+		try {
+			const response = await fetch("/api/health/library-sync/dry-run", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			const data = await response.json();
+			if (data.success && data.data) {
+				setDryRunResult(data.data);
+			} else {
+				throw new Error(data.error || "Failed to perform dry run");
+			}
+		} catch (error) {
+			console.error("Dry run failed:", error);
+			// Optionally show an error toast here
+		} finally {
+			setDryRunLoading(false);
+		}
 	};
 
 	const handleInputChange = (
@@ -102,9 +139,8 @@ export function HealthConfigSection({
 					<legend className="fieldset-legend">Library Directory</legend>
 					<input
 						type="text"
-						className={`input ${
-							validationError && formData.enabled ? "input-error border-error" : ""
-						}`}
+						className={`input ${validationError && formData.enabled ? "input-error border-error" : ""
+							}`}
 						value={formData.library_dir || ""}
 						disabled={isReadOnly}
 						placeholder="/media/library"
@@ -129,44 +165,116 @@ export function HealthConfigSection({
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Cleanup Settings</legend>
 					<label className="label cursor-pointer">
-						<span className="label-text">Cleanup orphaned metadata files</span>
+						<span className="label-text">Cleanup orphaned files</span>
 						<input
 							type="checkbox"
 							className="checkbox"
-							checked={formData.cleanup_orphaned_metadata ?? false}
+							checked={formData.cleanup_orphaned_files ?? false}
 							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("cleanup_orphaned_metadata", e.target.checked)}
+							onChange={(e) => handleInputChange("cleanup_orphaned_files", e.target.checked)}
 						/>
 					</label>
-					{formData.cleanup_orphaned_metadata && !formData.library_dir?.trim() && (
+					{formData.cleanup_orphaned_files && !formData.library_dir?.trim() && (
 						<div className="alert alert-warning mt-2">
 							<AlertTriangle className="h-4 w-4" />
 							<span className="text-sm">
-								Library Directory must be configured to enable metadata cleanup
+								Library Directory must be configured to enable file cleanup
 							</span>
 						</div>
 					)}
-					{formData.cleanup_orphaned_metadata && formData.library_dir?.trim() && (
+					{formData.cleanup_orphaned_files && formData.library_dir?.trim() && (
 						<div className="alert alert-warning mt-2">
 							<AlertTriangle className="h-4 w-4" />
 							<div className="text-sm">
 								<strong>Important:</strong> When enabled, this feature will automatically DELETE
-								metadata files that don't have corresponding symlinks in the library directory. This
-								helps prevent storage waste from orphaned metadata files, but files will be
-								permanently removed.
+								orphaned library files and metadata files during sync. This helps prevent storage
+								waste from orphaned files, but files will be permanently removed.
 							</div>
 						</div>
 					)}
 					<p className="label text-sm">
-						Automatically delete metadata files that don't have corresponding symlinks in the
-						library directory. This helps prevent storage waste from orphaned metadata files.
-						{formData.cleanup_orphaned_metadata && (
+						Automatically delete orphaned library files and metadata during library sync. When
+						disabled, no files will be deleted.
+						{formData.cleanup_orphaned_files && (
 							<strong className="text-warning">
 								{" "}
 								Requires Library Directory to be configured.
 							</strong>
 						)}
 					</p>
+
+					{/* Dry Run Button */}
+					<div className="mt-4">
+						<button
+							type="button"
+							className="btn btn-outline btn-sm"
+							onClick={handleDryRun}
+							disabled={!formData.library_dir?.trim() || dryRunLoading || isReadOnly}
+						>
+							{dryRunLoading ? (
+								<>
+									<span className="loading loading-spinner loading-sm" />
+									Running...
+								</>
+							) : (
+								<>
+									<TestTube className="h-4 w-4" />
+									Test Sync (Dry Run)
+								</>
+							)}
+						</button>
+						<p className="label mt-1 text-xs">
+							Preview what would be deleted without actually deleting anything
+						</p>
+					</div>
+
+					{/* Dry Run Results */}
+					{dryRunResult && (
+						<div
+							className={`alert ${dryRunResult.would_cleanup ? "alert-warning" : "alert-info"} mt-4`}
+						>
+							<div className="w-full">
+								<div className="flex items-start justify-between">
+									<div className="flex items-center gap-2">
+										<TestTube className="h-5 w-5" />
+										<h4 className="font-semibold">Dry Run Results</h4>
+									</div>
+								</div>
+								<div className="mt-3 space-y-2 text-sm">
+									<div className="grid grid-cols-2 gap-2">
+										<div>Metadata files to be deleted:</div>
+										<div className="font-mono font-semibold">
+											{dryRunResult.orphaned_metadata_count} files
+										</div>
+										<div>Library files to be deleted:</div>
+										<div className="font-mono font-semibold">
+											{dryRunResult.orphaned_library_files} files
+										</div>
+										<div>Empty Directories:</div>
+										<div className="font-mono font-semibold">
+											{dryRunResult.orphaned_directories} directories
+										</div>
+										<div>Database Records:</div>
+										<div className="font-mono font-semibold">
+											{dryRunResult.database_records_to_clean} records
+										</div>
+									</div>
+									<div className="divider my-2" />
+									<div className="font-semibold">
+										{dryRunResult.would_cleanup ? (
+											<span className="text-warning">
+												These files WOULD BE DELETED in a real sync (cleanup enabled)
+											</span>
+										) : (
+											<span className="text-info">
+												No files would be deleted (cleanup disabled)
+											</span>
+										)}
+									</div>
+								</div>
+							</div>
+						</div>
+					)}
 				</fieldset>
 			</div>
 

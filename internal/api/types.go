@@ -667,3 +667,14 @@ type TestProviderResponse struct {
 	Success      bool   `json:"success"`
 	ErrorMessage string `json:"error_message,omitempty"`
 }
+
+// Library Sync API Types
+
+// DryRunSyncResult represents the results of a library sync dry run
+type DryRunSyncResult struct {
+	OrphanedMetadataCount  int  `json:"orphaned_metadata_count"`  // Number of orphaned metadata files
+	OrphanedLibraryFiles   int  `json:"orphaned_library_files"`   // Number of orphaned library files (symlinks/STRM)
+	OrphanedDirectories    int  `json:"orphaned_directories"`     // Number of empty directories
+	DatabaseRecordsToClean int  `json:"database_records_to_clean"` // Number of database records to clean
+	WouldCleanup           bool `json:"would_cleanup"`            // Whether cleanup would occur based on config
+}

@@ -58,3 +58,31 @@ func (h *LibrarySyncHandlers) handleCancelLibrarySync(c *fiber.Ctx) error {
 		},
 	})
 }
+
+// handleDryRunLibrarySync handles POST /api/health/library-sync/dry-run
+func (h *LibrarySyncHandlers) handleDryRunLibrarySync(c *fiber.Ctx) error {
+	// Perform dry run using the refactored SyncLibrary method with dryRun=true
+	result := h.librarySyncWorker.SyncLibrary(c.Context(), true)
+	if result == nil {
+		// This should not happen unless there was an error during dry run
+		slog.ErrorContext(c.Context(), "Dry run returned nil result")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to perform dry run",
+		})
+	}
+
+	// Convert internal DryRunResult to API DryRunSyncResult
+	apiResult := DryRunSyncResult{
+		OrphanedMetadataCount:  result.OrphanedMetadataCount,
+		OrphanedLibraryFiles:   result.OrphanedLibraryFiles,
+		OrphanedDirectories:    result.OrphanedDirectories,
+		DatabaseRecordsToClean: result.DatabaseRecordsToClean,
+		WouldCleanup:           result.WouldCleanup,
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    apiResult,
+	})
+}

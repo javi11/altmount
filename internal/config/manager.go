@@ -160,7 +160,7 @@ type LogConfig struct {
 type HealthConfig struct {
 	Enabled                       *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	LibraryDir                    *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata       *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CleanupOrphanedFiles          *bool   `yaml:"cleanup_orphaned_files" mapstructure:"cleanup_orphaned_files" json:"cleanup_orphaned_files,omitempty"`
 	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
 	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
@@ -328,12 +328,12 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.LibraryDir = nil
 	}
 
-	// Deep copy Health.CleanupOrphanedMetadata pointer
-	if c.Health.CleanupOrphanedMetadata != nil {
-		v := *c.Health.CleanupOrphanedMetadata
-		copyCfg.Health.CleanupOrphanedMetadata = &v
+	// Deep copy Health.CleanupOrphanedFiles pointer
+	if c.Health.CleanupOrphanedFiles != nil {
+		v := *c.Health.CleanupOrphanedFiles
+		copyCfg.Health.CleanupOrphanedFiles = &v
 	} else {
-		copyCfg.Health.CleanupOrphanedMetadata = nil
+		copyCfg.Health.CleanupOrphanedFiles = nil
 	}
 
 	// Deep copy Metadata.DeleteSourceNzbOnRemoval pointer
@@ -611,10 +611,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate cleanup orphaned metadata - requires library_dir when enabled
-	if c.Health.CleanupOrphanedMetadata != nil && *c.Health.CleanupOrphanedMetadata {
+	// Validate cleanup orphaned files - requires library_dir when enabled
+	if c.Health.CleanupOrphanedFiles != nil && *c.Health.CleanupOrphanedFiles {
 		if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
-			return fmt.Errorf("health library_dir is required when cleanup_orphaned_metadata is enabled")
+			return fmt.Errorf("health library_dir is required when cleanup_orphaned_files is enabled")
 		}
 		if !filepath.IsAbs(*c.Health.LibraryDir) {
 			return fmt.Errorf("health library_dir must be an absolute path")
@@ -969,7 +969,7 @@ func isRunningInDocker() bool {
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
 	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
+	cleanupOrphanedFiles := false     // Cleanup orphaned files disabled by default
 	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
 	mountEnabled := false   // Disabled by default
@@ -1091,8 +1091,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:                       &healthEnabled,           // Disabled by default
-			CleanupOrphanedMetadata:       &cleanupOrphanedMetadata, // Disabled by default
+			Enabled:                       &healthEnabled,         // Disabled by default
+			CleanupOrphanedFiles:          &cleanupOrphanedFiles, // Disabled by default
 			CheckIntervalSeconds:          5,
 			MaxConnectionsForHealthChecks: 5,
 			SegmentSamplePercentage:       5,   // Default: 5% segment sampling

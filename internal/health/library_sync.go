@@ -212,10 +212,10 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 			slog.InfoContext(ctx, "Library sync worker stopped by context")
 			return
 		case <-ticker.C:
-			lsw.syncLibrary(ctx)
+			lsw.SyncLibrary(ctx, false)
 		case <-lsw.manualTrigger:
 			slog.InfoContext(ctx, "Manual library sync trigger received")
-			lsw.syncLibrary(ctx)
+			lsw.SyncLibrary(ctx, false)
 		}
 	}
 }
@@ -310,37 +310,47 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 }
 
 // syncDatabaseRecords performs batch add and delete operations on the health check database
-// Returns the number of records added and deleted
+// Returns the number of records added and deleted. If dryRun is true, it only counts without
+// performing actual database operations.
 func (lsw *LibrarySyncWorker) syncDatabaseRecords(
 	ctx context.Context,
 	filesToAdd []database.AutomaticHealthCheckRecord,
 	filesToDelete []string,
+	dryRun bool,
 ) syncCounts {
 	counts := syncCounts{}
 
 	// Batch add new files
 	if len(filesToAdd) > 0 {
-		if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, filesToAdd); err != nil {
-			slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
-				"count", len(filesToAdd),
-				"error", err)
+		if !dryRun {
+			if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, filesToAdd); err != nil {
+				slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
+					"count", len(filesToAdd),
+					"error", err)
+			} else {
+				counts.added = len(filesToAdd)
+				slog.InfoContext(ctx, "Added new files to automatic health checks",
+					"count", counts.added)
+			}
 		} else {
 			counts.added = len(filesToAdd)
-			slog.InfoContext(ctx, "Added new files to automatic health checks",
-				"count", counts.added)
 		}
 	}
 
 	// Batch delete orphaned files
 	if len(filesToDelete) > 0 {
-		if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, filesToDelete); err != nil {
-			slog.ErrorContext(ctx, "Failed to delete orphaned health records",
-				"count", len(filesToDelete),
-				"error", err)
+		if !dryRun {
+			if err := lsw.healthRepo.DeleteHealthRecordsBulk(ctx, filesToDelete); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete orphaned health records",
+					"count", len(filesToDelete),
+					"error", err)
+			} else {
+				counts.deleted = len(filesToDelete)
+				slog.InfoContext(ctx, "Deleted orphaned health records",
+					"count", counts.deleted)
+			}
 		} else {
 			counts.deleted = len(filesToDelete)
-			slog.InfoContext(ctx, "Deleted orphaned health records",
-				"count", counts.deleted)
 		}
 	}
 
@@ -388,8 +398,11 @@ func (lsw *LibrarySyncWorker) initializeProgressTracking(startTime time.Time) fu
 	}
 }
 
-// syncLibrary performs a full library synchronization
-func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
+// SyncLibrary performs a full library synchronization. If dryRun is true,
+// it will count what would be deleted without actually deleting anything,
+// and return a DryRunResult. If dryRun is false, it performs the sync normally
+// and returns nil.
+func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *DryRunResult {
 	startTime := time.Now()
 	cfg := lsw.configGetter()
 	slog.InfoContext(ctx, "Starting library sync")
@@ -397,8 +410,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	// Check import strategy - if NONE, only sync DB with metadata files
 	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
 		slog.InfoContext(ctx, "Import strategy is NONE, performing metadata-only sync")
-		lsw.syncMetadataOnly(ctx, startTime)
-		return
+		return lsw.syncMetadataOnly(ctx, startTime, dryRun)
 	}
 
 	// Initialize progress tracking
@@ -445,7 +457,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 		if !errors.Is(err, context.Canceled) {
 			slog.ErrorContext(ctx, "Failed to walk filesystem", "error", err)
 		}
-		return
+		return nil
 	}
 
 	// Update total files count
@@ -465,7 +477,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	dbRecords, err := lsw.healthRepo.GetAllHealthCheckRecords(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to get automatic health check paths from database", "error", err)
-		return
+		return nil
 	}
 
 	// Build lookup maps for efficient searching
@@ -489,7 +501,7 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	for mountRelativePath := range metaFileSet {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 		}
 
@@ -568,22 +580,24 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 
 	// Additional cleanup of orphaned metadata files if enabled
 	metadataDeletedCount := 0
-	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
+	if cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles {
 		// We already have libraryFiles from earlier in the function
 		for relativeMountPath := range metaFileSet {
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			default:
 			}
 
 			if _, exists := filesInUse[relativeMountPath]; !exists {
-				err := lsw.metadataService.DeleteFileMetadata(relativeMountPath)
-				if err != nil {
-					slog.ErrorContext(ctx, "Failed to delete metadata file", "error", err)
-				} else {
-					metadataDeletedCount++
+				if !dryRun {
+					err := lsw.metadataService.DeleteFileMetadata(relativeMountPath)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to delete metadata file", "error", err)
+						continue
+					}
 				}
+				metadataDeletedCount++
 			}
 		}
 
@@ -593,28 +607,70 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	libraryFilesDeletedCount := 0
 	libraryDirsDeletedCount := 0
 
-	for metaPath, file := range filesInUse {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+	if cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles {
+		for metaPath, file := range filesInUse {
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
 
-		if _, exists := metaFileSet[metaPath]; !exists {
-			err := os.Remove(file)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to delete metadata file", "error", err)
-			} else {
+			if _, exists := metaFileSet[metaPath]; !exists {
+				if !dryRun {
+					err := os.Remove(file)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to delete library file", "error", err)
+						continue
+					}
+				}
 				libraryFilesDeletedCount++
 			}
 		}
-	}
 
-	// Remove empty directories after file cleanup
-	libraryDirsDeletedCount, err = lsw.removeEmptyDirectories(ctx)
-	if err != nil {
-		if !errors.Is(err, context.Canceled) {
-			slog.ErrorContext(ctx, "Failed to remove empty directories", "error", err)
+		// Remove empty directories after file cleanup
+		if !dryRun {
+			// Clean up library directories
+			libraryDirsDeletedCount, err = lsw.removeEmptyDirectories(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					slog.ErrorContext(ctx, "Failed to remove empty directories from library", "error", err)
+				}
+			}
+
+			// Clean up import directories (if configured)
+			importDirsDeleted, err := lsw.cleanupImportDirectory(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					slog.ErrorContext(ctx, "Failed to remove empty directories from import", "error", err)
+				}
+			} else {
+				libraryDirsDeletedCount += importDirsDeleted
+			}
+
+			// Clean up metadata directories
+			metadataDirsDeleted, err := lsw.cleanupMetadataDirectory(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					slog.ErrorContext(ctx, "Failed to remove empty directories from metadata", "error", err)
+				}
+			} else {
+				libraryDirsDeletedCount += metadataDirsDeleted
+			}
+		} else {
+			// Count empty directories in dry-run mode
+			libraryDirsDeletedCount, _ = lsw.countEmptyDirectories(ctx)
+
+			// Count import directories (if configured)
+			if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+				importDirsCount, _ := lsw.countEmptyDirectoriesInPath(ctx, *cfg.Import.ImportDir)
+				libraryDirsDeletedCount += importDirsCount
+			}
+
+			// Count metadata directories
+			if cfg.Metadata.RootPath != "" {
+				metadataDirsCount, _ := lsw.countEmptyDirectoriesInPath(ctx, cfg.Metadata.RootPath)
+				libraryDirsDeletedCount += metadataDirsCount
+			}
 		}
 	}
 
@@ -622,7 +678,19 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, filesInUse)
 
 	// Perform batch operations
-	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete)
+	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete, dryRun)
+
+	// Return dry run results or record sync results
+	if dryRun {
+		wouldCleanup := cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles
+		return &DryRunResult{
+			OrphanedMetadataCount:  metadataDeletedCount,
+			OrphanedLibraryFiles:   libraryFilesDeletedCount,
+			OrphanedDirectories:    libraryDirsDeletedCount,
+			DatabaseRecordsToClean: dbCounts.deleted,
+			WouldCleanup:           wouldCleanup,
+		}
+	}
 
 	// Record sync results
 	cleanup := cleanupCounts{
@@ -631,6 +699,70 @@ func (lsw *LibrarySyncWorker) syncLibrary(ctx context.Context) {
 		libraryDirsDeleted:  libraryDirsDeletedCount,
 	}
 	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
+	return nil
+}
+
+// DryRunResult holds the results of a dry run sync
+type DryRunResult struct {
+	OrphanedMetadataCount  int
+	OrphanedLibraryFiles   int
+	OrphanedDirectories    int
+	DatabaseRecordsToClean int
+	WouldCleanup           bool
+}
+
+// PerformDryRun performs a dry run of the library sync, returning counts without deleting
+
+// countEmptyDirectoriesInPath counts empty directories in the specified path without removing them
+func (lsw *LibrarySyncWorker) countEmptyDirectoriesInPath(ctx context.Context, rootPath string) (int, error) {
+	if rootPath == "" {
+		return 0, nil
+	}
+
+	count := 0
+
+	// Walk the directory tree to count empty directories
+	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return context.Canceled
+		default:
+		}
+
+		// Skip if not a directory or is the root
+		if !d.IsDir() || path == rootPath {
+			return nil
+		}
+
+		// Check if directory is empty
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return nil // Skip on error
+		}
+
+		if len(entries) == 0 {
+			count++
+		}
+
+		return nil
+	})
+
+	return count, err
+}
+
+// countEmptyDirectories counts empty directories without removing them
+func (lsw *LibrarySyncWorker) countEmptyDirectories(ctx context.Context) (int, error) {
+	cfg := lsw.configGetter()
+	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
+		return 0, nil
+	}
+
+	libraryDir := *cfg.Health.LibraryDir
+	return lsw.countEmptyDirectoriesInPath(ctx, libraryDir)
 }
 
 // getAllMetadataFiles collects all .meta files from the filesystem
@@ -842,14 +974,29 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*UsedFi
 		// Normalize path separators
 		virtualPath := filepath.ToSlash(relativePath)
 
-		// Check if it's a .strm file
-		if strings.HasSuffix(d.Name(), ".strm") {
+		// Check if it's a symlink
+		if d.Type()&os.ModeSymlink != 0 {
+			// Read the symlink target
+			target, err := os.Readlink(path)
+			if err != nil {
+				slog.WarnContext(ctx, "Failed to read symlink in import directory",
+					"path", path,
+					"error", err)
+				return nil
+			}
+
+			// Make target absolute if it's relative
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+
+			// Store symlink with relative path as key
+			result.Symlinks[virtualPath] = path
+		} else if strings.HasSuffix(d.Name(), ".strm") {
 			// STRM file - add without .strm extension
 			result.StrmFiles[strings.TrimSuffix(virtualPath, ".strm")] = path
-		} else {
-			// Regular file
-			result.Symlinks[virtualPath] = path
 		}
+		// Ignore all other regular files
 
 		return nil
 	})
@@ -862,15 +1009,16 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context) (*UsedFi
 	return result, nil
 }
 
-// removeEmptyDirectories removes empty directories from the library directory
-func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, error) {
-	cfg := lsw.configGetter()
-	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
-		return 0, fmt.Errorf("library directory is not configured")
+// removeEmptyDirectoriesFromPath removes empty directories from the specified path
+// It uses an iterative depth-first approach to handle nested empty directories
+func (lsw *LibrarySyncWorker) removeEmptyDirectoriesFromPath(ctx context.Context, rootPath, pathLabel string) (int, error) {
+	if rootPath == "" {
+		return 0, fmt.Errorf("%s directory path is empty", pathLabel)
 	}
 
-	libraryDir := *cfg.Health.LibraryDir
-	slog.InfoContext(ctx, "Starting empty directory cleanup", "library_dir", libraryDir)
+	slog.InfoContext(ctx, "Starting empty directory cleanup",
+		"path_type", pathLabel,
+		"path", rootPath)
 
 	// Helper function to get directory depth
 	getDepth := func(path string) int {
@@ -879,7 +1027,7 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 
 	// Collect all directories
 	var dirs []string
-	err := filepath.WalkDir(libraryDir, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -890,7 +1038,7 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 			return nil // Continue on errors
 		}
 
-		if d.IsDir() && path != libraryDir {
+		if d.IsDir() && path != rootPath {
 			dirs = append(dirs, path)
 		}
 
@@ -898,7 +1046,9 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 	})
 
 	if err != nil {
-		slog.ErrorContext(ctx, "Error during directory scan", "error", err)
+		slog.ErrorContext(ctx, "Error during directory scan",
+			"path_type", pathLabel,
+			"error", err)
 		return 0, err
 	}
 
@@ -926,7 +1076,9 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 				continue
 			}
 
-			slog.InfoContext(ctx, "Removed empty directory", "path", dir)
+			slog.InfoContext(ctx, "Removed empty directory",
+				"path_type", pathLabel,
+				"path", dir)
 			removedThisIteration++
 			deletedCount++
 		}
@@ -938,15 +1090,56 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 	}
 
 	slog.InfoContext(ctx, "Empty directory cleanup completed",
+		"path_type", pathLabel,
 		"deleted_count", deletedCount)
 
 	return deletedCount, nil
 }
 
+// removeEmptyDirectories removes empty directories from the library directory
+func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, error) {
+	cfg := lsw.configGetter()
+	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
+		return 0, fmt.Errorf("library directory is not configured")
+	}
+
+	libraryDir := *cfg.Health.LibraryDir
+	return lsw.removeEmptyDirectoriesFromPath(ctx, libraryDir, "library")
+}
+
+// cleanupImportDirectory removes empty directories from the import directory
+func (lsw *LibrarySyncWorker) cleanupImportDirectory(ctx context.Context) (int, error) {
+	cfg := lsw.configGetter()
+
+	// Import directory is optional - skip if not configured
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		return 0, nil
+	}
+
+	importDir := *cfg.Import.ImportDir
+	return lsw.removeEmptyDirectoriesFromPath(ctx, importDir, "import")
+}
+
+// cleanupMetadataDirectory removes empty directories from the metadata directory
+func (lsw *LibrarySyncWorker) cleanupMetadataDirectory(ctx context.Context) (int, error) {
+	cfg := lsw.configGetter()
+
+	// Metadata root path is required in config, but double-check
+	if cfg.Metadata.RootPath == "" {
+		return 0, fmt.Errorf("metadata root path is not configured")
+	}
+
+	metadataRoot := cfg.Metadata.RootPath
+	return lsw.removeEmptyDirectoriesFromPath(ctx, metadataRoot, "metadata")
+}
+
 // syncMetadataOnly performs a simplified sync for NONE import strategy
 // It only synchronizes database records with metadata files, skipping all
-// library directory scanning and cleanup operations
-func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime time.Time) {
+// library directory scanning and cleanup operations. If dryRun is true,
+// it will count what would be changed without actually modifying the database,
+// and return a DryRunResult. If dryRun is false, it performs the sync normally
+// and returns nil.
+func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime time.Time, dryRun bool) *DryRunResult {
 	cfg := lsw.configGetter()
 	slog.InfoContext(ctx, "Starting metadata-only sync")
 
@@ -959,7 +1152,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		if !errors.Is(err, context.Canceled) {
 			slog.ErrorContext(ctx, "Failed to get metadata files", "error", err)
 		}
-		return
+		return nil
 	}
 
 	// Update total files count
@@ -971,7 +1164,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	dbRecords, err := lsw.healthRepo.GetAllHealthCheckRecords(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to get automatic health check paths from database", "error", err)
-		return
+		return nil
 	}
 
 	// Build lookup maps for efficient searching
@@ -995,7 +1188,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	for mountRelativePath := range metaFileSet {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 		}
 
@@ -1071,7 +1264,19 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, nil)
 
 	// Perform batch operations
-	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete)
+	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete, dryRun)
+
+	// Return dry run results or record sync results
+	if dryRun {
+		wouldCleanup := cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles
+		return &DryRunResult{
+			OrphanedMetadataCount:  0, // No orphaned metadata in NONE strategy
+			OrphanedLibraryFiles:   0, // No library files in NONE strategy
+			OrphanedDirectories:    0, // No directory cleanup in NONE strategy
+			DatabaseRecordsToClean: dbCounts.deleted,
+			WouldCleanup:           wouldCleanup,
+		}
+	}
 
 	// Record sync results (no cleanup operations for metadata-only sync)
 	cleanup := cleanupCounts{
@@ -1080,4 +1285,5 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		libraryDirsDeleted:  0,
 	}
 	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
+	return nil
 }
