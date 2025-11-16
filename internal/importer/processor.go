@@ -138,7 +138,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		"files", len(parsed.Files))
 
 	// Step 3: Separate files by type (regular, archive, PAR2)
-	regularFiles, archiveFiles, _ := filesystem.SeparateFiles(parsed.Files, parsed.Type)
+	regularFiles, archiveFiles, par2Files := filesystem.SeparateFiles(parsed.Files, parsed.Type)
 
 	// Check for cancellation before main processing
 	if err := proc.checkCancellation(ctx); err != nil {
@@ -150,11 +150,11 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, parsed.Path)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
@@ -166,7 +166,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, parsed.Path)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path)
 
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -185,6 +185,7 @@ func (proc *Processor) processSingleFile(
 	ctx context.Context,
 	virtualDir string,
 	regularFiles []parser.ParsedFile,
+	par2Files []parser.ParsedFile,
 	nzbPath string,
 ) (string, error) {
 	if len(regularFiles) == 0 {
@@ -201,6 +202,7 @@ func (proc *Processor) processSingleFile(
 		ctx,
 		virtualDir,
 		regularFiles[0],
+		par2Files,
 		nzbPath,
 		proc.metadataService,
 		proc.poolManager,
@@ -220,6 +222,7 @@ func (proc *Processor) processMultiFile(
 	ctx context.Context,
 	virtualDir string,
 	regularFiles []parser.ParsedFile,
+	par2Files []parser.ParsedFile,
 	nzbPath string,
 ) (string, error) {
 	// Create NZB folder
@@ -238,6 +241,7 @@ func (proc *Processor) processMultiFile(
 		ctx,
 		nzbFolder,
 		regularFiles,
+		par2Files,
 		nzbPath,
 		proc.metadataService,
 		proc.poolManager,
@@ -276,6 +280,7 @@ func (proc *Processor) processRarArchive(
 			ctx,
 			nzbFolder,
 			regularFiles,
+			nil, // No PAR2 files for archive imports
 			parsed.Path,
 			proc.metadataService,
 			proc.poolManager,
@@ -354,6 +359,7 @@ func (proc *Processor) processSevenZipArchive(
 			ctx,
 			nzbFolder,
 			regularFiles,
+			nil, // No PAR2 files for archive imports
 			parsed.Path,
 			proc.metadataService,
 			proc.poolManager,

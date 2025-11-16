@@ -258,6 +258,30 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 
 	nzb.Files = append(nzb.Files, file)
 
+	// Add PAR2 files if present
+	for _, par2File := range metadata.Par2Files {
+		par2FileEntry := nzbFile{
+			Poster:  "altmount@export",
+			Date:    fmt.Sprintf("%d", time.Now().UnixMilli()),
+			Subject: par2File.Filename,
+			Groups: nzbGroups{
+				Groups: []string{"alt.binaries.misc"},
+			},
+			Segments: []nzbSegment{},
+		}
+
+		// Add PAR2 file segments
+		for i, segment := range par2File.SegmentData {
+			par2FileEntry.Segments = append(par2FileEntry.Segments, nzbSegment{
+				Bytes:  segment.SegmentSize,
+				Number: i + 1,
+				ID:     segment.Id,
+			})
+		}
+
+		nzb.Files = append(nzb.Files, par2FileEntry)
+	}
+
 	// Marshal to XML with proper header
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)

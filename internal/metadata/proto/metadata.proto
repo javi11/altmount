@@ -26,6 +26,13 @@ message SegmentData {
   string id = 5;                // Usenet message ID
 }
 
+// Par2FileReference stores information about PAR2 repair files
+message Par2FileReference {
+  string filename = 1;          // PAR2 filename (e.g., "movie.par2", "movie.vol01+02.par2")
+  int64 file_size = 2;          // Size of the PAR2 file in bytes
+  repeated SegmentData segment_data = 3;  // Usenet segments containing PAR2 data
+}
+
 // FileMetadata represents a single virtual file in the filesystem
 // The filename comes from the actual metadata filename on disk
 message FileMetadata {
@@ -41,4 +48,5 @@ message FileMetadata {
   bytes aes_key = 10;           // AES encryption key (for AES-encrypted archives)
   bytes aes_iv = 11;            // AES initialization vector (for AES-encrypted archives)
   int64 release_date = 12;      // Unix timestamp of the original Usenet post release date
+  repeated Par2FileReference par2_files = 13;  // Associated PAR2 repair files
 }
