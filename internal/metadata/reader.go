@@ -130,3 +130,8 @@ func (mr *MetadataReader) GetFileSegments(virtualPath string) ([]*metapb.Segment
 	// Return the protobuf segments directly
 	return fileMeta.SegmentData, nil
 }
+
+// GetMetadataService returns the underlying metadata service
+func (mr *MetadataReader) GetMetadataService() *MetadataService {
+	return mr.service
+}

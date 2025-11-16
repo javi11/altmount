@@ -1,5 +1,6 @@
-import { Save } from "lucide-react";
+import { Download, Save } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useBatchExportNZB } from "../../hooks/useConfig";
 import type { ConfigResponse, MetadataConfig } from "../../types/config";
 
 interface MetadataConfigSectionProps {
@@ -17,6 +18,7 @@ export function MetadataConfigSection({
 }: MetadataConfigSectionProps) {
 	const [formData, setFormData] = useState<MetadataConfig>(config.metadata);
 	const [hasChanges, setHasChanges] = useState(false);
+	const batchExport = useBatchExportNZB();
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -78,6 +80,27 @@ export function MetadataConfigSection({
 					<p className="label">
 						When enabled, the original NZB file will be permanently deleted when its metadata is
 						removed
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Batch Export</legend>
+					<button
+						type="button"
+						className="btn btn-secondary w-xs"
+						onClick={() => batchExport.mutate("/")}
+						disabled={batchExport.isPending || !formData.root_path.trim()}
+					>
+						{batchExport.isPending ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Download className="h-4 w-4" />
+						)}
+						{batchExport.isPending ? "Exporting..." : "Export All as NZB"}
+					</button>
+					<p className="label">
+						Export all file metadata as NZB files in a single ZIP archive. Archives (RAR/7zip) and encrypted
+						files are automatically excluded.
 					</p>
 				</fieldset>
 			</div>

@@ -150,3 +150,38 @@ export function useTriggerLibrarySync() {
 		},
 	});
 }
+
+// Hook for batch exporting all metadata as NZB files
+export function useBatchExportNZB() {
+	const { showToast } = useToast();
+
+	return useMutation({
+		mutationFn: async (rootPath: string) => {
+			return apiClient.batchExportNZBs(rootPath);
+		},
+		onSuccess: (blob) => {
+			// Trigger automatic download
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement("a");
+			link.href = url;
+			link.download = `nzb-export-${Date.now()}.zip`;
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.URL.revokeObjectURL(url);
+
+			showToast({
+				type: "success",
+				title: "Export Complete",
+				message: "NZB files exported successfully",
+			});
+		},
+		onError: (error: APIError) => {
+			showToast({
+				type: "error",
+				title: "Export Failed",
+				message: error.message || "Failed to export NZB files",
+			});
+		},
+	});
+}

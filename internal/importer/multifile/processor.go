@@ -22,6 +22,7 @@ func ProcessRegularFiles(
 	ctx context.Context,
 	virtualDir string,
 	files []parser.ParsedFile,
+	par2Files []parser.ParsedFile,
 	nzbPath string,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
@@ -39,6 +40,16 @@ func ProcessRegularFiles(
 			"allowed_extensions", allowedFileExtensions,
 			"file_count", len(files))
 		return fmt.Errorf("no files with allowed extensions found (allowed: %v)", allowedFileExtensions)
+	}
+
+	// Convert PAR2 files to metadata format (shared across all files)
+	var par2Refs []*metapb.Par2FileReference
+	for _, par2File := range par2Files {
+		par2Refs = append(par2Refs, &metapb.Par2FileReference{
+			Filename:    par2File.Filename,
+			FileSize:    par2File.Size,
+			SegmentData: par2File.Segments,
+		})
 	}
 
 	for _, file := range files {
@@ -78,6 +89,7 @@ func ProcessRegularFiles(
 			file.Password,
 			file.Salt,
 			file.ReleaseDate.Unix(),
+			par2Refs,
 		)
 
 		// Delete old metadata if exists (simple collision handling)

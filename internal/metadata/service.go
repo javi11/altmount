@@ -167,6 +167,7 @@ func (ms *MetadataService) CreateFileMetadata(
 	password string,
 	salt string,
 	releaseDate int64,
+	par2Files []*metapb.Par2FileReference,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -181,6 +182,7 @@ func (ms *MetadataService) CreateFileMetadata(
 		CreatedAt:     now,
 		ModifiedAt:    now,
 		ReleaseDate:   releaseDate,
+		Par2Files:     par2Files,
 	}
 }
 

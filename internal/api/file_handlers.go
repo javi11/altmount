@@ -1,10 +1,16 @@
 package api
 
 import (
+	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -212,15 +218,8 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 		Files: []nzbFile{},
 	}
 
-	// Add metadata to head
+	// Get filename for file entry (not for metadata)
 	filename := filepath.Base(filePath)
-	nzb.Head.Meta = append(nzb.Head.Meta, nzbMeta{Type: "file_name", Value: filename})
-	nzb.Head.Meta = append(nzb.Head.Meta, nzbMeta{Type: "file_size", Value: fmt.Sprintf("%d", metadata.FileSize)})
-
-	// Add file extension
-	if ext := filepath.Ext(filename); ext != "" {
-		nzb.Head.Meta = append(nzb.Head.Meta, nzbMeta{Type: "file_extension", Value: ext})
-	}
 
 	// Add encryption info if present
 	if metadata.Encryption != metapb.Encryption_NONE {
@@ -258,6 +257,30 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 
 	nzb.Files = append(nzb.Files, file)
 
+	// Add PAR2 files if present
+	for _, par2File := range metadata.Par2Files {
+		par2FileEntry := nzbFile{
+			Poster:  "altmount@export",
+			Date:    fmt.Sprintf("%d", time.Now().UnixMilli()),
+			Subject: par2File.Filename,
+			Groups: nzbGroups{
+				Groups: []string{"alt.binaries.misc"},
+			},
+			Segments: []nzbSegment{},
+		}
+
+		// Add PAR2 file segments
+		for i, segment := range par2File.SegmentData {
+			par2FileEntry.Segments = append(par2FileEntry.Segments, nzbSegment{
+				Bytes:  segment.SegmentSize,
+				Number: i + 1,
+				ID:     segment.Id,
+			})
+		}
+
+		nzb.Files = append(nzb.Files, par2FileEntry)
+	}
+
 	// Marshal to XML with proper header
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
@@ -272,4 +295,226 @@ func (s *Server) generateNZBFromMetadata(metadata *metapb.FileMetadata, filePath
 	}
 
 	return buf.Bytes(), nil
+}
+
+// BatchExportRequest represents the batch export request body
+type BatchExportRequest struct {
+	RootPath string `json:"root_path"`
+}
+
+// Archive detection patterns
+var (
+	rarPattern      = regexp.MustCompile(`(?i)\.r(ar|\d+)$|\.part\d+\.rar$`)
+	sevenZipPattern = regexp.MustCompile(`(?i)\.7z$|\.7z\.\d+$`)
+	archiveExts     = []string{".rar", ".7z", ".zip", ".tar", ".gz", ".bz2", ".arj", ".arc"}
+)
+
+// shouldExcludeFile determines if a file should be excluded based on archive patterns
+func shouldExcludeFile(filename string, excludeArchives bool) bool {
+	if !excludeArchives {
+		return false
+	}
+
+	// Check for RAR pattern (includes multi-part like .r00, .r01, etc.)
+	if rarPattern.MatchString(filename) {
+		return true
+	}
+
+	// Check for 7zip pattern
+	if sevenZipPattern.MatchString(filename) {
+		return true
+	}
+
+	// Check for common archive extensions
+	ext := strings.ToLower(filepath.Ext(filename))
+	for _, archiveExt := range archiveExts {
+		if ext == archiveExt {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleBatchExportNZB handles POST /files/export-batch requests
+func (s *Server) handleBatchExportNZB(c *fiber.Ctx) error {
+	ctx := context.Background()
+
+	// Parse request body
+	var req BatchExportRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
+	}
+
+	slog.InfoContext(ctx, "Batch NZB export requested")
+
+	// Always use "/" as the virtual path to export from the metadata root
+	// The req.RootPath is not needed since we export all metadata files
+	virtualRootPath := "/"
+
+	// Get metadata root directory
+	metadataRootPath := s.metadataReader.GetMetadataService().GetMetadataDirectoryPath(virtualRootPath)
+
+	// Collect all metadata files
+	var metadataFiles []string
+	err := filepath.Walk(metadataRootPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Only process .meta files
+		if filepath.Ext(path) != ".meta" {
+			return nil
+		}
+
+		metadataFiles = append(metadataFiles, path)
+		return nil
+	})
+
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to walk metadata directory",
+			"error", err,
+			"path", metadataRootPath)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to collect metadata files",
+			"details": err.Error(),
+		})
+	}
+
+	if len(metadataFiles) == 0 {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "No metadata files found",
+		})
+	}
+
+	slog.InfoContext(ctx, "Collected metadata files",
+		"total_count", len(metadataFiles))
+
+	// Create ZIP archive in memory
+	var zipBuffer bytes.Buffer
+	zipWriter := zip.NewWriter(&zipBuffer)
+
+	exportedCount := 0
+	skippedCount := 0
+
+	for _, metaPath := range metadataFiles {
+		// Calculate virtual path
+		relPath, err := filepath.Rel(metadataRootPath, metaPath)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to calculate relative path",
+				"error", err,
+				"meta_path", metaPath)
+			continue
+		}
+
+		// Remove .meta extension to get virtual filename
+		virtualFilename := strings.TrimSuffix(relPath, ".meta")
+
+		// Check if should exclude based on archive pattern
+		// Archives and AES-encrypted files are always excluded
+		if shouldExcludeFile(virtualFilename, true) {
+			skippedCount++
+			slog.DebugContext(ctx, "Skipping archive file",
+				"filename", virtualFilename)
+			continue
+		}
+
+		// Calculate full virtual path
+		virtualPath := filepath.Join(virtualRootPath, virtualFilename)
+		virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
+
+		// Read metadata
+		metadata, err := s.metadataReader.GetFileMetadata(virtualPath)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to read metadata",
+				"error", err,
+				"virtual_path", virtualPath)
+			continue
+		}
+
+		if metadata == nil {
+			slog.WarnContext(ctx, "Metadata not found",
+				"virtual_path", virtualPath)
+			continue
+		}
+
+		// Skip AES-encrypted files (encrypted archives)
+		if metadata.Encryption == metapb.Encryption_AES {
+			skippedCount++
+			continue
+		}
+
+		// Generate NZB
+		nzbContent, err := s.generateNZBFromMetadata(metadata, virtualPath)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to generate NZB",
+				"error", err,
+				"virtual_path", virtualPath)
+			continue
+		}
+
+		// Create NZB filename
+		nzbFilename := strings.TrimSuffix(virtualFilename, filepath.Ext(virtualFilename)) + ".nzb"
+
+		// Add to ZIP
+		writer, err := zipWriter.Create(nzbFilename)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to create ZIP entry",
+				"error", err,
+				"filename", nzbFilename)
+			continue
+		}
+
+		if _, err := io.Copy(writer, bytes.NewReader(nzbContent)); err != nil {
+			slog.WarnContext(ctx, "Failed to write NZB to ZIP",
+				"error", err,
+				"filename", nzbFilename)
+			continue
+		}
+
+		exportedCount++
+	}
+
+	// Close ZIP writer
+	if err := zipWriter.Close(); err != nil {
+		slog.ErrorContext(ctx, "Failed to close ZIP writer",
+			"error", err)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to finalize ZIP archive",
+			"details": err.Error(),
+		})
+	}
+
+	if exportedCount == 0 {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "No files were exported",
+			"details": fmt.Sprintf("Skipped %d files (archives or AES-encrypted)", skippedCount),
+		})
+	}
+
+	slog.InfoContext(ctx, "Batch export completed",
+		"exported_count", exportedCount,
+		"skipped_count", skippedCount)
+
+	// Set response headers for ZIP download
+	timestamp := time.Now().Unix()
+	zipFilename := fmt.Sprintf("nzb-export-%d.zip", timestamp)
+
+	c.Set("Content-Type", "application/zip")
+	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipFilename))
+
+	return c.Send(zipBuffer.Bytes())
 }

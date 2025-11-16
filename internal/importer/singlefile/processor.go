@@ -21,6 +21,7 @@ func ProcessSingleFile(
 	ctx context.Context,
 	virtualDir string,
 	file parser.ParsedFile,
+	par2Files []parser.ParsedFile,
 	nzbPath string,
 	metadataService *metadata.MetadataService,
 	poolManager pool.Manager,
@@ -55,6 +56,16 @@ func ProcessSingleFile(
 		return "", err
 	}
 
+	// Convert PAR2 files to metadata format
+	var par2Refs []*metapb.Par2FileReference
+	for _, par2File := range par2Files {
+		par2Refs = append(par2Refs, &metapb.Par2FileReference{
+			Filename:    par2File.Filename,
+			FileSize:    par2File.Size,
+			SegmentData: par2File.Segments,
+		})
+	}
+
 	// Create file metadata
 	fileMeta := metadataService.CreateFileMetadata(
 		file.Size,
@@ -65,6 +76,7 @@ func ProcessSingleFile(
 		file.Password,
 		file.Salt,
 		file.ReleaseDate.Unix(),
+		par2Refs,
 	)
 
 	// Delete old metadata if exists (simple collision handling)
