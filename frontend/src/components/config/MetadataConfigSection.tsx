@@ -99,7 +99,7 @@ export function MetadataConfigSection({
 						{batchExport.isPending ? "Exporting..." : "Export All as NZB"}
 					</button>
 					<p className="label">
-						Export all file metadata as NZB files in a single ZIP archive. Archives and encrypted
+						Export all file metadata as NZB files in a single ZIP archive. Archives (RAR/7zip) and encrypted
 						files are automatically excluded.
 					</p>
 				</fieldset>
