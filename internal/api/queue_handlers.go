@@ -56,6 +56,26 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	// Parse search parameter
 	searchFilter := c.Query("search")
 
+	// Parse sort parameters
+	sortBy := c.Query("sort_by", "updated_at")
+	sortOrder := c.Query("sort_order", "desc")
+
+	// Validate sort_by
+	validSortFields := map[string]bool{
+		"created_at": true,
+		"updated_at": true,
+		"status":     true,
+		"nzb_path":   true,
+	}
+	if !validSortFields[sortBy] {
+		sortBy = "updated_at"
+	}
+
+	// Validate sort_order
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+
 	// Parse since filter
 	var sinceFilter *time.Time
 	if since, err := ParseTimeParamFiber(c, "since"); err != nil {
@@ -85,7 +105,7 @@ func (s *Server) handleListQueue(c *fiber.Ctx) error {
 	}
 
 	// Get queue items from repository
-	items, err := s.queueRepo.ListQueueItems(c.Context(),statusFilter, searchFilter, "", pagination.Limit, pagination.Offset)
+	items, err := s.queueRepo.ListQueueItems(c.Context(), statusFilter, searchFilter, "", pagination.Limit, pagination.Offset, sortBy, sortOrder)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

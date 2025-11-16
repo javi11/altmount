@@ -574,7 +574,7 @@ func (r *Repository) UpdateQueueStats(ctx context.Context) error {
 }
 
 // ListQueueItems retrieves queue items with optional filtering
-func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, search string, category string, limit, offset int) ([]*ImportQueueItem, error) {
+func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, search string, category string, limit, offset int, sortBy, sortOrder string) ([]*ImportQueueItem, error) {
 	var query string
 	var args []interface{}
 
@@ -607,7 +607,27 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 		query = baseSelect
 	}
 
-	query += " ORDER BY status DESC, created_at DESC LIMIT ? OFFSET ?"
+	// Build ORDER BY clause with validation
+	var orderByColumn string
+	switch sortBy {
+	case "created_at":
+		orderByColumn = "created_at"
+	case "updated_at":
+		orderByColumn = "updated_at"
+	case "status":
+		orderByColumn = "status"
+	case "nzb_path":
+		orderByColumn = "nzb_path"
+	default:
+		orderByColumn = "updated_at"
+	}
+
+	sortDirection := "DESC"
+	if sortOrder == "asc" {
+		sortDirection = "ASC"
+	}
+
+	query += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", orderByColumn, sortDirection)
 	args = append(conditionArgs, limit, offset)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)

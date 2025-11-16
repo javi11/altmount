@@ -1,5 +1,7 @@
 import {
 	AlertCircle,
+	ChevronDown,
+	ChevronUp,
 	Download,
 	MoreHorizontal,
 	Pause,
@@ -45,6 +47,10 @@ export function QueuePage() {
 	const [userInteracting, setUserInteracting] = useState(false);
 	const [countdown, setCountdown] = useState(0);
 	const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
+	const [sortBy, setSortBy] = useState<"created_at" | "updated_at" | "status" | "nzb_path">(
+		"updated_at",
+	);
+	const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
 	const pageSize = 20;
 	const {
@@ -57,6 +63,8 @@ export function QueuePage() {
 		offset: page * pageSize,
 		status: statusFilter || undefined,
 		search: searchTerm || undefined,
+		sort_by: sortBy,
+		sort_order: sortOrder,
 		refetchInterval: autoRefreshEnabled && !userInteracting ? refreshInterval : undefined,
 	});
 
@@ -301,6 +309,21 @@ export function QueuePage() {
 	const clearSelection = useCallback(() => {
 		setSelectedItems(new Set());
 	}, []);
+
+	// Handle sort column change
+	const handleSort = (column: "created_at" | "updated_at" | "status" | "nzb_path") => {
+		if (sortBy === column) {
+			// Toggle sort order if clicking the same column
+			setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+		} else {
+			// Set new column and default sort order
+			setSortBy(column);
+			// Default to desc for dates, asc for others
+			setSortOrder(column === "updated_at" || column === "created_at" ? "desc" : "asc");
+		}
+		setPage(0); // Reset to first page
+		clearSelection(); // Clear selections when sorting changes
+	};
 
 	// Helper functions for select all checkbox state
 	const isAllSelected =
@@ -612,13 +635,41 @@ export function QueuePage() {
 											/>
 										</label>
 									</th>
-									<th>NZB File</th>
+									<th>
+										<button
+											type="button"
+											className="flex items-center gap-1 hover:text-primary"
+											onClick={() => handleSort("nzb_path")}
+										>
+											NZB File
+											{sortBy === "nzb_path" &&
+												(sortOrder === "asc" ? (
+													<ChevronUp className="h-4 w-4" />
+												) : (
+													<ChevronDown className="h-4 w-4" />
+												))}
+										</button>
+									</th>
 									<th>Target Path</th>
 									<th>Category</th>
 									<th>File Size</th>
 									<th>Status</th>
 									<th>Retry Count</th>
-									<th>Updated</th>
+									<th>
+										<button
+											type="button"
+											className="flex items-center gap-1 hover:text-primary"
+											onClick={() => handleSort("updated_at")}
+										>
+											Updated
+											{sortBy === "updated_at" &&
+												(sortOrder === "asc" ? (
+													<ChevronUp className="h-4 w-4" />
+												) : (
+													<ChevronDown className="h-4 w-4" />
+												))}
+										</button>
+									</th>
 									<th>Actions</th>
 								</tr>
 							</thead>
