@@ -427,6 +427,33 @@ export class APIClient {
 		return response.blob();
 	}
 
+	async batchExportNZBs(rootPath: string): Promise<Blob> {
+		const url = `${this.baseURL}/files/export-batch`;
+
+		const response = await fetch(url, {
+			method: "POST",
+			credentials: "include",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/zip",
+			},
+			body: JSON.stringify({
+				root_path: rootPath,
+			}),
+		});
+
+		if (!response.ok) {
+			const errorData = await response.json();
+			throw new APIError(
+				response.status,
+				errorData.message || `HTTP ${response.status}: ${response.statusText}`,
+				errorData.details || "",
+			);
+		}
+
+		return response.blob();
+	}
+
 	// Authentication endpoints
 	async getCurrentUser() {
 		return this.request<User>("/user");

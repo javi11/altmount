@@ -194,6 +194,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
+	api.Post("/files/export-batch", s.handleBatchExportNZB)
 	// Note: /files/stream is handled by StreamHandler at HTTP server level
 
 	api.Post("/import/scan", s.handleStartManualScan)
