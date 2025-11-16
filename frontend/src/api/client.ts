@@ -151,6 +151,8 @@ export class APIClient {
 		status?: string;
 		since?: string;
 		search?: string;
+		sort_by?: string;
+		sort_order?: "asc" | "desc";
 	}) {
 		const searchParams = new URLSearchParams();
 		if (params?.limit) searchParams.set("limit", params.limit.toString());
@@ -158,6 +160,8 @@ export class APIClient {
 		if (params?.status) searchParams.set("status", params.status);
 		if (params?.since) searchParams.set("since", params.since);
 		if (params?.search) searchParams.set("search", params.search);
+		if (params?.sort_by) searchParams.set("sort_by", params.sort_by);
+		if (params?.sort_order) searchParams.set("sort_order", params.sort_order);
 
 		const query = searchParams.toString();
 		return this.requestWithMeta<QueueItem[]>(`/queue${query ? `?${query}` : ""}`);

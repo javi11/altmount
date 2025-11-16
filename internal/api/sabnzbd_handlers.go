@@ -356,7 +356,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	categoryFilter := c.Query("category", "")
 
 	// Get pending and processing items
-	items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", categoryFilter, 100, 0)
+	items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", categoryFilter, 100, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get queue")
 	}
@@ -430,14 +430,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	// Get completed items
 	completedStatus := database.QueueStatusCompleted
-	completed, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, 50, 0)
+	completed, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, 50, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items")
 	}
 
 	// Get failed items
 	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, 50, 0)
+	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, 50, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
 	}
@@ -516,7 +516,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	// Get queue information
 	var slots []SABnzbdQueueSlot
 	if s.queueRepo != nil {
-		items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", "", 50, 0)
+		items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", "", 50, 0, "updated_at", "desc")
 		if err == nil {
 			for i, item := range items {
 				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing {
