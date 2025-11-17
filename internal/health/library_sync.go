@@ -638,7 +638,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Cleanup orphaned library files (symlinks and STRM files without metadata)
 	libraryFilesDeletedCount := 0
-	libraryDirsDeletedCount := 0
 
 	if cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles {
 		for metaPath, file := range filesInUse {
@@ -673,7 +672,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		return &DryRunResult{
 			OrphanedMetadataCount:  metadataDeletedCount,
 			OrphanedLibraryFiles:   libraryFilesDeletedCount,
-			OrphanedDirectories:    libraryDirsDeletedCount,
 			DatabaseRecordsToClean: dbCounts.deleted,
 			WouldCleanup:           wouldCleanup,
 		}
@@ -693,7 +691,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 type DryRunResult struct {
 	OrphanedMetadataCount  int
 	OrphanedLibraryFiles   int
-	OrphanedDirectories    int
 	DatabaseRecordsToClean int
 	WouldCleanup           bool
 }
@@ -1177,7 +1174,6 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		return &DryRunResult{
 			OrphanedMetadataCount:  0, // No orphaned metadata in NONE strategy
 			OrphanedLibraryFiles:   0, // No library files in NONE strategy
-			OrphanedDirectories:    0, // No directory cleanup in NONE strategy
 			DatabaseRecordsToClean: dbCounts.deleted,
 			WouldCleanup:           wouldCleanup,
 		}
