@@ -139,9 +139,8 @@ export function HealthConfigSection({
 					<legend className="fieldset-legend">Library Directory</legend>
 					<input
 						type="text"
-						className={`input ${
-							validationError && formData.enabled ? "input-error border-error" : ""
-						}`}
+						className={`input ${validationError && formData.enabled ? "input-error border-error" : ""
+							}`}
 						value={formData.library_dir || ""}
 						disabled={isReadOnly}
 						placeholder="/media/library"
@@ -250,10 +249,6 @@ export function HealthConfigSection({
 										<div>Library files to be deleted:</div>
 										<div className="font-mono font-semibold">
 											{dryRunResult.orphaned_library_files} files
-										</div>
-										<div>Empty Directories:</div>
-										<div className="font-mono font-semibold">
-											{dryRunResult.orphaned_directories} directories
 										</div>
 										<div>Database Records:</div>
 										<div className="font-mono font-semibold">

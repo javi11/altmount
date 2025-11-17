@@ -78,7 +78,6 @@ func (h *LibrarySyncHandlers) handleDryRunLibrarySync(c *fiber.Ctx) error {
 	apiResult := DryRunSyncResult{
 		OrphanedMetadataCount:  result.OrphanedMetadataCount,
 		OrphanedLibraryFiles:   result.OrphanedLibraryFiles,
-		OrphanedDirectories:    result.OrphanedDirectories,
 		DatabaseRecordsToClean: result.DatabaseRecordsToClean,
 		WouldCleanup:           result.WouldCleanup,
 	}
