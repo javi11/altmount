@@ -581,14 +581,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 				scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
 
 				// Look up library path from our map
-				var libraryPath *string
-				mountPath := filepath.Join(cfg.MountPath, path)
-				if libPath, ok := filesInUse[mountPath]; ok {
-					libraryPath = &libPath
-				} else if libPath, ok := filesInUse[path]; ok {
-					// Try with virtual path (for STRM files)
-					libraryPath = &libPath
-				}
+				libraryPath := lsw.getLibraryPath(path, filesInUse)
 
 				// Protect shared slice with mutex
 				filesToAddMu.Lock()
@@ -622,7 +615,9 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			default:
 			}
 
-			if _, exists := filesInUse[relativeMountPath]; !exists {
+			libraryPath := lsw.getLibraryPath(relativeMountPath, filesInUse)
+
+			if libraryPath == nil {
 				if !dryRun {
 					err := lsw.metadataService.DeleteFileMetadata(relativeMountPath)
 					if err != nil {
@@ -647,7 +642,9 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			default:
 			}
 
-			if _, exists := metaFileSet[metaPath]; !exists {
+			libraryPath := lsw.getLibraryPath(metaPath, filesInUse)
+
+			if libraryPath == nil {
 				if !dryRun {
 					err := os.Remove(file)
 					if err != nil {
@@ -1033,6 +1030,24 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMount
 	}
 
 	return result, symlinkUpdates, nil
+}
+
+// getLibraryPath looks up the library path for a given mount relative path
+// It checks both the full mount path and the relative path (for STRM files)
+func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[string]string) *string {
+	cfg := lsw.configGetter()
+	mountPath := filepath.Join(cfg.MountPath, metaPath)
+
+	if libPath, ok := filesInUse[mountPath]; ok {
+		return &libPath
+	}
+
+	if libPath, ok := filesInUse[metaPath]; ok {
+		// Try with virtual path (for STRM files)
+		return &libPath
+	}
+
+	return nil
 }
 
 // syncMetadataOnly performs a simplified sync for NONE import strategy
