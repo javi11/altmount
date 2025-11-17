@@ -96,38 +96,69 @@ func (c *rcloneRcClient) RefreshDir(ctx context.Context, provider string, dirs [
 	}
 
 	// Use similar logic to Manager's RefreshDir but with vfs/refresh endpoint
-	args := map[string]interface{}{
+	refreshArgs := map[string]interface{}{
 		"_async":    "false", // Use async refresh
 		"recursive": "false", // Non-recursive by default
 	}
 
 	// Add filesystem specification if provider is provided
 	if provider != "" {
-		args["fs"] = fmt.Sprintf("%s:", provider)
+		refreshArgs["fs"] = fmt.Sprintf("%s:", provider)
 	}
 
 	// Add directories to refresh
 	for i, dir := range dirs {
 		if dir != "" {
 			if i == 0 {
-				args["dir"] = dir
+				refreshArgs["dir"] = dir
 			} else {
-				args[fmt.Sprintf("dir%d", i+1)] = dir
+				refreshArgs[fmt.Sprintf("dir%d", i+1)] = dir
 			}
 		}
 	}
 
-	payload, err := json.Marshal(args)
+	forgetArgs := make(map[string]interface{})
+	for k, v := range refreshArgs {
+		if k != "recursive" {
+			forgetArgs[k] = v
+		}
+	}
+
+	forgetPayload, err := json.Marshal(forgetArgs)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/refresh", bytes.NewBuffer(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/forget", bytes.NewBuffer(forgetPayload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("unexpected status code: %d, error: %s", resp.StatusCode, string(body))
+	}
+
+	refreshPayload, err := json.Marshal(refreshArgs)
+	if err != nil {
+		return err
+	}
+
+	req, err = http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/refresh", bytes.NewBuffer(refreshPayload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
