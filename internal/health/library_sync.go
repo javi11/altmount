@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,9 +23,16 @@ import (
 
 // SyncProgress tracks the progress of an ongoing library sync
 type SyncProgress struct {
-	TotalFiles     int          `json:"total_files"`
-	ProcessedFiles atomic.Int32 `json:"processed_files"`
-	StartTime      time.Time    `json:"start_time"`
+	TotalFiles     int       `json:"total_files"`
+	ProcessedFiles int       `json:"processed_files"`
+	StartTime      time.Time `json:"start_time"`
+}
+
+// internalSyncProgress is the internal representation using atomic for thread safety
+type internalSyncProgress struct {
+	TotalFiles     int
+	ProcessedFiles atomic.Int32
+	StartTime      time.Time
 }
 
 // SyncResult stores the results of a completed library sync
@@ -35,7 +41,6 @@ type SyncResult struct {
 	FilesDeleted        int           `json:"files_deleted"`
 	MetadataDeleted     int           `json:"metadata_deleted"`
 	LibraryFilesDeleted int           `json:"library_files_deleted"`
-	LibraryDirsDeleted  int           `json:"library_dirs_deleted"`
 	SymlinksUpdated     int           `json:"symlinks_updated"`
 	Duration            time.Duration `json:"duration"`
 	CompletedAt         time.Time     `json:"completed_at"`
@@ -64,7 +69,7 @@ type LibrarySyncWorker struct {
 	mu              sync.Mutex
 	running         bool
 	progressMu      sync.RWMutex
-	progress        *SyncProgress
+	progress        *internalSyncProgress
 	lastSyncResult  *SyncResult
 	manualTrigger   chan struct{}
 	rcloneClient    rclonecli.RcloneRcClient
@@ -145,10 +150,9 @@ func (lsw *LibrarySyncWorker) GetStatus() LibrarySyncStatus {
 		processedFiles := lsw.progress.ProcessedFiles.Load()
 		progressCopy := SyncProgress{
 			TotalFiles:     lsw.progress.TotalFiles,
-			ProcessedFiles: atomic.Int32{},
+			ProcessedFiles: int(processedFiles),
 			StartTime:      lsw.progress.StartTime,
 		}
-		progressCopy.ProcessedFiles.Store(processedFiles)
 		status.Progress = &progressCopy
 	}
 
@@ -240,7 +244,6 @@ type syncCounts struct {
 type cleanupCounts struct {
 	metadataDeleted     int
 	libraryFilesDeleted int
-	libraryDirsDeleted  int
 	symlinksUpdated     int
 }
 
@@ -296,7 +299,6 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 		FilesDeleted:        dbCounts.deleted,
 		MetadataDeleted:     cleanup.metadataDeleted,
 		LibraryFilesDeleted: cleanup.libraryFilesDeleted,
-		LibraryDirsDeleted:  cleanup.libraryDirsDeleted,
 		SymlinksUpdated:     cleanup.symlinksUpdated,
 		Duration:            duration,
 		CompletedAt:         time.Now(),
@@ -311,7 +313,6 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 		"deleted", dbCounts.deleted,
 		"metadata_deleted", cleanup.metadataDeleted,
 		"library_files_deleted", cleanup.libraryFilesDeleted,
-		"library_dirs_deleted", cleanup.libraryDirsDeleted,
 		"symlinks_updated", cleanup.symlinksUpdated,
 		"duration", duration)
 }
@@ -390,7 +391,7 @@ func (lsw *LibrarySyncWorker) buildSyncMaps(metadataFiles []string, dbRecords []
 // and returns a cleanup function to be called when sync completes
 func (lsw *LibrarySyncWorker) initializeProgressTracking(startTime time.Time) func() {
 	lsw.progressMu.Lock()
-	lsw.progress = &SyncProgress{
+	lsw.progress = &internalSyncProgress{
 		TotalFiles:     0, // Will be updated once we know the total
 		ProcessedFiles: atomic.Int32{},
 		StartTime:      startTime,
@@ -637,7 +638,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Cleanup orphaned library files (symlinks and STRM files without metadata)
 	libraryFilesDeletedCount := 0
-	libraryDirsDeletedCount := 0
 
 	if cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles {
 		for metaPath, file := range filesInUse {
@@ -658,52 +658,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 				libraryFilesDeletedCount++
 			}
 		}
-
-		// Remove empty directories after file cleanup
-		if !dryRun {
-			// Clean up library directories
-			libraryDirsDeletedCount, err = lsw.removeEmptyDirectories(ctx)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					slog.ErrorContext(ctx, "Failed to remove empty directories from library", "error", err)
-				}
-			}
-
-			// Clean up import directories (if configured)
-			importDirsDeleted, err := lsw.cleanupImportDirectory(ctx)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					slog.ErrorContext(ctx, "Failed to remove empty directories from import", "error", err)
-				}
-			} else {
-				libraryDirsDeletedCount += importDirsDeleted
-			}
-
-			// Clean up metadata directories
-			metadataDirsDeleted, err := lsw.cleanupMetadataDirectory(ctx)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					slog.ErrorContext(ctx, "Failed to remove empty directories from metadata", "error", err)
-				}
-			} else {
-				libraryDirsDeletedCount += metadataDirsDeleted
-			}
-		} else {
-			// Count empty directories in dry-run mode
-			libraryDirsDeletedCount, _ = lsw.countEmptyDirectories(ctx)
-
-			// Count import directories (if configured)
-			if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-				importDirsCount, _ := lsw.countEmptyDirectoriesInPath(ctx, *cfg.Import.ImportDir)
-				libraryDirsDeletedCount += importDirsCount
-			}
-
-			// Count metadata directories
-			if cfg.Metadata.RootPath != "" {
-				metadataDirsCount, _ := lsw.countEmptyDirectoriesInPath(ctx, cfg.Metadata.RootPath)
-				libraryDirsDeletedCount += metadataDirsCount
-			}
-		}
 	}
 
 	// Find files to delete (in database but not in filesystem or not in use)
@@ -718,7 +672,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		return &DryRunResult{
 			OrphanedMetadataCount:  metadataDeletedCount,
 			OrphanedLibraryFiles:   libraryFilesDeletedCount,
-			OrphanedDirectories:    libraryDirsDeletedCount,
 			DatabaseRecordsToClean: dbCounts.deleted,
 			WouldCleanup:           wouldCleanup,
 		}
@@ -728,7 +681,6 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	cleanup := cleanupCounts{
 		metadataDeleted:     metadataDeletedCount,
 		libraryFilesDeleted: libraryFilesDeletedCount,
-		libraryDirsDeleted:  libraryDirsDeletedCount,
 		symlinksUpdated:     totalSymlinksUpdated,
 	}
 	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
@@ -739,63 +691,8 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 type DryRunResult struct {
 	OrphanedMetadataCount  int
 	OrphanedLibraryFiles   int
-	OrphanedDirectories    int
 	DatabaseRecordsToClean int
 	WouldCleanup           bool
-}
-
-// PerformDryRun performs a dry run of the library sync, returning counts without deleting
-
-// countEmptyDirectoriesInPath counts empty directories in the specified path without removing them
-func (lsw *LibrarySyncWorker) countEmptyDirectoriesInPath(ctx context.Context, rootPath string) (int, error) {
-	if rootPath == "" {
-		return 0, nil
-	}
-
-	count := 0
-
-	// Walk the directory tree to count empty directories
-	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		select {
-		case <-ctx.Done():
-			return context.Canceled
-		default:
-		}
-
-		// Skip if not a directory or is the root
-		if !d.IsDir() || path == rootPath {
-			return nil
-		}
-
-		// Check if directory is empty
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return nil // Skip on error
-		}
-
-		if len(entries) == 0 {
-			count++
-		}
-
-		return nil
-	})
-
-	return count, err
-}
-
-// countEmptyDirectories counts empty directories without removing them
-func (lsw *LibrarySyncWorker) countEmptyDirectories(ctx context.Context) (int, error) {
-	cfg := lsw.configGetter()
-	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
-		return 0, nil
-	}
-
-	libraryDir := *cfg.Health.LibraryDir
-	return lsw.countEmptyDirectoriesInPath(ctx, libraryDir)
 }
 
 // getAllMetadataFiles collects all .meta files from the filesystem
@@ -1138,130 +1035,6 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMount
 	return result, symlinkUpdates, nil
 }
 
-// removeEmptyDirectoriesFromPath removes empty directories from the specified path
-// It uses an iterative depth-first approach to handle nested empty directories
-func (lsw *LibrarySyncWorker) removeEmptyDirectoriesFromPath(ctx context.Context, rootPath, pathLabel string) (int, error) {
-	if rootPath == "" {
-		return 0, fmt.Errorf("%s directory path is empty", pathLabel)
-	}
-
-	slog.InfoContext(ctx, "Starting empty directory cleanup",
-		"path_type", pathLabel,
-		"path", rootPath)
-
-	// Helper function to get directory depth
-	getDepth := func(path string) int {
-		return strings.Count(path, string(filepath.Separator))
-	}
-
-	// Collect all directories
-	var dirs []string
-	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if err != nil {
-			return nil // Continue on errors
-		}
-
-		if d.IsDir() && path != rootPath {
-			dirs = append(dirs, path)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		slog.ErrorContext(ctx, "Error during directory scan",
-			"path_type", pathLabel,
-			"error", err)
-		return 0, err
-	}
-
-	// Sort by depth (deepest first)
-	sort.Slice(dirs, func(i, j int) bool {
-		return getDepth(dirs[i]) > getDepth(dirs[j])
-	})
-
-	// Iteratively remove empty directories
-	deletedCount := 0
-	maxIterations := 10 // Prevent infinite loops
-	for range maxIterations {
-		removedThisIteration := 0
-
-		for _, dir := range dirs {
-			select {
-			case <-ctx.Done():
-				return deletedCount, ctx.Err()
-			default:
-			}
-
-			// Try to remove the directory
-			if err := os.Remove(dir); err != nil {
-				// Directory not empty or permission error - skip silently
-				continue
-			}
-
-			slog.InfoContext(ctx, "Removed empty directory",
-				"path_type", pathLabel,
-				"path", dir)
-			removedThisIteration++
-			deletedCount++
-		}
-
-		// If no directories were removed, we're done
-		if removedThisIteration == 0 {
-			break
-		}
-	}
-
-	slog.InfoContext(ctx, "Empty directory cleanup completed",
-		"path_type", pathLabel,
-		"deleted_count", deletedCount)
-
-	return deletedCount, nil
-}
-
-// removeEmptyDirectories removes empty directories from the library directory
-func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, error) {
-	cfg := lsw.configGetter()
-	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
-		return 0, fmt.Errorf("library directory is not configured")
-	}
-
-	libraryDir := *cfg.Health.LibraryDir
-	return lsw.removeEmptyDirectoriesFromPath(ctx, libraryDir, "library")
-}
-
-// cleanupImportDirectory removes empty directories from the import directory
-func (lsw *LibrarySyncWorker) cleanupImportDirectory(ctx context.Context) (int, error) {
-	cfg := lsw.configGetter()
-
-	// Import directory is optional - skip if not configured
-	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
-		return 0, nil
-	}
-
-	importDir := *cfg.Import.ImportDir
-	return lsw.removeEmptyDirectoriesFromPath(ctx, importDir, "import")
-}
-
-// cleanupMetadataDirectory removes empty directories from the metadata directory
-func (lsw *LibrarySyncWorker) cleanupMetadataDirectory(ctx context.Context) (int, error) {
-	cfg := lsw.configGetter()
-
-	// Metadata root path is required in config, but double-check
-	if cfg.Metadata.RootPath == "" {
-		return 0, fmt.Errorf("metadata root path is not configured")
-	}
-
-	metadataRoot := cfg.Metadata.RootPath
-	return lsw.removeEmptyDirectoriesFromPath(ctx, metadataRoot, "metadata")
-}
-
 // syncMetadataOnly performs a simplified sync for NONE import strategy
 // It only synchronizes database records with metadata files, skipping all
 // library directory scanning and cleanup operations. If dryRun is true,
@@ -1401,7 +1174,6 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		return &DryRunResult{
 			OrphanedMetadataCount:  0, // No orphaned metadata in NONE strategy
 			OrphanedLibraryFiles:   0, // No library files in NONE strategy
-			OrphanedDirectories:    0, // No directory cleanup in NONE strategy
 			DatabaseRecordsToClean: dbCounts.deleted,
 			WouldCleanup:           wouldCleanup,
 		}
@@ -1411,7 +1183,6 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	cleanup := cleanupCounts{
 		metadataDeleted:     0,
 		libraryFilesDeleted: 0,
-		libraryDirsDeleted:  0,
 		symlinksUpdated:     0,
 	}
 	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
