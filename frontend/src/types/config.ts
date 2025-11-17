@@ -90,7 +90,6 @@ export interface LibrarySyncStatus {
 export interface DryRunSyncResult {
 	orphaned_metadata_count: number; // Number of orphaned metadata files
 	orphaned_library_files: number; // Number of orphaned library files (symlinks/STRM)
-	orphaned_directories: number; // Number of empty directories
 	database_records_to_clean: number; // Number of database records to clean
 	would_cleanup: boolean; // Whether cleanup would occur based on config
 }
