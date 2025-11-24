@@ -846,7 +846,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			path             string
 			libraryPath      *string
 			releaseDate      *time.Time
-			scheduledCheckAt time.Time
+			scheduledCheckAt *time.Time
 			sourceNzbPath    *string
 		)
 
@@ -874,7 +874,7 @@ type AutomaticHealthCheckRecord struct {
 	FilePath         string
 	LibraryPath      *string
 	ReleaseDate      *time.Time
-	ScheduledCheckAt time.Time
+	ScheduledCheckAt *time.Time
 	SourceNzbPath    *string
 }
 
@@ -915,7 +915,11 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 
 	for i, record := range records {
 		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
-		args = append(args, record.FilePath, record.LibraryPath, HealthStatusHealthy, record.SourceNzbPath, record.ReleaseDate, record.ScheduledCheckAt)
+		var scheduledCheckAt interface{}
+		if record.ScheduledCheckAt != nil {
+			scheduledCheckAt = *record.ScheduledCheckAt
+		}
+		args = append(args, record.FilePath, record.LibraryPath, HealthStatusHealthy, record.SourceNzbPath, record.ReleaseDate, scheduledCheckAt)
 	}
 
 	query := fmt.Sprintf(`

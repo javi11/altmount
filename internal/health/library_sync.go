@@ -589,7 +589,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 					FilePath:         path,
 					LibraryPath:      libraryPath,
 					ReleaseDate:      &releaseDateAsTime,
-					ScheduledCheckAt: scheduledCheckAt,
+					ScheduledCheckAt: &scheduledCheckAt,
 					SourceNzbPath:    &fileMeta.SourceNzbPath,
 				})
 				filesToAddMu.Unlock()
@@ -1161,7 +1161,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 					FilePath:         path,
 					LibraryPath:      libraryPath,
 					ReleaseDate:      &releaseDateAsTime,
-					ScheduledCheckAt: scheduledCheckAt,
+					ScheduledCheckAt: &scheduledCheckAt,
 					SourceNzbPath:    &fileMeta.SourceNzbPath,
 				})
 				filesToAddMu.Unlock()
