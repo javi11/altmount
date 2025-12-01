@@ -809,7 +809,7 @@ func (r *HealthRepository) AddHealthCheck(
 			updated_at = datetime('now')
 	`
 
-	_, err := r.db.ExecContext(ctx, query, filePath, HealthStatusHealthy, sourceNzbPath, releaseDate, scheduledCheckAt)
+	_, err := r.db.ExecContext(ctx, query, filePath, HealthStatusHealthy, sourceNzbPath, releaseDate.UTC(), scheduledCheckAt.UTC())
 	if err != nil {
 		return fmt.Errorf("failed to add health check: %w", err)
 	}
@@ -827,7 +827,7 @@ func (r *HealthRepository) UpdateScheduledCheckTime(ctx context.Context, filePat
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime, filePath)
+	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime.UTC(), filePath)
 	if err != nil {
 		return fmt.Errorf("failed to update scheduled check time: %w", err)
 	}
@@ -858,7 +858,7 @@ func (r *HealthRepository) MarkAsHealthy(ctx context.Context, filePath string, n
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime, filePath)
+	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime.UTC(), filePath)
 	if err != nil {
 		return fmt.Errorf("failed to mark file as healthy: %w", err)
 	}
@@ -996,7 +996,18 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 
 	for i, record := range records {
 		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
-		args = append(args, record.FilePath, record.LibraryPath, HealthStatusHealthy, record.SourceNzbPath, record.ReleaseDate, record.ScheduledCheckAt)
+		
+		var releaseDateUTC, scheduledCheckAtUTC *time.Time
+		if record.ReleaseDate != nil {
+			t := record.ReleaseDate.UTC()
+			releaseDateUTC = &t
+		}
+		if record.ScheduledCheckAt != nil {
+			t := record.ScheduledCheckAt.UTC()
+			scheduledCheckAtUTC = &t
+		}
+
+		args = append(args, record.FilePath, record.LibraryPath, HealthStatusHealthy, record.SourceNzbPath, releaseDateUTC, scheduledCheckAtUTC)
 	}
 
 	query := fmt.Sprintf(`
