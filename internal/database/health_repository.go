@@ -455,6 +455,32 @@ func (r *HealthRepository) CleanupHealthRecords(ctx context.Context, existingFil
 	return nil
 }
 
+// RegisterCorruptedFile adds or updates a file as corrupted and schedules it for immediate check/repair
+func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath string, libraryPath *string, errorMessage string) error {
+	query := `
+		INSERT INTO file_health (
+			file_path, library_path, status, last_error, error_details,
+			retry_count, max_retries, repair_retry_count, max_repair_retries,
+			created_at, updated_at, scheduled_check_at
+		)
+		VALUES (?, ?, 'corrupted', ?, ?, 0, 2, 0, 3, datetime('now'), datetime('now'), datetime('now'))
+		ON CONFLICT(file_path) DO UPDATE SET
+			library_path = COALESCE(excluded.library_path, library_path),
+			status = 'corrupted',
+			last_error = excluded.last_error,
+			error_details = excluded.error_details,
+			scheduled_check_at = datetime('now'),
+			updated_at = datetime('now')
+	`
+
+	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, errorMessage, errorMessage)
+	if err != nil {
+		return fmt.Errorf("failed to register corrupted file: %w", err)
+	}
+
+	return nil
+}
+
 // AddFileToHealthCheck adds a file to the health database for checking
 func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, maxRetries int, sourceNzbPath *string) error {
 	query := `
@@ -703,6 +729,31 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 	return int(rowsAffected), nil
 }
 
+// ResetAllHealthChecks resets all health records to pending status
+func (r *HealthRepository) ResetAllHealthChecks(ctx context.Context) (int, error) {
+	query := `
+		UPDATE file_health
+		SET status = 'pending',
+		    retry_count = 0,
+		    repair_retry_count = 0,
+		    last_error = NULL,
+		    error_details = NULL,
+		    updated_at = datetime('now')
+	`
+
+	result, err := r.db.ExecContext(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to reset all health records: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
+}
+
 // DeleteHealthRecordsByDate deletes health records older than the specified date with optional status filter
 func (r *HealthRepository) DeleteHealthRecordsByDate(ctx context.Context, olderThan time.Time, statusFilter *HealthStatus) (int, error) {
 	query := `
@@ -824,6 +875,36 @@ func (r *HealthRepository) MarkAsHealthy(ctx context.Context, filePath string, n
 	return nil
 }
 
+// GetAllHealthCheckPaths returns all health check file paths (memory optimized)
+func (r *HealthRepository) GetAllHealthCheckPaths(ctx context.Context) ([]string, error) {
+	query := `
+		SELECT file_path
+		FROM file_health
+		ORDER BY file_path ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query health check paths: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("failed to scan file path: %w", err)
+		}
+		paths = append(paths, path)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate health check paths: %w", err)
+	}
+
+	return paths, nil
+}
+
 // GetAllHealthCheckRecords returns all health check records tracked in health system
 func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]AutomaticHealthCheckRecord, error) {
 	query := `
@@ -846,7 +927,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			path             string
 			libraryPath      *string
 			releaseDate      *time.Time
-			scheduledCheckAt time.Time
+			scheduledCheckAt *time.Time
 			sourceNzbPath    *string
 		)
 
@@ -874,7 +955,7 @@ type AutomaticHealthCheckRecord struct {
 	FilePath         string
 	LibraryPath      *string
 	ReleaseDate      *time.Time
-	ScheduledCheckAt time.Time
+	ScheduledCheckAt *time.Time
 	SourceNzbPath    *string
 }
 

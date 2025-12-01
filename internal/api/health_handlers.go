@@ -43,18 +43,19 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 	// Parse status filter
 	var statusFilter *database.HealthStatus
 	if statusStr := c.Query("status"); statusStr != "" {
+		statusStr = strings.TrimSpace(statusStr)
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy:
 			statusFilter = &status
 		default:
 			return c.Status(400).JSON(fiber.Map{
 				"success": false,
 				"error": fiber.Map{
 					"code":    "VALIDATION_ERROR",
-					"message": "Invalid status filter",
-					"details": "Valid values: pending, checking, corrupted, repair_triggered",
+					"message": fmt.Sprintf("Invalid status filter: '%s'", statusStr),
+					"details": "Valid values: pending, checking, corrupted, repair_triggered, healthy",
 				},
 			})
 		}
@@ -566,15 +567,16 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 	// Parse status parameter from query if not in body
 	if req.Status == nil {
 		if statusStr := c.Query("status"); statusStr != "" {
+			statusStr = strings.TrimSpace(statusStr)
 			status := database.HealthStatus(statusStr)
 			switch status {
-			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy:
 				req.Status = &status
 			default:
 				return c.Status(422).JSON(fiber.Map{
 					"success": false,
-					"message": "Invalid status filter",
-					"details": "Valid values: pending, checking, corrupted, repair_triggered",
+					"message": fmt.Sprintf("Invalid status filter: '%s'", statusStr),
+					"details": "Valid values: pending, checking, corrupted, repair_triggered, healthy",
 				})
 			}
 		}

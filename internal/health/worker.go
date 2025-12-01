@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -718,19 +719,24 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 		return fmt.Errorf("failed to get health record for library path lookup: %w", err)
 	}
 
-	if healthRecord.LibraryPath == nil || *healthRecord.LibraryPath == "" {
-		slog.ErrorContext(ctx, "No library path found for file",
-			"file_path", filePath)
-
-		return fmt.Errorf("no library path found for file: %s, trigger a manual library sync to fix this", filePath)
+	pathForRescan := ""
+	if healthRecord.LibraryPath != nil && *healthRecord.LibraryPath != "" {
+		pathForRescan = *healthRecord.LibraryPath
+	} else {
+		// Fallback to mount path if no library path found
+		// This is common for ImportStrategyNone or if metadata scan failed before determining library path
+		pathForRescan = filepath.Join(hw.configGetter().MountPath, filePath)
+		slog.InfoContext(ctx, "Using mount path fallback for repair trigger",
+			"file_path", filePath,
+			"mount_path", pathForRescan)
 	}
 
 	// Step 4: Trigger rescan through the ARR service
-	err = hw.arrsService.TriggerFileRescan(ctx, *healthRecord.LibraryPath)
+	err = hw.arrsService.TriggerFileRescan(ctx, pathForRescan)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
 			"file_path", filePath,
-			"library_path", *healthRecord.LibraryPath,
+			"path_for_rescan", pathForRescan,
 			"error", err)
 
 		// If we can't trigger repair, mark as corrupted for manual investigation
@@ -741,7 +747,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 	// ARR rescan was triggered successfully - set repair triggered status
 	slog.InfoContext(ctx, "Successfully triggered ARR rescan for file repair",
 		"file_path", filePath,
-		"library_path", *healthRecord.LibraryPath)
+		"path_for_rescan", pathForRescan)
 
 	return nil
 }
