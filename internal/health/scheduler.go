@@ -14,32 +14,9 @@ const (
 )
 
 // calculateInitialCheck calculates the first check time for a newly discovered file
-// Implements a tiered scheduling strategy based on file age.
 func calculateInitialCheck(releaseDate time.Time) time.Time {
-	now := time.Now()
-	age := now.Sub(releaseDate)
-
-	var interval time.Duration
-	if age < aggressiveCheckThreshold {
-		// For very new files, use their age as the interval but cap at 6 hours
-		// e.g., 1h old -> check in 1h. 10h old -> check in 6h.
-		if age < aggressiveCheckInterval {
-			interval = age
-		} else {
-			interval = aggressiveCheckInterval
-		}
-	} else if age < dailyCheckThreshold {
-		interval = dailyCheckInterval
-	} else {
-		interval = normalCheckInterval
-	}
-
-	// Ensure the interval is at least the absolute minimum
-	if interval < minInterval {
-		interval = minInterval
-	}
-
-	return now.Add(interval)
+	// Always schedule initial check immediately (with a small buffer)
+	return time.Now().Add(1 * time.Minute)
 }
 
 // calculateNextCheck calculates the next check time after a successful health check
