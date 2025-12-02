@@ -642,9 +642,22 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			default:
 			}
 
-			libraryPath := lsw.getLibraryPath(metaPath, filesInUse)
+			var relativeMountPath string
+			mountPath := cfg.MountPath
 
-			if libraryPath == nil {
+			if strings.HasPrefix(metaPath, mountPath) {
+				relativeMountPath = strings.TrimPrefix(metaPath, mountPath)
+				relativeMountPath = strings.TrimPrefix(relativeMountPath, string(filepath.Separator))
+			} else {
+				relativeMountPath = metaPath
+			}
+
+			normalizedPath := filepath.ToSlash(relativeMountPath)
+			_, exists := metaFileSet[relativeMountPath]
+			if !exists {
+				_, exists = metaFileSet[normalizedPath]
+			}
+			if !exists {
 				if !dryRun {
 					err := os.Remove(file)
 					if err != nil {

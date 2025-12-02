@@ -61,10 +61,7 @@ func ValidateSegmentAvailability(
 	for _, segment := range segmentsToValidate {
 		seg := segment // Capture loop variable
 		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-
-			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			_, err := usenetPool.Stat(ctx, seg.Id, []string{})
 			if err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}

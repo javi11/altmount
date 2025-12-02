@@ -371,3 +371,19 @@ func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 
 	return nil
 }
+
+// ResetItemToPending resets a specific queue item to pending status, clearing started_at and error_message
+func (r *QueueRepository) ResetItemToPending(ctx context.Context, itemID int64) error {
+	query := `
+		UPDATE import_queue
+		SET status = 'pending', started_at = NULL, error_message = NULL, updated_at = datetime('now')
+		WHERE id = ?
+	`
+	
+	_, err := r.db.ExecContext(ctx, query, itemID)
+	if err != nil {
+		return fmt.Errorf("failed to reset item to pending: %w", err)
+	}
+	
+	return nil
+}

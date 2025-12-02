@@ -403,10 +403,6 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 
 			firstSegment := fileToFetch.Segments[0]
 
-			// Create context with timeout
-			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
-			defer cancel()
-
 			// Get body reader for the first segment
 			r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
 			if err != nil {
@@ -470,12 +466,8 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				for segIdx := 1; segIdx < len(fileToFetch.Segments) && bytesRead < maxRead; segIdx++ {
 					segment := fileToFetch.Segments[segIdx]
 
-					// Create a new context for this segment
-					segCtx, segCancel := context.WithTimeout(ctx, time.Second*30)
-
-					segReader, err := cp.BodyReader(segCtx, segment.ID, nil)
+					segReader, err := cp.BodyReader(ctx, segment.ID, nil)
 					if err != nil {
-						segCancel()
 						p.log.DebugContext(ctx, "Failed to read additional segment for 16KB completion",
 							"segment_index", segIdx,
 							"error", err)
@@ -488,7 +480,6 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 
 					n, err := io.ReadFull(segReader, tempBuffer)
 					segReader.Close()
-					segCancel()
 
 					if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 						p.log.DebugContext(ctx, "Error reading from additional segment",

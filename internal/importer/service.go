@@ -459,6 +459,22 @@ func isDatabaseContentionError(err error) bool {
 		strings.Contains(err.Error(), "database is busy")
 }
 
+// isConnectionUnavailableError checks if an error indicates connection unavailability
+func isConnectionUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+
+	return strings.Contains(errStr, "context deadline exceeded") ||
+		strings.Contains(errStr, "error getting nntp connection") ||
+		strings.Contains(errStr, "no provider available") ||
+		strings.Contains(errStr, "max connections reached") ||
+		strings.Contains(errStr, "connection pool not available") ||
+		strings.Contains(errStr, "NNTP connection pool not available") ||
+		strings.Contains(errStr, "connection pool is shutdown")
+}
+
 // claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic using retry-go
 func (s *Service) claimItemWithRetry(ctx context.Context, workerID int) (*database.ImportQueueItem, error) {
 	var item *database.ImportQueueItem
@@ -643,12 +659,39 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		s.log.InfoContext(ctx, "Processing cancelled by user",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
-	} else {
-		s.log.WarnContext(ctx, "Processing failed",
+
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+			s.log.ErrorContext(ctx, "Failed to mark item as failed", "queue_id", item.ID, "error", err)
+		}
+		if s.broadcaster != nil {
+			s.broadcaster.ClearProgress(int(item.ID))
+		}
+		return
+	}
+
+	if isConnectionUnavailableError(processingErr) {
+		s.log.InfoContext(ctx, "Connection unavailable, resetting item to pending for retry",
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", processingErr)
+
+		if err := s.resetItemToPending(ctx, item.ID); err != nil {
+			s.log.ErrorContext(ctx, "Failed to reset item to pending", "queue_id", item.ID, "error", err)
+			if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
+				s.log.ErrorContext(ctx, "Failed to mark item as failed", "queue_id", item.ID, "error", err)
+			}
+		}
+
+		if s.broadcaster != nil {
+			s.broadcaster.ClearProgress(int(item.ID))
+		}
+		return
 	}
+
+	s.log.WarnContext(ctx, "Processing failed",
+		"queue_id", item.ID,
+		"file", item.NzbPath,
+		"error", processingErr)
 
 	// Mark as failed in queue database (no automatic retry)
 	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
@@ -686,6 +729,11 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			}
 		}
 	}
+}
+
+// resetItemToPending resets a queue item to pending status, clearing started_at and error_message
+func (s *Service) resetItemToPending(ctx context.Context, itemID int64) error {
+	return s.database.Repository.ResetItemToPending(ctx, itemID)
 }
 
 // attemptSABnzbdFallback attempts to send a failed import to an external SABnzbd instance
