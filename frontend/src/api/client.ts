@@ -311,6 +311,18 @@ export class APIClient {
 		});
 	}
 
+	async repairBulkHealthItems(filePaths: string[]) {
+		return this.request<{
+			message: string;
+			success_count: number;
+			failed_count: number;
+			errors: Record<string, string>;
+		}>("/health/bulk/repair", {
+			method: "POST",
+			body: JSON.stringify({ file_paths: filePaths }),
+		});
+	}
+
 	async retryHealthItem(id: string, resetStatus?: boolean) {
 		return this.request<FileHealth>(`/health/${encodeURIComponent(id)}/retry`, {
 			method: "POST",

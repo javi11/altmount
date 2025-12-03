@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
@@ -63,6 +64,7 @@ type Service struct {
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
+	arrsService     *arrs.Service                 // ARRs service for triggering scans
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
 	log             *slog.Logger
@@ -206,6 +208,13 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 	} else {
 		s.log.InfoContext(context.Background(), "RClone client disabled")
 	}
+}
+
+// SetArrsService sets or updates the ARRs service
+func (s *Service) SetArrsService(service *arrs.Service) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.arrsService = service
 }
 
 // Database returns the database instance for processing
@@ -627,6 +636,19 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	// Clear progress tracking
 	if s.broadcaster != nil {
 		s.broadcaster.ClearProgress(int(item.ID))
+	}
+
+	// Trigger ARR download scan if applicable
+	if s.arrsService != nil && item.Category != nil {
+		category := strings.ToLower(*item.Category)
+		// Determine instance type based on category
+		// Note: This assumes standard "tv" and "movies" categories.
+		// Ideally we should match against configured categories in config.SABnzbd.Categories
+		if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
+			s.arrsService.TriggerDownloadScan(ctx, "sonarr")
+		} else if category == "movies" || strings.Contains(category, "movie") {
+			s.arrsService.TriggerDownloadScan(ctx, "radarr")
+		}
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)

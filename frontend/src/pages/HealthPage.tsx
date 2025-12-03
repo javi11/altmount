@@ -11,6 +11,7 @@ import {
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
+	useRepairBulkHealthItems,
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
 } from "../hooks/useApi";
@@ -28,9 +29,11 @@ import { HealthStatsCards } from "./HealthPage/components/HealthStatsCards";
 import { HealthStatusAlert } from "./HealthPage/components/HealthStatusAlert";
 import { HealthTable } from "./HealthPage/components/HealthTable/HealthTable";
 import { LibraryScanStatus } from "./HealthPage/components/LibraryScanStatus";
+import { ProviderHealth } from "./HealthPage/components/ProviderHealth/ProviderHealth";
 import type { CleanupConfig, SortBy, SortOrder } from "./HealthPage/types";
 
 export function HealthPage() {
+	const [activeTab, setActiveTab] = useState<"files" | "providers">("files");
 	const [page, setPage] = useState(0);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState("");
@@ -68,6 +71,7 @@ export function HealthPage() {
 	const deleteItem = useDeleteHealthItem();
 	const deleteBulkItems = useDeleteBulkHealthItems();
 	const restartBulkItems = useRestartBulkHealthItems();
+	const repairBulkItems = useRepairBulkHealthItems();
 	const cleanupHealth = useCleanupHealth();
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
@@ -350,6 +354,40 @@ export function HealthPage() {
 		}
 	};
 
+	const handleBulkRepair = async () => {
+		if (selectedItems.size === 0) return;
+
+		const confirmed = await confirmAction(
+			"Repair Selected Files",
+			`Are you sure you want to trigger repair for ${selectedItems.size} selected files? This will ask the ARR applications to redownload them.`,
+			{
+				type: "warning",
+				confirmText: "Repair Selected",
+				confirmButtonClass: "btn-warning",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const filePaths = Array.from(selectedItems);
+				await repairBulkItems.mutateAsync(filePaths);
+				setSelectedItems(new Set());
+				showToast({
+					title: "Success",
+					message: `Repair triggered for ${filePaths.length} files`,
+					type: "success",
+				});
+			} catch (error) {
+				console.error("Failed to trigger bulk repair:", error);
+				showToast({
+					title: "Error",
+					message: "Failed to trigger bulk repair",
+					type: "error",
+				});
+			}
+		}
+	};
+
 	const clearSelection = useCallback(() => {
 		setSelectedItems(new Set());
 	}, []);
@@ -470,66 +508,91 @@ export function HealthPage() {
 				onRetry={refetchLibrarySync}
 			/>
 
-			<HealthFilters
-				searchTerm={searchTerm}
-				statusFilter={statusFilter}
-				onSearchChange={setSearchTerm}
-				onStatusFilterChange={setStatusFilter}
-				onUserInteractionStart={handleUserInteractionStart}
-				onUserInteractionEnd={handleUserInteractionEnd}
-			/>
+			<div className="flex gap-2 mb-6">
+				<button
+					type="button"
+					className={`btn ${activeTab === "files" ? "btn-primary" : "btn-ghost"}`}
+					onClick={() => setActiveTab("files")}
+				>
+					File Health
+				</button>
+				<button
+					type="button"
+					className={`btn ${activeTab === "providers" ? "btn-primary" : "btn-ghost"}`}
+					onClick={() => setActiveTab("providers")}
+				>
+					Provider Health
+				</button>
+			</div>
 
-			<BulkActionsToolbar
-				selectedCount={selectedItems.size}
-				isRestartPending={restartBulkItems.isPending}
-				isDeletePending={deleteBulkItems.isPending}
-				onClearSelection={() => setSelectedItems(new Set())}
-				onBulkRestart={handleBulkRestart}
-				onBulkDelete={handleBulkDelete}
-			/>
+			{activeTab === "files" ? (
+				<>
+					<HealthFilters
+						searchTerm={searchTerm}
+						statusFilter={statusFilter}
+						onSearchChange={setSearchTerm}
+						onStatusFilterChange={setStatusFilter}
+						onUserInteractionStart={handleUserInteractionStart}
+						onUserInteractionEnd={handleUserInteractionEnd}
+					/>
 
-			<HealthTable
-				data={data}
-				isLoading={isLoading}
-				selectedItems={selectedItems}
-				sortBy={sortBy}
-				sortOrder={sortOrder}
-				searchTerm={searchTerm}
-				statusFilter={statusFilter}
-				isCancelPending={cancelHealthCheck.isPending}
-				isDirectCheckPending={directHealthCheck.isPending}
-				isRepairPending={repairHealthItem.isPending}
-				isDeletePending={deleteItem.isPending}
-				onSelectItem={handleSelectItem}
-				onSelectAll={handleSelectAll}
-				onSort={handleSort}
-				onCancelCheck={handleCancelCheck}
-				onManualCheck={handleManualCheck}
-				onRepair={handleRepair}
-				onDelete={handleDelete}
-			/>
+					<BulkActionsToolbar
+						selectedCount={selectedItems.size}
+						isRestartPending={restartBulkItems.isPending}
+						isDeletePending={deleteBulkItems.isPending}
+						isRepairPending={repairBulkItems.isPending}
+						onClearSelection={() => setSelectedItems(new Set())}
+						onBulkRestart={handleBulkRestart}
+						onBulkDelete={handleBulkDelete}
+						onBulkRepair={handleBulkRepair}
+					/>
 
-			{meta?.total && meta.total > pageSize && (
-				<Pagination
-					currentPage={page + 1}
-					totalPages={Math.ceil(meta.total / pageSize)}
-					onPageChange={(newPage) => setPage(newPage - 1)}
-					totalItems={meta.total}
-					itemsPerPage={pageSize}
-					showSummary={true}
-				/>
+					<HealthTable
+						data={data}
+						isLoading={isLoading}
+						selectedItems={selectedItems}
+						sortBy={sortBy}
+						sortOrder={sortOrder}
+						searchTerm={searchTerm}
+						statusFilter={statusFilter}
+						isCancelPending={cancelHealthCheck.isPending}
+						isDirectCheckPending={directHealthCheck.isPending}
+						isRepairPending={repairHealthItem.isPending}
+						isDeletePending={deleteItem.isPending}
+						onSelectItem={handleSelectItem}
+						onSelectAll={handleSelectAll}
+						onSort={handleSort}
+						onCancelCheck={handleCancelCheck}
+						onManualCheck={handleManualCheck}
+						onRepair={handleRepair}
+						onDelete={handleDelete}
+					/>
+
+					{meta?.total && meta.total > pageSize && (
+						<Pagination
+							currentPage={page + 1}
+							totalPages={Math.ceil(meta.total / pageSize)}
+							onPageChange={(newPage) => setPage(newPage - 1)}
+							totalItems={meta.total}
+							itemsPerPage={pageSize}
+							showSummary={true}
+						/>
+					)}
+
+					<HealthStatusAlert stats={stats} />
+
+					<CleanupModal
+						show={showCleanupModal}
+						config={cleanupConfig}
+						isPending={cleanupHealth.isPending}
+						onClose={() => setShowCleanupModal(false)}
+						onConfigChange={setCleanupConfig}
+						onConfirm={handleCleanupConfirm}
+					/>
+				</>
+			) : (
+				<ProviderHealth />
 			)}
-
-			<HealthStatusAlert stats={stats} />
-
-			<CleanupModal
-				show={showCleanupModal}
-				config={cleanupConfig}
-				isPending={cleanupHealth.isPending}
-				onClose={() => setShowCleanupModal(false)}
-				onConfigChange={setCleanupConfig}
-				onConfirm={handleCleanupConfirm}
-			/>
 		</div>
 	);
 }

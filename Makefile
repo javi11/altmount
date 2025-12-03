@@ -1,4 +1,5 @@
 GO ?= go
+DOCKER_IMAGE_TAG ?= latest
 
 .DEFAULT_GOAL := check
 
@@ -68,7 +69,7 @@ git-hooks:
 
 .PHONY: docker-build
 docker-build:
-	docker build -f docker/Dockerfile -t altmount:latest .
+	docker build -f docker/Dockerfile -t altmount:$(DOCKER_IMAGE_TAG) .
 
 .PHONY: docker-build-ci
 docker-build-ci: build-frontend

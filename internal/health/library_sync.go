@@ -220,12 +220,22 @@ func (lsw *LibrarySyncWorker) run(ctx context.Context) {
 			slog.InfoContext(ctx, "Library sync worker stopped by context")
 			return
 		case <-ticker.C:
-			lsw.SyncLibrary(ctx, false)
+			lsw.safeSyncLibrary(ctx, false)
 		case <-lsw.manualTrigger:
 			slog.InfoContext(ctx, "Manual library sync trigger received")
-			lsw.SyncLibrary(ctx, false)
+			lsw.safeSyncLibrary(ctx, false)
 		}
 	}
+}
+
+// safeSyncLibrary executes SyncLibrary with panic recovery
+func (lsw *LibrarySyncWorker) safeSyncLibrary(ctx context.Context, dryRun bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "Panic in library sync", "panic", r)
+		}
+	}()
+	lsw.SyncLibrary(ctx, dryRun)
 }
 
 // syncMaps holds the metadata and database record maps used during synchronization

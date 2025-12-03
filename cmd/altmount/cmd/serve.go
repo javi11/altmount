@@ -99,14 +99,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 5. Initialize importer and filesystem
 	repos := setupRepositories(ctx, db)
 
-	// Reset all health checks on startup to force recalculation of next check times
-	// This ensures any schema or logic changes (like new caps) are applied immediately
-	if count, err := repos.HealthRepo.ResetAllHealthChecks(ctx); err != nil {
-		logger.ErrorContext(ctx, "Failed to reset health checks on startup", "error", err)
-	} else {
-		logger.InfoContext(ctx, "Reset health checks on startup", "count", count)
-	}
-
 	// Create progress broadcaster for WebSocket progress updates
 	progressBroadcaster := progress.NewProgressBroadcaster()
 	defer progressBroadcaster.Close()
@@ -129,6 +121,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	authService := setupAuthService(ctx, repos.UserRepo)
 
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
+	// Wire ARRs service into importer for instant import triggers
+	importerService.SetArrsService(arrsService)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster)
 

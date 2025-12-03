@@ -322,6 +322,7 @@ type HealthItemResponse struct {
 	CreatedAt        time.Time             `json:"created_at"`
 	UpdatedAt        time.Time             `json:"updated_at"`
 	ScheduledCheckAt *time.Time            `json:"scheduled_check_at,omitempty"`
+	Priority         bool                  `json:"priority"`
 }
 
 // HealthListRequest represents request parameters for listing health records
@@ -336,6 +337,7 @@ type HealthStatsResponse struct {
 	Total     int `json:"total"`
 	Pending   int `json:"pending"`
 	Corrupted int `json:"corrupted"`
+	Healthy   int `json:"healthy"`
 }
 
 // HealthRetryRequest represents request to retry a corrupted file
@@ -510,6 +512,7 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 		ScheduledCheckAt: item.ScheduledCheckAt,
+		Priority:         item.Priority,
 	}
 }
 
@@ -517,6 +520,7 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResponse {
 	pending := stats[database.HealthStatusPending]
 	corrupted := stats[database.HealthStatusCorrupted]
+	healthy := stats[database.HealthStatusHealthy]
 
 	// Calculate total from all tracked statuses
 	total := 0
@@ -528,6 +532,7 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 		Total:     total,
 		Pending:   pending,
 		Corrupted: corrupted,
+		Healthy:   healthy,
 	}
 }
 
