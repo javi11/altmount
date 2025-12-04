@@ -846,12 +846,16 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			path             string
 			libraryPath      *string
 			releaseDate      *time.Time
-			scheduledCheckAt time.Time
+			scheduledCheckAtNT sql.NullTime
 			sourceNzbPath    *string
 		)
 
-		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAt, &sourceNzbPath); err != nil {
+		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath); err != nil {
 			return nil, fmt.Errorf("failed to scan file path: %w", err)
+		}
+		var scheduledCheckAt time.Time
+		if scheduledCheckAtNT.Valid {
+			scheduledCheckAt = scheduledCheckAtNT.Time
 		}
 		records = append(records, AutomaticHealthCheckRecord{
 			FilePath:         path,
