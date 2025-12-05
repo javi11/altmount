@@ -673,11 +673,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// Process repair notification files
 	for _, fileHealth := range repairFiles {
 		wg.Go(func() {
-			slog.InfoContext(ctx, "Processing repair notification for file", "file_path", fileHealth.FilePath)
+			slog.InfoContext(ctx, "Checking repair status for file", "file_path", fileHealth.FilePath)
 
-			err := hw.processRepairNotification(ctx, fileHealth)
+			// Use performDirectCheck to verify if the file has been fixed
+			err := hw.performDirectCheck(ctx, fileHealth.FilePath)
 			if err != nil {
-				slog.ErrorContext(ctx, "Repair notification failed", "file_path", fileHealth.FilePath, "error", err)
+				slog.ErrorContext(ctx, "Repair check failed", "file_path", fileHealth.FilePath, "error", err)
 			}
 
 			// Update cycle progress stats
