@@ -15,6 +15,9 @@ RUN apt-get update && \
 # Backend build stage with native arch support
 FROM golang:1.24-alpine AS backend-builder
 
+# Upgrade busybox first to fix QEMU ARM64 emulation issues
+RUN apk upgrade --no-cache busybox
+
 # Install build dependencies including sqlite with cache mount
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     apk add --no-cache git gcc g++ musl-dev sqlite-dev
