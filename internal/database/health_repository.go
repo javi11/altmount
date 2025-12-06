@@ -964,7 +964,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			FilePath:         path,
 			LibraryPath:      libraryPath,
 			ReleaseDate:      releaseDate,
-			ScheduledCheckAt: scheduledCheckAt,
+			ScheduledCheckAt: &scheduledCheckAt,
 			SourceNzbPath:    sourceNzbPath,
 		})
 	}
