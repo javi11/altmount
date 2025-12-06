@@ -225,10 +225,23 @@ func (proc *Processor) processMultiFile(
 	par2Files []parser.ParsedFile,
 	nzbPath string,
 ) (string, error) {
-	// Create NZB folder
-	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
-	if err != nil {
-		return "", err
+	// For multi-file NZBs with only 1 regular file (excluding par2),
+	// don't create an extra NZB folder - treat it like a single file
+	var nzbFolder string
+	if len(regularFiles) == 1 {
+		// Single regular file - use virtualDir directly without creating NZB folder
+		nzbFolder = virtualDir
+		// Ensure the directory exists (consistent with processSingleFile)
+		if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+			return "", err
+		}
+	} else {
+		// Multiple regular files - create NZB folder
+		var err error
+		nzbFolder, err = filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	// Create directories for files

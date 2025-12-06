@@ -158,6 +158,8 @@ func ProcessArchive(
 
 		// Flatten the internal path by extracting only the base filename
 		normalizedInternalPath := strings.ReplaceAll(rarContent.InternalPath, "\\", "/")
+		// Remove trailing slashes to prevent incorrect directory creation
+		normalizedInternalPath = strings.TrimRight(normalizedInternalPath, "/\\")
 		baseFilename := filepath.Base(normalizedInternalPath)
 
 		// Create the virtual file path directly in the RAR directory (flattened)
