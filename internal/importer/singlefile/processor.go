@@ -38,7 +38,9 @@ func ProcessSingleFile(
 	}
 
 	// Create virtual file path
-	virtualFilePath := filepath.Join(virtualDir, file.Filename)
+	// Remove trailing slashes from filename to prevent incorrect directory creation
+	cleanFilename := strings.TrimRight(file.Filename, "/\\")
+	virtualFilePath := filepath.Join(virtualDir, cleanFilename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
 	// Validate segments

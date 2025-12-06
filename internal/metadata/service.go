@@ -25,6 +25,32 @@ func NewMetadataService(rootPath string) *MetadataService {
 	}
 }
 
+// normalizePath removes trailing slashes from paths to prevent incorrect directory creation
+// When a path has a trailing slash, filepath.Dir() includes the filename as part of the directory
+func normalizePath(path string) string {
+	// Don't normalize empty paths or root
+	if path == "" || path == "/" {
+		return path
+	}
+	
+	// First use filepath.Clean to handle standard path normalization
+	cleaned := filepath.Clean(path)
+	
+	// filepath.Clean on Unix doesn't treat backslashes as separators, but we need to
+	// handle both forward slashes and backslashes from NZB files (which might come from Windows)
+	// So we additionally strip trailing slashes and backslashes
+	result := strings.TrimRight(cleaned, "/\\")
+	
+	// Ensure we don't return empty string or just "." when we had a real path
+	if result == "" || result == "." {
+		if path != "" && path != "." {
+			return cleaned
+		}
+	}
+	
+	return result
+}
+
 // truncateFilename truncates the filename if it's too long to prevent filesystem issues
 // when creating .meta files. Keeps filename under 250 characters.
 func (ms *MetadataService) truncateFilename(filename string) string {
@@ -43,6 +69,9 @@ func (ms *MetadataService) truncateFilename(filename string) string {
 
 // WriteFileMetadata writes file metadata to disk
 func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metapb.FileMetadata) error {
+	// Normalize path to remove trailing slashes
+	virtualPath = normalizePath(virtualPath)
+	
 	// Ensure the directory exists
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	if err := os.MkdirAll(metadataDir, 0755); err != nil {
@@ -70,6 +99,9 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 
 // ReadFileMetadata reads file metadata from disk
 func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMetadata, error) {
+	// Normalize path to remove trailing slashes
+	virtualPath = normalizePath(virtualPath)
+	
 	// Create metadata file path
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
@@ -95,6 +127,9 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 
 // FileExists checks if a metadata file exists for the given virtual path
 func (ms *MetadataService) FileExists(virtualPath string) bool {
+	// Normalize path to remove trailing slashes
+	virtualPath = normalizePath(virtualPath)
+	
 	filename := filepath.Base(virtualPath)
 	truncatedFilename := ms.truncateFilename(filename)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
@@ -221,6 +256,9 @@ func (ms *MetadataService) DeleteFileMetadata(virtualPath string) error {
 
 // DeleteFileMetadataWithSourceNzb deletes a metadata file and optionally its source NZB
 func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, virtualPath string, deleteSourceNzb bool) error {
+	// Normalize path to remove trailing slashes
+	virtualPath = normalizePath(virtualPath)
+	
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
@@ -301,6 +339,9 @@ func (ms *MetadataService) CalculateSegmentSize(segments []*metapb.SegmentData) 
 
 // GetMetadataFilePath returns the filesystem path for a metadata file
 func (ms *MetadataService) GetMetadataFilePath(virtualPath string) string {
+	// Normalize path to remove trailing slashes
+	virtualPath = normalizePath(virtualPath)
+	
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	return filepath.Join(metadataDir, filename+".meta")
@@ -308,6 +349,8 @@ func (ms *MetadataService) GetMetadataFilePath(virtualPath string) string {
 
 // GetMetadataDirectoryPath returns the filesystem path for a metadata directory
 func (ms *MetadataService) GetMetadataDirectoryPath(virtualPath string) string {
+	// Normalize path to remove trailing slashes
+	virtualPath = normalizePath(virtualPath)
 	return filepath.Join(ms.rootPath, virtualPath)
 }
 

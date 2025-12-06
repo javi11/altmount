@@ -97,6 +97,8 @@ func EnsureDirectoryExists(virtualDir string, metadataService *metadata.Metadata
 
 // CreateNzbFolder creates a folder named after the NZB file
 func CreateNzbFolder(virtualDir, nzbFilename string, metadataService *metadata.MetadataService) (string, error) {
+	// Remove trailing slashes from nzbFilename before processing
+	nzbFilename = strings.TrimRight(nzbFilename, "/\\")
 	nzbBaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
 	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
 	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
@@ -115,8 +117,30 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 
 	for _, file := range files {
 		normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
+		// Remove trailing slashes to prevent filepath.Dir from treating filename as directory
+		normalizedFilename = strings.TrimRight(normalizedFilename, "/\\")
+		
 		dir := filepath.Dir(normalizedFilename)
 		if dir != "." && dir != "/" {
+			name := filepath.Base(normalizedFilename)
+			
+			// Handle redundant directory structures where the immediate parent directory
+			// has the same name as the file (e.g., "file.mkv/file.mkv")
+			// This is common in NZBs where files are nested in folders with matching names
+			dirBaseName := filepath.Base(dir)
+			nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
+			
+			if dirBaseName == name || dirBaseName == nameWithoutExt {
+				// Flatten by removing the redundant directory level
+				parentDir := filepath.Dir(dir)
+				if parentDir != "." && parentDir != "/" {
+					dir = parentDir
+				} else {
+					// No directory needed, file goes directly in virtualDir
+					continue
+				}
+			}
+			
 			virtualPath := filepath.Join(virtualDir, dir)
 			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 			dirs[virtualPath] = true
@@ -136,11 +160,29 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 // DetermineFileLocation determines where a file should be placed in the virtual structure
 func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, filename string) {
 	normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
+	// Remove trailing slashes to prevent filepath.Dir from treating filename as directory
+	normalizedFilename = strings.TrimRight(normalizedFilename, "/\\")
+	
 	dir := filepath.Dir(normalizedFilename)
 	name := filepath.Base(normalizedFilename)
 
 	if dir == "." || dir == "/" {
 		return baseDir, name
+	}
+
+	// Handle redundant directory structures where the immediate parent directory
+	// has the same name as the file (e.g., "file.mkv/file.mkv")
+	// This is common in NZBs where files are nested in folders with matching names
+	dirBaseName := filepath.Base(dir)
+	nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
+	
+	if dirBaseName == name || dirBaseName == nameWithoutExt {
+		// Flatten by removing the redundant directory level
+		parentDir := filepath.Dir(dir)
+		if parentDir == "." || parentDir == "/" {
+			return baseDir, name
+		}
+		dir = parentDir
 	}
 
 	virtualPath := filepath.Join(baseDir, dir)
