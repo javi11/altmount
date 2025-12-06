@@ -28,26 +28,26 @@ func NewMetadataService(rootPath string) *MetadataService {
 // normalizePath removes trailing slashes from paths to prevent incorrect directory creation
 // When a path has a trailing slash, filepath.Dir() includes the filename as part of the directory
 func normalizePath(path string) string {
+	// First normalize backslashes to forward slashes for cross-platform compatibility
+	path = strings.ReplaceAll(path, "\\", "/")
+
 	// Don't normalize empty paths or root
 	if path == "" || path == "/" {
 		return path
 	}
-	
-	// First use filepath.Clean to handle standard path normalization
+
+	// Use filepath.Clean to handle standard path normalization
 	cleaned := filepath.Clean(path)
-	
-	// filepath.Clean on Unix doesn't treat backslashes as separators, but we need to
-	// handle both forward slashes and backslashes from NZB files (which might come from Windows)
-	// So we additionally strip trailing slashes and backslashes
+
+	// Strip trailing slashes (forward or backward)
 	result := strings.TrimRight(cleaned, "/\\")
-	
+
 	// Ensure we don't return empty string or just "." when we had a real path
 	if result == "" || result == "." {
 		if path != "" && path != "." {
 			return cleaned
 		}
 	}
-	
 	return result
 }
 
