@@ -101,9 +101,9 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 		CookieDuration:  config.TokenDuration,
 		DisableXSRF:     false, // Enable XSRF protection
 		SecureCookies:   config.CookieSecure,
-		JWTCookieName:   "JWT",                                    // <-- ADICIONAR ESTA LINHA
-		JWTCookieDomain: config.CookieDomain,                      // <-- ADICIONAR ESTA LINHA
-		SameSiteCookie:  config.CookieSameSite,                    // <-- ADICIONAR ESTA LINHA
+		JWTCookieName:   "JWT",
+		JWTCookieDomain: config.CookieDomain,
+		SameSiteCookie:  config.CookieSameSite,
 		Issuer:          config.Issuer,
 		URL:             "http://" + config.CookieDomain + ":8080",
 		AvatarStore:     avatar.NewNoOp(), // No avatar storage for now
