@@ -2,6 +2,7 @@ package api
 
 import (
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -453,9 +454,25 @@ func (s *Server) mapUserToResponse(user *database.User) *UserResponse {
 	return response
 }
 
+// sameSiteToString converts http.SameSite to Fiber cookie SameSite string
+func sameSiteToString(sameSite http.SameSite) string {
+	switch sameSite {
+	case http.SameSiteDefaultMode:
+		return "Lax" // Default mode uses Lax behavior
+	case http.SameSiteStrictMode:
+		return "Strict"
+	case http.SameSiteLaxMode:
+		return "Lax"
+	case http.SameSiteNoneMode:
+		return "None"
+	default:
+		return "Lax" // Fallback for safety
+	}
+}
+
 // setJWTCookie sets the JWT cookie using Fiber's native cookie handling
 func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
-	config := auth.LoadConfigFromEnv()
+	config := s.authService.GetConfig()
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT", // Default JWT cookie name
@@ -465,7 +482,7 @@ func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 		Expires:  time.Now().Add(config.TokenDuration),
 		Secure:   config.CookieSecure,
 		HTTPOnly: true,
-		SameSite: "Lax", // Use Lax for Safari compatibility
+		SameSite: sameSiteToString(config.CookieSameSite),
 	}
 
 	c.Cookie(cookie)
@@ -474,7 +491,7 @@ func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 
 // clearJWTCookie clears the JWT cookie using Fiber's native cookie handling
 func (s *Server) clearJWTCookie(c *fiber.Ctx) {
-	config := auth.LoadConfigFromEnv()
+	config := s.authService.GetConfig()
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT",
@@ -484,7 +501,7 @@ func (s *Server) clearJWTCookie(c *fiber.Ctx) {
 		Expires:  time.Now().Add(-time.Hour), // Expire in the past
 		Secure:   config.CookieSecure,
 		HTTPOnly: true,
-		SameSite: "Lax",
+		SameSite: sameSiteToString(config.CookieSameSite),
 	}
 
 	c.Cookie(cookie)
