@@ -124,6 +124,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api := app.Group(s.config.Prefix)
 	// Import do not need user authentication
 	api.Post("/import/file", s.handleManualImportFile)
+	api.Post("/stream-url", s.handleGetStreamURL)
 
 	// Apply global middleware
 	api.Use(cors.New())

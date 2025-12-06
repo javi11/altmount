@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -244,4 +245,106 @@ func toScanStatusResponse(scanInfo importer.ScanInfo) *ScanStatusResponse {
 		CurrentFile: scanInfo.CurrentFile,
 		LastError:   scanInfo.LastError,
 	}
+}
+
+// handleGetStreamURL handles POST /api/stream-url
+func (s *Server) handleGetStreamURL(c *fiber.Ctx) error {
+	ctx := c.Context()
+
+	// Check for API key authentication
+	apiKey := c.Query("apikey")
+	if apiKey == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "API key required",
+			"details": "Please provide an API key via 'apikey' query parameter",
+		})
+	}
+
+	// Validate API key
+	if !s.validateAPIKey(c, apiKey) {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid API key",
+			"details": "The provided API key is not valid",
+		})
+	}
+
+	// Check if importer service is available
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Importer service not available",
+		})
+	}
+
+	// Parse multipart form to get uploaded file
+	file, err := c.FormFile("nzb")
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to read uploaded file",
+			"details": "NZB file must be provided via 'nzb' form field",
+		})
+	}
+
+	// Validate file extension
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".nzb") {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid file type",
+			"details": "Only .nzb files are accepted",
+		})
+	}
+
+	// Save uploaded file to temporary location
+	tempFile, err := os.CreateTemp("", "nzb-*.nzb")
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to create temporary file",
+			"details": err.Error(),
+		})
+	}
+	tempPath := tempFile.Name()
+	tempFile.Close()
+	defer os.Remove(tempPath) // Clean up temp file after processing
+
+	if err := c.SaveFile(file, tempPath); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to save uploaded file",
+			"details": err.Error(),
+		})
+	}
+
+	// Check if file with same content is already in queue
+	inQueue, err := s.queueRepo.IsFileInQueue(ctx, tempPath)
+	if err != nil {
+		slog.WarnContext(ctx, "Failed to check queue status", "error", err)
+		// Continue processing even if queue check fails
+	}
+
+	if inQueue {
+		// File already in queue - find it and return existing URLs
+		// Note: This is a simplified check - ideally we'd match by content hash
+		// For now, we'll process it anyway as temp files have unique names
+	}
+
+	// Process NZB with 0% validation by calling service method
+	streamURLs, err := s.importerService.ProcessNzbForStreamURL(ctx, tempPath)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to process NZB file",
+			"details": err.Error(),
+		})
+	}
+
+	// Return stream URLs
+	response := StreamURLResponse{
+		StreamURLs: streamURLs,
+	}
+
+	return c.Status(200).JSON(response)
 }

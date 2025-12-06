@@ -677,3 +677,8 @@ type DryRunSyncResult struct {
 	DatabaseRecordsToClean int  `json:"database_records_to_clean"` // Number of database records to clean
 	WouldCleanup           bool `json:"would_cleanup"`             // Whether cleanup would occur based on config
 }
+
+// StreamURLResponse represents stream URLs generated for an NZB file
+type StreamURLResponse struct {
+	StreamURLs []string `json:"stream_urls"`
+}

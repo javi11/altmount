@@ -1263,3 +1263,160 @@ func hashAPIKey(apiKey string) string {
 	hash := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(hash[:])
 }
+
+// ProcessNzbForStreamURL processes an NZB file with 0% validation and returns stream URLs
+func (s *Service) ProcessNzbForStreamURL(ctx context.Context, nzbPath string) ([]string, error) {
+	cfg := s.configGetter()
+
+	// Create a temporary processor with 0% validation
+	tempProcessor := NewProcessor(
+		s.metadataService,
+		s.processor.poolManager,
+		s.processor.maxImportConnections,
+		0, // 0% validation - skip all segment checks
+		s.processor.allowedFileExtensions,
+		cfg.Import.ImportCacheSizeMB,
+		s.broadcaster,
+	)
+
+	// Process the NZB file with a temporary queue ID (-1 indicates no queue tracking)
+	resultingPath, err := tempProcessor.ProcessNzbFile(ctx, nzbPath, "", -1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process NZB file: %w", err)
+	}
+
+	// Add to queue as completed with special category
+	streamURLCategory := "stream-url"
+	item := &database.ImportQueueItem{
+		NzbPath:     nzbPath,
+		Category:    &streamURLCategory,
+		Priority:    database.QueuePriorityNormal,
+		Status:      database.QueueStatusCompleted,
+		RetryCount:  0,
+		MaxRetries:  3,
+		CreatedAt:   time.Now(),
+		StartedAt:   &[]time.Time{time.Now()}[0],
+		CompletedAt: &[]time.Time{time.Now()}[0],
+	}
+
+	if err := s.database.Repository.AddToQueue(ctx, item); err != nil {
+		s.log.WarnContext(ctx, "Failed to add item to queue database", "file", nzbPath, "error", err)
+		// Don't fail - continue to generate URLs
+	} else {
+		// Add storage path
+		if err := s.database.Repository.AddStoragePath(ctx, item.ID, resultingPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to add storage path", "queue_id", item.ID, "error", err)
+		}
+	}
+
+	// Generate stream URLs from the resulting path
+	streamURLs, err := s.GenerateStreamURLsForPath(ctx, resultingPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate stream URLs: %w", err)
+	}
+
+	return streamURLs, nil
+}
+
+// GenerateStreamURLsForPath generates stream URLs for all metadata files in a storage path
+func (s *Service) GenerateStreamURLsForPath(ctx context.Context, storagePath string) ([]string, error) {
+	cfg := s.configGetter()
+
+	// Construct the full metadata path
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, storagePath)
+
+	// Get first admin user's API key for authentication
+	users, err := s.userRepo.GetAllUsers(ctx)
+	if err != nil || len(users) == 0 {
+		return nil, fmt.Errorf("no users with API keys found for stream URL generation: %w", err)
+	}
+
+	// Find first admin user with an API key
+	var adminAPIKey string
+	for _, user := range users {
+		if user.IsAdmin && user.APIKey != nil && *user.APIKey != "" {
+			adminAPIKey = *user.APIKey
+			break
+		}
+	}
+
+	if adminAPIKey == "" {
+		return nil, fmt.Errorf("no admin user with API key found for stream URL generation")
+	}
+
+	// Hash the API key with SHA256
+	hashedKey := hashAPIKey(adminAPIKey)
+
+	var streamURLs []string
+
+	// Check if it's a single file or directory
+	fileInfo, err := os.Stat(metadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat metadata path: %w", err)
+	}
+
+	if fileInfo.IsDir() {
+		// Walk the directory to find all .meta files
+		err = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			// Skip directories
+			if d.IsDir() {
+				return nil
+			}
+
+			// Only process .meta files
+			if !strings.HasSuffix(d.Name(), ".meta") {
+				return nil
+			}
+
+			// Calculate relative path from the root metadata directory
+			relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+			if err != nil {
+				s.log.ErrorContext(ctx, "Failed to calculate relative path",
+					"path", path,
+					"base", cfg.Metadata.RootPath,
+					"error", err)
+				return nil // Continue walking
+			}
+
+			// Remove .meta extension to get the actual filename
+			relPath = strings.TrimSuffix(relPath, ".meta")
+
+			// Generate stream URL
+			encodedPath := strings.ReplaceAll(relPath, " ", "%20")
+			streamURL := fmt.Sprintf("http://localhost:%d/api/files/stream?path=%s&download_key=%s",
+				cfg.WebDAV.Port, encodedPath, hashedKey)
+			streamURLs = append(streamURLs, streamURL)
+
+			return nil
+		})
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to walk metadata directory: %w", err)
+		}
+	} else {
+		// Single file - generate URL for it
+		relPath, err := filepath.Rel(cfg.Metadata.RootPath, metadataPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate relative path: %w", err)
+		}
+
+		// Remove .meta extension if present
+		relPath = strings.TrimSuffix(relPath, ".meta")
+
+		// Generate stream URL
+		encodedPath := strings.ReplaceAll(relPath, " ", "%20")
+		streamURL := fmt.Sprintf("http://localhost:%d/api/files/stream?path=%s&download_key=%s",
+			cfg.WebDAV.Port, encodedPath, hashedKey)
+		streamURLs = append(streamURLs, streamURL)
+	}
+
+	if len(streamURLs) == 0 {
+		return nil, fmt.Errorf("no metadata files found in path: %s", storagePath)
+	}
+
+	return streamURLs, nil
+}
