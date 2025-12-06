@@ -97,13 +97,16 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 		SecretReader: token.SecretFunc(func(string) (string, error) {
 			return config.JWTSecret, nil
 		}),
-		TokenDuration:  config.TokenDuration,
-		CookieDuration: config.TokenDuration,
-		DisableXSRF:    false, // Enable XSRF protection
-		SecureCookies:  config.CookieSecure,
-		Issuer:         config.Issuer,
-		URL:            "http://" + config.CookieDomain + ":8080",
-		AvatarStore:    avatar.NewNoOp(), // No avatar storage for now
+		TokenDuration:   config.TokenDuration,
+		CookieDuration:  config.TokenDuration,
+		DisableXSRF:     false, // Enable XSRF protection
+		SecureCookies:   config.CookieSecure,
+		JWTCookieName:   "JWT",                                    // <-- ADICIONAR ESTA LINHA
+		JWTCookieDomain: config.CookieDomain,                      // <-- ADICIONAR ESTA LINHA
+		SameSiteCookie:  config.CookieSameSite,                    // <-- ADICIONAR ESTA LINHA
+		Issuer:          config.Issuer,
+		URL:             "http://" + config.CookieDomain + ":8080",
+		AvatarStore:     avatar.NewNoOp(), // No avatar storage for now
 		ClaimsUpd: token.ClaimsUpdFunc(func(claims token.Claims) token.Claims {
 			// Add audience
 			if claims.Audience == nil {
