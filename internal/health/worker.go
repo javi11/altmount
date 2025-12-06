@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -123,7 +124,7 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 		s.Status = WorkerStatusRunning
 	})
 
-	slog.InfoContext(ctx, "Health worker started successfully", "check_interval", hw.getCheckInterval(), "max_concurrent_jobs", 1)
+	slog.InfoContext(ctx, "Health worker started successfully", "check_interval", hw.getCheckInterval(), "max_concurrent_jobs", hw.getMaxConcurrentJobs())
 	return nil
 }
 
@@ -251,7 +252,7 @@ func (hw *HealthWorker) run(ctx context.Context) {
 				continue
 			}
 
-			if err := hw.runHealthCheckCycle(ctx); err != nil {
+			if err := hw.safeRunHealthCheckCycle(ctx); err != nil {
 				slog.ErrorContext(ctx, "Health check cycle failed", "error", err)
 				hw.updateStats(func(s *WorkerStats) {
 					s.ErrorCount++
@@ -261,6 +262,17 @@ func (hw *HealthWorker) run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// safeRunHealthCheckCycle runs a health check cycle with panic recovery
+func (hw *HealthWorker) safeRunHealthCheckCycle(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in health check cycle: %v", r)
+			slog.ErrorContext(ctx, "Panic in health check cycle", "panic", r)
+		}
+	}()
+	return hw.runHealthCheckCycle(ctx)
 }
 
 // AddToHealthCheck adds a file to the health check list with pending status
@@ -504,8 +516,16 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 				slog.ErrorContext(ctx, "Health check failed", "file_path", event.FilePath, "error", event.Error)
 			}
 
-			// Increment health check retry count
-			if err := hw.healthRepo.IncrementRetryCount(ctx, event.FilePath, errorMsg); err != nil {
+			// Calculate exponential backoff: 15m * 2^retry_count
+			// retry_count starts at 0.
+			// 0 -> 15m
+			// 1 -> 30m
+			// 2 -> 60m
+			backoffMinutes := 15 * (1 << fileHealth.RetryCount)
+			nextCheck := time.Now().Add(time.Duration(backoffMinutes) * time.Minute)
+
+			// Increment health check retry count and schedule next check
+			if err := hw.healthRepo.IncrementRetryCount(ctx, event.FilePath, errorMsg, nextCheck); err != nil {
 				slog.ErrorContext(ctx, "Failed to increment retry count", "file_path", event.FilePath, "error", err)
 				return fmt.Errorf("failed to increment retry count: %w", err)
 			}
@@ -521,7 +541,8 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 				slog.InfoContext(ctx, "Health check retry scheduled",
 					"file_path", event.FilePath,
 					"retry_count", fileHealth.RetryCount+1,
-					"max_retries", fileHealth.MaxRetries)
+					"max_retries", fileHealth.MaxRetries,
+					"next_check", nextCheck)
 			}
 		}
 	}
@@ -587,16 +608,16 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		s.CurrentRunFilesChecked = 0
 	})
 
+	maxJobs := hw.getMaxConcurrentJobs()
+
 	// Get files due for checking (ordered by scheduled_check_at)
-	// Hardcoded to 1 - process one file at a time
-	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, 1)
+	unhealthyFiles, err := hw.healthRepo.GetUnhealthyFiles(ctx, maxJobs)
 	if err != nil {
 		return fmt.Errorf("failed to get unhealthy files: %w", err)
 	}
 
 	// Get files that need repair notifications
-	// Hardcoded to 1 - process one file at a time
-	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(ctx, 1)
+	repairFiles, err := hw.healthRepo.GetFilesForRepairNotification(ctx, maxJobs)
 	if err != nil {
 		return fmt.Errorf("failed to get files for repair notification: %w", err)
 	}
@@ -618,7 +639,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		"health_check_files", len(unhealthyFiles),
 		"repair_notification_files", len(repairFiles),
 		"total", totalFiles,
-		"max_concurrent_jobs", 1)
+		"max_concurrent_jobs", maxJobs)
 
 	// Process files in parallel using conc
 	wg := conc.NewWaitGroup()
@@ -704,6 +725,14 @@ func (hw *HealthWorker) getCheckInterval() time.Duration {
 	return time.Duration(intervalSeconds) * time.Second
 }
 
+func (hw *HealthWorker) getMaxConcurrentJobs() int {
+	jobs := hw.configGetter().Health.MaxConcurrentJobs
+	if jobs <= 0 {
+		return 1 // Default
+	}
+	return jobs
+}
+
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file
 // It directly queries ARR APIs to find which instance manages the file and triggers repair
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string) error {
@@ -718,19 +747,24 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 		return fmt.Errorf("failed to get health record for library path lookup: %w", err)
 	}
 
-	if healthRecord.LibraryPath == nil || *healthRecord.LibraryPath == "" {
-		slog.ErrorContext(ctx, "No library path found for file",
-			"file_path", filePath)
-
-		return fmt.Errorf("no library path found for file: %s, trigger a manual library sync to fix this", filePath)
+	pathForRescan := ""
+	if healthRecord.LibraryPath != nil && *healthRecord.LibraryPath != "" {
+		pathForRescan = *healthRecord.LibraryPath
+	} else {
+		// Fallback to mount path if no library path found
+		// This is common for ImportStrategyNone or if metadata scan failed before determining library path
+		pathForRescan = filepath.Join(hw.configGetter().MountPath, filePath)
+		slog.InfoContext(ctx, "Using mount path fallback for repair trigger",
+			"file_path", filePath,
+			"mount_path", pathForRescan)
 	}
 
 	// Step 4: Trigger rescan through the ARR service
-	err = hw.arrsService.TriggerFileRescan(ctx, *healthRecord.LibraryPath)
+	err = hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
 			"file_path", filePath,
-			"library_path", *healthRecord.LibraryPath,
+			"path_for_rescan", pathForRescan,
 			"error", err)
 
 		// If we can't trigger repair, mark as corrupted for manual investigation
@@ -741,7 +775,15 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 	// ARR rescan was triggered successfully - set repair triggered status
 	slog.InfoContext(ctx, "Successfully triggered ARR rescan for file repair",
 		"file_path", filePath,
-		"library_path", *healthRecord.LibraryPath)
+		"path_for_rescan", pathForRescan)
+
+	// Update status to repair_triggered
+	if err := hw.healthRepo.SetRepairTriggered(ctx, filePath, errorMsg); err != nil {
+		slog.ErrorContext(ctx, "Failed to set repair_triggered status",
+			"file_path", filePath,
+			"error", err)
+		return fmt.Errorf("failed to set repair_triggered status: %w", err)
+	}
 
 	return nil
 }

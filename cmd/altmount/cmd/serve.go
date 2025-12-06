@@ -121,6 +121,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	authService := setupAuthService(ctx, repos.UserRepo)
 
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
+	// Wire ARRs service into importer for instant import triggers
+	importerService.SetArrsService(arrsService)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster)
 

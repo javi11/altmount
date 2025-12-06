@@ -2,6 +2,7 @@ interface HealthStats {
 	total: number;
 	pending: number;
 	corrupted: number;
+	healthy: number;
 }
 
 interface HealthStatsCardsProps {
@@ -13,12 +14,22 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 		return null;
 	}
 
+	const healthyPercentage =
+		stats.total > 0 ? ((stats.healthy / stats.total) * 100).toFixed(1) : "0.0";
+	const corruptedPercentage =
+		stats.total > 0 ? ((stats.corrupted / stats.total) * 100).toFixed(1) : "0.0";
+
 	return (
 		<div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
 			<div className="stat rounded-box bg-base-100 shadow">
 				<div className="stat-title">Files Tracked</div>
 				<div className="stat-value text-primary">{stats.total}</div>
 				<div className="stat-desc">Total in database</div>
+			</div>
+			<div className="stat rounded-box bg-base-100 shadow">
+				<div className="stat-title">Healthy</div>
+				<div className="stat-value text-success">{stats.healthy || 0}</div>
+				<div className="stat-desc">{healthyPercentage}% of total</div>
 			</div>
 			<div className="stat rounded-box bg-base-100 shadow">
 				<div className="stat-title">Pending</div>
@@ -28,7 +39,7 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 			<div className="stat rounded-box bg-base-100 shadow">
 				<div className="stat-title">Corrupted</div>
 				<div className="stat-value text-error">{stats.corrupted}</div>
-				<div className="stat-desc">Require action</div>
+				<div className="stat-desc text-error font-bold">{corruptedPercentage}% - Require action</div>
 			</div>
 		</div>
 	);

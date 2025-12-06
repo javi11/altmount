@@ -653,6 +653,77 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 	return items, rows.Err()
 }
 
+// ListActiveQueueItems retrieves pending and processing queue items
+func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, category string, limit, offset int, sortBy, sortOrder string) ([]*ImportQueueItem, error) {
+	var query string
+	var args []interface{}
+
+	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
+	               FROM import_queue`
+
+	conditions := []string{"status IN ('pending', 'processing')"}
+	var conditionArgs []interface{}
+
+	if search != "" {
+		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
+		searchPattern := "%" + search + "%"
+		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
+	}
+
+	if category != "" {
+		conditions = append(conditions, "category = ?")
+		conditionArgs = append(conditionArgs, category)
+	}
+
+	query = baseSelect + " WHERE " + strings.Join(conditions, " AND ")
+
+	// Build ORDER BY clause with validation
+	var orderByColumn string
+	switch sortBy {
+	case "created_at":
+		orderByColumn = "created_at"
+	case "updated_at":
+		orderByColumn = "updated_at"
+	case "status":
+		orderByColumn = "status"
+	case "nzb_path":
+		orderByColumn = "nzb_path"
+	default:
+		orderByColumn = "updated_at"
+	}
+
+	sortDirection := "DESC"
+	if sortOrder == "asc" {
+		sortDirection = "ASC"
+	}
+
+	query += fmt.Sprintf(" ORDER BY %s %s LIMIT ? OFFSET ?", orderByColumn, sortDirection)
+	args = append(conditionArgs, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active queue items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	return items, rows.Err()
+}
+
 // CountQueueItems counts the total number of queue items matching the given filters
 func (r *Repository) CountQueueItems(ctx context.Context, status *QueueStatus, search string, category string) (int, error) {
 	var query string

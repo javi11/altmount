@@ -43,18 +43,19 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 	// Parse status filter
 	var statusFilter *database.HealthStatus
 	if statusStr := c.Query("status"); statusStr != "" {
+		statusStr = strings.TrimSpace(statusStr)
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy:
 			statusFilter = &status
 		default:
 			return c.Status(400).JSON(fiber.Map{
 				"success": false,
 				"error": fiber.Map{
 					"code":    "VALIDATION_ERROR",
-					"message": "Invalid status filter",
-					"details": "Valid values: pending, checking, corrupted, repair_triggered",
+					"message": fmt.Sprintf("Invalid status filter: '%s'", statusStr),
+					"details": "Valid values: pending, checking, corrupted, repair_triggered, healthy",
 				},
 			})
 		}
@@ -418,7 +419,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	}
 
 	// Trigger rescan with the resolved path
-	err = s.arrsService.TriggerFileRescan(ctx, pathForRescan)
+	err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath)
 	if err != nil {
 		// Check if this is a "no ARR instance found" error
 		if strings.Contains(err.Error(), "no ARR instance found") {
@@ -436,14 +437,15 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 		})
 	}
 
-	// Remove file from health table since repair was successfully triggered to ARR
-	if err := s.healthRepo.DeleteHealthRecord(ctx, item.FilePath); err != nil {
-		slog.ErrorContext(ctx, "Failed to delete health record after repair trigger",
+	// Update status to repair_triggered instead of deleting
+	// This gives user feedback that the repair is in progress (waiting for ARR)
+	if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+		slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
 			"error", err,
 			"file_path", item.FilePath)
-		// Don't fail the repair trigger if deletion fails - just log the error
+		// Don't fail the repair trigger if update fails
 	} else {
-		slog.InfoContext(ctx, "Removed file from health table after successful repair trigger",
+		slog.InfoContext(ctx, "Set status to repair_triggered after successful repair trigger",
 			"file_path", item.FilePath)
 	}
 
@@ -458,6 +460,109 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	}
 
 	response := ToHealthItemResponse(updatedItem)
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleRepairHealthBulk handles POST /api/health/bulk/repair
+func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
+	// Parse request body
+	var req struct {
+		FilePaths []string `json:"file_paths"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
+	}
+
+	// Validate file paths
+	if len(req.FilePaths) == 0 {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "At least one file path is required",
+		})
+	}
+
+	if len(req.FilePaths) > 100 {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "Too many file paths",
+			"details": "Maximum 100 files allowed per bulk operation",
+		})
+	}
+
+	ctx := c.Context()
+	cfg := s.configManager.GetConfig()
+	successCount := 0
+	failedCount := 0
+	errors := make(map[string]string)
+
+	for _, filePath := range req.FilePaths {
+		// Check if item exists
+		item, err := s.healthRepo.GetFileHealth(ctx, filePath)
+		if err != nil {
+			failedCount++
+			errors[filePath] = fmt.Sprintf("Failed to check health record: %v", err)
+			continue
+		}
+
+		if item == nil {
+			failedCount++
+			errors[filePath] = "Health record not found"
+			continue
+		}
+
+		// Determine path for rescan
+		var libraryPath string
+		if item.LibraryPath != nil && *item.LibraryPath != "" {
+			libraryPath = *item.LibraryPath
+		}
+
+		pathForRescan := libraryPath
+		if pathForRescan == "" {
+			pathForRescan = filepath.Join(cfg.MountPath, item.FilePath)
+		}
+
+		// Trigger rescan
+		err = s.arrsService.TriggerFileRescan(ctx, pathForRescan, item.FilePath)
+		if err != nil {
+			// If failed, track error but don't delete record yet?
+			// Actually existing single repair endpoint deletes it even if it fails?
+			// No, single endpoint returns 500/404 if TriggerFileRescan fails, and only deletes if successful (mostly).
+			// Wait, lines 437 in single handler:
+			// if err != nil { ... return ... }
+			// if err := s.healthRepo.DeleteHealthRecord...
+			// So it only deletes if TriggerFileRescan succeeds.
+			
+			failedCount++
+			errors[filePath] = fmt.Sprintf("Failed to trigger repair: %v", err)
+			continue
+		}
+
+		// Update status to repair_triggered instead of deleting
+		if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+			slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
+				"error", err,
+				"file_path", item.FilePath)
+			// Don't count as failure since repair was triggered
+		}
+		
+		successCount++
+	}
+
+	response := map[string]interface{}{
+		"message":       "Bulk repair operation completed",
+		"success_count": successCount,
+		"failed_count":  failedCount,
+		"errors":        errors,
+	}
+
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -566,15 +671,16 @@ func (s *Server) handleCleanupHealth(c *fiber.Ctx) error {
 	// Parse status parameter from query if not in body
 	if req.Status == nil {
 		if statusStr := c.Query("status"); statusStr != "" {
+			statusStr = strings.TrimSpace(statusStr)
 			status := database.HealthStatus(statusStr)
 			switch status {
-			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered:
+			case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy:
 				req.Status = &status
 			default:
 				return c.Status(422).JSON(fiber.Map{
 					"success": false,
-					"message": "Invalid status filter",
-					"details": "Valid values: pending, checking, corrupted, repair_triggered",
+					"message": fmt.Sprintf("Invalid status filter: '%s'", statusStr),
+					"details": "Valid values: pending, checking, corrupted, repair_triggered, healthy",
 				})
 			}
 		}

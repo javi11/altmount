@@ -324,6 +324,28 @@ export function HealthConfigSection({
 								</p>
 							</fieldset>
 						)}
+						{formData.max_concurrent_jobs !== undefined && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Max Concurrent Jobs</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.max_concurrent_jobs}
+									readOnly={isReadOnly}
+									min={1}
+									max={100}
+									onChange={(e) =>
+										handleInputChange(
+											"max_concurrent_jobs",
+											Number.parseInt(e.target.value, 10) || 1,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									Maximum number of files to process in parallel (health checks and repairs).
+								</p>
+							</fieldset>
+						)}
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend">Check All Segments</legend>
 							<label className="label cursor-pointer">

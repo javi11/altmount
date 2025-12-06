@@ -1,4 +1,4 @@
-import { Heart } from "lucide-react";
+import { Heart, HeartCrack, Wrench, Clock, Loader } from "lucide-react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
 import type { FileHealth } from "../../../../types/api";
@@ -31,6 +31,33 @@ export function HealthTableRow({
 	onRepair,
 	onDelete,
 }: HealthTableRowProps) {
+	let statusIcon;
+	let iconColorClass = "text-base-content/50"; // Default color
+
+	switch (item.status) {
+		case "healthy":
+			statusIcon = <Heart className="h-4 w-4" />;
+			iconColorClass = "text-success";
+			break;
+		case "corrupted":
+			statusIcon = <HeartCrack className="h-4 w-4" />;
+			iconColorClass = "text-error";
+			break;
+		case "repair_triggered":
+			statusIcon = <Wrench className="h-4 w-4 animate-spin-slow" />;
+			iconColorClass = "text-info";
+			break;
+		case "checking":
+			statusIcon = <Loader className="h-4 w-4 animate-spin" />;
+			iconColorClass = "text-warning";
+			break;
+		case "pending":
+		default:
+			statusIcon = <Clock className="h-4 w-4" />;
+			iconColorClass = "text-base-content/50";
+			break;
+	}
+
 	return (
 		<tr key={item.id} className={`hover ${isSelected ? "bg-base-200" : ""}`}>
 			<td>
@@ -45,7 +72,7 @@ export function HealthTableRow({
 			</td>
 			<td>
 				<div className="flex items-center space-x-3">
-					<Heart className="h-4 w-4 text-primary" />
+					<span className={iconColorClass}>{statusIcon}</span>
 					<div>
 						<div className="font-bold">
 							{truncateText(item.file_path.split("/").pop() || "", 40)}
@@ -84,6 +111,13 @@ export function HealthTableRow({
 							</div>
 						</div>
 					</div>
+				)}
+			</td>
+			<td>
+				{item.priority ? (
+					<div className="badge badge-error badge-sm">High</div>
+				) : (
+					<div className="badge badge-ghost badge-sm">Normal</div>
 				)}
 			</td>
 			<td>

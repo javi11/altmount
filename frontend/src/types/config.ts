@@ -60,6 +60,7 @@ export interface HealthConfig {
 	cleanup_orphaned_files?: boolean; // Clean up orphaned library files and metadata
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
+	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
@@ -264,6 +265,7 @@ export interface HealthUpdateRequest {
 	auto_repair_enabled?: boolean;
 	check_interval_seconds?: number; // Interval in seconds (optional)
 	max_connections_for_health_checks?: number;
+	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
 }

@@ -356,7 +356,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	categoryFilter := c.Query("category", "")
 
 	// Get pending and processing items
-	items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", categoryFilter, 100, 0, "updated_at", "desc")
+	items, err := s.queueRepo.ListActiveQueueItems(c.Context(), "", categoryFilter, 100, 0, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get queue")
 	}
@@ -516,12 +516,10 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	// Get queue information
 	var slots []SABnzbdQueueSlot
 	if s.queueRepo != nil {
-		items, err := s.queueRepo.ListQueueItems(c.Context(), nil, "", "", 50, 0, "updated_at", "desc")
+		items, err := s.queueRepo.ListActiveQueueItems(c.Context(), "", "", 50, 0, "updated_at", "desc")
 		if err == nil {
 			for i, item := range items {
-				if item.Status == database.QueueStatusPending || item.Status == database.QueueStatusProcessing {
-					slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
-				}
+				slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
 			}
 		}
 	}
