@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,22 +19,6 @@ import (
 )
 
 const cacheTTL = 10 * time.Minute
-
-// Regex to extract Season and Episode numbers (e.g., S01E05, s1e5)
-var seasonEpisodeRegex = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,3})`)
-
-// parseSeasonEpisode extracts Season and Episode numbers from a file path.
-// Returns season and episode as integers, or -1, -1 if not found.
-func parseSeasonEpisode(filePath string) (int, int) {
-	matches := seasonEpisodeRegex.FindStringSubmatch(filePath)
-	if len(matches) == 3 {
-		var season, episode int
-		fmt.Sscanf(matches[1], "%d", &season)
-		fmt.Sscanf(matches[2], "%d", &episode)
-		return season, episode
-	}
-	return -1, -1
-}
 
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
@@ -689,28 +672,8 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		}
 	}
 
-	// If we couldn't find the file (or episodes linked to it), try to find episode by SxxEyy
 	if len(episodeIDs) == 0 {
-		slog.InfoContext(ctx, "Episode file not found in Sonarr, attempting to identify episode by SxxEyy",
-			"file_path", filePath)
-
-		season, episodeNum := parseSeasonEpisode(relativePath)
-		if season != -1 && episodeNum != -1 {
-			for _, episode := range episodes {
-				if episode.SeasonNumber == season && episode.EpisodeNumber == episodeNum {
-					episodeIDs = append(episodeIDs, episode.ID)
-					slog.InfoContext(ctx, "Found matching episode by Season/Episode number",
-						"season", season,
-						"episode", episodeNum,
-						"episode_id", episode.ID)
-					break
-				}
-			}
-		}
-	}
-
-	if len(episodeIDs) == 0 {
-		return fmt.Errorf("no episodes found for file: %s (path match failed, SxxEyy match failed)", filePath)
+		return fmt.Errorf("no episodes found for file: %s (path match failed)", filePath)
 	}
 
 	// Trigger episode search for all episodes in this file
