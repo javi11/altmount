@@ -173,6 +173,7 @@ func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, li
 		FROM file_health
 		WHERE status = 'repair_triggered'
 		  AND repair_retry_count < max_repair_retries
+		  AND (scheduled_check_at IS NULL OR scheduled_check_at <= datetime('now'))
 		ORDER BY last_checked ASC
 		LIMIT ?
 	`

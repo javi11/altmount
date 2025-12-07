@@ -72,6 +72,7 @@ type Service struct {
 	// Runtime state
 	mu      sync.RWMutex
 	running bool
+	paused  bool
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -120,6 +121,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		cancel:          cancel,
 		cancelFuncs:     make(map[int64]context.CancelFunc),
 		scanInfo:        ScanInfo{Status: ScanStatusIdle},
+		paused:          false,
 	}
 
 	return service, nil
@@ -150,6 +152,29 @@ func (s *Service) Start(ctx context.Context) error {
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
 	return nil
+}
+
+// Pause pauses the queue processing
+func (s *Service) Pause() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.paused = true
+	s.log.InfoContext(context.Background(), "Import service paused")
+}
+
+// Resume resumes the queue processing
+func (s *Service) Resume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.paused = false
+	s.log.InfoContext(context.Background(), "Import service resumed")
+}
+
+// IsPaused returns whether the service is paused
+func (s *Service) IsPaused() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.paused
 }
 
 // Stop stops the NZB import service and all queue workers
@@ -451,6 +476,10 @@ func (s *Service) workerLoop(workerID int) {
 	for {
 		select {
 		case <-ticker.C:
+			// Check if service is paused
+			if s.IsPaused() {
+				continue
+			}
 			s.processQueueItems(s.ctx, workerID)
 		case <-s.ctx.Done():
 			log.Info("Queue worker stopped")

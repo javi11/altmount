@@ -248,6 +248,8 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		status = "Completed"
 	case database.QueueStatusFailed:
 		status = "Failed"
+	case database.QueueStatusPaused:
+		status = "Paused"
 	default:
 		status = "Unknown"
 	}
