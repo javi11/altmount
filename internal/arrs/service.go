@@ -309,7 +309,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	// Trigger rescan for the movie
-	response, err := client.SendCommandContext(ctx, &radarr.CommandRequest{
+	_, err = client.SendCommandContext(ctx, &radarr.CommandRequest{
 		Name:     "RescanMovie",
 		MovieIDs: []int64{targetMovie.ID},
 	})
@@ -318,6 +318,22 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	slog.DebugContext(ctx, "Successfully triggered Radarr rescan",
+		"instance", instanceName,
+		"movie_id", targetMovie.ID)
+
+	// Step 3: Trigger search for the missing movie
+	// We've deleted the file, so now we need to search for a replacement
+	searchCmd := &radarr.CommandRequest{
+		Name:     "MoviesSearch",
+		MovieIDs: []int64{targetMovie.ID},
+	}
+
+	response, err := client.SendCommandContext(ctx, searchCmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Radarr search for movie ID %d: %w", targetMovie.ID, err)
+	}
+
+	slog.InfoContext(ctx, "Successfully triggered Radarr search for re-download",
 		"instance", instanceName,
 		"movie_id", targetMovie.ID,
 		"command_id", response.ID)
@@ -475,9 +491,6 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 
 	// If we couldn't find the file (or episodes linked to it), try to find episode by SxxEyy
 	if len(episodeIDs) == 0 {
-		slog.InfoContext(ctx, "Episode file not found in Sonarr, attempting to identify episode by SxxEyy",
-			"file_path", filePath)
-
 		season, episodeNum := parseSeasonEpisode(relativePath)
 		if season != -1 && episodeNum != -1 {
 			for _, episode := range episodes {
