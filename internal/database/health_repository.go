@@ -173,8 +173,7 @@ func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, li
 		FROM file_health
 		WHERE status = 'repair_triggered'
 		  AND repair_retry_count < max_repair_retries
-		  AND scheduled_check_at IS NOT NULL
-		  AND scheduled_check_at <= datetime('now')
+		  AND (scheduled_check_at IS NULL OR scheduled_check_at <= datetime('now'))
 		ORDER BY last_checked ASC
 		LIMIT ?
 	`
@@ -951,18 +950,22 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			path             string
 			libraryPath      *string
 			releaseDate      *time.Time
-			scheduledCheckAt *time.Time
+			scheduledCheckAtNT sql.NullTime
 			sourceNzbPath    *string
 		)
 
-		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAt, &sourceNzbPath); err != nil {
+		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath); err != nil {
 			return nil, fmt.Errorf("failed to scan file path: %w", err)
+		}
+		var scheduledCheckAt time.Time
+		if scheduledCheckAtNT.Valid {
+			scheduledCheckAt = scheduledCheckAtNT.Time
 		}
 		records = append(records, AutomaticHealthCheckRecord{
 			FilePath:         path,
 			LibraryPath:      libraryPath,
 			ReleaseDate:      releaseDate,
-			ScheduledCheckAt: scheduledCheckAt,
+			ScheduledCheckAt: &scheduledCheckAt,
 			SourceNzbPath:    sourceNzbPath,
 		})
 	}
@@ -1020,7 +1023,6 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 
 	for i, record := range records {
 		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
-		
 		var releaseDateUTC, scheduledCheckAtUTC *time.Time
 		if record.ReleaseDate != nil {
 			t := record.ReleaseDate.UTC()

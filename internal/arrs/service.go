@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -298,6 +299,11 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		"movie_path", targetMovie.Path,
 		"file_path", filePath)
 
+	// Try to blocklist the release associated with this file
+	if err := s.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, targetMovie.MovieFile.ID); err != nil {
+		slog.WarnContext(ctx, "Failed to blocklist Radarr release", "error", err)
+	}
+
 	// Delete the existing file
 	err = client.DeleteMovieFilesContext(ctx, targetMovie.MovieFile.ID)
 	if err != nil {
@@ -309,7 +315,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	// Trigger rescan for the movie
-	response, err := client.SendCommandContext(ctx, &radarr.CommandRequest{
+	_, err = client.SendCommandContext(ctx, &radarr.CommandRequest{
 		Name:     "RescanMovie",
 		MovieIDs: []int64{targetMovie.ID},
 	})
@@ -318,6 +324,22 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	slog.DebugContext(ctx, "Successfully triggered Radarr rescan",
+		"instance", instanceName,
+		"movie_id", targetMovie.ID)
+
+	// Step 3: Trigger search for the missing movie
+	// We've deleted the file, so now we need to search for a replacement
+	searchCmd := &radarr.CommandRequest{
+		Name:     "MoviesSearch",
+		MovieIDs: []int64{targetMovie.ID},
+	}
+
+	response, err := client.SendCommandContext(ctx, searchCmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Radarr search for movie ID %d: %w", targetMovie.ID, err)
+	}
+
+	slog.InfoContext(ctx, "Successfully triggered Radarr search for re-download",
 		"instance", instanceName,
 		"movie_id", targetMovie.ID,
 		"command_id", response.ID)
@@ -461,6 +483,11 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 			slog.DebugContext(ctx, "Found matching episodes by file ID",
 				"episode_count", len(episodeIDs),
 				"episode_file_id", targetEpisodeFile.ID)
+
+			// Try to blocklist the release associated with this file
+			if err := s.blocklistSonarrEpisodeFile(ctx, client, targetSeries.ID, targetEpisodeFile.ID); err != nil {
+				slog.WarnContext(ctx, "Failed to blocklist Sonarr release", "error", err)
+			}
 
 			// Delete the existing episode file
 			err = client.DeleteEpisodeFileContext(ctx, targetEpisodeFile.ID)
@@ -818,3 +845,80 @@ func (s *Service) TestConnection(ctx context.Context, instanceType, url, apiKey 
 		return fmt.Errorf("unsupported instance type: %s", instanceType)
 	}
 }
+
+// blocklistRadarrMovieFile finds the history event for the given file and marks it as failed (blocklisting the release)
+func (s *Service) blocklistRadarrMovieFile(ctx context.Context, client *radarr.Radarr, movieID int64, fileID int64) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for movie file", "movie_id", movieID, "file_id", fileID)
+
+	req := &starr.PageReq{
+		PageSize: 100,
+		SortKey:  "date",
+		SortDir:  starr.SortDescend,
+	}
+	req.Set("movieId", strconv.FormatInt(movieID, 10))
+
+	history, err := client.GetHistoryPageContext(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to get history: %w", err)
+	}
+
+	targetFileID := strconv.FormatInt(fileID, 10)
+
+	for _, record := range history.Records {
+		// Check if this history record corresponds to our file
+		if record.Data.FileID == targetFileID {
+			slog.InfoContext(ctx, "Found history record for file, marking as failed to blocklist release",
+				"history_id", record.ID,
+				"source_title", record.SourceTitle,
+				"event_type", record.EventType)
+
+			// Mark history as failed (this adds to blocklist)
+			if err := client.FailContext(ctx, record.ID); err != nil {
+				return fmt.Errorf("failed to mark history as failed: %w", err)
+			}
+			return nil
+		}
+	}
+
+	slog.WarnContext(ctx, "No history record found for file, cannot blocklist", "movie_id", movieID, "file_id", fileID)
+	return nil
+}
+
+// blocklistSonarrEpisodeFile finds the history event for the given file and marks it as failed (blocklisting the release)
+func (s *Service) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr.Sonarr, seriesID int64, fileID int64) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for episode file", "series_id", seriesID, "file_id", fileID)
+
+	req := &starr.PageReq{
+		PageSize: 100,
+		SortKey:  "date",
+		SortDir:  starr.SortDescend,
+	}
+	req.Set("seriesId", strconv.FormatInt(seriesID, 10))
+
+	history, err := client.GetHistoryPageContext(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to get history: %w", err)
+	}
+
+	targetFileID := strconv.FormatInt(fileID, 10)
+
+	for _, record := range history.Records {
+		// Check if this history record corresponds to our file
+		if record.Data.FileID == targetFileID {
+			slog.InfoContext(ctx, "Found history record for file, marking as failed to blocklist release",
+				"history_id", record.ID,
+				"source_title", record.SourceTitle,
+				"event_type", record.EventType)
+
+			// Mark history as failed (this adds to blocklist)
+			if err := client.FailContext(ctx, record.ID); err != nil {
+				return fmt.Errorf("failed to mark history as failed: %w", err)
+			}
+			return nil
+		}
+	}
+
+	slog.WarnContext(ctx, "No history record found for file, cannot blocklist", "series_id", seriesID, "file_id", fileID)
+	return nil
+}
+

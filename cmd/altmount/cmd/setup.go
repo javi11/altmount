@@ -69,6 +69,7 @@ func initializeImporter(
 	configGetter config.ConfigGetter,
 	broadcaster *progress.ProgressBroadcaster,
 	userRepo *database.UserRepository,
+	healthRepo *database.HealthRepository,
 ) (*importer.Service, error) {
 	// Set defaults for workers if not configured
 	maxProcessorWorkers := cfg.Import.MaxProcessorWorkers
@@ -80,7 +81,7 @@ func initializeImporter(
 		Workers: maxProcessorWorkers,
 	}
 
-	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, broadcaster, userRepo)
+	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, healthRepo, broadcaster, userRepo)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to create importer service", "err", err)
 		return nil, err
