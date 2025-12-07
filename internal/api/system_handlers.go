@@ -310,8 +310,14 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		// Get error count for this provider from metrics
 		errorCount := int64(0)
 		if metrics.ProviderErrors != nil {
+			// Try matching by provider ID first
 			if count, exists := metrics.ProviderErrors[providerInfo.ID()]; exists {
 				errorCount = count
+			} else {
+				// Fallback: Try matching by provider Host if ID doesn't work (might be a mismatch in nntppool keys)
+				if count, exists := metrics.ProviderErrors[providerInfo.Host]; exists {
+					errorCount = count
+				}
 			}
 		}
 
