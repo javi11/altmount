@@ -1023,7 +1023,6 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 
 	for i, record := range records {
 		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
-		
 		var releaseDateUTC, scheduledCheckAtUTC *time.Time
 		if record.ReleaseDate != nil {
 			t := record.ReleaseDate.UTC()
