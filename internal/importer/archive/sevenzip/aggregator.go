@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -70,27 +71,7 @@ func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) boo
 			continue
 		}
 		// Check both the internal path and filename
-		if isAllowedFile(content.InternalPath, allowedExtensions) || isAllowedFile(content.Filename, allowedExtensions) {
-			return true
-		}
-	}
-	return false
-}
-
-// isAllowedFile checks if a filename has an allowed extension
-func isAllowedFile(filename string, allowedExtensions []string) bool {
-	if filename == "" {
-		return false
-	}
-
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
-	ext := strings.ToLower(filepath.Ext(filename))
-	for _, allowedExt := range allowedExtensions {
-		if ext == strings.ToLower(allowedExt) {
+		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
 			return true
 		}
 	}

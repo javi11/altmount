@@ -2,12 +2,15 @@ package utils
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
-	"github.com/javi11/altmount/internal/importer/archive/rar"
-	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
 	"github.com/javi11/altmount/internal/importer/parser"
 )
+
+// sampleProofPattern matches filenames containing "sample" or "proof" at word boundaries
+// Pattern: (^|[\W_])(sample|proof) - matches at start or after non-word/underscore
+var sampleProofPattern = regexp.MustCompile(`(?i)(^|[\W_])(sample|proof)`)
 
 // createExtensionMap converts a slice of extensions to a map for O(1) lookups
 func createExtensionMap(extensions []string) map[string]bool {
@@ -19,10 +22,15 @@ func createExtensionMap(extensions []string) map[string]bool {
 	return extMap
 }
 
-// isAllowedFile checks if a filename has an allowed extension
+// IsAllowedFile checks if a filename has an allowed extension
 // If allowedExtensions is empty, all files are allowed
-func isAllowedFile(filename string, allowedExtensions []string) bool {
+func IsAllowedFile(filename string, allowedExtensions []string) bool {
 	if filename == "" {
+		return false
+	}
+
+	// Reject files with sample/proof in their name
+	if sampleProofPattern.MatchString(filename) {
 		return false
 	}
 
@@ -45,78 +53,9 @@ func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtension
 	}
 
 	for _, file := range regularFiles {
-		if isAllowedFile(file.Filename, allowedExtensions) {
+		if IsAllowedFile(file.Filename, allowedExtensions) {
 			return true
 		}
 	}
-	return false
-}
-
-// HasAllowedFilesInRarArchive checks if any files within RAR archive contents match allowed extensions
-// If allowedExtensions is empty, returns true (all files allowed)
-func HasAllowedFilesInRarArchive(rarContents []rar.Content, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
-	for _, content := range rarContents {
-		// Skip directories
-		if content.IsDirectory {
-			continue
-		}
-		// Check both the internal path and filename
-		if isAllowedFile(content.InternalPath, allowedExtensions) || isAllowedFile(content.Filename, allowedExtensions) {
-			return true
-		}
-	}
-	return false
-}
-
-// HasAllowedFilesIn7zipArchive checks if any files within 7zip archive contents match allowed extensions
-// If allowedExtensions is empty, returns true (all files allowed)
-func HasAllowedFilesIn7zipArchive(sevenZipContents []sevenzip.Content, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
-	for _, content := range sevenZipContents {
-		// Skip directories
-		if content.IsDirectory {
-			continue
-		}
-		// Check both the internal path and filename
-		if isAllowedFile(content.InternalPath, allowedExtensions) || isAllowedFile(content.Filename, allowedExtensions) {
-			return true
-		}
-	}
-	return false
-}
-
-// HasAllowedFiles checks if there are any files matching allowed extensions in regular files or archive contents
-// If allowedExtensions is empty, returns true (all files allowed)
-// This is a convenience function that combines all the individual checks
-func HasAllowedFiles(regularFiles []parser.ParsedFile, rarContents []rar.Content, sevenZipContents []sevenzip.Content, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
-	// Check regular files
-	if HasAllowedFilesInRegular(regularFiles, allowedExtensions) {
-		return true
-	}
-
-	// Check RAR archive contents
-	if HasAllowedFilesInRarArchive(rarContents, allowedExtensions) {
-		return true
-	}
-
-	// Check 7zip archive contents
-	if HasAllowedFilesIn7zipArchive(sevenZipContents, allowedExtensions) {
-		return true
-	}
-
 	return false
 }
