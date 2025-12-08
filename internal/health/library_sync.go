@@ -282,6 +282,11 @@ func (lsw *LibrarySyncWorker) findFilesToDelete(
 
 		// Check if file is in use (only for full sync, not metadata-only)
 		if filesInUse != nil {
+			// If repair is triggered, skip file existence check as it might be temporarily missing during repair
+			if dbRecord.Status == database.HealthStatusRepairTriggered {
+				continue
+			}
+
 			if _, exists := filesInUse[dbRecord.FilePath]; !exists {
 				filesToDelete = append(filesToDelete, dbRecord.FilePath)
 			}

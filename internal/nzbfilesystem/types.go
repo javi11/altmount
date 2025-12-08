@@ -1,6 +1,7 @@
 package nzbfilesystem
 
 import (
+	"path/filepath"
 	"strings"
 )
 
@@ -17,6 +18,19 @@ func normalizePath(path string) string {
 		return path
 	}
 
-	// Remove trailing slashes for all other paths
-	return strings.TrimRight(path, "/")
+	// Replace backslashes with forward slashes first
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	// Clean the path using filepath.Clean
+	cleaned := filepath.Clean(path)
+
+	// Remove trailing slashes and backslashes
+	cleaned = strings.TrimRight(cleaned, "/\\")
+
+	// Ensure we don't return empty string after trimming (e.g. if path was just slashes)
+	if cleaned == "" || cleaned == "." {
+		return RootPath
+	}
+
+	return cleaned
 }

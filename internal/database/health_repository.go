@@ -933,7 +933,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 	query := `
 		SELECT file_path, library_path, 
 			   release_date, scheduled_check_at,
-			   source_nzb_path
+			   source_nzb_path, status
 		FROM file_health
 		ORDER BY file_path ASC
 	`
@@ -952,9 +952,10 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			releaseDate      *time.Time
 			scheduledCheckAtNT sql.NullTime
 			sourceNzbPath    *string
+			status           HealthStatus
 		)
 
-		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath); err != nil {
+		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath, &status); err != nil {
 			return nil, fmt.Errorf("failed to scan file path: %w", err)
 		}
 		var scheduledCheckAt time.Time
@@ -967,6 +968,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			ReleaseDate:      releaseDate,
 			ScheduledCheckAt: &scheduledCheckAt,
 			SourceNzbPath:    sourceNzbPath,
+			Status:           status,
 		})
 	}
 
@@ -984,6 +986,7 @@ type AutomaticHealthCheckRecord struct {
 	ReleaseDate      *time.Time
 	ScheduledCheckAt *time.Time
 	SourceNzbPath    *string
+	Status           HealthStatus
 }
 
 // BatchAddAutomaticHealthChecks inserts multiple automatic health checks efficiently
