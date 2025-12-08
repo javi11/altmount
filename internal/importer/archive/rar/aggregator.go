@@ -58,19 +58,15 @@ func calculateSegmentsToValidate(rarContents []Content, samplePercentage int) in
 }
 
 // hasAllowedFiles checks if any files within RAR archive contents match allowed extensions
-// If allowedExtensions is empty, returns true (all files allowed)
+// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
 func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
 	for _, content := range rarContents {
 		// Skip directories
 		if content.IsDirectory {
 			continue
 		}
 		// Check both the internal path and filename
+		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
 		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
 			return true
 		}

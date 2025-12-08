@@ -58,19 +58,15 @@ func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage in
 }
 
 // hasAllowedFiles checks if any files within 7zip archive contents match allowed extensions
-// If allowedExtensions is empty, returns true (all files allowed)
+// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
 func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
 	for _, content := range sevenZipContents {
 		// Skip directories
 		if content.IsDirectory {
 			continue
 		}
 		// Check both the internal path and filename
+		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
 		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
 			return true
 		}

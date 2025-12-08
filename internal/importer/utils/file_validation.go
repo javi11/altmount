@@ -45,13 +45,8 @@ func IsAllowedFile(filename string, allowedExtensions []string) bool {
 }
 
 // HasAllowedFilesInRegular checks if any regular (non-archive) files match allowed extensions
-// If allowedExtensions is empty, returns true (all files allowed)
+// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
 func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
 	for _, file := range regularFiles {
 		if IsAllowedFile(file.Filename, allowedExtensions) {
 			return true
