@@ -3,6 +3,8 @@ interface HealthStats {
 	pending: number;
 	corrupted: number;
 	healthy: number;
+	repair_triggered: number;
+	checking: number;
 }
 
 interface HealthStatsCardsProps {
@@ -20,7 +22,7 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 		stats.total > 0 ? ((stats.corrupted / stats.total) * 100).toFixed(1) : "0.0";
 
 	return (
-		<div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+		<div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
 			<div className="stat rounded-box bg-base-100 shadow">
 				<div className="stat-title">Files Tracked</div>
 				<div className="stat-value text-primary">{stats.total}</div>
@@ -35,6 +37,16 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 				<div className="stat-title">Pending</div>
 				<div className="stat-value text-info">{stats.pending || 0}</div>
 				<div className="stat-desc">Awaiting check</div>
+			</div>
+			<div className="stat rounded-box bg-base-100 shadow">
+				<div className="stat-title">Checking</div>
+				<div className="stat-value text-warning">{stats.checking || 0}</div>
+				<div className="stat-desc">In progress</div>
+			</div>
+			<div className="stat rounded-box bg-base-100 shadow">
+				<div className="stat-title">Repairing</div>
+				<div className="stat-value text-secondary">{stats.repair_triggered || 0}</div>
+				<div className="stat-desc">Triggered</div>
 			</div>
 			<div className="stat rounded-box bg-base-100 shadow">
 				<div className="stat-title">Corrupted</div>

@@ -116,6 +116,8 @@ export interface HealthStats {
 	pending: number;
 	healthy: number;
 	corrupted: number;
+	repair_triggered: number;
+	checking: number;
 }
 
 export interface HealthRetryRequest {
