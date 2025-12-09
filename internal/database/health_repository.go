@@ -173,6 +173,7 @@ func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, li
 		FROM file_health
 		WHERE status = 'repair_triggered'
 		  AND repair_retry_count < max_repair_retries
+		  AND (scheduled_check_at IS NULL OR scheduled_check_at <= datetime('now'))
 		ORDER BY last_checked ASC
 		LIMIT ?
 	`
@@ -932,7 +933,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 	query := `
 		SELECT file_path, library_path, 
 			   release_date, scheduled_check_at,
-			   source_nzb_path
+			   source_nzb_path, status
 		FROM file_health
 		ORDER BY file_path ASC
 	`
@@ -951,9 +952,10 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			releaseDate      *time.Time
 			scheduledCheckAtNT sql.NullTime
 			sourceNzbPath    *string
+			status           HealthStatus
 		)
 
-		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath); err != nil {
+		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath, &status); err != nil {
 			return nil, fmt.Errorf("failed to scan file path: %w", err)
 		}
 		var scheduledCheckAt time.Time
@@ -966,6 +968,7 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 			ReleaseDate:      releaseDate,
 			ScheduledCheckAt: &scheduledCheckAt,
 			SourceNzbPath:    sourceNzbPath,
+			Status:           status,
 		})
 	}
 
@@ -983,6 +986,7 @@ type AutomaticHealthCheckRecord struct {
 	ReleaseDate      *time.Time
 	ScheduledCheckAt *time.Time
 	SourceNzbPath    *string
+	Status           HealthStatus
 }
 
 // BatchAddAutomaticHealthChecks inserts multiple automatic health checks efficiently
@@ -1022,7 +1026,6 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 
 	for i, record := range records {
 		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
-		
 		var releaseDateUTC, scheduledCheckAtUTC *time.Time
 		if record.ReleaseDate != nil {
 			t := record.ReleaseDate.UTC()

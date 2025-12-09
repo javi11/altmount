@@ -6,31 +6,19 @@ import (
 	"log/slog"
 	"net/url"
 	"path/filepath"
-	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"golang.org/x/sync/singleflight"
 	"golift.io/starr"
 	"golift.io/starr/radarr"
 	"golift.io/starr/sonarr"
 )
 
-// Regex to extract Season and Episode numbers (e.g., S01E05, s1e5)
-var seasonEpisodeRegex = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,3})`)
-
-// parseSeasonEpisode extracts Season and Episode numbers from a file path.
-// Returns season and episode as integers, or -1, -1 if not found.
-func parseSeasonEpisode(filePath string) (int, int) {
-	matches := seasonEpisodeRegex.FindStringSubmatch(filePath)
-	if len(matches) == 3 {
-		var season, episode int
-		fmt.Sscanf(matches[1], "%d", &season)
-		fmt.Sscanf(matches[2], "%d", &episode)
-		return season, episode
-	}
-	return -1, -1
-}
+const cacheTTL = 10 * time.Minute
 
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
@@ -55,6 +43,13 @@ type Service struct {
 	mu            sync.RWMutex
 	radarrClients map[string]*radarr.Radarr // key: instance name
 	sonarrClients map[string]*sonarr.Sonarr // key: instance name
+
+	// Caching
+	cacheMu      sync.RWMutex
+	movieCache   map[string][]*radarr.Movie  // key: instance name
+	seriesCache  map[string][]*sonarr.Series // key: instance name
+	cacheExpiry  map[string]time.Time        // key: instance name
+	requestGroup singleflight.Group
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
@@ -64,6 +59,9 @@ func NewService(configGetter config.ConfigGetter, configManager ConfigManager) *
 		configManager: configManager,
 		radarrClients: make(map[string]*radarr.Radarr),
 		sonarrClients: make(map[string]*sonarr.Sonarr),
+		movieCache:    make(map[string][]*radarr.Movie),
+		seriesCache:   make(map[string][]*sonarr.Series),
+		cacheExpiry:   make(map[string]time.Time),
 	}
 }
 
@@ -144,16 +142,17 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 }
 
 // findInstanceForFilePath finds which ARR instance manages the given file path
-func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) (instanceType string, instanceName string, err error) {
-	slog.DebugContext(ctx, "Finding instance for file path", "file_path", filePath)
+func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string, relativePath string) (instanceType string, instanceName string, err error) {
+	slog.DebugContext(ctx, "Finding instance for file path", "file_path", filePath, "relative_path", relativePath)
 
-	// Try each enabled ARR instance to see which one manages this file
+	// Strategy 1: Fast Path - Check Root Folders
+	// This is the preferred method as it's O(1) per instance with root folders loaded
 	for _, instance := range s.getConfigInstances() {
 		if !instance.Enabled {
 			continue
 		}
 
-		slog.DebugContext(ctx, "Checking instance for file",
+		slog.DebugContext(ctx, "Checking instance for file (Root Folder Strategy)",
 			"instance_name", instance.Name,
 			"instance_type", instance.Type,
 			"file_path", filePath)
@@ -179,7 +178,89 @@ func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string) 
 		}
 	}
 
+	// Strategy 2: Slow Path - Search Cache by Relative Path
+	// If relativePath is provided, we can search our cached movies/series to see if any contain this file
+	if relativePath != "" {
+		slog.InfoContext(ctx, "Root folder match failed, attempting relative path search", "relative_path", relativePath)
+
+		for _, instance := range s.getConfigInstances() {
+			if !instance.Enabled {
+				continue
+			}
+
+			switch instance.Type {
+			case "radarr":
+				client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+				if err != nil {
+					continue
+				}
+				// Use helper that utilizes cache
+				if s.radarrHasFile(ctx, client, instance.Name, relativePath) {
+					slog.InfoContext(ctx, "Found managing Radarr instance by relative path", "instance", instance.Name)
+					return "radarr", instance.Name, nil
+				}
+
+			case "sonarr":
+				client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+				if err != nil {
+					continue
+				}
+				// Use helper that utilizes cache
+				if s.sonarrHasFile(ctx, client, instance.Name, relativePath) {
+					slog.InfoContext(ctx, "Found managing Sonarr instance by relative path", "instance", instance.Name)
+					return "sonarr", instance.Name, nil
+				}
+			}
+		}
+	}
+
 	return "", "", fmt.Errorf("no ARR instance found managing file path: %s", filePath)
+}
+
+// radarrHasFile checks if any movie in the instance contains the given relative path
+func (s *Service) radarrHasFile(ctx context.Context, client *radarr.Radarr, instanceName, relativePath string) bool {
+	movies, err := s.getMovies(ctx, client, instanceName)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to get movies for relative path check", "instance", instanceName, "error", err)
+		return false
+	}
+
+	for _, movie := range movies {
+		if movie.HasFile && movie.MovieFile != nil {
+			if strings.HasSuffix(movie.MovieFile.Path, relativePath) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sonarrHasFile checks if any series in the instance contains the given relative path
+// Note: This is an approximation. We check if the series path + relative path structure makes sense,
+// or if we can find the specific episode file. But 'series' objects don't contain episode files directly.
+// We'd need to fetch episode files for ALL series to be 100% sure, which is too expensive even with caching.
+// So we check if the series PATH contains part of the relative path, or if the relative path looks like it belongs to the series.
+func (s *Service) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, instanceName, relativePath string) bool {
+	seriesList, err := s.getSeries(ctx, client, instanceName)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to get series for relative path check", "instance", instanceName, "error", err)
+		return false
+	}
+
+	// Normalize relative path for comparison
+	relativePath = filepath.ToSlash(relativePath)
+
+	for _, series := range seriesList {
+		// Check if the series folder name is part of the relative path
+		// e.g. RelativePath: "TV/Show Name/Season 1/Ep.mkv"
+		// Series Path: "/mnt/media/TV/Show Name"
+		// Folder Name: "Show Name"
+		folderName := filepath.Base(series.Path)
+		if strings.Contains(relativePath, folderName) {
+			return true
+		}
+	}
+	return false
 }
 
 // TriggerFileRescan triggers a rescan for a specific file path through the appropriate ARR instance
@@ -189,7 +270,7 @@ func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 	slog.InfoContext(ctx, "Triggering ARR rescan", "path", pathForRescan, "relative_path", relativePath)
 
 	// Find which ARR instance manages this file path
-	instanceType, instanceName, err := s.findInstanceForFilePath(ctx, pathForRescan)
+	instanceType, instanceName, err := s.findInstanceForFilePath(ctx, pathForRescan, relativePath)
 	if err != nil {
 		return fmt.Errorf("failed to find ARR instance for file path %s: %w", pathForRescan, err)
 	}
@@ -226,6 +307,98 @@ func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 	}
 }
 
+// getMovies retrieves all movies from Radarr, using a cache if available and valid
+func (s *Service) getMovies(ctx context.Context, client *radarr.Radarr, instanceName string) ([]*radarr.Movie, error) {
+	// 1. Check cache (read lock)
+	s.cacheMu.RLock()
+	movies, ok := s.movieCache[instanceName]
+	expiry, valid := s.cacheExpiry[instanceName]
+	s.cacheMu.RUnlock()
+
+	if ok && valid && time.Now().Before(expiry) {
+		slog.DebugContext(ctx, "Using cached movie list", "instance", instanceName, "count", len(movies))
+		return movies, nil
+	}
+
+	// 2. Use singleflight to deduplicate requests
+	key := "radarr_movies_" + instanceName
+	v, err, _ := s.requestGroup.Do(key, func() (interface{}, error) {
+		// Double check cache
+		s.cacheMu.RLock()
+		movies, ok := s.movieCache[instanceName]
+		expiry, valid := s.cacheExpiry[instanceName]
+		s.cacheMu.RUnlock()
+		if ok && valid && time.Now().Before(expiry) {
+			return movies, nil
+		}
+
+		slog.DebugContext(ctx, "Fetching fresh movie list", "instance", instanceName)
+		freshMovies, err := client.GetMovieContext(ctx, &radarr.GetMovie{})
+		if err != nil {
+			return nil, err
+		}
+
+		s.cacheMu.Lock()
+		s.movieCache[instanceName] = freshMovies
+		s.cacheExpiry[instanceName] = time.Now().Add(cacheTTL)
+		s.cacheMu.Unlock()
+
+		return freshMovies, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return v.([]*radarr.Movie), nil
+}
+
+// getSeries retrieves all series from Sonarr, using a cache if available and valid
+func (s *Service) getSeries(ctx context.Context, client *sonarr.Sonarr, instanceName string) ([]*sonarr.Series, error) {
+	// 1. Check cache (read lock)
+	s.cacheMu.RLock()
+	series, ok := s.seriesCache[instanceName]
+	expiry, valid := s.cacheExpiry[instanceName]
+	s.cacheMu.RUnlock()
+
+	if ok && valid && time.Now().Before(expiry) {
+		slog.DebugContext(ctx, "Using cached series list", "instance", instanceName, "count", len(series))
+		return series, nil
+	}
+
+	// 2. Use singleflight to deduplicate requests
+	key := "sonarr_series_" + instanceName
+	v, err, _ := s.requestGroup.Do(key, func() (interface{}, error) {
+		// Double check cache
+		s.cacheMu.RLock()
+		series, ok := s.seriesCache[instanceName]
+		expiry, valid := s.cacheExpiry[instanceName]
+		s.cacheMu.RUnlock()
+		if ok && valid && time.Now().Before(expiry) {
+			return series, nil
+		}
+
+		slog.DebugContext(ctx, "Fetching fresh series list", "instance", instanceName)
+		freshSeries, err := client.GetAllSeriesContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		s.cacheMu.Lock()
+		s.seriesCache[instanceName] = freshSeries
+		s.cacheExpiry[instanceName] = time.Now().Add(cacheTTL)
+		s.cacheMu.Unlock()
+
+		return freshSeries, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return v.([]*sonarr.Series), nil
+}
+
 // radarrManagesFile checks if Radarr manages the given file path using root folders (checkrr approach)
 func (s *Service) radarrManagesFile(ctx context.Context, client *radarr.Radarr, filePath string) bool {
 	slog.DebugContext(ctx, "Checking Radarr root folders for file ownership",
@@ -259,7 +432,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		"relative_path", relativePath)
 
 	// Get all movies to find the one with matching file path
-	movies, err := client.GetMovieContext(ctx, &radarr.GetMovie{})
+	movies, err := s.getMovies(ctx, client, instanceName)
 	if err != nil {
 		return fmt.Errorf("failed to get movies from Radarr: %w", err)
 	}
@@ -298,6 +471,11 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 		"movie_path", targetMovie.Path,
 		"file_path", filePath)
 
+	// Try to blocklist the release associated with this file
+	if err := s.blocklistRadarrMovieFile(ctx, client, targetMovie.ID, targetMovie.MovieFile.ID); err != nil {
+		slog.WarnContext(ctx, "Failed to blocklist Radarr release", "error", err)
+	}
+
 	// Delete the existing file
 	err = client.DeleteMovieFilesContext(ctx, targetMovie.MovieFile.ID)
 	if err != nil {
@@ -309,7 +487,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	// Trigger rescan for the movie
-	response, err := client.SendCommandContext(ctx, &radarr.CommandRequest{
+	_, err = client.SendCommandContext(ctx, &radarr.CommandRequest{
 		Name:     "RescanMovie",
 		MovieIDs: []int64{targetMovie.ID},
 	})
@@ -318,6 +496,22 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 	}
 
 	slog.DebugContext(ctx, "Successfully triggered Radarr rescan",
+		"instance", instanceName,
+		"movie_id", targetMovie.ID)
+
+	// Step 3: Trigger search for the missing movie
+	// We've deleted the file, so now we need to search for a replacement
+	searchCmd := &radarr.CommandRequest{
+		Name:     "MoviesSearch",
+		MovieIDs: []int64{targetMovie.ID},
+	}
+
+	response, err := client.SendCommandContext(ctx, searchCmd)
+	if err != nil {
+		return fmt.Errorf("failed to trigger Radarr search for movie ID %d: %w", targetMovie.ID, err)
+	}
+
+	slog.InfoContext(ctx, "Successfully triggered Radarr search for re-download",
 		"instance", instanceName,
 		"movie_id", targetMovie.ID,
 		"command_id", response.ID)
@@ -369,7 +563,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		"library_dir", libraryDir)
 
 	// Get all series to find the one that contains this file path
-	series, err := client.GetAllSeriesContext(ctx)
+	series, err := s.getSeries(ctx, client, instanceName)
 	if err != nil {
 		return fmt.Errorf("failed to get series from Sonarr: %w", err)
 	}
@@ -462,6 +656,11 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 				"episode_count", len(episodeIDs),
 				"episode_file_id", targetEpisodeFile.ID)
 
+			// Try to blocklist the release associated with this file
+			if err := s.blocklistSonarrEpisodeFile(ctx, client, targetSeries.ID, targetEpisodeFile.ID); err != nil {
+				slog.WarnContext(ctx, "Failed to blocklist Sonarr release", "error", err)
+			}
+
 			// Delete the existing episode file
 			err = client.DeleteEpisodeFileContext(ctx, targetEpisodeFile.ID)
 			if err != nil {
@@ -473,28 +672,8 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		}
 	}
 
-	// If we couldn't find the file (or episodes linked to it), try to find episode by SxxEyy
 	if len(episodeIDs) == 0 {
-		slog.InfoContext(ctx, "Episode file not found in Sonarr, attempting to identify episode by SxxEyy",
-			"file_path", filePath)
-
-		season, episodeNum := parseSeasonEpisode(relativePath)
-		if season != -1 && episodeNum != -1 {
-			for _, episode := range episodes {
-				if episode.SeasonNumber == season && episode.EpisodeNumber == episodeNum {
-					episodeIDs = append(episodeIDs, episode.ID)
-					slog.InfoContext(ctx, "Found matching episode by Season/Episode number",
-						"season", season,
-						"episode", episodeNum,
-						"episode_id", episode.ID)
-					break
-				}
-			}
-		}
-	}
-
-	if len(episodeIDs) == 0 {
-		return fmt.Errorf("no episodes found for file: %s (path match failed, SxxEyy match failed)", filePath)
+		return fmt.Errorf("no episodes found for file: %s (path match failed)", filePath)
 	}
 
 	// Trigger episode search for all episodes in this file
@@ -818,3 +997,80 @@ func (s *Service) TestConnection(ctx context.Context, instanceType, url, apiKey 
 		return fmt.Errorf("unsupported instance type: %s", instanceType)
 	}
 }
+
+// blocklistRadarrMovieFile finds the history event for the given file and marks it as failed (blocklisting the release)
+func (s *Service) blocklistRadarrMovieFile(ctx context.Context, client *radarr.Radarr, movieID int64, fileID int64) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for movie file", "movie_id", movieID, "file_id", fileID)
+
+	req := &starr.PageReq{
+		PageSize: 100,
+		SortKey:  "date",
+		SortDir:  starr.SortDescend,
+	}
+	req.Set("movieId", strconv.FormatInt(movieID, 10))
+
+	history, err := client.GetHistoryPageContext(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to get history: %w", err)
+	}
+
+	targetFileID := strconv.FormatInt(fileID, 10)
+
+	for _, record := range history.Records {
+		// Check if this history record corresponds to our file
+		if record.Data.FileID == targetFileID {
+			slog.InfoContext(ctx, "Found history record for file, marking as failed to blocklist release",
+				"history_id", record.ID,
+				"source_title", record.SourceTitle,
+				"event_type", record.EventType)
+
+			// Mark history as failed (this adds to blocklist)
+			if err := client.FailContext(ctx, record.ID); err != nil {
+				return fmt.Errorf("failed to mark history as failed: %w", err)
+			}
+			return nil
+		}
+	}
+
+	slog.WarnContext(ctx, "No history record found for file, cannot blocklist", "movie_id", movieID, "file_id", fileID)
+	return nil
+}
+
+// blocklistSonarrEpisodeFile finds the history event for the given file and marks it as failed (blocklisting the release)
+func (s *Service) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr.Sonarr, seriesID int64, fileID int64) error {
+	slog.DebugContext(ctx, "Attempting to find and blocklist release for episode file", "series_id", seriesID, "file_id", fileID)
+
+	req := &starr.PageReq{
+		PageSize: 100,
+		SortKey:  "date",
+		SortDir:  starr.SortDescend,
+	}
+	req.Set("seriesId", strconv.FormatInt(seriesID, 10))
+
+	history, err := client.GetHistoryPageContext(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to get history: %w", err)
+	}
+
+	targetFileID := strconv.FormatInt(fileID, 10)
+
+	for _, record := range history.Records {
+		// Check if this history record corresponds to our file
+		if record.Data.FileID == targetFileID {
+			slog.InfoContext(ctx, "Found history record for file, marking as failed to blocklist release",
+				"history_id", record.ID,
+				"source_title", record.SourceTitle,
+				"event_type", record.EventType)
+
+			// Mark history as failed (this adds to blocklist)
+			if err := client.FailContext(ctx, record.ID); err != nil {
+				return fmt.Errorf("failed to mark history as failed: %w", err)
+			}
+			return nil
+		}
+	}
+
+	slog.WarnContext(ctx, "No history record found for file, cannot blocklist", "series_id", seriesID, "file_id", fileID)
+	return nil
+}
+

@@ -197,6 +197,16 @@ func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, s
 	return nil
 }
 
+// UpdateQueueItemPriority updates the priority of a queue item
+func (r *QueueRepository) UpdateQueueItemPriority(ctx context.Context, id int64, priority QueuePriority) error {
+	query := `UPDATE import_queue SET priority = ?, updated_at = datetime('now') WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, priority, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item priority: %w", err)
+	}
+	return nil
+}
+
 // GetQueueStats returns current queue statistics
 func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error) {
 	// Count items by status
@@ -222,10 +232,17 @@ func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error
 		counts = append(counts, count)
 	}
 
-	stats.TotalQueued = counts[0]     // pending
-	stats.TotalProcessing = counts[1] // processing
-	stats.TotalCompleted = counts[2]  // completed
-	stats.TotalFailed = counts[3]     // failed
+	// Include paused items in TotalQueued
+	var pausedCount int
+	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM import_queue WHERE status = 'paused'").Scan(&pausedCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get count for paused items: %w", err)
+	}
+
+	stats.TotalQueued = counts[0] + pausedCount // pending + paused
+	stats.TotalProcessing = counts[1]           // processing
+	stats.TotalCompleted = counts[2]            // completed
+	stats.TotalFailed = counts[3]               // failed
 
 	// Calculate average processing time for completed items
 	var avgProcessingTimeFloat sql.NullFloat64
@@ -234,7 +251,7 @@ func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error
 		FROM import_queue 
 		WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
 	`
-	err := r.db.QueryRowContext(ctx, avgQuery).Scan(&avgProcessingTimeFloat)
+	err = r.db.QueryRowContext(ctx, avgQuery).Scan(&avgProcessingTimeFloat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate average processing time: %w", err)
 	}

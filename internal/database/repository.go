@@ -842,3 +842,13 @@ func (r *Repository) IsFileInQueue(ctx context.Context, filePath string) (bool, 
 
 	return true, nil
 }
+
+// UpdateQueueItemPriority updates the priority of a queue item
+func (r *Repository) UpdateQueueItemPriority(ctx context.Context, id int64, priority QueuePriority) error {
+	query := `UPDATE import_queue SET priority = ?, updated_at = datetime('now') WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, priority, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item priority: %w", err)
+	}
+	return nil
+}
