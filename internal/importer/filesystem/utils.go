@@ -115,7 +115,18 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 
 	for _, file := range files {
 		normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
+		normalizedFilename = filepath.Clean(normalizedFilename)
+		normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
+
 		dir := filepath.Dir(normalizedFilename)
+		name := filepath.Base(normalizedFilename)
+
+		// Check for redundant nesting (e.g. file.mkv/file.mkv)
+		// If the last directory component matches the filename, flatten the structure
+		if filepath.Base(dir) == name {
+			dir = filepath.Dir(dir)
+		}
+
 		if dir != "." && dir != "/" {
 			virtualPath := filepath.Join(virtualDir, dir)
 			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
@@ -136,8 +147,17 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 // DetermineFileLocation determines where a file should be placed in the virtual structure
 func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, filename string) {
 	normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
+	normalizedFilename = filepath.Clean(normalizedFilename)
+	normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
+
 	dir := filepath.Dir(normalizedFilename)
 	name := filepath.Base(normalizedFilename)
+
+	// Check for redundant nesting (e.g. file.mkv/file.mkv)
+	// If the last directory component matches the filename, flatten the structure
+	if filepath.Base(dir) == name {
+		dir = filepath.Dir(dir)
+	}
 
 	if dir == "." || dir == "/" {
 		return baseDir, name

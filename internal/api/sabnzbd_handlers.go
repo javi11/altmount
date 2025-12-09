@@ -81,6 +81,12 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 		return s.handleSABnzbdAddUrl(c)
 	case "queue":
 		return s.handleSABnzbdQueue(c)
+	case "pause":
+		return s.handleSABnzbdPause(c)
+	case "resume":
+		return s.handleSABnzbdResume(c)
+	case "switch":
+		return s.handleSABnzbdSwitch(c)
 	case "history":
 		return s.handleSABnzbdHistory(c)
 	case "status":
@@ -92,6 +98,83 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	default:
 		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Unknown mode: %s", mode))
 	}
+}
+
+// handleSABnzbdPause handles global pause
+func (s *Server) handleSABnzbdPause(c *fiber.Ctx) error {
+	if s.importerService == nil {
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
+	}
+	s.importerService.Pause()
+	return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
+}
+
+// handleSABnzbdResume handles global resume
+func (s *Server) handleSABnzbdResume(c *fiber.Ctx) error {
+	if s.importerService == nil {
+		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
+	}
+	s.importerService.Resume()
+	return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
+}
+
+// handleSABnzbdSwitch handles priority switching
+func (s *Server) handleSABnzbdSwitch(c *fiber.Ctx) error {
+	value := c.Query("value")
+	value2 := c.Query("value2") // Priority (0, 1, 2)
+
+	if value == "" || value2 == "" {
+		return s.writeSABnzbdErrorFiber(c, "Missing parameters")
+	}
+
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Invalid ID")
+	}
+
+	priority := s.parseSABnzbdPriority(value2)
+
+	if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), id, priority); err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Failed to update priority")
+	}
+
+	return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
+}
+
+// handleSABnzbdQueuePause handles pausing/resuming a queue item
+func (s *Server) handleSABnzbdQueuePause(c *fiber.Ctx, pause bool) error {
+	value := c.Query("value")
+	if value == "" {
+		return s.writeSABnzbdErrorFiber(c, "Missing value parameter")
+	}
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Invalid value parameter")
+	}
+
+	item, err := s.queueRepo.GetQueueItem(c.Context(), id)
+	if err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Failed to get queue item")
+	}
+	if item == nil {
+		return s.writeSABnzbdErrorFiber(c, "Queue item not found")
+	}
+
+	if pause {
+		if item.Status == database.QueueStatusPending {
+			if err := s.queueRepo.UpdateQueueItemStatus(c.Context(), id, database.QueueStatusPaused, nil); err != nil {
+				return s.writeSABnzbdErrorFiber(c, "Failed to pause item")
+			}
+		}
+	} else {
+		if item.Status == database.QueueStatusPaused {
+			if err := s.queueRepo.UpdateQueueItemStatus(c.Context(), id, database.QueueStatusPending, nil); err != nil {
+				return s.writeSABnzbdErrorFiber(c, "Failed to resume item")
+			}
+		}
+	}
+
+	return s.writeSABnzbdResponseFiber(c, SABnzbdResponse{Status: true})
 }
 
 // tryAutoRegisterARR attempts to auto-register an ARR instance from SABnzbd request parameters
@@ -342,9 +425,14 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 
 // handleSABnzbdQueue handles queue operations
 func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
-	// Check for delete operation
-	if c.Query("name") == "delete" {
+	// Check for operations
+	name := c.Query("name")
+	if name == "delete" {
 		return s.handleSABnzbdQueueDelete(c)
+	} else if name == "pause" {
+		return s.handleSABnzbdQueuePause(c, true)
+	} else if name == "resume" {
+		return s.handleSABnzbdQueuePause(c, false)
 	}
 
 	// Get queue items
@@ -374,7 +462,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	response := SABnzbdQueueResponse{
 		Status: true,
 		Queue: SABnzbdQueueObject{
-			Paused: false,
+			Paused: s.importerService.IsPaused(),
 			Slots:  slots,
 		},
 	}
@@ -534,7 +622,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		Pid:             os.Getpid(),
 		NewRelURL:       "",
 		ActiveDownload:  len(slots) > 0,
-		Paused:          false,
+		Paused:          s.importerService != nil && s.importerService.IsPaused(),
 		PauseInt:        0,
 		Remaining:       "0 B",
 		MbLeft:          0,

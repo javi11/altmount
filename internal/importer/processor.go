@@ -225,7 +225,34 @@ func (proc *Processor) processMultiFile(
 	par2Files []parser.ParsedFile,
 	nzbPath string,
 ) (string, error) {
-	// Create NZB folder
+	// If we only have one regular file, we don't need to create a folder for the NZB
+	// This happens often with some indexers that mark single files as multi-file because they have par2 files
+	if len(regularFiles) == 1 {
+		// Just ensure the virtual directory exists
+		if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+			return "", err
+		}
+
+		// Process the single regular file directly in the virtualDir
+		if err := multifile.ProcessRegularFiles(
+			ctx,
+			virtualDir,
+			regularFiles,
+			par2Files,
+			nzbPath,
+			proc.metadataService,
+			proc.poolManager,
+			proc.maxImportConnections,
+			proc.segmentSamplePercentage,
+			proc.allowedFileExtensions,
+		); err != nil {
+			return "", err
+		}
+
+		return virtualDir, nil
+	}
+
+	// Create NZB folder for multiple files
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
 	if err != nil {
 		return "", err
