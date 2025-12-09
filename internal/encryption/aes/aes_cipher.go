@@ -48,10 +48,11 @@ func (c *AesCipher) DecryptedSize(encryptedFileSize int64) (int64, error) {
 }
 
 // Open creates a decrypting reader for AES-encrypted data
+// decryptedFileSize is the actual file size (output will be limited to this)
 func (c *AesCipher) Open(
 	ctx context.Context,
 	rh *utils.RangeHeader,
-	encryptedFileSize int64,
+	decryptedFileSize int64,
 	key []byte,
 	iv []byte,
 	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error),
@@ -65,13 +66,14 @@ func (c *AesCipher) Open(
 		return nil, fmt.Errorf("AES IV is required")
 	}
 
-	// Calculate the decrypted size
-	// This is approximate due to padding
-	decryptedSize := encryptedFileSize
+	// Calculate encrypted size (round up to AES block boundary)
+	// Segments contain padded encrypted data, so we need to request the full encrypted size
+	encryptedSize := c.EncryptedSize(decryptedFileSize)
 
 	// Wrap with AES decryption
 	// The decrypt reader will lazily initialize the source reader when needed
-	decryptReader, err := newAesDecryptReader(ctx, getReader, key, iv, decryptedSize)
+	// Pass both decrypted size (for output limiting) and encrypted size (for source reading)
+	decryptReader, err := newAesDecryptReader(ctx, getReader, key, iv, decryptedFileSize, encryptedSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
 	}

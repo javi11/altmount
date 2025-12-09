@@ -11,27 +11,30 @@ import (
 // aesDecryptReader wraps an io.ReadCloser with AES-CBC decryption
 // Based on the implementation from rardecode example: github.com/javi11/rardecode/blob/main/examples/rarextract/main.go
 type aesDecryptReader struct {
-	ctx       context.Context
-	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error)
-	source    io.ReadCloser
-	key       []byte
-	iv        []byte
-	origIV    []byte // Original IV for recalculation during seeks
-	decrypter cipher.BlockMode
-	buffer    []byte // Buffer for partial block reads
-	bufferPos int    // Current position in buffer
-	bufferLen int    // Length of valid data in buffer
-	offset    int64  // Current read position
-	size      int64  // Total size of decrypted data
-	closed    bool
+	ctx           context.Context
+	getReader     func(ctx context.Context, start, end int64) (io.ReadCloser, error)
+	source        io.ReadCloser
+	key           []byte
+	iv            []byte
+	origIV        []byte // Original IV for recalculation during seeks
+	decrypter     cipher.BlockMode
+	buffer        []byte // Buffer for partial block reads
+	bufferPos     int    // Current position in buffer
+	bufferLen     int    // Length of valid data in buffer
+	offset        int64  // Current read position
+	size          int64  // Total size of decrypted data (for output limiting)
+	encryptedSize int64  // Total size of encrypted data (for source reading)
+	closed        bool
 }
 
 // newAesDecryptReader creates a new AES-CBC decrypt reader
+// decryptedSize is the actual file size (for output limiting)
+// encryptedSize is the padded size in segments (for source reading)
 func newAesDecryptReader(
 	ctx context.Context,
 	getReader func(ctx context.Context, start, end int64) (io.ReadCloser, error),
 	key, iv []byte,
-	size int64,
+	decryptedSize, encryptedSize int64,
 ) (*aesDecryptReader, error) {
 	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
 		return nil, fmt.Errorf("invalid AES key size: %d (must be 16, 24, or 32 bytes)", len(key))
@@ -51,15 +54,16 @@ func newAesDecryptReader(
 	copy(ivCopy, iv)
 
 	return &aesDecryptReader{
-		ctx:       ctx,
-		getReader: getReader,
-		source:    nil, // Will be initialized lazily on first read
-		key:       key,
-		iv:        ivCopy,
-		origIV:    iv,
-		decrypter: cipher.NewCBCDecrypter(block, ivCopy),
-		buffer:    make([]byte, aes.BlockSize*64), // Buffer multiple blocks for efficiency
-		size:      size,
+		ctx:           ctx,
+		getReader:     getReader,
+		source:        nil, // Will be initialized lazily on first read
+		key:           key,
+		iv:            ivCopy,
+		origIV:        iv,
+		decrypter:     cipher.NewCBCDecrypter(block, ivCopy),
+		buffer:        make([]byte, aes.BlockSize*64), // Buffer multiple blocks for efficiency
+		size:          decryptedSize,
+		encryptedSize: encryptedSize,
 	}, nil
 }
 
@@ -70,9 +74,10 @@ func (r *aesDecryptReader) Read(p []byte) (int, error) {
 	}
 
 	// Lazy initialization of source reader
+	// Use encryptedSize to request full encrypted data (including padding)
 	if r.source == nil {
 		var err error
-		r.source, err = r.getReader(r.ctx, 0, r.size-1)
+		r.source, err = r.getReader(r.ctx, 0, r.encryptedSize-1)
 		if err != nil {
 			return 0, fmt.Errorf("failed to initialize source reader: %w", err)
 		}
@@ -226,8 +231,9 @@ func (r *aesDecryptReader) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	// Get a new reader starting at the target block
+	// Use encryptedSize to request full encrypted data (including padding)
 	sourceOffset := blockNum * int64(aes.BlockSize)
-	newSource, err := r.getReader(r.ctx, sourceOffset, r.size-1)
+	newSource, err := r.getReader(r.ctx, sourceOffset, r.encryptedSize-1)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get reader for seek position: %w", err)
 	}
