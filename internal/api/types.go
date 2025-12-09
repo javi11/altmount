@@ -334,10 +334,12 @@ type HealthListRequest struct {
 
 // HealthStatsResponse represents health statistics in API responses
 type HealthStatsResponse struct {
-	Total     int `json:"total"`
-	Pending   int `json:"pending"`
-	Corrupted int `json:"corrupted"`
-	Healthy   int `json:"healthy"`
+	Total           int `json:"total"`
+	Pending         int `json:"pending"`
+	Corrupted       int `json:"corrupted"`
+	Healthy         int `json:"healthy"`
+	RepairTriggered int `json:"repair_triggered"`
+	Checking        int `json:"checking"`
 }
 
 // HealthRetryRequest represents request to retry a corrupted file
@@ -521,6 +523,8 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 	pending := stats[database.HealthStatusPending]
 	corrupted := stats[database.HealthStatusCorrupted]
 	healthy := stats[database.HealthStatusHealthy]
+	repairTriggered := stats[database.HealthStatusRepairTriggered]
+	checking := stats[database.HealthStatusChecking]
 
 	// Calculate total from all tracked statuses
 	total := 0
@@ -529,10 +533,12 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 	}
 
 	return &HealthStatsResponse{
-		Total:     total,
-		Pending:   pending,
-		Corrupted: corrupted,
-		Healthy:   healthy,
+		Total:           total,
+		Pending:         pending,
+		Corrupted:       corrupted,
+		Healthy:         healthy,
+		RepairTriggered: repairTriggered,
+		Checking:        checking,
 	}
 }
 
