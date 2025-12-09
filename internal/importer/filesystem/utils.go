@@ -126,14 +126,41 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 		dir := filepath.Dir(normalizedFilename)
 		name := filepath.Base(normalizedFilename)
 
-		// Check for redundant nesting (e.g. file.mkv/file.mkv)
-		// If the last directory component matches the filename, flatten the structure
-		// Also check without extension for cases like Movie/Movie.mkv
-		nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
-		if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
-			dir = filepath.Dir(dir)
-		}
-		if dir != "." && dir != "/" {
+				// Check for redundant nesting (e.g. file.mkv/file.mkv)
+
+				// If the last directory component matches the filename, flatten the structure
+
+				// Also check without extension for cases like Movie/Movie.mkv
+
+				nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
+
+				if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
+
+					dir = filepath.Dir(dir)
+
+				}
+
+		
+
+				// Check for redundant nesting against parent directory
+
+				// e.g. /tv/ShowName/ShowName/file.mkv -> /tv/ShowName/file.mkv
+
+				parentDirName := filepath.Base(virtualDir)
+
+				if dir == parentDirName {
+
+					dir = "."
+
+				} else if strings.HasPrefix(dir, parentDirName+"/") {
+
+					dir = strings.TrimPrefix(dir, parentDirName+"/")
+
+				}
+
+		
+
+				if dir != "." && dir != "/" {
 			virtualPath := filepath.Join(virtualDir, dir)
 			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 			dirs[virtualPath] = true
@@ -159,14 +186,41 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 	dir := filepath.Dir(normalizedFilename)
 	name := filepath.Base(normalizedFilename)
 
-	// Check for redundant nesting (e.g. file.mkv/file.mkv)
-	// If the last directory component matches the filename, flatten the structure
-	// Also check without extension for cases like Movie/Movie.mkv
-	nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
-	if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
-		dir = filepath.Dir(dir)
-	}
-	if dir == "." || dir == "/" {
+			// Check for redundant nesting (e.g. file.mkv/file.mkv)
+
+			// If the last directory component matches the filename, flatten the structure
+
+			// Also check without extension for cases like Movie/Movie.mkv
+
+			nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
+
+			if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
+
+				dir = filepath.Dir(dir)
+
+			}
+
+	
+
+			// Check for redundant nesting against parent directory
+
+			// e.g. /tv/ShowName/ShowName/file.mkv -> /tv/ShowName/file.mkv
+
+			parentDirName := filepath.Base(baseDir)
+
+			if dir == parentDirName {
+
+				dir = "."
+
+			} else if strings.HasPrefix(dir, parentDirName+"/") {
+
+				dir = strings.TrimPrefix(dir, parentDirName+"/")
+
+			}
+
+	
+
+			if dir == "." || dir == "/" {
 		return baseDir, name
 	}
 
