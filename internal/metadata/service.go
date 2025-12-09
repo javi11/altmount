@@ -60,9 +60,25 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Write to file
-	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write metadata file: %w", err)
+	// Create a temporary file in the same directory to ensure atomic rename
+	tempFile, err := os.CreateTemp(metadataDir, truncatedFilename+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tempFile.Name()) // Clean up in case of error (rename will make this a no-op if successful)
+
+	// Write to temp file
+	if _, err := tempFile.Write(data); err != nil {
+		tempFile.Close()
+		return fmt.Errorf("failed to write to temp file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	// Atomically rename temp file to metadata file
+	if err := os.Rename(tempFile.Name(), metadataPath); err != nil {
+		return fmt.Errorf("failed to rename temp file to metadata file: %w", err)
 	}
 
 	return nil

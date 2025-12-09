@@ -17,7 +17,11 @@ func createExtensionMap(extensions []string) map[string]bool {
 	extMap := make(map[string]bool, len(extensions))
 	for _, ext := range extensions {
 		// Normalize to lowercase for case-insensitive comparison
-		extMap[strings.ToLower(ext)] = true
+		ext = strings.ToLower(ext)
+		if strings.HasPrefix(ext, ".") {
+			ext = ext[1:]
+		}
+		extMap[ext] = true
 	}
 	return extMap
 }
@@ -40,6 +44,9 @@ func IsAllowedFile(filename string, allowedExtensions []string) bool {
 	}
 
 	ext := strings.ToLower(filepath.Ext(filename))
+	if strings.HasPrefix(ext, ".") {
+		ext = ext[1:]
+	}
 	extMap := createExtensionMap(allowedExtensions)
 	return extMap[ext]
 }

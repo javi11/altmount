@@ -78,3 +78,46 @@ func TestDetermineFileLocation(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculateVirtualDirectory(t *testing.T) {
+	tests := []struct {
+		name         string
+		nzbPath      string
+		relativePath string
+		expected     string
+	}{
+		{
+			name:         "file in root of relative path",
+			nzbPath:      "/downloads/sonarr/Movie.mkv",
+			relativePath: "/downloads/sonarr",
+			expected:     "/Movie", // Should create folder based on filename
+		},
+		{
+			name:         "file in subfolder",
+			nzbPath:      "/downloads/sonarr/MovieFolder/Movie.mkv",
+			relativePath: "/downloads/sonarr",
+			expected:     "/MovieFolder",
+		},
+		{
+			name:         "empty relative path",
+			nzbPath:      "/downloads/Movie.mkv",
+			relativePath: "",
+			expected:     "/", // Default behavior for empty relative path
+		},
+		{
+			name:         "file with spaces",
+			nzbPath:      "/downloads/sonarr/Movie Name (2023).mkv",
+			relativePath: "/downloads/sonarr",
+			expected:     "/Movie Name (2023)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CalculateVirtualDirectory(tt.nzbPath, tt.relativePath)
+			if result != tt.expected {
+				t.Errorf("CalculateVirtualDirectory(%q, %q) = %q, want %q", tt.nzbPath, tt.relativePath, result, tt.expected)
+			}
+		})
+	}
+}

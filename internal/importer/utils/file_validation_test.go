@@ -101,6 +101,11 @@ func TestIsAllowedFile_WithExtensions(t *testing.T) {
 			filename: "movie.sample.avi",
 			expected: false,
 		},
+		{
+			name:     "allowed extension without dot",
+			filename: "movie.mkv",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -262,6 +267,41 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := IsAllowedFile(tt.filename, []string{})
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsAllowedFile_MixedDotFormats(t *testing.T) {
+	tests := []struct {
+		name        string
+		filename    string
+		allowed     []string
+		expected    bool
+	}{
+		{
+			name:     "allowed without dot matches file",
+			filename: "movie.mkv",
+			allowed:  []string{"mkv"},
+			expected: true,
+		},
+		{
+			name:     "allowed with dot matches file",
+			filename: "movie.mkv",
+			allowed:  []string{".mkv"},
+			expected: true,
+		},
+		{
+			name:     "mixed allowed list",
+			filename: "movie.mp4",
+			allowed:  []string{"mkv", ".mp4"},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsAllowedFile(tt.filename, tt.allowed)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
