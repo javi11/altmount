@@ -128,10 +128,11 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 
 		// Check for redundant nesting (e.g. file.mkv/file.mkv)
 		// If the last directory component matches the filename, flatten the structure
-		if filepath.Base(dir) == name {
+		// Also check without extension for cases like Movie/Movie.mkv
+		nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
+		if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
 			dir = filepath.Dir(dir)
 		}
-
 		if dir != "." && dir != "/" {
 			virtualPath := filepath.Join(virtualDir, dir)
 			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
@@ -160,10 +161,11 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 
 	// Check for redundant nesting (e.g. file.mkv/file.mkv)
 	// If the last directory component matches the filename, flatten the structure
-	if filepath.Base(dir) == name {
+	// Also check without extension for cases like Movie/Movie.mkv
+	nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
+	if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
 		dir = filepath.Dir(dir)
 	}
-
 	if dir == "." || dir == "/" {
 		return baseDir, name
 	}
