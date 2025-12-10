@@ -88,8 +88,6 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
-	defer os.RemoveAll(nzbTempDir) // Clean up temp directory for NZBs
-
 	// 4. Queue Imports
 	addedCount := 0
 	failedCount := 0
