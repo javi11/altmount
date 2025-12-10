@@ -192,15 +192,22 @@ func (proc *Processor) processSingleFile(
 		return "", fmt.Errorf("no regular files to process")
 	}
 
-	// Ensure directory exists
-	if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+	// Create NZB folder (always put single files in a folder to handle obfuscation and keep structure clean)
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	if err != nil {
 		return "", err
 	}
+
+	// Rename the file to match the NZB name to handle obfuscated filenames
+	nzbName := filepath.Base(nzbPath)
+	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	fileExt := filepath.Ext(regularFiles[0].Filename)
+	regularFiles[0].Filename = releaseName + fileExt
 
 	// Process the single file
 	result, err := singlefile.ProcessSingleFile(
 		ctx,
-		virtualDir,
+		nzbFolder,
 		regularFiles[0],
 		par2Files,
 		nzbPath,
