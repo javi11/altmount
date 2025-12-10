@@ -115,33 +115,33 @@ func (p *Parser) deriveRelPath(path, category string) string {
 	path = strings.Trim(path, "/")
 
 	// 2. Identify and remove category prefix
-	// Simple heuristic: check if path starts with known category roots
-	// We use the derived category to guess the prefix
+	// We want to find the category folder in the path and return everything after it
+	// e.g. /content/tv/Show/Season 1 -> Show/Season 1
 	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		return ""
+	
+	// Remove the last part (Release Name) as that is handled by the release name itself
+	if len(parts) > 0 {
+		parts = parts[:len(parts)-1]
 	}
 
-	// Remove the last part (Release Name)
-	// e.g. "TV/Show/Season 1" -> "TV/Show"
-	parts = parts[:len(parts)-1]
-
-	// Find where to start
-	startIndex := 0
-	if len(parts) > 0 {
-		firstPart := strings.ToLower(parts[0])
-		if category == "movies" && (firstPart == "movies" || firstPart == "movie") {
-			startIndex = 1
-		} else if category == "tv" && (firstPart == "tv" || firstPart == "series") {
-			startIndex = 1
+	// Find where the category folder is
+	categoryIndex := -1
+	for i, part := range parts {
+		lowerPart := strings.ToLower(part)
+		if lowerPart == category || (category == "tv" && lowerPart == "series") || (category == "movies" && lowerPart == "movie") {
+			categoryIndex = i
+			break
 		}
 	}
 
-	if startIndex >= len(parts) {
-		return ""
+	if categoryIndex != -1 && categoryIndex < len(parts)-1 {
+		// Return everything AFTER the category
+		return strings.Join(parts[categoryIndex+1:], "/")
 	}
 
-	return strings.Join(parts[startIndex:], "/")
+	// If category not found or it's the last folder, return empty
+	// This prevents returning "content/tv" which results in "tv/content/tv"
+	return ""
 }
 
 // writeNzb generates the NZB XML and writes it to the pipe
