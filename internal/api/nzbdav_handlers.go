@@ -132,6 +132,12 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 			} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
 				targetCategory = "tv"
 			}
+
+			// Append relative path from DB if present (e.g. "Series Name" or "Featurettes")
+			// This preserves the directory structure within the category
+			if res.RelPath != "" {
+				targetCategory = filepath.Join(targetCategory, res.RelPath)
+			}
 			
 			relPath := rootFolder
 			priority := database.QueuePriorityNormal

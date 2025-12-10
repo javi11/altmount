@@ -81,10 +81,12 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			
 			go p.writeNzb(p.dbPath, id, name, pw)
 
+			category := p.deriveCategory(path)
 			select {
 			case out <- &ParsedNzb{
 				Name:     name,
-				Category: p.deriveCategory(path),
+				Category: category,
+				RelPath:  p.deriveRelPath(path, category),
 				Content:  pr,
 			}:
 			case <-errChan: // Should not happen given logic, but good practice
@@ -105,6 +107,41 @@ func (p *Parser) deriveCategory(path string) string {
 		return "tv"
 	}
 	return "other"
+}
+
+func (p *Parser) deriveRelPath(path, category string) string {
+	// 1. Clean path separators
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.Trim(path, "/")
+
+	// 2. Identify and remove category prefix
+	// Simple heuristic: check if path starts with known category roots
+	// We use the derived category to guess the prefix
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	// Remove the last part (Release Name)
+	// e.g. "TV/Show/Season 1" -> "TV/Show"
+	parts = parts[:len(parts)-1]
+
+	// Find where to start
+	startIndex := 0
+	if len(parts) > 0 {
+		firstPart := strings.ToLower(parts[0])
+		if category == "movies" && (firstPart == "movies" || firstPart == "movie") {
+			startIndex = 1
+		} else if category == "tv" && (firstPart == "tv" || firstPart == "series") {
+			startIndex = 1
+		}
+	}
+
+	if startIndex >= len(parts) {
+		return ""
+	}
+
+	return strings.Join(parts[startIndex:], "/")
 }
 
 // writeNzb generates the NZB XML and writes it to the pipe

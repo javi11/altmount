@@ -26,5 +26,6 @@ type Release struct {
 type ParsedNzb struct {
 	Category string
 	Name     string
+	RelPath  string
 	Content  io.Reader
 }
