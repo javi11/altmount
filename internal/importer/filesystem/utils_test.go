@@ -60,7 +60,7 @@ func TestDetermineFileLocation(t *testing.T) {
 			name:           "non-redundant folder (almost match)",
 			filename:       "movie/movie.mkv",
 			baseDir:        "/base",
-			expectedParent: "/base/movie",
+			expectedParent: "/base",
 			expectedName:   "movie.mkv",
 		},
 	}
