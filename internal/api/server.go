@@ -124,6 +124,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api := app.Group(s.config.Prefix)
 	// Import do not need user authentication
 	api.Post("/import/file", s.handleManualImportFile)
+	api.Post("/import/nzbdav", s.handleImportNzbdav)
 
 	// Apply global middleware
 	api.Use(cors.New())
@@ -204,6 +205,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// System endpoints
 	api.Get("/system/stats", s.handleGetSystemStats)
 	api.Get("/system/health", s.handleGetSystemHealth)
+	api.Get("/system/browse", s.handleSystemBrowse)
 	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)

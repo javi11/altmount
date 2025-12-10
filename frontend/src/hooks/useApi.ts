@@ -392,3 +392,11 @@ export const useUploadToQueue = () => {
 		},
 	});
 };
+
+// System Browse hooks
+export const useSystemBrowse = (path?: string) => {
+	return useQuery({
+		queryKey: ["system", "browse", path],
+		queryFn: () => apiClient.getSystemBrowse(path),
+	});
+};

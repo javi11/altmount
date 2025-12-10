@@ -12,6 +12,7 @@ import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { Dashboard } from "./pages/Dashboard";
 import { FilesPage } from "./pages/FilesPage";
 import { HealthPage } from "./pages/HealthPage";
+import { ImportPage } from "./pages/ImportPage";
 import { QueuePage } from "./pages/QueuePage";
 
 function App() {
@@ -34,6 +35,7 @@ function App() {
 									>
 										<Route index element={<Dashboard />} />
 										<Route path="queue" element={<QueuePage />} />
+										<Route path="import" element={<ImportPage />} />
 										<Route path="health" element={<HealthPage />} />
 										<Route path="files" element={<FilesPage />} />
 
