@@ -162,6 +162,7 @@ func createFiberApp(ctx context.Context, cfg *config.Config) (*fiber.App, *bool)
 		RequestMethods: append(
 			fiber.DefaultMethods, "PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
 		),
+		BodyLimit: 100 * 1024 * 1024, // 100MB limit for uploads (e.g. nzbdav DBs)
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {

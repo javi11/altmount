@@ -8,6 +8,7 @@ import type {
 	HealthCleanupResponse,
 	HealthStats,
 	HealthWorkerStatus,
+	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
 	PoolMetrics,
@@ -636,6 +637,17 @@ export class APIClient {
 
 	async cancelScan() {
 		return this.request<ScanStatusResponse>("/import/scan", {
+			method: "DELETE",
+		});
+	}
+
+	// NZBDav Import endpoints
+	async getNzbdavImportStatus() {
+		return this.request<ImportStatusResponse>("/import/nzbdav/status");
+	}
+
+	async cancelNzbdavImport() {
+		return this.request<{ message: string }>("/import/nzbdav", {
 			method: "DELETE",
 		});
 	}

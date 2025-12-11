@@ -13,7 +13,13 @@ import { useEffect, useState } from "react";
 import { FileBrowserModal } from "../components/files/FileBrowserModal";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { useToast } from "../contexts/ToastContext";
-import { useCancelScan, useScanStatus, useStartManualScan } from "../hooks/useApi";
+import {
+	useCancelNzbdavImport,
+	useCancelScan,
+	useNzbdavImportStatus,
+	useScanStatus,
+	useStartManualScan,
+} from "../hooks/useApi";
 import { ScanStatus } from "../types/api";
 
 type ImportTab = "nzbdav" | "directory";
@@ -60,27 +66,38 @@ export function ImportPage() {
 }
 
 function NzbDavImportSection() {
+	const [inputMethod, setInputMethod] = useState<"server" | "upload">("server");
 	const [selectedDbPath, setSelectedDbPath] = useState("");
+	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [rootFolder, setRootFolder] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<Error | null>(null);
-	const [result, setResult] = useState<{ added: number; failed: number; total: number } | null>(
-		null,
-	);
 	const { showToast } = useToast();
 	const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);
 
+	const { data: importStatus } = useNzbdavImportStatus(2000);
+	const cancelImport = useCancelNzbdavImport();
+
+	const isRunning = importStatus?.status === "running";
+	const isCanceling = importStatus?.status === "canceling";
+
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!selectedDbPath || !rootFolder) return;
+		if (!rootFolder) return;
+		if (inputMethod === "server" && !selectedDbPath) return;
+		if (inputMethod === "upload" && !selectedFile) return;
 
 		setIsLoading(true);
 		setError(null);
-		setResult(null);
 
 		const formData = new FormData();
-		formData.append("dbPath", selectedDbPath);
 		formData.append("rootFolder", rootFolder);
+		
+		if (inputMethod === "server") {
+			formData.append("dbPath", selectedDbPath);
+		} else if (selectedFile) {
+			formData.append("file", selectedFile);
+		}
 
 		try {
 			const token = localStorage.getItem("token");
@@ -97,14 +114,12 @@ function NzbDavImportSection() {
 
 			if (!response.ok) {
 				const data = await response.json().catch(() => ({}));
-				throw new Error(data.message || "Failed to import database");
+				throw new Error(data.message || "Failed to start import");
 			}
 
-			const data = await response.json();
-			setResult(data.data);
 			showToast({
-				title: "Import Successful",
-				message: `Successfully imported ${data.data.added} items`,
+				title: "Import Started",
+				message: "The import process has started in the background.",
 				type: "success",
 			});
 		} catch (err: unknown) {
@@ -124,23 +139,28 @@ function NzbDavImportSection() {
 		setSelectedDbPath(path);
 	};
 
+	const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+		if (e.target.files && e.target.files.length > 0) {
+			setSelectedFile(e.target.files[0]);
+		}
+	};
+
+	const handleCancel = async () => {
+		try {
+			await cancelImport.mutateAsync();
+			showToast({
+				title: "Cancellation Requested",
+				message: "Stopping the import process...",
+				type: "info",
+			});
+		} catch (error) {
+			console.error("Failed to cancel import:", error);
+		}
+	};
+
 	return (
 		<>
 			{error && <ErrorAlert error={error} />}
-
-			{result && (
-				<div className="alert alert-success">
-					<CheckCircle2 className="h-6 w-6" />
-					<div>
-						<h3 className="font-bold">Import Completed</h3>
-						<div className="text-sm">
-							<p>Total processed: {result.total}</p>
-							<p>Added to queue: {result.added}</p>
-							<p>Failed: {result.failed}</p>
-						</div>
-					</div>
-				</div>
-			)}
 
 			<div className="card max-w-2xl bg-base-100 shadow-lg">
 				<div className="card-body">
@@ -152,64 +172,156 @@ function NzbDavImportSection() {
 						Import your existing NZBDav database to populate the library.
 					</p>
 
-					<form onSubmit={handleSubmit} className="space-y-4">
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend flex items-center gap-2">
-								<FolderInput className="h-4 w-4" />
-								Target Directory Name
-							</legend>
-							<input
-								type="text"
-								placeholder="e.g. MyLibrary"
-								className="input"
-								value={rootFolder}
-								onChange={(e) => setRootFolder(e.target.value)}
-								required
-							/>
-							<p className="label text-base-content/60">
-								This will create /movies and /tv subdirectories under this name.
-							</p>
-						</fieldset>
+					{(isRunning || isCanceling) ? (
+						<div className="space-y-4 rounded-lg bg-base-200 p-6">
+							<div className="flex items-center justify-between">
+								<div className="flex items-center gap-3">
+									{isCanceling ? (
+										<Square className="h-5 w-5 text-warning" />
+									) : (
+										<span className="loading loading-spinner text-primary" />
+									)}
+									<div>
+										<h3 className="font-bold">
+											{isCanceling ? "Canceling Import..." : "Importing Database..."}
+										</h3>
+										<p className="text-xs text-base-content/70">
+											This process runs in the background.
+										</p>
+									</div>
+								</div>
+								{!isCanceling && (
+									<button 
+										className="btn btn-sm btn-warning"
+										onClick={handleCancel}
+										disabled={cancelImport.isPending}
+									>
+										Cancel
+									</button>
+								)}
+							</div>
 
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend flex items-center gap-2">
-								<HardDrive className="h-4 w-4" />
-								Select Database File from Server
-							</legend>
-							<div className="join w-full">
+							<div className="stats w-full bg-base-100 shadow">
+								<div className="stat place-items-center">
+									<div className="stat-title">Total Found</div>
+									<div className="stat-value text-base">{importStatus?.total || 0}</div>
+								</div>
+								<div className="stat place-items-center">
+									<div className="stat-title">Added</div>
+									<div className="stat-value text-success text-base">{importStatus?.added || 0}</div>
+								</div>
+								<div className="stat place-items-center">
+									<div className="stat-title">Failed</div>
+									<div className="stat-value text-error text-base">{importStatus?.failed || 0}</div>
+								</div>
+							</div>
+
+							{importStatus?.last_error && (
+								<div className="alert alert-error text-sm">
+									<AlertCircle className="h-4 w-4" />
+									<span>{importStatus.last_error}</span>
+								</div>
+							)}
+						</div>
+					) : (
+						<form onSubmit={handleSubmit} className="space-y-4">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend flex items-center gap-2">
+									<FolderInput className="h-4 w-4" />
+									Target Directory Name
+								</legend>
 								<input
 									type="text"
-									placeholder="e.g. /data/nzbdav/db.sqlite"
-									className="input join-item w-full"
-									value={selectedDbPath}
-									onChange={(e) => setSelectedDbPath(e.target.value)}
+									placeholder="e.g. MyLibrary"
+									className="input"
+									value={rootFolder}
+									onChange={(e) => setRootFolder(e.target.value)}
 									required
 								/>
+								<p className="label text-base-content/60">
+									This will create /movies and /tv subdirectories under this name.
+								</p>
+							</fieldset>
+
+							<div className="flex gap-4 mb-2">
+								<label className="label cursor-pointer gap-2">
+									<input
+										type="radio"
+										name="inputMethod"
+										className="radio radio-primary"
+										checked={inputMethod === "server"}
+										onChange={() => setInputMethod("server")}
+									/>
+									<span className="label-text">File on Server</span>
+								</label>
+								<label className="label cursor-pointer gap-2">
+									<input
+										type="radio"
+										name="inputMethod"
+										className="radio radio-primary"
+										checked={inputMethod === "upload"}
+										onChange={() => setInputMethod("upload")}
+									/>
+									<span className="label-text">Upload File</span>
+								</label>
+							</div>
+
+							{inputMethod === "server" ? (
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend flex items-center gap-2">
+										<HardDrive className="h-4 w-4" />
+										Select Database File from Server
+									</legend>
+									<div className="join w-full">
+										<input
+											type="text"
+											placeholder="e.g. /data/nzbdav/db.sqlite"
+											className="input join-item w-full"
+											value={selectedDbPath}
+											onChange={(e) => setSelectedDbPath(e.target.value)}
+											required={inputMethod === "server"}
+										/>
+										<button
+											type="button"
+											className="btn btn-primary join-item"
+											onClick={() => setIsFileBrowserOpen(true)}
+										>
+											Browse
+										</button>
+									</div>
+								</fieldset>
+							) : (
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend flex items-center gap-2">
+										<Upload className="h-4 w-4" />
+										Upload Database File
+									</legend>
+									<input
+										type="file"
+										accept=".sqlite,.db"
+										className="file-input file-input-bordered w-full"
+										onChange={handleFileUpload}
+										required={inputMethod === "upload"}
+									/>
+								</fieldset>
+							)}
+
+							<div className="card-actions mt-4 justify-end">
 								<button
-									type="button"
-									className="btn btn-primary join-item"
-									onClick={() => setIsFileBrowserOpen(true)}
+									type="submit"
+									className="btn btn-primary"
+									disabled={isLoading || !rootFolder || (inputMethod === "server" ? !selectedDbPath : !selectedFile)}
 								>
-									Browse
+									{isLoading ? (
+										<span className="loading loading-spinner" />
+									) : (
+										<Upload className="h-4 w-4" />
+									)}
+									Start Import
 								</button>
 							</div>
-						</fieldset>
-
-						<div className="card-actions mt-4 justify-end">
-							<button
-								type="submit"
-								className="btn btn-primary"
-								disabled={isLoading || !selectedDbPath || !rootFolder}
-							>
-								{isLoading ? (
-									<span className="loading loading-spinner" />
-								) : (
-									<Upload className="h-4 w-4" />
-								)}
-								Start Import
-							</button>
-						</div>
-					</form>
+						</form>
+					)}
 				</div>
 			</div>
 

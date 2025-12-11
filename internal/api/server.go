@@ -125,6 +125,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Import do not need user authentication
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/import/nzbdav", s.handleImportNzbdav)
+	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
+	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
 
 	// Apply global middleware
 	api.Use(cors.New())
