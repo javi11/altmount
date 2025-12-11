@@ -4,33 +4,44 @@ import (
 	"time"
 )
 
+const (
+	minInterval             = 1 * time.Hour // Absolute minimum interval
+	aggressiveCheckThreshold = 7 * 24 * time.Hour // Files younger than 7 days
+	dailyCheckThreshold     = 30 * 24 * time.Hour // Files between 7 and 30 days
+	aggressiveCheckInterval = 6 * time.Hour
+	dailyCheckInterval      = 24 * time.Hour
+	normalCheckInterval     = 90 * 24 * time.Hour // Files older than 30 days
+)
+
 // calculateInitialCheck calculates the first check time for a newly discovered file
-// Uses the formula: NextCheck = ReleaseDate + 2 * (NOW - ReleaseDate)
-// with a minimum interval of 1 hour
 func calculateInitialCheck(releaseDate time.Time) time.Time {
-	now := time.Now()
-	age := now.Sub(releaseDate)
-
-	// Enforce minimum interval of 1 hour
-	if age < 1*time.Hour {
-		age = 1 * time.Hour
-	}
-
-	// NextCheck = ReleaseDate + 2 * (NOW - ReleaseDate)
-	return releaseDate.Add(2 * age)
+	// Always schedule initial check immediately (with a small buffer)
+	return time.Now().Add(1 * time.Minute)
 }
 
 // calculateNextCheck calculates the next check time after a successful health check
-// Uses the exponential backoff formula: NextCheck = ReleaseDate + 2 * (LastCheck - ReleaseDate)
-// with a minimum interval of 1 hour
+// Implements a tiered scheduling strategy based on file age.
 func calculateNextCheck(releaseDate, lastCheck time.Time) time.Time {
-	timeSinceRelease := lastCheck.Sub(releaseDate)
+	age := lastCheck.Sub(releaseDate) // Age at the time of the last successful check
 
-	// Enforce minimum interval of 1 hour
-	if timeSinceRelease < 1*time.Hour {
-		timeSinceRelease = 1 * time.Hour
+	var interval time.Duration
+	if age < aggressiveCheckThreshold {
+		// For very new files, use their age as the interval but cap at 6 hours
+		if age < aggressiveCheckInterval {
+			interval = age
+		} else {
+			interval = aggressiveCheckInterval
+		}
+	} else if age < dailyCheckThreshold {
+		interval = dailyCheckInterval
+	} else {
+		interval = normalCheckInterval
 	}
 
-	// NextCheck = ReleaseDate + 2 * (LastCheck - ReleaseDate)
-	return releaseDate.Add(2 * timeSinceRelease)
+	// Ensure the interval is at least the absolute minimum
+	if interval < minInterval {
+		interval = minInterval
+	}
+
+	return lastCheck.Add(interval)
 }

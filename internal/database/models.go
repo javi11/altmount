@@ -12,6 +12,7 @@ const (
 	QueueStatusProcessing QueueStatus = "processing"
 	QueueStatusCompleted  QueueStatus = "completed"
 	QueueStatusFailed     QueueStatus = "failed"
+	QueueStatusPaused     QueueStatus = "paused"
 	QueueStatusFallback   QueueStatus = "fallback" // Sent to external SABnzbd as fallback
 )
 
@@ -86,6 +87,7 @@ type FileHealth struct {
 	// Health check scheduling fields
 	ReleaseDate      *time.Time `db:"release_date"`       // Cached from metadata for scheduling
 	ScheduledCheckAt *time.Time `db:"scheduled_check_at"` // Next check time
+	Priority         bool       `db:"priority"`           // Priority flag for health checks
 }
 
 // User represents a user account in the system

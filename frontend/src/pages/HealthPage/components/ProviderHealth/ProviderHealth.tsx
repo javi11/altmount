@@ -1,0 +1,177 @@
+import { Activity, AlertTriangle, CheckCircle2, Wifi, WifiOff } from "lucide-react";
+import { usePoolMetrics } from "../../../../hooks/useApi";
+import { formatBytes, formatRelativeTime } from "../../../../lib/utils";
+
+export function ProviderHealth() {
+	const { data, isLoading, error } = usePoolMetrics();
+
+	if (isLoading) {
+		return (
+			<div className="flex items-center justify-center p-8">
+				<span className="loading loading-spinner loading-lg text-primary"></span>
+			</div>
+		);
+	}
+
+	if (error) {
+		return (
+			<div className="alert alert-error">
+				<AlertTriangle className="h-6 w-6" />
+				<span>Failed to load provider metrics: {(error as Error).message}</span>
+			</div>
+		);
+	}
+
+	if (!data) {
+		return null;
+	}
+
+	const totalMaxConnections = data.providers.reduce((sum, provider) => sum + provider.max_connections, 0);
+	const totalUsedConnections = data.providers.reduce((sum, provider) => {
+		if (provider.state === "connected" || provider.state === "active") {
+			return sum + provider.used_connections;
+		}
+		return sum;
+	}, 0);
+
+	return (
+		<div className="space-y-6">
+			{/* Global Metrics Cards */}
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+				<div className="stat bg-base-100 shadow rounded-box">
+					<div className="stat-figure text-primary">
+						<Activity className="h-8 w-8" />
+					</div>
+					<div className="stat-title">Download Traffic</div>
+					<div className="stat-value text-primary text-2xl">{formatBytes(data.bytes_downloaded)}</div>
+					<div className="stat-desc font-mono">
+						{formatBytes(data.download_speed_bytes_per_sec)}/s
+					</div>
+				</div>
+
+				<div className="stat bg-base-100 shadow rounded-box">
+					<div className="stat-figure text-secondary">
+						<Wifi className="h-8 w-8" />
+					</div>
+					<div className="stat-title">Articles</div>
+					<div className="stat-value text-secondary text-2xl">
+						{data.articles_downloaded.toLocaleString()}
+					</div>
+					<div className="stat-desc">Downloaded</div>
+				</div>
+
+				<div className="stat bg-base-100 shadow rounded-box">
+					<div className="stat-figure text-error">
+						<AlertTriangle className="h-8 w-8" />
+					</div>
+					<div className="stat-title">Total Errors</div>
+					<div className="stat-value text-error text-2xl">{data.total_errors.toLocaleString()}</div>
+					<div className="stat-desc">Across all providers</div>
+				</div>
+
+				<div className="stat bg-base-100 shadow rounded-box">
+					<div className="stat-figure text-info">
+						<CheckCircle2 className="h-8 w-8" />
+					</div>
+					<div className="stat-title">Active Connections</div>
+					<div className="stat-value text-info text-2xl">
+						{totalUsedConnections}
+						<span className="text-lg text-base-content/50"> / {totalMaxConnections}</span>
+					</div>
+				</div>
+			</div>
+
+			{/* Provider Table */}
+			<div className="card bg-base-100 shadow-xl">
+				<div className="card-body p-0">
+					<div className="p-4 border-b border-base-200">
+						<h2 className="card-title text-lg">Provider Performance</h2>
+					</div>
+					<div className="overflow-x-auto">
+						<table className="table table-zebra">
+							<thead>
+								<tr>
+									<th>Provider Host</th>
+									<th>State</th>
+									<th>Connections</th>
+									<th>Errors (% of Total)</th>
+									<th>Last Activity</th>
+									<th>Failure Reason</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data.providers.map((provider) => (
+									<tr key={provider.id}>
+										<td className="font-medium">
+											<div className="flex flex-col">
+												<span>{provider.host}</span>
+												<span className="text-xs text-base-content/50 font-mono blur-sm hover:blur-none transition-all cursor-pointer">
+													{provider.username}
+												</span>
+											</div>
+										</td>
+										<td>
+											<div className="flex items-center gap-2">
+												{provider.state === "connected" || provider.state === "active" ? (
+													<span className="badge badge-success badge-sm gap-1">
+														<Wifi className="h-3 w-3" /> Connected
+													</span>
+												) : provider.state === "disconnected" ? (
+													<span className="badge badge-ghost badge-sm gap-1">
+														<WifiOff className="h-3 w-3" /> Disconnected
+													</span>
+												) : (
+													<span className="badge badge-warning badge-sm">
+														{provider.state}
+													</span>
+												)}
+											</div>
+										</td>
+										<td>
+											<div className="flex items-center gap-2">
+												<progress 
+													className="progress progress-primary w-20" 
+													value={provider.used_connections} 
+													max={provider.max_connections}
+												></progress>
+												<span className="text-sm font-mono">
+													{provider.used_connections}/{provider.max_connections}
+												</span>
+											</div>
+										</td>
+										<td>
+											<div className="flex flex-col">
+												<span className={`font-mono ${provider.error_count > 0 ? "text-error font-bold" : "text-success"}`}>
+													{provider.error_count.toLocaleString()}
+												</span>
+												{data.total_errors > 0 && provider.error_count > 0 && (
+													<span className="text-xs text-base-content/50">
+														{((provider.error_count / data.total_errors) * 100).toFixed(1)}% of total
+													</span>
+												)}
+											</div>
+										</td>
+										<td className="text-sm text-base-content/70">
+											{provider.last_successful_connect 
+												? formatRelativeTime(provider.last_successful_connect)
+												: "Never"}
+										</td>
+										<td>
+											{provider.failure_reason && (
+												<div className="tooltip tooltip-left text-error cursor-help" data-tip={provider.failure_reason}>
+													<span className="max-w-[200px] truncate block">
+														{provider.failure_reason}
+													</span>
+												</div>
+											)}
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}

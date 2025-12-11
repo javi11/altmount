@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
+	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
@@ -63,6 +64,8 @@ type Service struct {
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
+	arrsService     *arrs.Service                 // ARRs service for triggering scans
+	healthRepo      *database.HealthRepository    // Health repository for updating health status
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
 	log             *slog.Logger
@@ -70,6 +73,7 @@ type Service struct {
 	// Runtime state
 	mu      sync.RWMutex
 	running bool
+	paused  bool
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -85,7 +89,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -110,6 +114,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		processor:       processor,
 		rcloneClient:    rcloneClient,
 		configGetter:    configGetter,
+		healthRepo:      healthRepo,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
 		broadcaster:     broadcaster,
 		userRepo:        userRepo,
@@ -118,6 +123,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		cancel:          cancel,
 		cancelFuncs:     make(map[int64]context.CancelFunc),
 		scanInfo:        ScanInfo{Status: ScanStatusIdle},
+		paused:          false,
 	}
 
 	return service, nil
@@ -148,6 +154,29 @@ func (s *Service) Start(ctx context.Context) error {
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
 
 	return nil
+}
+
+// Pause pauses the queue processing
+func (s *Service) Pause() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.paused = true
+	s.log.InfoContext(context.Background(), "Import service paused")
+}
+
+// Resume resumes the queue processing
+func (s *Service) Resume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.paused = false
+	s.log.InfoContext(context.Background(), "Import service resumed")
+}
+
+// IsPaused returns whether the service is paused
+func (s *Service) IsPaused() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.paused
 }
 
 // Stop stops the NZB import service and all queue workers
@@ -206,6 +235,13 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 	} else {
 		s.log.InfoContext(context.Background(), "RClone client disabled")
 	}
+}
+
+// SetArrsService sets or updates the ARRs service
+func (s *Service) SetArrsService(service *arrs.Service) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.arrsService = service
 }
 
 // Database returns the database instance for processing
@@ -442,6 +478,10 @@ func (s *Service) workerLoop(workerID int) {
 	for {
 		select {
 		case <-ticker.C:
+			// Check if service is paused
+			if s.IsPaused() {
+				continue
+			}
 			s.processQueueItems(s.ctx, workerID)
 		case <-s.ctx.Done():
 			log.Info("Queue worker stopped")
@@ -627,6 +667,29 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	// Clear progress tracking
 	if s.broadcaster != nil {
 		s.broadcaster.ClearProgress(int(item.ID))
+	}
+
+	// Trigger ARR download scan if applicable
+	if s.arrsService != nil && item.Category != nil {
+		category := strings.ToLower(*item.Category)
+		// Determine instance type based on category
+		// Note: This assumes standard "tv" and "movies" categories.
+		// Ideally we should match against configured categories in config.SABnzbd.Categories
+		if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
+			s.arrsService.TriggerDownloadScan(ctx, "sonarr")
+		} else if category == "movies" || strings.Contains(category, "movie") {
+			s.arrsService.TriggerDownloadScan(ctx, "radarr")
+		}
+	}
+
+	// Remove any existing health record for this file (in case it was corrupted and now replaced)
+	if s.healthRepo != nil {
+		// Calculate the mount relative path
+		// resultingPath is the virtual path (e.g. "movies/Movie (Year)/Movie.mkv")
+		// We can try to delete any health record matching this path
+		if err := s.healthRepo.DeleteHealthRecord(ctx, resultingPath); err == nil {
+			slog.InfoContext(ctx, "Removed health record for replaced file", "path", resultingPath)
+		}
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)

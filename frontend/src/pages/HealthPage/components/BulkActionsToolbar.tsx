@@ -1,21 +1,25 @@
-import { RefreshCw, Trash2 } from "lucide-react";
+import { RefreshCw, Trash2, Wrench } from "lucide-react";
 
 interface BulkActionsToolbarProps {
 	selectedCount: number;
 	isRestartPending: boolean;
 	isDeletePending: boolean;
+	isRepairPending: boolean;
 	onClearSelection: () => void;
 	onBulkRestart: () => void;
 	onBulkDelete: () => void;
+	onBulkRepair: () => void;
 }
 
 export function BulkActionsToolbar({
 	selectedCount,
 	isRestartPending,
 	isDeletePending,
+	isRepairPending,
 	onClearSelection,
 	onBulkRestart,
 	onBulkDelete,
+	onBulkRepair,
 }: BulkActionsToolbarProps) {
 	if (selectedCount === 0) {
 		return null;
@@ -34,6 +38,15 @@ export function BulkActionsToolbar({
 						</button>
 					</div>
 					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							className="btn btn-warning btn-sm"
+							onClick={onBulkRepair}
+							disabled={isRepairPending}
+						>
+							<Wrench className="h-4 w-4" />
+							Repair Selected
+						</button>
 						<button
 							type="button"
 							className="btn btn-info btn-sm"

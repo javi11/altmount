@@ -412,7 +412,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 		rc := Content{
 			InternalPath: normalizedName,
 			Filename:     filepath.Base(normalizedName),
-			Size:         af.TotalPackedSize,
+			Size:         af.TotalUnpackedSize,
 			AesKey:       aesKey,
 			AesIV:        aesIV,
 		}

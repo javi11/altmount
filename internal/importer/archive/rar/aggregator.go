@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -57,40 +59,16 @@ func calculateSegmentsToValidate(rarContents []Content, samplePercentage int) in
 }
 
 // hasAllowedFiles checks if any files within RAR archive contents match allowed extensions
-// If allowedExtensions is empty, returns true (all files allowed)
+// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
 func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
 	for _, content := range rarContents {
 		// Skip directories
 		if content.IsDirectory {
 			continue
 		}
 		// Check both the internal path and filename
-		if isAllowedFile(content.InternalPath, allowedExtensions) || isAllowedFile(content.Filename, allowedExtensions) {
-			return true
-		}
-	}
-	return false
-}
-
-// isAllowedFile checks if a filename has an allowed extension
-func isAllowedFile(filename string, allowedExtensions []string) bool {
-	if filename == "" {
-		return false
-	}
-
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
-	ext := strings.ToLower(filepath.Ext(filename))
-	for _, allowedExt := range allowedExtensions {
-		if ext == strings.ToLower(allowedExt) {
+		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
+		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
 			return true
 		}
 	}
@@ -175,11 +153,18 @@ func ProcessArchive(
 			)
 		}
 
+		// For AES-encrypted files, segments contain encrypted data which is padded
+		// to 16-byte boundary. Calculate expected segment size accordingly.
+		validationSize := rarContent.Size
+		if len(rarContent.AesKey) > 0 {
+			validationSize = aes.EncryptedSize(rarContent.Size)
+		}
+
 		// Validate segments with real-time progress updates
 		if err := validation.ValidateSegmentsForFile(
 			ctx,
 			baseFilename,
-			rarContent.Size,
+			validationSize,
 			rarContent.Segments,
 			metapb.Encryption_NONE,
 			poolManager,

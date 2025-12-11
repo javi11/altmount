@@ -108,6 +108,7 @@ export interface FileHealth {
 	created_at: string;
 	updated_at: string;
 	scheduled_check_at?: string;
+	priority: boolean;
 }
 
 export interface HealthStats {

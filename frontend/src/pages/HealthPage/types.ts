@@ -9,5 +9,5 @@ export interface HealthCheckForm {
 	priority: boolean;
 }
 
-export type SortBy = "file_path" | "created_at" | "status";
+export type SortBy = "file_path" | "created_at" | "status" | "priority";
 export type SortOrder = "asc" | "desc";

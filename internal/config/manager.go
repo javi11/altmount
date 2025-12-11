@@ -163,6 +163,7 @@ type HealthConfig struct {
 	CleanupOrphanedFiles          *bool   `yaml:"cleanup_orphaned_files" mapstructure:"cleanup_orphaned_files" json:"cleanup_orphaned_files,omitempty"`
 	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	MaxConcurrentJobs             int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
 	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
 	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 	LibrarySyncConcurrency        int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
@@ -593,6 +594,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.MaxConnectionsForHealthChecks <= 0 {
 		return fmt.Errorf("health max_connections_for_health_checks must be greater than 0")
+	}
+	if c.Health.MaxConcurrentJobs <= 0 {
+		return fmt.Errorf("health max_concurrent_jobs must be greater than 0")
 	}
 	if c.Health.LibrarySyncIntervalMinutes < 0 {
 		return fmt.Errorf("health library_sync_interval_minutes must be non-negative")
@@ -1129,6 +1133,7 @@ func DefaultConfig(configDir ...string) *Config {
 			CleanupOrphanedFiles:          &cleanupOrphanedFiles, // Disabled by default
 			CheckIntervalSeconds:          5,
 			MaxConnectionsForHealthChecks: 5,
+			MaxConcurrentJobs:             1,   // Default: 1 concurrent job
 			SegmentSamplePercentage:       5,   // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:    360, // Default: sync every 6 hours
 		},

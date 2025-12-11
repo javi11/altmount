@@ -221,6 +221,17 @@ export const useRestartBulkHealthItems = () => {
 	});
 };
 
+export const useRepairBulkHealthItems = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (filePaths: string[]) => apiClient.repairBulkHealthItems(filePaths),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
 export const useRetryHealthItem = () => {
 	const queryClient = useQueryClient();
 

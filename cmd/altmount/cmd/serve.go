@@ -103,7 +103,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	progressBroadcaster := progress.NewProgressBroadcaster()
 	defer progressBroadcaster.Close()
 
-	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, repos.UserRepo)
+	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, repos.UserRepo, repos.HealthRepo)
 	if err != nil {
 		return err
 	}
@@ -121,6 +121,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	authService := setupAuthService(ctx, repos.UserRepo)
 
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
+	// Wire ARRs service into importer for instant import triggers
+	importerService.SetArrsService(arrsService)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster)
 
