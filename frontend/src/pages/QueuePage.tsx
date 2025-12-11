@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
-import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
@@ -491,9 +490,6 @@ export function QueuePage() {
 				</div>
 			</div>
 
-			{/* Manual Scan Section */}
-			<ManualScanSection />
-
 			{/* Drag & Drop Upload Section */}
 			<DragDropUpload />
 
@@ -503,7 +499,10 @@ export function QueuePage() {
 					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Total</div>
 						<div className="stat-value text-primary">
-							{stats.total_queued + stats.total_processing + stats.total_completed + stats.total_failed}
+							{stats.total_queued +
+								stats.total_processing +
+								stats.total_completed +
+								stats.total_failed}
 						</div>
 					</div>
 					<div className="stat rounded-box bg-base-100 shadow">

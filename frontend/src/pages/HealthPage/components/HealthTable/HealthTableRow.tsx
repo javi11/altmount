@@ -1,4 +1,4 @@
-import { Heart, HeartCrack, Wrench, Clock, Loader } from "lucide-react";
+import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
 import type { FileHealth } from "../../../../types/api";
@@ -51,7 +51,6 @@ export function HealthTableRow({
 			statusIcon = <Loader className="h-4 w-4 animate-spin" />;
 			iconColorClass = "text-warning";
 			break;
-		case "pending":
 		default:
 			statusIcon = <Clock className="h-4 w-4" />;
 			iconColorClass = "text-base-content/50";

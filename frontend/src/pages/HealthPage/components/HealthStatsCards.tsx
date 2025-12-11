@@ -51,7 +51,9 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 			<div className="stat rounded-box bg-base-100 shadow">
 				<div className="stat-title">Corrupted</div>
 				<div className="stat-value text-error">{stats.corrupted}</div>
-				<div className="stat-desc text-error font-bold">{corruptedPercentage}% - Require action</div>
+				<div className="stat-desc font-bold text-error">
+					{corruptedPercentage}% - Require action
+				</div>
 			</div>
 		</div>
 	);

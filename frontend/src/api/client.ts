@@ -582,7 +582,7 @@ export class APIClient {
 	async getSystemBrowse(path?: string) {
 		const searchParams = new URLSearchParams();
 		if (path) searchParams.set("path", path);
-		
+
 		const query = searchParams.toString();
 		return this.request<SystemBrowseResponse>(`/system/browse${query ? `?${query}` : ""}`);
 	}

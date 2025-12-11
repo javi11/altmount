@@ -1,15 +1,8 @@
-import {
-	AlertTriangle,
-	File,
-	Folder,
-	RefreshCw,
-	Upload,
-	X,
-} from "lucide-react";
+import { AlertTriangle, File, Folder, RefreshCw, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSystemBrowse } from "../../hooks/useApi";
 import { formatBytes } from "../../lib/utils";
-import { type FileEntry } from "../../types/api";
+import type { FileEntry } from "../../types/api";
 
 export interface FileBrowserModalProps {
 	isOpen: boolean;
@@ -119,7 +112,7 @@ export function FileBrowserModal({
 				<div className="overflow-x-auto">
 					{isLoading ? (
 						<div className="flex justify-center p-4">
-							<span className="loading loading-spinner"></span>
+							<span className="loading loading-spinner" />
 						</div>
 					) : error ? (
 						<div className="alert alert-error">
@@ -130,7 +123,7 @@ export function FileBrowserModal({
 						<table className="table-zebra table-sm table">
 							<thead>
 								<tr>
-									<th></th> {/* Icon */}
+									<th /> {/* Icon */}
 									<th>Name</th>
 									<th>Size</th>
 									<th>Modified</th>
