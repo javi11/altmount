@@ -2,6 +2,7 @@ package api
 
 import (
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -83,7 +84,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 		})
 	}
 
-	// Set JWT cookie using Fiber's native API
+	// Set JWT cookie using Fiber's native API  (merged config)
 	err = s.setJWTCookie(c, tokenString)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -453,38 +454,80 @@ func (s *Server) mapUserToResponse(user *database.User) *UserResponse {
 	return response
 }
 
-// setJWTCookie sets the JWT cookie using Fiber's native cookie handling
+// sameSiteToString converts http.SameSite to Fiber cookie SameSite string
+func sameSiteToString(sameSite http.SameSite) string {
+	switch sameSite {
+	case http.SameSiteDefaultMode:
+		return "Lax" // Default mode uses Lax behavior
+	case http.SameSiteStrictMode:
+		return "Strict"
+	case http.SameSiteLaxMode:
+		return "Lax"
+	case http.SameSiteNoneMode:
+		return "None"
+	default:
+		return "Lax" // Fallback for safety
+	}
+}
+
+// mergeAuthConfig merges env config with service config
+func mergeAuthConfig(serviceCfg, envCfg *auth.Config) *auth.Config {
+	merged := *serviceCfg
+
+	if envCfg.CookieDomain != "" {
+		merged.CookieDomain = envCfg.CookieDomain
+	}
+	if envCfg.CookieSecure {
+		merged.CookieSecure = envCfg.CookieSecure
+	}
+	if envCfg.CookieSameSite != http.SameSiteDefaultMode {
+		merged.CookieSameSite = envCfg.CookieSameSite
+	}
+	if envCfg.TokenDuration != 0 {
+		merged.TokenDuration = envCfg.TokenDuration
+	}
+
+	return &merged
+}
+
+// setJWTCookie sets the JWT cookie using Fiber's native cookie handling (merged config)
 func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
-	config := auth.LoadConfigFromEnv()
+	serviceCfg := s.authService.GetConfig()
+	envCfg := auth.LoadConfigFromEnv()
+
+	cfg := mergeAuthConfig(serviceCfg, envCfg)
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT", // Default JWT cookie name
 		Value:    tokenString,
 		Path:     "/",
-		Domain:   config.CookieDomain,
-		Expires:  time.Now().Add(config.TokenDuration),
-		Secure:   config.CookieSecure,
+		Domain:   cfg.CookieDomain,
+		Expires:  time.Now().Add(cfg.TokenDuration),
+		Secure:   cfg.CookieSecure,
 		HTTPOnly: true,
-		SameSite: "Lax", // Use Lax for Safari compatibility
+		SameSite: sameSiteToString(cfg.CookieSameSite),
 	}
 
 	c.Cookie(cookie)
 	return nil
 }
 
-// clearJWTCookie clears the JWT cookie using Fiber's native cookie handling
+// clearJWTCookie clears the JWT cookie using Fiber's native cookie handling (merged config)
 func (s *Server) clearJWTCookie(c *fiber.Ctx) {
-	config := auth.LoadConfigFromEnv()
+	serviceCfg := s.authService.GetConfig()
+	envCfg := auth.LoadConfigFromEnv()
+
+	cfg := mergeAuthConfig(serviceCfg, envCfg)
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT",
 		Value:    "",
 		Path:     "/",
-		Domain:   config.CookieDomain,
+		Domain:   cfg.CookieDomain,
 		Expires:  time.Now().Add(-time.Hour), // Expire in the past
-		Secure:   config.CookieSecure,
+		Secure:   cfg.CookieSecure,
 		HTTPOnly: true,
-		SameSite: "Lax",
+		SameSite: sameSiteToString(cfg.CookieSameSite),
 	}
 
 	c.Cookie(cookie)

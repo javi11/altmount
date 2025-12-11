@@ -21,6 +21,7 @@ import (
 type Service struct {
 	authService *auth.Service
 	userRepo    *database.UserRepository
+	config      *Config
 }
 
 // Config represents authentication service configuration
@@ -45,7 +46,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		TokenDuration:     24 * time.Hour, // 24 hours
-		CookieDomain:      "localhost",
+		CookieDomain:      "",                   // Empty string allows browser to use current domain
 		CookieSecure:      false,                // true for production
 		CookieSameSite:    http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
 		DirectAuthEnabled: true,
@@ -93,17 +94,26 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 	}
 
 	// Create auth service options
+	// Use a fallback for URL construction if CookieDomain is empty
+	urlDomain := config.CookieDomain
+	if urlDomain == "" {
+		urlDomain = "localhost"
+	}
+
 	opts := auth.Opts{
 		SecretReader: token.SecretFunc(func(string) (string, error) {
 			return config.JWTSecret, nil
 		}),
-		TokenDuration:  config.TokenDuration,
-		CookieDuration: config.TokenDuration,
-		DisableXSRF:    false, // Enable XSRF protection
-		SecureCookies:  config.CookieSecure,
-		Issuer:         config.Issuer,
-		URL:            "http://" + config.CookieDomain + ":8080",
-		AvatarStore:    avatar.NewNoOp(), // No avatar storage for now
+		TokenDuration:   config.TokenDuration,
+		CookieDuration:  config.TokenDuration,
+		DisableXSRF:     false, // Enable XSRF protection
+		SecureCookies:   config.CookieSecure,
+		JWTCookieName:   "JWT",
+		JWTCookieDomain: config.CookieDomain,
+		SameSiteCookie:  config.CookieSameSite,
+		Issuer:          config.Issuer,
+		URL:             "http://" + urlDomain + ":8080",
+		AvatarStore:     avatar.NewNoOp(), // No avatar storage for now
 		ClaimsUpd: token.ClaimsUpdFunc(func(claims token.Claims) token.Claims {
 			// Add audience
 			if claims.Audience == nil {
@@ -118,6 +128,7 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 	service := &Service{
 		authService: authService,
 		userRepo:    userRepo,
+		config:      config,
 	}
 
 	return service, nil
@@ -141,6 +152,11 @@ func (s *Service) AuthService() *auth.Service {
 // TokenService returns the token service for JWT operations
 func (s *Service) TokenService() *token.Service {
 	return s.authService.TokenService()
+}
+
+// GetConfig returns the authentication configuration
+func (s *Service) GetConfig() *Config {
+	return s.config
 }
 
 // CreateOrUpdateUser creates or updates a user based on token claims
