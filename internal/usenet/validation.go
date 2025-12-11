@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sync/atomic"
-	"time"
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
