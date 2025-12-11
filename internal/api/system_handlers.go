@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -352,5 +353,65 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
+	})
+}
+
+// FileEntry represents a file or directory in the system browser
+type FileEntry struct {
+	Name    string    `json:"name"`
+	Path    string    `json:"path"`
+	IsDir   bool      `json:"is_dir"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mod_time"`
+}
+
+// handleSystemBrowse handles GET /api/system/browse
+func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
+	path := c.Query("path")
+	if path == "" {
+		// Default to root or current working directory
+		var err error
+		path, err = os.Getwd()
+		if err != nil {
+			path = "/"
+		}
+	}
+
+	// Read directory
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to read directory",
+			"details": err.Error(),
+		})
+	}
+
+	var files []FileEntry
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		// Skip hidden files if desired, but for system browsing we might want them
+		// For now, let's keep them
+
+		files = append(files, FileEntry{
+			Name:    entry.Name(),
+			Path:    filepath.Join(path, entry.Name()),
+			IsDir:   entry.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"current_path": path,
+			"parent_path":  filepath.Dir(path),
+			"files":        files,
+		},
 	})
 }

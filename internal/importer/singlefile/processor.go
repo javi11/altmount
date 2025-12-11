@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -78,12 +77,6 @@ func ProcessSingleFile(
 		file.ReleaseDate.Unix(),
 		par2Refs,
 	)
-
-	// Delete old metadata if exists (simple collision handling)
-	metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
-	if _, err := os.Stat(metadataPath); err == nil {
-		_ = metadataService.DeleteFileMetadata(virtualFilePath)
-	}
 
 	// Write file metadata to disk
 	if err := metadataService.WriteFileMetadata(virtualFilePath, fileMeta); err != nil {

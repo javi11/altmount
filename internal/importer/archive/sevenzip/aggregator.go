@@ -22,6 +22,8 @@ import (
 var (
 	// ErrNoAllowedFiles indicates that the archive contains no files matching allowed extensions
 	ErrNoAllowedFiles = errors.New("archive contains no files with allowed extensions")
+	// ErrNoFilesProcessed indicates that no files were successfully processed (all files failed validation)
+	ErrNoFilesProcessed = errors.New("no files were successfully processed (all files failed validation)")
 )
 
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
@@ -128,6 +130,7 @@ func ProcessArchive(
 
 	// Process extracted files with segment-based progress tracking
 	// 80-95% for validation loop, 95-100% for metadata finalization
+	filesProcessed := 0
 	for _, sevenZipContent := range sevenZipContents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
@@ -213,6 +216,13 @@ func ProcessArchive(
 			"size", sevenZipContent.Size,
 			"segments", len(sevenZipContent.Segments),
 			"validated_segments", fileSegmentsValidated)
+
+		filesProcessed++
+	}
+
+	// If no files were processed but we had content, fail the import
+	if filesProcessed == 0 && len(sevenZipContents) > 0 {
+		return ErrNoFilesProcessed
 	}
 
 	// Ensure validation progress is at 95% (end of validation range)
@@ -226,7 +236,7 @@ func ProcessArchive(
 		validationProgressTracker.UpdateAbsolute(100)
 	}
 
-	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", len(sevenZipContents))
+	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", filesProcessed)
 
 	return nil
 }

@@ -192,15 +192,22 @@ func (proc *Processor) processSingleFile(
 		return "", fmt.Errorf("no regular files to process")
 	}
 
-	// Ensure directory exists
-	if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+	// Create NZB folder (always put single files in a folder to handle obfuscation and keep structure clean)
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	if err != nil {
 		return "", err
 	}
+
+	// Rename the file to match the NZB name to handle obfuscated filenames
+	nzbName := filepath.Base(nzbPath)
+	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	fileExt := filepath.Ext(regularFiles[0].Filename)
+	regularFiles[0].Filename = releaseName + fileExt
 
 	// Process the single file
 	result, err := singlefile.ProcessSingleFile(
 		ctx,
-		virtualDir,
+		nzbFolder,
 		regularFiles[0],
 		par2Files,
 		nzbPath,
@@ -225,33 +232,6 @@ func (proc *Processor) processMultiFile(
 	par2Files []parser.ParsedFile,
 	nzbPath string,
 ) (string, error) {
-	// If we only have one regular file, we don't need to create a folder for the NZB
-	// This happens often with some indexers that mark single files as multi-file because they have par2 files
-	if len(regularFiles) == 1 {
-		// Just ensure the virtual directory exists
-		if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
-			return "", err
-		}
-
-		// Process the single regular file directly in the virtualDir
-		if err := multifile.ProcessRegularFiles(
-			ctx,
-			virtualDir,
-			regularFiles,
-			par2Files,
-			nzbPath,
-			proc.metadataService,
-			proc.poolManager,
-			proc.maxImportConnections,
-			proc.segmentSamplePercentage,
-			proc.allowedFileExtensions,
-		); err != nil {
-			return "", err
-		}
-
-		return virtualDir, nil
-	}
-
 	// Create NZB folder for multiple files
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
 	if err != nil {

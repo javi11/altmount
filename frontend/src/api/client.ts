@@ -15,6 +15,7 @@ import type {
 	QueueStats,
 	SABnzbdAddResponse,
 	ScanStatusResponse,
+	SystemBrowseResponse,
 	User,
 	UserAdminUpdateRequest,
 } from "../types/api";
@@ -576,6 +577,14 @@ export class APIClient {
 			method: "POST",
 			body: JSON.stringify({ force }),
 		});
+	}
+
+	async getSystemBrowse(path?: string) {
+		const searchParams = new URLSearchParams();
+		if (path) searchParams.set("path", path);
+		
+		const query = searchParams.toString();
+		return this.request<SystemBrowseResponse>(`/system/browse${query ? `?${query}` : ""}`);
 	}
 
 	// Provider endpoints

@@ -74,3 +74,4 @@ altmount.db*
 
 # Docker
 **/docker-compose*.yml
+db.sqlite

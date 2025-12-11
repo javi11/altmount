@@ -116,6 +116,8 @@ export interface HealthStats {
 	pending: number;
 	healthy: number;
 	corrupted: number;
+	repair_triggered: number;
+	checking: number;
 }
 
 export interface HealthRetryRequest {
@@ -308,4 +310,19 @@ export interface SABnzbdAddResponse {
 export interface SABnzbdResponse {
 	status: boolean;
 	error?: string;
+}
+
+// System Browse types
+export interface FileEntry {
+	name: string;
+	path: string;
+	is_dir: boolean;
+	size: number;
+	mod_time: string;
+}
+
+export interface SystemBrowseResponse {
+	current_path: string;
+	parent_path: string;
+	files: FileEntry[];
 }

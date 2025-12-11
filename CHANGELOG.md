@@ -1,30 +1,15 @@
 # Changelog
 
-## v0.6.0-alpha6 - 2025-12-05
-
-This update represents a major overhaul of the `altmount` Health and Import systems, focusing on **concurrency**, **observability**, and **automation**. It transforms the Health system from a passive scanner into an active, parallelized repair engine with deep insights into provider performance.
+## v0.6.0-alpha7 - 2025-12-09
 
 ### ✨ New Features
 
-*   **Provider Health Dashboard:**
-    *   New dedicated tab in the Health UI.
-    *   **Real-time Metrics:** View download traffic, total articles, and global error counts.
-    *   **Connection Monitoring:** See "Active Connections" vs "Max Connections" (e.g., `45 / 100`).
-    *   **Error Attribution:** Identifies which specific Usenet provider is causing the *most* errors relative to others (error percentage relative to total errors).
-    *   **Privacy:** Provider usernames are blurred by default and revealed on hover.
-
-*   **Instant Import ("Push" Notifications):**
-    *   `altmount` now proactively notifies Sonarr/Radarr immediately after a download completes.
-    *   Bypasses the standard 1-minute polling interval, resulting in near-instant imports.
-    *   Supports both `DownloadedEpisodesScan` (TV) and `DownloadedMoviesScan` (Movies).
-
-*   **Bulk Repair Actions:**
-    *   Added ability to select multiple "Corrupted" files in the UI.
-    *   New **"Repair Selected"** toolbar action triggers redownloads for all selected items in one go.
-
-*   **Concurrent Health Checks:**
-    *   Health checking is now parallelized.
-    *   Configurable `max_concurrent_jobs` (default: 1, recommended: 5-15) allows checking multiple files simultaneously, significantly clearing the "Pending" queue faster.
+*   **NZBDav Database Import:**
+    *   Introduced a new feature to import releases directly from an existing NZBDav SQLite database.
+    *   **UI Integration:** A new "Import" page in the UI allows users to upload their `db.sqlite` file.
+    *   **Customizable Output:** Users can specify a target "Root Folder Name" (e.g., "MyLibrary"). Imported movies will be placed under `[RootFolder]/movies` and TV series under `[RootFolder]/tv`.
+    *   **Automatic Categorization:** The importer automatically categorizes releases as "movies" or "tv" based on release names and paths found in the NZBDav database.
+    *   **Queue Integration:** All imported releases are added to the existing `altmount` import queue for processing, ensuring proper metadata generation and file handling.
 
 ### ⚡ Improvements & Logic Changes
 
