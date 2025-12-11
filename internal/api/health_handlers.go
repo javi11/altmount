@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 )
 
@@ -410,6 +411,12 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 
 	// Determine final path for ARR rescan
 	pathForRescan := libraryPath
+	if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		pathForRescan = filepath.Join(*cfg.Import.ImportDir, item.FilePath)
+		slog.InfoContext(ctx, "Using symlink import path for manual repair",
+			"file_path", item.FilePath,
+			"symlink_path", pathForRescan)
+	}
 	if pathForRescan == "" {
 		// Fallback to mount path if no library path found
 		pathForRescan = filepath.Join(cfg.MountPath, item.FilePath)
