@@ -414,6 +414,19 @@ export const useUploadToQueue = () => {
 	});
 };
 
+export const useAddTestQueueItem = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (size: "100MB" | "1GB" | "10GB") => apiClient.addTestQueueItem(size),
+		onSuccess: () => {
+			// Invalidate queue data to show newly added test file
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
 // System Browse hooks
 export const useSystemBrowse = (path?: string) => {
 	return useQuery({

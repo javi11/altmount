@@ -700,6 +700,13 @@ export class APIClient {
 			headers: {},
 		});
 	}
+
+	async addTestQueueItem(size: "100MB" | "1GB" | "10GB") {
+		return this.request<APIResponse<QueueItem>>("/queue/test", {
+			method: "POST",
+			body: JSON.stringify({ size }),
+		});
+	}
 }
 
 // Export a default instance

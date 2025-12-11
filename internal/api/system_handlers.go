@@ -338,16 +338,17 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 
 	// Map pool metrics to API response format
 	response := PoolMetricsResponse{
-		BytesDownloaded:          metrics.BytesDownloaded,
-		BytesUploaded:            metrics.BytesUploaded,
-		ArticlesDownloaded:       metrics.ArticlesDownloaded,
-		ArticlesPosted:           metrics.ArticlesPosted,
-		TotalErrors:              metrics.TotalErrors,
-		ProviderErrors:           metrics.ProviderErrors,
-		DownloadSpeedBytesPerSec: metrics.DownloadSpeedBytesPerSec,
-		UploadSpeedBytesPerSec:   metrics.UploadSpeedBytesPerSec,
-		Timestamp:                metrics.Timestamp,
-		Providers:                providers,
+		BytesDownloaded:             metrics.BytesDownloaded,
+		BytesUploaded:               metrics.BytesUploaded,
+		ArticlesDownloaded:          metrics.ArticlesDownloaded,
+		ArticlesPosted:              metrics.ArticlesPosted,
+		TotalErrors:                 metrics.TotalErrors,
+		ProviderErrors:              metrics.ProviderErrors,
+		DownloadSpeedBytesPerSec:    metrics.DownloadSpeedBytesPerSec,
+		MaxDownloadSpeedBytesPerSec: metrics.MaxDownloadSpeedBytesPerSec,
+		UploadSpeedBytesPerSec:      metrics.UploadSpeedBytesPerSec,
+		Timestamp:                   metrics.Timestamp,
+		Providers:                   providers,
 	}
 
 	return c.Status(200).JSON(fiber.Map{

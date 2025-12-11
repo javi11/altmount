@@ -11,15 +11,16 @@ import (
 
 // MetricsSnapshot represents pool metrics at a point in time with calculated values
 type MetricsSnapshot struct {
-	BytesDownloaded          int64            `json:"bytes_downloaded"`
-	BytesUploaded            int64            `json:"bytes_uploaded"`
-	ArticlesDownloaded       int64            `json:"articles_downloaded"`
-	ArticlesPosted           int64            `json:"articles_posted"`
-	TotalErrors              int64            `json:"total_errors"`
-	ProviderErrors           map[string]int64 `json:"provider_errors"`
-	DownloadSpeedBytesPerSec float64          `json:"download_speed_bytes_per_sec"`
-	UploadSpeedBytesPerSec   float64          `json:"upload_speed_bytes_per_sec"`
-	Timestamp                time.Time        `json:"timestamp"`
+	BytesDownloaded             int64            `json:"bytes_downloaded"`
+	BytesUploaded               int64            `json:"bytes_uploaded"`
+	ArticlesDownloaded          int64            `json:"articles_downloaded"`
+	ArticlesPosted              int64            `json:"articles_posted"`
+	TotalErrors                 int64            `json:"total_errors"`
+	ProviderErrors              map[string]int64 `json:"provider_errors"`
+	DownloadSpeedBytesPerSec    float64          `json:"download_speed_bytes_per_sec"`
+	MaxDownloadSpeedBytesPerSec float64          `json:"max_download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec      float64          `json:"upload_speed_bytes_per_sec"`
+	Timestamp                   time.Time        `json:"timestamp"`
 }
 
 // MetricsTracker tracks pool metrics over time and calculates rates
@@ -30,6 +31,7 @@ type MetricsTracker struct {
 	sampleInterval    time.Duration
 	retentionPeriod   time.Duration
 	calculationWindow time.Duration // Window for speed calculations (shorter than retention for accuracy)
+	maxDownloadSpeed  float64
 	cancel            context.CancelFunc
 	logger            *slog.Logger
 }
@@ -86,8 +88,8 @@ func (mt *MetricsTracker) Stop() {
 
 // GetSnapshot returns the current metrics with calculated speeds
 func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
-	mt.mu.RLock()
-	defer mt.mu.RUnlock()
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
 
 	// Get current snapshot from pool
 	poolSnapshot := mt.pool.GetMetricsSnapshot()
@@ -95,16 +97,22 @@ func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
 	// Calculate speeds
 	downloadSpeed, uploadSpeed := mt.calculateSpeeds(poolSnapshot)
 
+	// Update max speed
+	if downloadSpeed > mt.maxDownloadSpeed {
+		mt.maxDownloadSpeed = downloadSpeed
+	}
+
 	return MetricsSnapshot{
-		BytesDownloaded:          poolSnapshot.BytesDownloaded,
-		BytesUploaded:            poolSnapshot.BytesUploaded,
-		ArticlesDownloaded:       poolSnapshot.ArticlesDownloaded,
-		ArticlesPosted:           poolSnapshot.ArticlesPosted,
-		TotalErrors:              poolSnapshot.TotalErrors,
-		ProviderErrors:           poolSnapshot.ProviderErrors,
-		DownloadSpeedBytesPerSec: downloadSpeed,
-		UploadSpeedBytesPerSec:   uploadSpeed,
-		Timestamp:                poolSnapshot.Timestamp,
+		BytesDownloaded:             poolSnapshot.BytesDownloaded,
+		BytesUploaded:               poolSnapshot.BytesUploaded,
+		ArticlesDownloaded:          poolSnapshot.ArticlesDownloaded,
+		ArticlesPosted:              poolSnapshot.ArticlesPosted,
+		TotalErrors:                 poolSnapshot.TotalErrors,
+		ProviderErrors:              poolSnapshot.ProviderErrors,
+		DownloadSpeedBytesPerSec:    downloadSpeed,
+		MaxDownloadSpeedBytesPerSec: mt.maxDownloadSpeed,
+		UploadSpeedBytesPerSec:      uploadSpeed,
+		Timestamp:                   poolSnapshot.Timestamp,
 	}
 }
 

@@ -313,6 +313,7 @@ export interface PoolMetrics {
 	total_errors: number;
 	provider_errors: Record<string, number>;
 	download_speed_bytes_per_sec: number;
+	max_download_speed_bytes_per_sec: number;
 	upload_speed_bytes_per_sec: number;
 	timestamp: string;
 	providers: ProviderStatus[];
