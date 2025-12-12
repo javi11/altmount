@@ -198,18 +198,37 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	workerWg.Wait()
 	duration := time.Since(startTime)
 
+	var speed float64
 	if duration.Seconds() == 0 {
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data": ProviderSpeedTestResponse{
-				SpeedMBps: 0,
-				Duration:  0,
-			},
-		})
+		speed = 0
+	} else {
+		mb := float64(totalBytes) / 1024 / 1024
+		speed = mb / duration.Seconds()
 	}
 
-	mb := float64(totalBytes) / 1024 / 1024
-	speed := mb / duration.Seconds()
+	// Update provider config with speed test result
+	now := time.Now()
+	// Create a copy of the config to modify
+	currentConfig := s.configManager.GetConfig()
+	newConfig := currentConfig.DeepCopy() // DeepCopy ensures we don't modify the live config directly
+
+	// Find the provider in the new config and update its fields
+	for i, p := range newConfig.Providers {
+		if p.ID == providerID {
+			newConfig.Providers[i].LastSpeedTestMbps = speed
+			newConfig.Providers[i].LastSpeedTestTime = &now
+			break
+		}
+	}
+
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
+		slog.Error("Failed to update provider speed test result in config", "provider_id", providerID, "err", err)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to save speed test result",
+			"details": err.Error(),
+		})
+	}
 
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
@@ -219,3 +238,4 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		},
 	})
 }
+

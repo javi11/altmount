@@ -10,6 +10,7 @@ import {
 	WifiOff,
 } from "lucide-react";
 import { useState } from "react";
+import { formatDistanceToNowStrict } from "date-fns";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
@@ -57,12 +58,12 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 		});
 
 		try {
-			const result = await testProviderSpeed.mutateAsync(provider.id);
+			await testProviderSpeed.mutateAsync(provider.id);
 			showToast({
 				type: "success",
 				title: "Speed Test Completed",
-				message: `${provider.host}: ${result.speed_mbps.toFixed(2)} MB/s`,
-				duration: 8000,
+				message: `Speed test for ${provider.host} completed. Results are updated on the card.`,
+				duration: 5000,
 			});
 		} catch (error) {
 			console.error("Failed to test speed:", error);
@@ -399,6 +400,27 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													)}
 												</div>
 											</div>
+											{provider.last_speed_test_mbps !== undefined && (
+												<div>
+													<span className="text-base-content/60">Last Speed Test:</span>
+													<div className="font-mono">
+														{provider.last_speed_test_mbps.toFixed(2)} MB/s
+														{provider.last_speed_test_time && (
+															<span className="text-base-content/50 text-xs">
+																{" "}
+																(
+																{formatDistanceToNowStrict(
+																	new Date(provider.last_speed_test_time),
+																	{
+																		addSuffix: true,
+																	},
+																)}
+																)
+															</span>
+														)}
+													</div>
+												</div>
+											)}
 										</div>
 									</div>
 								</div>

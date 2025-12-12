@@ -19,8 +19,13 @@ export function useTestProvider() {
 
 // Test provider speed
 export function useTestProviderSpeed() {
+	const queryClient = useQueryClient();
 	return useMutation<{ speed_mbps: number; duration_seconds: number }, Error, string>({
 		mutationFn: (id) => apiClient.testProviderSpeed(id),
+		onSuccess: () => {
+			// Invalidate config cache to refetch providers
+			queryClient.invalidateQueries({ queryKey: configKeys.current() });
+		},
 	});
 }
 

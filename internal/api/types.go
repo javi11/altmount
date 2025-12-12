@@ -87,6 +87,8 @@ type ProviderAPIResponse struct {
 	PasswordSet      bool   `json:"password_set"`
 	Enabled          bool   `json:"enabled"`
 	IsBackupProvider bool   `json:"is_backup_provider"`
+	LastSpeedTestMbps float64 `json:"last_speed_test_mbps,omitempty"`
+	LastSpeedTestTime *time.Time `json:"last_speed_test_time,omitempty"`
 }
 
 // ImportAPIResponse handles Import config for API responses
@@ -133,6 +135,8 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			PasswordSet:      p.Password != "",
 			Enabled:          p.Enabled != nil && *p.Enabled,
 			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
+			LastSpeedTestMbps: p.LastSpeedTestMbps,
+			LastSpeedTestTime: p.LastSpeedTestTime,
 		}
 	}
 

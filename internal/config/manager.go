@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/javi11/nntppool/v2"
 	"github.com/spf13/viper"
@@ -259,6 +260,8 @@ type ProviderConfig struct {
 	InsecureTLS      bool   `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
 	Enabled          *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	IsBackupProvider *bool  `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
+	LastSpeedTestMbps float64 `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
+	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
 }
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
@@ -381,27 +384,33 @@ func (c *Config) DeepCopy() *Config {
 
 	// Deep copy Providers slice and their pointer fields
 	if c.Providers != nil {
-		copyCfg.Providers = make([]ProviderConfig, len(c.Providers))
-		for i, p := range c.Providers {
-			pc := p // copy struct value
-			if p.Enabled != nil {
-				ev := *p.Enabled
-				pc.Enabled = &ev
+					copyCfg.Providers = make([]ProviderConfig, len(c.Providers))
+				for i, p := range c.Providers {
+					pc := p // copy struct value
+					if p.Enabled != nil {
+						ev := *p.Enabled
+						pc.Enabled = &ev
+					} else {
+						pc.Enabled = nil
+					}
+					if p.IsBackupProvider != nil {
+						bv := *p.IsBackupProvider
+						pc.IsBackupProvider = &bv
+					} else {
+						pc.IsBackupProvider = nil
+					}
+					if p.LastSpeedTestTime != nil {
+						tv := *p.LastSpeedTestTime
+						pc.LastSpeedTestTime = &tv
+					} else {
+						pc.LastSpeedTestTime = nil
+					}
+					// LastSpeedTestMbps is a value type, directly copied by `pc := p`
+					copyCfg.Providers[i] = pc
+				}
 			} else {
-				pc.Enabled = nil
+				copyCfg.Providers = nil
 			}
-			if p.IsBackupProvider != nil {
-				bv := *p.IsBackupProvider
-				pc.IsBackupProvider = &bv
-			} else {
-				pc.IsBackupProvider = nil
-			}
-			copyCfg.Providers[i] = pc
-		}
-	} else {
-		copyCfg.Providers = nil
-	}
-
 	// Deep copy SABnzbd.Enabled pointer
 	if c.SABnzbd.Enabled != nil {
 		v := *c.SABnzbd.Enabled
