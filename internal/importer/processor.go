@@ -84,12 +84,9 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, maxConnectionsOverride *int, allowedExtensionsOverride *[]string) (string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string) (string, error) {
 	// Determine max connections to use
 	maxConnections := proc.maxImportConnections
-	if maxConnectionsOverride != nil && *maxConnectionsOverride > 0 {
-		maxConnections = *maxConnectionsOverride
-	}
 
 	// Determine allowed file extensions to use
 	allowedExtensions := proc.allowedFileExtensions

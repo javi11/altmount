@@ -816,17 +816,14 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		basePath = filepath.Join(basePath, *item.Category)
 	}
 
-	// Determine if max connections override is needed
-	var maxConnectionsOverride *int
+	// Determine if allowed extensions override is needed
 	var allowedExtensionsOverride *[]string
 	if item.Category != nil && strings.ToLower(*item.Category) == "test" {
-		val := 1000 // Unlimited (effectively)
-		maxConnectionsOverride = &val
 		emptySlice := []string{}
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), maxConnectionsOverride, allowedExtensionsOverride)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing
