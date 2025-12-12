@@ -76,6 +76,16 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 							</span>
 						</div>
 
+						{/* Max Download Speed - Only show if > 0 */}
+						{poolMetrics.max_download_speed_bytes_per_sec > 0 && (
+							<div className="flex items-center justify-between text-sm">
+								<span className="text-base-content/70">Top Speed</span>
+								<span className="font-medium text-success">
+									{formatSpeed(poolMetrics.max_download_speed_bytes_per_sec)}
+								</span>
+							</div>
+						)}
+
 						{/* Upload Speed - Only show if > 0 */}
 						{poolMetrics.upload_speed_bytes_per_sec > 0 && (
 							<div className="flex items-center justify-between text-sm">

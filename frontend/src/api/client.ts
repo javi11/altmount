@@ -8,6 +8,7 @@ import type {
 	HealthCleanupResponse,
 	HealthStats,
 	HealthWorkerStatus,
+	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
 	PoolMetrics,
@@ -595,6 +596,15 @@ export class APIClient {
 		});
 	}
 
+	async testProviderSpeed(id: string) {
+		return this.request<{ speed_mbps: number; duration_seconds: number }>(
+			`/providers/${id}/speedtest`,
+			{
+				method: "POST",
+			},
+		);
+	}
+
 	async createProvider(data: ProviderCreateRequest) {
 		return this.request<ProviderConfig>("/providers", {
 			method: "POST",
@@ -636,6 +646,17 @@ export class APIClient {
 
 	async cancelScan() {
 		return this.request<ScanStatusResponse>("/import/scan", {
+			method: "DELETE",
+		});
+	}
+
+	// NZBDav Import endpoints
+	async getNzbdavImportStatus() {
+		return this.request<ImportStatusResponse>("/import/nzbdav/status");
+	}
+
+	async cancelNzbdavImport() {
+		return this.request<{ message: string }>("/import/nzbdav", {
 			method: "DELETE",
 		});
 	}
@@ -686,6 +707,13 @@ export class APIClient {
 			body: formData,
 			// Don't set Content-Type header - let browser set it with boundary for multipart/form-data
 			headers: {},
+		});
+	}
+
+	async addTestQueueItem(size: "100MB" | "1GB" | "10GB") {
+		return this.request<APIResponse<QueueItem>>("/queue/test", {
+			method: "POST",
+			body: JSON.stringify({ size }),
 		});
 	}
 }

@@ -81,6 +81,23 @@ export interface ScanStatusResponse {
 	last_error?: string;
 }
 
+// Import Job types
+export const ImportJobStatus = {
+	IDLE: "idle",
+	RUNNING: "running",
+	CANCELING: "canceling",
+} as const;
+
+export type ImportJobStatus = (typeof ImportJobStatus)[keyof typeof ImportJobStatus];
+
+export interface ImportStatusResponse {
+	status: ImportJobStatus;
+	total: number;
+	added: number;
+	failed: number;
+	last_error?: string;
+}
+
 // Health types
 export const HealthStatus = {
 	PENDING: "pending",
@@ -296,6 +313,7 @@ export interface PoolMetrics {
 	total_errors: number;
 	provider_errors: Record<string, number>;
 	download_speed_bytes_per_sec: number;
+	max_download_speed_bytes_per_sec: number;
 	upload_speed_bytes_per_sec: number;
 	timestamp: string;
 	providers: ProviderStatus[];

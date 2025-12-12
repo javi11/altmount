@@ -2,16 +2,12 @@ package api
 
 import (
 	"fmt"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/database"
-	"github.com/javi11/altmount/internal/nzbdav"
+	"github.com/javi11/altmount/internal/importer"
 )
 
 // handleImportNzbdav handles POST /import/nzbdav
@@ -70,112 +66,69 @@ func (s *Server) handleImportNzbdav(c *fiber.Ctx) error {
 		isTempFile = true
 	}
 
-	if isTempFile {
-		defer os.Remove(dbPath) // Clean up temp DB file
-	}
-	
-	// 3. Parse Database
-	parser := nzbdav.NewParser(dbPath)
-	nzbChan, errChan := parser.Parse() // Use the new channel-based Parse method
-
-	// Create temp dir for NZBs
-	// Note: these temp files should be cleaned up by the importer service once processed
-	nzbTempDir, err := os.MkdirTemp(os.TempDir(), "altmount-nzbdav-imports-")
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
+	// 3. Start Async Import
+	if err := s.importerService.StartNzbdavImport(dbPath, rootFolder, isTempFile); err != nil {
+		if isTempFile {
+			os.Remove(dbPath) // Clean up if start failed
+		}
+		return c.Status(409).JSON(fiber.Map{
 			"success": false,
-			"message": "Failed to create temp directory for NZBs",
+			"message": "Failed to start import",
 			"details": err.Error(),
 		})
 	}
-	// 4. Queue Imports
-	addedCount := 0
-	failedCount := 0
-	totalCount := 0 // Keep track of total items processed
-	
-	for {
-		select {
-		case res, ok := <-nzbChan:
-			if !ok {
-				nzbChan = nil // Channel closed
-				break
-			}
-			totalCount++
 
-			// Create Temp NZB File
-			nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
-			nzbPath := filepath.Join(nzbTempDir, nzbFileName)
-			
-			outFile, err := os.Create(nzbPath)
-			if err != nil {
-				slog.Error("Failed to create temp NZB file", "file", nzbFileName, "error", err)
-				failedCount++
-				continue
-			}
+	return c.Status(202).JSON(fiber.Map{
+		"success": true,
+		"message": "Import started in background",
+	})
+}
 
-			_, err = io.Copy(outFile, res.Content)
-			outFile.Close()
-			if err != nil {
-				slog.Error("Failed to write temp NZB file content", "file", nzbFileName, "error", err)
-				failedCount++
-				os.Remove(nzbPath) // Clean up partial file
-				continue
-			}
+// handleGetNzbdavImportStatus handles GET /import/nzbdav/status
+func (s *Server) handleGetNzbdavImportStatus(c *fiber.Ctx) error {
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Importer service not available",
+		})
+	}
 
-			// Determine Category and Relative Path
-			targetCategory := "other"
-			lowerCat := strings.ToLower(res.Category)
-			if strings.Contains(lowerCat, "movie") {
-				targetCategory = "movies"
-			} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
-				targetCategory = "tv"
-			}
+	status := s.importerService.GetImportStatus()
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    toImportStatusResponse(status),
+	})
+}
 
-			// Append relative path from DB if present (e.g. "Series Name" or "Featurettes")
-			// This preserves the directory structure within the category
-			if res.RelPath != "" {
-				targetCategory = filepath.Join(targetCategory, res.RelPath)
-			}
-			
-			relPath := rootFolder
-			priority := database.QueuePriorityNormal
-			
-			_, err = s.importerService.AddToQueue(nzbPath, &relPath, &targetCategory, &priority)
-			if err != nil {
-				slog.Error("Failed to add to queue", "release", res.Name, "error", err)
-				failedCount++
-				os.Remove(nzbPath) // Clean up NZB if not queued
-			} else {
-				addedCount++
-			}
-		case err := <-errChan:
-			if err != nil {
-				slog.Error("Error during NZBDav parsing", "error", err)
-				return c.Status(500).JSON(fiber.Map{
-					"success": false,
-					"message": "Error during database parsing",
-					"details": err.Error(),
-				})
-			}
-			errChan = nil // Channel closed
-		}
+// handleCancelNzbdavImport handles DELETE /import/nzbdav
+func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Importer service not available",
+		})
+	}
 
-		if nzbChan == nil && errChan == nil {
-			break // Both channels closed
-		}
+	if err := s.importerService.CancelImport(); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to cancel import",
+			"details": err.Error(),
+		})
 	}
 
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
-		"data": fiber.Map{
-			"added":  addedCount,
-			"failed": failedCount,
-			"total":  totalCount,
-		},
+		"message": "Import cancellation requested",
 	})
 }
 
-func sanitizeFilename(name string) string {
-	// Simple sanitization
-	return strings.ReplaceAll(name, "/", "_")
+func toImportStatusResponse(info importer.ImportInfo) map[string]interface{} {
+	return map[string]interface{}{
+		"status":     string(info.Status),
+		"total":      info.Total,
+		"added":      info.Added,
+		"failed":     info.Failed,
+		"last_error": info.LastError,
+	}
 }

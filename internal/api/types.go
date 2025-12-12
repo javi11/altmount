@@ -87,6 +87,8 @@ type ProviderAPIResponse struct {
 	PasswordSet      bool   `json:"password_set"`
 	Enabled          bool   `json:"enabled"`
 	IsBackupProvider bool   `json:"is_backup_provider"`
+	LastSpeedTestMbps float64 `json:"last_speed_test_mbps"`
+	LastSpeedTestTime *time.Time `json:"last_speed_test_time,omitempty"`
 }
 
 // ImportAPIResponse handles Import config for API responses
@@ -133,6 +135,8 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			PasswordSet:      p.Password != "",
 			Enabled:          p.Enabled != nil && *p.Enabled,
 			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
+			LastSpeedTestMbps: p.LastSpeedTestMbps,
+			LastSpeedTestTime: p.LastSpeedTestTime,
 		}
 	}
 
@@ -662,16 +666,17 @@ type ProviderStatusResponse struct {
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
-	BytesDownloaded          int64                    `json:"bytes_downloaded"`
-	BytesUploaded            int64                    `json:"bytes_uploaded"`
-	ArticlesDownloaded       int64                    `json:"articles_downloaded"`
-	ArticlesPosted           int64                    `json:"articles_posted"`
-	TotalErrors              int64                    `json:"total_errors"`
-	ProviderErrors           map[string]int64         `json:"provider_errors"`
-	DownloadSpeedBytesPerSec float64                  `json:"download_speed_bytes_per_sec"`
-	UploadSpeedBytesPerSec   float64                  `json:"upload_speed_bytes_per_sec"`
-	Timestamp                time.Time                `json:"timestamp"`
-	Providers                []ProviderStatusResponse `json:"providers"`
+	BytesDownloaded             int64                    `json:"bytes_downloaded"`
+	BytesUploaded               int64                    `json:"bytes_uploaded"`
+	ArticlesDownloaded          int64                    `json:"articles_downloaded"`
+	ArticlesPosted              int64                    `json:"articles_posted"`
+	TotalErrors                 int64                    `json:"total_errors"`
+	ProviderErrors              map[string]int64         `json:"provider_errors"`
+	DownloadSpeedBytesPerSec    float64                  `json:"download_speed_bytes_per_sec"`
+	MaxDownloadSpeedBytesPerSec float64                  `json:"max_download_speed_bytes_per_sec"`
+	UploadSpeedBytesPerSec      float64                  `json:"upload_speed_bytes_per_sec"`
+	Timestamp                   time.Time                `json:"timestamp"`
+	Providers                   []ProviderStatusResponse `json:"providers"`
 }
 
 type TestProviderResponse struct {

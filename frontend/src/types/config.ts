@@ -187,6 +187,8 @@ export interface ProviderConfig {
 	password_set: boolean;
 	enabled: boolean;
 	is_backup_provider: boolean;
+	last_speed_test_mbps?: number;
+	last_speed_test_time?: string;
 }
 
 // SABnzbd configuration

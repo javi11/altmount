@@ -356,6 +356,27 @@ export const useCancelScan = () => {
 	});
 };
 
+// NZBDav Import hooks
+export const useNzbdavImportStatus = (refetchInterval?: number) => {
+	return useQuery({
+		queryKey: ["import", "nzbdav", "status"],
+		queryFn: () => apiClient.getNzbdavImportStatus(),
+		refetchInterval: refetchInterval,
+	});
+};
+
+export const useCancelNzbdavImport = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.cancelNzbdavImport(),
+		onSuccess: () => {
+			// Invalidate scan status to update immediately
+			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
+		},
+	});
+};
+
 // NZB file upload hook (SABnzbd API)
 export const useUploadNzb = () => {
 	const queryClient = useQueryClient();
@@ -387,6 +408,19 @@ export const useUploadToQueue = () => {
 		}) => apiClient.uploadToQueue(file, category, priority),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
+export const useAddTestQueueItem = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (size: "100MB" | "1GB" | "10GB") => apiClient.addTestQueueItem(size),
+		onSuccess: () => {
+			// Invalidate queue data to show newly added test file
 			queryClient.invalidateQueries({ queryKey: ["queue"] });
 			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
 		},

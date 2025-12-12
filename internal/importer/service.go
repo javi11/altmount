@@ -23,6 +23,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/nzbdav"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
@@ -53,6 +54,24 @@ type ScanInfo struct {
 	FilesAdded  int        `json:"files_added"`
 	CurrentFile string     `json:"current_file,omitempty"`
 	LastError   *string    `json:"last_error,omitempty"`
+}
+
+// ImportJobStatus represents the status of an NZBDav import job
+type ImportJobStatus string
+
+const (
+	ImportStatusIdle      ImportJobStatus = "idle"
+	ImportStatusRunning   ImportJobStatus = "running"
+	ImportStatusCanceling ImportJobStatus = "canceling"
+)
+
+// ImportInfo holds information about the current NZBDav import operation
+type ImportInfo struct {
+	Status    ImportJobStatus `json:"status"`
+	Total     int             `json:"total"`
+	Added     int             `json:"added"`
+	Failed    int             `json:"failed"`
+	LastError *string         `json:"last_error,omitempty"`
 }
 
 // Service provides NZB import functionality with manual directory scanning and queue-based processing
@@ -86,6 +105,11 @@ type Service struct {
 	scanMu     sync.RWMutex
 	scanInfo   ScanInfo
 	scanCancel context.CancelFunc
+
+	// Import state
+	importMu     sync.RWMutex
+	importInfo   ImportInfo
+	importCancel context.CancelFunc
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
@@ -123,6 +147,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		cancel:          cancel,
 		cancelFuncs:     make(map[int64]context.CancelFunc),
 		scanInfo:        ScanInfo{Status: ScanStatusIdle},
+		importInfo:      ImportInfo{Status: ImportStatusIdle},
 		paused:          false,
 	}
 
@@ -325,6 +350,174 @@ func (s *Service) CancelScan() error {
 
 	s.log.InfoContext(context.Background(), "Manual scan cancellation requested", "path", s.scanInfo.Path)
 	return nil
+}
+
+// StartNzbdavImport starts an asynchronous import from an NZBDav database
+func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+
+	if s.importInfo.Status != ImportStatusIdle {
+		return fmt.Errorf("import already in progress")
+	}
+
+	// Create import context
+	importCtx, cancel := context.WithCancel(context.Background())
+	s.importCancel = cancel
+
+	// Initialize status
+	s.importInfo = ImportInfo{
+		Status: ImportStatusRunning,
+		Total:  0,
+		Added:  0,
+		Failed: 0,
+	}
+
+	go func() {
+		defer func() {
+			s.importMu.Lock()
+			s.importInfo.Status = ImportStatusIdle
+			s.importCancel = nil
+			s.importMu.Unlock()
+			
+			if cleanupFile {
+				os.Remove(dbPath)
+			}
+		}()
+
+		// 1. Parse Database
+		parser := nzbdav.NewParser(dbPath)
+		nzbChan, errChan := parser.Parse()
+
+		// Create temp dir for NZBs
+		nzbTempDir, err := os.MkdirTemp(os.TempDir(), "altmount-nzbdav-imports-")
+		if err != nil {
+			s.log.ErrorContext(importCtx, "Failed to create temp directory for NZBs", "error", err)
+			s.importMu.Lock()
+			msg := err.Error()
+			s.importInfo.LastError = &msg
+			s.importMu.Unlock()
+			return
+		}
+
+		for {
+			select {
+			case <-importCtx.Done():
+				s.log.InfoContext(importCtx, "Import cancelled")
+				return
+			case res, ok := <-nzbChan:
+				if !ok {
+					nzbChan = nil
+					break
+				}
+				
+				s.importMu.Lock()
+				s.importInfo.Total++
+				s.importMu.Unlock()
+
+				// Create Temp NZB File
+				nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
+				nzbPath := filepath.Join(nzbTempDir, nzbFileName)
+				
+				outFile, err := os.Create(nzbPath)
+				if err != nil {
+					s.log.ErrorContext(importCtx, "Failed to create temp NZB file", "file", nzbFileName, "error", err)
+					s.importMu.Lock()
+					s.importInfo.Failed++
+					s.importMu.Unlock()
+					continue
+				}
+
+				_, err = io.Copy(outFile, res.Content)
+				outFile.Close()
+				if err != nil {
+					s.log.ErrorContext(importCtx, "Failed to write temp NZB file content", "file", nzbFileName, "error", err)
+					s.importMu.Lock()
+					s.importInfo.Failed++
+					s.importMu.Unlock()
+					os.Remove(nzbPath)
+					continue
+				}
+
+				// Determine Category and Relative Path
+				targetCategory := "other"
+				lowerCat := strings.ToLower(res.Category)
+				if strings.Contains(lowerCat, "movie") {
+					targetCategory = "movies"
+				} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
+					targetCategory = "tv"
+				}
+
+				if res.RelPath != "" {
+					targetCategory = filepath.Join(targetCategory, res.RelPath)
+				}
+				
+				relPath := rootFolder
+				priority := database.QueuePriorityNormal
+				
+				_, err = s.AddToQueue(nzbPath, &relPath, &targetCategory, &priority)
+				if err != nil {
+					s.log.ErrorContext(importCtx, "Failed to add to queue", "release", res.Name, "error", err)
+					s.importMu.Lock()
+					s.importInfo.Failed++
+					s.importMu.Unlock()
+					os.Remove(nzbPath)
+				} else {
+					s.importMu.Lock()
+					s.importInfo.Added++
+					s.importMu.Unlock()
+				}
+
+			case err := <-errChan:
+				if err != nil {
+					s.log.ErrorContext(importCtx, "Error during NZBDav parsing", "error", err)
+					s.importMu.Lock()
+					msg := err.Error()
+					s.importInfo.LastError = &msg
+					s.importMu.Unlock()
+				}
+				errChan = nil
+			}
+
+			if nzbChan == nil && errChan == nil {
+				break
+			}
+		}
+	}()
+
+	return nil
+}
+
+// GetImportStatus returns the current import status
+func (s *Service) GetImportStatus() ImportInfo {
+	s.importMu.RLock()
+	defer s.importMu.RUnlock()
+	return s.importInfo
+}
+
+// CancelImport cancels the current import operation
+func (s *Service) CancelImport() error {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+
+	if s.importInfo.Status == ImportStatusIdle {
+		return fmt.Errorf("no import is currently running")
+	}
+
+	if s.importInfo.Status == ImportStatusCanceling {
+		return fmt.Errorf("import is already being canceled")
+	}
+
+	s.importInfo.Status = ImportStatusCanceling
+	if s.importCancel != nil {
+		s.importCancel()
+	}
+
+	return nil
+}
+
+func sanitizeFilename(name string) string {
+	return strings.ReplaceAll(name, "/", "_")
 }
 
 // performManualScan performs the actual scanning work in a separate goroutine
@@ -623,7 +816,14 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		basePath = filepath.Join(basePath, *item.Category)
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID))
+	// Determine if allowed extensions override is needed
+	var allowedExtensionsOverride *[]string
+	if item.Category != nil && strings.ToLower(*item.Category) == "test" {
+		emptySlice := []string{}
+		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
+	}
+
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing

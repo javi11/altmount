@@ -125,6 +125,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Import do not need user authentication
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/import/nzbdav", s.handleImportNzbdav)
+	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
+	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
 
 	// Apply global middleware
 	api.Use(cors.New())
@@ -165,6 +167,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/queue/bulk/restart", s.handleRestartQueueBulk)
 	api.Post("/queue/bulk/cancel", s.handleCancelQueueBulk)
 	api.Post("/queue/upload", s.handleUploadToQueue)
+	api.Post("/queue/test", s.handleAddTestQueueItem)
 	api.Get("/queue/:id", s.handleGetQueue)
 	api.Delete("/queue/:id", s.handleDeleteQueue)
 	api.Post("/queue/:id/retry", s.handleRetryQueue)
@@ -218,6 +221,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
+	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
 	api.Post("/providers", s.handleCreateProvider)
 	api.Put("/providers/reorder", s.handleReorderProviders)
 	api.Put("/providers/:id", s.handleUpdateProvider)

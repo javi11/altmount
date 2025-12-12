@@ -1,5 +1,16 @@
-import { Edit, GripVertical, Plus, Power, PowerOff, Trash2, Wifi, WifiOff } from "lucide-react";
+import {
+	Edit,
+	Gauge,
+	GripVertical,
+	Plus,
+	Power,
+	PowerOff,
+	Trash2,
+	Wifi,
+	WifiOff,
+} from "lucide-react";
 import { useState } from "react";
+import { formatDistanceToNowStrict } from "date-fns";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
@@ -18,8 +29,9 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 	const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
 	const [togglingProviderId, setTogglingProviderId] = useState<string | null>(null);
 	const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
+	const [testingSpeedProviderId, setTestingSpeedProviderId] = useState<string | null>(null);
 
-	const { deleteProvider, updateProvider, reorderProviders } = useProviders();
+	const { deleteProvider, updateProvider, reorderProviders, testProviderSpeed } = useProviders();
 	const isReordering = reorderProviders.isPending;
 	const { confirmDelete } = useConfirm();
 	const { showToast } = useToast();
@@ -34,6 +46,35 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 		setEditingProvider(provider);
 		setModalMode("edit");
 		setIsModalOpen(true);
+	};
+
+	const handleSpeedTest = async (provider: ProviderConfig) => {
+		setTestingSpeedProviderId(provider.id);
+		showToast({
+			type: "info",
+			title: "Speed Test Started",
+			message: `Testing speed for ${provider.host}... This may take a few seconds.`,
+			duration: 5000,
+		});
+
+		try {
+			await testProviderSpeed.mutateAsync(provider.id);
+			showToast({
+				type: "success",
+				title: "Speed Test Completed",
+				message: `Speed test for ${provider.host} completed. Results are updated on the card.`,
+				duration: 5000,
+			});
+		} catch (error) {
+			console.error("Failed to test speed:", error);
+			showToast({
+				type: "error",
+				title: "Speed Test Failed",
+				message: error instanceof Error ? error.message : "Failed to test speed",
+			});
+		} finally {
+			setTestingSpeedProviderId(null);
+		}
 	};
 
 	const handleDelete = async (providerId: string) => {
@@ -274,6 +315,21 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 												</button>
 												<button
 													type="button"
+													className="btn btn-sm btn-info join-item"
+													onClick={() => handleSpeedTest(provider)}
+													title="Speed Test"
+													disabled={
+														testingSpeedProviderId === provider.id || !provider.enabled
+													}
+												>
+													{testingSpeedProviderId === provider.id ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : (
+														<Gauge className="h-4 w-4" />
+													)}
+												</button>
+												<button
+													type="button"
 													className="btn btn-sm btn-outline join-item"
 													onClick={() => handleEdit(provider)}
 													title="Edit"
@@ -344,6 +400,27 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													)}
 												</div>
 											</div>
+											{provider.last_speed_test_mbps !== undefined && (
+												<div>
+													<span className="text-base-content/60">Last Speed Test:</span>
+													<div className="font-mono">
+														{provider.last_speed_test_mbps.toFixed(2)} MB/s
+														{provider.last_speed_test_time && (
+															<span className="text-base-content/50 text-xs">
+																{" "}
+																(
+																{formatDistanceToNowStrict(
+																	new Date(provider.last_speed_test_time),
+																	{
+																		addSuffix: true,
+																	},
+																)}
+																)
+															</span>
+														)}
+													</div>
+												</div>
+											)}
 										</div>
 									</div>
 								</div>
