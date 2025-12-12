@@ -87,7 +87,7 @@ type ProviderAPIResponse struct {
 	PasswordSet      bool   `json:"password_set"`
 	Enabled          bool   `json:"enabled"`
 	IsBackupProvider bool   `json:"is_backup_provider"`
-	LastSpeedTestMbps float64 `json:"last_speed_test_mbps,omitempty"`
+	LastSpeedTestMbps float64 `json:"last_speed_test_mbps"`
 	LastSpeedTestTime *time.Time `json:"last_speed_test_time,omitempty"`
 }
 
