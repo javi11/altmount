@@ -596,6 +596,15 @@ export class APIClient {
 		});
 	}
 
+	async testProviderSpeed(id: string) {
+		return this.request<{ speed_mbps: number; duration_seconds: number }>(
+			`/providers/${id}/speedtest`,
+			{
+				method: "POST",
+			},
+		);
+	}
+
 	async createProvider(data: ProviderCreateRequest) {
 		return this.request<ProviderConfig>("/providers", {
 			method: "POST",

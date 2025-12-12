@@ -1,4 +1,14 @@
-import { Edit, GripVertical, Plus, Power, PowerOff, Trash2, Wifi, WifiOff } from "lucide-react";
+import {
+	Edit,
+	Gauge,
+	GripVertical,
+	Plus,
+	Power,
+	PowerOff,
+	Trash2,
+	Wifi,
+	WifiOff,
+} from "lucide-react";
 import { useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -18,8 +28,9 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 	const [dragOverProvider, setDragOverProvider] = useState<string | null>(null);
 	const [togglingProviderId, setTogglingProviderId] = useState<string | null>(null);
 	const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
+	const [testingSpeedProviderId, setTestingSpeedProviderId] = useState<string | null>(null);
 
-	const { deleteProvider, updateProvider, reorderProviders } = useProviders();
+	const { deleteProvider, updateProvider, reorderProviders, testProviderSpeed } = useProviders();
 	const isReordering = reorderProviders.isPending;
 	const { confirmDelete } = useConfirm();
 	const { showToast } = useToast();
@@ -34,6 +45,35 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 		setEditingProvider(provider);
 		setModalMode("edit");
 		setIsModalOpen(true);
+	};
+
+	const handleSpeedTest = async (provider: ProviderConfig) => {
+		setTestingSpeedProviderId(provider.id);
+		showToast({
+			type: "info",
+			title: "Speed Test Started",
+			message: `Testing speed for ${provider.host}... This may take a few seconds.`,
+			duration: 5000,
+		});
+
+		try {
+			const result = await testProviderSpeed.mutateAsync(provider.id);
+			showToast({
+				type: "success",
+				title: "Speed Test Completed",
+				message: `${provider.host}: ${result.speed_mbps.toFixed(2)} MB/s`,
+				duration: 8000,
+			});
+		} catch (error) {
+			console.error("Failed to test speed:", error);
+			showToast({
+				type: "error",
+				title: "Speed Test Failed",
+				message: error instanceof Error ? error.message : "Failed to test speed",
+			});
+		} finally {
+			setTestingSpeedProviderId(null);
+		}
 	};
 
 	const handleDelete = async (providerId: string) => {
@@ -270,6 +310,21 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 														<PowerOff className="h-4 w-4" />
 													) : (
 														<Power className="h-4 w-4" />
+													)}
+												</button>
+												<button
+													type="button"
+													className="btn btn-sm btn-info join-item"
+													onClick={() => handleSpeedTest(provider)}
+													title="Speed Test"
+													disabled={
+														testingSpeedProviderId === provider.id || !provider.enabled
+													}
+												>
+													{testingSpeedProviderId === provider.id ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : (
+														<Gauge className="h-4 w-4" />
 													)}
 												</button>
 												<button
