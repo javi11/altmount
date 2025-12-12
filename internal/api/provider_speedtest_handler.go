@@ -54,9 +54,9 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		})
 	}
 
-	// 1. Download Test NZB (100MB)
-	// We use the 100MB file as it's large enough for a decent test but not too huge
-	nzbURL := "https://sabnzbd.org/tests/test_download_100MB.nzb"
+	// 1. Download Test NZB (1GB)
+	// We use the 1GB file to ensure high-speed connections are properly tested
+	nzbURL := "https://sabnzbd.org/tests/test_download_1GB.nzb"
 	
 	req, err := http.NewRequestWithContext(c.Context(), http.MethodGet, nzbURL, nil)
 	if err != nil {
@@ -150,8 +150,8 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	}
 	defer pool.Quit()
 
-	// Test for up to 10 seconds
-	testCtx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
+	// Test for up to 15 seconds
+	testCtx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
 	defer cancel()
 
 	var totalBytes int64
@@ -159,10 +159,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 
 	numWorkers := targetProvider.MaxConnections
 	if numWorkers <= 0 {
-		numWorkers = 10
-	}
-	if numWorkers > 20 {
-		numWorkers = 20 // Cap for test to avoid resource exhaustion on server
+		numWorkers = 20
 	}
 
 	segmentChan := make(chan segmentInfo, len(allSegments))
