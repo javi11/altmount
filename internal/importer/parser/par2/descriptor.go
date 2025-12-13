@@ -116,6 +116,7 @@ func readFileDescriptors(
 	// Increase limit to accommodate larger PAR2 files with many FileDesc packets
 	maxPackets := 1000 // Limit the number of packets to process
 	packetCount := 0
+	var lastError error
 
 	for packetCount < maxPackets {
 		select {
@@ -128,10 +129,13 @@ func readFileDescriptors(
 		header, err := packetReader.ReadHeader()
 		if err != nil {
 			if err == io.EOF {
-				// Reached end of file
 				break
 			}
 
+			if len(descriptors) == 0 {
+				return descriptors, fmt.Errorf("corrupted PAR2 file: failed to read packet header: %w", err)
+			}
+			slog.DebugContext(ctx, "Corrupted packet header encountered, returning partial PAR2 descriptors", "error", err, "descriptors_found", len(descriptors))
 			break
 		}
 
@@ -142,8 +146,8 @@ func readFileDescriptors(
 			// Read and parse the file descriptor
 			desc, err := packetReader.ReadFileDescriptor(header)
 			if err != nil {
-				slog.DebugContext(ctx, "Failed to read file descriptor", "error", err)
-				// Skip to next packet
+				slog.DebugContext(ctx, "Failed to read file descriptor from corrupted packet", "error", err)
+				lastError = err
 				continue
 			}
 
@@ -151,10 +155,17 @@ func readFileDescriptors(
 		} else {
 			// Skip non-FileDesc packets
 			if err := packetReader.SkipPacketBody(header); err != nil {
-				slog.DebugContext(ctx, "Failed to skip packet body", "error", err)
+				if len(descriptors) == 0 {
+					return descriptors, fmt.Errorf("corrupted PAR2 file: failed to skip packet body: %w", err)
+				}
+				slog.DebugContext(ctx, "Corrupted packet body encountered, returning partial PAR2 descriptors", "error", err, "descriptors_found", len(descriptors))
 				break
 			}
 		}
+	}
+
+	if len(descriptors) == 0 && lastError != nil {
+		return descriptors, fmt.Errorf("corrupted PAR2 file: failed to extract any file descriptors: %w", lastError)
 	}
 
 	return descriptors, nil

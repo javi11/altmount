@@ -40,6 +40,11 @@ func (pr *PacketReader) ReadHeader() (*PacketHeader, error) {
 		return nil, fmt.Errorf("packet length %d is not a multiple of 4", header.Length)
 	}
 
+	const maxPacketSize = 1024 * 1024 * 1024
+	if header.Length > maxPacketSize {
+		return nil, fmt.Errorf("packet length too large: %d bytes (max %d)", header.Length, maxPacketSize)
+	}
+
 	return header, nil
 }
 
@@ -77,16 +82,21 @@ func (pr *PacketReader) ReadFileDescriptor(header *PacketHeader) (*FileDescripto
 	// Read filename (remaining bytes, null-terminated, 4-byte aligned)
 	filenameLength := bodyLength - 56
 	if filenameLength > 0 {
-		filenameBytes := make([]byte, filenameLength)
+		const maxFilenameLength = 64 * 1024
+		if filenameLength > maxFilenameLength {
+			return nil, fmt.Errorf("filename length too large: %d bytes (max %d)", filenameLength, maxFilenameLength)
+		}
+
+		filenameBytes := make([]byte, int(filenameLength))
 		if _, err := io.ReadFull(pr.r, filenameBytes); err != nil {
 			return nil, fmt.Errorf("failed to read filename: %w", err)
 		}
 
 		// Find the actual end of the filename (remove null bytes and padding)
-		actualLength := filenameLength
+		actualLength := int(filenameLength)
 		for i := len(filenameBytes) - 1; i >= 0; i-- {
 			if filenameBytes[i] == 0 || filenameBytes[i] < 32 {
-				actualLength = uint64(i)
+				actualLength = i
 			} else {
 				break
 			}
@@ -103,6 +113,11 @@ func (pr *PacketReader) SkipPacketBody(header *PacketHeader) error {
 	remainingBytes := header.Length - PacketHeaderSize
 	if remainingBytes == 0 {
 		return nil
+	}
+
+	const maxPacketBodySize = 1024 * 1024 * 1024
+	if remainingBytes > maxPacketBodySize {
+		return fmt.Errorf("packet body too large: %d bytes (max %d)", remainingBytes, maxPacketBodySize)
 	}
 
 	_, err := io.CopyN(io.Discard, pr.r, int64(remainingBytes))
