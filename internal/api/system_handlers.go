@@ -305,6 +305,24 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Get provider information from pool
 	providersInfo := pool.GetProvidersInfo()
 
+	// Get current configuration to access speed test results
+	config := s.configManager.GetConfig()
+	providerConfigMap := make(map[string]struct {
+		Speed float64
+		Time  *time.Time
+	})
+	if config != nil {
+		for _, p := range config.Providers {
+			providerConfigMap[p.ID] = struct {
+				Speed float64
+				Time  *time.Time
+			}{
+				Speed: p.LastSpeedTestMbps,
+				Time:  p.LastSpeedTestTime,
+			}
+		}
+	}
+
 	// Map provider info to response format
 	providers := make([]ProviderStatusResponse, 0, len(providersInfo))
 	for _, providerInfo := range providersInfo {
@@ -322,6 +340,26 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			}
 		}
 
+		// Get speed test info
+		var lastSpeedTestMbps float64
+		var lastSpeedTestTime *time.Time
+		
+		// Try to look up by ID first
+		if info, ok := providerConfigMap[providerInfo.ID()]; ok {
+			lastSpeedTestMbps = info.Speed
+			lastSpeedTestTime = info.Time
+		} else if config != nil {
+			// Fallback: try to find matching provider in config by Host and Username
+			// This handles cases where nntppool might use a different ID scheme or ID is empty
+			for _, p := range config.Providers {
+				if p.Host == providerInfo.Host && p.Username == providerInfo.Username {
+					lastSpeedTestMbps = p.LastSpeedTestMbps
+					lastSpeedTestTime = p.LastSpeedTestTime
+					break
+				}
+			}
+		}
+
 		providers = append(providers, ProviderStatusResponse{
 			ID:                    providerInfo.ID(),
 			Host:                  providerInfo.Host,
@@ -333,6 +371,8 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			LastConnectionAttempt: providerInfo.LastConnectionAttempt,
 			LastSuccessfulConnect: providerInfo.LastSuccessfulConnect,
 			FailureReason:         providerInfo.FailureReason,
+			LastSpeedTestMbps:     lastSpeedTestMbps,
+			LastSpeedTestTime:     lastSpeedTestTime,
 		})
 	}
 
