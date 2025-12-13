@@ -88,17 +88,6 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 					/>
 				</div>
 
-				{/* Error count - only show if > 0 */}
-				{provider.error_count > 0 && (
-					<div className="mt-2 flex items-center justify-between text-sm">
-						<span className="text-base-content/70">Errors</span>
-						<div className="flex items-center gap-1 text-error">
-							<AlertTriangle className="h-4 w-4" />
-							<span className="font-medium">{provider.error_count.toLocaleString()}</span>
-						</div>
-					</div>
-				)}
-
 				{/* Failure reason - only show if present */}
 				{provider.failure_reason && provider.failure_reason !== "" && (
 					<div className="mt-2">
