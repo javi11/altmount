@@ -5,7 +5,10 @@ import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { truncateText } from "../../lib/utils";
 
 export function ActiveStreamsCard() {
-	const { data: streams, isLoading, error } = useActiveStreams();
+	const { data: allStreams, isLoading, error } = useActiveStreams();
+
+	// Filter to show only WebDAV streams (covers RClone and external players)
+	const streams = allStreams?.filter((s) => s.source === "WebDAV");
 
 	if (error) {
 		return (

@@ -16,6 +16,7 @@ type ActiveStream struct {
 	StartedAt time.Time `json:"started_at"`
 	UserAgent string    `json:"user_agent"`
 	Range     string    `json:"range,omitempty"`
+	Source    string    `json:"source"`
 }
 
 // StreamTracker tracks active streams
@@ -29,7 +30,7 @@ func NewStreamTracker() *StreamTracker {
 }
 
 // Add adds a new stream and returns its ID
-func (t *StreamTracker) Add(filePath, clientIP, userAgent, rangeHeader string) string {
+func (t *StreamTracker) Add(filePath, clientIP, userAgent, rangeHeader, source string) string {
 	id := uuid.New().String()
 	stream := ActiveStream{
 		ID:        id,
@@ -38,6 +39,7 @@ func (t *StreamTracker) Add(filePath, clientIP, userAgent, rangeHeader string) s
 		StartedAt: time.Now(),
 		UserAgent: userAgent,
 		Range:     rangeHeader,
+		Source:    source,
 	}
 	t.streams.Store(id, stream)
 	return id

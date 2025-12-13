@@ -314,6 +314,7 @@ export interface ActiveStream {
 	started_at: string;
 	user_agent: string;
 	range?: string;
+	source: string;
 }
 
 export interface PoolMetrics {

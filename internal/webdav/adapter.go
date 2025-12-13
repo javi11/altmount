@@ -156,7 +156,7 @@ func NewHandler(
 			// Extract path (this includes prefix, but that's fine for display)
 			// Or we could strip prefix if we want cleaner display
 			// r.URL.Path contains the full path including prefix
-			streamID := streamTracker.Add(r.URL.Path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"))
+			streamID := streamTracker.Add(r.URL.Path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "WebDAV")
 			defer streamTracker.Remove(streamID)
 		}
 

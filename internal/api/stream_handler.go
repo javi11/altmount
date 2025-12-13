@@ -134,7 +134,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 
 	// Track stream if tracker is available
 	if h.streamTracker != nil {
-		streamID := h.streamTracker.Add(path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"))
+		streamID := h.streamTracker.Add(path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "API")
 		defer h.streamTracker.Remove(streamID)
 	}
 
