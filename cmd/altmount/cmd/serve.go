@@ -124,7 +124,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Wire ARRs service into importer for instant import triggers
 	importerService.SetArrsService(arrsService)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster)
+	// Create stream tracker for monitoring active streams
+	streamTracker := api.NewStreamTracker()
+
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager)
 	if err != nil {
@@ -132,7 +135,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create stream handler for file streaming
-	streamHandler := setupStreamHandler(fs, repos.UserRepo)
+	streamHandler := setupStreamHandler(fs, repos.UserRepo, streamTracker)
 
 	// Setup SPA routes
 	setupSPARoutes(app)

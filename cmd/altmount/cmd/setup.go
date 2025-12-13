@@ -229,8 +229,9 @@ func setupAuthService(ctx context.Context, userRepo *database.UserRepository) *a
 func setupStreamHandler(
 	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	userRepo *database.UserRepository,
+	streamTracker *api.StreamTracker,
 ) *api.StreamHandler {
-	return api.NewStreamHandler(nzbFilesystem, userRepo)
+	return api.NewStreamHandler(nzbFilesystem, userRepo, streamTracker)
 }
 
 // setupAPIServer creates and configures the API server
@@ -246,6 +247,7 @@ func setupAPIServer(
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
+	streamTracker *api.StreamTracker,
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -266,6 +268,7 @@ func setupAPIServer(
 		arrsService,
 		mountService,
 		progressBroadcaster,
+		streamTracker,
 	)
 
 	apiServer.SetupRoutes(app)
