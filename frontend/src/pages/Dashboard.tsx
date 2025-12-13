@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle, Download, Network } from "lucide-react";
 import { useMemo } from "react";
-import { HealthChart, QueueChart } from "../components/charts/QueueChart";
+import { HealthChart } from "../components/charts/HealthChart";
+import { QueueChart } from "../components/charts/QueueChart";
 import { ActiveStreamsCard } from "../components/system/ActiveStreamsCard";
 import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
 import { ProviderCard } from "../components/system/ProviderCard";
