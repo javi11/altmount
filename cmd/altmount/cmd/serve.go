@@ -129,7 +129,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 
-	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager)
+	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {
 		return err
 	}

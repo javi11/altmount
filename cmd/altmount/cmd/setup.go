@@ -290,6 +290,7 @@ func setupWebDAV(
 	authService *auth.Service,
 	userRepo *database.UserRepository,
 	configManager *config.Manager,
+	streamTracker *api.StreamTracker,
 ) (*webdav.Handler, error) {
 	var tokenService *token.Service
 	var webdavUserRepo *database.UserRepository
@@ -305,7 +306,7 @@ func setupWebDAV(
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
 		Prefix: "/webdav",
-	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter())
+	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter(), streamTracker)
 
 	if err != nil {
 		return nil, err
