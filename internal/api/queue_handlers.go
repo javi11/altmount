@@ -2,6 +2,8 @@ package api
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -970,6 +972,145 @@ func (s *Server) handleCancelQueueBulk(c *fiber.Ctx) error {
 	}
 
 	return c.Status(202).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleAddTestQueueItem handles POST /api/queue/test
+func (s *Server) handleAddTestQueueItem(c *fiber.Ctx) error {
+	// Parse request body
+	var req struct {
+		Size string `json:"size"` // "100MB", "1GB", "10GB"
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_REQUEST",
+				"message": "Invalid request body",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Validate size
+	validSizes := map[string]bool{
+		"100MB": true,
+		"1GB":   true,
+		"10GB":  true,
+	}
+	if !validSizes[req.Size] {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "VALIDATION_ERROR",
+				"message": "Invalid size",
+				"details": "Allowed values: 100MB, 1GB, 10GB",
+			},
+		})
+	}
+
+	// Determine NZB URL
+	nzbURL := fmt.Sprintf("https://sabnzbd.org/tests/test_download_%s.nzb", req.Size)
+
+	// Create temporary file
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("test_download_%s_*.nzb", req.Size))
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to create temp file",
+				"details": err.Error(),
+			},
+		})
+	}
+	defer tempFile.Close()
+	tempPath := tempFile.Name()
+
+	// Download NZB
+	resp, err := http.Get(nzbURL)
+	if err != nil {
+		os.Remove(tempPath)
+		return c.Status(502).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_GATEWAY",
+				"message": "Failed to download test NZB from sabnzbd.org",
+				"details": err.Error(),
+			},
+		})
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		os.Remove(tempPath)
+		return c.Status(502).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "BAD_GATEWAY",
+				"message": "Failed to download test NZB",
+				"details": fmt.Sprintf("Remote server returned status: %s", resp.Status),
+			},
+		})
+	}
+
+	// Write content to file
+	if _, err := io.Copy(tempFile, resp.Body); err != nil {
+		os.Remove(tempPath)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to save test NZB",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	// Check if importer service is available
+	if s.importerService == nil {
+		os.Remove(tempPath)
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "SERVICE_UNAVAILABLE",
+				"message": "Importer service not available",
+				"details": "",
+			},
+		})
+	}
+
+	// Add to queue
+	category := "test"
+	priority := database.QueuePriorityHigh // Prioritize test files
+	
+	// Build base path from CompleteDir for manually uploaded files
+	var basePath *string
+	if s.configManager != nil {
+		completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+		if completeDir != "" {
+			basePath = &completeDir
+		}
+	}
+
+	item, err := s.importerService.AddToQueue(tempPath, basePath, &category, &priority)
+	if err != nil {
+		os.Remove(tempPath)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to add test file to queue",
+				"details": err.Error(),
+			},
+		})
+	}
+
+	response := ToQueueItemResponse(item)
+	return c.Status(201).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
 	})

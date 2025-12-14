@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
-import { ManualScanSection } from "../components/queue/ManualScanSection";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
@@ -21,8 +20,6 @@ import { PathDisplay } from "../components/ui/PathDisplay";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
-	useBulkCancelQueueItems,
-	useCancelQueueItem,
 	useClearCompletedQueue,
 	useClearFailedQueue,
 	useClearPendingQueue,
@@ -32,6 +29,9 @@ import {
 	useQueueStats,
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
+	useBulkCancelQueueItems,
+	useCancelQueueItem,
+	useAddTestQueueItem,
 } from "../hooks/useApi";
 import { useProgressStream } from "../hooks/useProgressStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
@@ -101,6 +101,7 @@ export function QueuePage() {
 	const clearCompleted = useClearCompletedQueue();
 	const clearFailed = useClearFailedQueue();
 	const clearPending = useClearPendingQueue();
+	const addTestQueueItem = useAddTestQueueItem();
 	const { confirmDelete, confirmAction } = useConfirm();
 
 	const handleDelete = async (id: number) => {
@@ -199,6 +200,14 @@ export function QueuePage() {
 		);
 		if (confirmed) {
 			await clearPending.mutateAsync("");
+		}
+	};
+
+	const handleAddTestFile = async (size: "100MB" | "1GB" | "10GB") => {
+		try {
+			await addTestQueueItem.mutateAsync(size);
+		} catch (error) {
+			console.error(`Failed to add ${size} test file:`, error);
 		}
 	};
 
@@ -488,11 +497,47 @@ export function QueuePage() {
 							Clear Failed
 						</button>
 					)}
+
+					<div className="dropdown dropdown-end">
+						<div tabIndex={0} role="button" className="btn btn-neutral">
+							<PlayCircle className="h-4 w-4" />
+							Add Test NZB
+						</div>
+						<ul
+							tabIndex={0}
+							className="menu dropdown-content z-[1] w-36 rounded-box bg-base-100 p-2 shadow"
+						>
+							<li>
+								<button
+									type="button"
+									onClick={() => handleAddTestFile("100MB")}
+									disabled={addTestQueueItem.isPending}
+								>
+									100MB
+								</button>
+							</li>
+							<li>
+								<button
+									type="button"
+									onClick={() => handleAddTestFile("1GB")}
+									disabled={addTestQueueItem.isPending}
+								>
+									1GB
+								</button>
+							</li>
+							<li>
+								<button
+									type="button"
+									onClick={() => handleAddTestFile("10GB")}
+									disabled={addTestQueueItem.isPending}
+								>
+									10GB
+								</button>
+							</li>
+						</ul>
+					</div>
 				</div>
 			</div>
-
-			{/* Manual Scan Section */}
-			<ManualScanSection />
 
 			{/* Drag & Drop Upload Section */}
 			<DragDropUpload />
@@ -502,7 +547,12 @@ export function QueuePage() {
 				<div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
 					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Total</div>
-						<div className="stat-value text-primary">{stats.total_completed}</div>
+						<div className="stat-value text-primary">
+							{stats.total_queued +
+								stats.total_processing +
+								stats.total_completed +
+								stats.total_failed}
+						</div>
 					</div>
 					<div className="stat rounded-box bg-base-100 shadow">
 						<div className="stat-title">Pending</div>

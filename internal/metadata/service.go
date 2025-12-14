@@ -60,7 +60,7 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Write to file
+	// Write directly to metadata file
 	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write metadata file: %w", err)
 	}

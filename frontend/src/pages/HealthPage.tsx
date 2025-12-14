@@ -508,7 +508,7 @@ export function HealthPage() {
 				onRetry={refetchLibrarySync}
 			/>
 
-			<div className="flex gap-2 mb-6">
+			<div className="mb-6 flex gap-2">
 				<button
 					type="button"
 					className={`btn ${activeTab === "files" ? "btn-primary" : "btn-ghost"}`}

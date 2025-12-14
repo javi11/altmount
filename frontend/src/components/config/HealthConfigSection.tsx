@@ -139,8 +139,9 @@ export function HealthConfigSection({
 					<legend className="fieldset-legend">Library Directory</legend>
 					<input
 						type="text"
-						className={`input ${validationError && formData.enabled ? "input-error border-error" : ""
-							}`}
+						className={`input ${
+							validationError && formData.enabled ? "input-error border-error" : ""
+						}`}
 						value={formData.library_dir || ""}
 						disabled={isReadOnly}
 						placeholder="/media/library"

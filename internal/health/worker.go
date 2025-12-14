@@ -751,6 +751,11 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 	pathForRescan := ""
 	if healthRecord.LibraryPath != nil && *healthRecord.LibraryPath != "" {
 		pathForRescan = *healthRecord.LibraryPath
+	} else if cfg := hw.configGetter(); cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		pathForRescan = filepath.Join(*cfg.Import.ImportDir, filePath)
+		slog.InfoContext(ctx, "Using symlink import path for repair trigger",
+			"file_path", filePath,
+			"symlink_path", pathForRescan)
 	} else {
 		// Fallback to mount path if no library path found
 		// This is common for ImportStrategyNone or if metadata scan failed before determining library path

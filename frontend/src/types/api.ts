@@ -81,6 +81,23 @@ export interface ScanStatusResponse {
 	last_error?: string;
 }
 
+// Import Job types
+export const ImportJobStatus = {
+	IDLE: "idle",
+	RUNNING: "running",
+	CANCELING: "canceling",
+} as const;
+
+export type ImportJobStatus = (typeof ImportJobStatus)[keyof typeof ImportJobStatus];
+
+export interface ImportStatusResponse {
+	status: ImportJobStatus;
+	total: number;
+	added: number;
+	failed: number;
+	last_error?: string;
+}
+
 // Health types
 export const HealthStatus = {
 	PENDING: "pending",
@@ -116,6 +133,8 @@ export interface HealthStats {
 	pending: number;
 	healthy: number;
 	corrupted: number;
+	repair_triggered: number;
+	checking: number;
 }
 
 export interface HealthRetryRequest {
@@ -284,6 +303,18 @@ export interface ProviderStatus {
 	last_connection_attempt: string;
 	last_successful_connect: string;
 	failure_reason: string;
+	last_speed_test_mbps: number;
+	last_speed_test_time?: string;
+}
+
+export interface ActiveStream {
+	id: string;
+	file_path: string;
+	client_ip: string;
+	started_at: string;
+	user_agent: string;
+	range?: string;
+	source: string;
 }
 
 export interface PoolMetrics {
@@ -294,6 +325,7 @@ export interface PoolMetrics {
 	total_errors: number;
 	provider_errors: Record<string, number>;
 	download_speed_bytes_per_sec: number;
+	max_download_speed_bytes_per_sec: number;
 	upload_speed_bytes_per_sec: number;
 	timestamp: string;
 	providers: ProviderStatus[];
@@ -308,4 +340,19 @@ export interface SABnzbdAddResponse {
 export interface SABnzbdResponse {
 	status: boolean;
 	error?: string;
+}
+
+// System Browse types
+export interface FileEntry {
+	name: string;
+	path: string;
+	is_dir: boolean;
+	size: number;
+	mod_time: string;
+}
+
+export interface SystemBrowseResponse {
+	current_path: string;
+	parent_path: string;
+	files: FileEntry[];
 }

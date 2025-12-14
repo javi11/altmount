@@ -9,6 +9,7 @@ import {
 	Home,
 	List,
 	Settings,
+	Upload,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useHealthStats, useQueueStats } from "../../hooks/useApi";
@@ -34,6 +35,11 @@ const navigation = [
 		name: "Files",
 		href: "/files",
 		icon: Folder,
+	},
+	{
+		name: "Import",
+		href: "/import",
+		icon: Upload,
 	},
 	{
 		name: "Configuration",

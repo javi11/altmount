@@ -53,6 +53,7 @@ type Server struct {
 	mountService        *rclone.MountService
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
+	streamTracker       *StreamTracker
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -71,6 +72,7 @@ func NewServer(
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
+	streamTracker *StreamTracker,
 ) *Server {
 	if config == nil {
 		config = DefaultConfig()
@@ -92,6 +94,7 @@ func NewServer(
 		mountService:        mountService,
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
+		streamTracker:       streamTracker,
 	}
 
 	return server
@@ -124,6 +127,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api := app.Group(s.config.Prefix)
 	// Import do not need user authentication
 	api.Post("/import/file", s.handleManualImportFile)
+	api.Post("/import/nzbdav", s.handleImportNzbdav)
+	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
+	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
 
 	// Apply global middleware
 	api.Use(cors.New())
@@ -164,6 +170,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/queue/bulk/restart", s.handleRestartQueueBulk)
 	api.Post("/queue/bulk/cancel", s.handleCancelQueueBulk)
 	api.Post("/queue/upload", s.handleUploadToQueue)
+	api.Post("/queue/test", s.handleAddTestQueueItem)
 	api.Get("/queue/:id", s.handleGetQueue)
 	api.Delete("/queue/:id", s.handleDeleteQueue)
 	api.Post("/queue/:id/retry", s.handleRetryQueue)
@@ -194,6 +201,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/library-sync/dry-run", s.handleDryRunLibrarySync)
 
 	api.Get("/files/info", s.handleGetFileMetadata)
+	api.Get("/files/active-streams", s.handleGetActiveStreams)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
 	api.Post("/files/export-batch", s.handleBatchExportNZB)
 	// Note: /files/stream is handled by StreamHandler at HTTP server level
@@ -204,6 +212,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// System endpoints
 	api.Get("/system/stats", s.handleGetSystemStats)
 	api.Get("/system/health", s.handleGetSystemHealth)
+	api.Get("/system/browse", s.handleSystemBrowse)
 	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)
@@ -216,6 +225,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
+	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
 	api.Post("/providers", s.handleCreateProvider)
 	api.Put("/providers/reorder", s.handleReorderProviders)
 	api.Put("/providers/:id", s.handleUpdateProvider)
@@ -242,6 +252,22 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Admin endpoints (admin check is done inside handlers)
 	api.Get("/users", s.handleListUsers)
 	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
+}
+
+// handleGetActiveStreams handles GET /api/files/active-streams
+func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
+	if s.streamTracker == nil {
+		return c.Status(200).JSON(fiber.Map{
+			"success": true,
+			"data":    []ActiveStream{},
+		})
+	}
+
+	streams := s.streamTracker.GetAll()
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    streams,
+	})
 }
 
 // getSystemInfo returns current system information

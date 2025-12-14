@@ -84,7 +84,16 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int) (string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string) (string, error) {
+	// Determine max connections to use
+	maxConnections := proc.maxImportConnections
+
+	// Determine allowed file extensions to use
+	allowedExtensions := proc.allowedFileExtensions
+	if allowedExtensionsOverride != nil {
+		allowedExtensions = *allowedExtensionsOverride
+	}
+
 	// Update progress: starting
 	proc.updateProgress(queueID, 0)
 	// Step 1: Open and parse the file
@@ -135,7 +144,8 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		"virtual_dir", virtualDir,
 		"type", parsed.Type,
 		"total_size", parsed.TotalSize,
-		"files", len(parsed.Files))
+		"files", len(parsed.Files),
+		"max_connections", maxConnections)
 
 	// Step 3: Separate files by type (regular, archive, PAR2)
 	regularFiles, archiveFiles, par2Files := filesystem.SeparateFiles(parsed.Files, parsed.Type)
@@ -150,23 +160,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
 
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -187,28 +197,37 @@ func (proc *Processor) processSingleFile(
 	regularFiles []parser.ParsedFile,
 	par2Files []parser.ParsedFile,
 	nzbPath string,
+	maxConnections int,
+	allowedExtensions []string,
 ) (string, error) {
 	if len(regularFiles) == 0 {
 		return "", fmt.Errorf("no regular files to process")
 	}
 
-	// Ensure directory exists
-	if err := filesystem.EnsureDirectoryExists(virtualDir, proc.metadataService); err != nil {
+	// Create NZB folder (always put single files in a folder to handle obfuscation and keep structure clean)
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	if err != nil {
 		return "", err
 	}
+
+	// Rename the file to match the NZB name to handle obfuscated filenames
+	nzbName := filepath.Base(nzbPath)
+	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	fileExt := filepath.Ext(regularFiles[0].Filename)
+	regularFiles[0].Filename = releaseName + fileExt
 
 	// Process the single file
 	result, err := singlefile.ProcessSingleFile(
 		ctx,
-		virtualDir,
+		nzbFolder,
 		regularFiles[0],
 		par2Files,
 		nzbPath,
 		proc.metadataService,
 		proc.poolManager,
-		proc.maxImportConnections,
+		maxConnections,
 		proc.segmentSamplePercentage,
-		proc.allowedFileExtensions,
+		allowedExtensions,
 	)
 	if err != nil {
 		return "", err
@@ -224,8 +243,10 @@ func (proc *Processor) processMultiFile(
 	regularFiles []parser.ParsedFile,
 	par2Files []parser.ParsedFile,
 	nzbPath string,
+	maxConnections int,
+	allowedExtensions []string,
 ) (string, error) {
-	// Create NZB folder
+	// Create NZB folder for multiple files
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
 	if err != nil {
 		return "", err
@@ -245,9 +266,9 @@ func (proc *Processor) processMultiFile(
 		nzbPath,
 		proc.metadataService,
 		proc.poolManager,
-		proc.maxImportConnections,
+		maxConnections,
 		proc.segmentSamplePercentage,
-		proc.allowedFileExtensions,
+		allowedExtensions,
 	); err != nil {
 		return "", err
 	}
@@ -263,6 +284,8 @@ func (proc *Processor) processRarArchive(
 	archiveFiles []parser.ParsedFile,
 	parsed *parser.ParsedNzb,
 	queueID int,
+	maxConnections int,
+	allowedExtensions []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -284,9 +307,9 @@ func (proc *Processor) processRarArchive(
 			parsed.Path,
 			proc.metadataService,
 			proc.poolManager,
-			proc.maxImportConnections,
+			maxConnections,
 			proc.segmentSamplePercentage,
-			proc.allowedFileExtensions,
+			allowedExtensions,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -321,9 +344,9 @@ func (proc *Processor) processRarArchive(
 			proc.poolManager,
 			archiveProgressTracker,
 			validationProgressTracker,
-			proc.maxImportConnections,
+			maxConnections,
 			proc.segmentSamplePercentage,
-			proc.allowedFileExtensions,
+			allowedExtensions,
 		)
 		if err != nil {
 			return "", err
@@ -342,6 +365,8 @@ func (proc *Processor) processSevenZipArchive(
 	archiveFiles []parser.ParsedFile,
 	parsed *parser.ParsedNzb,
 	queueID int,
+	maxConnections int,
+	allowedExtensions []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -363,9 +388,9 @@ func (proc *Processor) processSevenZipArchive(
 			parsed.Path,
 			proc.metadataService,
 			proc.poolManager,
-			proc.maxImportConnections,
+			maxConnections,
 			proc.segmentSamplePercentage,
-			proc.allowedFileExtensions,
+			allowedExtensions,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -400,9 +425,9 @@ func (proc *Processor) processSevenZipArchive(
 			proc.poolManager,
 			archiveProgressTracker,
 			validationProgressTracker,
-			proc.maxImportConnections,
+			maxConnections,
 			proc.segmentSamplePercentage,
-			proc.allowedFileExtensions,
+			allowedExtensions,
 		)
 		if err != nil {
 			return "", err

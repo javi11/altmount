@@ -114,3 +114,41 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, numFiles, count)
 }
+
+func TestFindFilesToDelete_RepairTriggered(t *testing.T) {
+	worker := &LibrarySyncWorker{}
+
+	dbRecords := []database.AutomaticHealthCheckRecord{
+		{
+			FilePath: "movie.mkv",
+			Status:   database.HealthStatusHealthy,
+		},
+		{
+			FilePath: "repairing.mkv",
+			Status:   database.HealthStatusRepairTriggered,
+		},
+		{
+			FilePath: "deleted.mkv",
+			Status:   database.HealthStatusHealthy,
+		},
+	}
+
+	metaFileSet := map[string]string{
+		"movie.mkv":     "path/to/meta/movie.mkv.meta",
+		"repairing.mkv": "path/to/meta/repairing.mkv.meta",
+		"deleted.mkv":   "path/to/meta/deleted.mkv.meta",
+	}
+
+	filesInUse := map[string]string{
+		"movie.mkv": "path/to/lib/link",
+		// repairing.mkv is MISSING from filesInUse (simulating ARR deleted it)
+		// deleted.mkv is MISSING from filesInUse
+	}
+
+	toDelete := worker.findFilesToDelete(context.Background(), dbRecords, metaFileSet, filesInUse)
+
+	// repairing.mkv should be protected by its status
+	// deleted.mkv should be marked for deletion
+	require.Len(t, toDelete, 1)
+	assert.Equal(t, "deleted.mkv", toDelete[0])
+}

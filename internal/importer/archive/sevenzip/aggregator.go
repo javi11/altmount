@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/importer/parser"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -21,6 +22,8 @@ import (
 var (
 	// ErrNoAllowedFiles indicates that the archive contains no files matching allowed extensions
 	ErrNoAllowedFiles = errors.New("archive contains no files with allowed extensions")
+	// ErrNoFilesProcessed indicates that no files were successfully processed (all files failed validation)
+	ErrNoFilesProcessed = errors.New("no files were successfully processed (all files failed validation)")
 )
 
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
@@ -57,40 +60,16 @@ func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage in
 }
 
 // hasAllowedFiles checks if any files within 7zip archive contents match allowed extensions
-// If allowedExtensions is empty, returns true (all files allowed)
+// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
 func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) bool {
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
 	for _, content := range sevenZipContents {
 		// Skip directories
 		if content.IsDirectory {
 			continue
 		}
 		// Check both the internal path and filename
-		if isAllowedFile(content.InternalPath, allowedExtensions) || isAllowedFile(content.Filename, allowedExtensions) {
-			return true
-		}
-	}
-	return false
-}
-
-// isAllowedFile checks if a filename has an allowed extension
-func isAllowedFile(filename string, allowedExtensions []string) bool {
-	if filename == "" {
-		return false
-	}
-
-	// Empty list = allow all files
-	if len(allowedExtensions) == 0 {
-		return true
-	}
-
-	ext := strings.ToLower(filepath.Ext(filename))
-	for _, allowedExt := range allowedExtensions {
-		if ext == strings.ToLower(allowedExt) {
+		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
+		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
 			return true
 		}
 	}
@@ -151,6 +130,7 @@ func ProcessArchive(
 
 	// Process extracted files with segment-based progress tracking
 	// 80-95% for validation loop, 95-100% for metadata finalization
+	filesProcessed := 0
 	for _, sevenZipContent := range sevenZipContents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
@@ -236,6 +216,13 @@ func ProcessArchive(
 			"size", sevenZipContent.Size,
 			"segments", len(sevenZipContent.Segments),
 			"validated_segments", fileSegmentsValidated)
+
+		filesProcessed++
+	}
+
+	// If no files were processed but we had content, fail the import
+	if filesProcessed == 0 && len(sevenZipContents) > 0 {
+		return ErrNoFilesProcessed
 	}
 
 	// Ensure validation progress is at 95% (end of validation range)
@@ -249,7 +236,7 @@ func ProcessArchive(
 		validationProgressTracker.UpdateAbsolute(100)
 	}
 
-	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", len(sevenZipContents))
+	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", filesProcessed)
 
 	return nil
 }

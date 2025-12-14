@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -124,15 +125,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Wire ARRs service into importer for instant import triggers
 	importerService.SetArrsService(arrsService)
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster)
+	// Create stream tracker for monitoring active streams
+	streamTracker := api.NewStreamTracker()
 
-	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
+
+	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {
 		return err
 	}
 
 	// Create stream handler for file streaming
-	streamHandler := setupStreamHandler(fs, repos.UserRepo)
+	streamHandler := setupStreamHandler(fs, repos.UserRepo, streamTracker)
 
 	// Setup SPA routes
 	setupSPARoutes(app)
@@ -194,7 +198,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// This ensures the WebDAV server is ready to accept connections
 	go func() {
 		// Wait for HTTP server to be fully ready
-		time.Sleep(2 * time.Second)
+		serverURL := fmt.Sprintf("http://localhost:%d/live", cfg.WebDAV.Port)
+		client := &http.Client{Timeout: 500 * time.Millisecond}
+
+		ready := false
+		for i := 0; i < 20; i++ { // Wait up to 10 seconds
+			time.Sleep(500 * time.Millisecond)
+			resp, err := client.Get(serverURL)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == 200 {
+					ready = true
+					break
+				}
+			}
+		}
+
+		if !ready {
+			logger.WarnContext(ctx, "Timeout waiting for server to be ready, proceeding with mount attempt")
+		} else {
+			// Give it one more second to settle
+			time.Sleep(1 * time.Second)
+		}
 
 		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
 			logger.WarnContext(ctx, "Mount service failed to start", "err", err)
@@ -231,12 +256,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Stop RClone mount service if running
-	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
-		if err := mountService.Stop(ctx); err != nil {
-			logger.ErrorContext(ctx, "Failed to stop mount service", "error", err)
-		} else {
-			logger.InfoContext(ctx, "RClone mount service stopped")
-		}
+	if err := mountService.Stop(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to stop mount service", "error", err)
+	} else {
+		logger.InfoContext(ctx, "RClone mount service stopped")
 	}
 
 	// Shutdown custom server with timeout

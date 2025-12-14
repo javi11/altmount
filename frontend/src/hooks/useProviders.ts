@@ -17,6 +17,18 @@ export function useTestProvider() {
 	});
 }
 
+// Test provider speed
+export function useTestProviderSpeed() {
+	const queryClient = useQueryClient();
+	return useMutation<{ speed_mbps: number; duration_seconds: number }, Error, string>({
+		mutationFn: (id) => apiClient.testProviderSpeed(id),
+		onSuccess: () => {
+			// Invalidate config cache to refetch providers
+			queryClient.invalidateQueries({ queryKey: configKeys.current() });
+		},
+	});
+}
+
 // Create new provider
 export function useCreateProvider() {
 	const queryClient = useQueryClient();
@@ -84,6 +96,7 @@ export function useReorderProviders() {
 // Combined hook for easier usage
 export function useProviders() {
 	const testProvider = useTestProvider();
+	const testProviderSpeed = useTestProviderSpeed();
 	const createProvider = useCreateProvider();
 	const updateProvider = useUpdateProvider();
 	const deleteProvider = useDeleteProvider();
@@ -91,6 +104,7 @@ export function useProviders() {
 
 	return {
 		testProvider,
+		testProviderSpeed,
 		createProvider,
 		updateProvider,
 		deleteProvider,

@@ -689,28 +689,8 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		}
 	}
 
-	// If we couldn't find the file (or episodes linked to it), try to find episode by SxxEyy
 	if len(episodeIDs) == 0 {
-		slog.InfoContext(ctx, "Episode file not found in Sonarr, attempting to identify episode by SxxEyy",
-			"file_path", filePath)
-
-		season, episodeNum := parseSeasonEpisode(relativePath)
-		if season != -1 && episodeNum != -1 {
-			for _, episode := range episodes {
-				if episode.SeasonNumber == season && episode.EpisodeNumber == episodeNum {
-					episodeIDs = append(episodeIDs, episode.ID)
-					slog.InfoContext(ctx, "Found matching episode by Season/Episode number",
-						"season", season,
-						"episode", episodeNum,
-						"episode_id", episode.ID)
-					break
-				}
-			}
-		}
-	}
-
-	if len(episodeIDs) == 0 {
-		return fmt.Errorf("no episodes found for file: %s (path match failed, SxxEyy match failed)", filePath)
+		return fmt.Errorf("no episodes found for file: %s (path match failed)", filePath)
 	}
 
 	// Trigger episode search for all episodes in this file

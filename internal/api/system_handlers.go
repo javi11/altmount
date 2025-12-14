@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -304,6 +305,24 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Get provider information from pool
 	providersInfo := pool.GetProvidersInfo()
 
+	// Get current configuration to access speed test results
+	config := s.configManager.GetConfig()
+	providerConfigMap := make(map[string]struct {
+		Speed float64
+		Time  *time.Time
+	})
+	if config != nil {
+		for _, p := range config.Providers {
+			providerConfigMap[p.ID] = struct {
+				Speed float64
+				Time  *time.Time
+			}{
+				Speed: p.LastSpeedTestMbps,
+				Time:  p.LastSpeedTestTime,
+			}
+		}
+	}
+
 	// Map provider info to response format
 	providers := make([]ProviderStatusResponse, 0, len(providersInfo))
 	for _, providerInfo := range providersInfo {
@@ -332,25 +351,88 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			LastConnectionAttempt: providerInfo.LastConnectionAttempt,
 			LastSuccessfulConnect: providerInfo.LastSuccessfulConnect,
 			FailureReason:         providerInfo.FailureReason,
+			LastSpeedTestMbps:     lastSpeedTestMbps,
+			LastSpeedTestTime:     lastSpeedTestTime,
 		})
 	}
 
 	// Map pool metrics to API response format
 	response := PoolMetricsResponse{
-		BytesDownloaded:          metrics.BytesDownloaded,
-		BytesUploaded:            metrics.BytesUploaded,
-		ArticlesDownloaded:       metrics.ArticlesDownloaded,
-		ArticlesPosted:           metrics.ArticlesPosted,
-		TotalErrors:              metrics.TotalErrors,
-		ProviderErrors:           metrics.ProviderErrors,
-		DownloadSpeedBytesPerSec: metrics.DownloadSpeedBytesPerSec,
-		UploadSpeedBytesPerSec:   metrics.UploadSpeedBytesPerSec,
-		Timestamp:                metrics.Timestamp,
-		Providers:                providers,
+		BytesDownloaded:             metrics.BytesDownloaded,
+		BytesUploaded:               metrics.BytesUploaded,
+		ArticlesDownloaded:          metrics.ArticlesDownloaded,
+		ArticlesPosted:              metrics.ArticlesPosted,
+		TotalErrors:                 metrics.TotalErrors,
+		ProviderErrors:              metrics.ProviderErrors,
+		DownloadSpeedBytesPerSec:    metrics.DownloadSpeedBytesPerSec,
+		MaxDownloadSpeedBytesPerSec: metrics.MaxDownloadSpeedBytesPerSec,
+		UploadSpeedBytesPerSec:      metrics.UploadSpeedBytesPerSec,
+		Timestamp:                   metrics.Timestamp,
+		Providers:                   providers,
 	}
 
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
+	})
+}
+
+// FileEntry represents a file or directory in the system browser
+type FileEntry struct {
+	Name    string    `json:"name"`
+	Path    string    `json:"path"`
+	IsDir   bool      `json:"is_dir"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mod_time"`
+}
+
+// handleSystemBrowse handles GET /api/system/browse
+func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
+	path := c.Query("path")
+	if path == "" {
+		// Default to root or current working directory
+		var err error
+		path, err = os.Getwd()
+		if err != nil {
+			path = "/"
+		}
+	}
+
+	// Read directory
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to read directory",
+			"details": err.Error(),
+		})
+	}
+
+	var files []FileEntry
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		// Skip hidden files if desired, but for system browsing we might want them
+		// For now, let's keep them
+
+		files = append(files, FileEntry{
+			Name:    entry.Name(),
+			Path:    filepath.Join(path, entry.Name()),
+			IsDir:   entry.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"current_path": path,
+			"parent_path":  filepath.Dir(path),
+			"files":        files,
+		},
 	})
 }

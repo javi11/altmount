@@ -1,4 +1,5 @@
 import type {
+	ActiveStream,
 	APIResponse,
 	AuthResponse,
 	FileHealth,
@@ -8,6 +9,7 @@ import type {
 	HealthCleanupResponse,
 	HealthStats,
 	HealthWorkerStatus,
+	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
 	PoolMetrics,
@@ -15,6 +17,7 @@ import type {
 	QueueStats,
 	SABnzbdAddResponse,
 	ScanStatusResponse,
+	SystemBrowseResponse,
 	User,
 	UserAdminUpdateRequest,
 } from "../types/api";
@@ -421,6 +424,10 @@ export class APIClient {
 		return this.request<FileMetadata>(`/files/info?path=${encodeURIComponent(path)}`);
 	}
 
+	async getActiveStreams() {
+		return this.request<ActiveStream[]>("/files/active-streams");
+	}
+
 	async exportMetadataToNZB(path: string): Promise<Blob> {
 		const url = `${this.baseURL}/files/export-nzb?path=${encodeURIComponent(path)}`;
 
@@ -578,12 +585,29 @@ export class APIClient {
 		});
 	}
 
+	async getSystemBrowse(path?: string) {
+		const searchParams = new URLSearchParams();
+		if (path) searchParams.set("path", path);
+
+		const query = searchParams.toString();
+		return this.request<SystemBrowseResponse>(`/system/browse${query ? `?${query}` : ""}`);
+	}
+
 	// Provider endpoints
 	async testProvider(data: ProviderTestRequest) {
 		return this.request<ProviderTestResponse>("/providers/test", {
 			method: "POST",
 			body: JSON.stringify(data),
 		});
+	}
+
+	async testProviderSpeed(id: string) {
+		return this.request<{ speed_mbps: number; duration_seconds: number }>(
+			`/providers/${id}/speedtest`,
+			{
+				method: "POST",
+			},
+		);
 	}
 
 	async createProvider(data: ProviderCreateRequest) {
@@ -627,6 +651,17 @@ export class APIClient {
 
 	async cancelScan() {
 		return this.request<ScanStatusResponse>("/import/scan", {
+			method: "DELETE",
+		});
+	}
+
+	// NZBDav Import endpoints
+	async getNzbdavImportStatus() {
+		return this.request<ImportStatusResponse>("/import/nzbdav/status");
+	}
+
+	async cancelNzbdavImport() {
+		return this.request<{ message: string }>("/import/nzbdav", {
 			method: "DELETE",
 		});
 	}
@@ -677,6 +712,13 @@ export class APIClient {
 			body: formData,
 			// Don't set Content-Type header - let browser set it with boundary for multipart/form-data
 			headers: {},
+		});
+	}
+
+	async addTestQueueItem(size: "100MB" | "1GB" | "10GB") {
+		return this.request<APIResponse<QueueItem>>("/queue/test", {
+			method: "POST",
+			body: JSON.stringify({ size }),
 		});
 	}
 }
