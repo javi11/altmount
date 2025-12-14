@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"syscall" // Import syscall
 	"time"
 
@@ -23,6 +24,8 @@ type NzbFuseFs struct {
 	fs.Inode
 	metadataRemoteFile *nzbfilesystem.MetadataRemoteFile
 	readahead          int
+	uid                uint32
+	gid                uint32
 }
 
 var _ fs.InodeEmbedder = (*NzbFuseFs)(nil)
@@ -31,9 +34,15 @@ var _ fs.InodeEmbedder = (*NzbFuseFs)(nil)
 func NewNzbFuseFs(
 	cfg *config.Config,
 	readaheadBytes int,
+	uid uint32,
+	gid uint32,
 	db *database.DB,
 	poolManager pool.Manager,
 ) (*NzbFuseFs, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database connection is nil")
+	}
+
 	// Initialize dependencies for MetadataRemoteFile
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
 	
@@ -55,16 +64,24 @@ func NewNzbFuseFs(
 	return &NzbFuseFs{
 		metadataRemoteFile: metadataRemoteFile,
 		readahead:          readaheadBytes,
+		uid:                uid,
+		gid:                gid,
 	}, nil
 }
 
 // Mount mounts the FUSE filesystem and returns the server instance
 func (nfs *NzbFuseFs) Mount(mountpoint string) (*fuse.Server, error) {
-	root := nfs.NewInode(context.Background(), nil, fs.StableAttr{Mode: fuse.S_IFDIR})
+	// nfs is the root inode
 	sec := time.Second
-	server, err := fs.Mount(mountpoint, root, &fs.Options{
+	server, err := fs.Mount(mountpoint, nfs, &fs.Options{
 		AttrTimeout:  &sec,
 		EntryTimeout: &sec,
+				MountOptions: fuse.MountOptions{
+					AllowOther:   true,
+					Name:         "altmount-fuse",
+					Options:      []string{"allow_other"},
+					MaxReadAhead: nfs.readahead,
+				},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to mount FUSE: %w", err)
@@ -86,14 +103,16 @@ func (nfs *NzbFuseFs) Lookup(ctx context.Context, name string, out *fuse.EntryOu
 	}
 
 	stableAttr := fs.StableAttr{
-		Mode: uint32(info.Mode()),
+		Mode: ToFuseMode(info.Mode()),
 		Ino:  nfs.StableAttr().Ino, // Use the root inode for now, will generate unique later
 	}
-	out.Attr.Mode = uint32(info.Mode())
+	out.Attr.Mode = ToFuseMode(info.Mode())
 	out.Attr.Size = uint64(info.Size())
 	out.Attr.Mtime = uint64(info.ModTime().Unix())
 	out.Attr.Ctime = uint64(info.ModTime().Unix())
 	out.Attr.Atime = uint64(info.ModTime().Unix())
+	out.Attr.Uid = nfs.uid
+	out.Attr.Gid = nfs.gid
 
 	var inode *fs.Inode
 	if info.IsDir() {
@@ -102,6 +121,8 @@ func (nfs *NzbFuseFs) Lookup(ctx context.Context, name string, out *fuse.EntryOu
 		dir := &NzbDir{
 			metadataRemoteFile: nfs.metadataRemoteFile,
 			path:               name,
+			uid:                nfs.uid,
+			gid:                nfs.gid,
 		}
 		inode = nfs.NewInode(ctx, dir, stableAttr)
 	} else {
@@ -109,6 +130,8 @@ func (nfs *NzbFuseFs) Lookup(ctx context.Context, name string, out *fuse.EntryOu
 		file := &NzbFile{
 			metadataRemoteFile: nfs.metadataRemoteFile,
 			path:               name,
+			uid:                nfs.uid,
+			gid:                nfs.gid,
 		}
 		inode = nfs.NewInode(ctx, file, stableAttr)
 	}
@@ -127,12 +150,14 @@ func (nfs *NzbFuseFs) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.A
 	// For specific files/directories, the Inode associated with them will have its own Getattr.
 
 	// For the root directory, we return attributes for a directory
-	out.Mode = fuse.S_IFDIR | 0755
+	out.Mode = ToFuseMode(os.ModeDir | 0755)
 	out.Size = 4096 // Typical directory size
 	out.Nlink = 1
 	out.Atime = uint64(time.Now().Unix())
 	out.Mtime = uint64(time.Now().Unix())
 	out.Ctime = uint64(time.Now().Unix())
+	out.Uid = nfs.uid
+	out.Gid = nfs.gid
 
 	return fs.OK
 }

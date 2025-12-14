@@ -4,6 +4,8 @@ package fusefs
 
 import (
 	"context"
+	"log/slog"
+	"path/filepath"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -17,9 +19,59 @@ type NzbDir struct {
 	fs.Inode
 	metadataRemoteFile *nzbfilesystem.MetadataRemoteFile
 	path               string // The full path of this directory in the virtual filesystem
+	uid                uint32
+	gid                uint32
 }
 
 var _ = (fs.InodeEmbedder)((*NzbDir)(nil))
+
+// Lookup implements fs.Inode.Lookup
+func (d *NzbDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fullPath := filepath.Join(d.path, name)
+	ok, info, err := d.metadataRemoteFile.Stat(ctx, fullPath)
+	if err != nil {
+		slog.Error("Failed to stat file during lookup", "path", fullPath, "error", err)
+		return nil, syscall.EIO
+	}
+	if !ok {
+		return nil, syscall.ENOENT
+	}
+
+	stableAttr := fs.StableAttr{
+		Mode: ToFuseMode(info.Mode()),
+		// Ino will be generated automatically if not set, or we can try to be consistent
+	}
+	out.Attr.Mode = ToFuseMode(info.Mode())
+	out.Attr.Size = uint64(info.Size())
+	out.Attr.Mtime = uint64(info.ModTime().Unix())
+	out.Attr.Ctime = uint64(info.ModTime().Unix())
+	out.Attr.Atime = uint64(info.ModTime().Unix())
+	out.Attr.Uid = d.uid
+	out.Attr.Gid = d.gid
+
+	var inode *fs.Inode
+	if info.IsDir() {
+		// For directories
+		dir := &NzbDir{
+			metadataRemoteFile: d.metadataRemoteFile,
+			path:               fullPath,
+			uid:                d.uid,
+			gid:                d.gid,
+		}
+		inode = d.NewInode(ctx, dir, stableAttr)
+	} else {
+		// For files
+		file := &NzbFile{
+			metadataRemoteFile: d.metadataRemoteFile,
+			path:               fullPath,
+			uid:                d.uid,
+			gid:                d.gid,
+		}
+		inode = d.NewInode(ctx, file, stableAttr)
+	}
+
+	return inode, fs.OK
+}
 
 // Readdir implements fs.Inode.Readdir.
 // It reads the contents of the directory using the MetadataRemoteFile.
@@ -69,11 +121,13 @@ func (d *NzbDir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr) 
 		return syscall.ENOENT
 	}
 
-	out.Mode = uint32(info.Mode())
+	out.Mode = ToFuseMode(info.Mode())
 	out.Size = uint64(info.Size())
 	out.Mtime = uint64(info.ModTime().Unix())
 	out.Ctime = uint64(info.ModTime().Unix())
 	out.Atime = uint64(info.ModTime().Unix())
+	out.Uid = d.uid
+	out.Gid = d.gid
 
 	return fs.OK
 }

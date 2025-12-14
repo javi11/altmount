@@ -54,6 +54,7 @@ type Server struct {
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
 	streamTracker       *StreamTracker
+	OnRestart           func(ctx context.Context)
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)

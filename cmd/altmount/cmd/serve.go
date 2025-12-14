@@ -62,6 +62,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var restartRequested bool
+
 	configManager := config.NewManager(cfg, configFile)
 	poolManager := pool.NewManager(ctx)
 
@@ -130,6 +132,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	streamTracker := api.NewStreamTracker()
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
+	apiServer.OnRestart = func(c context.Context) {
+		slog.InfoContext(c, "Server restart requested via API")
+		time.Sleep(100 * time.Millisecond) // Allow HTTP response to flush
+		restartRequested = true
+		cancel()
+	}
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {
@@ -221,7 +229,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.ErrorContext(ctx, "Server error, shutting down", "error", err)
 		cancel()
 	case <-ctx.Done():
-		logger.InfoContext(ctx, "Context cancelled, shutting down")
+		if restartRequested {
+			logger.InfoContext(ctx, "Context cancelled for restart")
+		} else {
+			logger.InfoContext(ctx, "Context cancelled, shutting down")
+		}
 	}
 
 	// Start graceful shutdown sequence
@@ -267,6 +279,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	logger.InfoContext(ctx, "Server shutdown completed")
+
+	if restartRequested {
+		logger.InfoContext(ctx, "Performing process restart...")
+		executable, err := os.Executable()
+		if err != nil {
+			logger.ErrorContext(ctx, "Failed to get executable for restart", "error", err)
+			return err
+		}
+		// Use syscall.Exec to replace the current process
+		if err := syscall.Exec(executable, os.Args, os.Environ()); err != nil {
+			logger.ErrorContext(ctx, "Failed to exec new process", "error", err)
+			return err
+		}
+	}
 
 	logger.InfoContext(ctx, "AltMount server shutdown completed successfully")
 	return nil

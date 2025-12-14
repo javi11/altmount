@@ -19,6 +19,8 @@ export function FuseConfigSection({
 		enabled: config.fuse?.enabled ?? false,
 		mount_point: config.fuse?.mount_point ?? "",
 		readahead: config.fuse?.readahead ?? "128K",
+		uid: config.fuse?.uid ?? 1000,
+		gid: config.fuse?.gid ?? 1000,
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 
@@ -28,11 +30,13 @@ export function FuseConfigSection({
 			enabled: config.fuse?.enabled ?? false,
 			mount_point: config.fuse?.mount_point ?? "",
 			readahead: config.fuse?.readahead ?? "128K",
+			uid: config.fuse?.uid ?? 1000,
+			gid: config.fuse?.gid ?? 1000,
 		});
 		setHasChanges(false);
 	}, [config.fuse]);
 
-	const handleInputChange = (field: keyof FuseConfig, value: string | boolean) => {
+	const handleInputChange = (field: keyof FuseConfig, value: string | boolean | number) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		
@@ -40,6 +44,8 @@ export function FuseConfigSection({
 			enabled: config.fuse?.enabled ?? false,
 			mount_point: config.fuse?.mount_point ?? "",
 			readahead: config.fuse?.readahead ?? "128K",
+			uid: config.fuse?.uid ?? 1000,
+			gid: config.fuse?.gid ?? 1000,
 		};
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(currentConfig));
 	};
@@ -112,6 +118,32 @@ export function FuseConfigSection({
 					<p className="label">
 						Read-ahead buffer size (e.g., 128K, 4M). Larger values can improve streaming performance.
 					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Owner UID</legend>
+					<input
+						type="number"
+						className="input w-full"
+						value={formData.uid}
+						disabled={isReadOnly || !formData.enabled}
+						onChange={(e) => handleInputChange("uid", Number.parseInt(e.target.value, 10) || 0)}
+						placeholder="1000"
+					/>
+					<p className="label">User ID that will own the mounted files.</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Owner GID</legend>
+					<input
+						type="number"
+						className="input w-full"
+						value={formData.gid}
+						disabled={isReadOnly || !formData.enabled}
+						onChange={(e) => handleInputChange("gid", Number.parseInt(e.target.value, 10) || 0)}
+						placeholder="1000"
+					/>
+					<p className="label">Group ID that will own the mounted files.</p>
 				</fieldset>
 			</div>
 

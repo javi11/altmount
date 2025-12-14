@@ -20,6 +20,8 @@ type NzbFile struct {
 	fs.Inode
 	metadataRemoteFile *nzbfilesystem.MetadataRemoteFile
 	path               string // The full path of this file in the virtual filesystem
+	uid                uint32
+	gid                uint32
 }
 
 var _ = (fs.InodeEmbedder)((*NzbFile)(nil))
@@ -42,11 +44,13 @@ func (f *NzbFile) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.Attr)
 		return syscall.ENOENT
 	}
 
-	out.Mode = uint32(info.Mode())
+	out.Mode = ToFuseMode(info.Mode())
 	out.Size = uint64(info.Size())
 	out.Mtime = uint64(info.ModTime().Unix())
 	out.Ctime = uint64(info.ModTime().Unix())
 	out.Atime = uint64(info.ModTime().Unix())
+	out.Uid = f.uid
+	out.Gid = f.gid
 
 	return fs.OK
 }

@@ -41,6 +41,8 @@ type FuseConfig struct {
 	Enabled    bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	MountPoint string `yaml:"mount_point" mapstructure:"mount_point" json:"mount_point"`
 	Readahead  string `yaml:"readahead" mapstructure:"readahead" json:"readahead"`
+	UID        int    `yaml:"uid" mapstructure:"uid" json:"uid"`
+	GID        int    `yaml:"gid" mapstructure:"gid" json:"gid"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -1182,6 +1184,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Enabled:    false,
 			MountPoint: "",
 			Readahead:  "128K",
+			UID:        1000,
+			GID:        1000,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}

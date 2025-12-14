@@ -25,6 +25,8 @@ export interface FuseConfig {
 	enabled: boolean;
 	mount_point: string;
 	readahead: string;
+	uid: number;
+	gid: number;
 }
 
 // WebDAV server configuration
@@ -241,6 +243,8 @@ export interface FuseUpdateRequest {
 	enabled?: boolean;
 	mount_point?: string;
 	readahead?: string;
+	uid?: number;
+	gid?: number;
 }
 
 // WebDAV update request
@@ -423,6 +427,8 @@ export interface FuseFormData {
 	enabled: boolean;
 	mount_point: string;
 	readahead: string;
+	uid: number;
+	gid: number;
 }
 
 export interface APIFormData {

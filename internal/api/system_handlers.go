@@ -207,8 +207,13 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 		"data":    response,
 	})
 
-	// Start restart process in a goroutine to allow response to be sent
-	go s.performRestart(c.Context())
+	// Call OnRestart if defined, otherwise use legacy performRestart
+	if s.OnRestart != nil {
+		go s.OnRestart(context.Background())
+	} else {
+		// Start restart process in a goroutine to allow response to be sent
+		go s.performRestart(c.Context())
+	}
 
 	return result
 }
