@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/fusefs"
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
@@ -90,6 +91,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}()
 
 	mountService := rclone.NewMountService(configManager)
+	fuseService := fusefs.NewFuseService(configManager, db, poolManager)
 
 	var rcloneRCClient = setupRCloneClient(ctx, cfg, configManager)
 	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
@@ -144,6 +146,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	pool.RegisterConfigHandlers(ctx, configManager, poolManager)
 	webdav.RegisterConfigHandlers(ctx, configManager, webdavHandler)
 	api.RegisterLogLevelHandler(ctx, configManager, debugMode)
+	fuseService.RegisterConfigHandlers(configManager)
 
 	healthWorker, librarySyncWorker, err := startHealthWorker(ctx, cfg, repos.HealthRepo, poolManager, configManager, rcloneRCClient, arrsService)
 	if err != nil {
@@ -202,6 +205,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
 			logger.WarnContext(ctx, "Mount service failed to start", "err", err)
 		}
+		
+		// Start FUSE service
+		if err := fuseService.Start(ctx); err != nil {
+			logger.WarnContext(ctx, "FUSE service failed to start", "err", err)
+		}
 	}()
 
 	// Wait for shutdown signal or server error
@@ -240,6 +248,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		} else {
 			logger.InfoContext(ctx, "RClone mount service stopped")
 		}
+	}
+
+	// Stop FUSE service if running
+	if err := fuseService.Stop(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to stop FUSE service", "error", err)
+	} else {
+		logger.InfoContext(ctx, "FUSE service stopped")
 	}
 
 	// Shutdown custom server with timeout
