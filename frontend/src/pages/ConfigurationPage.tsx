@@ -17,6 +17,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
+import { FuseConfigSection } from "../components/config/FuseConfigSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
@@ -42,6 +43,7 @@ import type {
 	ArrsConfig,
 	AuthConfig,
 	ConfigSection,
+	FuseConfig,
 	HealthConfig,
 	ImportConfig,
 	LogFormData,
@@ -168,6 +170,7 @@ export function ConfigurationPage() {
 			| HealthConfig
 			| ImportConfig
 			| MetadataConfig
+			| FuseConfig
 			| RCloneRCFormData
 			| RCloneMountFormData
 			| LogFormData
@@ -194,6 +197,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "auth",
 					config: { auth: data as AuthConfig },
+				});
+			} else if (section === "fuse") {
+				await updateConfigSection.mutateAsync({
+					section: "fuse",
+					config: { fuse: data as FuseConfig },
 				});
 			} else if (section === "streaming") {
 				await updateConfigSection.mutateAsync({
@@ -503,6 +511,14 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "fuse" && (
+									<FuseConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
+
 								{activeSection === "import" && (
 									<ImportConfigSection
 										config={config}
@@ -580,6 +596,7 @@ export function ConfigurationPage() {
 									"system",
 									"providers",
 									"rclone",
+									"fuse",
 									"sabnzbd",
 									"arrs",
 									"health",

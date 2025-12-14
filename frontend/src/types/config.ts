@@ -14,9 +14,17 @@ export interface ConfigResponse {
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
 	arrs: ArrsConfig;
+	fuse: FuseConfig;
 	providers: ProviderConfig[];
 	mount_path: string;
 	api_key?: string;
+}
+
+// Fuse configuration
+export interface FuseConfig {
+	enabled: boolean;
+	mount_point: string;
+	readahead: string;
 }
 
 // WebDAV server configuration
@@ -223,8 +231,16 @@ export interface ConfigUpdateRequest {
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;
 	arrs?: ArrsConfig;
+	fuse?: FuseUpdateRequest;
 	providers?: ProviderUpdateRequest[];
 	mount_path?: string;
+}
+
+// Fuse update request
+export interface FuseUpdateRequest {
+	enabled?: boolean;
+	mount_point?: string;
+	readahead?: string;
 }
 
 // WebDAV update request
@@ -391,6 +407,7 @@ export type ConfigSection =
 	| "import"
 	| "providers"
 	| "rclone"
+	| "fuse"
 	| "sabnzbd"
 	| "arrs"
 	| "system";
@@ -400,6 +417,12 @@ export interface WebDAVFormData {
 	port: number;
 	user: string;
 	password: string;
+}
+
+export interface FuseFormData {
+	enabled: boolean;
+	mount_point: string;
+	readahead: string;
 }
 
 export interface APIFormData {
@@ -689,6 +712,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	rclone: {
 		title: "Mount & RClone",
 		description: "RClone mount and VFS settings",
+		icon: "HardDrive",
+		canEdit: true,
+	},
+	fuse: {
+		title: "FUSE Mount",
+		description: "Native FUSE mount settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},

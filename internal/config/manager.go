@@ -30,9 +30,17 @@ type Config struct {
 	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
 	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"` // New Fuse config
 	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
 	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
 	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+}
+
+// FuseConfig represents FUSE mount configuration
+type FuseConfig struct {
+	Enabled    bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	MountPoint string `yaml:"mount_point" mapstructure:"mount_point" json:"mount_point"`
+	Readahead  string `yaml:"readahead" mapstructure:"readahead" json:"readahead"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -692,6 +700,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("mount_path must be an absolute path")
 	}
 
+	// Validate Fuse configuration
+	if c.Fuse.Enabled {
+		if c.Fuse.MountPoint == "" {
+			return fmt.Errorf("fuse mount_point cannot be empty when enabled")
+		}
+		if !filepath.IsAbs(c.Fuse.MountPoint) {
+			return fmt.Errorf("fuse mount_point must be an absolute path")
+		}
+	}
+
 	// Validate scraper configuration
 	if c.Arrs.Enabled != nil && *c.Arrs.Enabled {
 		// Mount path is required when ARRs is enabled
@@ -1159,6 +1177,11 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxWorkers:      5,                // Default to 5 concurrent workers
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+		},
+		Fuse: FuseConfig{
+			Enabled:    false,
+			MountPoint: "",
+			Readahead:  "128K",
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}
