@@ -303,6 +303,8 @@ export interface ProviderStatus {
 	last_connection_attempt: string;
 	last_successful_connect: string;
 	failure_reason: string;
+	last_speed_test_mbps: number;
+	last_speed_test_time?: string;
 }
 
 export interface PoolMetrics {

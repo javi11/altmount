@@ -99,7 +99,6 @@ export function ProviderHealth() {
 									<th>Provider Host</th>
 									<th>State</th>
 									<th>Connections</th>
-									<th>Errors (% of Total)</th>
 									<th>Last Activity</th>
 									<th>Failure Reason</th>
 								</tr>
@@ -140,21 +139,6 @@ export function ProviderHealth() {
 												<span className="font-mono text-sm">
 													{provider.used_connections}/{provider.max_connections}
 												</span>
-											</div>
-										</td>
-										<td>
-											<div className="flex flex-col">
-												<span
-													className={`font-mono ${provider.error_count > 0 ? "font-bold text-error" : "text-success"}`}
-												>
-													{provider.error_count.toLocaleString()}
-												</span>
-												{data.total_errors > 0 && provider.error_count > 0 && (
-													<span className="text-base-content/50 text-xs">
-														{((provider.error_count / data.total_errors) * 100).toFixed(1)}% of
-														total
-													</span>
-												)}
 											</div>
 										</td>
 										<td className="text-base-content/70 text-sm">
