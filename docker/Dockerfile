@@ -65,7 +65,7 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/tmp/go-build-cache,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
-    go build -a -ldflags '-linkmode external -extldflags "-static"' -o altmount cmd/altmount/main.go
+    go build -tags fuse -a -ldflags '-linkmode external -extldflags "-static"' -o altmount cmd/altmount/main.go
 
 # Final stage - use custom base image with pre-installed packages
 ARG TARGETARCH
