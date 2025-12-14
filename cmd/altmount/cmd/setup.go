@@ -229,8 +229,9 @@ func setupAuthService(ctx context.Context, userRepo *database.UserRepository) *a
 func setupStreamHandler(
 	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	userRepo *database.UserRepository,
+	streamTracker *api.StreamTracker,
 ) *api.StreamHandler {
-	return api.NewStreamHandler(nzbFilesystem, userRepo)
+	return api.NewStreamHandler(nzbFilesystem, userRepo, streamTracker)
 }
 
 // setupAPIServer creates and configures the API server
@@ -246,6 +247,7 @@ func setupAPIServer(
 	arrsService *arrs.Service,
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
+	streamTracker *api.StreamTracker,
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -266,6 +268,7 @@ func setupAPIServer(
 		arrsService,
 		mountService,
 		progressBroadcaster,
+		streamTracker,
 	)
 
 	apiServer.SetupRoutes(app)
@@ -287,6 +290,7 @@ func setupWebDAV(
 	authService *auth.Service,
 	userRepo *database.UserRepository,
 	configManager *config.Manager,
+	streamTracker *api.StreamTracker,
 ) (*webdav.Handler, error) {
 	var tokenService *token.Service
 	var webdavUserRepo *database.UserRepository
@@ -302,7 +306,7 @@ func setupWebDAV(
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
 		Prefix: "/webdav",
-	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter())
+	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter(), streamTracker)
 
 	if err != nil {
 		return nil, err

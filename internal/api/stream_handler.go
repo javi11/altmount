@@ -21,13 +21,15 @@ import (
 type StreamHandler struct {
 	nzbFilesystem *nzbfilesystem.NzbFilesystem
 	userRepo      *database.UserRepository
+	streamTracker *StreamTracker
 }
 
 // NewStreamHandler creates a new stream handler with the provided filesystem and user repository
-func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository) *StreamHandler {
+func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker) *StreamHandler {
 	return &StreamHandler{
 		nzbFilesystem: fs,
 		userRepo:      userRepo,
+		streamTracker: streamTracker,
 	}
 }
 
@@ -129,6 +131,12 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+
+	// Track stream if tracker is available
+	if h.streamTracker != nil {
+		streamID := h.streamTracker.Add(path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "API")
+		defer h.streamTracker.Remove(streamID)
+	}
 
 	// Get file info
 	stat, err := file.Stat()

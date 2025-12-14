@@ -307,6 +307,16 @@ export interface ProviderStatus {
 	last_speed_test_time?: string;
 }
 
+export interface ActiveStream {
+	id: string;
+	file_path: string;
+	client_ip: string;
+	started_at: string;
+	user_agent: string;
+	range?: string;
+	source: string;
+}
+
 export interface PoolMetrics {
 	bytes_downloaded: number;
 	bytes_uploaded: number;

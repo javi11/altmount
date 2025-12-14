@@ -295,6 +295,14 @@ export const usePoolMetrics = () => {
 	});
 };
 
+export const useActiveStreams = () => {
+	return useQuery({
+		queryKey: ["files", "active-streams"],
+		queryFn: () => apiClient.getActiveStreams(),
+		refetchInterval: 3000, // Refetch every 3 seconds for liveliness
+	});
+};
+
 export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 
