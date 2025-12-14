@@ -227,6 +227,12 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		})
 	}
 
+	// Persist changes to disk
+	if err := s.configManager.SaveConfig(); err != nil {
+		slog.Error("Failed to persist config after speed test", "err", err)
+		// We don't fail the request since the test was successful and in-memory config is updated
+	}
+
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data": ProviderSpeedTestResponse{
