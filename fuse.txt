@@ -1,0 +1,262 @@
+Got it — **keep AltMount exactly as it is today**, and **add** a native FUSE mount mode **without breaking or replacing** WebDAV, rclone, or existing workflows.
+
+Below is a **conservative, additive integration plan** you can give to **Gemini CLI** that fits AltMount’s philosophy and minimizes risk.
+
+---
+
+# Additive Plan: Native FUSE Mode for AltMount (No Breaking Changes)
+
+## Core Principle
+
+> **FUSE is just another frontend**, like WebDAV and rclone — it reuses *all existing AltMount logic*.
+
+Nothing is removed.
+Nothing is refactored aggressively.
+No behavior changes for current users.
+
+---
+
+## Updated Architecture (Additive)
+
+```
+                 ┌──────────────┐
+                 │  AltMount    │
+                 │  Core Logic  │
+                 │              │
+                 │  - Index     │
+                 │  - Usenet    │
+                 │  - Gateway   │
+                 └──────┬───────┘
+                        │
+      ┌─────────────────┼─────────────────┐
+      │                 │                 │
+┌─────▼─────┐     ┌─────▼─────┐     ┌─────▼─────┐
+│  WebDAV   │     │  rclone   │     │   FUSE    │  ← NEW
+│  server   │     │  mount    │     │  mount    │
+└───────────┘     └───────────┘     └───────────┘
+```
+
+FUSE **calls the same internal APIs** as WebDAV.
+
+---
+
+## CLI Changes (Minimal & Safe)
+
+Add a new command:
+
+```bash
+altmount fuse \
+  --mountpoint /mnt/altmount \
+  --readahead 4M
+```
+
+No flags removed.
+No behavior changed elsewhere.
+
+---
+
+## Package Layout (Non-invasive)
+
+```
+altmount/
+├── cmd/
+│   ├── fuse.go         # new cobra command
+├── fusefs/             # NEW package
+│   ├── fs.go
+│   ├── dir.go
+│   ├── file.go
+│   └── handle.go
+```
+
+Everything else untouched.
+
+---
+
+## Backend Reuse (Key to Safety)
+
+Do **NOT** introduce a new backend abstraction.
+
+Instead:
+
+* Import existing AltMount packages
+* Call the same functions WebDAV uses
+
+Example:
+
+```go
+import "altmount/internal/usenet"
+import "altmount/internal/index"
+```
+
+This guarantees:
+
+* Same metadata
+* Same naming
+* Same auth
+* Same behavior
+
+---
+
+## FUSE ↔ AltMount Mapping
+
+| FUSE Operation | AltMount Call                |
+| -------------- | ---------------------------- |
+| `Readdir`      | existing index `ListDir()`   |
+| `Lookup`       | existing index lookup        |
+| `Getattr`      | existing size/mtime          |
+| `Open`         | existing gateway stream init |
+| `Read`         | existing HTTP range reader   |
+
+No new logic paths.
+
+---
+
+## File Handle Model (Additive, Local Only)
+
+```go
+type FileHandle struct {
+    streamURL string
+    objectID  string
+}
+```
+
+* Created on `Open`
+* Destroyed on `Release`
+* Never leaks into AltMount core
+
+---
+
+## Stream URL Handling (No Core Changes)
+
+Reuse existing logic:
+
+```go
+url, err := gateway.GetStreamURL(objectID)
+```
+
+Optional retry wrapper **inside FUSE only**:
+
+* refresh URL once if expired
+* no change to gateway code required
+
+---
+
+## Read Path (No Caching Initially)
+
+```go
+func (fh *FileHandle) Read(ctx context.Context, dest []byte, off int64)
+```
+
+* Direct HTTP Range call
+* Same path WebDAV uses
+* No buffering changes elsewhere
+
+This keeps behavior identical.
+
+---
+
+## Read-only Enforcement
+
+Inside FUSE only:
+
+* Reject write flags
+* Return `EROFS`
+
+AltMount core remains unaware.
+
+---
+
+## Required No-op Ops (FUSE Only)
+
+Implement stubs:
+
+* `Flush`
+* `Fsync`
+* `Statfs`
+
+These do **not** touch core code.
+
+---
+
+## Platform Strategy
+
+| OS      | Support                            |
+| ------- | ---------------------------------- |
+| Linux   | Full FUSE                          |
+| macOS   | FUSE if installed                  |
+| Windows | Not supported (keep WebDAV/rclone) |
+
+No regression for Windows users.
+
+---
+
+## Build & Dependency Impact
+
+* Add dependency: `github.com/hanwen/go-fuse/v2`
+* Optional build tag:
+
+  ```go
+  //go:build fuse
+  ```
+
+This keeps:
+
+* CI fast
+* Optional builds clean
+
+---
+
+## Incremental Rollout Plan
+
+### Phase 1 – Minimal, Safe
+
+* Read-only FUSE mount
+* No cache
+* Linux only
+* Document as **experimental**
+
+### Phase 2 – Parity Improvements
+
+* Optional readahead
+* Stream URL retry
+* Metadata caching
+
+### Phase 3 – Polishing
+
+* Better errors
+* Metrics
+* Debug logging
+
+---
+
+## Why This Fits AltMount’s Philosophy
+
+✔ No replacement of WebDAV
+✔ No rclone removal
+✔ Same internal behavior
+✔ Optional, opt-in feature
+✔ Power users only
+
+AltMount remains:
+
+> *“Works everywhere via WebDAV/rclone”*
+
+FUSE becomes:
+
+> *“Best experience on Linux”*
+
+---
+
+## Exact Gemini CLI Prompt You Can Use
+
+> Add a native FUSE mount mode to AltMount without modifying existing WebDAV or rclone functionality. Implement it as a new frontend that reuses existing AltMount index and Usenet gateway logic. Use go-fuse v2. Read-only filesystem, HTTP range reads, per-open stream URLs, optional readahead. Keep all current behavior unchanged.
+
+---
+
+If you want, next I can:
+
+* Draft **actual Go code** that plugs into AltMount’s existing packages
+* Identify **exact functions** in AltMount to reuse
+* Help write the **README / docs** section so users understand when to use FUSE vs WebDAV
+
+Just tell me which one you want next.
