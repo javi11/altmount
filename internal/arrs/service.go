@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,22 @@ import (
 )
 
 const cacheTTL = 10 * time.Minute
+
+// Regex to extract Season and Episode numbers (e.g., S01E05, s1e5)
+var seasonEpisodeRegex = regexp.MustCompile(`(?i)S(\d{1,2})E(\d{1,3})`)
+
+// parseSeasonEpisode extracts Season and Episode numbers from a file path.
+// Returns season and episode as integers, or -1, -1 if not found.
+func parseSeasonEpisode(filePath string) (int, int) {
+	matches := seasonEpisodeRegex.FindStringSubmatch(filePath)
+	if len(matches) == 3 {
+		var season, episode int
+		fmt.Sscanf(matches[1], "%d", &season)
+		fmt.Sscanf(matches[2], "%d", &episode)
+		return season, episode
+	}
+	return -1, -1
+}
 
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {

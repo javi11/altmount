@@ -147,7 +147,6 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		cancel:          cancel,
 		cancelFuncs:     make(map[int64]context.CancelFunc),
 		scanInfo:        ScanInfo{Status: ScanStatusIdle},
-		importInfo:      ImportInfo{Status: ImportStatusIdle},
 		paused:          false,
 	}
 
