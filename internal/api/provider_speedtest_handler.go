@@ -227,9 +227,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		})
 	}
 
-<<<<<<< HEAD
-=======
->>>>>>> drondeseries/feat/async-nzbdav-import
+
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data": ProviderSpeedTestResponse{
