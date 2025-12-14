@@ -1,4 +1,5 @@
 import type {
+	ActiveStream,
 	APIResponse,
 	AuthResponse,
 	FileHealth,
@@ -421,6 +422,10 @@ export class APIClient {
 	// File metadata endpoints
 	async getFileMetadata(path: string) {
 		return this.request<FileMetadata>(`/files/info?path=${encodeURIComponent(path)}`);
+	}
+
+	async getActiveStreams() {
+		return this.request<ActiveStream[]>("/files/active-streams");
 	}
 
 	async exportMetadataToNZB(path: string): Promise<Blob> {
