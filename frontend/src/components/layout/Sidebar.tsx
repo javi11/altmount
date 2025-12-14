@@ -27,11 +27,6 @@ const navigation = [
 		icon: List,
 	},
 	{
-		name: "Import",
-		href: "/import",
-		icon: Upload,
-	},
-	{
 		name: "Health",
 		href: "/health",
 		icon: Heart,
@@ -40,6 +35,11 @@ const navigation = [
 		name: "Files",
 		href: "/files",
 		icon: Folder,
+	},
+	{
+		name: "Import",
+		href: "/import",
+		icon: Upload,
 	},
 	{
 		name: "Configuration",
