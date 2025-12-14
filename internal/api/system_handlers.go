@@ -351,8 +351,8 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			LastConnectionAttempt: providerInfo.LastConnectionAttempt,
 			LastSuccessfulConnect: providerInfo.LastSuccessfulConnect,
 			FailureReason:         providerInfo.FailureReason,
-			LastSpeedTestMbps:     lastSpeedTestMbps,
-			LastSpeedTestTime:     lastSpeedTestTime,
+			LastSpeedTestMbps:     providerConfigMap[providerInfo.ID()].Speed,
+			LastSpeedTestTime:     providerConfigMap[providerInfo.ID()].Time,
 		})
 	}
 
