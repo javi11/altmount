@@ -1,3 +1,4 @@
+import { formatDistanceToNowStrict } from "date-fns";
 import { AlertTriangle, CheckCircle, Network, XCircle } from "lucide-react";
 import type { ProviderStatus } from "../../types/api";
 
@@ -64,7 +65,9 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 					<div className="min-w-0 flex-1">
 						<h3 className="card-title truncate font-medium text-base">{provider.host}</h3>
 						{provider.username && (
-							<p className="truncate text-base-content/60 text-sm">@{provider.username}</p>
+							<p className="cursor-pointer truncate text-base-content/60 text-sm blur-sm transition-all hover:blur-none">
+								@{provider.username}
+							</p>
 						)}
 					</div>
 					<div className={`badge ${stateBadge.color} gap-1`}>
@@ -87,6 +90,25 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 						max={provider.max_connections}
 					/>
 				</div>
+
+				{/* Speed Test Info */}
+				{provider.last_speed_test_mbps > 0 && (
+					<div className="mt-2 flex items-center justify-between text-xs">
+						<span className="text-base-content/60">Last Speed Test:</span>
+						<div className="text-right">
+							<span className="font-medium text-success">
+								{provider.last_speed_test_mbps.toFixed(2)} MB/s
+							</span>
+							{provider.last_speed_test_time && (
+								<div className="text-base-content/50">
+									{formatDistanceToNowStrict(new Date(provider.last_speed_test_time), {
+										addSuffix: true,
+									})}
+								</div>
+							)}
+						</div>
+					</div>
+				)}
 
 				{/* Failure reason - only show if present */}
 				{provider.failure_reason && provider.failure_reason !== "" && (

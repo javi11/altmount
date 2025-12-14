@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-pkgz/auth/v2/token"
+	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
@@ -32,6 +33,7 @@ func NewHandler(
 	tokenService *token.Service, // Optional token service for JWT auth
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
 	configGetter config.ConfigGetter, // Dynamic config access
+	streamTracker *api.StreamTracker, // Optional stream tracker
 ) (*Handler, error) {
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
@@ -147,6 +149,15 @@ func NewHandler(
 			}
 
 			return
+		}
+
+		// Track active streams for GET requests
+		if r.Method == http.MethodGet && streamTracker != nil {
+			// Extract path (this includes prefix, but that's fine for display)
+			// Or we could strip prefix if we want cleaner display
+			// r.URL.Path contains the full path including prefix
+			streamID := streamTracker.Add(r.URL.Path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "WebDAV")
+			defer streamTracker.Remove(streamID)
 		}
 
 		webdavHandler.ServeHTTP(w, r)
