@@ -1048,7 +1048,7 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 		)
 		VALUES %s
 		ON CONFLICT(file_path) DO UPDATE SET
-			library_path = excluded.library_path,
+			library_path = COALESCE(excluded.library_path, library_path),
 			release_date = excluded.release_date,
 			scheduled_check_at = excluded.scheduled_check_at,
 			status = excluded.status,

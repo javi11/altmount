@@ -17,6 +17,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -287,7 +288,13 @@ func (lsw *LibrarySyncWorker) findFilesToDelete(
 				continue
 			}
 
-			if _, exists := filesInUse[dbRecord.FilePath]; !exists {
+			cfg := lsw.configGetter()
+			fullMountPath := filepath.Join(cfg.MountPath, dbRecord.FilePath)
+
+			_, existsAsFullPath := filesInUse[fullMountPath]
+			_, existsAsRelativePath := filesInUse[dbRecord.FilePath]
+
+			if !existsAsFullPath && !existsAsRelativePath {
 				filesToDelete = append(filesToDelete, dbRecord.FilePath)
 			}
 		}
@@ -569,6 +576,10 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 							regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, libPath, err.Error())
 							if regErr != nil {
 								slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
+							}
+							// Update metadata file status
+							if statusErr := lsw.metadataService.UpdateFileStatus(path, metapb.FileStatus_FILE_STATUS_CORRUPTED); statusErr != nil {
+								slog.ErrorContext(ctx, "Failed to update metadata file status to corrupted", "path", path, "error", statusErr)
 							}
 						}
 						continue
@@ -1204,6 +1215,10 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 						regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, nil, err.Error())
 						if regErr != nil {
 							slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
+						}
+						// Update metadata file status
+						if statusErr := lsw.metadataService.UpdateFileStatus(path, metapb.FileStatus_FILE_STATUS_CORRUPTED); statusErr != nil {
+							slog.ErrorContext(ctx, "Failed to update metadata file status to corrupted", "path", path, "error", statusErr)
 						}
 						continue
 					}
