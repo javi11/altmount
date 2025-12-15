@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"syscall" // Import syscall
 	"time"
 
@@ -29,6 +30,10 @@ type NzbFuseFs struct {
 }
 
 var _ fs.InodeEmbedder = (*NzbFuseFs)(nil)
+var _ = (fs.NodeMkdirer)((*NzbFuseFs)(nil))
+var _ = (fs.NodeUnlinker)((*NzbFuseFs)(nil))
+var _ = (fs.NodeRmdirer)((*NzbFuseFs)(nil))
+var _ = (fs.NodeRenamer)((*NzbFuseFs)(nil))
 
 // NewNzbFuseFs creates a new FUSE filesystem instance
 func NewNzbFuseFs(
@@ -45,7 +50,7 @@ func NewNzbFuseFs(
 
 	// Initialize dependencies for MetadataRemoteFile
 	metadataService := metadata.NewMetadataService(cfg.Metadata.RootPath)
-	
+
 	// Create health repository using the database connection
 	healthRepository := database.NewHealthRepository(db.Connection())
 
@@ -76,12 +81,12 @@ func (nfs *NzbFuseFs) Mount(mountpoint string) (*fuse.Server, error) {
 	server, err := fs.Mount(mountpoint, nfs, &fs.Options{
 		AttrTimeout:  &sec,
 		EntryTimeout: &sec,
-				MountOptions: fuse.MountOptions{
-					AllowOther:   true,
-					Name:         "altmount-fuse",
-					Options:      []string{"allow_other"},
-					MaxReadAhead: nfs.readahead,
-				},
+		MountOptions: fuse.MountOptions{
+			AllowOther:   true,
+			Name:         "altmount-fuse",
+			Options:      []string{"allow_other"},
+			MaxReadAhead: nfs.readahead,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to mount FUSE: %w", err)
@@ -180,4 +185,88 @@ func (nfs *NzbFuseFs) Open(ctx context.Context, flags uint32) (fh fs.FileHandle,
 	}
 	// No special file handle needed for the root directory itself
 	return nil, fuse.FOPEN_KEEP_CACHE, fs.OK
+}
+
+// Mkdir implements fs.NodeMkdirer
+func (nfs *NzbFuseFs) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fullPath := name // Relative path for root
+	// Convert fuse mode to os.FileMode
+	perm := os.FileMode(mode & 0777)
+
+	err := nfs.metadataRemoteFile.Mkdir(ctx, fullPath, perm)
+	if err != nil {
+		slog.Error("Failed to create directory", "path", fullPath, "error", err)
+		return nil, syscall.EIO
+	}
+
+	ok, info, err := nfs.metadataRemoteFile.Stat(ctx, fullPath)
+	if err != nil || !ok {
+		slog.Error("Failed to stat newly created directory", "path", fullPath, "error", err)
+		return nil, syscall.EIO
+	}
+
+	stableAttr := fs.StableAttr{
+		Mode: ToFuseMode(info.Mode()),
+	}
+	out.Attr.Mode = ToFuseMode(info.Mode())
+	out.Attr.Size = uint64(info.Size())
+	out.Attr.Mtime = uint64(info.ModTime().Unix())
+	out.Attr.Ctime = uint64(info.ModTime().Unix())
+	out.Attr.Atime = uint64(info.ModTime().Unix())
+	out.Attr.Uid = nfs.uid
+	out.Attr.Gid = nfs.gid
+
+	newDir := &NzbDir{
+		metadataRemoteFile: nfs.metadataRemoteFile,
+		path:               fullPath,
+		uid:                nfs.uid,
+		gid:                nfs.gid,
+	}
+
+	return nfs.NewInode(ctx, newDir, stableAttr), fs.OK
+}
+
+// Unlink implements fs.NodeUnlinker
+func (nfs *NzbFuseFs) Unlink(ctx context.Context, name string) syscall.Errno {
+	fullPath := name
+	_, err := nfs.metadataRemoteFile.RemoveFile(ctx, fullPath)
+	if err != nil {
+		slog.Error("Failed to remove file", "path", fullPath, "error", err)
+		return syscall.EIO
+	}
+	return fs.OK
+}
+
+// Rmdir implements fs.NodeRmdirer
+func (nfs *NzbFuseFs) Rmdir(ctx context.Context, name string) syscall.Errno {
+	fullPath := name
+	_, err := nfs.metadataRemoteFile.RemoveFile(ctx, fullPath)
+	if err != nil {
+		slog.Error("Failed to remove directory", "path", fullPath, "error", err)
+		return syscall.EIO
+	}
+	return fs.OK
+}
+
+// Rename implements fs.NodeRenamer
+func (nfs *NzbFuseFs) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	oldPath := name
+
+	var newParentPath string
+	if np, ok := newParent.(*NzbDir); ok {
+		newParentPath = np.path
+	} else if _, ok := newParent.(*NzbFuseFs); ok {
+		newParentPath = "" // Root
+	} else {
+		return syscall.EXDEV
+	}
+
+	newPath := filepath.Join(newParentPath, newName)
+
+	_, err := nfs.metadataRemoteFile.RenameFile(ctx, oldPath, newPath)
+	if err != nil {
+		slog.Error("Failed to rename", "old", oldPath, "new", newPath, "error", err)
+		return syscall.EIO
+	}
+	return fs.OK
 }

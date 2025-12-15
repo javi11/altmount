@@ -5,6 +5,7 @@ package fusefs
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"syscall"
 
@@ -24,6 +25,10 @@ type NzbDir struct {
 }
 
 var _ = (fs.InodeEmbedder)((*NzbDir)(nil))
+var _ = (fs.NodeMkdirer)((*NzbDir)(nil))
+var _ = (fs.NodeUnlinker)((*NzbDir)(nil))
+var _ = (fs.NodeRmdirer)((*NzbDir)(nil))
+var _ = (fs.NodeRenamer)((*NzbDir)(nil))
 
 // Lookup implements fs.Inode.Lookup
 func (d *NzbDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
@@ -108,6 +113,90 @@ func (d *NzbDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	}
 
 	return fs.NewListDirStream(entries), fs.OK
+}
+
+// Mkdir implements fs.NodeMkdirer
+func (d *NzbDir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	fullPath := filepath.Join(d.path, name)
+	// Convert fuse mode to os.FileMode
+	perm := os.FileMode(mode & 0777)
+
+	err := d.metadataRemoteFile.Mkdir(ctx, fullPath, perm)
+	if err != nil {
+		slog.Error("Failed to create directory", "path", fullPath, "error", err)
+		return nil, syscall.EIO
+	}
+
+	ok, info, err := d.metadataRemoteFile.Stat(ctx, fullPath)
+	if err != nil || !ok {
+		slog.Error("Failed to stat newly created directory", "path", fullPath, "error", err)
+		return nil, syscall.EIO
+	}
+
+	stableAttr := fs.StableAttr{
+		Mode: ToFuseMode(info.Mode()),
+	}
+	out.Attr.Mode = ToFuseMode(info.Mode())
+	out.Attr.Size = uint64(info.Size())
+	out.Attr.Mtime = uint64(info.ModTime().Unix())
+	out.Attr.Ctime = uint64(info.ModTime().Unix())
+	out.Attr.Atime = uint64(info.ModTime().Unix())
+	out.Attr.Uid = d.uid
+	out.Attr.Gid = d.gid
+
+	newDir := &NzbDir{
+		metadataRemoteFile: d.metadataRemoteFile,
+		path:               fullPath,
+		uid:                d.uid,
+		gid:                d.gid,
+	}
+
+	return d.NewInode(ctx, newDir, stableAttr), fs.OK
+}
+
+// Unlink implements fs.NodeUnlinker
+func (d *NzbDir) Unlink(ctx context.Context, name string) syscall.Errno {
+	fullPath := filepath.Join(d.path, name)
+	_, err := d.metadataRemoteFile.RemoveFile(ctx, fullPath)
+	if err != nil {
+		slog.Error("Failed to remove file", "path", fullPath, "error", err)
+		return syscall.EIO
+	}
+	return fs.OK
+}
+
+// Rmdir implements fs.NodeRmdirer
+func (d *NzbDir) Rmdir(ctx context.Context, name string) syscall.Errno {
+	fullPath := filepath.Join(d.path, name)
+	_, err := d.metadataRemoteFile.RemoveFile(ctx, fullPath)
+	if err != nil {
+		slog.Error("Failed to remove directory", "path", fullPath, "error", err)
+		return syscall.EIO
+	}
+	return fs.OK
+}
+
+// Rename implements fs.NodeRenamer
+func (d *NzbDir) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	oldPath := filepath.Join(d.path, name)
+
+	var newParentPath string
+	if np, ok := newParent.(*NzbDir); ok {
+		newParentPath = np.path
+	} else if _, ok := newParent.(*NzbFuseFs); ok {
+		newParentPath = "" // Root
+	} else {
+		return syscall.EXDEV
+	}
+
+	newPath := filepath.Join(newParentPath, newName)
+
+	_, err := d.metadataRemoteFile.RenameFile(ctx, oldPath, newPath)
+	if err != nil {
+		slog.Error("Failed to rename", "old", oldPath, "new", newPath, "error", err)
+		return syscall.EIO
+	}
+	return fs.OK
 }
 
 // Getattr implements fs.Inode.Getattr.

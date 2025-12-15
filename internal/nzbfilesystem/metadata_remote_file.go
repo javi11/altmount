@@ -276,9 +276,16 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 	}
 
 	// Convert to fs.FileInfo
+	size := fileMeta.FileSize
+	if fileMeta.Encryption == metapb.Encryption_RCLONE && mrf.rcloneCipher != nil {
+		if decrypted, err := mrf.rcloneCipher.DecryptedSize(size); err == nil {
+			size = decrypted
+		}
+	}
+
 	info := &MetadataFileInfo{
 		name:    filepath.Base(normalizedName),
-		size:    fileMeta.FileSize,
+		size:    size,
 		mode:    0644, // Default file mode
 		modTime: time.Unix(fileMeta.ModifiedAt, 0),
 		isDir:   false,
@@ -501,12 +508,50 @@ type MetadataVirtualFile struct {
 
 // Read implements afero.File.Read
 func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
+	mvf.mu.Lock()
+	defer mvf.mu.Unlock()
+	
+	// Delegate to internal read logic which handles reader management
+	n, err = mvf.readInternal(p, mvf.position)
+	
+	// Update position for sequential read
+	if n > 0 {
+		mvf.position += int64(n)
+	}
+	
+	return n, err
+}
+
+// ReadAt implements afero.File.ReadAt
+func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
+	mvf.mu.Lock()
+	defer mvf.mu.Unlock()
+	
+	return mvf.readInternal(p, off)
+}
+
+// readInternal handles the actual reading logic for both Read and ReadAt
+// It expects the lock to be held by the caller
+func (mvf *MetadataVirtualFile) readInternal(p []byte, off int64) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	mvf.mu.Lock()
-	defer mvf.mu.Unlock()
+	// Validate offset
+	if off < 0 {
+		return 0, ErrNegativeOffset
+	}
+	if off >= mvf.fileMeta.FileSize {
+		return 0, io.EOF
+	}
+
+	// Check if we need to seek/reset the reader
+	// If the requested offset matches our current stream position, we can continue streaming
+	if !mvf.readerInitialized || mvf.position != off {
+		// We are jumping to a new location, close current reader to force a new range request
+		mvf.closeCurrentReader()
+		mvf.position = off
+	}
 
 	if err := mvf.ensureReader(); err != nil {
 		return 0, err
@@ -514,15 +559,17 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 
 	totalRead, err := mvf.reader.Read(p)
 	if err != nil {
-		// Check if this is EOF and we have more data to read
+		// Check if this is EOF and we have more data to read (chunked reading)
 		if errors.Is(err, io.EOF) && mvf.hasMoreDataToRead() {
 			// Close current reader and create a new one for the next range
 			mvf.closeCurrentReader()
+			
+			// Update position to reflect what we just read, so ensureReader picks up from the right spot
+			mvf.position += int64(totalRead)
 
 			// Try to create a new reader for the remaining data
 			if newReaderErr := mvf.ensureReader(); newReaderErr != nil {
 				// If we can't create a new reader, return what we have
-				mvf.position += int64(totalRead)
 				return totalRead, err
 			}
 
@@ -551,20 +598,25 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 				UnderlyingErr: dataCorruptionErr,
 			}
 		}
+		
+		// Note: We don't update mvf.position here because readInternal is stateless regarding the public Seek offset
+		// EXCEPT that we are managing a stateful reader internally.
+		// The caller (Read) will update the public position.
+		// ReadAt does NOT update public position.
+		// However, to keep the internal reader in sync for the NEXT read, we MUST update mvf.position
+		// if we successfully read data from the stream.
+		if totalRead > 0 {
+			mvf.position += int64(totalRead)
+		}
 
-		// Update position even on error if we read some data
-		mvf.position += int64(totalRead)
 		return totalRead, err
 	}
+	
+	if totalRead > 0 {
+		mvf.position += int64(totalRead)
+	}
 
-	// Update the current position after reading
-	mvf.position += int64(totalRead)
 	return totalRead, nil
-}
-
-// ReadAt implements afero.File.ReadAt
-func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
-	return 0, os.ErrPermission // Not supported for streaming readers
 }
 
 // Seek implements afero.File.Seek
@@ -593,9 +645,10 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, ErrSeekTooFar
 	}
 
-	// Check if the new position is outside our current reader's range
-	if mvf.readerInitialized && (abs < mvf.currentRangeStart || abs > mvf.currentRangeEnd) {
-		// Position is outside current range, need to recreate reader
+	// Check if the new position is different from current position
+	// If so, we must close the reader because our reader is a stream and cannot seek
+	// Note: Sequential reads (where abs == mvf.position) will skip this and preserve the reader
+	if mvf.readerInitialized && abs != mvf.position {
 		mvf.closeCurrentReader()
 	}
 
@@ -645,9 +698,16 @@ func (mvf *MetadataVirtualFile) Readdirnames(n int) ([]string, error) {
 
 // Stat implements afero.File.Stat
 func (mvf *MetadataVirtualFile) Stat() (fs.FileInfo, error) {
+	size := mvf.fileMeta.FileSize
+	if mvf.fileMeta.Encryption == metapb.Encryption_RCLONE && mvf.rcloneCipher != nil {
+		if decrypted, err := mvf.rcloneCipher.DecryptedSize(size); err == nil {
+			size = decrypted
+		}
+	}
+
 	info := &MetadataFileInfo{
 		name:    filepath.Base(mvf.name),
-		size:    mvf.fileMeta.FileSize,
+		size:    size,
 		mode:    0644,
 		modTime: time.Unix(mvf.fileMeta.ModifiedAt, 0),
 		isDir:   false, // Files are never directories in simplified schema
@@ -684,7 +744,7 @@ func (mvf *MetadataVirtualFile) Truncate(size int64) error {
 // hasMoreDataToRead checks if there's more data to read beyond current range
 func (mvf *MetadataVirtualFile) hasMoreDataToRead() bool {
 	// If we have an original range end and haven't reached it, there's more to read
-	if mvf.originalRangeEnd != -1 && mvf.position < mvf.originalRangeEnd {
+	if mvf.originalRangeEnd != -1 && mvf.position <= mvf.originalRangeEnd {
 		return true
 	}
 	// If original range was unbounded (-1) and we haven't reached file end, there's more to read
@@ -761,7 +821,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 
 		// No range header, set unbounded
 		mvf.originalRangeEnd = -1
-		return 0, -1
+		return mvf.position, -1
 	}
 
 	// For subsequent reads, use current position and respect original range
@@ -774,7 +834,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		targetEnd = mvf.originalRangeEnd
 	}
 
-	return 0, targetEnd
+	return mvf.position, targetEnd
 }
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
@@ -824,11 +884,17 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 			salt = mvf.globalSalt
 		}
 
+		// Calculate decrypted size for correct offset mapping
+		decryptedSize, err := mvf.rcloneCipher.DecryptedSize(mvf.fileMeta.FileSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate decrypted size: %w", err)
+		}
+
 		// Wrap with rclone decryption
 		decryptedReader, err := mvf.rcloneCipher.Open(
 			mvf.ctx,
 			&utils.RangeHeader{Start: start, End: end},
-			mvf.fileMeta.FileSize,
+			decryptedSize,
 			password,
 			salt,
 			func(ctx context.Context, start, end int64) (io.ReadCloser, error) {

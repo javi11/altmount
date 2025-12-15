@@ -78,15 +78,9 @@ func (f *NzbFile) Open(ctx context.Context, flags uint32) (fh fs.FileHandle, fus
 // Read implements fs.FileHandle.Read.
 // It reads data from the underlying afero.File.
 func (fh *NzbFileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	// Seek to the correct offset
-	_, err := fh.aferoFile.Seek(off, io.SeekStart)
-	if err != nil {
-		slog.Error("Failed to seek file", "offset", off, "error", err)
-		return nil, syscall.EIO
-	}
-
-	// Read data into the destination buffer
-	n, err := fh.aferoFile.Read(dest)
+	// Use ReadAt to read from the specific offset
+	// This avoids explicit Seek calls and leverages the underlying random access capability
+	n, err := fh.aferoFile.ReadAt(dest, off)
 	if err != nil && err != io.EOF {
 		slog.Error("Failed to read file", "error", err)
 		return nil, syscall.EIO
