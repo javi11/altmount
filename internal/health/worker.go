@@ -550,44 +550,6 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 	return nil
 }
 
-// processRepairNotification processes a file that needs repair notification to ARRs
-func (hw *HealthWorker) processRepairNotification(ctx context.Context, fileHealth *database.FileHealth) error {
-	// Check if context is cancelled
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	slog.InfoContext(ctx, "Notifying ARRs for repair", "file_path", fileHealth.FilePath, "source_nzb", fileHealth.SourceNzbPath)
-
-	// Use triggerFileRepair to handle the actual ARR notification logic
-	// This will directly query ARR APIs to find which instance manages this file
-	err := hw.triggerFileRepair(ctx, fileHealth.FilePath, nil)
-	if err != nil {
-		// If triggerFileRepair fails, increment repair retry count for later retry
-		slog.WarnContext(ctx, "Repair trigger failed, will retry later", "file_path", fileHealth.FilePath, "error", err)
-
-		errorMsg := err.Error()
-		retryErr := hw.healthRepo.IncrementRepairRetryCount(ctx, fileHealth.FilePath, &errorMsg)
-		if retryErr != nil {
-			return fmt.Errorf("failed to increment repair retry count after trigger failure: %w", retryErr)
-		}
-
-		slog.InfoContext(ctx, "Repair notification retry scheduled",
-			"file_path", fileHealth.FilePath,
-			"repair_retry_count", fileHealth.RepairRetryCount+1,
-			"max_repair_retries", fileHealth.MaxRepairRetries,
-			"error", err)
-
-		return nil // Don't return error - retry was scheduled
-	}
-
-	slog.InfoContext(ctx, "Repair notification completed successfully", "file_path", fileHealth.FilePath)
-
-	return nil
-}
-
 // runHealthCheckCycle runs a single cycle of health checks
 func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// Set the cycle running flag
