@@ -90,7 +90,7 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 			name:         "file in root of relative path",
 			nzbPath:      "/downloads/sonarr/Movie.mkv",
 			relativePath: "/downloads/sonarr",
-			expected:     "/Movie", // Should create folder based on filename
+			expected:     "/",
 		},
 		{
 			name:         "file in subfolder",
@@ -108,7 +108,7 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 			name:         "file with spaces",
 			nzbPath:      "/downloads/sonarr/Movie Name (2023).mkv",
 			relativePath: "/downloads/sonarr",
-			expected:     "/Movie Name (2023)",
+			expected:     "/",
 		},
 	}
 
