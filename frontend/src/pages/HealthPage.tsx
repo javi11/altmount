@@ -93,7 +93,15 @@ export function HealthPage() {
 	const cancelLibrarySync = useCancelLibrarySync();
 
 	const handleDelete = async (id: number) => {
-		const confirmed = await confirmDelete("health record");
+		const confirmed = await confirmAction(
+			"Delete Health Record",
+			"Are you sure you want to delete this health record? The imported file (symlink/strm) will also be deleted if it exists. This action cannot be undone.",
+			{
+				type: "error",
+				confirmText: "Delete",
+				confirmButtonClass: "btn-error",
+			},
+		);
 		if (confirmed) {
 			await deleteItem.mutateAsync(id);
 		}
@@ -291,7 +299,7 @@ export function HealthPage() {
 
 		const confirmed = await confirmAction(
 			"Delete Selected Health Records",
-			`Are you sure you want to delete ${selectedItems.size} selected health records? The actual file won´t be deleted.`,
+			`Are you sure you want to delete ${selectedItems.size} selected health records? The imported files (symlinks/strm) WILL also be deleted if they exist.`,
 			{
 				type: "warning",
 				confirmText: "Delete Selected",
