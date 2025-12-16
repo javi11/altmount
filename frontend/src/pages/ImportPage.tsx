@@ -338,6 +338,7 @@ function NzbDavImportSection() {
 function DirectoryScanSection() {
 	const [scanPath, setScanPath] = useState("");
 	const [validationError, setValidationError] = useState("");
+	const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);
 
 	const { data: scanStatus } = useScanStatus(2000);
 	const startScan = useStartManualScan();
@@ -388,6 +389,10 @@ function DirectoryScanSection() {
 		}
 	};
 
+	const handlePathSelect = (path: string) => {
+		setScanPath(path);
+	};
+
 	const getProgressPercentage = (): number => {
 		if (!scanStatus || scanStatus.files_found === 0) return 0;
 		return Math.min((scanStatus.files_added / scanStatus.files_found) * 100, 100);
@@ -422,14 +427,24 @@ function DirectoryScanSection() {
 				<div className="mb-4 flex flex-col gap-4 sm:flex-row">
 					<fieldset className="fieldset flex-1">
 						<legend className="fieldset-legend">Directory Path</legend>
-						<input
-							type="text"
-							placeholder="/path/to/directory"
-							className={`input ${validationError ? "input-error" : ""}`}
-							value={scanPath}
-							onChange={(e) => setScanPath(e.target.value)}
-							disabled={isScanning || isCanceling}
-						/>
+						<div className="join w-full">
+							<input
+								type="text"
+								placeholder="/path/to/directory"
+								className={`input join-item w-full ${validationError ? "input-error" : ""}`}
+								value={scanPath}
+								onChange={(e) => setScanPath(e.target.value)}
+								disabled={isScanning || isCanceling}
+							/>
+							<button
+								type="button"
+								className="btn btn-primary join-item"
+								onClick={() => setIsFileBrowserOpen(true)}
+								disabled={isScanning || isCanceling}
+							>
+								Browse
+							</button>
+						</div>
 						{validationError && <p className="label text-error">{validationError}</p>}
 					</fieldset>
 
@@ -534,6 +549,14 @@ function DirectoryScanSection() {
 					)}
 				</div>
 			</div>
+
+			<FileBrowserModal
+				isOpen={isFileBrowserOpen}
+				onClose={() => setIsFileBrowserOpen(false)}
+				onSelect={handlePathSelect}
+				title="Select Directory to Scan"
+				allowDirectorySelection={true}
+			/>
 		</div>
 	);
 }
