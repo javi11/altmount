@@ -32,7 +32,8 @@ func setupTestDB(t *testing.T) *HealthRepository {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			release_date DATETIME,
-			scheduled_check_at DATETIME
+			scheduled_check_at DATETIME,
+			priority BOOLEAN DEFAULT 0
 		);
 	`)
 	require.NoError(t, err)
