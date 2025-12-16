@@ -110,6 +110,12 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 			relativePath: "/downloads/sonarr",
 			expected:     "/",
 		},
+		{
+			name:         "directory with extension matching filename",
+			nzbPath:      "/downloads/sonarr/Movie.mkv/Movie.mkv",
+			relativePath: "/downloads/sonarr",
+			expected:     "/Movie",
+		},
 	}
 
 	for _, tt := range tests {
