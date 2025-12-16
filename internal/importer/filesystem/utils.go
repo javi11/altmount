@@ -100,6 +100,18 @@ func EnsureDirectoryExists(virtualDir string, metadataService *metadata.Metadata
 // CreateNzbFolder creates a folder named after the NZB file
 func CreateNzbFolder(virtualDir, nzbFilename string, metadataService *metadata.MetadataService) (string, error) {
 	nzbBaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	// Now, also strip the media file extension if it exists
+	// Common media extensions: .mkv, .mp4, .avi, .flv, .wmv, .mov, .webm
+	// This is not exhaustive, but covers common cases.
+	mediaExtensions := []string{".mkv", ".mp4", ".avi", ".flv", ".wmv", ".mov", ".webm", ".ts", ".iso"}
+
+	for _, ext := range mediaExtensions {
+		if strings.HasSuffix(strings.ToLower(nzbBaseName), ext) {
+			nzbBaseName = strings.TrimSuffix(nzbBaseName, ext)
+			break
+		}
+	}
+
 	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
 	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
 
