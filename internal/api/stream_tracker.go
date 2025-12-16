@@ -14,10 +14,7 @@ import (
 type ActiveStream struct {
 	ID        string             `json:"id"`
 	FilePath  string             `json:"file_path"`
-	ClientIP  string             `json:"client_ip"`
 	StartedAt time.Time          `json:"started_at"`
-	UserAgent string             `json:"user_agent"`
-	Range     string             `json:"range,omitempty"`
 	Source    string             `json:"source"`
 	UserName  string             `json:"user_name,omitempty"`
 	TotalSize int64              `json:"total_size"`
@@ -36,15 +33,12 @@ func NewStreamTracker() *StreamTracker {
 }
 
 // Add adds a new stream and returns the stream object for updates
-func (t *StreamTracker) Add(filePath, clientIP, userAgent, rangeHeader, source, userName string, totalSize int64, cancel context.CancelFunc) *ActiveStream {
+func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) *ActiveStream {
 	id := uuid.New().String()
 	stream := &ActiveStream{
 		ID:        id,
 		FilePath:  filePath,
-		ClientIP:  clientIP,
 		StartedAt: time.Now(),
-		UserAgent: userAgent,
-		Range:     rangeHeader,
 		Source:    source,
 		UserName:  userName,
 		TotalSize: totalSize,

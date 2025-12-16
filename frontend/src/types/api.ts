@@ -310,11 +310,11 @@ export interface ProviderStatus {
 export interface ActiveStream {
 	id: string;
 	file_path: string;
-	client_ip: string;
 	started_at: string;
-	user_agent: string;
-	range?: string;
 	source: string;
+	user_name?: string;
+	total_size: number;
+	bytes_sent: number;
 }
 
 export interface PoolMetrics {

@@ -175,7 +175,7 @@ func NewHandler(
 			// Create cancellable context
 			ctx, cancel := context.WithCancel(r.Context())
 			// Add to tracker
-			stream := streamTracker.Add(r.URL.Path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "WebDAV", effectiveUser, 0, cancel)
+			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, 0, cancel)
 			defer streamTracker.Remove(stream.ID)
 
 			// Inject stream into context for monitoredFileSystem

@@ -197,15 +197,14 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Track stream if tracker is available
-	if h.streamTracker != nil {
-		// Create a cancellable context for the stream
-		streamCtx, cancel := context.WithCancel(ctx)
-		defer cancel() // Ensure cleanup
-
-		stream := h.streamTracker.Add(path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "API", userName, stat.Size(), cancel)
-		defer h.streamTracker.Remove(stream.ID)
-
+			// Track stream if tracker is available
+		if h.streamTracker != nil {
+			// Create a cancellable context for the stream
+			streamCtx, cancel := context.WithCancel(ctx)
+			defer cancel() // Ensure cleanup
+	
+			stream := h.streamTracker.Add(path, "API", userName, stat.Size(), cancel)
+			defer h.streamTracker.Remove(stream.ID)
 		// Wrap the file with monitoring
 		monitoredFile := &MonitoredFile{
 			file:   file,

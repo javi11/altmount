@@ -58,13 +58,10 @@ export function ActiveStreamsCard() {
 									</div>
 									<div className="text-xs text-base-content/60 flex flex-col gap-0.5 mt-1">
 										<div className="flex justify-between">
-											<span>Client: {stream.client_ip}</span>
+											<span>{stream.user_name || "Unknown User"}</span>
 											<span>
 												{formatDistanceToNowStrict(new Date(stream.started_at), { addSuffix: true })}
 											</span>
-										</div>
-										<div className="truncate opacity-70" title={stream.user_agent}>
-											{truncateText(stream.user_agent, 30)}
 										</div>
 									</div>
 								</div>
