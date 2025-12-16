@@ -34,6 +34,23 @@ func CalculateVirtualDirectory(nzbPath, relativePath string) string {
 		return "/"
 	}
 
+	// Check if the directory name matches the filename (with extension)
+	// If so, strip the extension to avoid directories like "Movie.mkv/"
+	filename := filepath.Base(nzbPath)
+	if filepath.Base(relDir) == filename {
+		ext := filepath.Ext(filename)
+		if ext != "" {
+			parent := filepath.Dir(relDir)
+			base := filepath.Base(relDir)
+			newBase := strings.TrimSuffix(base, ext)
+			if parent == "." {
+				relDir = newBase
+			} else {
+				relDir = filepath.Join(parent, newBase)
+			}
+		}
+	}
+
 	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
 	return filepath.Clean(virtualPath)
 }
