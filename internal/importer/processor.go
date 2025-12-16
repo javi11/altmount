@@ -214,7 +214,11 @@ func (proc *Processor) processSingleFile(
 	nzbName := filepath.Base(nzbPath)
 	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 	fileExt := filepath.Ext(regularFiles[0].Filename)
-	regularFiles[0].Filename = releaseName + fileExt
+	if !strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
+		regularFiles[0].Filename = releaseName + fileExt
+	} else {
+		regularFiles[0].Filename = releaseName
+	}
 
 	// Process the single file
 	result, err := singlefile.ProcessSingleFile(
