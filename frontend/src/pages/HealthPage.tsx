@@ -76,7 +76,7 @@ export function HealthPage() {
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
-	const { confirmDelete, confirmAction } = useConfirm();
+	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
 	// Config hook
