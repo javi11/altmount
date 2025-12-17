@@ -499,6 +499,32 @@ type MetadataVirtualFile struct {
 	mu sync.Mutex
 }
 
+// WarmUp triggers a background pre-fetch of the file start
+func (mvf *MetadataVirtualFile) WarmUp() {
+	go func() {
+		mvf.mu.Lock()
+		defer mvf.mu.Unlock()
+
+		// Skip if already initialized
+		if mvf.readerInitialized {
+			return
+		}
+
+		// Initialize reader for the beginning of the file
+		if err := mvf.ensureReader(); err != nil {
+			// Just log/ignore, the actual Read will handle it later
+			return
+		}
+
+		// If the reader supports manual starting (UsenetReader), trigger it
+		// This starts the background workers to fetch data into the cache
+		// without consuming any bytes from the stream.
+		if ur, ok := mvf.reader.(*usenet.UsenetReader); ok {
+			ur.Start()
+		}
+	}()
+}
+
 // Read implements afero.File.Read
 func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
@@ -761,7 +787,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 
 		// No range header, set unbounded
 		mvf.originalRangeEnd = -1
-		return 0, -1
+		return mvf.position, -1
 	}
 
 	// For subsequent reads, use current position and respect original range
@@ -774,7 +800,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		targetEnd = mvf.originalRangeEnd
 	}
 
-	return 0, targetEnd
+	return mvf.position, targetEnd
 }
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
