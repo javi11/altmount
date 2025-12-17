@@ -63,6 +63,7 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 	content Content,
 	sourceNzbPath string,
 	releaseDate int64,
+	nzbdavId string,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -74,6 +75,7 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 		ModifiedAt:    now,
 		SegmentData:   content.Segments,
 		ReleaseDate:   releaseDate,
+		NzbdavId:      nzbdavId,
 	}
 
 	// Set AES encryption if keys are present
@@ -344,6 +346,12 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 			aesKey = derivedKey
 		}
 
+		// Extract ID from the first part of the archive
+		var nzbdavID string
+		if len(sevenZipFiles) > 0 {
+			nzbdavID = sevenZipFiles[0].NzbdavID
+		}
+
 		content := Content{
 			InternalPath: normalizedName,
 			Filename:     filepath.Base(normalizedName),
@@ -351,6 +359,7 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 			IsDirectory:  isDirectory,
 			AesKey:       aesKey,
 			AesIV:        aesIV,
+			NzbdavID:     nzbdavID,
 		}
 
 		// Map the file's offset and size to segments from the 7z parts
