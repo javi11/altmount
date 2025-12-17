@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -23,12 +24,14 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbdav"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
+	"google.golang.org/protobuf/proto"
 )
 
 // ServiceConfig holds configuration for the NZB import service
@@ -379,7 +382,7 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			s.importInfo.Status = ImportStatusIdle
 			s.importCancel = nil
 			s.importMu.Unlock()
-			
+
 			if cleanupFile {
 				os.Remove(dbPath)
 			}
@@ -400,92 +403,177 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			return
 		}
 
-		for {
-			select {
-			case <-importCtx.Done():
-				s.log.InfoContext(importCtx, "Import cancelled")
-				return
-			case res, ok := <-nzbChan:
-				if !ok {
-					nzbChan = nil
-					break
+		// Create workers
+		numWorkers := 20 // 20 parallel workers for file creation
+		var workerWg sync.WaitGroup
+		batchChan := make(chan *database.ImportQueueItem, 100)
+
+		// Start batch processor
+		var batchWg sync.WaitGroup
+		batchWg.Add(1)
+		go func() {
+			defer batchWg.Done()
+			s.processQueueBatch(importCtx, batchChan)
+		}()
+
+		// Start workers
+		for i := 0; i < numWorkers; i++ {
+			workerWg.Add(1)
+			go func() {
+				defer workerWg.Done()
+				for {
+					select {
+					case <-importCtx.Done():
+						return
+					case res, ok := <-nzbChan:
+						if !ok {
+							return
+						}
+
+						s.importMu.Lock()
+						s.importInfo.Total++
+						s.importMu.Unlock()
+
+						item, err := s.createNzbFileAndPrepareItem(res, rootFolder, nzbTempDir)
+						if err != nil {
+							s.log.ErrorContext(importCtx, "Failed to prepare item", "file", res.Name, "error", err)
+							s.importMu.Lock()
+							s.importInfo.Failed++
+							s.importMu.Unlock()
+							continue
+						}
+
+						select {
+						case batchChan <- item:
+						case <-importCtx.Done():
+							return
+						}
+					}
 				}
-				
+			}()
+		}
+
+		// Wait for workers to finish processing nzbChan
+		workerWg.Wait()
+		close(batchChan)
+		batchWg.Wait()
+
+		// Check for parser errors
+		select {
+		case err := <-errChan:
+			if err != nil {
+				s.log.ErrorContext(importCtx, "Error during NZBDav parsing", "error", err)
 				s.importMu.Lock()
-				s.importInfo.Total++
+				msg := err.Error()
+				s.importInfo.LastError = &msg
 				s.importMu.Unlock()
-
-				// Create Temp NZB File
-				nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
-				nzbPath := filepath.Join(nzbTempDir, nzbFileName)
-				
-				outFile, err := os.Create(nzbPath)
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to create temp NZB file", "file", nzbFileName, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					continue
-				}
-
-				_, err = io.Copy(outFile, res.Content)
-				outFile.Close()
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to write temp NZB file content", "file", nzbFileName, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					os.Remove(nzbPath)
-					continue
-				}
-
-				// Determine Category and Relative Path
-				targetCategory := "other"
-				lowerCat := strings.ToLower(res.Category)
-				if strings.Contains(lowerCat, "movie") {
-					targetCategory = "movies"
-				} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
-					targetCategory = "tv"
-				}
-
-				if res.RelPath != "" {
-					targetCategory = filepath.Join(targetCategory, res.RelPath)
-				}
-				
-				relPath := rootFolder
-				priority := database.QueuePriorityNormal
-				
-				_, err = s.AddToQueue(nzbPath, &relPath, &targetCategory, &priority)
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to add to queue", "release", res.Name, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					os.Remove(nzbPath)
-				} else {
-					s.importMu.Lock()
-					s.importInfo.Added++
-					s.importMu.Unlock()
-				}
-
-			case err := <-errChan:
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Error during NZBDav parsing", "error", err)
-					s.importMu.Lock()
-					msg := err.Error()
-					s.importInfo.LastError = &msg
-					s.importMu.Unlock()
-				}
-				errChan = nil
 			}
-
-			if nzbChan == nil && errChan == nil {
-				break
-			}
+		default:
 		}
 	}()
 
 	return nil
+}
+
+func (s *Service) processQueueBatch(ctx context.Context, batchChan <-chan *database.ImportQueueItem) {
+	var batch []*database.ImportQueueItem
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	insertBatch := func() {
+		if len(batch) > 0 {
+			if err := s.database.Repository.AddBatchToQueue(ctx, batch); err != nil {
+				s.log.ErrorContext(ctx, "Failed to add batch to queue", "count", len(batch), "error", err)
+				s.importMu.Lock()
+				s.importInfo.Failed += len(batch)
+				s.importMu.Unlock()
+			} else {
+				s.importMu.Lock()
+				s.importInfo.Added += len(batch)
+				s.importMu.Unlock()
+			}
+			batch = nil // Reset batch
+		}
+	}
+
+	for {
+		select {
+		case item, ok := <-batchChan:
+			if !ok {
+				// Channel closed, drain remaining batch
+				insertBatch()
+				return
+			}
+			batch = append(batch, item)
+			if len(batch) >= 100 { // Batch size
+				insertBatch()
+			}
+		case <-ticker.C:
+			insertBatch()
+		case <-ctx.Done():
+			insertBatch()
+			return
+		}
+	}
+}
+
+func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
+	// Create Temp NZB File
+	// Use ID to ensure uniqueness and avoid collisions with releases having the same name
+	nzbFileName := fmt.Sprintf("%s_%s.nzb", sanitizeFilename(res.ID), sanitizeFilename(res.Name))
+	nzbPath := filepath.Join(nzbTempDir, nzbFileName)
+
+	outFile, err := os.Create(nzbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp NZB file: %w", err)
+	}
+
+	// Copy content
+	_, err = io.Copy(outFile, res.Content)
+	outFile.Close()
+	if err != nil {
+		os.Remove(nzbPath)
+		return nil, fmt.Errorf("failed to write temp NZB file content: %w", err)
+	}
+
+	// Determine Category and Relative Path
+	targetCategory := "other"
+	lowerCat := strings.ToLower(res.Category)
+	if strings.Contains(lowerCat, "movie") {
+		targetCategory = "movies"
+	} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
+		targetCategory = "tv"
+	}
+
+	if res.RelPath != "" {
+		targetCategory = filepath.Join(targetCategory, res.RelPath)
+	}
+
+	relPath := rootFolder
+	priority := database.QueuePriorityNormal
+
+	// Store original ID in metadata
+	metaJSON := fmt.Sprintf(`{"nzbdav_id": "%s"}`, res.ID)
+
+	// Prepare item struct
+	item := &database.ImportQueueItem{
+		NzbPath:      nzbPath,
+		RelativePath: &relPath,
+		Category:     &targetCategory,
+		Priority:     priority,
+		Status:       database.QueueStatusPending,
+		RetryCount:   0,
+		MaxRetries:   3,
+		CreatedAt:    time.Now(),
+		Metadata:     &metaJSON,
+	}
+
+	// Calculate file size
+	if size, err := s.CalculateFileSizeOnly(nzbPath); err == nil {
+		item.FileSize = &size
+	}
+
+	return item, nil
 }
 
 // GetImportStatus returns the current import status
@@ -846,8 +934,12 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"path", resultingPath,
 			"error", err)
-		// Don't fail the import, just log the warning
+
+		return err
 	}
+
+	// Create ID metadata links if applicable (for nzbdav compatibility)
+	s.handleIdMetadataLinks(item, resultingPath)
 
 	// Create STRM files (non-blocking)
 	if err := s.createStrmFiles(item, resultingPath); err != nil {
@@ -855,7 +947,8 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"path", resultingPath,
 			"error", err)
-		// Don't fail the import, just log the warning
+
+		return err
 	}
 
 	// Mark as completed in queue database
@@ -1525,4 +1618,90 @@ func (s *Service) createSingleStrmFile(virtualPath string, port int) error {
 func hashAPIKey(apiKey string) string {
 	hash := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(hash[:])
+}
+
+func (s *Service) handleIdMetadataLinks(item *database.ImportQueueItem, resultingPath string) {
+	// 1. Check if the queue item itself has a release-level ID in its metadata
+	if item.Metadata != nil && *item.Metadata != "" {
+		var meta struct {
+			NzbdavID string `json:"nzbdav_id"`
+		}
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil && meta.NzbdavID != "" {
+			if err := s.createIDMetadataLink(meta.NzbdavID, resultingPath); err != nil {
+				s.log.Warn("Failed to create release ID metadata link", "id", meta.NzbdavID, "error", err)
+			}
+		}
+	}
+
+	// 2. Check individual files for IDs
+	cfg := s.configGetter()
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+
+	_ = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		// Read the metadata file to find the ID
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		// Parse the protobuf metadata to get the ID
+		meta := &metapb.FileMetadata{}
+		if err := proto.Unmarshal(data, meta); err != nil {
+			return nil
+		}
+
+		if meta.NzbdavId != "" {
+			// Calculate the virtual path from the metadata file path
+			relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+			if err != nil {
+				return nil
+			}
+			// Remove .meta extension
+			virtualPath := strings.TrimSuffix(relPath, ".meta")
+
+			if err := s.createIDMetadataLink(meta.NzbdavId, virtualPath); err != nil {
+				s.log.Warn("Failed to create file ID metadata link", "id", meta.NzbdavId, "error", err)
+			}
+		}
+
+		return nil
+	})
+}
+
+func (s *Service) createIDMetadataLink(nzbdavID, resultingPath string) error {
+	cfg := s.configGetter()
+	metadataRoot := cfg.Metadata.RootPath
+
+	// Calculate sharded path
+	// 04db0bde-7ad0-46a3-a2f4-9ef8efd0d7d7 -> .ids/0/4/d/b/0/04db0bde-7ad0-46a3-a2f4-9ef8efd0d7d7.meta
+	id := strings.ToLower(nzbdavID)
+	if len(id) < 5 {
+		return nil // Invalid ID for sharding
+	}
+
+	shardPath := filepath.Join(".ids", string(id[0]), string(id[1]), string(id[2]), string(id[3]), string(id[4]))
+	fullShardDir := filepath.Join(metadataRoot, shardPath)
+
+	if err := os.MkdirAll(fullShardDir, 0755); err != nil {
+		return err
+	}
+
+	targetMetaPath := s.metadataService.GetMetadataFilePath(resultingPath)
+	linkPath := filepath.Join(fullShardDir, id+".meta")
+
+	// Remove if exists
+	os.Remove(linkPath)
+
+	// Create relative symlink if possible, or absolute
+	// Relative is better if metadataRoot moves
+	relTarget, err := filepath.Rel(fullShardDir, targetMetaPath)
+	if err != nil {
+		return os.Symlink(targetMetaPath, linkPath)
+	}
+
+	return os.Symlink(relTarget, linkPath)
 }

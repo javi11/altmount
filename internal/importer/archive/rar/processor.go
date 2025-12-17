@@ -83,6 +83,7 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 	Content Content,
 	sourceNzbPath string,
 	releaseDate int64,
+	nzbdavId string,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -94,6 +95,7 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 		ModifiedAt:    now,
 		SegmentData:   Content.Segments,
 		ReleaseDate:   releaseDate,
+		NzbdavId:      nzbdavId,
 	}
 
 	// Set AES encryption if keys are present
@@ -401,11 +403,21 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 		// Extract AES credentials from this file's first part (if encrypted)
 		// Each file can have its own encryption credentials
 		var aesKey, aesIV []byte
+		var nzbdavID string
 		if len(af.Parts) > 0 {
 			firstPart := af.Parts[0]
 			if firstPart.AesKey != nil {
 				aesKey = firstPart.AesKey
 				aesIV = firstPart.AesIV
+			}
+
+			// Also extract ID from the first part
+			pf := fileIndex[firstPart.Path]
+			if pf == nil {
+				pf = fileIndex[filepath.Base(firstPart.Path)]
+			}
+			if pf != nil {
+				nzbdavID = pf.NzbdavID
 			}
 		}
 
@@ -415,6 +427,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 			Size:         af.TotalUnpackedSize,
 			AesKey:       aesKey,
 			AesIV:        aesIV,
+			NzbdavID:     nzbdavID,
 		}
 
 		var fileSegments []*metapb.SegmentData
