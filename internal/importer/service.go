@@ -400,92 +400,172 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			return
 		}
 
-		for {
-			select {
-			case <-importCtx.Done():
-				s.log.InfoContext(importCtx, "Import cancelled")
-				return
-			case res, ok := <-nzbChan:
-				if !ok {
-					nzbChan = nil
-					break
-				}
+		// Create workers
+		numWorkers := 20 // 20 parallel workers for file creation
+		var workerWg sync.WaitGroup
+		batchChan := make(chan *database.ImportQueueItem, 100)
 
+		// Start batch processor
+		var batchWg sync.WaitGroup
+		batchWg.Add(1)
+		go func() {
+			defer batchWg.Done()
+			s.processQueueBatch(importCtx, batchChan)
+		}()
+
+		// Start workers
+		for i := 0; i < numWorkers; i++ {
+			workerWg.Add(1)
+			go func() {
+				defer workerWg.Done()
+				for {
+					select {
+					case <-importCtx.Done():
+						return
+					case res, ok := <-nzbChan:
+						if !ok {
+							return
+						}
+
+						s.importMu.Lock()
+						s.importInfo.Total++
+						s.importMu.Unlock()
+
+						item, err := s.createNzbFileAndPrepareItem(res, rootFolder, nzbTempDir)
+						if err != nil {
+							s.log.ErrorContext(importCtx, "Failed to prepare item", "file", res.Name, "error", err)
+							s.importMu.Lock()
+							s.importInfo.Failed++
+							s.importMu.Unlock()
+							continue
+						}
+
+						select {
+						case batchChan <- item:
+						case <-importCtx.Done():
+							return
+						}
+					}
+				}
+			}()
+		}
+
+		// Wait for workers to finish processing nzbChan
+		workerWg.Wait()
+		close(batchChan)
+		batchWg.Wait()
+
+		// Check for parser errors
+		select {
+		case err := <-errChan:
+			if err != nil {
+				s.log.ErrorContext(importCtx, "Error during NZBDav parsing", "error", err)
 				s.importMu.Lock()
-				s.importInfo.Total++
+				msg := err.Error()
+				s.importInfo.LastError = &msg
 				s.importMu.Unlock()
-
-				// Create Temp NZB File
-				nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
-				nzbPath := filepath.Join(nzbTempDir, nzbFileName)
-
-				outFile, err := os.Create(nzbPath)
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to create temp NZB file", "file", nzbFileName, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					continue
-				}
-
-				_, err = io.Copy(outFile, res.Content)
-				outFile.Close()
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to write temp NZB file content", "file", nzbFileName, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					os.Remove(nzbPath)
-					continue
-				}
-
-				// Determine Category and Relative Path
-				targetCategory := "other"
-				lowerCat := strings.ToLower(res.Category)
-				if strings.Contains(lowerCat, "movie") {
-					targetCategory = "movies"
-				} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
-					targetCategory = "tv"
-				}
-
-				if res.RelPath != "" {
-					targetCategory = filepath.Join(targetCategory, res.RelPath)
-				}
-
-				relPath := rootFolder
-				priority := database.QueuePriorityNormal
-
-				_, err = s.AddToQueue(nzbPath, &relPath, &targetCategory, &priority)
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to add to queue", "release", res.Name, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					os.Remove(nzbPath)
-				} else {
-					s.importMu.Lock()
-					s.importInfo.Added++
-					s.importMu.Unlock()
-				}
-
-			case err := <-errChan:
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Error during NZBDav parsing", "error", err)
-					s.importMu.Lock()
-					msg := err.Error()
-					s.importInfo.LastError = &msg
-					s.importMu.Unlock()
-				}
-				errChan = nil
 			}
-
-			if nzbChan == nil && errChan == nil {
-				break
-			}
+		default:
 		}
 	}()
 
 	return nil
+}
+
+func (s *Service) processQueueBatch(ctx context.Context, batchChan <-chan *database.ImportQueueItem) {
+	var batch []*database.ImportQueueItem
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	insertBatch := func() {
+		if len(batch) > 0 {
+			if err := s.database.Repository.AddBatchToQueue(ctx, batch); err != nil {
+				s.log.ErrorContext(ctx, "Failed to add batch to queue", "count", len(batch), "error", err)
+				s.importMu.Lock()
+				s.importInfo.Failed += len(batch)
+				s.importMu.Unlock()
+			} else {
+				s.importMu.Lock()
+				s.importInfo.Added += len(batch)
+				s.importMu.Unlock()
+			}
+			batch = nil // Reset batch
+		}
+	}
+
+	for {
+		select {
+		case item, ok := <-batchChan:
+			if !ok {
+				// Channel closed, drain remaining batch
+				insertBatch()
+				return
+			}
+			batch = append(batch, item)
+			if len(batch) >= 100 { // Batch size
+				insertBatch()
+			}
+		case <-ticker.C:
+			insertBatch()
+		case <-ctx.Done():
+			insertBatch()
+			return
+		}
+	}
+}
+
+func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
+	// Create Temp NZB File
+	nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
+	nzbPath := filepath.Join(nzbTempDir, nzbFileName)
+
+	outFile, err := os.Create(nzbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp NZB file: %w", err)
+	}
+
+	// Copy content
+	_, err = io.Copy(outFile, res.Content)
+	outFile.Close()
+	if err != nil {
+		os.Remove(nzbPath)
+		return nil, fmt.Errorf("failed to write temp NZB file content: %w", err)
+	}
+
+	// Determine Category and Relative Path
+	targetCategory := "other"
+	lowerCat := strings.ToLower(res.Category)
+	if strings.Contains(lowerCat, "movie") {
+		targetCategory = "movies"
+	} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
+		targetCategory = "tv"
+	}
+
+	if res.RelPath != "" {
+		targetCategory = filepath.Join(targetCategory, res.RelPath)
+	}
+
+	relPath := rootFolder
+	priority := database.QueuePriorityNormal
+
+	// Prepare item struct
+	item := &database.ImportQueueItem{
+		NzbPath:      nzbPath,
+		RelativePath: &relPath,
+		Category:     &targetCategory,
+		Priority:     priority,
+		Status:       database.QueueStatusPending,
+		RetryCount:   0,
+		MaxRetries:   3,
+		CreatedAt:    time.Now(),
+	}
+
+	// Calculate file size
+	if size, err := s.CalculateFileSizeOnly(nzbPath); err == nil {
+		item.FileSize = &size
+	}
+
+	return item, nil
 }
 
 // GetImportStatus returns the current import status
