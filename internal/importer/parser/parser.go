@@ -482,32 +482,37 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						break // Stop trying, use what we have
 					}
 
-					// Read remaining bytes needed
-					remainingBytes := maxRead - bytesRead
-					tempBuffer := make([]byte, remainingBytes)
+					// Use closure to ensure cleanup via defer regardless of how we exit
+					shouldBreak := func() bool {
+						defer segReader.Close()
+						defer segCancel()
 
-					n, err := io.ReadFull(segReader, tempBuffer)
-					segReader.Close()
-					segCancel()
+						// Read remaining bytes needed
+						remainingBytes := maxRead - bytesRead
+						tempBuffer := make([]byte, remainingBytes)
 
-					if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-						p.log.DebugContext(ctx, "Error reading from additional segment",
+						n, err := io.ReadFull(segReader, tempBuffer)
+						if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+							p.log.DebugContext(ctx, "Error reading from additional segment",
+								"segment_index", segIdx,
+								"error", err)
+							return true // break outer loop
+						}
+
+						// Append to our buffer
+						copy(buffer[bytesRead:], tempBuffer[:n])
+						bytesRead += n
+
+						p.log.DebugContext(ctx, "Read additional bytes from segment",
 							"segment_index", segIdx,
-							"error", err)
-						break // Stop trying, use what we have
-					}
+							"bytes_read", n,
+							"total_bytes", bytesRead)
 
-					// Append to our buffer
-					copy(buffer[bytesRead:], tempBuffer[:n])
-					bytesRead += n
+						return false
+					}()
 
-					p.log.DebugContext(ctx, "Read additional bytes from segment",
-						"segment_index", segIdx,
-						"bytes_read", n,
-						"total_bytes", bytesRead)
-
-					if bytesRead >= maxRead {
-						break // We have enough data
+					if shouldBreak || bytesRead >= maxRead {
+						break
 					}
 				}
 			}
