@@ -16,6 +16,8 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
+	github.com/google/uuid v1.6.0
+	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/javi11/nntppool/v2 v2.2.7
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
@@ -132,7 +134,6 @@ require (
 	github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e // indirect
 	github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gordonklaus/ineffassign v0.1.0 // indirect
 	github.com/gostaticanalysis/analysisutil v0.7.1 // indirect
 	github.com/gostaticanalysis/comment v1.5.0 // indirect

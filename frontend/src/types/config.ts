@@ -391,6 +391,7 @@ export type ConfigSection =
 	| "import"
 	| "providers"
 	| "rclone"
+	| "fuse"
 	| "sabnzbd"
 	| "arrs"
 	| "system";
@@ -689,6 +690,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	rclone: {
 		title: "Mount & RClone",
 		description: "RClone mount and VFS settings",
+		icon: "HardDrive",
+		canEdit: true,
+	},
+	fuse: {
+		title: "Native FUSE Mount",
+		description: "Configure native FUSE mount settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},
