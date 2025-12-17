@@ -99,6 +99,8 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 			streamCopy := *s
 			// Load current atomic value
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
+			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
+			streamCopy.ID = groupKey
 			grouped[groupKey] = &streamCopy
 		}
 		return true
