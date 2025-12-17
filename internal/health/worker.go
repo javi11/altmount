@@ -486,14 +486,14 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 				slog.ErrorContext(ctx, "Repair check failed", "file_path", event.FilePath, "error", event.Error)
 			}
 
-			if err := hw.healthRepo.IncrementRepairRetryCount(ctx, event.FilePath, errorMsg); err != nil {
+			if err := hw.healthRepo.IncrementRepairRetryCount(ctx, event.FilePath, errorMsg, event.Details); err != nil {
 				slog.ErrorContext(ctx, "Failed to increment repair retry count", "file_path", event.FilePath, "error", err)
 				return fmt.Errorf("failed to increment repair retry count: %w", err)
 			}
 
 			if fileHealth.RepairRetryCount >= fileHealth.MaxRepairRetries-1 {
 				// Max repair retries reached - mark as permanently corrupted
-				if err := hw.healthRepo.MarkAsCorrupted(ctx, event.FilePath, errorMsg); err != nil {
+				if err := hw.healthRepo.MarkAsCorrupted(ctx, event.FilePath, errorMsg, event.Details); err != nil {
 					slog.ErrorContext(ctx, "Failed to mark file as corrupted after repair retries", "error", err)
 					return fmt.Errorf("failed to mark file as corrupted: %w", err)
 				}
@@ -525,14 +525,14 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 			nextCheck := time.Now().Add(time.Duration(backoffMinutes) * time.Minute)
 
 			// Increment health check retry count and schedule next check
-			if err := hw.healthRepo.IncrementRetryCount(ctx, event.FilePath, errorMsg, nextCheck); err != nil {
+			if err := hw.healthRepo.IncrementRetryCount(ctx, event.FilePath, errorMsg, event.Details, nextCheck); err != nil {
 				slog.ErrorContext(ctx, "Failed to increment retry count", "file_path", event.FilePath, "error", err)
 				return fmt.Errorf("failed to increment retry count: %w", err)
 			}
 
 			if fileHealth.RetryCount >= fileHealth.MaxRetries-1 {
 				// Max health check retries reached - trigger repair phase
-				if err := hw.triggerFileRepair(ctx, event.FilePath, errorMsg); err != nil {
+				if err := hw.triggerFileRepair(ctx, event.FilePath, errorMsg, event.Details); err != nil {
 					slog.ErrorContext(ctx, "Failed to trigger repair", "error", err)
 					return fmt.Errorf("failed to trigger repair: %w", err)
 				}
@@ -546,44 +546,6 @@ func (hw *HealthWorker) handleHealthCheckResult(ctx context.Context, event Healt
 			}
 		}
 	}
-
-	return nil
-}
-
-// processRepairNotification processes a file that needs repair notification to ARRs
-func (hw *HealthWorker) processRepairNotification(ctx context.Context, fileHealth *database.FileHealth) error {
-	// Check if context is cancelled
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	slog.InfoContext(ctx, "Notifying ARRs for repair", "file_path", fileHealth.FilePath, "source_nzb", fileHealth.SourceNzbPath)
-
-	// Use triggerFileRepair to handle the actual ARR notification logic
-	// This will directly query ARR APIs to find which instance manages this file
-	err := hw.triggerFileRepair(ctx, fileHealth.FilePath, nil)
-	if err != nil {
-		// If triggerFileRepair fails, increment repair retry count for later retry
-		slog.WarnContext(ctx, "Repair trigger failed, will retry later", "file_path", fileHealth.FilePath, "error", err)
-
-		errorMsg := err.Error()
-		retryErr := hw.healthRepo.IncrementRepairRetryCount(ctx, fileHealth.FilePath, &errorMsg)
-		if retryErr != nil {
-			return fmt.Errorf("failed to increment repair retry count after trigger failure: %w", retryErr)
-		}
-
-		slog.InfoContext(ctx, "Repair notification retry scheduled",
-			"file_path", fileHealth.FilePath,
-			"repair_retry_count", fileHealth.RepairRetryCount+1,
-			"max_repair_retries", fileHealth.MaxRepairRetries,
-			"error", err)
-
-		return nil // Don't return error - retry was scheduled
-	}
-
-	slog.InfoContext(ctx, "Repair notification completed successfully", "file_path", fileHealth.FilePath)
 
 	return nil
 }
@@ -736,7 +698,7 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file
 // It directly queries ARR APIs to find which instance manages the file and triggers repair
-func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string) error {
+func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string, errorDetails *string) error {
 	slog.InfoContext(ctx, "Triggering file repair using direct ARR API approach", "file_path", filePath)
 
 	healthRecord, err := hw.healthRepo.GetFileHealth(ctx, filePath)
@@ -775,7 +737,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 
 		// If we can't trigger repair, mark as corrupted for manual investigation
 		errMsg := err.Error()
-		return hw.healthRepo.SetCorrupted(ctx, filePath, &errMsg)
+		return hw.healthRepo.SetCorrupted(ctx, filePath, &errMsg, errorDetails)
 	}
 
 	// ARR rescan was triggered successfully - set repair triggered status
@@ -784,7 +746,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 		"path_for_rescan", pathForRescan)
 
 	// Update status to repair_triggered
-	if err := hw.healthRepo.SetRepairTriggered(ctx, filePath, errorMsg); err != nil {
+	if err := hw.healthRepo.SetRepairTriggered(ctx, filePath, errorMsg, errorDetails); err != nil {
 		slog.ErrorContext(ctx, "Failed to set repair_triggered status",
 			"file_path", filePath,
 			"error", err)

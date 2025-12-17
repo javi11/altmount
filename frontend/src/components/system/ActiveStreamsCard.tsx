@@ -1,11 +1,12 @@
-import { Activity, FileVideo, MonitorPlay } from "lucide-react";
+import { Activity, FileVideo, MonitorPlay, Square } from "lucide-react";
 import { formatDistanceToNowStrict } from "date-fns";
-import { useActiveStreams } from "../../hooks/useApi";
+import { useActiveStreams, useDeleteActiveStream } from "../../hooks/useApi";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { truncateText } from "../../lib/utils";
 
 export function ActiveStreamsCard() {
 	const { data: allStreams, isLoading, error } = useActiveStreams();
+	const { mutate: stopStream } = useDeleteActiveStream();
 
 	// Filter to show only WebDAV streams (covers RClone and external players)
 	const streams = allStreams?.filter((s) => s.source === "WebDAV");
@@ -48,7 +49,7 @@ export function ActiveStreamsCard() {
 				) : (
 					<div className="space-y-3">
 						{streams.map((stream) => (
-							<div key={stream.id} className="flex items-start gap-3 p-3 bg-base-200/50 rounded-lg">
+							<div key={stream.id} className="flex items-center gap-3 p-3 bg-base-200/50 rounded-lg group">
 								<div className="mt-1">
 									<FileVideo className="h-8 w-8 text-primary/70" />
 								</div>
@@ -58,16 +59,20 @@ export function ActiveStreamsCard() {
 									</div>
 									<div className="text-xs text-base-content/60 flex flex-col gap-0.5 mt-1">
 										<div className="flex justify-between">
-											<span>Client: {stream.client_ip}</span>
+											<span>{stream.user_name || "Unknown User"}</span>
 											<span>
 												{formatDistanceToNowStrict(new Date(stream.started_at), { addSuffix: true })}
 											</span>
 										</div>
-										<div className="truncate opacity-70" title={stream.user_agent}>
-											{truncateText(stream.user_agent, 30)}
-										</div>
 									</div>
 								</div>
+								<button
+									className="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity"
+									onClick={() => stopStream(stream.id)}
+									title="Stop Stream"
+								>
+									<Square className="h-4 w-4 fill-current" />
+								</button>
 							</div>
 						))}
 					</div>

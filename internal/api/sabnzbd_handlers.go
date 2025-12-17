@@ -427,11 +427,12 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	// Check for operations
 	name := c.Query("name")
-	if name == "delete" {
+	switch name {
+	case "delete":
 		return s.handleSABnzbdQueueDelete(c)
-	} else if name == "pause" {
+	case "pause":
 		return s.handleSABnzbdQueuePause(c, true)
-	} else if name == "resume" {
+	case "resume":
 		return s.handleSABnzbdQueuePause(c, false)
 	}
 

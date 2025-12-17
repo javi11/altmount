@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 )
 
@@ -24,6 +25,27 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, mountPath, webda
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
+			// Try RC unmount first (cleans up rclone internal state)
+			if m.IsReady() {
+				req := RCRequest{
+					Command: "mount/unmount",
+					Args: map[string]interface{}{
+						"mountPoint": mountPath,
+					},
+				}
+				if _, err := m.makeRequest(req, true); err != nil {
+					m.logger.DebugContext(ctx, "RC unmount before retry failed (may be expected)", "err", err, "provider", provider)
+				}
+			}
+
+			// Force unmount using system commands
+			if err := m.forceUnmountPath(mountPath); err != nil {
+				m.logger.DebugContext(ctx, "Force unmount before retry returned error (may be expected)", "err", err, "provider", provider)
+			}
+
+			// Clean up mount directory if empty
+			_ = os.Remove(mountPath)
+
 			// Wait before retry
 			wait := time.Duration(attempt*2) * time.Second
 			m.logger.DebugContext(ctx, "Retrying mount operation", "attempt", attempt, "provider", provider)
@@ -365,11 +387,23 @@ func (m *Manager) createConfig(configName, webdavURL string, user, pass string) 
 
 // forceUnmountPath attempts to force unmount a path using system commands
 func (m *Manager) forceUnmountPath(mountPath string) error {
-	methods := [][]string{
-		{"fusermount", "-uz", mountPath},
-		{"umount", mountPath},
-		{"umount", "-l", mountPath}, // lazy unmount
-		{"fusermount3", "-uz", mountPath},
+	var methods [][]string
+
+	if runtime.GOOS == "darwin" {
+		// macOS-specific commands
+		methods = [][]string{
+			{"umount", "-f", mountPath},                       // macOS force unmount
+			{"diskutil", "unmount", "force", mountPath},       // macOS diskutil
+			{"umount", mountPath},                             // Standard unmount
+		}
+	} else {
+		// Linux/Unix commands
+		methods = [][]string{
+			{"fusermount", "-uz", mountPath},
+			{"umount", mountPath},
+			{"umount", "-l", mountPath}, // lazy unmount
+			{"fusermount3", "-uz", mountPath},
+		}
 	}
 
 	for _, method := range methods {

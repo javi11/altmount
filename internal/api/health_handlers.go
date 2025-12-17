@@ -251,6 +251,9 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 	}
 
 	// Delete the health record from database using ID
+	// Try to delete the imported file first (symlink/strm)
+	s.deleteImportedFile(c.Context(), item)
+
 	err = s.healthRepo.DeleteHealthRecordByID(c.Context(), id)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -271,6 +274,48 @@ func (s *Server) handleDeleteHealth(c *fiber.Ctx) error {
 		"success": true,
 		"data":    response,
 	})
+}
+
+// deleteImportedFile attempts to delete the physical imported file (symlink or strm)
+func (s *Server) deleteImportedFile(ctx context.Context, item *database.FileHealth) error {
+	cfg := s.configManager.GetConfig()
+	
+	// Only proceed if we have an import directory and a strategy that creates files
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		return nil
+	}
+
+	importDir := *cfg.Import.ImportDir
+	var targetPath string
+
+	switch cfg.Import.ImportStrategy {
+	case config.ImportStrategySYMLINK:
+		targetPath = filepath.Join(importDir, item.FilePath)
+	case config.ImportStrategySTRM:
+		targetPath = filepath.Join(importDir, item.FilePath)
+		// Check if we need to add .strm extension
+		if !strings.HasSuffix(targetPath, ".strm") {
+			targetPath += ".strm"
+		}
+	default:
+		return nil // Do nothing for other strategies
+	}
+
+	// Attempt to delete
+	if err := os.Remove(targetPath); err != nil {
+		if !os.IsNotExist(err) {
+			slog.WarnContext(ctx, "Failed to delete imported file", 
+				"path", targetPath, 
+				"error", err,
+				"strategy", cfg.Import.ImportStrategy)
+			return err
+		}
+	} else {
+		slog.InfoContext(ctx, "Deleted imported file", 
+			"path", targetPath,
+			"strategy", cfg.Import.ImportStrategy)
+	}
+	return nil
 }
 
 // handleDeleteHealthBulk handles POST /api/health/bulk/delete
@@ -305,6 +350,7 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 	}
 
 	// Check for any items currently being checked and cancel if needed
+	// Also delete physical files
 	if s.healthWorker != nil {
 		for _, filePath := range req.FilePaths {
 			// Get the record to check status
@@ -313,12 +359,25 @@ func (s *Server) handleDeleteHealthBulk(c *fiber.Ctx) error {
 				continue // Skip if we can't get the record, will fail in bulk delete anyway
 			}
 
-			if item != nil && item.Status == database.HealthStatusChecking {
-				// Check if there's actually an active check to cancel
-				if s.healthWorker.IsCheckActive(filePath) {
-					// Cancel the health check before deletion
-					_ = s.healthWorker.CancelHealthCheck(c.Context(), filePath) // Ignore error, proceed with deletion
+			if item != nil {
+				// Delete physical file
+				_ = s.deleteImportedFile(c.Context(), item)
+
+				if item.Status == database.HealthStatusChecking {
+					// Check if there's actually an active check to cancel
+					if s.healthWorker.IsCheckActive(filePath) {
+						// Cancel the health check before deletion
+						_ = s.healthWorker.CancelHealthCheck(c.Context(), filePath) // Ignore error, proceed with deletion
+					}
 				}
+			}
+		}
+	} else {
+		// If health worker not available, still try to delete files
+		for _, filePath := range req.FilePaths {
+			item, err := s.healthRepo.GetFileHealth(c.Context(), filePath)
+			if err == nil && item != nil {
+				_ = s.deleteImportedFile(c.Context(), item)
 			}
 		}
 	}
@@ -446,7 +505,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 
 	// Update status to repair_triggered instead of deleting
 	// This gives user feedback that the repair is in progress (waiting for ARR)
-	if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+	if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError, item.ErrorDetails); err != nil {
 		slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
 			"error", err,
 			"file_path", item.FilePath)
@@ -553,7 +612,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		}
 
 		// Update status to repair_triggered instead of deleting
-		if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+		if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError, item.ErrorDetails); err != nil {
 			slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
 				"error", err,
 				"file_path", item.FilePath)
@@ -777,8 +836,8 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 		for _, item := range oldItemsInBatch {
 			allFilePaths = append(allFilePaths, item.FilePath)
 
-			// Attempt to delete the physical file using os.Remove
-			if deleteErr := os.Remove(item.FilePath); deleteErr != nil {
+			// Attempt to delete the physical file using helper
+			if deleteErr := s.deleteImportedFile(ctx, item); deleteErr != nil {
 				// Track error but continue with other files
 				fileErrors = append(fileErrors, fmt.Sprintf("%s: %v", item.FilePath, deleteErr))
 			} else {

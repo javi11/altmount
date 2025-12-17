@@ -379,7 +379,7 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			s.importInfo.Status = ImportStatusIdle
 			s.importCancel = nil
 			s.importMu.Unlock()
-			
+
 			if cleanupFile {
 				os.Remove(dbPath)
 			}
@@ -410,7 +410,7 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 					nzbChan = nil
 					break
 				}
-				
+
 				s.importMu.Lock()
 				s.importInfo.Total++
 				s.importMu.Unlock()
@@ -418,7 +418,7 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 				// Create Temp NZB File
 				nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
 				nzbPath := filepath.Join(nzbTempDir, nzbFileName)
-				
+
 				outFile, err := os.Create(nzbPath)
 				if err != nil {
 					s.log.ErrorContext(importCtx, "Failed to create temp NZB file", "file", nzbFileName, "error", err)
@@ -451,10 +451,10 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 				if res.RelPath != "" {
 					targetCategory = filepath.Join(targetCategory, res.RelPath)
 				}
-				
+
 				relPath := rootFolder
 				priority := database.QueuePriorityNormal
-				
+
 				_, err = s.AddToQueue(nzbPath, &relPath, &targetCategory, &priority)
 				if err != nil {
 					s.log.ErrorContext(importCtx, "Failed to add to queue", "release", res.Name, "error", err)
@@ -846,7 +846,8 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"path", resultingPath,
 			"error", err)
-		// Don't fail the import, just log the warning
+
+		return err
 	}
 
 	// Create STRM files (non-blocking)
@@ -855,7 +856,8 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"path", resultingPath,
 			"error", err)
-		// Don't fail the import, just log the warning
+
+		return err
 	}
 
 	// Mark as completed in queue database

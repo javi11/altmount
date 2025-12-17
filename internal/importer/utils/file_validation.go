@@ -16,11 +16,7 @@ var sampleProofPattern = regexp.MustCompile(`(?i)(^|[\W_])(sample|proof)`)
 func createExtensionMap(extensions []string) map[string]bool {
 	extMap := make(map[string]bool, len(extensions))
 	for _, ext := range extensions {
-		// Normalize to lowercase for case-insensitive comparison
-		ext = strings.ToLower(ext)
-		if strings.HasPrefix(ext, ".") {
-			ext = ext[1:]
-		}
+		ext = strings.ToLower(strings.TrimPrefix(ext, "."))
 		extMap[ext] = true
 	}
 	return extMap
@@ -43,10 +39,7 @@ func IsAllowedFile(filename string, allowedExtensions []string) bool {
 		return true
 	}
 
-	ext := strings.ToLower(filepath.Ext(filename))
-	if strings.HasPrefix(ext, ".") {
-		ext = ext[1:]
-	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
 	extMap := createExtensionMap(allowedExtensions)
 	return extMap[ext]
 }

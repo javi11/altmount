@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,13 +12,14 @@ import (
 
 // ActiveStream represents a file currently being streamed
 type ActiveStream struct {
-	ID        string    `json:"id"`
-	FilePath  string    `json:"file_path"`
-	ClientIP  string    `json:"client_ip"`
-	StartedAt time.Time `json:"started_at"`
-	UserAgent string    `json:"user_agent"`
-	Range     string    `json:"range,omitempty"`
-	Source    string    `json:"source"`
+	ID        string             `json:"id"`
+	FilePath  string             `json:"file_path"`
+	StartedAt time.Time          `json:"started_at"`
+	Source    string             `json:"source"`
+	UserName  string             `json:"user_name,omitempty"`
+	TotalSize int64              `json:"total_size"`
+	BytesSent int64              `json:"bytes_sent"`
+	cancel    context.CancelFunc `json:"-"`
 }
 
 // StreamTracker tracks active streams
@@ -29,20 +32,20 @@ func NewStreamTracker() *StreamTracker {
 	return &StreamTracker{}
 }
 
-// Add adds a new stream and returns its ID
-func (t *StreamTracker) Add(filePath, clientIP, userAgent, rangeHeader, source string) string {
+// Add adds a new stream and returns the stream object for updates
+func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) *ActiveStream {
 	id := uuid.New().String()
-	stream := ActiveStream{
+	stream := &ActiveStream{
 		ID:        id,
 		FilePath:  filePath,
-		ClientIP:  clientIP,
 		StartedAt: time.Now(),
-		UserAgent: userAgent,
-		Range:     rangeHeader,
 		Source:    source,
+		UserName:  userName,
+		TotalSize: totalSize,
+		cancel:    cancel,
 	}
 	t.streams.Store(id, stream)
-	return id
+	return stream
 }
 
 // Remove removes a stream by ID
@@ -50,11 +53,27 @@ func (t *StreamTracker) Remove(id string) {
 	t.streams.Delete(id)
 }
 
+// Stop terminates a stream by ID
+func (t *StreamTracker) Stop(id string) bool {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*ActiveStream)
+		if stream.cancel != nil {
+			stream.cancel()
+			return true
+		}
+	}
+	return false
+}
+
 // GetAll returns all active streams
 func (t *StreamTracker) GetAll() []ActiveStream {
 	var streams []ActiveStream
 	t.streams.Range(func(key, value interface{}) bool {
-		streams = append(streams, value.(ActiveStream))
+		s := value.(*ActiveStream)
+		// Create a copy to avoid race conditions and ensure atomic read
+		streamCopy := *s
+		streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
+		streams = append(streams, streamCopy)
 		return true
 	})
 

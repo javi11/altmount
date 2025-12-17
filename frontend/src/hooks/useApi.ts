@@ -303,6 +303,17 @@ export const useActiveStreams = () => {
 	});
 };
 
+export const useDeleteActiveStream = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: string) => apiClient.deleteActiveStream(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["files", "active-streams"] });
+		},
+	});
+};
+
 export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 
@@ -409,11 +420,13 @@ export const useUploadToQueue = () => {
 			file,
 			category,
 			priority,
+			relativePath,
 		}: {
 			file: File;
 			category?: string;
 			priority?: number;
-		}) => apiClient.uploadToQueue(file, category, priority),
+			relativePath?: string;
+		}) => apiClient.uploadToQueue(file, category, priority, relativePath),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
 			queryClient.invalidateQueries({ queryKey: ["queue"] });

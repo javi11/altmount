@@ -428,6 +428,12 @@ export class APIClient {
 		return this.request<ActiveStream[]>("/files/active-streams");
 	}
 
+	async deleteActiveStream(id: string) {
+		return this.request<{ success: boolean; message: string }>(`/files/active-streams/${id}`, {
+			method: "DELETE",
+		});
+	}
+
 	async exportMetadataToNZB(path: string): Promise<Blob> {
 		const url = `${this.baseURL}/files/export-nzb?path=${encodeURIComponent(path)}`;
 
@@ -697,6 +703,7 @@ export class APIClient {
 		file: File,
 		category?: string,
 		priority?: number,
+		relativePath?: string,
 	): Promise<APIResponse<QueueItem>> {
 		const formData = new FormData();
 		formData.append("file", file);
@@ -705,6 +712,9 @@ export class APIClient {
 		}
 		if (priority !== undefined) {
 			formData.append("priority", priority.toString());
+		}
+		if (relativePath) {
+			formData.append("relative_path", relativePath);
 		}
 
 		return this.request<APIResponse<QueueItem>>("/queue/upload", {
