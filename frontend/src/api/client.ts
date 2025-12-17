@@ -428,12 +428,6 @@ export class APIClient {
 		return this.request<ActiveStream[]>("/files/active-streams");
 	}
 
-	async deleteActiveStream(id: string) {
-		return this.request<{ success: boolean; message: string }>(`/files/active-streams/${id}`, {
-			method: "DELETE",
-		});
-	}
-
 	async exportMetadataToNZB(path: string): Promise<Blob> {
 		const url = `${this.baseURL}/files/export-nzb?path=${encodeURIComponent(path)}`;
 
