@@ -202,7 +202,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/active-streams", s.handleGetActiveStreams)
-	api.Delete("/files/active-streams/:id", s.handleStopActiveStream)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
 	api.Post("/files/export-batch", s.handleBatchExportNZB)
 	// Note: /files/stream is handled by StreamHandler at HTTP server level
@@ -286,24 +285,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	})
 }
 
-// handleStopActiveStream handles DELETE /api/files/active-streams/:id
-func (s *Server) handleStopActiveStream(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if s.streamTracker == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "Stream tracker not available",
-		})
-	}
-	if success := s.streamTracker.Stop(id); success {
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"success": true,
-			"message": "Stream stopped",
-		})
-	}
-	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-		"error": "Stream not found",
-	})
-}
+
 
 // getSystemInfo returns current system information
 func (s *Server) getSystemInfo() SystemInfoResponse {
