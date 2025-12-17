@@ -516,7 +516,8 @@ func (s *Service) processQueueBatch(ctx context.Context, batchChan <-chan *datab
 
 func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
 	// Create Temp NZB File
-	nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
+	// Use ID to ensure uniqueness and avoid collisions with releases having the same name
+	nzbFileName := fmt.Sprintf("%s_%s.nzb", sanitizeFilename(res.ID), sanitizeFilename(res.Name))
 	nzbPath := filepath.Join(nzbTempDir, nzbFileName)
 
 	outFile, err := os.Create(nzbPath)
