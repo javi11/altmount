@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -22,11 +23,60 @@ type ActiveStream struct {
 // StreamTracker tracks active streams
 type StreamTracker struct {
 	streams sync.Map
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 // NewStreamTracker creates a new stream tracker
 func NewStreamTracker() *StreamTracker {
-	return &StreamTracker{}
+	ctx, cancel := context.WithCancel(context.Background())
+	st := &StreamTracker{
+		ctx:    ctx,
+		cancel: cancel,
+	}
+	
+	// Start cleanup goroutine to remove stale streams
+	go st.cleanupStaleStreams()
+	
+	return st
+}
+
+// Close stops the stream tracker and cleans up resources
+func (st *StreamTracker) Close() {
+	st.cancel()
+	// Clear all streams
+	st.streams.Range(func(key, value interface{}) bool {
+		st.streams.Delete(key)
+		return true
+	})
+}
+
+// cleanupStaleStreams periodically removes streams that have been active for too long (likely abandoned)
+func (st *StreamTracker) cleanupStaleStreams() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-st.ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			st.streams.Range(func(key, value interface{}) bool {
+				stream, ok := value.(ActiveStream)
+				if !ok {
+					st.streams.Delete(key)
+					return true
+				}
+				// Remove streams that have been active for more than 1 hour (likely abandoned)
+				if now.Sub(stream.StartedAt) > 1*time.Hour {
+					st.streams.Delete(key)
+				}
+				return true
+			})
+		}
+	}
 }
 
 // Add adds a new stream and returns its ID

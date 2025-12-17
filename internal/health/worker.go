@@ -146,6 +146,14 @@ func (hw *HealthWorker) Stop(ctx context.Context) error {
 	close(hw.stopChan)
 	hw.running = false
 
+	// Cancel all active checks
+	hw.activeChecksMu.Lock()
+	for filePath, cancel := range hw.activeChecks {
+		cancel()
+		delete(hw.activeChecks, filePath)
+	}
+	hw.activeChecksMu.Unlock()
+
 	// Wait for all goroutines to finish
 	hw.wg.Wait()
 
@@ -325,8 +333,13 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 		return fmt.Errorf("health worker is not running")
 	}
 
+	// Track this goroutine
+	hw.wg.Add(1)
+	
 	// Start health check in background
 	go func() {
+		defer hw.wg.Done()
+		
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 

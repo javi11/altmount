@@ -125,6 +125,11 @@ func (b *usenetReader) Close() error {
 		b.rg = nil
 	}
 
+	// Clean up downloading segments map
+	b.mu.Lock()
+	b.downloadingSegments = make(map[int]bool)
+	b.mu.Unlock()
+
 	return nil
 }
 
@@ -318,8 +323,19 @@ func (b *usenetReader) downloadManager(
 			WithMaxGoroutines(downloadWorkers).
 			WithContext(ctx)
 
+		// Create a ticker once for the loop to avoid creating many timers
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
 		// Start continuous download monitoring
-		for ctx.Err() == nil {
+		for {
+			// Check context cancellation first
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			// Get current reading position
 			currentIndex := b.rg.GetCurrentIndex()
 
@@ -398,11 +414,10 @@ func (b *usenetReader) downloadManager(
 
 			// Wait a bit before checking again to avoid busy-waiting
 			select {
-			case <-time.After(100 * time.Millisecond):
+			case <-ticker.C:
 				continue
 			case <-ctx.Done():
-				// Context is done, next iteration will break the loop
-				continue
+				return
 			}
 		}
 

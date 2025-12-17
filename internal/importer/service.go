@@ -218,6 +218,14 @@ func (s *Service) Stop(ctx context.Context) error {
 	// Cancel all goroutines
 	s.cancel()
 
+	// Cancel all active processing items
+	s.cancelMu.Lock()
+	for itemID, cancel := range s.cancelFuncs {
+		cancel()
+		delete(s.cancelFuncs, itemID)
+	}
+	s.cancelMu.Unlock()
+
 	// Wait for all goroutines to finish
 	s.wg.Wait()
 
@@ -1071,18 +1079,27 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 		return // No rclone client configured or RClone RC is disabled
 	}
 
-	refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
-	defer cancel()
+	// Start async notification with timeout to prevent goroutine leaks
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.ErrorContext(context.Background(), "Panic in rclone VFS notification", "panic", r, "path", resultingPath)
+			}
+		}()
+		
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
+		defer cancel()
 
-	err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
-	if err != nil {
-		s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
-			"virtual_dir", resultingPath,
-			"error", err)
-	} else {
-		s.log.InfoContext(ctx, "Successfully notified rclone VFS about new import",
-			"virtual_dir", resultingPath)
-	}
+		err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
+		if err != nil {
+			s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
+				"virtual_dir", resultingPath,
+				"error", err)
+		} else {
+			s.log.InfoContext(ctx, "Successfully notified rclone VFS about new import",
+				"virtual_dir", resultingPath)
+		}
+	}()
 }
 
 // ProcessItemInBackground processes a specific queue item in the background
