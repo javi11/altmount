@@ -129,9 +129,18 @@ func (m *Manager) performMountHealthCheck() {
 			}
 			m.mountsMutex.Unlock()
 
-			// Attempt recovery
+			// Attempt recovery with timeout to prevent goroutine leaks
 			go func(provider string) {
-				if err := m.RecoverMount(m.ctx, provider); err != nil {
+				defer func() {
+					if r := recover(); r != nil {
+						m.logger.ErrorContext(m.ctx, "Panic in mount recovery", "panic", r, "provider", provider)
+					}
+				}()
+				
+				recoverCtx, cancel := context.WithTimeout(m.ctx, 2*time.Minute)
+				defer cancel()
+				
+				if err := m.RecoverMount(recoverCtx, provider); err != nil {
 					m.logger.ErrorContext(m.ctx, "Failed to recover mount", "err", err, "provider", provider)
 				}
 			}(provider)

@@ -169,9 +169,14 @@ func (mt *MetricsTracker) cleanupOldSamples() {
 		}
 	}
 
-	// Remove old samples
+	// Remove old samples - use copy to prevent memory leak from slice growth
 	if keepIndex > 0 {
-		mt.samples = mt.samples[keepIndex:]
+		// If we're removing more than half the samples, reallocate to save memory
+		if keepIndex > len(mt.samples)/2 {
+			mt.samples = append([]metricsample(nil), mt.samples[keepIndex:]...)
+		} else {
+			mt.samples = mt.samples[keepIndex:]
+		}
 	}
 }
 

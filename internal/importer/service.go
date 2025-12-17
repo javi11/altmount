@@ -218,6 +218,14 @@ func (s *Service) Stop(ctx context.Context) error {
 	// Cancel all goroutines
 	s.cancel()
 
+	// Cancel all active processing items
+	s.cancelMu.Lock()
+	for itemID, cancel := range s.cancelFuncs {
+		cancel()
+		delete(s.cancelFuncs, itemID)
+	}
+	s.cancelMu.Unlock()
+
 	// Wait for all goroutines to finish
 	s.wg.Wait()
 
@@ -837,7 +845,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	// Refresh mount path if needed
 	s.refreshMountPathIfNeeded(ctx, resultingPath, item.ID)
 
-	// Notify rclone VFS about the new import (async, don't fail on error)
+	// Notify rclone VFS about the new import (synchronous with timeout - must complete before ARR scan)
 	s.notifyRcloneVFS(ctx, resultingPath)
 
 	// Create category symlink (non-blocking)
@@ -1065,16 +1073,20 @@ func (s *Service) CancelProcessing(itemID int64) error {
 	return nil
 }
 
-// notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
+// notifyRcloneVFS notifies rclone VFS about a new import (synchronous with timeout to prevent leaks)
+// Must be synchronous to ensure rclone refreshes before ARR scan triggers
 func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 	if s.rcloneClient == nil {
 		return // No rclone client configured or RClone RC is disabled
 	}
 
+	// Use timeout context with background to prevent hanging (prevents leak)
+	// Use Background() to ensure refresh completes even if parent ctx is cancelled
 	refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
 	defer cancel()
 
-	err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
+	// Synchronous call - must complete before ARR scan to ensure files are visible
+	err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath})
 	if err != nil {
 		s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
 			"virtual_dir", resultingPath,

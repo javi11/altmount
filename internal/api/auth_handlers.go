@@ -84,7 +84,7 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 		})
 	}
 
-	// Set JWT cookie using Fiber's native API  (merged config)
+	// Set JWT cookie using Fiber's native API
 	err = s.setJWTCookie(c, tokenString)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -470,64 +470,38 @@ func sameSiteToString(sameSite http.SameSite) string {
 	}
 }
 
-// mergeAuthConfig merges env config with service config
-func mergeAuthConfig(serviceCfg, envCfg *auth.Config) *auth.Config {
-	merged := *serviceCfg
-
-	if envCfg.CookieDomain != "" {
-		merged.CookieDomain = envCfg.CookieDomain
-	}
-	if envCfg.CookieSecure {
-		merged.CookieSecure = envCfg.CookieSecure
-	}
-	if envCfg.CookieSameSite != http.SameSiteDefaultMode {
-		merged.CookieSameSite = envCfg.CookieSameSite
-	}
-	if envCfg.TokenDuration != 0 {
-		merged.TokenDuration = envCfg.TokenDuration
-	}
-
-	return &merged
-}
-
-// setJWTCookie sets the JWT cookie using Fiber's native cookie handling (merged config)
+// setJWTCookie sets the JWT cookie using Fiber's native cookie handling
 func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
-	serviceCfg := s.authService.GetConfig()
-	envCfg := auth.LoadConfigFromEnv()
-
-	cfg := mergeAuthConfig(serviceCfg, envCfg)
+	config := s.authService.GetConfig()
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT", // Default JWT cookie name
 		Value:    tokenString,
 		Path:     "/",
-		Domain:   cfg.CookieDomain,
-		Expires:  time.Now().Add(cfg.TokenDuration),
-		Secure:   cfg.CookieSecure,
+		Domain:   config.CookieDomain,
+		Expires:  time.Now().Add(config.TokenDuration),
+		Secure:   config.CookieSecure,
 		HTTPOnly: true,
-		SameSite: sameSiteToString(cfg.CookieSameSite),
+		SameSite: sameSiteToString(config.CookieSameSite),
 	}
 
 	c.Cookie(cookie)
 	return nil
 }
 
-// clearJWTCookie clears the JWT cookie using Fiber's native cookie handling (merged config)
+// clearJWTCookie clears the JWT cookie using Fiber's native cookie handling
 func (s *Server) clearJWTCookie(c *fiber.Ctx) {
-	serviceCfg := s.authService.GetConfig()
-	envCfg := auth.LoadConfigFromEnv()
-
-	cfg := mergeAuthConfig(serviceCfg, envCfg)
+	config := s.authService.GetConfig()
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT",
 		Value:    "",
 		Path:     "/",
-		Domain:   cfg.CookieDomain,
+		Domain:   config.CookieDomain,
 		Expires:  time.Now().Add(-time.Hour), // Expire in the past
-		Secure:   cfg.CookieSecure,
+		Secure:   config.CookieSecure,
 		HTTPOnly: true,
-		SameSite: sameSiteToString(cfg.CookieSameSite),
+		SameSite: sameSiteToString(config.CookieSameSite),
 	}
 
 	c.Cookie(cookie)

@@ -882,14 +882,32 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 
 	// Update metadata status (non-blocking)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.ErrorContext(context.Background(), "Panic in metadata status update", "panic", r, "file", mvf.name)
+			}
+		}()
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		
 		if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
 			// Log error but don't fail the read operation
-			fmt.Printf("Warning: failed to update metadata status for %s: %v\n", mvf.name, err)
+			slog.WarnContext(ctx, "Failed to update metadata status", "file", mvf.name, "error", err)
 		}
 	}()
 
 	// Update database health tracking (non-blocking)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.ErrorContext(context.Background(), "Panic in health repository update", "panic", r, "file", mvf.name)
+			}
+		}()
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		
 		errorMsg := dataCorruptionErr.Error()
 		sourceNzbPath := &mvf.fileMeta.SourceNzbPath
 		if *sourceNzbPath == "" {
@@ -901,7 +919,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
 
 		if err := mvf.healthRepository.UpdateFileHealth(
-			context.Background(),
+			ctx,
 			mvf.name,
 			dbStatus,
 			&errorMsg,
@@ -909,7 +927,7 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 			&errorDetails,
 			noRetry,
 		); err != nil {
-			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
+			slog.WarnContext(ctx, "Failed to update file health", "file", mvf.name, "error", err)
 		}
 	}()
 }

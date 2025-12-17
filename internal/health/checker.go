@@ -183,8 +183,14 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		return // No notification needed for other event types
 	}
 
-	// Start async notification
+	// Start async notification with timeout to prevent goroutine leaks
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.ErrorContext(context.Background(), "Panic in rclone VFS notification", "panic", r, "file", filePath)
+			}
+		}()
+		
 		// Extract directory path from file path for VFS refresh
 		virtualDir := filepath.Dir(filePath)
 
