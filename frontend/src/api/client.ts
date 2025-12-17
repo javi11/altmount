@@ -703,6 +703,7 @@ export class APIClient {
 		file: File,
 		category?: string,
 		priority?: number,
+		relativePath?: string,
 	): Promise<APIResponse<QueueItem>> {
 		const formData = new FormData();
 		formData.append("file", file);
@@ -711,6 +712,9 @@ export class APIClient {
 		}
 		if (priority !== undefined) {
 			formData.append("priority", priority.toString());
+		}
+		if (relativePath) {
+			formData.append("relative_path", relativePath);
 		}
 
 		return this.request<APIResponse<QueueItem>>("/queue/upload", {

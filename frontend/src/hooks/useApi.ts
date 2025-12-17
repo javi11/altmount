@@ -420,11 +420,13 @@ export const useUploadToQueue = () => {
 			file,
 			category,
 			priority,
+			relativePath,
 		}: {
 			file: File;
 			category?: string;
 			priority?: number;
-		}) => apiClient.uploadToQueue(file, category, priority),
+			relativePath?: string;
+		}) => apiClient.uploadToQueue(file, category, priority, relativePath),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
 			queryClient.invalidateQueries({ queryKey: ["queue"] });
