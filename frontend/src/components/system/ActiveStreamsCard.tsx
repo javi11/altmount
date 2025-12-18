@@ -7,8 +7,8 @@ import { truncateText } from "../../lib/utils";
 export function ActiveStreamsCard() {
 	const { data: allStreams, isLoading, error } = useActiveStreams();
 
-	// Filter to show only WebDAV streams (covers RClone and external players)
-	const streams = allStreams?.filter((s) => s.source === "WebDAV");
+	// Filter to show only WebDAV or FUSE streams (covers RClone, FUSE and external players)
+	const streams = allStreams?.filter((s) => s.source === "WebDAV" || s.source === "FUSE");
 
 	if (error) {
 		return (
