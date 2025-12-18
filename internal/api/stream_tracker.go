@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -12,14 +11,13 @@ import (
 
 // ActiveStream represents a file currently being streamed
 type ActiveStream struct {
-	ID        string             `json:"id"`
-	FilePath  string             `json:"file_path"`
-	StartedAt time.Time          `json:"started_at"`
-	Source    string             `json:"source"`
-	UserName  string             `json:"user_name,omitempty"`
-	TotalSize int64              `json:"total_size"`
-	BytesSent int64              `json:"bytes_sent"`
-	cancel    context.CancelFunc `json:"-"`
+	ID        string    `json:"id"`
+	FilePath  string    `json:"file_path"`
+	StartedAt time.Time `json:"started_at"`
+	Source    string    `json:"source"`
+	UserName  string    `json:"user_name,omitempty"`
+	TotalSize int64     `json:"total_size"`
+	BytesSent int64     `json:"bytes_sent"`
 }
 
 // StreamTracker tracks active streams
@@ -33,7 +31,7 @@ func NewStreamTracker() *StreamTracker {
 }
 
 // AddStream adds a new stream and returns the stream object for updates
-func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) *ActiveStream {
+func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64) *ActiveStream {
 	id := uuid.New().String()
 	stream := &ActiveStream{
 		ID:        id,
@@ -42,15 +40,14 @@ func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize i
 		Source:    source,
 		UserName:  userName,
 		TotalSize: totalSize,
-		cancel:    cancel,
 	}
 	t.streams.Store(id, stream)
 	return stream
 }
 
 // Add adds a new stream and returns its ID (implements nzbfilesystem.StreamTracker)
-func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) string {
-	return t.AddStream(filePath, source, userName, totalSize, cancel).ID
+func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64) string {
+	return t.AddStream(filePath, source, userName, totalSize).ID
 }
 
 // Remove removes a stream by ID

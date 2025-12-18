@@ -63,7 +63,7 @@ func (s *Server) startFuseServer(path string) error {
 		cfg := s.configManager.GetConfig().Fuse
 		cfg.MountPath = path // Ensure path matches request
 
-		adapter := fuse.NewContextAdapter(s.nzbFilesystem)
+		adapter := fuse.NewContextAdapter(s.nzbFilesystem, cfg)
 		server := fuse.NewServer(path, adapter, logger, cfg)
 
 		s.fuseManager.mu.Lock()
