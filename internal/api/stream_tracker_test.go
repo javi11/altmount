@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -38,7 +39,7 @@ func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 	assert.Len(t, streams, 3)
 
 	// Find the aggregated stream for movie.mkv user1
-	var movieUser1 *ActiveStream
+	var movieUser1 *nzbfilesystem.ActiveStream
 	for _, s := range streams {
 		if s.FilePath == "/movies/movie.mkv" && s.UserName == "user1" {
 			movieUser1 = &s
