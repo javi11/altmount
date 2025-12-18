@@ -115,6 +115,7 @@ func initializeFilesystem(
 		healthRepo,
 		poolManager,
 		configGetter,
+		api.NewStreamTracker(),
 	)
 
 	// Create filesystem backed by metadata
