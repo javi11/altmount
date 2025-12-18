@@ -29,7 +29,7 @@ type StreamHandler struct {
 // MonitoredFile wraps an afero.File to track read progress and support cancellation
 type MonitoredFile struct {
 	file   afero.File
-	stream *ActiveStream
+	stream *nzbfilesystem.ActiveStream
 	ctx    context.Context
 }
 

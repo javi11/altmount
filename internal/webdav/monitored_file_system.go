@@ -5,7 +5,7 @@ import (
 	"os"
 	"sync/atomic"
 
-	"github.com/javi11/altmount/internal/api"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
 	"golang.org/x/net/webdav"
 )
@@ -26,7 +26,7 @@ func (m *monitoredFileSystem) OpenFile(ctx context.Context, name string, flag in
 
 	// Check if this is a monitored stream
 	if streamVal := ctx.Value(utils.ActiveStreamKey); streamVal != nil {
-		if stream, ok := streamVal.(*api.ActiveStream); ok {
+		if stream, ok := streamVal.(*nzbfilesystem.ActiveStream); ok {
 			// Update total size if available
 			if stat, err := f.Stat(); err == nil {
 				atomic.StoreInt64(&stream.TotalSize, stat.Size())
@@ -52,7 +52,7 @@ func (m *monitoredFileSystem) Stat(ctx context.Context, name string) (os.FileInf
 
 type monitoredFile struct {
 	webdav.File
-	stream *api.ActiveStream
+	stream *nzbfilesystem.ActiveStream
 	ctx    context.Context
 }
 

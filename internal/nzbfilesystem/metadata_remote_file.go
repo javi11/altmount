@@ -160,7 +160,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		// Check if we already have a stream ID in context
 		if id, ok := ctx.Value(utils.StreamIDKey).(string); ok && id != "" {
 			streamID = id
-		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*api.ActiveStream); ok {
+		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*ActiveStream); ok {
 			streamID = stream.ID
 		} else {
 			// Fallback to FUSE if no tracking info in context
