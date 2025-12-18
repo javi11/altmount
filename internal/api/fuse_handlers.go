@@ -58,6 +58,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 
 	// Ensure directory exists
 	if err := os.MkdirAll(req.Path, 0755); err != nil {
+		slog.Error("Failed to create FUSE mount directory", "path", req.Path, "error", err)
 		s.fuseManager.mu.Lock()
 		s.fuseManager.status = "error"
 		s.fuseManager.mu.Unlock()
@@ -68,9 +69,11 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		})
 	}
 
+	slog.Info("Starting FUSE mount", "path", req.Path)
+
 	// Start FUSE server in background
 	go func() {
-		logger := slog.With("component", "fuse")
+		logger := slog.With("component", "fuse", "path", req.Path)
 		adapter := fuse.NewContextAdapter(s.nzbFilesystem)
 		server := fuse.NewServer(req.Path, adapter, logger)
 		
@@ -80,12 +83,13 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		s.fuseManager.mu.Unlock()
 
 		if err := server.Mount(); err != nil {
-			slog.Error("FUSE mount failed", "error", err)
+			slog.Error("FUSE mount failed", "path", req.Path, "error", err)
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "error"
 			s.fuseManager.server = nil
 			s.fuseManager.mu.Unlock()
 		} else {
+			slog.Info("FUSE unmounted successfully", "path", req.Path)
 			// Mount returned (unmounted)
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "stopped"
