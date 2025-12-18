@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"runtime"
 	"sync"
 
 	"github.com/gofiber/fiber/v2"
@@ -35,6 +37,12 @@ func (s *Server) startFuseServer(path string) error {
 	s.fuseManager.status = "starting"
 	s.fuseManager.path = path
 	s.fuseManager.mu.Unlock()
+
+	// Cleanup stale mount if any before MkdirAll
+	if runtime.GOOS == "linux" {
+		_ = exec.Command("fusermount", "-uz", path).Run()
+		_ = exec.Command("umount", "-l", path).Run()
+	}
 
 	// Ensure directory exists
 	if err := os.MkdirAll(path, 0755); err != nil {
