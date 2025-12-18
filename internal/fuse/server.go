@@ -11,6 +11,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/spf13/afero"
 )
 
@@ -20,14 +21,16 @@ type Server struct {
 	fileSystem afero.Fs
 	logger     *slog.Logger
 	server     *fuse.Server
+	config     config.FuseConfig
 }
 
 // NewServer creates a new FUSE server instance
-func NewServer(mountPoint string, fileSystem afero.Fs, logger *slog.Logger) *Server {
+func NewServer(mountPoint string, fileSystem afero.Fs, logger *slog.Logger, cfg config.FuseConfig) *Server {
 	return &Server{
 		mountPoint: mountPoint,
 		fileSystem: fileSystem,
 		logger:     logger,
+		config:     cfg,
 	}
 }
 
@@ -54,17 +57,27 @@ func (s *Server) Mount() error {
 
 	// Configure FUSE options
 	// We want to enable some caching to avoid hitting metadata service too often
+	attrTimeout := time.Duration(s.config.AttrTimeoutSeconds) * time.Second
+	entryTimeout := time.Duration(s.config.EntryTimeoutSeconds) * time.Second
+
+	// Ensure timeouts are at least 1s if they were 0/defaulted weirdly, though config validator should handle it.
+	if attrTimeout == 0 {
+		attrTimeout = 1 * time.Second
+	}
+	if entryTimeout == 0 {
+		entryTimeout = 1 * time.Second
+	}
+
 	opts := &fs.Options{
 		MountOptions: fuse.MountOptions{
-			AllowOther: true, // Allow other users to access the mount
+			AllowOther: s.config.AllowOther,
 			Name:       "altmount",
-			// Enable debug logging if needed, could be tied to app log level
-			// Debug:      true, 
+			Debug:      s.config.Debug,
 		},
 		// Cache timeout settings
-		EntryTimeout:    &[]time.Duration{1 * time.Second}[0],
-		AttrTimeout:     &[]time.Duration{1 * time.Second}[0],
-		NegativeTimeout: &[]time.Duration{1 * time.Second}[0],
+		EntryTimeout:    &entryTimeout,
+		AttrTimeout:     &attrTimeout,
+		NegativeTimeout: &entryTimeout, // Use same as entry timeout
 	}
 
 	server, err := fs.Mount(s.mountPoint, root, opts)

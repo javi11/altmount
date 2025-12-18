@@ -30,6 +30,7 @@ type Config struct {
 	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
 	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
 	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
 	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -40,6 +41,16 @@ type WebDAVConfig struct {
 	Port     int    `yaml:"port" mapstructure:"port" json:"port"`
 	User     string `yaml:"user" mapstructure:"user" json:"user"`
 	Password string `yaml:"password" mapstructure:"password" json:"password"`
+}
+
+// FuseConfig represents FUSE mount configuration
+type FuseConfig struct {
+	MountPath           string `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	AllowOther          bool   `yaml:"allow_other" mapstructure:"allow_other" json:"allow_other"`
+	Debug               bool   `yaml:"debug" mapstructure:"debug" json:"debug"`
+	AttrTimeoutSeconds  int    `yaml:"attr_timeout_seconds" mapstructure:"attr_timeout_seconds" json:"attr_timeout_seconds"`
+	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 }
 
 // APIConfig represents REST API configuration
@@ -437,6 +448,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Arrs.Enabled = &v
 	} else {
 		copyCfg.Arrs.Enabled = nil
+	}
+
+	// Deep copy Fuse.Enabled pointer
+	if c.Fuse.Enabled != nil {
+		v := *c.Fuse.Enabled
+		copyCfg.Fuse.Enabled = &v
+	} else {
+		copyCfg.Fuse.Enabled = nil
 	}
 
 	// Deep copy Scraper Radarr instances
@@ -1022,6 +1041,7 @@ func DefaultConfig(configDir ...string) *Config {
 	mountEnabled := false   // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
+	fuseEnabled := false
 	loginRequired := true // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
@@ -1159,6 +1179,14 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxWorkers:      5,                // Default to 5 concurrent workers
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+		},
+		Fuse: FuseConfig{
+			Enabled:             &fuseEnabled,
+			MountPath:           "",
+			AllowOther:          true,
+			Debug:               false,
+			AttrTimeoutSeconds:  1,
+			EntryTimeoutSeconds: 1,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}
