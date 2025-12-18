@@ -10,6 +10,7 @@ export interface ConfigResponse {
 	streaming: StreamingConfig;
 	health: HealthConfig;
 	rclone: RCloneConfig;
+	fuse: FuseConfig;
 	import: ImportConfig;
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
@@ -150,6 +151,16 @@ export interface RCloneConfig {
 	use_mmap: boolean;
 }
 
+// Fuse configuration
+export interface FuseConfig {
+	mount_path: string;
+	enabled: boolean;
+	allow_other: boolean;
+	debug: boolean;
+	attr_timeout_seconds: number;
+	entry_timeout_seconds: number;
+}
+
 // Import strategy type
 export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 
@@ -219,6 +230,7 @@ export interface ConfigUpdateRequest {
 	streaming?: StreamingUpdateRequest;
 	health?: HealthUpdateRequest;
 	rclone?: RCloneUpdateRequest;
+	fuse?: Partial<FuseConfig>;
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;

@@ -202,6 +202,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
 			logger.WarnContext(ctx, "Mount service failed to start", "err", err)
 		}
+
+		// Auto-start FUSE mount if enabled
+		apiServer.AutoStartFuse()
 	}()
 
 	// Wait for shutdown signal or server error
