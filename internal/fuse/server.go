@@ -3,8 +3,10 @@ package fuse
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -29,13 +31,26 @@ func NewServer(mountPoint string, fileSystem afero.Fs, logger *slog.Logger) *Ser
 	}
 }
 
+// getIDFromEnv parses a numeric ID from an environment variable with a default fallback
+func getIDFromEnv(key string, defaultID int) int {
+	if val := os.Getenv(key); val != "" {
+		if id, err := strconv.Atoi(val); err == nil {
+			return id
+		}
+	}
+	return defaultID
+}
+
 // Mount mounts the filesystem and starts serving
 // This method blocks until the filesystem is unmounted
 func (s *Server) Mount() error {
 	// Try to cleanup stale mount first
 	s.CleanupMount()
 
-	root := NewAltMountRoot(s.fileSystem, "", s.logger)
+	uid := uint32(getIDFromEnv("PUID", 1000))
+	gid := uint32(getIDFromEnv("PGID", 1000))
+
+	root := NewAltMountRoot(s.fileSystem, "", s.logger, uid, gid)
 
 	// Configure FUSE options
 	// We want to enable some caching to avoid hitting metadata service too often
