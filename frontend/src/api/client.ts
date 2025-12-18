@@ -20,6 +20,7 @@ import type {
 	SystemBrowseResponse,
 	User,
 	UserAdminUpdateRequest,
+	FuseStatus,
 } from "../types/api";
 import type {
 	ConfigResponse,
@@ -729,6 +730,25 @@ export class APIClient {
 		return this.request<APIResponse<QueueItem>>("/queue/test", {
 			method: "POST",
 			body: JSON.stringify({ size }),
+		});
+	}
+
+	// FUSE endpoints
+	async getFuseStatus() {
+		return this.request<FuseStatus>("/fuse/status");
+	}
+
+	async startFuseMount(path: string) {
+		return this.request<{ message: string }>("/fuse/start", {
+			method: "POST",
+			body: JSON.stringify({ path }),
+		});
+	}
+
+	async stopFuseMount() {
+		return this.request<{ message: string }>("/fuse/stop", {
+			method: "POST",
+			body: JSON.stringify({}),
 		});
 	}
 }

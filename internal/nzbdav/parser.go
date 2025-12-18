@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"text/template"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -26,15 +27,30 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 	errChan := make(chan error, 1)
 
 	go func() {
-		defer close(out)
-		defer close(errChan)
-
+		// WaitGroup to track active writers
+		var wg sync.WaitGroup
+		
 		db, err := sql.Open("sqlite3", p.dbPath)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to open database: %w", err)
+			close(out)
+			close(errChan)
 			return
 		}
-		defer db.Close()
+		
+		// Ensure DB is closed only after all writers are done
+		defer func() {
+			wg.Wait()
+			db.Close()
+			close(out)
+			close(errChan)
+		}()
+		
+		// Enable WAL mode for better concurrency if possible, 
+		// but simple connection reuse is already a big win.
+		// Set limits to prevent file descriptor exhaustion
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(10)
 
 		// Query to find all "Release" folders
 		// A release folder is a parent of any item that has an entry in DavNzbFiles
@@ -60,30 +76,16 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			// Create pipe for streaming content
 			pr, pw := io.Pipe()
 
-			// Launch goroutine to write NZB content to the pipe
-			// We use a WaitGroup to ensure we don't close the DB before this goroutine finishes? 
-			// No, the outer loop waits for rows.Next(), but we launch a goroutine.
-			// Actually, if we launch 'go p.writeNzb', the outer loop continues.
-			// BUT, the channel send 'out <- ...' blocks until the receiver takes it.
-			// The receiver (handler) reads the 'Content' (pipe) fully before taking the next item?
-			// Yes, 'io.Copy(outFile, res.Content)' blocks until EOF.
-			// So 'writeNzb' will finish *before* the handler takes the *next* item from 'out'? 
-			// No, 'io.Copy' reads from 'pr'. 'writeNzb' writes to 'pw'.
-			// The handler calls 'io.Copy', which drains 'pr'.
-			// Once 'pr' is drained (EOF), the handler loop continues and might read from 'out' again.
-			// So we are effectively serializing the DB access mostly, EXCEPT that 'writeNzb' runs concurrently with 'io.Copy'.
-			// But since we are inside the 'rows.Next()' loop, we can't easily pass 'db' to 'writeNzb' if we want to query concurrently 
-			// because sqlite3 has locking (though read-only is usually fine with WAL, but default might be strict).
-			// Ideally, we shouldn't share the 'db' connection object across goroutines if we are iterating 'rows'.
-			// Actually, 'database/sql' is thread-safe. But iterating 'rows' holds a connection.
-			// If 'writeNzb' tries to query, it might need another connection from the pool.
-			// This should be fine.
-			
-			go p.writeNzb(p.dbPath, id, name, pw)
+			wg.Add(1)
+			go func(rid, rname string, writer *io.PipeWriter) {
+				defer wg.Done()
+				p.writeNzb(db, rid, rname, writer)
+			}(id, name, pw)
 
 			category := p.deriveCategory(path)
 			select {
 			case out <- &ParsedNzb{
+				ID:       id,
 				Name:     name,
 				Category: category,
 				RelPath:  p.deriveRelPath(path, category),
@@ -145,18 +147,9 @@ func (p *Parser) deriveRelPath(path, category string) string {
 }
 
 // writeNzb generates the NZB XML and writes it to the pipe
-// It opens its own DB connection to avoid interfering with the main iteration loop
-func (p *Parser) writeNzb(dbPath, releaseId, releaseName string, pw *io.PipeWriter) {
+// It uses the shared DB connection pool
+func (p *Parser) writeNzb(db *sql.DB, releaseId, releaseName string, pw *io.PipeWriter) {
 	defer pw.Close()
-
-	// We open a new connection for this operation to ensure thread safety and avoid lock contention
-	// especially since the main loop is holding a cursor open.
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		pw.CloseWithError(fmt.Errorf("failed to open db for nzb generation: %w", err))
-		return
-	}
-	defer db.Close()
 
 	// Fetch files for this release
 	rows, err := db.Query(`

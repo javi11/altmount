@@ -356,3 +356,9 @@ export interface SystemBrowseResponse {
 	parent_path: string;
 	files: FileEntry[];
 }
+
+// FUSE types
+export interface FuseStatus {
+	status: "stopped" | "starting" | "running" | "error";
+	path: string;
+}
