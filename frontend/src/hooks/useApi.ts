@@ -303,17 +303,6 @@ export const useActiveStreams = () => {
 	});
 };
 
-export const useDeleteActiveStream = () => {
-	const queryClient = useQueryClient();
-
-	return useMutation({
-		mutationFn: (id: string) => apiClient.deleteActiveStream(id),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["files", "active-streams"] });
-		},
-	});
-};
-
 export const useDirectHealthCheck = () => {
 	const queryClient = useQueryClient();
 

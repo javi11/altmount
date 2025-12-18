@@ -1,12 +1,11 @@
-import { Activity, FileVideo, MonitorPlay, Square } from "lucide-react";
+import { Activity, FileVideo, MonitorPlay } from "lucide-react";
 import { formatDistanceToNowStrict } from "date-fns";
-import { useActiveStreams, useDeleteActiveStream } from "../../hooks/useApi";
+import { useActiveStreams } from "../../hooks/useApi";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { truncateText } from "../../lib/utils";
 
 export function ActiveStreamsCard() {
 	const { data: allStreams, isLoading, error } = useActiveStreams();
-	const { mutate: stopStream } = useDeleteActiveStream();
 
 	// Filter to show only WebDAV or FUSE streams (covers RClone, FUSE and external players)
 	const streams = allStreams?.filter((s) => s.source === "WebDAV" || s.source === "FUSE");
@@ -66,13 +65,6 @@ export function ActiveStreamsCard() {
 										</div>
 									</div>
 								</div>
-								<button
-									className="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity"
-									onClick={() => stopStream(stream.id)}
-									title="Stop Stream"
-								>
-									<Square className="h-4 w-4 fill-current" />
-								</button>
 							</div>
 						))}
 					</div>

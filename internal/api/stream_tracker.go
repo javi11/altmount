@@ -58,18 +58,6 @@ func (t *StreamTracker) Remove(id string) {
 	t.streams.Delete(id)
 }
 
-// Stop terminates a stream by ID
-func (t *StreamTracker) Stop(id string) bool {
-	if val, ok := t.streams.Load(id); ok {
-		stream := val.(*ActiveStream)
-		if stream.cancel != nil {
-			stream.cancel()
-			return true
-		}
-	}
-	return false
-}
-
 // GetAll returns all active streams
 func (t *StreamTracker) GetAll() []ActiveStream {
 	var streams []ActiveStream
