@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -12,14 +11,14 @@ import (
 
 // ActiveStream represents a file currently being streamed
 type ActiveStream struct {
-	ID        string             `json:"id"`
-	FilePath  string             `json:"file_path"`
-	StartedAt time.Time          `json:"started_at"`
-	Source    string             `json:"source"`
-	UserName  string             `json:"user_name,omitempty"`
-	TotalSize int64              `json:"total_size"`
-	BytesSent int64              `json:"bytes_sent"`
-	cancel    context.CancelFunc `json:"-"`
+	ID               string    `json:"id"`
+	FilePath         string    `json:"file_path"`
+	StartedAt        time.Time `json:"started_at"`
+	Source           string    `json:"source"`
+	UserName         string    `json:"user_name,omitempty"`
+	TotalSize        int64     `json:"total_size"`
+	BytesSent        int64     `json:"bytes_sent"`
+	TotalConnections int       `json:"total_connections"`
 }
 
 // StreamTracker tracks active streams
@@ -32,8 +31,8 @@ func NewStreamTracker() *StreamTracker {
 	return &StreamTracker{}
 }
 
-// Add adds a new stream and returns the stream object for updates
-func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) *ActiveStream {
+// AddStream adds a new stream and returns the stream object for updates
+func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64) *ActiveStream {
 	id := uuid.New().String()
 	stream := &ActiveStream{
 		ID:        id,
@@ -42,27 +41,27 @@ func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, 
 		Source:    source,
 		UserName:  userName,
 		TotalSize: totalSize,
-		cancel:    cancel,
 	}
 	t.streams.Store(id, stream)
 	return stream
 }
 
+// Add adds a new stream and returns its ID (implements nzbfilesystem.StreamTracker)
+func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64) string {
+	return t.AddStream(filePath, source, userName, totalSize).ID
+}
+
+// UpdateProgress updates the bytes sent for a stream by ID
+func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*ActiveStream)
+		atomic.AddInt64(&stream.BytesSent, bytesRead)
+	}
+}
+
 // Remove removes a stream by ID
 func (t *StreamTracker) Remove(id string) {
 	t.streams.Delete(id)
-}
-
-// Stop terminates a stream by ID
-func (t *StreamTracker) Stop(id string) bool {
-	if val, ok := t.streams.Load(id); ok {
-		stream := val.(*ActiveStream)
-		if stream.cancel != nil {
-			stream.cancel()
-			return true
-		}
-	}
-	return false
 }
 
 // GetAll returns all active streams, aggregated by file, user, and source
@@ -94,6 +93,8 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 			if existing.TotalSize == 0 && s.TotalSize > 0 {
 				existing.TotalSize = s.TotalSize
 			}
+
+			existing.TotalConnections++
 		} else {
 			// Initialize new group with this stream
 			streamCopy := *s
@@ -101,6 +102,7 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
 			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
 			streamCopy.ID = groupKey
+			streamCopy.TotalConnections = 1
 			grouped[groupKey] = &streamCopy
 		}
 		return true

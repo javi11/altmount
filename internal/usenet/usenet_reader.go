@@ -21,7 +21,7 @@ const (
 )
 
 var (
-	_ io.ReadCloser = &usenetReader{}
+	_ io.ReadCloser = &UsenetReader{}
 )
 
 type DataCorruptionError struct {
@@ -38,7 +38,7 @@ func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
-type usenetReader struct {
+type UsenetReader struct {
 	log                *slog.Logger
 	wg                 sync.WaitGroup
 	cancel             context.CancelFunc
@@ -64,7 +64,7 @@ func NewUsenetReader(
 	rg *segmentRange,
 	maxDownloadWorkers int,
 	maxCacheSizeMB int,
-) (io.ReadCloser, error) {
+) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -74,7 +74,7 @@ func NewUsenetReader(
 		maxCacheSize = defaultMaxCacheSize
 	}
 
-	ur := &usenetReader{
+	ur := &UsenetReader{
 		log:                 log,
 		cancel:              cancel,
 		rg:                  rg,
@@ -98,7 +98,15 @@ func NewUsenetReader(
 	return ur, nil
 }
 
-func (b *usenetReader) Close() error {
+// Start triggers the background download process manually.
+// This is useful for pre-fetching data before the first Read call.
+func (b *UsenetReader) Start() {
+	b.initDownload.Do(func() {
+		b.init <- struct{}{}
+	})
+}
+
+func (b *UsenetReader) Close() error {
 	b.cancel()
 	close(b.init)
 
@@ -131,7 +139,7 @@ func (b *usenetReader) Close() error {
 // Read reads len(p) byte from the Buffer starting at the current offset.
 // It returns the number of bytes read and an error if any.
 // Returns io.EOF error if pointer is at the end of the Buffer.
-func (b *usenetReader) Read(p []byte) (int, error) {
+func (b *UsenetReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -220,12 +228,12 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 }
 
 // isArticleNotFoundError checks if the error indicates articles were not found in providers
-func (b *usenetReader) isArticleNotFoundError(err error) bool {
+func (b *UsenetReader) isArticleNotFoundError(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFoundInProviders)
 }
 
 // isPoolUnavailableError checks if the error indicates the pool is unavailable or shutdown
-func (b *usenetReader) isPoolUnavailableError(err error) bool {
+func (b *UsenetReader) isPoolUnavailableError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -236,7 +244,7 @@ func (b *usenetReader) isPoolUnavailableError(err error) bool {
 }
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
-func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
+func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
 	return retry.Do(
 		func() error {
 			// Get current pool
@@ -281,7 +289,7 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 	)
 }
 
-func (b *usenetReader) downloadManager(
+func (b *UsenetReader) downloadManager(
 	ctx context.Context,
 ) {
 	select {

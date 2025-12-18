@@ -33,6 +33,7 @@ type MetadataRemoteFile struct {
 	configGetter     config.ConfigGetter // Dynamic config access
 	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
 	aesCipher        *aes.AesCipher      // For AES encryption/decryption
+	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -44,6 +45,7 @@ func NewMetadataRemoteFile(
 	healthRepository *database.HealthRepository,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
+	streamTracker StreamTracker,
 ) *MetadataRemoteFile {
 	// Initialize rclone cipher with global credentials for encrypted files
 	cfg := configGetter()
@@ -64,6 +66,7 @@ func NewMetadataRemoteFile(
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
 		aesCipher:        aesCipher,
+		streamTracker:    streamTracker,
 	}
 }
 
@@ -147,6 +150,22 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
+	// Extract workers and cache size from context if available (overrides global config)
+	maxWorkers := mrf.getMaxDownloadWorkers()
+	if val, ok := ctx.Value(utils.MaxDownloadWorkersKey).(int); ok && val > 0 {
+		maxWorkers = val
+	}
+	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
+	if val, ok := ctx.Value(utils.MaxCacheSizeMBKey).(int); ok && val > 0 {
+		maxCacheSizeMB = val
+	}
+
+	// Start tracking stream if tracker available
+	streamID := ""
+	if mrf.streamTracker != nil {
+		streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
+	}
+
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -155,12 +174,14 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		healthRepository: mrf.healthRepository,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
-		maxWorkers:       mrf.getMaxDownloadWorkers(),
-		maxCacheSizeMB:   mrf.getMaxCacheSizeMB(),
+		maxWorkers:       maxWorkers,
+		maxCacheSizeMB:   maxCacheSizeMB,
 		rcloneCipher:     mrf.rcloneCipher,
 		aesCipher:        mrf.aesCipher,
 		globalPassword:   mrf.getGlobalPassword(),
 		globalSalt:       mrf.getGlobalSalt(),
+		streamTracker:    mrf.streamTracker,
+		streamID:         streamID,
 	}
 
 	return true, virtualFile, nil
@@ -487,6 +508,8 @@ type MetadataVirtualFile struct {
 	aesCipher        *aes.AesCipher
 	globalPassword   string
 	globalSalt       string
+	streamTracker    StreamTracker
+	streamID         string
 
 	// Reader state and position tracking
 	reader            io.ReadCloser
@@ -499,6 +522,32 @@ type MetadataVirtualFile struct {
 	mu sync.Mutex
 }
 
+// WarmUp triggers a background pre-fetch of the file start
+func (mvf *MetadataVirtualFile) WarmUp() {
+	go func() {
+		mvf.mu.Lock()
+		defer mvf.mu.Unlock()
+
+		// Skip if already initialized
+		if mvf.readerInitialized {
+			return
+		}
+
+		// Initialize reader for the beginning of the file
+		if err := mvf.ensureReader(); err != nil {
+			// Just log/ignore, the actual Read will handle it later
+			return
+		}
+
+		// If the reader supports manual starting (UsenetReader), trigger it
+		// This starts the background workers to fetch data into the cache
+		// without consuming any bytes from the stream.
+		if ur, ok := mvf.reader.(*usenet.UsenetReader); ok {
+			ur.Start()
+		}
+	}()
+}
+
 // Read implements afero.File.Read
 func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
@@ -508,58 +557,41 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 
-	if err := mvf.ensureReader(); err != nil {
-		return 0, err
-	}
-
-	totalRead, err := mvf.reader.Read(p)
-	if err != nil {
-		// Check if this is EOF and we have more data to read
-		if errors.Is(err, io.EOF) && mvf.hasMoreDataToRead() {
-			// Close current reader and create a new one for the next range
-			mvf.closeCurrentReader()
-
-			// Try to create a new reader for the remaining data
-			if newReaderErr := mvf.ensureReader(); newReaderErr != nil {
-				// If we can't create a new reader, return what we have
-				mvf.position += int64(totalRead)
-				return totalRead, err
-			}
-
-			// Try to read more data with the new reader
-			if totalRead < len(p) {
-				additionalRead, newErr := mvf.reader.Read(p[totalRead:])
-				totalRead += additionalRead
-				if newErr != nil && !errors.Is(newErr, io.EOF) {
-					err = newErr
-				} else if newErr == nil {
-					err = nil // Clear EOF if we successfully read more
-				}
-			} else if totalRead == len(p) {
-				err = nil
-			}
+	for n < len(p) {
+		if err := mvf.ensureReader(); err != nil {
+			return n, err
 		}
 
-		var dataCorruptionErr *usenet.DataCorruptionError
-		// Handle UsenetReader errors the same way as VirtualFile
-		if errors.As(err, &dataCorruptionErr) {
-			// Update file health status and database tracking
-			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
-			// No content read - return corrupted file error
-			return totalRead, &CorruptedFileError{
-				TotalExpected: mvf.fileMeta.FileSize,
-				UnderlyingErr: dataCorruptionErr,
-			}
-		}
-
-		// Update position even on error if we read some data
+		totalRead, readErr := mvf.reader.Read(p[n:])
+		n += totalRead
 		mvf.position += int64(totalRead)
-		return totalRead, err
+
+		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
+		}
+
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
+				// Close current reader and try to get a new one for the next range in next iteration
+				mvf.closeCurrentReader()
+				continue
+			}
+
+			// For data corruption errors, report and mark as corrupted
+			var dataCorruptionErr *usenet.DataCorruptionError
+			if errors.As(readErr, &dataCorruptionErr) {
+				mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
+				return n, &CorruptedFileError{
+					TotalExpected: mvf.fileMeta.FileSize,
+					UnderlyingErr: dataCorruptionErr,
+				}
+			}
+
+			return n, readErr
+		}
 	}
 
-	// Update the current position after reading
-	mvf.position += int64(totalRead)
-	return totalRead, nil
+	return n, nil
 }
 
 // ReadAt implements afero.File.ReadAt
@@ -606,6 +638,12 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 // Close implements afero.File.Close
 func (mvf *MetadataVirtualFile) Close() error {
+	// Remove from stream tracker if applicable
+	if mvf.streamTracker != nil && mvf.streamID != "" {
+		mvf.streamTracker.Remove(mvf.streamID)
+		mvf.streamID = ""
+	}
+
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 	if mvf.reader != nil {
@@ -761,7 +799,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 
 		// No range header, set unbounded
 		mvf.originalRangeEnd = -1
-		return 0, -1
+		return mvf.position, -1
 	}
 
 	// For subsequent reads, use current position and respect original range
@@ -774,7 +812,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		targetEnd = mvf.originalRangeEnd
 	}
 
-	return 0, targetEnd
+	return mvf.position, targetEnd
 }
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
@@ -874,44 +912,44 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 	}
 }
 
-// updateFileHealthOnError updates both metadata and database health status when corruption is detected
+// updateFileHealthOnError updates both metadata and database health status when corruption is detected.
+// Uses synchronous operations with timeout to prevent goroutine leaks.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	// Use a short timeout context to prevent blocking indefinitely
+	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
+	defer cancel()
+
 	// Any file with missing segments or corruption is marked as corrupted
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
 	dbStatus := database.HealthStatusCorrupted
 
-	// Update metadata status (non-blocking)
-	go func() {
-		if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
-			// Log error but don't fail the read operation
-			fmt.Printf("Warning: failed to update metadata status for %s: %v\n", mvf.name, err)
-		}
-	}()
+	// Update metadata status (blocking with timeout)
+	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
+		slog.WarnContext(ctx, "Failed to update metadata status", "file", mvf.name, "error", err)
+	}
 
-	// Update database health tracking (non-blocking)
-	go func() {
-		errorMsg := dataCorruptionErr.Error()
-		sourceNzbPath := &mvf.fileMeta.SourceNzbPath
-		if *sourceNzbPath == "" {
-			sourceNzbPath = nil
-		}
+	// Update database health tracking (blocking with timeout)
+	errorMsg := dataCorruptionErr.Error()
+	sourceNzbPath := &mvf.fileMeta.SourceNzbPath
+	if *sourceNzbPath == "" {
+		sourceNzbPath = nil
+	}
 
-		// Create error details JSON
-		errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
-			1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
+	// Create error details JSON
+	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
+		1, len(mvf.fileMeta.SegmentData))
 
-		if err := mvf.healthRepository.UpdateFileHealth(
-			context.Background(),
-			mvf.name,
-			dbStatus,
-			&errorMsg,
-			sourceNzbPath,
-			&errorDetails,
-			noRetry,
-		); err != nil {
-			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
-		}
-	}()
+	if err := mvf.healthRepository.UpdateFileHealth(
+		ctx,
+		mvf.name,
+		dbStatus,
+		&errorMsg,
+		sourceNzbPath,
+		&errorDetails,
+		noRetry,
+	); err != nil {
+		slog.WarnContext(ctx, "Failed to update file health", "file", mvf.name, "error", err)
+	}
 }
 
 // isValidEmptyDirectory checks if a path could represent a valid empty directory

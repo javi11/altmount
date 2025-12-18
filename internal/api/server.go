@@ -54,6 +54,7 @@ type Server struct {
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
 	streamTracker       *StreamTracker
+	fuseManager         *FuseManager
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -95,6 +96,7 @@ func NewServer(
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
+		fuseManager:         NewFuseManager(),
 	}
 
 	return server
@@ -223,6 +225,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
 
+	// FUSE endpoints
+	api.Post("/fuse/start", s.handleStartFuseMount)
+	api.Post("/fuse/stop", s.handleStopFuseMount)
+	api.Get("/fuse/status", s.handleGetFuseStatus)
+
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
 	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
@@ -284,8 +291,6 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 		"data":    streams,
 	})
 }
-
-
 
 // getSystemInfo returns current system information
 func (s *Server) getSystemInfo() SystemInfoResponse {

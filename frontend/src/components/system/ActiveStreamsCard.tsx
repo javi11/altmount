@@ -7,8 +7,8 @@ import { truncateText } from "../../lib/utils";
 export function ActiveStreamsCard() {
 	const { data: allStreams, isLoading, error } = useActiveStreams();
 
-	// Filter to show only WebDAV streams (covers RClone and external players)
-	const streams = allStreams?.filter((s) => s.source === "WebDAV");
+	// Filter to show only WebDAV or FUSE streams (covers RClone, FUSE and external players)
+	const streams = allStreams?.filter((s) => s.source === "WebDAV" || s.source === "FUSE");
 
 	if (error) {
 		return (
@@ -58,7 +58,7 @@ export function ActiveStreamsCard() {
 									</div>
 									<div className="text-xs text-base-content/60 flex flex-col gap-0.5 mt-1">
 										<div className="flex justify-between">
-											<span>{stream.user_name || "Unknown User"}</span>
+											<span>{stream.user_name || "Unknown User"} • {stream.total_connections} {stream.total_connections === 1 ? 'connection' : 'connections'}</span>
 											<span>
 												{formatDistanceToNowStrict(new Date(stream.started_at), { addSuffix: true })}
 											</span>

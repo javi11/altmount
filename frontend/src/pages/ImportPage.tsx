@@ -120,7 +120,6 @@ function UploadSection() {
 					relativePath = parts.slice(0, -1).join("/");
 				}
 			}
-
 			try {
 				await uploadMutation.mutateAsync({
 					file: file,

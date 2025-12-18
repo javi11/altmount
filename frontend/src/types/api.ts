@@ -315,6 +315,7 @@ export interface ActiveStream {
 	user_name?: string;
 	total_size: number;
 	bytes_sent: number;
+	total_connections: number;
 }
 
 export interface PoolMetrics {
@@ -355,4 +356,10 @@ export interface SystemBrowseResponse {
 	current_path: string;
 	parent_path: string;
 	files: FileEntry[];
+}
+
+// FUSE types
+export interface FuseStatus {
+	status: "stopped" | "starting" | "running" | "error";
+	path: string;
 }
