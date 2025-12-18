@@ -86,6 +86,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			category := p.deriveCategory(path)
 			select {
 			case out <- &ParsedNzb{
+				ID:       id,
 				Name:     name,
 				Category: category,
 				RelPath:  p.deriveRelPath(path, category),
