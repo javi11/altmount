@@ -159,6 +159,7 @@ type rarPart struct {
 // It uses the shared DB connection pool
 func (p *Parser) writeNzb(db *sql.DB, releaseId, releaseName string, pw *io.PipeWriter) {
 	defer pw.Close()
+
 	// Fetch files for this release
 	rows, err := db.Query(`
 		SELECT c.Id, c.Name, c.FileSize, n.SegmentIds, r.RarParts

@@ -266,7 +266,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,
-			"data":    []ActiveStream{},
+			"data":    []nzbfilesystem.ActiveStream{},
 		})
 	}
 
@@ -276,7 +276,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	filterType := c.Query("type") // e.g., type=file
 
 	if filterType == "file" {
-		filteredStreams := make([]ActiveStream, 0)
+		filteredStreams := make([]nzbfilesystem.ActiveStream, 0)
 		for _, stream := range streams {
 			// Assuming "API" and "WebDAV" are the desired "file being streams"
 			if stream.Source == "API" || stream.Source == "WebDAV" {

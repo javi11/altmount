@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,19 +119,32 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
-		// Check if this could be a valid empty directory
-		if mrf.isValidEmptyDirectory(normalizedName) {
-			// Create a directory handle for empty directory
-			virtualDir := &MetadataVirtualDirectory{
-				name:            name,
-				normalizedPath:  normalizedName,
-				metadataService: mrf.metadataService,
-				showCorrupted:   showCorrupted,
+		// Check if it's a sharded ID path (.ids/...)
+		if strings.HasPrefix(normalizedName, ".ids/") {
+			// Resolve the ID path to the actual virtual path
+			resolvedPath, err := mrf.resolveIDPath(normalizedName)
+			if err == nil && resolvedPath != "" {
+				// Continue with the resolved path
+				normalizedName = resolvedPath
+				exists = true
 			}
-			return true, virtualDir, nil
 		}
-		// Neither file nor directory found
-		return false, nil, nil
+
+		if !exists {
+			// Check if this could be a valid empty directory
+			if mrf.isValidEmptyDirectory(normalizedName) {
+				// Create a directory handle for empty directory
+				virtualDir := &MetadataVirtualDirectory{
+					name:            name,
+					normalizedPath:  normalizedName,
+					metadataService: mrf.metadataService,
+					showCorrupted:   showCorrupted,
+				}
+				return true, virtualDir, nil
+			}
+			// Neither file nor directory found
+			return false, nil, nil
+		}
 	}
 
 	// Get file metadata using simplified schema
@@ -152,18 +166,20 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 	// Extract workers and cache size from context if available (overrides global config)
 	maxWorkers := mrf.getMaxDownloadWorkers()
-	if val, ok := ctx.Value(utils.MaxDownloadWorkersKey).(int); ok && val > 0 {
-		maxWorkers = val
-	}
 	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
-	if val, ok := ctx.Value(utils.MaxCacheSizeMBKey).(int); ok && val > 0 {
-		maxCacheSizeMB = val
-	}
 
 	// Start tracking stream if tracker available
 	streamID := ""
 	if mrf.streamTracker != nil {
-		streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
+		// Check if we already have a stream ID in context
+		if id, ok := ctx.Value(utils.StreamIDKey).(string); ok && id != "" {
+			streamID = id
+		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*ActiveStream); ok {
+			streamID = stream.ID
+		} else {
+			// Fallback to FUSE if no tracking info in context
+			streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
+		}
 	}
 
 	// Create a metadata-based virtual file handle
@@ -283,7 +299,20 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
-		return false, nil, fs.ErrNotExist
+		// Check if it's a sharded ID path (.ids/...)
+		if strings.HasPrefix(normalizedName, ".ids/") {
+			// Resolve the ID path to the actual virtual path
+			resolvedPath, err := mrf.resolveIDPath(normalizedName)
+			if err == nil && resolvedPath != "" {
+				// Continue with the resolved path
+				normalizedName = resolvedPath
+				exists = true
+			}
+		}
+
+		if !exists {
+			return false, nil, fs.ErrNotExist
+		}
 	}
 
 	// Get file metadata using simplified schema
@@ -542,7 +571,7 @@ func (mvf *MetadataVirtualFile) WarmUp() {
 		// If the reader supports manual starting (UsenetReader), trigger it
 		// This starts the background workers to fetch data into the cache
 		// without consuming any bytes from the stream.
-		if ur, ok := mvf.reader.(*usenet.UsenetReader); ok {
+		if ur, ok := mvf.reader.(interface{ Start() }); ok {
 			ur.Start()
 		}
 	}()
@@ -981,4 +1010,39 @@ func (mrf *MetadataRemoteFile) Mkdir(ctx context.Context, name string, perm os.F
 
 func (mrf *MetadataRemoteFile) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
 	return mrf.metadataService.CreateDirectory(name)
+}
+
+// resolveIDPath resolves a sharded ID path (.ids/...) to the actual virtual path
+func (mrf *MetadataRemoteFile) resolveIDPath(idPath string) (string, error) {
+	cfg := mrf.configGetter()
+	metadataRoot := cfg.Metadata.RootPath
+
+	// The idPath is like .ids/4/0/e/9/a/40e9a6c9-e922-4217-ab6c-9d2207528a78
+	// The metadata file is at metadataRoot/.ids/4/0/e/9/a/40e9a6c9-e922-4217-ab6c-9d2207528a78.meta
+	
+	// Ensure it has .meta extension for the check
+	fullIdPath := filepath.Join(metadataRoot, idPath+".meta")
+
+	// Read the symlink
+	target, err := os.Readlink(fullIdPath)
+	if err != nil {
+		return "", err
+	}
+
+	// The target is relative to the directory of the symlink
+	// e.g. ../../../../../movies/Spider-Man.../Spider-Man....meta
+	
+	// Calculate the absolute path of the target metadata file
+	absTarget := filepath.Join(filepath.Dir(fullIdPath), target)
+	
+	// Calculate the relative path from metadataRoot to get the virtual path
+	relPath, err := filepath.Rel(metadataRoot, absTarget)
+	if err != nil {
+		return "", err
+	}
+
+	// Remove .meta extension to get the virtual filename
+	virtualPath := strings.TrimSuffix(relPath, ".meta")
+
+	return virtualPath, nil
 }

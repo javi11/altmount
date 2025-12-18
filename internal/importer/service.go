@@ -530,9 +530,15 @@ func (s *Service) processQueueBatch(ctx context.Context, batchChan <-chan *datab
 
 func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
 	// Create Temp NZB File
-	// Use ID to ensure uniqueness and avoid collisions with releases having the same name
-	nzbFileName := fmt.Sprintf("%s_%s.nzb", sanitizeFilename(res.ID), sanitizeFilename(res.Name))
-	nzbPath := filepath.Join(nzbTempDir, nzbFileName)
+	// Use ID to ensure uniqueness and avoid collisions with releases having the same name in the temp directory
+	// but don't include it in the filename to avoid it appearing in the final folder/file names
+	nzbSubDir := filepath.Join(nzbTempDir, sanitizeFilename(res.ID))
+	if err := os.MkdirAll(nzbSubDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create temp NZB subdirectory: %w", err)
+	}
+
+	nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
+	nzbPath := filepath.Join(nzbSubDir, nzbFileName)
 
 	outFile, err := os.Create(nzbPath)
 	if err != nil {

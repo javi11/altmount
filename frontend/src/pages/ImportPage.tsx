@@ -110,21 +110,10 @@ function UploadSection() {
 
 		for (let i = 0; i < nzbFiles.length; i++) {
 			const file = nzbFiles[i];
-			// Extract relative directory path if available (for folder uploads)
-			let relativePath = "";
-			// @ts-ignore - webkitRelativePath is a standard property on File objects from input[webkitdirectory]
-			if (file.webkitRelativePath) {
-				// @ts-ignore
-				const parts = file.webkitRelativePath.split("/");
-				if (parts.length > 1) {
-					relativePath = parts.slice(0, -1).join("/");
-				}
-			}
 			try {
 				await uploadMutation.mutateAsync({
 					file: file,
 					priority: 0, // Normal priority
-					relativePath: relativePath || undefined,
 				});
 				successes++;
 			} catch (error) {

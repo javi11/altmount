@@ -7,19 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 )
-
-// ActiveStream represents a file currently being streamed
-type ActiveStream struct {
-	ID               string    `json:"id"`
-	FilePath         string    `json:"file_path"`
-	StartedAt        time.Time `json:"started_at"`
-	Source           string    `json:"source"`
-	UserName         string    `json:"user_name,omitempty"`
-	TotalSize        int64     `json:"total_size"`
-	BytesSent        int64     `json:"bytes_sent"`
-	TotalConnections int       `json:"total_connections"`
-}
 
 // StreamTracker tracks active streams
 type StreamTracker struct {
@@ -32,9 +21,9 @@ func NewStreamTracker() *StreamTracker {
 }
 
 // AddStream adds a new stream and returns the stream object for updates
-func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64) *ActiveStream {
+func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64) *nzbfilesystem.ActiveStream {
 	id := uuid.New().String()
-	stream := &ActiveStream{
+	stream := &nzbfilesystem.ActiveStream{
 		ID:        id,
 		FilePath:  filePath,
 		StartedAt: time.Now(),
@@ -54,7 +43,7 @@ func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64) 
 // UpdateProgress updates the bytes sent for a stream by ID
 func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 	if val, ok := t.streams.Load(id); ok {
-		stream := val.(*ActiveStream)
+		stream := val.(*nzbfilesystem.ActiveStream)
 		atomic.AddInt64(&stream.BytesSent, bytesRead)
 	}
 }
@@ -65,12 +54,12 @@ func (t *StreamTracker) Remove(id string) {
 }
 
 // GetAll returns all active streams, aggregated by file, user, and source
-func (t *StreamTracker) GetAll() []ActiveStream {
-	// Map to group streams: key -> *ActiveStream
-	grouped := make(map[string]*ActiveStream)
+func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
+	// Map to group streams: key -> *nzbfilesystem.ActiveStream
+	grouped := make(map[string]*nzbfilesystem.ActiveStream)
 
 	t.streams.Range(func(key, value interface{}) bool {
-		s := value.(*ActiveStream)
+		s := value.(*nzbfilesystem.ActiveStream)
 
 		// Create a composite key for grouping
 		// We group by FilePath, UserName and Source to aggregate parallel connections
@@ -109,7 +98,7 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 	})
 
 	// Convert map to slice
-	var streams []ActiveStream
+	var streams []nzbfilesystem.ActiveStream
 	for _, s := range grouped {
 		streams = append(streams, *s)
 	}
@@ -120,4 +109,12 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 	})
 
 	return streams
+}
+
+// GetStream returns an active stream by ID
+func (t *StreamTracker) GetStream(id string) *nzbfilesystem.ActiveStream {
+	if val, ok := t.streams.Load(id); ok {
+		return val.(*nzbfilesystem.ActiveStream)
+	}
+	return nil
 }

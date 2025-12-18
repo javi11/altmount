@@ -15,6 +15,5 @@ const (
 	Origin           = contextKey("origin")
 	ShowCorrupted    = contextKey("showCorrupted")
 	ActiveStreamKey  = contextKey("activeStream")
-	MaxDownloadWorkersKey = contextKey("maxDownloadWorkers")
-	MaxCacheSizeMBKey     = contextKey("maxCacheSizeMB")
+	StreamIDKey      = contextKey("streamID")
 )
