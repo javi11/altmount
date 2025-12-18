@@ -152,7 +152,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 	// Extract workers and cache size from context if available (overrides global config)
 	maxWorkers := mrf.getMaxDownloadWorkers()
-	maxWorkers := mrf.getMaxDownloadWorkers()
 	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
 
 	// Start tracking stream if tracker available
@@ -561,13 +560,10 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		n += totalRead
 		mvf.position += int64(totalRead)
 
-<<<<<<< HEAD
-=======
 		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
 			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
 		}
 
->>>>>>> review/active-streams
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
 				// Close current reader and try to get a new one for the next range in next iteration

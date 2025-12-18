@@ -20,7 +20,6 @@ type ActiveStream struct {
 	BytesSent        int64     `json:"bytes_sent"`
 	TotalConnections int       `json:"total_connections"`
 }
-}
 
 // StreamTracker tracks active streams
 type StreamTracker struct {
@@ -58,7 +57,6 @@ func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 		stream := val.(*ActiveStream)
 		atomic.AddInt64(&stream.BytesSent, bytesRead)
 	}
-}
 }
 
 // Remove removes a stream by ID

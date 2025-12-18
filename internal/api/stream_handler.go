@@ -33,9 +33,9 @@ type MonitoredFile struct {
 	ctx    context.Context
 }
 
+func (m *MonitoredFile) Read(p []byte) (n int, err error) {
 	if err := m.ctx.Err(); err != nil {
 		return 0, err
-	}
 	}
 	n, err = m.file.Read(p)
 	if n > 0 {
@@ -47,7 +47,6 @@ type MonitoredFile struct {
 func (m *MonitoredFile) Seek(offset int64, whence int) (int64, error) {
 	if err := m.ctx.Err(); err != nil {
 		return 0, err
-	}
 	}
 	return m.file.Seek(offset, whence)
 }
