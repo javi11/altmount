@@ -3,6 +3,8 @@ package fuse
 import (
 	"fmt"
 	"log/slog"
+	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -30,6 +32,9 @@ func NewServer(mountPoint string, fileSystem afero.Fs, logger *slog.Logger) *Ser
 // Mount mounts the filesystem and starts serving
 // This method blocks until the filesystem is unmounted
 func (s *Server) Mount() error {
+	// Try to cleanup stale mount first
+	s.CleanupMount()
+
 	root := NewAltMountRoot(s.fileSystem, "", s.logger)
 
 	// Configure FUSE options
@@ -40,6 +45,7 @@ func (s *Server) Mount() error {
 			Name:       "altmount",
 			// Enable debug logging if needed, could be tied to app log level
 			// Debug:      true, 
+			AsyncRead: true, // Explicitly enable async read for performance
 		},
 		// Cache timeout settings
 		EntryTimeout:    &[]time.Duration{1 * time.Second}[0],
@@ -60,12 +66,42 @@ func (s *Server) Mount() error {
 	return nil
 }
 
-// Unmount gracefully unmounts the filesystem
+// Unmount gracefully unmounts the filesystem, falling back to force unmount
 func (s *Server) Unmount() error {
-	if s.server == nil {
-		return nil
-	}
-	
 	s.logger.Info("Unmounting FUSE filesystem", "mountpoint", s.mountPoint)
-	return s.server.Unmount()
+
+	if s.server != nil {
+		err := s.server.Unmount()
+		if err == nil {
+			return nil
+		}
+		s.logger.Warn("Standard unmount failed, attempting force unmount", "error", err)
+	}
+
+	return s.ForceUnmount()
+}
+
+// ForceUnmount attempts to lazy/force unmount the mountpoint
+func (s *Server) ForceUnmount() error {
+	if runtime.GOOS == "linux" {
+		// Try fusermount -uz (lazy unmount)
+		if err := exec.Command("fusermount", "-uz", s.mountPoint).Run(); err == nil {
+			s.logger.Info("Successfully lazy unmounted using fusermount")
+			return nil
+		}
+		// Fallback to umount -l
+		if err := exec.Command("umount", "-l", s.mountPoint).Run(); err == nil {
+			s.logger.Info("Successfully lazy unmounted using umount")
+			return nil
+		}
+	}
+	// Add macOS/Windows logic if needed, but Linux is primary target
+	return fmt.Errorf("failed to force unmount %s", s.mountPoint)
+}
+
+// CleanupMount checks for and cleans up stale mounts at the mountpoint
+func (s *Server) CleanupMount() {
+	// Simple check: try to unmount. If it fails, it probably wasn't mounted or we lack perms.
+	// We ignore errors here as we just want to ensure it's clean for the new mount.
+	_ = s.ForceUnmount()
 }
