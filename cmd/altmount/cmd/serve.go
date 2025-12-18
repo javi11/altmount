@@ -103,6 +103,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	progressBroadcaster := progress.NewProgressBroadcaster()
 	defer progressBroadcaster.Close()
 
+	// Create stream tracker for monitoring active streams
+	streamTracker := api.NewStreamTracker()
+
 	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, repos.UserRepo, repos.HealthRepo)
 	if err != nil {
 		return err
@@ -114,7 +117,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, poolManager, configManager.GetConfigGetter())
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, poolManager, configManager.GetConfigGetter(), streamTracker)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
@@ -123,9 +126,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
 	// Wire ARRs service into importer for instant import triggers
 	importerService.SetArrsService(arrsService)
-
-	// Create stream tracker for monitoring active streams
-	streamTracker := api.NewStreamTracker()
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 

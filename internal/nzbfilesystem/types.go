@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// StreamTracker interface for tracking active streams
+type StreamTracker interface {
+	Add(filePath, clientIP, userAgent, rangeHeader, source string) string
+	Remove(id string)
+}
+
 // normalizePath normalizes file paths for consistent database lookups
 // Removes trailing slashes except for root path "/"
 func normalizePath(path string) string {
