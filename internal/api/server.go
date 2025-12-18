@@ -54,7 +54,6 @@ type Server struct {
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
 	streamTracker       *StreamTracker
-	fuseManager         *FuseManager
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -96,7 +95,6 @@ func NewServer(
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
-		fuseManager:         NewFuseManager(),
 	}
 
 	return server
@@ -225,11 +223,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
 
-	// FUSE endpoints
-	api.Post("/fuse/start", s.handleStartFuseMount)
-	api.Post("/fuse/stop", s.handleStopFuseMount)
-	api.Get("/fuse/status", s.handleGetFuseStatus)
-
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
 	api.Post("/providers/:id/speedtest", s.handleTestProviderSpeed)
@@ -271,6 +264,21 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	}
 
 	streams := s.streamTracker.GetAll()
+	
+	// Check for filter parameter
+	filterType := c.Query("type") // e.g., type=file
+
+	if filterType == "file" {
+		filteredStreams := make([]ActiveStream, 0)
+		for _, stream := range streams {
+			// Assuming "API" and "WebDAV" are the desired "file being streams"
+			if stream.Source == "API" || stream.Source == "WebDAV" {
+				filteredStreams = append(filteredStreams, stream)
+			}
+		}
+		streams = filteredStreams
+	}
+
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    streams,

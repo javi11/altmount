@@ -202,7 +202,7 @@ func ProcessArchive(
 		validatedSegmentsCount += fileSegmentsValidated
 
 		// Create file metadata using the RAR handler's helper function
-		fileMeta := rarProcessor.CreateFileMetadataFromRarContent(rarContent, nzbPath, releaseDate)
+		fileMeta := rarProcessor.CreateFileMetadataFromRarContent(rarContent, nzbPath, releaseDate, rarContent.NzbdavID)
 
 		// Delete old metadata if exists (simple collision handling)
 		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)

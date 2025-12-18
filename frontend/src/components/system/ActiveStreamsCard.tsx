@@ -48,7 +48,7 @@ export function ActiveStreamsCard() {
 				) : (
 					<div className="space-y-3">
 						{streams.map((stream) => (
-							<div key={stream.id} className="flex items-start gap-3 p-3 bg-base-200/50 rounded-lg">
+							<div key={stream.id} className="flex items-center gap-3 p-3 bg-base-200/50 rounded-lg group">
 								<div className="mt-1">
 									<FileVideo className="h-8 w-8 text-primary/70" />
 								</div>
@@ -58,13 +58,10 @@ export function ActiveStreamsCard() {
 									</div>
 									<div className="text-xs text-base-content/60 flex flex-col gap-0.5 mt-1">
 										<div className="flex justify-between">
-											<span>Client: {stream.client_ip}</span>
+											<span>{stream.user_name || "Unknown User"} • {stream.total_connections} {stream.total_connections === 1 ? 'connection' : 'connections'}</span>
 											<span>
 												{formatDistanceToNowStrict(new Date(stream.started_at), { addSuffix: true })}
 											</span>
-										</div>
-										<div className="truncate opacity-70" title={stream.user_agent}>
-											{truncateText(stream.user_agent, 30)}
 										</div>
 									</div>
 								</div>

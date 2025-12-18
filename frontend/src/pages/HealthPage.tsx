@@ -76,7 +76,7 @@ export function HealthPage() {
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
-	const { confirmDelete, confirmAction } = useConfirm();
+	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
 	// Config hook
@@ -93,7 +93,15 @@ export function HealthPage() {
 	const cancelLibrarySync = useCancelLibrarySync();
 
 	const handleDelete = async (id: number) => {
-		const confirmed = await confirmDelete("health record");
+		const confirmed = await confirmAction(
+			"Delete Health Record",
+			"Are you sure you want to delete this health record? The actual file won´t be deleted.",
+			{
+				type: "warning",
+				confirmText: "Delete",
+				confirmButtonClass: "btn-error",
+			},
+		);
 		if (confirmed) {
 			await deleteItem.mutateAsync(id);
 		}

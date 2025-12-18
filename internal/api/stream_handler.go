@@ -33,9 +33,9 @@ type MonitoredFile struct {
 	ctx    context.Context
 }
 
-func (m *MonitoredFile) Read(p []byte) (n int, err error) {
-	if m.ctx.Err() != nil {
-		return 0, m.ctx.Err()
+	if err := m.ctx.Err(); err != nil {
+		return 0, err
+	}
 	}
 	n, err = m.file.Read(p)
 	if n > 0 {
@@ -45,8 +45,9 @@ func (m *MonitoredFile) Read(p []byte) (n int, err error) {
 }
 
 func (m *MonitoredFile) Seek(offset int64, whence int) (int64, error) {
-	if m.ctx.Err() != nil {
-		return 0, m.ctx.Err()
+	if err := m.ctx.Err(); err != nil {
+		return 0, err
+	}
 	}
 	return m.file.Seek(offset, whence)
 }
@@ -203,14 +204,19 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 			streamCtx, cancel := context.WithCancel(ctx)
 			defer cancel() // Ensure cleanup
 	
-			stream := h.streamTracker.AddStream(path, "API", userName, stat.Size())
-			defer h.streamTracker.Remove(stream.ID)
-		// Wrap the file with monitoring
-		monitoredFile := &MonitoredFile{
-			file:   file,
-			stream: stream,
-			ctx:    streamCtx,
-		}
+			stream := h.streamTracker.Add(path, "API", userName, stat.Size())
+			defer h.streamTracker.Remove(stream)
+			streamObj := h.streamTracker.GetStream(stream)
+			if streamObj == nil {
+				http.Error(w, "Stream not found", http.StatusInternalServerError)
+				return
+			}
+			// Wrap the file with monitoring
+			monitoredFile := &MonitoredFile{
+				file:   file,
+				stream: streamObj,
+				ctx:    streamCtx,
+			}
 		// Use monitoredFile instead of file
 		// Note: http.ServeContent requires io.ReadSeeker. MonitoredFile implements it.
 		// However, http.ServeContent also uses the 'content' param (file) to read.

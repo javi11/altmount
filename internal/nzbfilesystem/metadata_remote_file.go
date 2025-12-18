@@ -152,18 +152,13 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 	// Extract workers and cache size from context if available (overrides global config)
 	maxWorkers := mrf.getMaxDownloadWorkers()
-	if val, ok := ctx.Value(utils.MaxDownloadWorkersKey).(int); ok && val > 0 {
-		maxWorkers = val
-	}
+	maxWorkers := mrf.getMaxDownloadWorkers()
 	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
-	if val, ok := ctx.Value(utils.MaxCacheSizeMBKey).(int); ok && val > 0 {
-		maxCacheSizeMB = val
-	}
 
 	// Start tracking stream if tracker available
 	streamID := ""
 	if mrf.streamTracker != nil {
-		streamID = mrf.streamTracker.Add(name, "FUSE", "FUSE", fileMeta.FileSize)
+		streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
 	}
 
 	// Create a metadata-based virtual file handle
@@ -542,7 +537,7 @@ func (mvf *MetadataVirtualFile) WarmUp() {
 		// If the reader supports manual starting (UsenetReader), trigger it
 		// This starts the background workers to fetch data into the cache
 		// without consuming any bytes from the stream.
-		if ur, ok := mvf.reader.(*usenet.UsenetReader); ok {
+		if ur, ok := mvf.reader.(interface{ Start() }); ok {
 			ur.Start()
 		}
 	}()
@@ -566,6 +561,13 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		n += totalRead
 		mvf.position += int64(totalRead)
 
+<<<<<<< HEAD
+=======
+		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
+		}
+
+>>>>>>> review/active-streams
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
 				// Close current reader and try to get a new one for the next range in next iteration
@@ -908,44 +910,44 @@ func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadClo
 	}
 }
 
-// updateFileHealthOnError updates both metadata and database health status when corruption is detected
+// updateFileHealthOnError updates both metadata and database health status when corruption is detected.
+// Uses synchronous operations with timeout to prevent goroutine leaks.
 func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usenet.DataCorruptionError, noRetry bool) {
+	// Use a short timeout context to prevent blocking indefinitely
+	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
+	defer cancel()
+
 	// Any file with missing segments or corruption is marked as corrupted
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
 	dbStatus := database.HealthStatusCorrupted
 
-	// Update metadata status (non-blocking)
-	go func() {
-		if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
-			// Log error but don't fail the read operation
-			fmt.Printf("Warning: failed to update metadata status for %s: %v\n", mvf.name, err)
-		}
-	}()
+	// Update metadata status (blocking with timeout)
+	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
+		slog.WarnContext(ctx, "Failed to update metadata status", "file", mvf.name, "error", err)
+	}
 
-	// Update database health tracking (non-blocking)
-	go func() {
-		errorMsg := dataCorruptionErr.Error()
-		sourceNzbPath := &mvf.fileMeta.SourceNzbPath
-		if *sourceNzbPath == "" {
-			sourceNzbPath = nil
-		}
+	// Update database health tracking (blocking with timeout)
+	errorMsg := dataCorruptionErr.Error()
+	sourceNzbPath := &mvf.fileMeta.SourceNzbPath
+	if *sourceNzbPath == "" {
+		sourceNzbPath = nil
+	}
 
-		// Create error details JSON
-		errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
-			1, len(mvf.fileMeta.SegmentData)) // Simplified, could be enhanced
+	// Create error details JSON
+	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
+		1, len(mvf.fileMeta.SegmentData))
 
-		if err := mvf.healthRepository.UpdateFileHealth(
-			context.Background(),
-			mvf.name,
-			dbStatus,
-			&errorMsg,
-			sourceNzbPath,
-			&errorDetails,
-			noRetry,
-		); err != nil {
-			fmt.Printf("Warning: failed to update file health for %s: %v\n", mvf.name, err)
-		}
-	}()
+	if err := mvf.healthRepository.UpdateFileHealth(
+		ctx,
+		mvf.name,
+		dbStatus,
+		&errorMsg,
+		sourceNzbPath,
+		&errorDetails,
+		noRetry,
+	); err != nil {
+		slog.WarnContext(ctx, "Failed to update file health", "file", mvf.name, "error", err)
+	}
 }
 
 // isValidEmptyDirectory checks if a path could represent a valid empty directory
