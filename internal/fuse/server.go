@@ -45,7 +45,6 @@ func (s *Server) Mount() error {
 			Name:       "altmount",
 			// Enable debug logging if needed, could be tied to app log level
 			// Debug:      true, 
-			AsyncRead: true, // Explicitly enable async read for performance
 		},
 		// Cache timeout settings
 		EntryTimeout:    &[]time.Duration{1 * time.Second}[0],
