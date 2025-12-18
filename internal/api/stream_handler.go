@@ -158,7 +158,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userName := "Unknown"
+	var userName string
 	if user.Name != nil && *user.Name != "" {
 		userName = *user.Name
 	} else {
