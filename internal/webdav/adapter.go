@@ -180,6 +180,9 @@ func NewHandler(
 			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, 0)
 			defer streamTracker.Remove(stream)
 
+			// Add stream ID to context for low-level tracking
+			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)
+
 			// Inject stream into context for monitoredFileSystem
 			if sObj := streamTracker.GetStream(stream); sObj != nil {
 				r = r.WithContext(context.WithValue(streamCtx, utils.ActiveStreamKey, sObj)) // Use streamCtx for the new context

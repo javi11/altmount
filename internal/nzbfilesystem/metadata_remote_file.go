@@ -157,7 +157,15 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// Start tracking stream if tracker available
 	streamID := ""
 	if mrf.streamTracker != nil {
-		streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
+		// Check if we already have a stream ID in context
+		if id, ok := ctx.Value(utils.StreamIDKey).(string); ok && id != "" {
+			streamID = id
+		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*api.ActiveStream); ok {
+			streamID = stream.ID
+		} else {
+			// Fallback to FUSE if no tracking info in context
+			streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
+		}
 	}
 
 	// Create a metadata-based virtual file handle

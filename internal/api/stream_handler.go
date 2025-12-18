@@ -205,6 +205,10 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	
 			stream := h.streamTracker.Add(path, "API", userName, stat.Size())
 			defer h.streamTracker.Remove(stream)
+
+			// Add stream ID to context for low-level tracking
+			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)
+
 			streamObj := h.streamTracker.GetStream(stream)
 			if streamObj == nil {
 				http.Error(w, "Stream not found", http.StatusInternalServerError)
