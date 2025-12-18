@@ -203,7 +203,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 			streamCtx, cancel := context.WithCancel(ctx)
 			defer cancel() // Ensure cleanup
 	
-			stream := h.streamTracker.Add(path, "API", userName, stat.Size(), cancel)
+			stream := h.streamTracker.AddStream(path, "API", userName, stat.Size(), cancel)
 			defer h.streamTracker.Remove(stream.ID)
 		// Wrap the file with monitoring
 		monitoredFile := &MonitoredFile{

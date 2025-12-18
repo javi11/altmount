@@ -32,8 +32,8 @@ func NewStreamTracker() *StreamTracker {
 	return &StreamTracker{}
 }
 
-// Add adds a new stream and returns the stream object for updates
-func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) *ActiveStream {
+// AddStream adds a new stream and returns the stream object for updates
+func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) *ActiveStream {
 	id := uuid.New().String()
 	stream := &ActiveStream{
 		ID:        id,
@@ -46,6 +46,11 @@ func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, 
 	}
 	t.streams.Store(id, stream)
 	return stream
+}
+
+// Add adds a new stream and returns its ID (implements nzbfilesystem.StreamTracker)
+func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) string {
+	return t.AddStream(filePath, source, userName, totalSize, cancel).ID
 }
 
 // Remove removes a stream by ID
