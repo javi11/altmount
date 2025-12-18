@@ -27,15 +27,19 @@ type AltMountRoot struct {
 	path      string
 	logger    *slog.Logger
 	isRootDir bool
+	uid       uint32
+	gid       uint32
 }
 
 // NewAltMountRoot creates a new root node for the FUSE filesystem
-func NewAltMountRoot(fileSystem afero.Fs, path string, logger *slog.Logger) *AltMountRoot {
+func NewAltMountRoot(fileSystem afero.Fs, path string, logger *slog.Logger, uid, gid uint32) *AltMountRoot {
 	return &AltMountRoot{
 		fs:        fileSystem,
 		path:      path,
 		logger:    logger,
 		isRootDir: path == "" || path == "/",
+		uid:       uid,
+		gid:       gid,
 	}
 }
 
@@ -48,6 +52,8 @@ func (r *AltMountRoot) OnAdd(ctx context.Context) {
 func (r *AltMountRoot) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	if r.isRootDir {
 		out.Mode = 0755 | syscall.S_IFDIR
+		out.Uid = r.uid
+		out.Gid = r.gid
 		return 0
 	}
 
@@ -60,7 +66,7 @@ func (r *AltMountRoot) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.
 		return syscall.EIO
 	}
 
-	fillAttr(info, &out.Attr)
+	fillAttr(info, &out.Attr, r.uid, r.gid)
 	return 0
 }
 
@@ -77,13 +83,15 @@ func (r *AltMountRoot) Lookup(ctx context.Context, name string, out *fuse.EntryO
 		return nil, syscall.EIO
 	}
 
-	fillAttr(info, &out.Attr)
+	fillAttr(info, &out.Attr, r.uid, r.gid)
 
 	if info.IsDir() {
 		node := &AltMountRoot{
 			fs:     r.fs,
 			path:   fullPath,
 			logger: r.logger,
+			uid:    r.uid,
+			gid:    r.gid,
 		}
 		return r.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
 	}
@@ -93,6 +101,8 @@ func (r *AltMountRoot) Lookup(ctx context.Context, name string, out *fuse.EntryO
 		path:   fullPath,
 		logger: r.logger,
 		size:   info.Size(),
+		uid:    r.uid,
+		gid:    r.gid,
 	}
 	return r.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
 }
@@ -148,6 +158,8 @@ type AltMountFile struct {
 	path   string
 	logger *slog.Logger
 	size   int64
+	uid    uint32
+	gid    uint32
 }
 
 // Getattr implements fs.NodeGetattrer
@@ -161,7 +173,7 @@ func (f *AltMountFile) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.
 		return syscall.EIO
 	}
 
-	fillAttr(info, &out.Attr)
+	fillAttr(info, &out.Attr, f.uid, f.gid)
 	return 0
 }
 
@@ -241,10 +253,12 @@ func (h *FileHandle) Release(ctx context.Context) syscall.Errno {
 }
 
 // helper to fill FUSE attributes from os.FileInfo
-func fillAttr(info os.FileInfo, out *fuse.Attr) {
+func fillAttr(info os.FileInfo, out *fuse.Attr, uid, gid uint32) {
 	out.Size = uint64(info.Size())
 	out.Mtime = uint64(info.ModTime().Unix())
 	out.Ctime = uint64(info.ModTime().Unix())
+	out.Uid = uid
+	out.Gid = gid
 	
 	// Set generic permissions
 	if info.IsDir() {
