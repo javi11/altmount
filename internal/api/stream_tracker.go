@@ -11,13 +11,14 @@ import (
 
 // ActiveStream represents a file currently being streamed
 type ActiveStream struct {
-	ID        string    `json:"id"`
-	FilePath  string    `json:"file_path"`
-	StartedAt time.Time `json:"started_at"`
-	Source    string    `json:"source"`
-	UserName  string    `json:"user_name,omitempty"`
-	TotalSize int64     `json:"total_size"`
-	BytesSent int64     `json:"bytes_sent"`
+	ID               string    `json:"id"`
+	FilePath         string    `json:"file_path"`
+	StartedAt        time.Time `json:"started_at"`
+	Source           string    `json:"source"`
+	UserName         string    `json:"user_name,omitempty"`
+	TotalSize        int64     `json:"total_size"`
+	BytesSent        int64     `json:"bytes_sent"`
+	TotalConnections int       `json:"total_connections"`
 }
 
 // StreamTracker tracks active streams
@@ -48,6 +49,14 @@ func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize i
 // Add adds a new stream and returns its ID (implements nzbfilesystem.StreamTracker)
 func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64) string {
 	return t.AddStream(filePath, source, userName, totalSize).ID
+}
+
+// UpdateProgress updates the bytes sent for a stream by ID
+func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*ActiveStream)
+		atomic.AddInt64(&stream.BytesSent, bytesRead)
+	}
 }
 
 // Remove removes a stream by ID
@@ -84,6 +93,8 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 			if existing.TotalSize == 0 && s.TotalSize > 0 {
 				existing.TotalSize = s.TotalSize
 			}
+
+			existing.TotalConnections++
 		} else {
 			// Initialize new group with this stream
 			streamCopy := *s
@@ -91,6 +102,7 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
 			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
 			streamCopy.ID = groupKey
+			streamCopy.TotalConnections = 1
 			grouped[groupKey] = &streamCopy
 		}
 		return true

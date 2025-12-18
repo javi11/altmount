@@ -58,7 +58,7 @@ export function ActiveStreamsCard() {
 									</div>
 									<div className="text-xs text-base-content/60 flex flex-col gap-0.5 mt-1">
 										<div className="flex justify-between">
-											<span>{stream.user_name || "Unknown User"}</span>
+											<span>{stream.user_name || "Unknown User"} • {stream.total_connections} {stream.total_connections === 1 ? 'connection' : 'connections'}</span>
 											<span>
 												{formatDistanceToNowStrict(new Date(stream.started_at), { addSuffix: true })}
 											</span>

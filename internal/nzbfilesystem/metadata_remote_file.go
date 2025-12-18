@@ -163,7 +163,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// Start tracking stream if tracker available
 	streamID := ""
 	if mrf.streamTracker != nil {
-		streamID = mrf.streamTracker.Add(name, "FUSE", "FUSE", fileMeta.FileSize)
+		streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
 	}
 
 	// Create a metadata-based virtual file handle
@@ -565,6 +565,10 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 		totalRead, readErr := mvf.reader.Read(p[n:])
 		n += totalRead
 		mvf.position += int64(totalRead)
+
+		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
+		}
 
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
