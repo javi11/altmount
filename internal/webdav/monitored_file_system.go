@@ -57,8 +57,8 @@ type monitoredFile struct {
 }
 
 func (m *monitoredFile) Read(p []byte) (n int, err error) {
-	if m.ctx.Err() != nil {
-		return 0, m.ctx.Err()
+	if err := m.ctx.Err(); err != nil {
+		return 0, err
 	}
 	n, err = m.File.Read(p)
 	if n > 0 {
@@ -68,15 +68,15 @@ func (m *monitoredFile) Read(p []byte) (n int, err error) {
 }
 
 func (m *monitoredFile) Seek(offset int64, whence int) (int64, error) {
-	if m.ctx.Err() != nil {
-		return 0, m.ctx.Err()
+	if err := m.ctx.Err(); err != nil {
+		return 0, err
 	}
 	return m.File.Seek(offset, whence)
 }
 
 func (m *monitoredFile) Write(p []byte) (n int, err error) {
-	if m.ctx.Err() != nil {
-		return 0, m.ctx.Err()
+	if err := m.ctx.Err(); err != nil {
+		return 0, err
 	}
 	return m.File.Write(p)
 }

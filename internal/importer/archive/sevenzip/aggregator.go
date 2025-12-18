@@ -196,7 +196,7 @@ func ProcessArchive(
 		validatedSegmentsCount += fileSegmentsValidated
 
 		// Create file metadata using the 7zip handler's helper function
-		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate)
+		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate, sevenZipContent.NzbdavID)
 
 		// Delete old metadata if exists (simple collision handling)
 		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)

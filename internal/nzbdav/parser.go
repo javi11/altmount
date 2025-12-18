@@ -53,12 +53,14 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 		db.SetMaxIdleConns(10)
 
 		// Query to find all "Release" folders
-		// A release folder is a parent of any item that has an entry in DavNzbFiles
+		// A release folder is a parent of any item that has an entry in DavNzbFiles or DavRarFiles
 		rows, err := db.Query(`
 			SELECT DISTINCT p.Id, p.Name, p.Path 
 			FROM DavItems p
 			JOIN DavItems c ON c.ParentId = p.Id
-			JOIN DavNzbFiles n ON n.Id = c.Id
+			LEFT JOIN DavNzbFiles n ON n.Id = c.Id
+			LEFT JOIN DavRarFiles r ON r.Id = c.Id
+			WHERE n.Id IS NOT NULL OR r.Id IS NOT NULL
 		`)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to query releases: %w", err)
@@ -146,17 +148,24 @@ func (p *Parser) deriveRelPath(path, category string) string {
 	return ""
 }
 
+type rarPart struct {
+	SegmentIds []string `json:"SegmentIds"`
+	PartSize   int64    `json:"PartSize"`
+	Offset     int64    `json:"Offset"`
+	ByteCount  int64    `json:"ByteCount"`
+}
+
 // writeNzb generates the NZB XML and writes it to the pipe
 // It uses the shared DB connection pool
 func (p *Parser) writeNzb(db *sql.DB, releaseId, releaseName string, pw *io.PipeWriter) {
 	defer pw.Close()
-
 	// Fetch files for this release
 	rows, err := db.Query(`
-		SELECT c.Name, c.FileSize, n.SegmentIds
+		SELECT c.Id, c.Name, c.FileSize, n.SegmentIds, r.RarParts
 		FROM DavItems c
-		JOIN DavNzbFiles n ON n.Id = c.Id
-		WHERE c.ParentId = ?
+		LEFT JOIN DavNzbFiles n ON n.Id = c.Id
+		LEFT JOIN DavRarFiles r ON r.Id = c.Id
+		WHERE c.ParentId = ? AND (n.Id IS NOT NULL OR r.Id IS NOT NULL)
 	`, releaseId)
 	if err != nil {
 		pw.CloseWithError(fmt.Errorf("failed to query files: %w", err))
@@ -169,83 +178,156 @@ func (p *Parser) writeNzb(db *sql.DB, releaseId, releaseName string, pw *io.Pipe
 <!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
 <nzb xmlns="http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
 	<head>
-		<meta type="name">` + releaseName + `</meta>
+		<meta type="name">` + template.HTMLEscapeString(releaseName) + `</meta>
 	</head>
 `
 	if _, err := pw.Write([]byte(header)); err != nil {
 		return
 	}
 
-	// Iterate files and write segments
-	for rows.Next() {
-		var fileName string
-		var fileSize sql.NullInt64
-		var segmentIdsJSON string
+		// Iterate files and write segments
+		for rows.Next() {
+			var fileId, fileName string
+			var fileSize sql.NullInt64
+			var segmentIdsJSON sql.NullString
+			var rarPartsJSON sql.NullString
+	
+			if err := rows.Scan(&fileId, &fileName, &fileSize, &segmentIdsJSON, &rarPartsJSON); err != nil {
+				slog.Error("Failed to scan file row", "error", err)
+				continue
+			}
+	
+			if segmentIdsJSON.Valid {
+				var segmentIds []string
+				if err := json.Unmarshal([]byte(segmentIdsJSON.String), &segmentIds); err != nil {
+					slog.Error("Failed to unmarshal segment IDs", "file", fileName, "error", err)
+					continue
+				}
+	
+				if len(segmentIds) == 0 {
+					continue
+				}
+	
+				// Calculate segment size
+				totalBytes := int64(0)
+				if fileSize.Valid {
+					totalBytes = fileSize.Int64
+				}
+	
+				// Estimate bytes per segment
+				bytesPerSegment := int64(0)
+				if totalBytes > 0 {
+					bytesPerSegment = totalBytes / int64(len(segmentIds))
+				}
+	
+				// Write File Header
+				subject := template.HTMLEscapeString(fileName)
+				if fileId != "" {
+					subject = fmt.Sprintf("NZBDAV_ID:%s %s", template.HTMLEscapeString(fileId), template.HTMLEscapeString(fileName))
+				}
 
-		if err := rows.Scan(&fileName, &fileSize, &segmentIdsJSON); err != nil {
-			slog.Error("Failed to scan file row", "error", err)
-			continue
-		}
+				fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
+			<groups>
+				<group>alt.binaries.test</group>
+			</groups>
+			<segments>
+	`, 0, subject)
 
-		var segmentIds []string
-		if err := json.Unmarshal([]byte(segmentIdsJSON), &segmentIds); err != nil {
-			slog.Error("Failed to unmarshal segment IDs", "file", fileName, "error", err)
-			continue
-		}
+				if _, err := pw.Write([]byte(fileHeader)); err != nil {
+					return
+				}
 
-		if len(segmentIds) == 0 {
-			continue
-		}
+			// Write Segments
+			for i, msgId := range segmentIds {
+				segBytes := bytesPerSegment
+				// Adjust last segment size
+				if i == len(segmentIds)-1 && totalBytes > 0 {
+					segBytes = totalBytes - (bytesPerSegment * int64(i))
+				}
+				if segBytes <= 0 {
+					segBytes = 1 // Fallback
+				}
 
-		// Calculate segment size
-		totalBytes := int64(0)
-		if fileSize.Valid {
-			totalBytes = fileSize.Int64
-		}
-		
-		// Estimate bytes per segment
-		bytesPerSegment := int64(0)
-		if totalBytes > 0 {
-			bytesPerSegment = totalBytes / int64(len(segmentIds))
-		}
+				segmentLine := fmt.Sprintf(`			<segment bytes="%d" number="%d">%s</segment>
+`, segBytes, i+1, template.HTMLEscapeString(msgId))
 
-		// Write File Header
-		fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
+				if _, err := pw.Write([]byte(segmentLine)); err != nil {
+					return
+				}
+			}
+
+			// Write File Footer
+			if _, err := pw.Write([]byte(`		</segments>
+	</file>
+`)); err != nil {
+				return
+			}
+		} else if rarPartsJSON.Valid {
+			var parts []rarPart
+			if err := json.Unmarshal([]byte(rarPartsJSON.String), &parts); err != nil {
+				slog.Error("Failed to unmarshal RAR parts", "file", fileName, "error", err)
+				continue
+			}
+
+			for partIdx, part := range parts {
+				if len(part.SegmentIds) == 0 {
+					continue
+				}
+
+				// If it's a RAR archive, we should name the files accordingly so the importer detects it
+				// If fileName is "movie.mkv", we name parts "movie.mkv.part01.rar", etc.
+				// This ensures the importer processes it as an archive and gets the real file inside.
+				partFileName := fmt.Sprintf("%s.part%02d.rar", fileName, partIdx+1)
+
+				totalBytes := part.ByteCount
+				bytesPerSegment := int64(0)
+				if totalBytes > 0 {
+					bytesPerSegment = totalBytes / int64(len(part.SegmentIds))
+				}
+
+				// Write File Header
+				subject := template.HTMLEscapeString(partFileName)
+				if fileId != "" {
+					subject = fmt.Sprintf("NZBDAV_ID:%s %s", template.HTMLEscapeString(fileId), template.HTMLEscapeString(partFileName))
+				}
+
+				fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
 		<groups>
 			<group>alt.binaries.test</group>
 		</groups>
 		<segments>
-`, 0, template.HTMLEscapeString(fileName)) 
-		// Note: Date is 0 as we don't have it easily available, subject is filename
+`, 0, subject)
 
-		if _, err := pw.Write([]byte(fileHeader)); err != nil {
-			return
-		}
+				if _, err := pw.Write([]byte(fileHeader)); err != nil {
+					return
+				}
 
-		// Write Segments
-		for i, msgId := range segmentIds {
-			segBytes := bytesPerSegment
-			// Adjust last segment size
-			if i == len(segmentIds)-1 && totalBytes > 0 {
-				segBytes = totalBytes - (bytesPerSegment * int64(i))
-			}
-			if segBytes <= 0 {
-				segBytes = 1 // Fallback
-			}
+				// Write Segments
+				for i, msgId := range part.SegmentIds {
+					segBytes := bytesPerSegment
+					// Adjust last segment size
+					if i == len(part.SegmentIds)-1 && totalBytes > 0 {
+						segBytes = totalBytes - (bytesPerSegment * int64(i))
+					}
+					if segBytes <= 0 {
+						segBytes = 1 // Fallback
+					}
 
-			segmentLine := fmt.Sprintf(`			<segment bytes="%d" number="%d">%s</segment>
+					segmentLine := fmt.Sprintf(`			<segment bytes="%d" number="%d">%s</segment>
 `, segBytes, i+1, template.HTMLEscapeString(msgId))
-			
-			if _, err := pw.Write([]byte(segmentLine)); err != nil {
-				return
-			}
-		}
 
-		// Write File Footer
-		if _, err := pw.Write([]byte(`		</segments>
+					if _, err := pw.Write([]byte(segmentLine)); err != nil {
+						return
+					}
+				}
+
+				// Write File Footer
+				if _, err := pw.Write([]byte(`		</segments>
 	</file>
 `)); err != nil {
-			return
+					return
+				}
+			}
 		}
 	}
 
