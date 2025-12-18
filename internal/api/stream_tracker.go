@@ -3,21 +3,12 @@ package api
 import (
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 )
-
-// ActiveStream represents a file currently being streamed
-type ActiveStream struct {
-	ID        string    `json:"id"`
-	FilePath  string    `json:"file_path"`
-	ClientIP  string    `json:"client_ip"`
-	StartedAt time.Time `json:"started_at"`
-	UserAgent string    `json:"user_agent"`
-	Range     string    `json:"range,omitempty"`
-	Source    string    `json:"source"`
-}
 
 // StreamTracker tracks active streams
 type StreamTracker struct {
@@ -29,20 +20,32 @@ func NewStreamTracker() *StreamTracker {
 	return &StreamTracker{}
 }
 
-// Add adds a new stream and returns its ID
-func (t *StreamTracker) Add(filePath, clientIP, userAgent, rangeHeader, source string) string {
+// AddStream adds a new stream and returns the stream object for updates
+func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64) *nzbfilesystem.ActiveStream {
 	id := uuid.New().String()
-	stream := ActiveStream{
+	stream := &nzbfilesystem.ActiveStream{
 		ID:        id,
 		FilePath:  filePath,
-		ClientIP:  clientIP,
 		StartedAt: time.Now(),
-		UserAgent: userAgent,
-		Range:     rangeHeader,
 		Source:    source,
+		UserName:  userName,
+		TotalSize: totalSize,
 	}
 	t.streams.Store(id, stream)
-	return id
+	return stream
+}
+
+// Add adds a new stream and returns its ID (implements nzbfilesystem.StreamTracker)
+func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64) string {
+	return t.AddStream(filePath, source, userName, totalSize).ID
+}
+
+// UpdateProgress updates the bytes sent for a stream by ID
+func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*nzbfilesystem.ActiveStream)
+		atomic.AddInt64(&stream.BytesSent, bytesRead)
+	}
 }
 
 // Remove removes a stream by ID
@@ -50,13 +53,55 @@ func (t *StreamTracker) Remove(id string) {
 	t.streams.Delete(id)
 }
 
-// GetAll returns all active streams
-func (t *StreamTracker) GetAll() []ActiveStream {
-	var streams []ActiveStream
+// GetAll returns all active streams, aggregated by file, user, and source
+func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
+	// Map to group streams: key -> *nzbfilesystem.ActiveStream
+	grouped := make(map[string]*nzbfilesystem.ActiveStream)
+
 	t.streams.Range(func(key, value interface{}) bool {
-		streams = append(streams, value.(ActiveStream))
+		s := value.(*nzbfilesystem.ActiveStream)
+
+		// Create a composite key for grouping
+		// We group by FilePath, UserName and Source to aggregate parallel connections
+		// for the same playback session
+		groupKey := s.FilePath + "|" + s.UserName + "|" + s.Source
+
+		if existing, ok := grouped[groupKey]; ok {
+			// Aggregate with existing group
+			
+			// Sum up bytes sent from all connections
+			currentBytes := atomic.LoadInt64(&s.BytesSent)
+			existing.BytesSent += currentBytes
+
+			// Use the earliest start time to represent the session start
+			if s.StartedAt.Before(existing.StartedAt) {
+				existing.StartedAt = s.StartedAt
+			}
+
+			// Ensure we have the total size (should be consistent across connections)
+			if existing.TotalSize == 0 && s.TotalSize > 0 {
+				existing.TotalSize = s.TotalSize
+			}
+
+			existing.TotalConnections++
+		} else {
+			// Initialize new group with this stream
+			streamCopy := *s
+			// Load current atomic value
+			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
+			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
+			streamCopy.ID = groupKey
+			streamCopy.TotalConnections = 1
+			grouped[groupKey] = &streamCopy
+		}
 		return true
 	})
+
+	// Convert map to slice
+	var streams []nzbfilesystem.ActiveStream
+	for _, s := range grouped {
+		streams = append(streams, *s)
+	}
 
 	// Sort by start time, newest first
 	sort.Slice(streams, func(i, j int) bool {
@@ -64,4 +109,12 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 	})
 
 	return streams
+}
+
+// GetStream returns an active stream by ID
+func (t *StreamTracker) GetStream(id string) *nzbfilesystem.ActiveStream {
+	if val, ok := t.streams.Load(id); ok {
+		return val.(*nzbfilesystem.ActiveStream)
+	}
+	return nil
 }

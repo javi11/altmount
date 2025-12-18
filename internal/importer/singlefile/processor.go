@@ -76,6 +76,7 @@ func ProcessSingleFile(
 		file.Salt,
 		file.ReleaseDate.Unix(),
 		par2Refs,
+		file.NzbdavID,
 	)
 
 	// Write file metadata to disk

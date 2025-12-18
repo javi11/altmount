@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
+	"github.com/spf13/afero"
 )
 
 // StreamHandler handles HTTP streaming requests for files in NzbFilesystem
@@ -22,6 +24,31 @@ type StreamHandler struct {
 	nzbFilesystem *nzbfilesystem.NzbFilesystem
 	userRepo      *database.UserRepository
 	streamTracker *StreamTracker
+}
+
+// MonitoredFile wraps an afero.File to track read progress and support cancellation
+type MonitoredFile struct {
+	file   afero.File
+	stream *nzbfilesystem.ActiveStream
+	ctx    context.Context
+}
+
+func (m *MonitoredFile) Read(p []byte) (n int, err error) {
+	if err := m.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err = m.file.Read(p)
+	if n > 0 {
+		atomic.AddInt64(&m.stream.BytesSent, int64(n))
+	}
+	return n, err
+}
+
+func (m *MonitoredFile) Seek(offset int64, whence int) (int64, error) {
+	if err := m.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return m.file.Seek(offset, whence)
 }
 
 // NewStreamHandler creates a new stream handler with the provided filesystem and user repository
@@ -34,8 +61,8 @@ func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRe
 }
 
 // authenticate validates the download_key parameter against user API keys
-// Returns true if the download_key matches a hashed API key from any user
-func (h *StreamHandler) authenticate(r *http.Request) bool {
+// Returns the user and true if the download_key matches a hashed API key from any user
+func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	ctx := r.Context()
 
 	// Extract download_key from query parameter
@@ -44,7 +71,7 @@ func (h *StreamHandler) authenticate(r *http.Request) bool {
 		slog.WarnContext(ctx, "Stream access attempt without download_key",
 			"path", r.URL.Query().Get("path"),
 			"remote_addr", r.RemoteAddr)
-		return false
+		return nil, false
 	}
 
 	// Get all users with API keys
@@ -52,7 +79,7 @@ func (h *StreamHandler) authenticate(r *http.Request) bool {
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to get users for authentication",
 			"error", err)
-		return false
+		return nil, false
 	}
 
 	// Check download_key against hashed API keys
@@ -66,14 +93,14 @@ func (h *StreamHandler) authenticate(r *http.Request) bool {
 
 		// Compare with provided download_key (constant-time comparison for security)
 		if hashedKey == downloadKey {
-			return true
+			return user, true
 		}
 	}
 
 	slog.WarnContext(ctx, "Stream authentication failed - invalid download_key",
 		"path", r.URL.Query().Get("path"),
 		"remote_addr", r.RemoteAddr)
-	return false
+	return nil, false
 }
 
 // hashAPIKey generates a SHA256 hash of the API key for secure comparison
@@ -92,7 +119,8 @@ func hashAPIKey(apiKey string) string {
 func (h *StreamHandler) GetHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Authenticate using download_key
-		if !h.authenticate(r) {
+		_, ok := h.authenticate(r)
+		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="Stream API"`)
 			http.Error(w, "Unauthorized: valid download_key required", http.StatusUnauthorized)
 			return
@@ -113,6 +141,30 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, utils.Origin, r.RequestURI)
 	ctx = context.WithValue(ctx, utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true")
 
+	// Authenticate again to get user details (cached/fast enough) or refactor GetHTTPHandler to pass it
+	// Since GetHTTPHandler calls serveFile directly, we can optimize by fetching user once.
+	// However, GetHTTPHandler interface is fixed as http.Handler.
+	// Let's re-authenticate or trust the caller? GetHTTPHandler does auth.
+	// To pass user, we could use context or change serveFile signature.
+	// Changing serveFile signature is cleaner but it is called by GetHTTPHandler.
+	// Let's call authenticate again, it's a DB call? No, GetAllUsers might be cached or DB.
+	// To avoid DB hit, let's modify GetHTTPHandler to pass user in context or refactor.
+	// Actually, for now, calling it again is safe but inefficient.
+	// BETTER: Modify GetHTTPHandler to store user in context.
+	user, ok := h.authenticate(r)
+	if !ok {
+		// Should have been caught by GetHTTPHandler
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userName := "Unknown"
+	if user.Name != nil && *user.Name != "" {
+		userName = *user.Name
+	} else {
+		userName = user.UserID
+	}
+
 	// Get path from query parameter
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -132,12 +184,6 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Track stream if tracker is available
-	if h.streamTracker != nil {
-		streamID := h.streamTracker.Add(path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "API")
-		defer h.streamTracker.Remove(streamID)
-	}
-
 	// Get file info
 	stat, err := file.Stat()
 	if err != nil {
@@ -151,8 +197,56 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set MIME type based on file extension (prevents internal seeks)
-	// This follows the same pattern as the WebDAV adapter
+			// Track stream if tracker is available
+		if h.streamTracker != nil {
+			// Create a cancellable context for the stream
+			streamCtx, cancel := context.WithCancel(ctx)
+			defer cancel() // Ensure cleanup
+	
+			stream := h.streamTracker.Add(path, "API", userName, stat.Size())
+			defer h.streamTracker.Remove(stream)
+
+			// Add stream ID to context for low-level tracking
+			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)
+
+			streamObj := h.streamTracker.GetStream(stream)
+			if streamObj == nil {
+				http.Error(w, "Stream not found", http.StatusInternalServerError)
+				return
+			}
+			// Wrap the file with monitoring
+			monitoredFile := &MonitoredFile{
+				file:   file,
+				stream: streamObj,
+				ctx:    streamCtx,
+			}
+		// Use monitoredFile instead of file
+		// Note: http.ServeContent requires io.ReadSeeker. MonitoredFile implements it.
+		// However, http.ServeContent also uses the 'content' param (file) to read.
+
+		// Set MIME type based on file extension (prevents internal seeks)
+		ext := filepath.Ext(path)
+		if ext != "" {
+			mimeType := mime.TypeByExtension(ext)
+			if mimeType != "" {
+				w.Header().Set("Content-Type", mimeType)
+			} else {
+				w.Header().Set("Content-Type", "application/octet-stream")
+			}
+		}
+
+		// Indicate support for range requests
+		w.Header().Set("Accept-Ranges", "bytes")
+
+		// Set Content-Disposition to inline for browser viewing
+		filename := filepath.Base(path)
+		w.Header().Set("Content-Disposition", `inline; filename="`+filename+`"`)
+
+		http.ServeContent(w, r, filename, stat.ModTime(), monitoredFile)
+		return
+	}
+
+	// Fallback if tracker is nil (should not happen in prod)
 	ext := filepath.Ext(path)
 	if ext != "" {
 		mimeType := mime.TypeByExtension(ext)
@@ -162,22 +256,8 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/octet-stream")
 		}
 	}
-
-	// Indicate support for range requests
 	w.Header().Set("Accept-Ranges", "bytes")
-
-	// Set Content-Disposition to inline for browser viewing
 	filename := filepath.Base(path)
 	w.Header().Set("Content-Disposition", `inline; filename="`+filename+`"`)
-
-	// http.ServeContent will handle:
-	// - Range requests automatically (HTTP 206 Partial Content)
-	// - Content-Type detection from filename (already set above)
-	// - Last-Modified header from file modtime
-	// - If-Modified-Since conditional requests
-	// - If-None-Match with ETag (if we add it)
-	// - Accept-Ranges: bytes header (already set above)
-	//
-	// The file must implement io.ReadSeeker (which afero.File does)
 	http.ServeContent(w, r, filename, stat.ModTime(), file)
 }

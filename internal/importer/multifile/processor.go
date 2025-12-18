@@ -90,6 +90,7 @@ func ProcessRegularFiles(
 			file.Salt,
 			file.ReleaseDate.Unix(),
 			par2Refs,
+			file.NzbdavID,
 		)
 
 		// Delete old metadata if exists (simple collision handling)

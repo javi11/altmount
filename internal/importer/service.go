@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -23,12 +24,14 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbdav"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
+	"google.golang.org/protobuf/proto"
 )
 
 // ServiceConfig holds configuration for the NZB import service
@@ -374,6 +377,10 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 	}
 
 	go func() {
+		// 1. Parse Database
+		parser := nzbdav.NewParser(dbPath)
+		nzbChan, errChan := parser.Parse()
+
 		defer func() {
 			s.importMu.Lock()
 			s.importInfo.Status = ImportStatusIdle
@@ -383,11 +390,18 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			if cleanupFile {
 				os.Remove(dbPath)
 			}
-		}()
 
-		// 1. Parse Database
-		parser := nzbdav.NewParser(dbPath)
-		nzbChan, errChan := parser.Parse()
+			// Drain any remaining items from channels to prevent parser goroutine leaks.
+			// This ensures the parser can complete even if we exit early due to cancellation.
+			go func() {
+				for range nzbChan {
+				}
+			}()
+			go func() {
+				for range errChan {
+				}
+			}()
+		}()
 
 		// Create temp dir for NZBs
 		nzbTempDir, err := os.MkdirTemp(os.TempDir(), "altmount-nzbdav-imports-")
@@ -555,6 +569,9 @@ func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder,
 	relPath := rootFolder
 	priority := database.QueuePriorityNormal
 
+	// Store original ID in metadata
+	metaJSON := fmt.Sprintf(`{"nzbdav_id": "%s"}`, res.ID)
+
 	// Prepare item struct
 	item := &database.ImportQueueItem{
 		NzbPath:      nzbPath,
@@ -565,6 +582,7 @@ func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder,
 		RetryCount:   0,
 		MaxRetries:   3,
 		CreatedAt:    time.Now(),
+		Metadata:     &metaJSON,
 	}
 
 	// Calculate file size
@@ -936,6 +954,9 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 		return err
 	}
+
+	// Create ID metadata links if applicable (for nzbdav compatibility)
+	s.handleIdMetadataLinks(item, resultingPath)
 
 	// Create STRM files (non-blocking)
 	if err := s.createStrmFiles(item, resultingPath); err != nil {
@@ -1614,4 +1635,90 @@ func (s *Service) createSingleStrmFile(virtualPath string, port int) error {
 func hashAPIKey(apiKey string) string {
 	hash := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(hash[:])
+}
+
+func (s *Service) handleIdMetadataLinks(item *database.ImportQueueItem, resultingPath string) {
+	// 1. Check if the queue item itself has a release-level ID in its metadata
+	if item.Metadata != nil && *item.Metadata != "" {
+		var meta struct {
+			NzbdavID string `json:"nzbdav_id"`
+		}
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil && meta.NzbdavID != "" {
+			if err := s.createIDMetadataLink(meta.NzbdavID, resultingPath); err != nil {
+				s.log.Warn("Failed to create release ID metadata link", "id", meta.NzbdavID, "error", err)
+			}
+		}
+	}
+
+	// 2. Check individual files for IDs
+	cfg := s.configGetter()
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+
+	_ = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		// Read the metadata file to find the ID
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		// Parse the protobuf metadata to get the ID
+		meta := &metapb.FileMetadata{}
+		if err := proto.Unmarshal(data, meta); err != nil {
+			return nil
+		}
+
+		if meta.NzbdavId != "" {
+			// Calculate the virtual path from the metadata file path
+			relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+			if err != nil {
+				return nil
+			}
+			// Remove .meta extension
+			virtualPath := strings.TrimSuffix(relPath, ".meta")
+
+			if err := s.createIDMetadataLink(meta.NzbdavId, virtualPath); err != nil {
+				s.log.Warn("Failed to create file ID metadata link", "id", meta.NzbdavId, "error", err)
+			}
+		}
+
+		return nil
+	})
+}
+
+func (s *Service) createIDMetadataLink(nzbdavID, resultingPath string) error {
+	cfg := s.configGetter()
+	metadataRoot := cfg.Metadata.RootPath
+
+	// Calculate sharded path
+	// 04db0bde-7ad0-46a3-a2f4-9ef8efd0d7d7 -> .ids/0/4/d/b/0/04db0bde-7ad0-46a3-a2f4-9ef8efd0d7d7.meta
+	id := strings.ToLower(nzbdavID)
+	if len(id) < 5 {
+		return nil // Invalid ID for sharding
+	}
+
+	shardPath := filepath.Join(".ids", string(id[0]), string(id[1]), string(id[2]), string(id[3]), string(id[4]))
+	fullShardDir := filepath.Join(metadataRoot, shardPath)
+
+	if err := os.MkdirAll(fullShardDir, 0755); err != nil {
+		return err
+	}
+
+	targetMetaPath := s.metadataService.GetMetadataFilePath(resultingPath)
+	linkPath := filepath.Join(fullShardDir, id+".meta")
+
+	// Remove if exists
+	os.Remove(linkPath)
+
+	// Create relative symlink if possible, or absolute
+	// Relative is better if metadataRoot moves
+	relTarget, err := filepath.Rel(fullShardDir, targetMetaPath)
+	if err != nil {
+		return os.Symlink(targetMetaPath, linkPath)
+	}
+
+	return os.Symlink(relTarget, linkPath)
 }

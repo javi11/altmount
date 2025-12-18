@@ -284,6 +284,15 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 	// Use filename from fileInfo (priority-based: PAR2 > Subject > yEnc headers)
 	filename := info.Filename
 	enc := metapb.Encryption_NONE // Default to no encryption
+	var nzbdavID string
+
+	// Extract nzbdavID from subject if present
+	if strings.HasPrefix(info.NzbFile.Subject, "NZBDAV_ID:") {
+		parts := strings.SplitN(info.NzbFile.Subject, " ", 2)
+		if len(parts) > 0 {
+			nzbdavID = strings.TrimPrefix(parts[0], "NZBDAV_ID:")
+		}
+	}
 
 	// Check metadata for overrides
 	if meta != nil {
@@ -349,6 +358,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		ReleaseDate:   info.ReleaseDate,
 		IsPar2Archive: info.IsPar2Archive,
 		OriginalIndex: info.OriginalIndex,
+		NzbdavID:      nzbdavID,
 	}
 
 	return parsedFile, nil
@@ -482,32 +492,37 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						break // Stop trying, use what we have
 					}
 
-					// Read remaining bytes needed
-					remainingBytes := maxRead - bytesRead
-					tempBuffer := make([]byte, remainingBytes)
+					// Use closure to ensure cleanup via defer regardless of how we exit
+					shouldBreak := func() bool {
+						defer segReader.Close()
+						defer segCancel()
 
-					n, err := io.ReadFull(segReader, tempBuffer)
-					segReader.Close()
-					segCancel()
+						// Read remaining bytes needed
+						remainingBytes := maxRead - bytesRead
+						tempBuffer := make([]byte, remainingBytes)
 
-					if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-						p.log.DebugContext(ctx, "Error reading from additional segment",
+						n, err := io.ReadFull(segReader, tempBuffer)
+						if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+							p.log.DebugContext(ctx, "Error reading from additional segment",
+								"segment_index", segIdx,
+								"error", err)
+							return true // break outer loop
+						}
+
+						// Append to our buffer
+						copy(buffer[bytesRead:], tempBuffer[:n])
+						bytesRead += n
+
+						p.log.DebugContext(ctx, "Read additional bytes from segment",
 							"segment_index", segIdx,
-							"error", err)
-						break // Stop trying, use what we have
-					}
+							"bytes_read", n,
+							"total_bytes", bytesRead)
 
-					// Append to our buffer
-					copy(buffer[bytesRead:], tempBuffer[:n])
-					bytesRead += n
+						return false
+					}()
 
-					p.log.DebugContext(ctx, "Read additional bytes from segment",
-						"segment_index", segIdx,
-						"bytes_read", n,
-						"total_bytes", bytesRead)
-
-					if bytesRead >= maxRead {
-						break // We have enough data
+					if shouldBreak || bytesRead >= maxRead {
+						break
 					}
 				}
 			}

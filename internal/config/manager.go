@@ -30,6 +30,7 @@ type Config struct {
 	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
 	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
 	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
 	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -40,6 +41,18 @@ type WebDAVConfig struct {
 	Port     int    `yaml:"port" mapstructure:"port" json:"port"`
 	User     string `yaml:"user" mapstructure:"user" json:"user"`
 	Password string `yaml:"password" mapstructure:"password" json:"password"`
+}
+
+// FuseConfig represents FUSE mount configuration
+type FuseConfig struct {
+	MountPath           string `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	AllowOther          bool   `yaml:"allow_other" mapstructure:"allow_other" json:"allow_other"`
+	Debug               bool   `yaml:"debug" mapstructure:"debug" json:"debug"`
+	AttrTimeoutSeconds  int    `yaml:"attr_timeout_seconds" mapstructure:"attr_timeout_seconds" json:"attr_timeout_seconds"`
+	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
+	MaxDownloadWorkers  int    `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
+	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 }
 
 // APIConfig represents REST API configuration
@@ -439,6 +452,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Arrs.Enabled = nil
 	}
 
+	// DeepCopy Fuse.Enabled pointer
+	if c.Fuse.Enabled != nil {
+		v := *c.Fuse.Enabled
+		copyCfg.Fuse.Enabled = &v
+	} else {
+		copyCfg.Fuse.Enabled = nil
+	}
+
 	// Deep copy Scraper Radarr instances
 	if c.Arrs.RadarrInstances != nil {
 		copyCfg.Arrs.RadarrInstances = make([]ArrsInstanceConfig, len(c.Arrs.RadarrInstances))
@@ -714,6 +735,14 @@ func (c *Config) Validate() error {
 		if provider.MaxConnections <= 0 {
 			return fmt.Errorf("provider %d: max_connections must be greater than 0", i)
 		}
+	}
+
+	// Validate Fuse configuration
+	if c.Fuse.MaxDownloadWorkers <= 0 {
+		c.Fuse.MaxDownloadWorkers = 15 // Default
+	}
+	if c.Fuse.MaxCacheSizeMB <= 0 {
+		c.Fuse.MaxCacheSizeMB = 32 // Default
 	}
 
 	return nil
@@ -1022,6 +1051,7 @@ func DefaultConfig(configDir ...string) *Config {
 	mountEnabled := false   // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
+	fuseEnabled := false
 	loginRequired := true // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
@@ -1159,6 +1189,16 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxWorkers:      5,                // Default to 5 concurrent workers
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+		},
+		Fuse: FuseConfig{
+			Enabled:             &fuseEnabled,
+			MountPath:           "",
+			AllowOther:          true,
+			Debug:               false,
+			AttrTimeoutSeconds:  1,
+			EntryTimeoutSeconds: 1,
+			MaxDownloadWorkers:  15,
+			MaxCacheSizeMB:      32,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}

@@ -14,4 +14,6 @@ const (
 	IsCopy           = contextKey("isCopy")
 	Origin           = contextKey("origin")
 	ShowCorrupted    = contextKey("showCorrupted")
+	ActiveStreamKey  = contextKey("activeStream")
+	StreamIDKey      = contextKey("streamID")
 )

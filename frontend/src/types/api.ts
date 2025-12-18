@@ -310,11 +310,12 @@ export interface ProviderStatus {
 export interface ActiveStream {
 	id: string;
 	file_path: string;
-	client_ip: string;
 	started_at: string;
-	user_agent: string;
-	range?: string;
 	source: string;
+	user_name?: string;
+	total_size: number;
+	bytes_sent: number;
+	total_connections: number;
 }
 
 export interface PoolMetrics {
@@ -355,4 +356,10 @@ export interface SystemBrowseResponse {
 	current_path: string;
 	parent_path: string;
 	files: FileEntry[];
+}
+
+// FUSE types
+export interface FuseStatus {
+	status: "stopped" | "starting" | "running" | "error";
+	path: string;
 }

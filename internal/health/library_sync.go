@@ -603,7 +603,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 					// Look up library path from our map
 					libraryPath := lsw.getLibraryPath(path, filesInUse)
-				
+
 					// Protect shared slice with mutex
 					filesToAddMu.Lock()
 					filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
@@ -628,7 +628,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		for mountRelativePath := range metaFileSet {
 			select {
 			case <-ctx.Done():
-				break
+				return
 			case jobChan <- mountRelativePath:
 			}
 		}
@@ -1191,22 +1191,22 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 			defer wg.Done()
 			for path := range jobChan {
 				// Check if needs to be added
-				                if _, exists := dbPathSet[path]; !exists {
-									// Read metadata to get release date
-									fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
-									if err != nil {
-										slog.ErrorContext(ctx, "Failed to read metadata",
-											"mount_relative_path", path,
-											"error", err)
-				
-										// Register as corrupted so HealthWorker can pick it up and trigger repair
-										// For NONE strategy, library path is effectively the mount path or nil
-										regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, nil, err.Error())
-										if regErr != nil {
-											slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
-										}
-										continue
-									}
+				if _, exists := dbPathSet[path]; !exists {
+					// Read metadata to get release date
+					fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to read metadata",
+							"mount_relative_path", path,
+							"error", err)
+
+						// Register as corrupted so HealthWorker can pick it up and trigger repair
+						// For NONE strategy, library path is effectively the mount path or nil
+						regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, nil, err.Error())
+						if regErr != nil {
+							slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
+						}
+						continue
+					}
 					if fileMeta == nil {
 						continue
 					}
@@ -1260,7 +1260,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		for mountRelativePath := range metaFileSet {
 			select {
 			case <-ctx.Done():
-				break
+				return
 			case jobChan <- mountRelativePath:
 			}
 		}

@@ -43,8 +43,13 @@ func NewHandler(
 		fileSystem: nzbToWebdavFS(fs),
 	}
 
+	var finalFS webdav.FileSystem = errorHandler
+	if streamTracker != nil {
+		finalFS = &monitoredFileSystem{fs: errorHandler}
+	}
+
 	webdavHandler := &webdav.Handler{
-		FileSystem: errorHandler,
+		FileSystem: finalFS,
 		LockSystem: webdav.NewMemLS(),
 		Prefix:     config.Prefix,
 		Logger: func(r *http.Request, err error) {
@@ -60,6 +65,8 @@ func NewHandler(
 		username, password, hasBasicAuth := r.BasicAuth()
 
 		var authenticated bool
+		var effectiveUser string
+
 		if !hasBasicAuth {
 			// Try JWT token authentication first (if services are available)
 			if tokenService != nil && userRepo != nil {
@@ -75,6 +82,11 @@ func NewHandler(
 						user, err := userRepo.GetUserByID(r.Context(), userID)
 						if err == nil && user != nil {
 							authenticated = true
+							if user.Name != nil && *user.Name != "" {
+								effectiveUser = *user.Name
+							} else {
+								effectiveUser = user.UserID
+							}
 						}
 					}
 				}
@@ -84,6 +96,7 @@ func NewHandler(
 			currentUser, currentPass := authCreds.GetCredentials()
 			if username == currentUser && password == currentPass {
 				authenticated = true
+				effectiveUser = username
 			}
 		}
 
@@ -95,6 +108,10 @@ func NewHandler(
 				slog.ErrorContext(r.Context(), "Error writing the response to the client", "err", err)
 			}
 			return
+		}
+
+		if effectiveUser == "" {
+			effectiveUser = "WebDAV"
 		}
 
 		// This will prevent webdav internal seeks which is not supported by usenet reader
@@ -154,10 +171,25 @@ func NewHandler(
 		// Track active streams for GET requests
 		if r.Method == http.MethodGet && streamTracker != nil {
 			// Extract path (this includes prefix, but that's fine for display)
-			// Or we could strip prefix if we want cleaner display
 			// r.URL.Path contains the full path including prefix
-			streamID := streamTracker.Add(r.URL.Path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "WebDAV")
-			defer streamTracker.Remove(streamID)
+			// Create cancellable context
+			streamCtx, cancel := context.WithCancel(r.Context())
+			defer cancel() // Ensure cleanup for this specific stream context
+			
+			// Add to tracker
+			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, 0)
+			defer streamTracker.Remove(stream)
+
+			// Add stream ID to context for low-level tracking
+			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)
+
+			// Inject stream into context for monitoredFileSystem
+			if sObj := streamTracker.GetStream(stream); sObj != nil {
+				r = r.WithContext(context.WithValue(streamCtx, utils.ActiveStreamKey, sObj)) // Use streamCtx for the new context
+			} else {
+				// If streamObj is nil, we still need to use streamCtx for the request
+				r = r.WithContext(streamCtx)
+			}
 		}
 
 		webdavHandler.ServeHTTP(w, r)

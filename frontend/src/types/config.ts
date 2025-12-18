@@ -10,6 +10,7 @@ export interface ConfigResponse {
 	streaming: StreamingConfig;
 	health: HealthConfig;
 	rclone: RCloneConfig;
+	fuse: FuseConfig;
 	import: ImportConfig;
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
@@ -150,6 +151,18 @@ export interface RCloneConfig {
 	use_mmap: boolean;
 }
 
+// Fuse configuration
+export interface FuseConfig {
+	mount_path: string;
+	enabled: boolean;
+	allow_other: boolean;
+	debug: boolean;
+	attr_timeout_seconds: number;
+	entry_timeout_seconds: number;
+	max_download_workers: number;
+	max_cache_size_mb: number;
+}
+
 // Import strategy type
 export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 
@@ -219,6 +232,7 @@ export interface ConfigUpdateRequest {
 	streaming?: StreamingUpdateRequest;
 	health?: HealthUpdateRequest;
 	rclone?: RCloneUpdateRequest;
+	fuse?: Partial<FuseConfig>;
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;
@@ -391,6 +405,7 @@ export type ConfigSection =
 	| "import"
 	| "providers"
 	| "rclone"
+	| "fuse"
 	| "sabnzbd"
 	| "arrs"
 	| "system";
@@ -689,6 +704,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 	rclone: {
 		title: "Mount & RClone",
 		description: "RClone mount and VFS settings",
+		icon: "HardDrive",
+		canEdit: true,
+	},
+	fuse: {
+		title: "Native FUSE Mount",
+		description: "Configure native FUSE mount settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},
