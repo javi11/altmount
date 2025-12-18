@@ -159,6 +159,8 @@ export interface FuseConfig {
 	debug: boolean;
 	attr_timeout_seconds: number;
 	entry_timeout_seconds: number;
+	max_download_workers: number;
+	max_cache_size_mb: number;
 }
 
 // Import strategy type

@@ -150,10 +150,20 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
+	// Extract workers and cache size from context if available (overrides global config)
+	maxWorkers := mrf.getMaxDownloadWorkers()
+	if val, ok := ctx.Value(utils.MaxDownloadWorkersKey).(int); ok && val > 0 {
+		maxWorkers = val
+	}
+	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
+	if val, ok := ctx.Value(utils.MaxCacheSizeMBKey).(int); ok && val > 0 {
+		maxCacheSizeMB = val
+	}
+
 	// Start tracking stream if tracker available
 	streamID := ""
 	if mrf.streamTracker != nil {
-		streamID = mrf.streamTracker.Add(name, "FUSE", "FUSE", fileMeta.FileSize, nil)
+		streamID = mrf.streamTracker.Add(name, "FUSE", "FUSE", fileMeta.FileSize)
 	}
 
 	// Create a metadata-based virtual file handle
@@ -164,8 +174,8 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		healthRepository: mrf.healthRepository,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
-		maxWorkers:       mrf.getMaxDownloadWorkers(),
-		maxCacheSizeMB:   mrf.getMaxCacheSizeMB(),
+		maxWorkers:       maxWorkers,
+		maxCacheSizeMB:   maxCacheSizeMB,
 		rcloneCipher:     mrf.rcloneCipher,
 		aesCipher:        mrf.aesCipher,
 		globalPassword:   mrf.getGlobalPassword(),

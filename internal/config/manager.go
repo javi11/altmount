@@ -51,6 +51,8 @@ type FuseConfig struct {
 	Debug               bool   `yaml:"debug" mapstructure:"debug" json:"debug"`
 	AttrTimeoutSeconds  int    `yaml:"attr_timeout_seconds" mapstructure:"attr_timeout_seconds" json:"attr_timeout_seconds"`
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
+	MaxDownloadWorkers  int    `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
+	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 }
 
 // APIConfig represents REST API configuration
@@ -450,7 +452,7 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Arrs.Enabled = nil
 	}
 
-	// Deep copy Fuse.Enabled pointer
+	// DeepCopy Fuse.Enabled pointer
 	if c.Fuse.Enabled != nil {
 		v := *c.Fuse.Enabled
 		copyCfg.Fuse.Enabled = &v
@@ -733,6 +735,14 @@ func (c *Config) Validate() error {
 		if provider.MaxConnections <= 0 {
 			return fmt.Errorf("provider %d: max_connections must be greater than 0", i)
 		}
+	}
+
+	// Validate Fuse configuration
+	if c.Fuse.MaxDownloadWorkers <= 0 {
+		c.Fuse.MaxDownloadWorkers = 15 // Default
+	}
+	if c.Fuse.MaxCacheSizeMB <= 0 {
+		c.Fuse.MaxCacheSizeMB = 32 // Default
 	}
 
 	return nil
@@ -1187,6 +1197,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Debug:               false,
 			AttrTimeoutSeconds:  1,
 			EntryTimeoutSeconds: 1,
+			MaxDownloadWorkers:  15,
+			MaxCacheSizeMB:      32,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}

@@ -5,7 +5,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
 
@@ -15,13 +17,15 @@ var _ afero.Fs = (*ContextAdapter)(nil)
 // ContextAdapter wraps a context-aware filesystem to implement afero.Fs
 // It uses context.Background() for all operations
 type ContextAdapter struct {
-	fs *nzbfilesystem.NzbFilesystem
+	fs     *nzbfilesystem.NzbFilesystem
+	config config.FuseConfig
 }
 
 // NewContextAdapter creates a new adapter
-func NewContextAdapter(fs *nzbfilesystem.NzbFilesystem) *ContextAdapter {
+func NewContextAdapter(fs *nzbfilesystem.NzbFilesystem, cfg config.FuseConfig) *ContextAdapter {
 	return &ContextAdapter{
-		fs: fs,
+		fs:     fs,
+		config: cfg,
 	}
 }
 
@@ -38,11 +42,15 @@ func (c *ContextAdapter) MkdirAll(name string, perm os.FileMode) error {
 }
 
 func (c *ContextAdapter) Open(name string) (afero.File, error) {
-	return c.fs.Open(context.Background(), name)
+	ctx := context.WithValue(context.Background(), utils.MaxDownloadWorkersKey, c.config.MaxDownloadWorkers)
+	ctx = context.WithValue(ctx, utils.MaxCacheSizeMBKey, c.config.MaxCacheSizeMB)
+	return c.fs.Open(ctx, name)
 }
 
 func (c *ContextAdapter) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	return c.fs.OpenFile(context.Background(), name, flag, perm)
+	ctx := context.WithValue(context.Background(), utils.MaxDownloadWorkersKey, c.config.MaxDownloadWorkers)
+	ctx = context.WithValue(ctx, utils.MaxCacheSizeMBKey, c.config.MaxCacheSizeMB)
+	return c.fs.OpenFile(ctx, name, flag, perm)
 }
 
 func (c *ContextAdapter) Remove(name string) error {
