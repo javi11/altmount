@@ -445,7 +445,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	}
 
 	// Update status to repair_triggered instead of deleting
-	if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+	if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError, item.ErrorDetails); err != nil {
 		slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
 			"error", err,
 			"file_path", item.FilePath)
@@ -552,7 +552,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		}
 
 		// Update status to repair_triggered instead of deleting
-		if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+		if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError, item.ErrorDetails); err != nil {
 			slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
 				"error", err,
 				"file_path", item.FilePath)
