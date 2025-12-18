@@ -19,6 +19,8 @@ var _ fs.NodeOnAdder = (*AltMountRoot)(nil)
 var _ fs.NodeReaddirer = (*AltMountRoot)(nil)
 var _ fs.NodeLookuper = (*AltMountRoot)(nil)
 var _ fs.NodeGetattrer = (*AltMountRoot)(nil)
+var _ fs.NodeRenamer = (*AltMountRoot)(nil)
+var _ fs.NodeSetattrer = (*AltMountRoot)(nil)
 
 // AltMountRoot represents a directory in the FUSE filesystem
 type AltMountRoot struct {
@@ -70,6 +72,11 @@ func (r *AltMountRoot) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.
 	return 0
 }
 
+// Setattr implements fs.NodeSetattrer (no-op success for renames/moves)
+func (r *AltMountRoot) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	return r.Getattr(ctx, f, out)
+}
+
 // Lookup implements fs.NodeLookuper
 func (r *AltMountRoot) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fullPath := filepath.Join(r.path, name)
@@ -105,6 +112,27 @@ func (r *AltMountRoot) Lookup(ctx context.Context, name string, out *fuse.EntryO
 		gid:    r.gid,
 	}
 	return r.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
+}
+
+// Rename implements fs.NodeRenamer
+func (r *AltMountRoot) Rename(ctx context.Context, oldName string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
+	oldPath := filepath.Join(r.path, oldName)
+
+	targetDir, ok := newParent.(*AltMountRoot)
+	if !ok {
+		return syscall.EINVAL
+	}
+	newPath := filepath.Join(targetDir.path, newName)
+
+	if err := r.fs.Rename(oldPath, newPath); err != nil {
+		if os.IsNotExist(err) {
+			return syscall.ENOENT
+		}
+		r.logger.ErrorContext(ctx, "Rename failed", "old", oldPath, "new", newPath, "error", err)
+		return syscall.EIO
+	}
+
+	return 0
 }
 
 // Readdir implements fs.NodeReaddirer
@@ -147,6 +175,7 @@ func (r *AltMountRoot) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno
 var _ fs.NodeOpener = (*AltMountFile)(nil)
 var _ fs.NodeGetattrer = (*AltMountFile)(nil)
 var _ fs.NodeReader = (*AltMountFile)(nil)
+var _ fs.NodeSetattrer = (*AltMountFile)(nil)
 
 // ensure FileHandle implements fs.FileReleaser
 var _ fs.FileReleaser = (*FileHandle)(nil)
@@ -175,6 +204,11 @@ func (f *AltMountFile) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.
 
 	fillAttr(info, &out.Attr, f.uid, f.gid)
 	return 0
+}
+
+// Setattr implements fs.NodeSetattrer (no-op success)
+func (f *AltMountFile) Setattr(ctx context.Context, fh fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
+	return f.Getattr(ctx, fh, out)
 }
 
 // Open implements fs.NodeOpener
