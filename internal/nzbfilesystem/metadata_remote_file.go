@@ -153,8 +153,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// Start tracking stream if tracker available
 	streamID := ""
 	if mrf.streamTracker != nil {
-		// We use "FUSE" as IP/UserAgent for FUSE mounts to distinguish them
-		streamID = mrf.streamTracker.Add(name, "FUSE", "FUSE Mount", "", "FUSE")
+		streamID = mrf.streamTracker.Add(name, "FUSE", "FUSE", fileMeta.FileSize, nil)
 	}
 
 	// Create a metadata-based virtual file handle
