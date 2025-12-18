@@ -173,7 +173,7 @@ func TestAltMountRoot_Getattr(t *testing.T) {
 	mockFs := new(MockFs)
 	logger := slog.Default()
 
-	root := NewAltMountRoot(mockFs, "/root", logger)
+	root := NewAltMountRoot(mockFs, "/root", logger, 1000, 1000)
 	root.isRootDir = false // Force it to check fs.Stat
 
 	// Test Directory Getattr
