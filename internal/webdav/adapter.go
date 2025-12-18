@@ -173,16 +173,20 @@ func NewHandler(
 			// Extract path (this includes prefix, but that's fine for display)
 			// r.URL.Path contains the full path including prefix
 			// Create cancellable context
-			ctx = context.WithCancel(r.Context())
+			streamCtx, cancel := context.WithCancel(r.Context())
+			defer cancel() // Ensure cleanup for this specific stream context
+			
 			// Add to tracker
 			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, 0)
 			defer streamTracker.Remove(stream)
 
 			// Inject stream into context for monitoredFileSystem
 			if sObj := streamTracker.GetStream(stream); sObj != nil {
-				ctx = context.WithValue(ctx, utils.ActiveStreamKey, sObj)
+				r = r.WithContext(context.WithValue(streamCtx, utils.ActiveStreamKey, sObj)) // Use streamCtx for the new context
+			} else {
+				// If streamObj is nil, we still need to use streamCtx for the request
+				r = r.WithContext(streamCtx)
 			}
-			r = r.WithContext(ctx)
 		}
 
 		webdavHandler.ServeHTTP(w, r)
