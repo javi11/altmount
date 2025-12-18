@@ -57,15 +57,17 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 	s.fuseManager.mu.Unlock()
 
 	// Ensure directory exists
-	if err := os.MkdirAll(req.Path, 0755); err != nil {
-		s.fuseManager.mu.Lock()
-		s.fuseManager.status = "error"
-		s.fuseManager.mu.Unlock()
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to create mount directory",
-			"details": err.Error(),
-		})
+	if _, err := os.Stat(req.Path); os.IsNotExist(err) {
+		if err := os.MkdirAll(req.Path, 0755); err != nil {
+			s.fuseManager.mu.Lock()
+			s.fuseManager.status = "error"
+			s.fuseManager.mu.Unlock()
+			return c.Status(500).JSON(fiber.Map{
+				"success": false,
+				"message": "Failed to create mount directory",
+				"details": err.Error(),
+			})
+		}
 	}
 
 	// Start FUSE server in background
@@ -160,12 +162,14 @@ func (s *Server) AutoStartFuse() {
 		s.fuseManager.path = cfg.Fuse.MountPath
 		s.fuseManager.mu.Unlock()
 
-		if err := os.MkdirAll(cfg.Fuse.MountPath, 0755); err != nil {
-			slog.Error("Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
-			s.fuseManager.mu.Lock()
-			s.fuseManager.status = "error"
-			s.fuseManager.mu.Unlock()
-			return
+		if _, err := os.Stat(cfg.Fuse.MountPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(cfg.Fuse.MountPath, 0755); err != nil {
+				slog.Error("Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
+				s.fuseManager.mu.Lock()
+				s.fuseManager.status = "error"
+				s.fuseManager.mu.Unlock()
+				return
+			}
 		}
 
 		go func() {
