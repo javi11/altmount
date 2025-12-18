@@ -121,3 +121,11 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 
 	return streams
 }
+
+// GetStream returns an active stream by ID
+func (t *StreamTracker) GetStream(id string) *ActiveStream {
+	if val, ok := t.streams.Load(id); ok {
+		return val.(*ActiveStream)
+	}
+	return nil
+}

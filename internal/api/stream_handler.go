@@ -203,14 +203,19 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 			streamCtx, cancel := context.WithCancel(ctx)
 			defer cancel() // Ensure cleanup
 	
-			stream := h.streamTracker.Add(path, "API", userName, stat.Size(), cancel)
-			defer h.streamTracker.Remove(stream.ID)
-		// Wrap the file with monitoring
-		monitoredFile := &MonitoredFile{
-			file:   file,
-			stream: stream,
-			ctx:    streamCtx,
-		}
+			stream := h.streamTracker.Add(path, "API", userName, stat.Size())
+			defer h.streamTracker.Remove(stream)
+			streamObj := h.streamTracker.GetStream(stream)
+			if streamObj == nil {
+				http.Error(w, "Stream not found", http.StatusInternalServerError)
+				return
+			}
+			// Wrap the file with monitoring
+			monitoredFile := &MonitoredFile{
+				file:   file,
+				stream: streamObj,
+				ctx:    streamCtx,
+			}
 		// Use monitoredFile instead of file
 		// Note: http.ServeContent requires io.ReadSeeker. MonitoredFile implements it.
 		// However, http.ServeContent also uses the 'content' param (file) to read.
