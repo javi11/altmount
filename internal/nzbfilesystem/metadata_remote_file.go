@@ -152,13 +152,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 	// Extract workers and cache size from context if available (overrides global config)
 	maxWorkers := mrf.getMaxDownloadWorkers()
-	if val, ok := ctx.Value(utils.MaxDownloadWorkersKey).(int); ok && val > 0 {
-		maxWorkers = val
-	}
 	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
-	if val, ok := ctx.Value(utils.MaxCacheSizeMBKey).(int); ok && val > 0 {
-		maxCacheSizeMB = val
-	}
 
 	// Start tracking stream if tracker available
 	streamID := ""
@@ -542,7 +536,7 @@ func (mvf *MetadataVirtualFile) WarmUp() {
 		// If the reader supports manual starting (UsenetReader), trigger it
 		// This starts the background workers to fetch data into the cache
 		// without consuming any bytes from the stream.
-		if ur, ok := mvf.reader.(*usenet.UsenetReader); ok {
+		if ur, ok := mvf.reader.(interface{ Start() }); ok {
 			ur.Start()
 		}
 	}()

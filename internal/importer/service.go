@@ -481,8 +481,6 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			}
 		default:
 		}
-		default:
-		}
 	}()
 
 	return nil
