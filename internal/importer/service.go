@@ -899,8 +899,14 @@ func (s *Service) refreshMountPathIfNeeded(ctx context.Context, resultingPath st
 	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
 	if _, err := os.Stat(mountPath); err != nil {
 		if os.IsNotExist(err) {
+			cfg := s.configGetter()
+			vfsName := cfg.RClone.VFSName
+			if vfsName == "" {
+				vfsName = config.MountProvider
+			}
+
 			// Refresh the root path if the mount path is not found
-			err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
+			err := s.rcloneClient.RefreshDir(s.ctx, vfsName, []string{"/"})
 			if err != nil {
 				s.log.ErrorContext(ctx, "Failed to refresh mount path", "queue_id", itemID, "path", mountPath, "error", err)
 			}
@@ -1182,7 +1188,13 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 	refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
 	defer cancel()
 
-	err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
+	cfg := s.configGetter()
+	vfsName := cfg.RClone.VFSName
+	if vfsName == "" {
+		vfsName = config.MountProvider
+	}
+
+	err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, []string{resultingPath}) // Use RefreshDir with empty provider
 	if err != nil {
 		s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
 			"virtual_dir", resultingPath,

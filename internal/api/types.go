@@ -26,10 +26,17 @@ type RCloneAPIResponse struct {
 	PasswordSet bool `json:"password_set"`
 	SaltSet     bool `json:"salt_set"`
 
-	// RC (Remote Control) Configuration
-	RCEnabled bool              `json:"rc_enabled"`
-	RCUrl     string            `json:"rc_url"`
-	RCPort    int               `json:"rc_port"`
+		// RC (Remote Control) Configuration
+
+		RCEnabled    bool              `json:"rc_enabled"`
+
+		RCUrl        string            `json:"rc_url"`
+
+		VFSName      string            `json:"vfs_name"`
+
+		RCPort       int               `json:"rc_port"`
+
+	
 	RCUser    string            `json:"rc_user"`
 	RCPassSet bool              `json:"rc_pass_set"`
 	RCOptions map[string]string `json:"rc_options"`
@@ -146,6 +153,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		SaltSet:      cfg.RClone.Salt != "",
 		RCEnabled:    cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled,
 		RCUrl:        cfg.RClone.RCUrl,
+		VFSName:      cfg.RClone.VFSName,
 		RCPort:       cfg.RClone.RCPort,
 		RCUser:       cfg.RClone.RCUser,
 		RCPassSet:    cfg.RClone.RCPass != "",

@@ -109,10 +109,10 @@ export function FuseConfig() {
       <div className="card-body">
         <h2 className="card-title flex items-center gap-2">
           <FolderOpen className="w-6 h-6" />
-          AltFS Native Mount
+          altmount Native Mount
         </h2>
         <p className="text-sm opacity-70">
-          Mount AltFS directly to a local directory for high performance access.
+          Mount altmount directly to a local directory for high performance access.
         </p>
 
         <div className="divider"></div>

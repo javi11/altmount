@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const MountProvider = "AltFS"
+const MountProvider = "altmount"
 
 // Config represents the complete application configuration
 type Config struct {
@@ -101,6 +101,7 @@ type RCloneConfig struct {
 
 	// Mount Configuration
 	MountEnabled *bool             `yaml:"mount_enabled" mapstructure:"mount_enabled" json:"mount_enabled"`
+	VFSName      string            `yaml:"vfs_name" mapstructure:"vfs_name" json:"vfs_name"`
 	MountOptions map[string]string `yaml:"mount_options" mapstructure:"mount_options" json:"mount_options"`
 	LogLevel     string            `yaml:"log_level" mapstructure:"log_level" json:"log_level"`
 	UID          int               `yaml:"uid" mapstructure:"uid" json:"uid"`
@@ -1114,6 +1115,7 @@ func DefaultConfig(configDir ...string) *Config {
 			RCUser:       "admin",
 			RCPass:       "admin",
 			RCPort:       5573, // Changed from 5572 to match your command
+			VFSName:      MountProvider,
 			MountEnabled: &mountEnabled,
 			MountOptions: map[string]string{},
 

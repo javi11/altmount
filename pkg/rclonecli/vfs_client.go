@@ -36,6 +36,7 @@ func TestConnection(
 	rcUrl string,
 	rcUser string,
 	rcPass string,
+	vfsName string,
 	httpClient *http.Client,
 ) error {
 	if rcUrl == "" {
@@ -47,26 +48,47 @@ func TestConnection(
 		return fmt.Errorf("invalid RC URL configuration: %w", err)
 	}
 
-	data := map[string]string{}
-
-	payload, err := json.Marshal(data)
+	// 1. Test basic connection with rc/noop
+	req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/rc/noop", bytes.NewBuffer([]byte("{}")))
 	if err != nil {
 		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", baseUrl+"/rc/noop", bytes.NewBuffer(payload))
-	if err != nil {
-		return err
-	}
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return fmt.Errorf("RC server returned status %d", resp.StatusCode)
+	}
+
+	// 2. If vfsName is provided, verify it exists using vfs/forget
+	if vfsName != "" {
+		data := map[string]string{
+			"fs":  fmt.Sprintf("%s:", vfsName),
+			"dir": "/",
+		}
+		payload, _ := json.Marshal(data)
+
+		req, err = http.NewRequestWithContext(ctx, "POST", baseUrl+"/vfs/forget", bytes.NewBuffer(payload))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err = httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("VFS %q not found or not ready: %s", vfsName, string(body))
+		}
 	}
 
 	return nil

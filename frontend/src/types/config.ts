@@ -105,6 +105,7 @@ export interface RCloneConfig {
 	// RC (Remote Control) Configuration
 	rc_enabled: boolean;
 	rc_url: string;
+	vfs_name: string;
 	rc_port: number;
 	rc_user: string;
 	rc_pass_set: boolean;
@@ -293,6 +294,7 @@ export interface RCloneUpdateRequest {
 	salt?: string;
 	rc_enabled?: boolean;
 	rc_url?: string;
+	vfs_name?: string;
 	rc_port?: number;
 	rc_user?: string;
 	rc_pass?: string;
@@ -441,9 +443,9 @@ export interface StreamingFormData {
 
 export interface RCloneFormData {
 	password: string;
-	salt: string;
 	rc_enabled: boolean;
 	rc_url: string;
+	vfs_name: string;
 	rc_port: number;
 	rc_user: string;
 	rc_pass: string;
@@ -491,6 +493,7 @@ export interface RCloneFormData {
 export interface RCloneRCFormData {
 	rc_enabled: boolean;
 	rc_url: string;
+	vfs_name: string;
 	rc_port: number;
 	rc_user: string;
 	rc_pass: string;
@@ -709,8 +712,8 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	fuse: {
-		title: "AltFS Native Mount",
-		description: "Configure AltFS native FUSE mount settings",
+		title: "altmount Native Mount",
+		description: "Configure altmount native FUSE mount settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},

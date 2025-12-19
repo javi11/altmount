@@ -71,7 +71,7 @@ func (s *Server) Mount() error {
 	opts := &fs.Options{
 		MountOptions: fuse.MountOptions{
 			AllowOther:   s.config.AllowOther,
-			Name:         "AltFS",
+			Name:         "altmount",
 			Debug:        s.config.Debug,
 			MaxReadAhead: s.config.MaxReadAheadMB * 1024 * 1024,
 			// AsyncRead:    true,
