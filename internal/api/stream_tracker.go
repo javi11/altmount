@@ -13,6 +13,7 @@ import (
 // StreamTracker tracks active streams
 type StreamTracker struct {
 	streams sync.Map
+	done    chan struct{}
 }
 
 type streamInternal struct {
@@ -23,54 +24,75 @@ type streamInternal struct {
 
 // NewStreamTracker creates a new stream tracker
 func NewStreamTracker() *StreamTracker {
-	t := &StreamTracker{}
+	t := &StreamTracker{
+		done: make(chan struct{}),
+	}
 	go t.snapshotLoop()
 	return t
+}
+
+func (t *StreamTracker) Stop() {
+	close(t.done)
 }
 
 func (t *StreamTracker) snapshotLoop() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		t.streams.Range(func(key, value interface{}) bool {
-			s := value.(*streamInternal)
-			now := time.Now()
-			currentBytes := atomic.LoadInt64(&s.BytesSent)
+	for {
+		select {
+		case <-t.done:
+			return
+		case <-ticker.C:
+			t.streams.Range(func(key, value interface{}) bool {
+				s := value.(*streamInternal)
+				now := time.Now()
 
-			if !s.lastSnapshot.IsZero() {
-				duration := now.Sub(s.lastSnapshot).Seconds()
-				if duration > 0 {
-					bytesDiff := currentBytes - s.lastBytesSent
-					if bytesDiff < 0 {
-						bytesDiff = 0
+				// Cleanup stale streams (no activity for 5 minutes)
+				if !s.lastSnapshot.IsZero() && now.Sub(s.lastSnapshot) > 5*time.Minute {
+					t.streams.Delete(key)
+					return true
+				}
+
+				currentBytes := atomic.LoadInt64(&s.BytesSent)
+
+				if !s.lastSnapshot.IsZero() {
+					duration := now.Sub(s.lastSnapshot).Seconds()
+					if duration > 0 {
+						bytesDiff := currentBytes - s.lastBytesSent
+						if bytesDiff < 0 {
+							bytesDiff = 0
+						}
+						s.BytesPerSecond = int64(float64(bytesDiff) / duration)
 					}
-					s.BytesPerSecond = int64(float64(bytesDiff) / duration)
 				}
-			}
 
-			// Calculate Average Speed
-			totalDuration := now.Sub(s.StartedAt).Seconds()
-			if totalDuration > 0 {
-				s.SpeedAvg = int64(float64(currentBytes) / totalDuration)
-			}
+				// Calculate Average Speed
+				totalDuration := now.Sub(s.StartedAt).Seconds()
+				if totalDuration > 0 {
+					s.SpeedAvg = int64(float64(currentBytes) / totalDuration)
+				}
 
-			// Calculate ETA based on current speed
-			if s.BytesPerSecond > 0 && s.TotalSize > 0 {
-				remainingBytes := s.TotalSize - currentBytes
-				if remainingBytes > 0 {
-					s.ETA = remainingBytes / s.BytesPerSecond
+				// Calculate ETA based on current speed
+				if s.BytesPerSecond > 0 && s.TotalSize > 0 {
+					remainingBytes := s.TotalSize - currentBytes
+					if remainingBytes > 0 {
+						s.ETA = remainingBytes / s.BytesPerSecond
+					} else {
+						s.ETA = 0
+					}
 				} else {
-					s.ETA = 0
+					s.ETA = -1 // Unknown or Infinite
 				}
-			} else {
-				s.ETA = -1 // Unknown or Infinite
-			}
 
-			s.lastBytesSent = currentBytes
-			s.lastSnapshot = now
-			return true
-		})
+				s.lastBytesSent = currentBytes
+				// Only update lastSnapshot if bytes were actually sent, otherwise it keeps the time of last activity
+				if currentBytes > s.lastBytesSent || s.lastSnapshot.IsZero() {
+					s.lastSnapshot = now
+				}
+				return true
+			})
+		}
 	}
 }
 
@@ -103,6 +125,7 @@ func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
 		atomic.AddInt64(&stream.BytesSent, bytesRead)
+		stream.lastSnapshot = time.Now()
 	}
 }
 

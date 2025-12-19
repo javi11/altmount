@@ -80,3 +80,7 @@ func (m *monitoredFile) Write(p []byte) (n int, err error) {
 	}
 	return m.File.Write(p)
 }
+
+func (m *monitoredFile) Close() error {
+	return m.File.Close()
+}

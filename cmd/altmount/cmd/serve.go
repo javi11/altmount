@@ -105,6 +105,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create stream tracker for monitoring active streams
 	streamTracker := api.NewStreamTracker()
+	defer streamTracker.Stop()
 
 	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, repos.UserRepo, repos.HealthRepo)
 	if err != nil {
@@ -221,6 +222,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Start graceful shutdown sequence
 	logger.InfoContext(ctx, "Starting graceful shutdown sequence")
+
+	// Shutdown API server and its managed resources (like FUSE)
+	apiServer.Shutdown(ctx)
 
 	// Stop health worker if running
 	if healthWorker != nil {

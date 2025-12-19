@@ -24,6 +24,21 @@ func NewFuseManager() *FuseManager {
 	}
 }
 
+// Stop stops the FUSE mount if running
+func (m *FuseManager) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.server != nil {
+		slog.Info("Unmounting FUSE on manager stop")
+		if err := m.server.Unmount(); err != nil {
+			slog.Error("Failed to unmount FUSE on manager stop", "error", err)
+		}
+		m.server = nil
+		m.status = "stopped"
+	}
+}
+
 // handleStartFuseMount starts the FUSE mount
 func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 	var req struct {

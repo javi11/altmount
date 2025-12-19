@@ -47,6 +47,7 @@ type UsenetReader struct {
 	maxCacheSize       int64 // Maximum cache size in bytes
 	init               chan any
 	initDownload       sync.Once
+	closeOnce          sync.Once
 	totalBytesRead     int64
 	poolGetter         func() (nntppool.UsenetConnectionPool, error) // Dynamic pool getter
 
@@ -102,36 +103,52 @@ func NewUsenetReader(
 // This is useful for pre-fetching data before the first Read call.
 func (b *UsenetReader) Start() {
 	b.initDownload.Do(func() {
-		b.init <- struct{}{}
+		// Use select to avoid blocking or panicking if closed
+		select {
+		case b.init <- struct{}{}:
+		default:
+		}
 	})
 }
 
 func (b *UsenetReader) Close() error {
-	b.cancel()
-	close(b.init)
+	b.closeOnce.Do(func() {
+		b.cancel()
+		
+		// Drain and close init channel safely
+		select {
+		case <-b.init:
+		default:
+		}
+		close(b.init)
 
-	// Wait synchronously with timeout to prevent goroutine leaks
-	// Use a separate goroutine to detect when cleanup completes
-	done := make(chan struct{})
-	go func() {
-		b.wg.Wait()
-		close(done)
-	}()
+		// Wait synchronously with timeout to prevent goroutine leaks
+		// Use a separate goroutine to detect when cleanup completes
+		done := make(chan struct{})
+		go func() {
+			b.wg.Wait()
+			close(done)
+		}()
 
-	// Wait for cleanup with reasonable timeout
-	select {
-	case <-done:
-		// Cleanup completed successfully
-		_ = b.rg.Clear()
-		b.rg = nil
-	case <-time.After(30 * time.Second):
-		// Timeout waiting for downloads to complete
-		// This prevents hanging but logs the issue
-		b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
-		// Still attempt to clear resources
-		_ = b.rg.Clear()
-		b.rg = nil
-	}
+		// Wait for cleanup with reasonable timeout
+		select {
+		case <-done:
+			// Cleanup completed successfully
+			if b.rg != nil {
+				_ = b.rg.Clear()
+				b.rg = nil
+			}
+		case <-time.After(30 * time.Second):
+			// Timeout waiting for downloads to complete
+			// This prevents hanging but logs the issue
+			b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
+			// Still attempt to clear resources
+			if b.rg != nil {
+				_ = b.rg.Clear()
+				b.rg = nil
+			}
+		}
+	})
 
 	return nil
 }
@@ -145,7 +162,11 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 	}
 
 	b.initDownload.Do(func() {
-		b.init <- struct{}{}
+		// Use select to avoid blocking or panicking if closed
+		select {
+		case b.init <- struct{}{}:
+		default:
+		}
 	})
 
 	s, err := b.rg.Get()

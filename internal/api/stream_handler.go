@@ -51,6 +51,10 @@ func (m *MonitoredFile) Seek(offset int64, whence int) (int64, error) {
 	return m.file.Seek(offset, whence)
 }
 
+func (m *MonitoredFile) Close() error {
+	return m.file.Close()
+}
+
 // NewStreamHandler creates a new stream handler with the provided filesystem and user repository
 func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker) *StreamHandler {
 	return &StreamHandler{

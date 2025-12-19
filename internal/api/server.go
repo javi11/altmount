@@ -262,6 +262,13 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
 }
 
+// Shutdown shuts down the API server and its managed resources
+func (s *Server) Shutdown(ctx context.Context) {
+	if s.fuseManager != nil {
+		s.fuseManager.Stop()
+	}
+}
+
 // handleGetActiveStreams handles GET /api/files/active-streams
 func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
