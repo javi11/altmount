@@ -21,7 +21,9 @@ type ActiveStream struct {
 	TotalSize        int64     `json:"total_size"`
 	BytesSent        int64     `json:"bytes_sent"`
 	TotalConnections int       `json:"total_connections"`
-	LastActivity     int64     `json:"-"` // Unix nano timestamp of last activity
+	CurrentSpeed     int64     `json:"current_speed"` // Bytes per second
+	LastActivity     int64     `json:"-"`             // Unix nano timestamp of last activity
+	lastBytesSent    int64     `json:"-"`             // Used for speed calculation
 }
 
 // StreamTracker tracks active streams
@@ -38,14 +40,16 @@ func NewStreamTracker() *StreamTracker {
 // AddStream adds a new stream and returns the stream object for updates
 func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64) *ActiveStream {
 	id := uuid.New().String()
+	now := time.Now()
 	stream := &ActiveStream{
-		ID:           id,
-		FilePath:     filePath,
-		StartedAt:    time.Now(),
-		Source:       source,
-		UserName:     userName,
-		TotalSize:    totalSize,
-		LastActivity: time.Now().UnixNano(),
+		ID:            id,
+		FilePath:      filePath,
+		StartedAt:     now,
+		Source:        source,
+		UserName:      userName,
+		TotalSize:     totalSize,
+		LastActivity:  now.UnixNano(),
+		lastBytesSent: 0,
 	}
 	t.streams.Store(id, stream)
 	return stream
@@ -100,6 +104,9 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 			currentBytes := atomic.LoadInt64(&s.BytesSent)
 			existing.BytesSent += currentBytes
 
+			// Sum up current speed
+			existing.CurrentSpeed += atomic.LoadInt64(&s.CurrentSpeed)
+
 			// Use the earliest start time to represent the session start
 			if s.StartedAt.Before(existing.StartedAt) {
 				existing.StartedAt = s.StartedAt
@@ -114,8 +121,9 @@ func (t *StreamTracker) GetAll() []ActiveStream {
 		} else {
 			// Initialize new group with this stream
 			streamCopy := *s
-			// Load current atomic value
+			// Load current atomic values
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
+			streamCopy.CurrentSpeed = atomic.LoadInt64(&s.CurrentSpeed)
 			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
 			streamCopy.ID = groupKey
 			streamCopy.TotalConnections = 1
@@ -146,22 +154,60 @@ func (t *StreamTracker) GetStream(id string) *ActiveStream {
 	return nil
 }
 
-// StartCleanup starts a background goroutine to clean up stale streams
+// StartCleanup starts a background goroutine to clean up stale streams and update speeds
 func (t *StreamTracker) StartCleanup(ctx context.Context) {
 	go func() {
-		// Run cleanup every 5 minutes
-		ticker := time.NewTicker(5 * time.Minute)
+		// Run cleanup and speed calculation every 5 seconds
+		// Frequent enough for speed updates, infrequent enough for cleanup overhead
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+
+		// Counter to only run heavy cleanup every minute (12 * 5s)
+		cleanupCounter := 0
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				t.CleanupStaleStreams(30 * time.Minute)
+				// 1. Calculate speeds for all active streams
+				t.CalculateSpeeds(5 * time.Second)
+
+				// 2. Perform stale stream cleanup every minute
+				cleanupCounter++
+				if cleanupCounter >= 12 {
+					t.CleanupStaleStreams(30 * time.Minute)
+					cleanupCounter = 0
+				}
 			}
 		}
 	}()
+}
+
+// CalculateSpeeds updates the CurrentSpeed for all active streams based on bytes sent since last check
+func (t *StreamTracker) CalculateSpeeds(interval time.Duration) {
+	seconds := interval.Seconds()
+	if seconds <= 0 {
+		return
+	}
+
+	t.streams.Range(func(key, value interface{}) bool {
+		stream := value.(*ActiveStream)
+		
+		currentBytes := atomic.LoadInt64(&stream.BytesSent)
+		lastBytes := atomic.LoadInt64(&stream.lastBytesSent)
+		
+		delta := currentBytes - lastBytes
+		if delta < 0 {
+			delta = 0
+		}
+		
+		speed := int64(float64(delta) / seconds)
+		atomic.StoreInt64(&stream.CurrentSpeed, speed)
+		atomic.StoreInt64(&stream.lastBytesSent, currentBytes)
+		
+		return true
+	})
 }
 
 // CleanupStaleStreams removes streams that haven't been active for the specified duration
