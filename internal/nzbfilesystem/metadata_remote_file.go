@@ -177,8 +177,19 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*ActiveStream); ok {
 			streamID = stream.ID
 		} else {
+			// Check for source and username in context
+			source := "FUSE"
+			if s, ok := ctx.Value(utils.StreamSourceKey).(string); ok && s != "" {
+				source = s
+			}
+			
+			userName := "FUSE"
+			if u, ok := ctx.Value(utils.StreamUserNameKey).(string); ok && u != "" {
+				userName = u
+			}
+
 			// Fallback to FUSE if no tracking info in context
-			streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
+			streamID = mrf.streamTracker.Add(normalizedName, source, userName, fileMeta.FileSize)
 		}
 	}
 
@@ -549,6 +560,11 @@ type MetadataVirtualFile struct {
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
 
 	mu sync.Mutex
+}
+
+// GetStreamID returns the active stream ID associated with this file handle
+func (mvf *MetadataVirtualFile) GetStreamID() string {
+	return mvf.streamID
 }
 
 // WarmUp triggers a background pre-fetch of the file start

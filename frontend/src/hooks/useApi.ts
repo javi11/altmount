@@ -316,6 +316,18 @@ export const useDirectHealthCheck = () => {
 	});
 };
 
+export const useSetHealthPriority = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ id, priority }: { id: number; priority: boolean }) =>
+			apiClient.setHealthPriority(id, priority),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
 export const useCancelHealthCheck = () => {
 	const queryClient = useQueryClient();
 

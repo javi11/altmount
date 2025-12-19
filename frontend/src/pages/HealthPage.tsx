@@ -14,6 +14,7 @@ import {
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
+	useSetHealthPriority,
 } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
 import {
@@ -76,6 +77,7 @@ export function HealthPage() {
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
+	const setHealthPriority = useSetHealthPriority();
 	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
@@ -104,6 +106,24 @@ export function HealthPage() {
 		);
 		if (confirmed) {
 			await deleteItem.mutateAsync(id);
+		}
+	};
+
+	const handleSetPriority = async (id: number, priority: boolean) => {
+		try {
+			await setHealthPriority.mutateAsync({ id, priority });
+			showToast({
+				title: "Priority Updated",
+				message: `File priority set to ${priority ? "High" : "Normal"}`,
+				type: "success",
+			});
+		} catch (err) {
+			console.error("Failed to update priority:", err);
+			showToast({
+				title: "Update Failed",
+				message: "Failed to update file priority",
+				type: "error",
+			});
 		}
 	};
 
@@ -574,6 +594,7 @@ export function HealthPage() {
 						onManualCheck={handleManualCheck}
 						onRepair={handleRepair}
 						onDelete={handleDelete}
+						onSetPriority={handleSetPriority}
 					/>
 
 					{meta?.total && meta.total > pageSize && (

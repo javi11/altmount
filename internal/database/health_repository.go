@@ -536,10 +536,12 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 	if sortBy != "" {
 		// Whitelist of allowed sort fields to prevent SQL injection
 		allowedFields := map[string]string{
-			"file_path":  "file_path",
-			"created_at": "created_at",
-			"status":     "status",
-			"priority":   "priority",
+			"file_path":          "file_path",
+			"created_at":         "created_at",
+			"status":             "status",
+			"priority":           "priority",
+			"last_checked":       "last_checked",
+			"scheduled_check_at": "scheduled_check_at",
 		}
 
 		if field, ok := allowedFields[sortBy]; ok {

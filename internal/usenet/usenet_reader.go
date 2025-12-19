@@ -391,6 +391,11 @@ func (b *UsenetReader) downloadManager(
 						return err
 					}
 
+					if err := w.Close(); err != nil {
+						b.log.ErrorContext(ctx, "Error closing segment buffer on success:", "error", err)
+						return err
+					}
+
 					return nil
 				})
 			}

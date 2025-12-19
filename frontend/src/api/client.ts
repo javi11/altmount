@@ -406,6 +406,20 @@ export class APIClient {
 		});
 	}
 
+	async setHealthPriority(id: number, priority: boolean) {
+		return this.request<{
+			message: string;
+			id: number;
+			file_path: string;
+			priority: boolean;
+			updated_at: string;
+			health_data: FileHealth;
+		}>(`/health/${id}/priority`, {
+			method: "POST",
+			body: JSON.stringify({ priority }),
+		});
+	}
+
 	async cancelHealthCheck(id: number) {
 		return this.request<{
 			message: string;

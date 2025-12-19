@@ -141,16 +141,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, utils.Origin, r.RequestURI)
 	ctx = context.WithValue(ctx, utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true")
 
-	// Authenticate again to get user details (cached/fast enough) or refactor GetHTTPHandler to pass it
-	// Since GetHTTPHandler calls serveFile directly, we can optimize by fetching user once.
-	// However, GetHTTPHandler interface is fixed as http.Handler.
-	// Let's re-authenticate or trust the caller? GetHTTPHandler does auth.
-	// To pass user, we could use context or change serveFile signature.
-	// Changing serveFile signature is cleaner but it is called by GetHTTPHandler.
-	// Let's call authenticate again, it's a DB call? No, GetAllUsers might be cached or DB.
-	// To avoid DB hit, let's modify GetHTTPHandler to pass user in context or refactor.
-	// Actually, for now, calling it again is safe but inefficient.
-	// BETTER: Modify GetHTTPHandler to store user in context.
+	// Authenticate again to get user details
 	user, ok := h.authenticate(r)
 	if !ok {
 		// Should have been caught by GetHTTPHandler
@@ -164,6 +155,10 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	} else {
 		userName = user.UserID
 	}
+
+	// Set stream source and username for tracking
+	ctx = context.WithValue(ctx, utils.StreamSourceKey, "API")
+	ctx = context.WithValue(ctx, utils.StreamUserNameKey, userName)
 
 	// Get path from query parameter
 	path := r.URL.Query().Get("path")
@@ -197,53 +192,53 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-			// Track stream if tracker is available
-		if h.streamTracker != nil {
-			// Create a cancellable context for the stream
-			streamCtx, cancel := context.WithCancel(ctx)
-			defer cancel() // Ensure cleanup
-	
-			stream := h.streamTracker.Add(path, "API", userName, stat.Size())
-			defer h.streamTracker.Remove(stream)
+	// Track stream if tracker is available
+	if h.streamTracker != nil {
+		// Create a cancellable context for the stream
+		streamCtx, cancel := context.WithCancel(ctx)
+		defer cancel() // Ensure cleanup
 
-			// Add stream ID to context for low-level tracking
-			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)
-
-			streamObj := h.streamTracker.GetStream(stream)
-			if streamObj == nil {
-				http.Error(w, "Stream not found", http.StatusInternalServerError)
-				return
-			}
-			// Wrap the file with monitoring
-			monitoredFile := &MonitoredFile{
-				file:   file,
-				stream: streamObj,
-				ctx:    streamCtx,
-			}
-		// Use monitoredFile instead of file
-		// Note: http.ServeContent requires io.ReadSeeker. MonitoredFile implements it.
-		// However, http.ServeContent also uses the 'content' param (file) to read.
-
-		// Set MIME type based on file extension (prevents internal seeks)
-		ext := filepath.Ext(path)
-		if ext != "" {
-			mimeType := mime.TypeByExtension(ext)
-			if mimeType != "" {
-				w.Header().Set("Content-Type", mimeType)
-			} else {
-				w.Header().Set("Content-Type", "application/octet-stream")
-			}
+		var streamID string
+		// Try to get stream ID from the file itself (created during OpenFile)
+		if mvf, ok := file.(*nzbfilesystem.MetadataVirtualFile); ok {
+			streamID = mvf.GetStreamID()
 		}
 
-		// Indicate support for range requests
-		w.Header().Set("Accept-Ranges", "bytes")
+		if streamID != "" {
+			// Add stream ID to context for low-level tracking
+			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, streamID)
 
-		// Set Content-Disposition to inline for browser viewing
-		filename := filepath.Base(path)
-		w.Header().Set("Content-Disposition", `inline; filename="`+filename+`"`)
+			streamObj := h.streamTracker.GetStream(streamID)
+			if streamObj != nil {
+				// Wrap the file with monitoring
+				monitoredFile := &MonitoredFile{
+					file:   file,
+					stream: streamObj,
+					ctx:    streamCtx,
+				}
 
-		http.ServeContent(w, r, filename, stat.ModTime(), monitoredFile)
-		return
+				// Set MIME type based on file extension (prevents internal seeks)
+				ext := filepath.Ext(path)
+				if ext != "" {
+					mimeType := mime.TypeByExtension(ext)
+					if mimeType != "" {
+						w.Header().Set("Content-Type", mimeType)
+					} else {
+						w.Header().Set("Content-Type", "application/octet-stream")
+					}
+				}
+
+				// Indicate support for range requests
+				w.Header().Set("Accept-Ranges", "bytes")
+
+				// Set Content-Disposition to inline for browser viewing
+				filename := filepath.Base(path)
+				w.Header().Set("Content-Disposition", `inline; filename="`+filename+`"`)
+
+				http.ServeContent(w, r, filename, stat.ModTime(), monitoredFile)
+				return
+			}
+		}
 	}
 
 	// Fallback if tracker is nil (should not happen in prod)

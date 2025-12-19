@@ -16,6 +16,7 @@ interface HealthTableRowProps {
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onSetPriority: (id: number, priority: boolean) => void;
 }
 
 export function HealthTableRow({
@@ -30,6 +31,7 @@ export function HealthTableRow({
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onSetPriority,
 }: HealthTableRowProps) {
 	let statusIcon;
 	let iconColorClass = "text-base-content/50"; // Default color
@@ -113,11 +115,24 @@ export function HealthTableRow({
 				)}
 			</td>
 			<td>
-				{item.priority ? (
-					<div className="badge badge-error badge-sm">High</div>
-				) : (
-					<div className="badge badge-ghost badge-sm">Normal</div>
-				)}
+				<div
+					className="cursor-pointer transition-transform hover:scale-110"
+					onClick={() => onSetPriority(item.id, !item.priority)}
+					title="Click to toggle priority"
+					role="button"
+					tabIndex={0}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							onSetPriority(item.id, !item.priority);
+						}
+					}}
+				>
+					{item.priority ? (
+						<div className="badge badge-error badge-sm">High</div>
+					) : (
+						<div className="badge badge-ghost badge-sm">Normal</div>
+					)}
+				</div>
 			</td>
 			<td>
 				<div className="flex flex-col gap-1">

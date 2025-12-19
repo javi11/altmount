@@ -29,9 +29,12 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 
 	// Validate sort parameters
 	validSortFields := map[string]bool{
-		"file_path":  true,
-		"created_at": true,
-		"status":     true,
+		"file_path":          true,
+		"created_at":         true,
+		"status":             true,
+		"priority":           true,
+		"last_checked":       true,
+		"scheduled_check_at": true,
 	}
 	if !validSortFields[sortBy] {
 		sortBy = "created_at"
@@ -1204,3 +1207,90 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 		"data":    response,
 	})
 }
+
+// handleSetHealthPriority handles POST /api/health/{id}/priority
+func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record identifier is required",
+		})
+	}
+
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid health record ID",
+			"details": "ID must be a valid integer",
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Priority bool `json:"priority"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
+	}
+
+	// Check if item exists in health database
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to check health record",
+			"details": err.Error(),
+		})
+	}
+
+	if item == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record not found",
+		})
+	}
+
+	// Set priority
+	err = s.healthRepo.SetPriority(c.Context(), id, req.Priority)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to update priority",
+			"details": err.Error(),
+		})
+	}
+
+	// Get the updated health record
+	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve updated health record",
+			"details": err.Error(),
+		})
+	}
+
+	response := map[string]interface{}{
+		"message":     "Health priority updated",
+		"id":          id,
+		"file_path":   item.FilePath,
+		"priority":    updatedItem.Priority,
+		"updated_at":  time.Now().Format(time.RFC3339),
+		"health_data": ToHealthItemResponse(updatedItem),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+

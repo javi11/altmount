@@ -24,6 +24,7 @@ interface HealthTableProps {
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onSetPriority: (id: number, priority: boolean) => void;
 }
 
 export function HealthTable({
@@ -45,6 +46,7 @@ export function HealthTable({
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onSetPriority,
 }: HealthTableProps) {
 	// Helper functions for select all checkbox state
 	const isAllSelected =
@@ -82,6 +84,7 @@ export function HealthTable({
 										onManualCheck={onManualCheck}
 										onRepair={onRepair}
 										onDelete={onDelete}
+										onSetPriority={onSetPriority}
 									/>
 								))}
 							</tbody>

@@ -16,4 +16,6 @@ const (
 	ShowCorrupted    = contextKey("showCorrupted")
 	ActiveStreamKey  = contextKey("activeStream")
 	StreamIDKey      = contextKey("streamID")
+	StreamSourceKey  = contextKey("streamSource")
+	StreamUserNameKey = contextKey("streamUserName")
 )
