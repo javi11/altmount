@@ -1,12 +1,17 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// Default timeout for stale streams (4 hours - covers most movie lengths)
+const defaultStreamTimeout = 4 * time.Hour
 
 // ActiveStream represents a file currently being streamed
 type ActiveStream struct {
@@ -22,11 +27,58 @@ type ActiveStream struct {
 // StreamTracker tracks active streams
 type StreamTracker struct {
 	streams sync.Map
+	timeout time.Duration
 }
 
 // NewStreamTracker creates a new stream tracker
 func NewStreamTracker() *StreamTracker {
-	return &StreamTracker{}
+	return &StreamTracker{
+		timeout: defaultStreamTimeout,
+	}
+}
+
+// StartCleanup starts a background goroutine that periodically removes stale streams.
+// Call this once during server startup. The cleanup runs every 5 minutes.
+// The goroutine stops when the context is cancelled.
+func (t *StreamTracker) StartCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				t.cleanupStale()
+			}
+		}
+	}()
+}
+
+// cleanupStale removes streams that have been active longer than the timeout.
+// This handles cases where client disconnections don't properly trigger cleanup.
+func (t *StreamTracker) cleanupStale() {
+	now := time.Now()
+	var removed int
+
+	t.streams.Range(func(key, value interface{}) bool {
+		stream := value.(ActiveStream)
+		if now.Sub(stream.StartedAt) > t.timeout {
+			t.streams.Delete(key)
+			removed++
+			slog.Debug("Cleaned up stale stream",
+				"stream_id", stream.ID,
+				"file_path", stream.FilePath,
+				"started_at", stream.StartedAt,
+				"age", now.Sub(stream.StartedAt))
+		}
+		return true
+	})
+
+	if removed > 0 {
+		slog.Info("Cleaned up stale streams", "count", removed)
+	}
 }
 
 // Add adds a new stream and returns its ID
