@@ -1,6 +1,7 @@
 package nzbfilesystem
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 )
@@ -8,6 +9,7 @@ import (
 // StreamTracker interface for tracking active streams
 type StreamTracker interface {
 	Add(filePath, source, userName string, totalSize int64) string
+	AddWithCancel(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) string
 	UpdateProgress(id string, bytesRead int64)
 	Remove(id string)
 }

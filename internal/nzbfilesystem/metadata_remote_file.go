@@ -158,16 +158,9 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	streamID := ""
 	fileCtx := ctx
 	if mrf.streamTracker != nil {
-		// Try to cast to the full tracker implementation to use cancellation support
-		if fullTracker, ok := mrf.streamTracker.(interface {
-			AddWithCancel(filePath, source, userName string, totalSize int64, cancel context.CancelFunc) string
-		}); ok {
-			var cancel context.CancelFunc
-			fileCtx, cancel = context.WithCancel(ctx)
-			streamID = fullTracker.AddWithCancel(normalizedName, "FUSE", "FUSE", fileMeta.FileSize, cancel)
-		} else {
-			streamID = mrf.streamTracker.Add(normalizedName, "FUSE", "FUSE", fileMeta.FileSize)
-		}
+		var cancel context.CancelFunc
+		fileCtx, cancel = context.WithCancel(ctx)
+		streamID = mrf.streamTracker.AddWithCancel(normalizedName, "FUSE", "FUSE", fileMeta.FileSize, cancel)
 	}
 
 	// Create a metadata-based virtual file handle
