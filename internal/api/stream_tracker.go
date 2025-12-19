@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -13,19 +14,24 @@ import (
 // StreamTracker tracks active streams
 type StreamTracker struct {
 	streams sync.Map
+	history []nzbfilesystem.ActiveStream
 	done    chan struct{}
+	mu      sync.Mutex // For history protection
 }
 
 type streamInternal struct {
 	*nzbfilesystem.ActiveStream
 	lastBytesSent int64
 	lastSnapshot  time.Time
+	lastReadAt    time.Time
+	cancel        context.CancelFunc
 }
 
 // NewStreamTracker creates a new stream tracker
 func NewStreamTracker() *StreamTracker {
 	t := &StreamTracker{
-		done: make(chan struct{}),
+		done:    make(chan struct{}),
+		history: make([]nzbfilesystem.ActiveStream, 0, 50),
 	}
 	go t.snapshotLoop()
 	return t
@@ -50,7 +56,7 @@ func (t *StreamTracker) snapshotLoop() {
 
 				// Cleanup stale streams (no activity for 5 minutes)
 				if !s.lastSnapshot.IsZero() && now.Sub(s.lastSnapshot) > 5*time.Minute {
-					t.streams.Delete(key)
+					t.Remove(key.(string))
 					return true
 				}
 
@@ -65,6 +71,15 @@ func (t *StreamTracker) snapshotLoop() {
 						}
 						s.BytesPerSecond = int64(float64(bytesDiff) / duration)
 					}
+				}
+
+				// Update Status
+				if currentBytes == 0 {
+					s.Status = "Buffering"
+				} else if !s.lastReadAt.IsZero() && now.Sub(s.lastReadAt) > 10*time.Second {
+					s.Status = "Stalled"
+				} else {
+					s.Status = "Streaming"
 				}
 
 				// Calculate Average Speed
@@ -97,7 +112,7 @@ func (t *StreamTracker) snapshotLoop() {
 }
 
 // AddStream adds a new stream and returns the stream object for updates
-func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize int64) *nzbfilesystem.ActiveStream {
+func (t *StreamTracker) AddStream(filePath, source, userName, clientIP, userAgent string, totalSize int64) *nzbfilesystem.ActiveStream {
 	id := uuid.New().String()
 	stream := &nzbfilesystem.ActiveStream{
 		ID:        id,
@@ -105,7 +120,10 @@ func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize i
 		StartedAt: time.Now(),
 		Source:    source,
 		UserName:  userName,
+		ClientIP:  clientIP,
+		UserAgent: userAgent,
 		TotalSize: totalSize,
+		Status:    "Starting",
 	}
 	internal := &streamInternal{
 		ActiveStream: stream,
@@ -116,8 +134,16 @@ func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize i
 }
 
 // Add adds a new stream and returns its ID (implements nzbfilesystem.StreamTracker)
-func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64) string {
-	return t.AddStream(filePath, source, userName, totalSize).ID
+func (t *StreamTracker) Add(filePath, source, userName, clientIP, userAgent string, totalSize int64) string {
+	return t.AddStream(filePath, source, userName, clientIP, userAgent, totalSize).ID
+}
+
+// SetCancelFunc sets the cancellation function for a stream
+func (t *StreamTracker) SetCancelFunc(id string, cancel context.CancelFunc) {
+	if val, ok := t.streams.Load(id); ok {
+		internal := val.(*streamInternal)
+		internal.cancel = cancel
+	}
 }
 
 // UpdateProgress updates the bytes sent for a stream by ID
@@ -126,12 +152,59 @@ func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 		stream := val.(*streamInternal)
 		atomic.AddInt64(&stream.BytesSent, bytesRead)
 		stream.lastSnapshot = time.Now()
+		stream.lastReadAt = time.Now()
 	}
 }
 
-// Remove removes a stream by ID
+// Remove removes a stream by ID and adds it to history
 func (t *StreamTracker) Remove(id string) {
-	t.streams.Delete(id)
+	if val, ok := t.streams.Load(id); ok {
+		internal := valueToInternal(val)
+		
+		// Capture final stats
+		finalStream := *internal.ActiveStream
+		finalStream.BytesSent = atomic.LoadInt64(&internal.BytesSent)
+		finalStream.Status = "Completed"
+		
+		t.mu.Lock()
+		// Keep last 50 streams in history
+		if len(t.history) >= 50 {
+			t.history = t.history[1:]
+		}
+		t.history = append(t.history, finalStream)
+		t.mu.Unlock()
+
+		t.streams.Delete(id)
+	}
+}
+
+// KillStream cancels the context associated with a stream
+func (t *StreamTracker) KillStream(id string) bool {
+	if val, ok := t.streams.Load(id); ok {
+		internal := val.(*streamInternal)
+		if internal.cancel != nil {
+			internal.cancel()
+			return true
+		}
+	}
+	return false
+}
+
+// GetHistory returns the recent stream history
+func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	
+	// Return a copy of history, reversed (newest first)
+	res := make([]nzbfilesystem.ActiveStream, len(t.history))
+	for i, s := range t.history {
+		res[len(t.history)-1-i] = s
+	}
+	return res
+}
+
+func valueToInternal(val interface{}) *streamInternal {
+	return val.(*streamInternal)
 }
 
 // GetAll returns all active streams, aggregated by file, user, and source
@@ -177,6 +250,11 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			// Ensure we have the total size (should be consistent across connections)
 			if existing.TotalSize == 0 && s.TotalSize > 0 {
 				existing.TotalSize = s.TotalSize
+			}
+
+			// Use the "most active" status
+			if existing.Status != "Streaming" && s.Status == "Streaming" {
+				existing.Status = "Streaming"
 			}
 
 			existing.TotalConnections++

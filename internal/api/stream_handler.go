@@ -163,6 +163,8 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	// Set stream source and username for tracking
 	ctx = context.WithValue(ctx, utils.StreamSourceKey, "API")
 	ctx = context.WithValue(ctx, utils.StreamUserNameKey, userName)
+	ctx = context.WithValue(ctx, utils.ClientIPKey, r.RemoteAddr)
+	ctx = context.WithValue(ctx, utils.UserAgentKey, r.UserAgent())
 
 	// Get path from query parameter
 	path := r.URL.Query().Get("path")
@@ -211,6 +213,9 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		if streamID != "" {
 			// Add stream ID to context for low-level tracking
 			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, streamID)
+			
+			// Register cancel function in tracker
+			h.streamTracker.SetCancelFunc(streamID, cancel)
 
 			streamObj := h.streamTracker.GetStream(streamID)
 			if streamObj != nil {

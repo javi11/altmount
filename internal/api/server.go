@@ -205,6 +205,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/active-streams", s.handleGetActiveStreams)
+	api.Delete("/files/active-streams/:id", s.handleKillStream)
+	api.Get("/files/streams/history", s.handleGetStreamHistory)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
 	api.Post("/files/export-batch", s.handleBatchExportNZB)
 	// Note: /files/stream is handled by StreamHandler at HTTP server level
@@ -402,4 +404,42 @@ func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
 func (s *Server) handleGetSyncNeeded(c *fiber.Ctx) error {
 	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleGetSyncNeeded(c)
+}
+
+// handleKillStream handles DELETE /api/files/active-streams/:id
+func (s *Server) handleKillStream(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if s.streamTracker == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Stream tracker not available",
+		})
+	}
+
+	if s.streamTracker.KillStream(id) {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"message": "Stream termination requested",
+		})
+	}
+
+	return c.Status(404).JSON(fiber.Map{
+		"success": false,
+		"message": "Stream not found or cannot be killed",
+	})
+}
+
+// handleGetStreamHistory handles GET /api/files/streams/history
+func (s *Server) handleGetStreamHistory(c *fiber.Ctx) error {
+	if s.streamTracker == nil {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []nzbfilesystem.ActiveStream{},
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    s.streamTracker.GetHistory(),
+	})
 }

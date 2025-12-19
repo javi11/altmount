@@ -131,6 +131,8 @@ func NewHandler(
 		r = r.WithContext(context.WithValue(r.Context(), utils.IsCopy, r.Method == "COPY"))
 		r = r.WithContext(context.WithValue(r.Context(), utils.Origin, r.RequestURI))
 		r = r.WithContext(context.WithValue(r.Context(), utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true"))
+		r = r.WithContext(context.WithValue(r.Context(), utils.ClientIPKey, r.RemoteAddr))
+		r = r.WithContext(context.WithValue(r.Context(), utils.UserAgentKey, r.UserAgent()))
 
 		// Log MOVE and COPY operations to understand client behavior
 		switch r.Method {
@@ -176,9 +178,12 @@ func NewHandler(
 			streamCtx, cancel := context.WithCancel(r.Context())
 			defer cancel() // Ensure cleanup for this specific stream context
 			
-			// Add to tracker
-			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, 0)
+			// Add to tracker with full metadata
+			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, r.RemoteAddr, r.UserAgent(), 0)
 			defer streamTracker.Remove(stream)
+			
+			// Register cancel function in tracker
+			streamTracker.SetCancelFunc(stream, cancel)
 
 			// Add stream ID to context for low-level tracking
 			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)

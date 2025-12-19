@@ -13,17 +13,20 @@ type ActiveStream struct {
 	StartedAt        time.Time `json:"started_at"`
 	Source           string    `json:"source"`
 	UserName         string    `json:"user_name,omitempty"`
+	ClientIP         string    `json:"client_ip,omitempty"`
+	UserAgent        string    `json:"user_agent,omitempty"`
 	TotalSize        int64     `json:"total_size"`
 	BytesSent        int64     `json:"bytes_sent"`
 	BytesPerSecond   int64     `json:"bytes_per_second"`
 	SpeedAvg         int64     `json:"speed_avg"`
 	ETA              int64     `json:"eta"` // Seconds remaining
 	TotalConnections int       `json:"total_connections"`
+	Status           string    `json:"status"` // e.g., "Buffering", "Streaming", "Stalled"
 }
 
 // StreamTracker interface for tracking active streams
 type StreamTracker interface {
-	Add(filePath, source, userName string, totalSize int64) string
+	Add(filePath, source, userName, clientIP, userAgent string, totalSize int64) string
 	UpdateProgress(id string, bytesRead int64)
 	Remove(id string)
 }

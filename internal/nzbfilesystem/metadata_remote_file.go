@@ -192,8 +192,18 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 				userName = u
 			}
 
+			clientIP := ""
+			if ip, ok := ctx.Value(utils.ClientIPKey).(string); ok {
+				clientIP = ip
+			}
+
+			userAgent := ""
+			if ua, ok := ctx.Value(utils.UserAgentKey).(string); ok {
+				userAgent = ua
+			}
+
 			// Fallback to FUSE if no tracking info in context
-			streamID = mrf.streamTracker.Add(normalizedName, source, userName, fileMeta.FileSize)
+			streamID = mrf.streamTracker.Add(normalizedName, source, userName, clientIP, userAgent, fileMeta.FileSize)
 		}
 	}
 
