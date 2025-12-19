@@ -190,7 +190,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	return result, err
 }
 
-// processSingleFile handles single file imports
+// processSingleFile handles single file imports, preserving the source structure.
 func (proc *Processor) processSingleFile(
 	ctx context.Context,
 	virtualDir string,
@@ -204,20 +204,20 @@ func (proc *Processor) processSingleFile(
 		return "", fmt.Errorf("no regular files to process")
 	}
 
-	// Normalize virtualDir only for synthetic duplicate folders; skip if the NZB actually lives inside a
-	// real directory named like the release (e.g. .../Season 01/<file>/<file>.nzb).
 	nzbName := filepath.Base(nzbPath)
 	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 	nzbDirBase := filepath.Base(filepath.Dir(nzbPath))
 	fileDir := filepath.Dir(regularFiles[0].Filename)
+	fileBase := strings.TrimSuffix(regularFiles[0].Filename, filepath.Ext(regularFiles[0].Filename))
+
+	// Only remove redundancy if the folder does not exist in the source (NZB is not actually inside it)
 	if fileDir == "." || fileDir == "" {
-		// Only flatten when the enclosing folder is not the same real folder as the release name.
-		if !strings.EqualFold(nzbDirBase, releaseName) && !strings.EqualFold(nzbDirBase, strings.TrimSuffix(regularFiles[0].Filename, filepath.Ext(regularFiles[0].Filename))) {
+		if !strings.EqualFold(nzbDirBase, releaseName) && !strings.EqualFold(nzbDirBase, fileBase) {
 			virtualDir = normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
 		}
 	}
 
-	// Keep NZB-provided subfolders but rename the leaf to the release name (preventing duplicate extensions)
+	// Keeps NZB subfolders, but renames the file to the release name (avoids duplicate extension)
 	originalDir := filepath.Dir(regularFiles[0].Filename)
 	normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
 	if originalDir != "." && originalDir != "" {
@@ -226,7 +226,7 @@ func (proc *Processor) processSingleFile(
 		regularFiles[0].Filename = normalizedBase
 	}
 
-	// Compute final parent/name, flattening only redundant nesting like file.mkv/file.mkv
+	// Calculates the final destination, preserving the source structure
 	parentPath, finalName := filesystem.DetermineFileLocation(regularFiles[0], virtualDir)
 
 	// Ensure the parent directory exists in metadata
@@ -237,7 +237,7 @@ func (proc *Processor) processSingleFile(
 	// Use the final name for processing
 	regularFiles[0].Filename = finalName
 
-	// Process the single file at the resolved parentPath
+	// Processes the file
 	result, err := singlefile.ProcessSingleFile(
 		ctx,
 		parentPath,
@@ -502,8 +502,7 @@ func normalizeReleaseFilename(nzbFilename, originalFilename string) string {
 	return releaseName + fileExt
 }
 
-// normalizeSingleFileVirtualDir flattens paths where the last directory component matches
-// the release name or filename, avoiding redundant nesting like file.mkv/file.mkv.
+// normalizeSingleFileVirtualDir only remove the last component if it is redundant and does not exist in the source.
 func normalizeSingleFileVirtualDir(virtualDir, releaseName, filename string) string {
 	cleanDir := filepath.Clean(virtualDir)
 	if cleanDir == "." || cleanDir == string(filepath.Separator) {
@@ -513,6 +512,7 @@ func normalizeSingleFileVirtualDir(virtualDir, releaseName, filename string) str
 	base := filepath.Base(cleanDir)
 	fileNoExt := strings.TrimSuffix(filename, filepath.Ext(filename))
 
+	// Only remove if redundant (e.g., file.mkv/file.mkv), but never if it exists in the source
 	if strings.EqualFold(base, releaseName) || strings.EqualFold(base, filename) || strings.EqualFold(base, fileNoExt) {
 		cleanDir = filepath.Dir(cleanDir)
 		if cleanDir == "." {
