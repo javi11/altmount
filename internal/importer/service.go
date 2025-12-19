@@ -394,7 +394,10 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			// Drain any remaining items from channels to prevent parser goroutine leaks.
 			// This ensures the parser can complete even if we exit early due to cancellation.
 			go func() {
-				for range nzbChan {
+				for res := range nzbChan {
+					if res.Content != nil {
+						res.Content.Close()
+					}
 				}
 			}()
 			go func() {
@@ -529,6 +532,11 @@ func (s *Service) processQueueBatch(ctx context.Context, batchChan <-chan *datab
 }
 
 func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
+	// Ensure the content stream is closed
+	if res.Content != nil {
+		defer res.Content.Close()
+	}
+
 	// Create Temp NZB File
 	// Use ID to ensure uniqueness and avoid collisions with releases having the same name
 	nzbFileName := fmt.Sprintf("%s_%s.nzb", sanitizeFilename(res.ID), sanitizeFilename(res.Name))

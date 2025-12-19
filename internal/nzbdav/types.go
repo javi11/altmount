@@ -9,5 +9,5 @@ type ParsedNzb struct {
 	Category string
 	Name     string
 	RelPath  string
-	Content  io.Reader
+	Content  io.ReadCloser
 }
