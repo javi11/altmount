@@ -374,6 +374,10 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 	}
 
 	go func() {
+		// 1. Parse Database
+		parser := nzbdav.NewParser(dbPath)
+		nzbChan, errChan := parser.Parse()
+
 		defer func() {
 			s.importMu.Lock()
 			s.importInfo.Status = ImportStatusIdle
@@ -383,11 +387,18 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			if cleanupFile {
 				os.Remove(dbPath)
 			}
-		}()
 
-		// 1. Parse Database
-		parser := nzbdav.NewParser(dbPath)
-		nzbChan, errChan := parser.Parse()
+			// Drain any remaining items from channels to prevent parser goroutine leaks.
+			// This ensures the parser can complete even if we exit early due to cancellation.
+			go func() {
+				for range nzbChan {
+				}
+			}()
+			go func() {
+				for range errChan {
+				}
+			}()
+		}()
 
 		// Create temp dir for NZBs
 		nzbTempDir, err := os.MkdirTemp(os.TempDir(), "altmount-nzbdav-imports-")
@@ -404,7 +415,7 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			select {
 			case <-importCtx.Done():
 				s.log.InfoContext(importCtx, "Import cancelled")
-				return
+				return // defer will drain remaining channel items
 			case res, ok := <-nzbChan:
 				if !ok {
 					nzbChan = nil
