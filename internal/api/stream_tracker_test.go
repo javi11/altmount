@@ -11,11 +11,12 @@ import (
 
 func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 	tracker := NewStreamTracker()
+	defer tracker.Stop()
 
 	// Add 3 connections for the same file
-	s1 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user1", 1000)
-	s2 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user1", 1000)
-	s3 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user1", 1000)
+	s1 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user1", "127.0.0.1", "TestAgent", 1000)
+	s2 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user1", "127.0.0.1", "TestAgent", 1000)
+	s3 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user1", "127.0.0.1", "TestAgent", 1000)
 
 	// Add some bytes sent to each
 	atomic.AddInt64(&s1.BytesSent, 100)
@@ -23,11 +24,11 @@ func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 	atomic.AddInt64(&s3.BytesSent, 300)
 
 	// Add another file for same user
-	s4 := tracker.AddStream("/movies/other.mkv", "WebDAV", "user1", 2000)
+	s4 := tracker.AddStream("/movies/other.mkv", "WebDAV", "user1", "127.0.0.1", "TestAgent", 2000)
 	atomic.AddInt64(&s4.BytesSent, 500)
 
 	// Add same file for different user
-	s5 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user2", 1000)
+	s5 := tracker.AddStream("/movies/movie.mkv", "WebDAV", "user2", "127.0.0.1", "TestAgent", 1000)
 	atomic.AddInt64(&s5.BytesSent, 50)
 
 	streams := tracker.GetAll()
@@ -55,13 +56,14 @@ func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 
 func TestStreamTracker_GetAll_Sorting(t *testing.T) {
 	tracker := NewStreamTracker()
+	defer tracker.Stop()
 
 	// Add an older stream
-	s1 := tracker.AddStream("/old.mkv", "WebDAV", "user1", 1000)
+	s1 := tracker.AddStream("/old.mkv", "WebDAV", "user1", "127.0.0.1", "TestAgent", 1000)
 	s1.StartedAt = time.Now().Add(-10 * time.Minute)
 
 	// Add a newer stream
-	s2 := tracker.AddStream("/new.mkv", "WebDAV", "user1", 1000)
+	s2 := tracker.AddStream("/new.mkv", "WebDAV", "user1", "127.0.0.1", "TestAgent", 1000)
 	s2.StartedAt = time.Now().Add(-1 * time.Minute)
 
 	streams := tracker.GetAll()
