@@ -16,6 +16,8 @@ type ActiveStream struct {
 	TotalSize        int64     `json:"total_size"`
 	BytesSent        int64     `json:"bytes_sent"`
 	BytesPerSecond   int64     `json:"bytes_per_second"`
+	SpeedAvg         int64     `json:"speed_avg"`
+	ETA              int64     `json:"eta"` // Seconds remaining
 	TotalConnections int       `json:"total_connections"`
 }
 

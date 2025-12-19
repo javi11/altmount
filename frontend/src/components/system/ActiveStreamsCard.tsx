@@ -1,8 +1,7 @@
 import { Activity, FileVideo, MonitorPlay } from "lucide-react";
-import { formatDistanceToNowStrict } from "date-fns";
 import { useActiveStreams } from "../../hooks/useApi";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
-import { truncateText, formatBytes } from "../../lib/utils";
+import { truncateText, formatBytes, formatDuration } from "../../lib/utils";
 
 export function ActiveStreamsCard() {
 	const { data: allStreams, isLoading, error } = useActiveStreams();
@@ -62,12 +61,14 @@ export function ActiveStreamsCard() {
 											<div className="font-medium text-sm truncate" title={stream.file_path}>
 												{truncateText(stream.file_path.split("/").pop() || "", 40)}
 											</div>
-											<div className="text-[10px] uppercase font-bold mt-1">
+											<div className="text-[10px] flex items-center gap-2 mt-1">
 												{stream.bytes_per_second > 0 ? (
-													<span className="text-success animate-pulse">Streaming</span>
+													<span className="text-success font-bold animate-pulse">STREAMING</span>
 												) : (
-													<span className="text-base-content/40">Idle</span>
+													<span className="text-base-content/40 font-bold">IDLE</span>
 												)}
+												<span className="text-base-content/40">•</span>
+												<span className="text-base-content/60">{formatBytes(stream.total_size)}</span>
 											</div>
 										</div>
 									</div>
@@ -75,15 +76,23 @@ export function ActiveStreamsCard() {
 									<div className="space-y-1">
 										<div className="flex justify-between items-center text-[10px] px-0.5">
 											<span className="font-medium text-primary">{progress}%</span>
-											{stream.bytes_per_second > 0 && (
-												<span className="opacity-70 font-mono">{formatBytes(stream.bytes_per_second)}/s</span>
-											)}
+											<div className="flex gap-2 opacity-70 font-mono">
+												{stream.eta > 0 && (
+													<span>ETA: {formatDuration(stream.eta)}</span>
+												)}
+												{stream.bytes_per_second > 0 && (
+													<span>{formatBytes(stream.bytes_per_second)}/s</span>
+												)}
+											</div>
 										</div>
 										<progress 
 											className={`progress ${stream.bytes_per_second > 0 ? 'progress-primary' : 'progress-neutral'} w-full h-1.5`} 
 											value={stream.bytes_sent} 
 											max={stream.total_size}
 										></progress>
+										<div className="flex justify-end text-[9px] text-base-content/40 font-mono">
+											Avg: {formatBytes(stream.speed_avg)}/s
+										</div>
 									</div>
 								</div>
 							);

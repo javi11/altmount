@@ -316,6 +316,8 @@ export interface ActiveStream {
 	total_size: number;
 	bytes_sent: number;
 	bytes_per_second: number;
+	speed_avg: number;
+	eta: number;
 	total_connections: number;
 }
 

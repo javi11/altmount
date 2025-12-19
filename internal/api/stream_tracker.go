@@ -49,6 +49,24 @@ func (t *StreamTracker) snapshotLoop() {
 				}
 			}
 
+			// Calculate Average Speed
+			totalDuration := now.Sub(s.StartedAt).Seconds()
+			if totalDuration > 0 {
+				s.SpeedAvg = int64(float64(currentBytes) / totalDuration)
+			}
+
+			// Calculate ETA based on current speed
+			if s.BytesPerSecond > 0 && s.TotalSize > 0 {
+				remainingBytes := s.TotalSize - currentBytes
+				if remainingBytes > 0 {
+					s.ETA = remainingBytes / s.BytesPerSecond
+				} else {
+					s.ETA = 0
+				}
+			} else {
+				s.ETA = -1 // Unknown or Infinite
+			}
+
 			s.lastBytesSent = currentBytes
 			s.lastSnapshot = now
 			return true
@@ -114,6 +132,19 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			currentBytes := atomic.LoadInt64(&s.BytesSent)
 			existing.BytesSent += currentBytes
 			existing.BytesPerSecond += internal.BytesPerSecond
+			// Average speed is complex to aggregate, but sum of averages approximates total throughput
+			existing.SpeedAvg += internal.SpeedAvg 
+			
+			// For ETA, use the stream with the longest remaining time or re-calculate based on totals?
+			// Re-calculating based on aggregated values is safer
+			if existing.BytesPerSecond > 0 && existing.TotalSize > 0 {
+				remaining := existing.TotalSize - existing.BytesSent
+				if remaining > 0 {
+					existing.ETA = remaining / existing.BytesPerSecond
+				} else {
+					existing.ETA = 0
+				}
+			}
 
 			// Use the earliest start time to represent the session start
 			if s.StartedAt.Before(existing.StartedAt) {
@@ -132,6 +163,8 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			// Load current atomic value
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
 			streamCopy.BytesPerSecond = internal.BytesPerSecond
+			streamCopy.SpeedAvg = internal.SpeedAvg
+			streamCopy.ETA = internal.ETA
 			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
 			streamCopy.ID = groupKey
 			streamCopy.TotalConnections = 1
