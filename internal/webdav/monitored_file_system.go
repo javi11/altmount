@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/javi11/altmount/internal/api"
 	"github.com/javi11/altmount/internal/utils"
@@ -63,6 +64,7 @@ func (m *monitoredFile) Read(p []byte) (n int, err error) {
 	n, err = m.File.Read(p)
 	if n > 0 {
 		atomic.AddInt64(&m.stream.BytesSent, int64(n))
+		atomic.StoreInt64(&m.stream.LastActivity, time.Now().UnixNano())
 	}
 	return n, err
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
@@ -40,6 +41,7 @@ func (m *MonitoredFile) Read(p []byte) (n int, err error) {
 	n, err = m.file.Read(p)
 	if n > 0 {
 		atomic.AddInt64(&m.stream.BytesSent, int64(n))
+		atomic.StoreInt64(&m.stream.LastActivity, time.Now().UnixNano())
 	}
 	return n, err
 }
@@ -203,7 +205,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 			streamCtx, cancel := context.WithCancel(ctx)
 			defer cancel() // Ensure cleanup
 	
-			stream := h.streamTracker.Add(path, "API", userName, stat.Size())
+			stream := h.streamTracker.AddWithCancel(path, "API", userName, stat.Size(), cancel)
 			defer h.streamTracker.Remove(stream)
 			streamObj := h.streamTracker.GetStream(stream)
 			if streamObj == nil {
