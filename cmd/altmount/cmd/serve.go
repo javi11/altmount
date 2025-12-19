@@ -126,6 +126,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create stream tracker for monitoring active streams
 	streamTracker := api.NewStreamTracker()
+	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 
