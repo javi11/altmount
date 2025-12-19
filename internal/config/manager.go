@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const MountProvider = "altmount"
+const MountProvider = "AltFS"
 
 // Config represents the complete application configuration
 type Config struct {
@@ -53,6 +53,7 @@ type FuseConfig struct {
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxDownloadWorkers  int    `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
+	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
 }
 
 // APIConfig represents REST API configuration
@@ -744,6 +745,9 @@ func (c *Config) Validate() error {
 	if c.Fuse.MaxCacheSizeMB <= 0 {
 		c.Fuse.MaxCacheSizeMB = 32 // Default
 	}
+	if c.Fuse.MaxReadAheadMB <= 0 {
+		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
+	}
 
 	return nil
 }
@@ -1198,7 +1202,8 @@ func DefaultConfig(configDir ...string) *Config {
 			AttrTimeoutSeconds:  1,
 			EntryTimeoutSeconds: 1,
 			MaxDownloadWorkers:  15,
-			MaxCacheSizeMB:      32,
+			MaxCacheSizeMB:      128,
+			MaxReadAheadMB:      128,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}

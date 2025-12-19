@@ -18,4 +18,5 @@ const (
 	StreamIDKey      = contextKey("streamID")
 	StreamSourceKey  = contextKey("streamSource")
 	StreamUserNameKey = contextKey("streamUserName")
+	MaxCacheSizeKey   = contextKey("maxCacheSize")
 )

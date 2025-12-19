@@ -16,7 +16,8 @@ export function FuseConfig() {
     attr_timeout_seconds: 1,
     entry_timeout_seconds: 1,
     max_download_workers: 15,
-    max_cache_size_mb: 32
+    max_cache_size_mb: 128,
+    max_read_ahead_mb: 128
   });
   
   const [isLoading, setIsLoading] = useState(false);
@@ -108,10 +109,10 @@ export function FuseConfig() {
       <div className="card-body">
         <h2 className="card-title flex items-center gap-2">
           <FolderOpen className="w-6 h-6" />
-          Native FUSE Mount
+          AltFS Native Mount
         </h2>
         <p className="text-sm opacity-70">
-          Mount the virtual filesystem directly to a local directory for high performance access.
+          Mount AltFS directly to a local directory for high performance access.
         </p>
 
         <div className="divider"></div>
@@ -198,6 +199,25 @@ export function FuseConfig() {
                   <span className="label-text-alt opacity-70">How long the kernel caches directory lookups</span>
                 </label>
               </div>
+
+              <div className="form-control">
+                <label className="label">
+                  <span className="label-text">Kernel Read-Ahead</span>
+                </label>
+                <div className="join">
+                  <input
+                    type="number"
+                    className="input input-bordered join-item w-full"
+                    value={formData.max_read_ahead_mb ?? 128}
+                    onChange={(e) => setFormData({...formData, max_read_ahead_mb: parseInt(e.target.value) || 0})}
+                    disabled={isRunning}
+                  />
+                  <span className="btn no-animation join-item">MB</span>
+                </div>
+                <label className="label">
+                  <span className="label-text-alt opacity-70">Maximum data the kernel will request ahead (FUSE max_readahead)</span>
+                </label>
+              </div>
             </div>
           </section>
 
@@ -231,7 +251,7 @@ export function FuseConfig() {
                   <input
                     type="number"
                     className="input input-bordered join-item w-full"
-                    value={formData.max_cache_size_mb ?? 32}
+                    value={formData.max_cache_size_mb ?? 128}
                     onChange={(e) => setFormData({...formData, max_cache_size_mb: parseInt(e.target.value) || 0})}
                     disabled={isRunning}
                   />

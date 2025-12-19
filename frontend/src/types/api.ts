@@ -315,6 +315,7 @@ export interface ActiveStream {
 	user_name?: string;
 	total_size: number;
 	bytes_sent: number;
+	bytes_per_second: number;
 	total_connections: number;
 }
 

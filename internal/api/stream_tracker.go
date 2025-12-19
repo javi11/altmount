@@ -15,9 +15,45 @@ type StreamTracker struct {
 	streams sync.Map
 }
 
+type streamInternal struct {
+	*nzbfilesystem.ActiveStream
+	lastBytesSent int64
+	lastSnapshot  time.Time
+}
+
 // NewStreamTracker creates a new stream tracker
 func NewStreamTracker() *StreamTracker {
-	return &StreamTracker{}
+	t := &StreamTracker{}
+	go t.snapshotLoop()
+	return t
+}
+
+func (t *StreamTracker) snapshotLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		t.streams.Range(func(key, value interface{}) bool {
+			s := value.(*streamInternal)
+			now := time.Now()
+			currentBytes := atomic.LoadInt64(&s.BytesSent)
+
+			if !s.lastSnapshot.IsZero() {
+				duration := now.Sub(s.lastSnapshot).Seconds()
+				if duration > 0 {
+					bytesDiff := currentBytes - s.lastBytesSent
+					if bytesDiff < 0 {
+						bytesDiff = 0
+					}
+					s.BytesPerSecond = int64(float64(bytesDiff) / duration)
+				}
+			}
+
+			s.lastBytesSent = currentBytes
+			s.lastSnapshot = now
+			return true
+		})
+	}
 }
 
 // AddStream adds a new stream and returns the stream object for updates
@@ -31,7 +67,11 @@ func (t *StreamTracker) AddStream(filePath, source, userName string, totalSize i
 		UserName:  userName,
 		TotalSize: totalSize,
 	}
-	t.streams.Store(id, stream)
+	internal := &streamInternal{
+		ActiveStream: stream,
+		lastSnapshot: time.Now(),
+	}
+	t.streams.Store(id, internal)
 	return stream
 }
 
@@ -43,7 +83,7 @@ func (t *StreamTracker) Add(filePath, source, userName string, totalSize int64) 
 // UpdateProgress updates the bytes sent for a stream by ID
 func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 	if val, ok := t.streams.Load(id); ok {
-		stream := val.(*nzbfilesystem.ActiveStream)
+		stream := val.(*streamInternal)
 		atomic.AddInt64(&stream.BytesSent, bytesRead)
 	}
 }
@@ -59,7 +99,8 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 	grouped := make(map[string]*nzbfilesystem.ActiveStream)
 
 	t.streams.Range(func(key, value interface{}) bool {
-		s := value.(*nzbfilesystem.ActiveStream)
+		internal := value.(*streamInternal)
+		s := internal.ActiveStream
 
 		// Create a composite key for grouping
 		// We group by FilePath, UserName and Source to aggregate parallel connections
@@ -72,6 +113,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			// Sum up bytes sent from all connections
 			currentBytes := atomic.LoadInt64(&s.BytesSent)
 			existing.BytesSent += currentBytes
+			existing.BytesPerSecond += internal.BytesPerSecond
 
 			// Use the earliest start time to represent the session start
 			if s.StartedAt.Before(existing.StartedAt) {
@@ -89,6 +131,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			streamCopy := *s
 			// Load current atomic value
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
+			streamCopy.BytesPerSecond = internal.BytesPerSecond
 			// Use groupKey as stable ID to prevent UI flickering when underlying connections change
 			streamCopy.ID = groupKey
 			streamCopy.TotalConnections = 1
@@ -114,7 +157,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 // GetStream returns an active stream by ID
 func (t *StreamTracker) GetStream(id string) *nzbfilesystem.ActiveStream {
 	if val, ok := t.streams.Load(id); ok {
-		return val.(*nzbfilesystem.ActiveStream)
+		return val.(*streamInternal).ActiveStream
 	}
 	return nil
 }

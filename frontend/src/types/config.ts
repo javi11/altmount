@@ -161,6 +161,7 @@ export interface FuseConfig {
 	entry_timeout_seconds: number;
 	max_download_workers: number;
 	max_cache_size_mb: number;
+	max_read_ahead_mb: number;
 }
 
 // Import strategy type
@@ -708,8 +709,8 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	fuse: {
-		title: "Native FUSE Mount",
-		description: "Configure native FUSE mount settings",
+		title: "AltFS Native Mount",
+		description: "Configure AltFS native FUSE mount settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},

@@ -168,6 +168,10 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	maxWorkers := mrf.getMaxDownloadWorkers()
 	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
 
+	if size, ok := ctx.Value(utils.MaxCacheSizeKey).(int); ok && size > 0 {
+		maxCacheSizeMB = size
+	}
+
 	// Start tracking stream if tracker available
 	streamID := ""
 	if mrf.streamTracker != nil {

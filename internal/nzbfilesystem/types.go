@@ -15,6 +15,7 @@ type ActiveStream struct {
 	UserName         string    `json:"user_name,omitempty"`
 	TotalSize        int64     `json:"total_size"`
 	BytesSent        int64     `json:"bytes_sent"`
+	BytesPerSecond   int64     `json:"bytes_per_second"`
 	TotalConnections int       `json:"total_connections"`
 }
 
