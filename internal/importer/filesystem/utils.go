@@ -116,7 +116,7 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 	dirs := make(map[string]bool)
 
 	for _, file := range files {
-		normalizedFilename := strings.ReplaceAll(file.Filename, "\", "/")
+		normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
 		normalizedFilename = filepath.Clean(normalizedFilename)
 		normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
 
@@ -149,7 +149,7 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 
 // DetermineFileLocation determines where a file should be placed in the virtual structure
 func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, filename string) {
-	normalizedFilename := strings.ReplaceAll(file.Filename, "\", "/")
+	normalizedFilename := strings.ReplaceAll(file.Filename, "\\", "/")
 	normalizedFilename = filepath.Clean(normalizedFilename)
 	normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
 
