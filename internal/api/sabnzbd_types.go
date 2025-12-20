@@ -273,6 +273,12 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 	var jobName string
 	if item.StoragePath != nil && *item.StoragePath != "" {
 		jobName = filepath.Base(*item.StoragePath)
+		// Safety check: If the job name is just "movies" or "tv", it means it was a flattened import
+		// Fallback to the NZB name so Radarr/Sonarr can actually match it
+		if jobName == "movies" || jobName == "tv" || jobName == "complete" {
+			nzbName := filepath.Base(item.NzbPath)
+			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		}
 	} else {
 		nzbName := filepath.Base(item.NzbPath)
 		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
@@ -354,6 +360,13 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		fullStoragePath := filepath.Join(basePath, *item.StoragePath)
 		finalPath = filepath.Dir(fullStoragePath)
 		jobName = filepath.Base(fullStoragePath)
+
+		// Safety check: If the job name is just "movies" or "tv", it means it was a flattened import
+		// Fallback to the NZB name so Radarr/Sonarr can actually match it
+		if jobName == "movies" || jobName == "tv" || jobName == "complete" {
+			nzbName := filepath.Base(item.NzbPath)
+			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		}
 	} else {
 		finalPath = basePath
 		// Fallback to NZB name if no storage path yet
