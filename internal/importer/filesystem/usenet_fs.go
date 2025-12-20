@@ -245,15 +245,35 @@ func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
 		end = uf.size - 1
 	}
 
+	// Create a timeout context to prevent indefinite blocking
+	ctx, cancel := context.WithTimeout(uf.ctx, 5*time.Minute)
+	defer cancel()
+
 	// Create a new reader for this specific range
-	reader, err := uf.createUsenetReader(uf.ctx, off, end)
+	reader, err := uf.createUsenetReader(ctx, off, end)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create usenet reader: %w", err)
 	}
 	defer reader.Close()
 
-	// Read from the reader
-	return io.ReadFull(reader, p)
+	// Read from the reader with timeout handling
+	type readResult struct {
+		n   int
+		err error
+	}
+	done := make(chan readResult, 1)
+
+	go func() {
+		n, err := io.ReadFull(reader, p)
+		done <- readResult{n, err}
+	}()
+
+	select {
+	case result := <-done:
+		return result.n, result.err
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
 }
 
 // createUsenetReader creates a Usenet reader for the specified range

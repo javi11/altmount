@@ -207,9 +207,9 @@ func (s *Service) IsPaused() bool {
 // Stop stops the NZB import service and all queue workers
 func (s *Service) Stop(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if !s.running {
+		s.mu.Unlock()
 		return nil
 	}
 
@@ -218,8 +218,30 @@ func (s *Service) Stop(ctx context.Context) error {
 	// Cancel all goroutines
 	s.cancel()
 
-	// Wait for all goroutines to finish
-	s.wg.Wait()
+	// Release lock BEFORE waiting to avoid deadlock
+	// Workers call IsPaused() which needs this lock
+	s.mu.Unlock()
+
+	// Wait for all goroutines to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All goroutines finished
+	case <-time.After(30 * time.Second):
+		s.log.WarnContext(ctx, "Timeout waiting for workers to stop, some goroutines may still be running")
+	case <-ctx.Done():
+		s.log.WarnContext(ctx, "Context cancelled while waiting for workers to stop")
+		return ctx.Err()
+	}
+
+	// Re-acquire lock to update state
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Recreate context for potential restart
 	s.ctx, s.cancel = context.WithCancel(context.Background())
