@@ -51,7 +51,7 @@ func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 	assert.NotNil(t, movieUser1)
 	assert.Equal(t, int64(600), movieUser1.BytesSent) // 100 + 200 + 300
 	assert.Equal(t, int64(1000), movieUser1.TotalSize)
-	assert.Equal(t, "/movies/movie.mkv|user1|WebDAV", movieUser1.ID)
+	assert.Equal(t, "/movies/movie.mkv|user1|WebDAV|127.0.0.1|TestAgent", movieUser1.ID)
 }
 
 func TestStreamTracker_GetAll_Sorting(t *testing.T) {

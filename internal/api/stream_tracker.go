@@ -227,9 +227,9 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 		s := internal.ActiveStream
 
 		// Create a composite key for grouping
-		// We group by FilePath, UserName and Source to aggregate parallel connections
-		// for the same playback session
-		groupKey := s.FilePath + "|" + s.UserName + "|" + s.Source
+		// We group by FilePath, UserName, Source, ClientIP and UserAgent to aggregate parallel connections
+		// for the same playback session while keeping different devices separate
+		groupKey := s.FilePath + "|" + s.UserName + "|" + s.Source + "|" + s.ClientIP + "|" + s.UserAgent
 
 		if existing, ok := grouped[groupKey]; ok {
 			// Aggregate with existing group
