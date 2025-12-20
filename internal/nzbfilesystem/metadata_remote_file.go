@@ -240,8 +240,10 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 
 	// Prevent removal of category folders
 	if mrf.isCategoryFolder(normalizedName) {
-		slog.WarnContext(ctx, "Prevented removal of category folder", "path", normalizedName)
-		return false, os.ErrPermission
+		slog.DebugContext(ctx, "Silently ignored removal request for category folder", "path", normalizedName)
+		// Return true (success) but do nothing. This prevents Sonarr/Radarr/rclone
+		// from logging "directory not empty" or "permission denied" errors.
+		return true, nil
 	}
 
 	// Check if this is a directory
@@ -319,23 +321,45 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 // isCategoryFolder checks if a path corresponds to a configured category folder
 func (mrf *MetadataRemoteFile) isCategoryFolder(path string) bool {
 	cfg := mrf.configGetter()
-	normalizedPath := normalizePath(path)
+	normalizedPath := strings.Trim(normalizePath(path), "/")
+	completeDir := strings.Trim(normalizePath(cfg.SABnzbd.CompleteDir), "/")
+
+	// Helper to check if a name matches a category
+	matchesCategory := func(name string) bool {
+		name = strings.Trim(normalizePath(name), "/")
+		if name == "" {
+			return false
+		}
+
+		// Check exact match
+		if normalizedPath == name {
+			return true
+		}
+
+		// Check match with complete_dir prefix (e.g. complete/tv)
+		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
+			return true
+		}
+
+		return false
+	}
+
+	// Check complete_dir itself
+	if normalizedPath == completeDir {
+		return true
+	}
 
 	// Check configured categories
 	for _, cat := range cfg.SABnzbd.Categories {
-		catDir := cat.Dir
-		if catDir == "" {
-			catDir = cat.Name
-		}
-		if normalizedPath == normalizePath(catDir) {
+		if matchesCategory(cat.Dir) || matchesCategory(cat.Name) {
 			return true
 		}
 	}
 
-	// Also check default categories if not explicitly configured
-	defaults := []string{"movies", "tv", "series", "shows", "music", "books"}
+	// Also check default categories
+	defaults := []string{"movies", "tv", "series", "shows", "music", "books", "Animes"}
 	for _, def := range defaults {
-		if normalizedPath == normalizePath(def) {
+		if matchesCategory(def) {
 			return true
 		}
 	}
