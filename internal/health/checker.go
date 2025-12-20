@@ -203,7 +203,8 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		virtualDir := filepath.Dir(filePath)
 
 		// Use background context with timeout for VFS notification
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Increased timeout to 60 seconds as vfs/refresh can be slow
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
 		cfg := hc.configGetter()

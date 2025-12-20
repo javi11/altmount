@@ -1185,24 +1185,29 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 		return // No rclone client configured or RClone RC is disabled
 	}
 
-	refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
-	defer cancel()
+	// Run in a separate goroutine to avoid blocking the import queue
+	go func(path string) {
+		// Use background context with timeout for VFS notification
+		// Increased timeout to 60 seconds as vfs/refresh can be slow
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
 
-	cfg := s.configGetter()
-	vfsName := cfg.RClone.VFSName
-	if vfsName == "" {
-		vfsName = config.MountProvider
-	}
+		cfg := s.configGetter()
+		vfsName := cfg.RClone.VFSName
+		if vfsName == "" {
+			vfsName = config.MountProvider
+		}
 
-	err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, []string{resultingPath}) // Use RefreshDir with empty provider
-	if err != nil {
-		s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
-			"virtual_dir", resultingPath,
-			"error", err)
-	} else {
-		s.log.InfoContext(ctx, "Successfully notified rclone VFS about new import",
-			"virtual_dir", resultingPath)
-	}
+		err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, []string{path}) // Use RefreshDir with empty provider
+		if err != nil {
+			s.log.WarnContext(refreshCtx, "Failed to notify rclone VFS about new import",
+				"virtual_dir", path,
+				"error", err)
+		} else {
+			s.log.InfoContext(refreshCtx, "Successfully notified rclone VFS about new import",
+				"virtual_dir", path)
+		}
+	}(resultingPath)
 }
 
 // ProcessItemInBackground processes a specific queue item in the background
