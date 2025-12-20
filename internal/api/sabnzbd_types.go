@@ -273,9 +273,13 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 	var jobName string
 	if item.StoragePath != nil && *item.StoragePath != "" {
 		jobName = filepath.Base(*item.StoragePath)
-		// Safety check: If the job name is just "movies" or "tv", it means it was a flattened import
-		// Fallback to the NZB name so Radarr/Sonarr can actually match it
-		if jobName == "movies" || jobName == "tv" || jobName == "complete" {
+		// Safety check: If the job name matches a generic category name, fallback to NZB name
+		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete"
+		if item.Category != nil && jobName == *item.Category {
+			isGeneric = true
+		}
+
+		if isGeneric {
 			nzbName := filepath.Base(item.NzbPath)
 			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 		}
@@ -361,9 +365,14 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		finalPath = filepath.Dir(fullStoragePath)
 		jobName = filepath.Base(fullStoragePath)
 
-		// Safety check: If the job name is just "movies" or "tv", it means it was a flattened import
-		// Fallback to the NZB name so Radarr/Sonarr can actually match it
-		if jobName == "movies" || jobName == "tv" || jobName == "complete" {
+		// Safety check: If the job name is just "movies", "tv", or matches the category name,
+		// it means it was a flattened import. Fallback to the NZB name.
+		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete"
+		if item.Category != nil && jobName == *item.Category {
+			isGeneric = true
+		}
+
+		if isGeneric {
 			nzbName := filepath.Base(item.NzbPath)
 			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 		}
