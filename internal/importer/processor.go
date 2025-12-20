@@ -101,15 +101,11 @@ func (proc *Processor) isCategoryFolder(path string) bool {
 
 	// Check configured categories
 	for _, cat := range cfg.SABnzbd.Categories {
-		if matchesCategory(cat.Dir) || matchesCategory(cat.Name) {
+		// Check both the category name and its specific directory if set
+		if matchesCategory(cat.Name) {
 			return true
 		}
-	}
-
-	// Also check default categories
-	defaults := []string{"movies", "tv", "series", "shows", "music", "books", "Animes"}
-	for _, def := range defaults {
-		if matchesCategory(def) {
+		if cat.Dir != "" && matchesCategory(cat.Dir) {
 			return true
 		}
 	}
