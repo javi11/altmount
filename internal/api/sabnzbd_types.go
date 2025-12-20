@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/progress"
@@ -267,18 +268,14 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		priority = "Normal"
 	}
 
-	// Extract filename from path
-	filename := item.NzbPath
-	if len(filename) > 0 {
-		// Get just the filename from the full path
-		if lastSlash := len(filename) - 1; lastSlash >= 0 {
-			for i := lastSlash; i >= 0; i-- {
-				if filename[i] == '/' || filename[i] == '\\' {
-					filename = filename[i+1:]
-					break
-				}
-			}
-		}
+	// Calculate job name
+	// SABnzbd 'filename' in queue is usually the job name
+	var jobName string
+	if item.StoragePath != nil && *item.StoragePath != "" {
+		jobName = filepath.Base(*item.StoragePath)
+	} else {
+		nzbName := filepath.Base(item.NzbPath)
+		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 	}
 
 	// Get category, default to "default" if not set
@@ -319,7 +316,7 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		Index:      index,
 		NzoID:      fmt.Sprintf("%d", item.ID),
 		Priority:   priority,
-		Filename:   filename,
+		Filename:   jobName,
 		Cat:        category,
 		Percentage: fmt.Sprintf("%d", progressPercentage),
 		Status:     status,
@@ -346,24 +343,26 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		status = "Unknown"
 	}
 
-	// Extract filename from path
-	filename := item.NzbPath
-	name := filename
-	if len(filename) > 0 {
-		// Get just the filename from the full path
-		if lastSlash := len(filename) - 1; lastSlash >= 0 {
-			for i := lastSlash; i >= 0; i-- {
-				if filename[i] == '/' || filename[i] == '\\' {
-					name = filename[i+1:]
-					break
-				}
-			}
-		}
-		// Remove .nzb extension for display name
-		if len(name) > 4 && name[len(name)-4:] == ".nzb" {
-			name = name[:len(name)-4]
-		}
+	// Calculate paths
+	// SABnzbd reports 'path' as the directory CONTAINING the job folder,
+	// and 'name' as the name of that folder.
+	var finalPath string
+	var jobName string
+
+	if item.StoragePath != nil && *item.StoragePath != "" {
+		// Construct the full absolute path on the mount
+		fullStoragePath := filepath.Join(basePath, *item.StoragePath)
+		finalPath = filepath.Dir(fullStoragePath)
+		jobName = filepath.Base(fullStoragePath)
+	} else {
+		finalPath = basePath
+		// Fallback to NZB name if no storage path yet
+		nzbName := filepath.Base(item.NzbPath)
+		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 	}
+
+	// Ensure nzb_name is just the filename
+	nzbFilename := filepath.Base(item.NzbPath)
 
 	var completetime int64
 	if item.CompletedAt != nil {
@@ -381,35 +380,26 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		category = *item.Category
 	}
 
-	// Calculate storage path using the provided base path (which includes category folder)
-	var storagePath string
-	if item.StoragePath != nil {
-		// Construct path: basePath/basename
-		storagePath = filepath.Join(basePath, *item.StoragePath)
-	} else {
-		storagePath = basePath
-	}
-
 	return SABnzbdHistorySlot{
 		Index:        index,
 		NzoID:        fmt.Sprintf("%d", item.ID),
-		Name:         name,
+		Name:         jobName,
 		Category:     category,
 		PP:           "",
 		Script:       "",
 		Report:       "",
 		URL:          "",
 		Status:       status,
-		NzbName:      filename,
-		Download:     name,
-		Storage:      storagePath,
-		Path:         storagePath,
+		NzbName:      nzbFilename,
+		Download:     jobName,
+		Storage:      finalPath,
+		Path:         finalPath,
 		Postproc:     "",
 		Downloaded:   0,
 		Completetime: completetime,
 		NzbAvg:       "",
 		Script_log:   "",
-		DuplicateKey: name,
+		DuplicateKey: jobName,
 		Script_line:  "",
 		Fail_message: failMessage,
 		Url_info:     "",
