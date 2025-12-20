@@ -948,8 +948,8 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	// Refresh mount path if needed
 	s.refreshMountPathIfNeeded(ctx, resultingPath, item.ID)
 
-	// Notify rclone VFS about the new import (async, don't fail on error)
-	s.notifyRcloneVFS(ctx, resultingPath)
+	// Notify rclone VFS about the new import (blocking, ensures visibility for ARRs)
+	s.notifyRcloneVFS(ctx, resultingPath, false)
 
 	// Create category symlink (non-blocking)
 	if err := s.createSymlinks(item, resultingPath); err != nil {
@@ -1179,14 +1179,13 @@ func (s *Service) CancelProcessing(itemID int64) error {
 	return nil
 }
 
-// notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
-func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
+// notifyRcloneVFS notifies rclone VFS about a new import
+func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string, async bool) {
 	if s.rcloneClient == nil {
 		return // No rclone client configured or RClone RC is disabled
 	}
 
-	// Run in a separate goroutine to avoid blocking the import queue
-	go func(path string) {
+	refreshFunc := func(path string) {
 		// Use background context with timeout for VFS notification
 		// Increased timeout to 60 seconds as vfs/refresh can be slow
 		refreshCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -1212,7 +1211,7 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 		parentDir := filepath.Dir(path)
 		if parentDir != "." && parentDir != "/" {
 			dirsToRefresh = append(dirsToRefresh, normalizeForRclone(parentDir))
-			
+
 			// Also refresh grandparent if parent might be new (e.g. /complete/tv)
 			grandParent := filepath.Dir(parentDir)
 			if grandParent != "." && grandParent != "/" {
@@ -1224,14 +1223,20 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 
 		err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, dirsToRefresh)
 		if err != nil {
-			s.log.WarnContext(refreshCtx, "Failed to notify rclone VFS refresh",
+			slog.WarnContext(refreshCtx, "Failed to notify rclone VFS refresh",
 				"dirs", dirsToRefresh,
 				"error", err)
 		} else {
-			s.log.InfoContext(refreshCtx, "Successfully notified rclone VFS refresh",
+			slog.InfoContext(refreshCtx, "Successfully notified rclone VFS refresh",
 				"dirs", dirsToRefresh)
 		}
-	}(resultingPath)
+	}
+
+	if async {
+		go refreshFunc(resultingPath)
+	} else {
+		refreshFunc(resultingPath)
+	}
 }
 
 // ProcessItemInBackground processes a specific queue item in the background
