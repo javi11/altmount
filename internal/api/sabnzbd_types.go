@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -273,17 +272,8 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 	// SABnzbd 'filename' in queue is usually the job name
 	var jobName string
 	if item.StoragePath != nil && *item.StoragePath != "" {
-		// Use the same logic as history for consistency
-		// Note: We don't have basePath here, but we can usually infer from NzbPath or just use the Base
-		jobName = filepath.Base(*item.StoragePath)
-
-		// For queue, we just need a reasonable job name for matching.
-		// If it's a file, remove the extension.
-		if !strings.Contains(jobName, " ") && strings.Contains(jobName, ".") {
-			if ext := filepath.Ext(jobName); ext != "" {
-				jobName = strings.TrimSuffix(jobName, ext)
-			}
-		}
+		storagePath := filepath.ToSlash(*item.StoragePath)
+		jobName = filepath.Base(storagePath)
 
 		// Safety check: If the job name matches a generic category name, fallback to NZB name
 		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete" || jobName == "."
@@ -373,25 +363,15 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 
 	if item.StoragePath != nil && *item.StoragePath != "" {
 		// Construct the full absolute path on the mount
-		fullStoragePath := filepath.Join(basePath, *item.StoragePath)
+		// We use filepath.ToSlash to ensure consistent forward slashes for the API
+		storagePath := filepath.ToSlash(*item.StoragePath)
+		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, storagePath))
 
-		// Determine if the storage path is a directory or a file
-		// In SABnzbd, 'path' should be the directory containing the media files.
-		if info, err := os.Stat(fullStoragePath); err == nil && info.IsDir() {
-			// It's a directory (normal import)
-			finalPath = fullStoragePath
-			jobName = filepath.Base(fullStoragePath)
-		} else {
-			// It's a file (flattened import) or doesn't exist
-			finalPath = filepath.Dir(fullStoragePath)
-			jobName = filepath.Base(fullStoragePath)
-			// Remove extension from jobName if it's a file
-			if !strings.Contains(jobName, " ") && strings.Contains(jobName, ".") {
-				if ext := filepath.Ext(jobName); ext != "" {
-					jobName = strings.TrimSuffix(jobName, ext)
-				}
-			}
-		}
+		// SABnzbd reports 'path' as the directory containing the job folder,
+		// and 'name' as the name of that folder.
+		// For AltMount, we always ensure a subfolder for category imports now.
+		finalPath = filepath.Dir(fullStoragePath)
+		jobName = filepath.Base(fullStoragePath)
 
 		// Safety check: If the job name matches a generic category name, fallback to NZB name
 		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete" || jobName == "."
