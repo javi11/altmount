@@ -273,6 +273,8 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	normalizedOld := normalizePath(oldName)
 	normalizedNew := normalizePath(newName)
 
+	slog.InfoContext(ctx, "MOVE operation requested", "source", normalizedOld, "destination", normalizedNew)
+
 	// Prevent renaming of category folders
 	if mrf.isCategoryFolder(normalizedOld) {
 		slog.WarnContext(ctx, "Prevented renaming of category folder", "path", normalizedOld)
@@ -285,6 +287,8 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		oldDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedOld)
 		newDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedNew)
 
+		slog.InfoContext(ctx, "Moving metadata directory", "from", oldDirPath, "to", newDirPath)
+
 		// Rename the entire directory
 		if err := os.Rename(oldDirPath, newDirPath); err != nil {
 			return false, fmt.Errorf("failed to rename directory: %w", err)
@@ -295,7 +299,7 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	// Check if old path exists as a file
 	exists := mrf.metadataService.FileExists(normalizedOld)
 	if !exists {
-		// Neither file nor directory found
+		slog.WarnContext(ctx, "MOVE source not found", "path", normalizedOld)
 		return false, nil
 	}
 
@@ -314,6 +318,8 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	if err := mrf.metadataService.DeleteFileMetadata(normalizedOld); err != nil {
 		return false, fmt.Errorf("failed to delete old metadata: %w", err)
 	}
+
+	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
 
 	return true, nil
 }

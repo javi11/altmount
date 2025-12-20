@@ -1199,25 +1199,36 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 		}
 
 		// Refresh both the path and its parent to ensure visibility
-		dirsToRefresh := []string{path}
+		// Ensure paths are relative to the rclone remote root (no leading slash)
+		normalizeForRclone := func(p string) string {
+			p = strings.TrimPrefix(p, "/")
+			if p == "" {
+				return "."
+			}
+			return p
+		}
+
+		dirsToRefresh := []string{normalizeForRclone(path)}
 		parentDir := filepath.Dir(path)
 		if parentDir != "." && parentDir != "/" {
-			dirsToRefresh = append(dirsToRefresh, parentDir)
+			dirsToRefresh = append(dirsToRefresh, normalizeForRclone(parentDir))
 			
 			// Also refresh grandparent if parent might be new (e.g. /complete/tv)
 			grandParent := filepath.Dir(parentDir)
 			if grandParent != "." && grandParent != "/" {
-				dirsToRefresh = append(dirsToRefresh, grandParent)
+				dirsToRefresh = append(dirsToRefresh, normalizeForRclone(grandParent))
 			}
 		}
 
+		slog.DebugContext(refreshCtx, "Notifying rclone VFS refresh", "dirs", dirsToRefresh, "vfs", vfsName)
+
 		err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, dirsToRefresh)
 		if err != nil {
-			s.log.WarnContext(refreshCtx, "Failed to notify rclone VFS about new import",
+			s.log.WarnContext(refreshCtx, "Failed to notify rclone VFS refresh",
 				"dirs", dirsToRefresh,
 				"error", err)
 		} else {
-			s.log.InfoContext(refreshCtx, "Successfully notified rclone VFS about new import",
+			s.log.InfoContext(refreshCtx, "Successfully notified rclone VFS refresh",
 				"dirs", dirsToRefresh)
 		}
 	}(resultingPath)

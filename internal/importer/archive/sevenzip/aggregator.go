@@ -231,13 +231,10 @@ func ProcessArchive(
 			return fmt.Errorf("failed to write metadata for 7zip file %s: %w", sevenZipContent.Filename, err)
 		}
 
-		slog.DebugContext(ctx, "Created metadata for 7zip extracted file",
+		slog.InfoContext(ctx, "Created metadata for 7zip extracted file",
 			"file", baseFilename,
-			"original_internal_path", sevenZipContent.InternalPath,
 			"virtual_path", virtualFilePath,
-			"size", sevenZipContent.Size,
-			"segments", len(sevenZipContent.Segments),
-			"validated_segments", fileSegmentsValidated)
+			"size", sevenZipContent.Size)
 
 		filesProcessed++
 	}

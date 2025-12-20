@@ -237,13 +237,10 @@ func ProcessArchive(
 			return fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
 		}
 
-		slog.DebugContext(ctx, "Created metadata for RAR extracted file",
+		slog.InfoContext(ctx, "Created metadata for RAR extracted file",
 			"file", baseFilename,
-			"original_internal_path", rarContent.InternalPath,
 			"virtual_path", virtualFilePath,
-			"size", rarContent.Size,
-			"segments", len(rarContent.Segments),
-			"validated_segments", fileSegmentsValidated)
+			"size", rarContent.Size)
 
 		filesProcessed++
 	}
