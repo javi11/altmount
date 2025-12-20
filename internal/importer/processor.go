@@ -241,7 +241,7 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	return result, err
 }
 
-// processSingleFile handles single file imports, preserving the source structure.
+// processSingleFile handles single file imports
 func (proc *Processor) processSingleFile(
 	ctx context.Context,
 	virtualDir string,
@@ -255,55 +255,26 @@ func (proc *Processor) processSingleFile(
 		return "", fmt.Errorf("no regular files to process")
 	}
 
-	nzbName := filepath.Base(nzbPath)
-	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
-	nzbDirBase := filepath.Base(filepath.Dir(nzbPath))
-	fileDir := filepath.Dir(regularFiles[0].Filename)
-	fileBase := strings.TrimSuffix(regularFiles[0].Filename, filepath.Ext(regularFiles[0].Filename))
-
-	// Only remove redundancy if the folder does not exist in the source (NZB is not actually inside it)
-	if fileDir == "." || fileDir == "" {
-		if !strings.EqualFold(nzbDirBase, releaseName) && !strings.EqualFold(nzbDirBase, fileBase) {
-			// Check if we are at the root of a category (e.g., "movies", "tv", "complete/tv")
-			isCategoryRoot := proc.isCategoryFolder(virtualDir)
-
-			if isCategoryRoot {
-				// If we are at the root of a category, ENSURE we have a subfolder for the release
-				// to prevent Sonarr/Radarr from deleting the category folder itself
-				virtualDir = filepath.Join(virtualDir, releaseName)
-			} else {
-				virtualDir = normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
-			}
-		}
-	} else if proc.isCategoryFolder(virtualDir) {
-		// Even if fileDir is not empty, if we are at category root, ensure we don't accidentally flatten
-		// This handles cases where the NZB has a folder that might match the category name or something weird
-	}
-
-	// Keeps NZB subfolders, but renames the file to the release name (avoids duplicate extension)
-	originalDir := filepath.Dir(regularFiles[0].Filename)
-	normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
-	if originalDir != "." && originalDir != "" {
-		regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
-	} else {
-		regularFiles[0].Filename = normalizedBase
-	}
-
-	// Calculates the final destination, preserving the source structure
-	parentPath, finalName := filesystem.DetermineFileLocation(regularFiles[0], virtualDir)
-
-	// Ensure the parent directory exists in metadata
-	if err := filesystem.EnsureDirectoryExists(parentPath, proc.metadataService); err != nil {
+	// Create NZB folder (always put single files in a folder to handle obfuscation and keep structure clean)
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	if err != nil {
 		return "", err
 	}
 
-	// Use the final name for processing
-	regularFiles[0].Filename = finalName
+	// Rename the file to match the NZB name to handle obfuscated filenames
+	nzbName := filepath.Base(nzbPath)
+	releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	fileExt := filepath.Ext(regularFiles[0].Filename)
+	if !strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
+		regularFiles[0].Filename = releaseName + fileExt
+	} else {
+		regularFiles[0].Filename = releaseName
+	}
 
 	// Processes the file
 	result, err := singlefile.ProcessSingleFile(
 		ctx,
-		parentPath,
+		nzbFolder,
 		regularFiles[0],
 		par2Files,
 		nzbPath,
@@ -330,60 +301,21 @@ func (proc *Processor) processMultiFile(
 	maxConnections int,
 	allowedExtensions []string,
 ) (string, error) {
-	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
-	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
-	// provided virtual directory (preserving any subpaths inside the NZB).
-	singleLike := len(regularFiles) == 1
-	targetBaseDir := virtualDir
+	// Create NZB folder for multiple files
+	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
+	if err != nil {
+		return "", err
+	}
 
-	if singleLike {
-		nzbName := filepath.Base(nzbPath)
-
-		// Rename the leaf to the release name (prevents ext duplication) but keep NZB-provided subfolders.
-		originalDir := filepath.Dir(regularFiles[0].Filename)
-		normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
-		if originalDir != "." && originalDir != "" {
-			regularFiles[0].Filename = filepath.Join(originalDir, normalizedBase)
-		} else {
-			regularFiles[0].Filename = normalizedBase
-		}
-
-		// Check if we are at the root of a category (e.g., "movies", "tv", "complete/tv")
-		isCategoryRoot := proc.isCategoryFolder(virtualDir)
-
-		if isCategoryRoot && (originalDir == "." || originalDir == "") {
-			// If we are at category root and the file has no subfolder in the NZB,
-			// create one named after the release to protect the category folder
-			nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
-			if err != nil {
-				return "", err
-			}
-			targetBaseDir = nzbFolder
-		} else {
-			// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
-			if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
-				return "", err
-			}
-		}
-	} else {
-		// Create NZB folder for true multi-file imports
-		nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
-		if err != nil {
-			return "", err
-		}
-
-		// Create directories for files
-		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
-			return "", err
-		}
-
-		targetBaseDir = nzbFolder
+	// Create directories for files
+	if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
+		return "", err
 	}
 
 	// Process all regular files
 	if err := multifile.ProcessRegularFiles(
 		ctx,
-		targetBaseDir,
+		nzbFolder,
 		regularFiles,
 		par2Files,
 		nzbPath,
@@ -396,7 +328,7 @@ func (proc *Processor) processMultiFile(
 		return "", err
 	}
 
-	return targetBaseDir, nil
+	return nzbFolder, nil
 }
 
 // processRarArchive handles RAR archive imports
@@ -559,42 +491,4 @@ func (proc *Processor) processSevenZipArchive(
 	}
 
 	return nzbFolder, nil
-}
-
-// normalizeReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
-// It avoids generating duplicate extensions like ".mp4.mp4" when the NZB name already contains the suffix.
-func normalizeReleaseFilename(nzbFilename, originalFilename string) string {
-	releaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
-	fileExt := filepath.Ext(originalFilename)
-
-	if fileExt == "" {
-		return releaseName
-	}
-
-	if strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
-		return releaseName
-	}
-
-	return releaseName + fileExt
-}
-
-// normalizeSingleFileVirtualDir only remove the last component if it is redundant and does not exist in the source.
-func normalizeSingleFileVirtualDir(virtualDir, releaseName, filename string) string {
-	cleanDir := filepath.Clean(virtualDir)
-	if cleanDir == "." || cleanDir == string(filepath.Separator) {
-		return "/"
-	}
-
-	base := filepath.Base(cleanDir)
-	fileNoExt := strings.TrimSuffix(filename, filepath.Ext(filename))
-
-	// Only remove if redundant (e.g., file.mkv/file.mkv), but never if it exists in the source
-	if strings.EqualFold(base, releaseName) || strings.EqualFold(base, filename) || strings.EqualFold(base, fileNoExt) {
-		cleanDir = filepath.Dir(cleanDir)
-		if cleanDir == "." {
-			cleanDir = "/"
-		}
-	}
-
-	return strings.ReplaceAll(cleanDir, string(filepath.Separator), "/")
 }

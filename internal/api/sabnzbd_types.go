@@ -271,11 +271,24 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 	// Calculate job name
 	// SABnzbd 'filename' in queue is usually the job name
 	var jobName string
-	
-	// For the JobName, we should use the NZB name (without extension)
-	// as this is what Radarr/Sonarr use to match against their "Grabbed" history.
-	nzbName := filepath.Base(item.NzbPath)
-	jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	if item.StoragePath != nil && *item.StoragePath != "" {
+		storagePath := filepath.ToSlash(*item.StoragePath)
+		jobName = filepath.Base(storagePath)
+
+		// Safety check: If the job name matches a generic category name, fallback to NZB name
+		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete" || jobName == "."
+		if item.Category != nil && jobName == *item.Category {
+			isGeneric = true
+		}
+
+		if isGeneric {
+			nzbName := filepath.Base(item.NzbPath)
+			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		}
+	} else {
+		nzbName := filepath.Base(item.NzbPath)
+		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+	}
 
 	// Get category, default to "default" if not set
 	category := "default"
@@ -354,14 +367,22 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		storagePath := filepath.ToSlash(*item.StoragePath)
 		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, storagePath))
 
-		// SABnzbd reports 'path' as the absolute path to the JOB folder.
-		// Sonarr/Radarr will look INSIDE this folder for media files.
-		finalPath = fullStoragePath
-		
-		// For the Name/JobName, we should use the NZB name (without extension)
-		// as this is what Radarr/Sonarr use to match against their "Grabbed" history.
-		nzbName := filepath.Base(item.NzbPath)
-		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		// SABnzbd reports 'path' as the directory CONTAINING the job folder,
+		// and 'name' as the name of that folder.
+		// For AltMount, we always ensure a subfolder for category imports now.
+		finalPath = filepath.Dir(fullStoragePath)
+		jobName = filepath.Base(fullStoragePath)
+
+		// Safety check: If the job name matches a generic category name, fallback to NZB name
+		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete" || jobName == "."
+		if item.Category != nil && jobName == *item.Category {
+			isGeneric = true
+		}
+
+		if isGeneric {
+			nzbName := filepath.Base(item.NzbPath)
+			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		}
 	} else {
 		finalPath = basePath
 		// Fallback to NZB name if no storage path yet
