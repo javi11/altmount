@@ -1198,14 +1198,27 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
 			vfsName = config.MountProvider
 		}
 
-		err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, []string{path}) // Use RefreshDir with empty provider
+		// Refresh both the path and its parent to ensure visibility
+		dirsToRefresh := []string{path}
+		parentDir := filepath.Dir(path)
+		if parentDir != "." && parentDir != "/" {
+			dirsToRefresh = append(dirsToRefresh, parentDir)
+			
+			// Also refresh grandparent if parent might be new (e.g. /complete/tv)
+			grandParent := filepath.Dir(parentDir)
+			if grandParent != "." && grandParent != "/" {
+				dirsToRefresh = append(dirsToRefresh, grandParent)
+			}
+		}
+
+		err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, dirsToRefresh)
 		if err != nil {
 			s.log.WarnContext(refreshCtx, "Failed to notify rclone VFS about new import",
-				"virtual_dir", path,
+				"dirs", dirsToRefresh,
 				"error", err)
 		} else {
 			s.log.InfoContext(refreshCtx, "Successfully notified rclone VFS about new import",
-				"virtual_dir", path)
+				"dirs", dirsToRefresh)
 		}
 	}(resultingPath)
 }
