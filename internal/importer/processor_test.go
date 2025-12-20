@@ -200,8 +200,8 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 		{
 			name:         "file in subfolder",
 			nzbPath:      "/downloads/sonarr/MovieFolder/Movie.mkv",
-			relativePath: "/downloads/sonarr",
-			expected:     "/MovieFolder",
+			relativePath: "/downloads/sonarr/MovieFolder",
+			expected:     "/",
 		},
 		{
 			name:         "empty relative path",
