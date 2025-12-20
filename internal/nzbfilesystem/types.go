@@ -11,12 +11,14 @@ type ActiveStream struct {
 	ID               string    `json:"id"`
 	FilePath         string    `json:"file_path"`
 	StartedAt        time.Time `json:"started_at"`
+	LastActivity     time.Time `json:"last_activity"`
 	Source           string    `json:"source"`
 	UserName         string    `json:"user_name,omitempty"`
 	ClientIP         string    `json:"client_ip,omitempty"`
 	UserAgent        string    `json:"user_agent,omitempty"`
 	TotalSize        int64     `json:"total_size"`
 	BytesSent        int64     `json:"bytes_sent"`
+	CurrentOffset    int64     `json:"current_offset"`
 	BytesPerSecond   int64     `json:"bytes_per_second"`
 	SpeedAvg         int64     `json:"speed_avg"`
 	ETA              int64     `json:"eta"` // Seconds remaining

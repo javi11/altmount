@@ -313,11 +313,15 @@ export interface ActiveStream {
 	started_at: string;
 	source: string;
 	user_name?: string;
-	total_size: number;
+	client_ip?: string;
+	user_agent?: string;
 	bytes_sent: number;
+	current_offset: number;
 	bytes_per_second: number;
 	speed_avg: number;
+	total_size: number;
 	eta: number;
+	status: string;
 	total_connections: number;
 }
 

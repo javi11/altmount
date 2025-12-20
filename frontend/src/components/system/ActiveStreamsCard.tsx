@@ -47,8 +47,9 @@ export function ActiveStreamsCard() {
 				) : (
 					<div className="space-y-3">
 						{streams.map((stream) => {
+							const position = stream.current_offset > 0 ? stream.current_offset : stream.bytes_sent;
 							const progress = stream.total_size > 0 
-								? Math.round((stream.bytes_sent / stream.total_size) * 100) 
+								? Math.round((position / stream.total_size) * 100) 
 								: 0;
 
 							return (
@@ -87,7 +88,7 @@ export function ActiveStreamsCard() {
 										</div>
 										<progress 
 											className={`progress ${stream.bytes_per_second > 0 ? 'progress-primary' : 'progress-neutral'} w-full h-1.5`} 
-											value={stream.bytes_sent} 
+											value={position} 
 											max={stream.total_size}
 										></progress>
 										<div className="flex justify-end text-[9px] text-base-content/40 font-mono">

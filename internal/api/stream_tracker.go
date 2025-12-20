@@ -90,7 +90,15 @@ func (t *StreamTracker) snapshotLoop() {
 
 				// Calculate ETA based on current speed
 				if s.BytesPerSecond > 0 && s.TotalSize > 0 {
-					remainingBytes := s.TotalSize - currentBytes
+					currentOffset := atomic.LoadInt64(&s.CurrentOffset)
+					// Use the greater of CurrentOffset or BytesSent to determine progress
+					// This handles cases where offset tracking might be missing
+					progress := currentOffset
+					if currentBytes > progress {
+						progress = currentBytes
+					}
+					
+					remainingBytes := s.TotalSize - progress
 					if remainingBytes > 0 {
 						s.ETA = remainingBytes / s.BytesPerSecond
 					} else {
@@ -114,20 +122,23 @@ func (t *StreamTracker) snapshotLoop() {
 // AddStream adds a new stream and returns the stream object for updates
 func (t *StreamTracker) AddStream(filePath, source, userName, clientIP, userAgent string, totalSize int64) *nzbfilesystem.ActiveStream {
 	id := uuid.New().String()
+	now := time.Now()
 	stream := &nzbfilesystem.ActiveStream{
-		ID:        id,
-		FilePath:  filePath,
-		StartedAt: time.Now(),
-		Source:    source,
-		UserName:  userName,
-		ClientIP:  clientIP,
-		UserAgent: userAgent,
-		TotalSize: totalSize,
-		Status:    "Starting",
+		ID:           id,
+		FilePath:     filePath,
+		StartedAt:    now,
+		LastActivity: now,
+		Source:       source,
+		UserName:     userName,
+		ClientIP:     clientIP,
+		UserAgent:    userAgent,
+		TotalSize:    totalSize,
+		Status:       "Starting",
 	}
 	internal := &streamInternal{
 		ActiveStream: stream,
-		lastSnapshot: time.Now(),
+		lastSnapshot: now,
+		lastReadAt:   now,
 	}
 	t.streams.Store(id, internal)
 	return stream
@@ -151,7 +162,6 @@ func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 	if val, ok := t.streams.Load(id); ok {
 		stream := val.(*streamInternal)
 		atomic.AddInt64(&stream.BytesSent, bytesRead)
-		stream.lastSnapshot = time.Now()
 		stream.lastReadAt = time.Now()
 	}
 }
@@ -230,11 +240,19 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			existing.BytesPerSecond += internal.BytesPerSecond
 			// Average speed is complex to aggregate, but sum of averages approximates total throughput
 			existing.SpeedAvg += internal.SpeedAvg 
+
+			// Use the current offset from the most recently active connection
+			// This handles seek-back scenarios better than taking the max
+			if internal.lastReadAt.After(existing.LastActivity) {
+				existing.LastActivity = internal.lastReadAt
+				existing.CurrentOffset = atomic.LoadInt64(&s.CurrentOffset)
+			}
 			
 			// For ETA, use the stream with the longest remaining time or re-calculate based on totals?
 			// Re-calculating based on aggregated values is safer
 			if existing.BytesPerSecond > 0 && existing.TotalSize > 0 {
-				remaining := existing.TotalSize - existing.BytesSent
+				remaining := existing.TotalSize - existing.CurrentOffset
+				
 				if remaining > 0 {
 					existing.ETA = remaining / existing.BytesPerSecond
 				} else {
@@ -263,6 +281,8 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			streamCopy := *s
 			// Load current atomic value
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
+			streamCopy.CurrentOffset = atomic.LoadInt64(&s.CurrentOffset)
+			streamCopy.LastActivity = internal.lastReadAt
 			streamCopy.BytesPerSecond = internal.BytesPerSecond
 			streamCopy.SpeedAvg = internal.SpeedAvg
 			streamCopy.ETA = internal.ETA
