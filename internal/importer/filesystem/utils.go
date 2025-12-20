@@ -29,12 +29,9 @@ func CalculateVirtualDirectory(nzbPath, relativePath string) string {
 
 	relDir := filepath.Dir(relPath)
 	if relDir == "." || relDir == "" {
-		// If the file is at the root, create a directory based on the filename
-		// This prevents flattening and potential "delete root" issues
-		filename := filepath.Base(nzbPath)
-		ext := filepath.Ext(filename)
-		dirName := strings.TrimSuffix(filename, ext)
-		return "/" + dirName
+		// If the file is at the root, return root
+		// The processor will handle creating a folder if needed (e.g. for archives or multi-file NZBs)
+		return "/"
 	}
 
 	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
@@ -103,18 +100,6 @@ func EnsureDirectoryExists(virtualDir string, metadataService *metadata.Metadata
 // CreateNzbFolder creates a folder named after the NZB file
 func CreateNzbFolder(virtualDir, nzbFilename string, metadataService *metadata.MetadataService) (string, error) {
 	nzbBaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
-	// Now, also strip the media file extension if it exists
-	// Common media extensions: .mkv, .mp4, .avi, .flv, .wmv, .mov, .webm
-	// This is not exhaustive, but covers common cases.
-	mediaExtensions := []string{".mkv", ".mp4", ".avi", ".flv", ".wmv", ".mov", ".webm", ".ts", ".iso"}
-
-	for _, ext := range mediaExtensions {
-		if strings.HasSuffix(strings.ToLower(nzbBaseName), ext) {
-			nzbBaseName = strings.TrimSuffix(nzbBaseName, ext)
-			break
-		}
-	}
-
 	nzbVirtualDir := filepath.Join(virtualDir, nzbBaseName)
 	nzbVirtualDir = strings.ReplaceAll(nzbVirtualDir, string(filepath.Separator), "/")
 
@@ -136,18 +121,8 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 		normalizedFilename = strings.TrimPrefix(normalizedFilename, "/")
 
 		dir := filepath.Dir(normalizedFilename)
-		name := filepath.Base(normalizedFilename)
 
-		// Check for redundant nesting (e.g. file.mkv/file.mkv)
-		// If the last directory component matches the filename, flatten the structure
-		// Also check without extension for cases like Movie/Movie.mkv
-		nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
-		if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
-			dir = filepath.Dir(dir)
-		}
-
-		// Check for redundant nesting against parent directory
-		// e.g. /tv/ShowName/ShowName/file.mkv -> /tv/ShowName/file.mkv
+		// Flatten redundant nesting against parent directory (same-level duplicate names)
 		parentDirName := filepath.Base(virtualDir)
 		if dir == parentDirName {
 			dir = "."
@@ -155,9 +130,7 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 			dir = strings.TrimPrefix(dir, parentDirName+"/")
 		}
 
-		
-
-				if dir != "." && dir != "/" {
+		if dir != "." && dir != "/" {
 			virtualPath := filepath.Join(virtualDir, dir)
 			virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 			dirs[virtualPath] = true
@@ -183,16 +156,7 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 	dir := filepath.Dir(normalizedFilename)
 	name := filepath.Base(normalizedFilename)
 
-	// Check for redundant nesting (e.g. file.mkv/file.mkv)
-	// If the last directory component matches the filename, flatten the structure
-	// Also check without extension for cases like Movie/Movie.mkv
-	nameWithoutExt := strings.TrimSuffix(name, filepath.Ext(name))
-	if filepath.Base(dir) == name || filepath.Base(dir) == nameWithoutExt {
-		dir = filepath.Dir(dir)
-	}
-
-	// Check for redundant nesting against parent directory
-	// e.g. /tv/ShowName/ShowName/file.mkv -> /tv/ShowName/file.mkv
+	// Flatten redundant nesting against parent directory (same-level duplicate names)
 	parentDirName := filepath.Base(baseDir)
 	if dir == parentDirName {
 		dir = "."
@@ -200,9 +164,7 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 		dir = strings.TrimPrefix(dir, parentDirName+"/")
 	}
 
-	
-
-			if dir == "." || dir == "/" {
+	if dir == "." || dir == "/" {
 		return baseDir, name
 	}
 
