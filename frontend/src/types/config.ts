@@ -711,12 +711,6 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "HardDrive",
 		canEdit: true,
 	},
-	fuse: {
-		title: "altmount Native Mount",
-		description: "Configure altmount native FUSE mount settings",
-		icon: "HardDrive",
-		canEdit: true,
-	},
 	metadata: {
 		title: "Metadata",
 		description: "File metadata storage settings",

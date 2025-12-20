@@ -17,8 +17,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
-import { FuseConfig } from "../components/config/FuseConfig";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
+import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
@@ -547,8 +547,6 @@ export function ConfigurationPage() {
 									/>
 								)}
 
-								{activeSection === "fuse" && <FuseConfig />}
-
 								{activeSection === "sabnzbd" && (
 									<SABnzbdConfigSection
 										config={config}
@@ -583,7 +581,6 @@ export function ConfigurationPage() {
 									"system",
 									"providers",
 									"rclone",
-									"fuse",
 									"sabnzbd",
 									"arrs",
 									"health",
