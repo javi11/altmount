@@ -658,6 +658,7 @@ export interface ConfigSectionInfo {
 	description: string;
 	icon: string;
 	canEdit: boolean;
+	hidden?: boolean;
 }
 
 // Configuration sections metadata
@@ -710,6 +711,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description: "RClone mount and VFS settings",
 		icon: "HardDrive",
 		canEdit: true,
+	},
+	fuse: {
+		title: "altmount Native Mount",
+		description: "Configure altmount native FUSE mount settings",
+		icon: "HardDrive",
+		canEdit: true,
+		hidden: true,
 	},
 	metadata: {
 		title: "Metadata",
