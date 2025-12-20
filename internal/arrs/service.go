@@ -772,6 +772,65 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	return nil
 }
 
+// TriggerScanForFile finds the ARR instance managing the file and triggers a download scan on it.
+// Returns error if no instance manages the file.
+func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error {
+	// Try to find which instance manages this file path
+	instanceType, instanceName, err := s.findInstanceForFilePath(ctx, filePath, "")
+	if err != nil {
+		return err
+	}
+
+	instance, err := s.findConfigInstance(instanceType, instanceName)
+	if err != nil {
+		return err
+	}
+
+	if !instance.Enabled {
+		return fmt.Errorf("instance %s is disabled", instanceName)
+	}
+
+	slog.InfoContext(ctx, "Triggering download scan for specific instance", "instance", instanceName, "type", instanceType)
+
+	// Launch scan in background to not block caller
+	go func() {
+		// Use a new background context for the async call
+		bgCtx := context.Background()
+
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to create Radarr client for scan trigger", "instance", instance.Name, "error", err)
+				return
+			}
+			// Trigger DownloadedMoviesScan
+			_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "DownloadedMoviesScan"})
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedMoviesScan", "instance", instance.Name, "error", err)
+			} else {
+				slog.InfoContext(bgCtx, "Triggered DownloadedMoviesScan", "instance", instance.Name)
+			}
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", instance.Name, "error", err)
+				return
+			}
+			// Trigger DownloadedEpisodesScan
+			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "DownloadedEpisodesScan"})
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedEpisodesScan", "instance", instance.Name, "error", err)
+			} else {
+				slog.InfoContext(bgCtx, "Triggered DownloadedEpisodesScan", "instance", instance.Name)
+			}
+		}
+	}()
+
+	return nil
+}
+
 // TriggerDownloadScan triggers the "Check For Finished Downloads" task in ARR instances
 func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) {
 	instances := s.getConfigInstances()

@@ -987,14 +987,20 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 	// Trigger ARR download scan if applicable
 	if s.arrsService != nil && item.Category != nil {
-		category := strings.ToLower(*item.Category)
-		// Determine instance type based on category
-		// Note: This assumes standard "tv" and "movies" categories.
-		// Ideally we should match against configured categories in config.SABnzbd.Categories
-		if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
-			s.arrsService.TriggerDownloadScan(ctx, "sonarr")
-		} else if category == "movies" || strings.Contains(category, "movie") {
-			s.arrsService.TriggerDownloadScan(ctx, "radarr")
+		// Try to trigger scan on the specific instance that manages this file
+		// resultingPath is the virtual path, e.g. "movies/MovieName/Movie.mkv"
+		// This uses the Root Folder check which is fast and accurate
+		if err := s.arrsService.TriggerScanForFile(ctx, resultingPath); err != nil {
+			// Fallback: If we couldn't find a specific owner, broadcast to all instances of the type
+			s.log.DebugContext(ctx, "Could not find specific ARR instance for file, broadcasting scan",
+				"path", resultingPath, "error", err)
+
+			category := strings.ToLower(*item.Category)
+			if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
+				s.arrsService.TriggerDownloadScan(ctx, "sonarr")
+			} else if category == "movies" || strings.Contains(category, "movie") {
+				s.arrsService.TriggerDownloadScan(ctx, "radarr")
+			}
 		}
 	}
 
