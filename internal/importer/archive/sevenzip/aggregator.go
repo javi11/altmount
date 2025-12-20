@@ -131,6 +131,19 @@ func ProcessArchive(
 	// Process extracted files with segment-based progress tracking
 	// 80-95% for validation loop, 95-100% for metadata finalization
 	filesProcessed := 0
+
+	// Determine if we should rename the file to match the NZB basename
+	// Only do this if there's exactly one media file in the archive
+	mediaFilesCount := 0
+	for _, content := range sevenZipContents {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, allowedFileExtensions) || utils.IsAllowedFile(content.Filename, allowedFileExtensions)) {
+			mediaFilesCount++
+		}
+	}
+
+	nzbName := filepath.Base(nzbPath)
+	shouldNormalizeName := mediaFilesCount == 1
+
 	for _, sevenZipContent := range sevenZipContents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
@@ -141,6 +154,15 @@ func ProcessArchive(
 		// Flatten the internal path by extracting only the base filename
 		normalizedInternalPath := strings.ReplaceAll(sevenZipContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
+
+		// Normalize filename to match NZB if it's the only media file
+		if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, allowedFileExtensions) || utils.IsAllowedFile(sevenZipContent.Filename, allowedFileExtensions)) {
+			// Extract release name and combine with original extension
+			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
+			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",
+				"original", sevenZipContent.Filename,
+				"normalized", baseFilename)
+		}
 
 		// Create the virtual file path directly in the 7zip directory (flattened)
 		virtualFilePath := filepath.Join(virtualDir, baseFilename)
@@ -239,4 +261,21 @@ func ProcessArchive(
 	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", filesProcessed)
 
 	return nil
+}
+
+// normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
+func normalizeArchiveReleaseFilename(nzbFilename, originalFilename string) string {
+	releaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	fileExt := filepath.Ext(originalFilename)
+
+	if fileExt == "" {
+		return releaseName
+	}
+
+	// If release name already contains the extension (e.g. Movie.mkv.nzb -> Movie.mkv), don't duplicate
+	if strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
+		return releaseName
+	}
+
+	return releaseName + fileExt
 }
