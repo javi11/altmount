@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/importer/archive/rar"
 	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
 	"github.com/javi11/altmount/internal/importer/filesystem"
@@ -32,9 +33,10 @@ type Processor struct {
 	rarProcessor            rar.Processor
 	sevenZipProcessor       sevenzip.Processor
 	poolManager             pool.Manager // Pool manager for dynamic pool access
-	maxImportConnections    int          // Maximum concurrent NNTP connections for validation and archive processing
-	segmentSamplePercentage int          // Percentage of segments to check when sampling (1-100)
-	allowedFileExtensions   []string     // Allowed file extensions for validation (empty = allow all)
+	configGetter            config.ConfigGetter
+	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
+	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
+	allowedFileExtensions   []string
 	log                     *slog.Logger
 	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
 
@@ -45,7 +47,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -53,6 +55,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
 		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
 		poolManager:             poolManager,
+		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,
 		segmentSamplePercentage: segmentSamplePercentage,
 		allowedFileExtensions:   allowedFileExtensions,
@@ -64,6 +67,54 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		rarRPattern:       regexp.MustCompile(`^(.+)\.r(\d+)$`),         // filename.r00, filename.r01
 		rarNumericPattern: regexp.MustCompile(`^(.+)\.(\d+)$`),          // filename.001, filename.002
 	}
+}
+
+func (proc *Processor) isCategoryFolder(path string) bool {
+	cfg := proc.configGetter()
+	normalizedPath := strings.Trim(filepath.ToSlash(path), "/")
+	completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+
+	// Helper to check if a name matches a category
+	matchesCategory := func(name string) bool {
+		name = strings.Trim(filepath.ToSlash(name), "/")
+		if name == "" {
+			return false
+		}
+
+		// Check exact match
+		if normalizedPath == name {
+			return true
+		}
+
+		// Check match with complete_dir prefix (e.g. complete/tv)
+		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
+			return true
+		}
+
+		return false
+	}
+
+	// Check complete_dir itself
+	if normalizedPath == completeDir {
+		return true
+	}
+
+	// Check configured categories
+	for _, cat := range cfg.SABnzbd.Categories {
+		if matchesCategory(cat.Dir) || matchesCategory(cat.Name) {
+			return true
+		}
+	}
+
+	// Also check default categories
+	defaults := []string{"movies", "tv", "series", "shows", "music", "books", "Animes"}
+	for _, def := range defaults {
+		if matchesCategory(def) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // updateProgress emits a progress update if broadcaster is available
@@ -213,9 +264,8 @@ func (proc *Processor) processSingleFile(
 	// Only remove redundancy if the folder does not exist in the source (NZB is not actually inside it)
 	if fileDir == "." || fileDir == "" {
 		if !strings.EqualFold(nzbDirBase, releaseName) && !strings.EqualFold(nzbDirBase, fileBase) {
-			// Check if we are at the root of a category (e.g., "movies", "tv")
-			// A top-level category has no slashes after being trimmed
-			isCategoryRoot := virtualDir != "" && virtualDir != "/" && !strings.Contains(strings.Trim(virtualDir, "/"), "/")
+			// Check if we are at the root of a category (e.g., "movies", "tv", "complete/tv")
+			isCategoryRoot := proc.isCategoryFolder(virtualDir)
 
 			if isCategoryRoot {
 				// If we are at the root of a category, ENSURE we have a subfolder for the release
@@ -225,7 +275,7 @@ func (proc *Processor) processSingleFile(
 				virtualDir = normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
 			}
 		}
-	} else if virtualDir != "" && virtualDir != "/" && !strings.Contains(strings.Trim(virtualDir, "/"), "/") {
+	} else if proc.isCategoryFolder(virtualDir) {
 		// Even if fileDir is not empty, if we are at category root, ensure we don't accidentally flatten
 		// This handles cases where the NZB has a folder that might match the category name or something weird
 	}
@@ -298,8 +348,8 @@ func (proc *Processor) processMultiFile(
 			regularFiles[0].Filename = normalizedBase
 		}
 
-		// Check if we are at the root of a category (e.g., "movies", "tv")
-		isCategoryRoot := virtualDir != "" && virtualDir != "/" && !strings.Contains(strings.Trim(virtualDir, "/"), "/")
+		// Check if we are at the root of a category (e.g., "movies", "tv", "complete/tv")
+		isCategoryRoot := proc.isCategoryFolder(virtualDir)
 
 		if isCategoryRoot && (originalDir == "." || originalDir == "") {
 			// If we are at category root and the file has no subfolder in the NZB,
