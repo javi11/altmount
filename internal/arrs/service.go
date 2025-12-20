@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,10 @@ import (
 	"golift.io/starr"
 	"golift.io/starr/radarr"
 	"golift.io/starr/sonarr"
+)
+
+var (
+	episodeRegex = regexp.MustCompile(`(?i)s(\d+)e(\d+)`)
 )
 
 const cacheTTL = 10 * time.Minute
@@ -744,6 +749,33 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 					"instance", instanceName,
 					"episode_file_id", targetEpisodeFile.ID,
 					"error", err)
+			}
+		}
+	}
+
+	// Fallback: If no episodes found by path match, try matching by SxxExx from the path
+	if len(episodeIDs) == 0 {
+		matches := episodeRegex.FindStringSubmatch(relativePath)
+		if len(matches) == 3 {
+			season, _ := strconv.Atoi(matches[1])
+			episodeNum, _ := strconv.Atoi(matches[2])
+
+			for _, episode := range episodes {
+				if int(episode.SeasonNumber) == season && int(episode.EpisodeNumber) == episodeNum {
+					slog.InfoContext(ctx, "Found matching episode by SxxExx fallback",
+						"season", season,
+						"episode", episodeNum,
+						"episode_id", episode.ID)
+					episodeIDs = append(episodeIDs, episode.ID)
+
+					// If the episode HAS a file in Sonarr but the path didn't match, we should delete it
+					if episode.HasFile && episode.EpisodeFileID > 0 {
+						slog.InfoContext(ctx, "Deleting existing episode file in Sonarr (path mismatch)",
+							"episode_file_id", episode.EpisodeFileID)
+						_ = client.DeleteEpisodeFileContext(ctx, episode.EpisodeFileID)
+					}
+					break
+				}
 			}
 		}
 	}
