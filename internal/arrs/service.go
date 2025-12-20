@@ -145,76 +145,123 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string, relativePath string) (instanceType string, instanceName string, err error) {
 	slog.DebugContext(ctx, "Finding instance for file path", "file_path", filePath, "relative_path", relativePath)
 
+	// Determine preferred instance type based on file patterns
+	preferredType := ""
+	if s.isMovie(filePath) || (relativePath != "" && s.isMovie(relativePath)) {
+		preferredType = "radarr"
+	} else if s.isEpisode(filePath) || (relativePath != "" && s.isEpisode(relativePath)) {
+		preferredType = "sonarr"
+	}
+
+	instances := s.getConfigInstances()
+
 	// Strategy 1: Fast Path - Check Root Folders
-	// This is the preferred method as it's O(1) per instance with root folders loaded
-	for _, instance := range s.getConfigInstances() {
-		if !instance.Enabled {
-			continue
+	// If we have a preferred type, check those instances first
+	if preferredType != "" {
+		for _, instance := range instances {
+			if !instance.Enabled || instance.Type != preferredType {
+				continue
+			}
+
+			if client, err := s.getOrCreateClient(instance); err == nil {
+				if s.managesFile(ctx, instance.Type, client, filePath) {
+					return instance.Type, instance.Name, nil
+				}
+			}
+		}
+	}
+
+	// Fallback to checking all enabled instances
+	for _, instance := range instances {
+		if !instance.Enabled || instance.Type == preferredType {
+			continue // Already checked or disabled
 		}
 
-		slog.DebugContext(ctx, "Checking instance for file (Root Folder Strategy)",
-			"instance_name", instance.Name,
-			"instance_type", instance.Type,
-			"file_path", filePath)
-
-		switch instance.Type {
-		case "radarr":
-			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
-			if err != nil {
-				continue
-			}
-			if s.radarrManagesFile(ctx, client, filePath) {
-				return "radarr", instance.Name, nil
-			}
-
-		case "sonarr":
-			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
-			if err != nil {
-				continue
-			}
-			if s.sonarrManagesFile(ctx, client, filePath) {
-				return "sonarr", instance.Name, nil
+		if client, err := s.getOrCreateClient(instance); err == nil {
+			if s.managesFile(ctx, instance.Type, client, filePath) {
+				return instance.Type, instance.Name, nil
 			}
 		}
 	}
 
 	// Strategy 2: Slow Path - Search Cache by Relative Path
-	// If relativePath is provided, we can search our cached movies/series to see if any contain this file
 	if relativePath != "" {
 		slog.InfoContext(ctx, "Root folder match failed, attempting relative path search", "relative_path", relativePath)
 
-		for _, instance := range s.getConfigInstances() {
+		for _, instance := range instances {
 			if !instance.Enabled {
 				continue
 			}
 
-			switch instance.Type {
-			case "radarr":
-				client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
-				if err != nil {
-					continue
-				}
-				// Use helper that utilizes cache
-				if s.radarrHasFile(ctx, client, instance.Name, relativePath) {
-					slog.InfoContext(ctx, "Found managing Radarr instance by relative path", "instance", instance.Name)
-					return "radarr", instance.Name, nil
-				}
-
-			case "sonarr":
-				client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
-				if err != nil {
-					continue
-				}
-				// Use helper that utilizes cache
-				if s.sonarrHasFile(ctx, client, instance.Name, relativePath) {
-					slog.InfoContext(ctx, "Found managing Sonarr instance by relative path", "instance", instance.Name)
-					return "sonarr", instance.Name, nil
+			if client, err := s.getOrCreateClient(instance); err == nil {
+				if s.hasFile(ctx, instance.Type, client, instance.Name, relativePath) {
+					slog.InfoContext(ctx, "Found managing instance by relative path", "instance", instance.Name, "type", instance.Type)
+					return instance.Type, instance.Name, nil
 				}
 			}
 		}
 	}
 
 	return "", "", fmt.Errorf("no ARR instance found managing file path: %s", filePath)
+}
+
+// getOrCreateClient is a helper to get or create the appropriate client
+func (s *Service) getOrCreateClient(instance *ConfigInstance) (interface{}, error) {
+	if instance.Type == "radarr" {
+		return s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+	}
+	return s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+}
+
+// managesFile is a unified helper for radarrManagesFile and sonarrManagesFile
+func (s *Service) managesFile(ctx context.Context, instanceType string, client interface{}, filePath string) bool {
+	if instanceType == "radarr" {
+		return s.radarrManagesFile(ctx, client.(*radarr.Radarr), filePath)
+	}
+	return s.sonarrManagesFile(ctx, client.(*sonarr.Sonarr), filePath)
+}
+
+// hasFile is a unified helper for radarrHasFile and sonarrHasFile
+func (s *Service) hasFile(ctx context.Context, instanceType string, client interface{}, instanceName, relativePath string) bool {
+	if instanceType == "radarr" {
+		return s.radarrHasFile(ctx, client.(*radarr.Radarr), instanceName, relativePath)
+	}
+	return s.sonarrHasFile(ctx, client.(*sonarr.Sonarr), instanceName, relativePath)
+}
+
+func (s *Service) isMovie(path string) bool {
+	lowerPath := strings.ToLower(path)
+	// Common movie patterns in scene names
+	moviePatterns := []string{"movie", "film", "2160p", "1080p", "720p", "bluray", "web-dl", "webrip", "dvdrip"}
+	for _, pattern := range moviePatterns {
+		if strings.Contains(lowerPath, pattern) {
+			// Check it's not also an episode (episodes often have these too)
+			if !s.isEpisode(path) {
+				return true
+			}
+		}
+	}
+	// Also check directory structure
+	if strings.Contains(lowerPath, "/movies/") || strings.Contains(lowerPath, "/movie/") {
+		return true
+	}
+	return false
+}
+
+func (s *Service) isEpisode(path string) bool {
+	lowerPath := strings.ToLower(path)
+	// Common TV show patterns (S01E01, 1x01, etc.)
+	// Simple check for S00E00 pattern
+	for i := 0; i < 100; i++ {
+		sStr := fmt.Sprintf("s%02d", i)
+		if strings.Contains(lowerPath, sStr) {
+			return true
+		}
+	}
+	if strings.Contains(lowerPath, "/tv/") || strings.Contains(lowerPath, "/series/") || strings.Contains(lowerPath, "/shows/") {
+		return true
+	}
+	return false
 }
 
 // radarrHasFile checks if any movie in the instance contains the given relative path
@@ -225,9 +272,12 @@ func (s *Service) radarrHasFile(ctx context.Context, client *radarr.Radarr, inst
 		return false
 	}
 
+	strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+
 	for _, movie := range movies {
 		if movie.HasFile && movie.MovieFile != nil {
-			if strings.HasSuffix(movie.MovieFile.Path, relativePath) {
+			if strings.HasSuffix(movie.MovieFile.Path, relativePath) ||
+				strings.HasSuffix(strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)), strippedRelative) {
 				return true
 			}
 		}
@@ -249,6 +299,7 @@ func (s *Service) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, inst
 
 	// Normalize relative path for comparison
 	relativePath = filepath.ToSlash(relativePath)
+	strippedRelative := strings.TrimSuffix(relativePath, ".strm")
 
 	for _, series := range seriesList {
 		// Check if the series folder name is part of the relative path
@@ -256,7 +307,7 @@ func (s *Service) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, inst
 		// Series Path: "/mnt/media/TV/Show Name"
 		// Folder Name: "Show Name"
 		folderName := filepath.Base(series.Path)
-		if strings.Contains(relativePath, folderName) {
+		if strings.Contains(relativePath, folderName) || strings.Contains(strippedRelative, folderName) {
 			return true
 		}
 	}
@@ -445,13 +496,26 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 				targetMovie = movie
 				break
 			}
+			// Try match without .strm extension if filePath is a .strm file
+			if strings.HasSuffix(filePath, ".strm") {
+				strippedPath := strings.TrimSuffix(filePath, ".strm")
+				// Check if movie file path (without its own extension) matches stripped filePath
+				if strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)) == strippedPath {
+					targetMovie = movie
+					break
+				}
+			}
 			// Try suffix match with relative path if provided
-			if relativePath != "" && strings.HasSuffix(movie.MovieFile.Path, relativePath) {
-				slog.InfoContext(ctx, "Found Radarr movie match by relative path suffix",
-					"radarr_path", movie.MovieFile.Path,
-					"relative_path", relativePath)
-				targetMovie = movie
-				break
+			if relativePath != "" {
+				strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+				if strings.HasSuffix(movie.MovieFile.Path, relativePath) ||
+					strings.HasSuffix(strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)), strippedRelative) {
+					slog.InfoContext(ctx, "Found Radarr movie match by relative path suffix",
+						"radarr_path", movie.MovieFile.Path,
+						"relative_path", relativePath)
+					targetMovie = movie
+					break
+				}
 			}
 		}
 	}
@@ -631,13 +695,25 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 			targetEpisodeFile = episodeFile
 			break
 		}
+		// Try match without .strm extension
+		if strings.HasSuffix(filePath, ".strm") {
+			strippedPath := strings.TrimSuffix(filePath, ".strm")
+			if strings.TrimSuffix(episodeFile.Path, filepath.Ext(episodeFile.Path)) == strippedPath {
+				targetEpisodeFile = episodeFile
+				break
+			}
+		}
 		// Try match with relative path
-		if relativePath != "" && strings.HasSuffix(episodeFile.Path, relativePath) {
-			slog.InfoContext(ctx, "Found Sonarr episode match by relative path suffix",
-				"sonarr_path", episodeFile.Path,
-				"relative_path", relativePath)
-			targetEpisodeFile = episodeFile
-			break
+		if relativePath != "" {
+			strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+			if strings.HasSuffix(episodeFile.Path, relativePath) ||
+				strings.HasSuffix(strings.TrimSuffix(episodeFile.Path, filepath.Ext(episodeFile.Path)), strippedRelative) {
+				slog.InfoContext(ctx, "Found Sonarr episode match by relative path suffix",
+					"sonarr_path", episodeFile.Path,
+					"relative_path", relativePath)
+				targetEpisodeFile = episodeFile
+				break
+			}
 		}
 	}
 

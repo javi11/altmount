@@ -213,8 +213,21 @@ func (proc *Processor) processSingleFile(
 	// Only remove redundancy if the folder does not exist in the source (NZB is not actually inside it)
 	if fileDir == "." || fileDir == "" {
 		if !strings.EqualFold(nzbDirBase, releaseName) && !strings.EqualFold(nzbDirBase, fileBase) {
-			virtualDir = normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
+			// Check if we are at the root of a category (e.g., "movies", "tv")
+			// A top-level category has no slashes after being trimmed
+			isCategoryRoot := virtualDir != "" && virtualDir != "/" && !strings.Contains(strings.Trim(virtualDir, "/"), "/")
+
+			if isCategoryRoot {
+				// If we are at the root of a category, ENSURE we have a subfolder for the release
+				// to prevent Sonarr/Radarr from deleting the category folder itself
+				virtualDir = filepath.Join(virtualDir, releaseName)
+			} else {
+				virtualDir = normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
+			}
 		}
+	} else if virtualDir != "" && virtualDir != "/" && !strings.Contains(strings.Trim(virtualDir, "/"), "/") {
+		// Even if fileDir is not empty, if we are at category root, ensure we don't accidentally flatten
+		// This handles cases where the NZB has a folder that might match the category name or something weird
 	}
 
 	// Keeps NZB subfolders, but renames the file to the release name (avoids duplicate extension)
@@ -285,9 +298,22 @@ func (proc *Processor) processMultiFile(
 			regularFiles[0].Filename = normalizedBase
 		}
 
-		// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
-		if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
-			return "", err
+		// Check if we are at the root of a category (e.g., "movies", "tv")
+		isCategoryRoot := virtualDir != "" && virtualDir != "/" && !strings.Contains(strings.Trim(virtualDir, "/"), "/")
+
+		if isCategoryRoot && (originalDir == "." || originalDir == "") {
+			// If we are at category root and the file has no subfolder in the NZB,
+			// create one named after the release to protect the category folder
+			nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, nzbName, proc.metadataService)
+			if err != nil {
+				return "", err
+			}
+			targetBaseDir = nzbFolder
+		} else {
+			// Avoid nesting like /Season 02/<release>/<release>.mkv; drop the NZB-named folder here.
+			if err := filesystem.EnsureDirectoryExists(targetBaseDir, proc.metadataService); err != nil {
+				return "", err
+			}
 		}
 	} else {
 		// Create NZB folder for true multi-file imports

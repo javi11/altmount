@@ -238,6 +238,12 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		return false, ErrCannotRemoveRoot
 	}
 
+	// Prevent removal of category folders
+	if mrf.isCategoryFolder(normalizedName) {
+		slog.WarnContext(ctx, "Prevented removal of category folder", "path", normalizedName)
+		return false, os.ErrPermission
+	}
+
 	// Check if this is a directory
 	if mrf.metadataService.DirectoryExists(normalizedName) {
 		// Use MetadataService's directory delete operation
@@ -264,6 +270,12 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	// Normalize paths
 	normalizedOld := normalizePath(oldName)
 	normalizedNew := normalizePath(newName)
+
+	// Prevent renaming of category folders
+	if mrf.isCategoryFolder(normalizedOld) {
+		slog.WarnContext(ctx, "Prevented renaming of category folder", "path", normalizedOld)
+		return false, os.ErrPermission
+	}
 
 	// Check if old path is a directory
 	if mrf.metadataService.DirectoryExists(normalizedOld) {
@@ -302,6 +314,33 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	}
 
 	return true, nil
+}
+
+// isCategoryFolder checks if a path corresponds to a configured category folder
+func (mrf *MetadataRemoteFile) isCategoryFolder(path string) bool {
+	cfg := mrf.configGetter()
+	normalizedPath := normalizePath(path)
+
+	// Check configured categories
+	for _, cat := range cfg.SABnzbd.Categories {
+		catDir := cat.Dir
+		if catDir == "" {
+			catDir = cat.Name
+		}
+		if normalizedPath == normalizePath(catDir) {
+			return true
+		}
+	}
+
+	// Also check default categories if not explicitly configured
+	defaults := []string{"movies", "tv", "series", "shows", "music", "books"}
+	for _, def := range defaults {
+		if normalizedPath == normalizePath(def) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Stat returns file information for a path using metadata
