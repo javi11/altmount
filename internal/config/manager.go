@@ -158,6 +158,7 @@ type ImportConfig struct {
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
 }
@@ -549,6 +550,10 @@ func (c *Config) Validate() error {
 
 	if c.Import.SegmentSamplePercentage < 1 || c.Import.SegmentSamplePercentage > 100 {
 		return fmt.Errorf("import segment_sample_percentage must be between 1 and 100")
+	}
+
+	if c.Import.ReadTimeoutSeconds <= 0 {
+		c.Import.ReadTimeoutSeconds = 300
 	}
 
 	// Validate import strategy
@@ -1162,6 +1167,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
 			ImportCacheSizeMB:       64,                 // Default: 64MB cache for archive analysis
 			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
+			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
 		},

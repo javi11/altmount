@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/importer/archive/rar"
@@ -47,13 +48,13 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
 		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
+		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
 		poolManager:             poolManager,
 		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,

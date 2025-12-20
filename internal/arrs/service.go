@@ -804,12 +804,12 @@ func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error
 				slog.ErrorContext(bgCtx, "Failed to create Radarr client for scan trigger", "instance", instance.Name, "error", err)
 				return
 			}
-			// Trigger DownloadedMoviesScan
-			_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "DownloadedMoviesScan"})
+			// Trigger RefreshMonitoredDownloads
+			_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 			if err != nil {
-				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedMoviesScan", "instance", instance.Name, "error", err)
+				slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", instance.Name, "error", err)
 			} else {
-				slog.InfoContext(bgCtx, "Triggered DownloadedMoviesScan", "instance", instance.Name)
+				slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", instance.Name)
 			}
 
 		case "sonarr":
@@ -818,12 +818,12 @@ func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error
 				slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", instance.Name, "error", err)
 				return
 			}
-			// Trigger DownloadedEpisodesScan
-			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "DownloadedEpisodesScan"})
+			// Trigger RefreshMonitoredDownloads
+			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 			if err != nil {
-				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedEpisodesScan", "instance", instance.Name, "error", err)
+				slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", instance.Name, "error", err)
 			} else {
-				slog.InfoContext(bgCtx, "Triggered DownloadedEpisodesScan", "instance", instance.Name)
+				slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", instance.Name)
 			}
 		}
 	}()
@@ -852,12 +852,12 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					slog.ErrorContext(bgCtx, "Failed to create Radarr client for scan trigger", "instance", inst.Name, "error", err)
 					return
 				}
-				// Trigger DownloadedMoviesScan
-				_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "DownloadedMoviesScan"})
+				// Trigger RefreshMonitoredDownloads
+				_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to trigger DownloadedMoviesScan", "instance", inst.Name, "error", err)
+					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
 				} else {
-					slog.InfoContext(bgCtx, "Triggered DownloadedMoviesScan", "instance", inst.Name)
+					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
 				}
 
 			case "sonarr":
@@ -866,12 +866,12 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", inst.Name, "error", err)
 					return
 				}
-				// Trigger DownloadedEpisodesScan
-				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "DownloadedEpisodesScan"})
+				// Trigger RefreshMonitoredDownloads
+				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to trigger DownloadedEpisodesScan", "instance", inst.Name, "error", err)
+					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
 				} else {
-					slog.InfoContext(bgCtx, "Triggered DownloadedEpisodesScan", "instance", inst.Name)
+					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
 				}
 			}
 		}(instance)

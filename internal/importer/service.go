@@ -128,9 +128,13 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
+	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, broadcaster, configGetter)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -210,9 +214,9 @@ func (s *Service) IsPaused() bool {
 // Stop stops the NZB import service and all queue workers
 func (s *Service) Stop(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if !s.running {
+		s.mu.Unlock()
 		return nil
 	}
 
@@ -220,14 +224,17 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	// Cancel all goroutines
 	s.cancel()
+	s.running = false
+	s.mu.Unlock()
 
 	// Wait for all goroutines to finish
 	s.wg.Wait()
 
 	// Recreate context for potential restart
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
-	s.running = false
 	s.log.InfoContext(ctx, "NZB import service stopped")
 
 	return nil
