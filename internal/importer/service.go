@@ -1730,6 +1730,13 @@ func (s *Service) handleIdMetadataLinks(item *database.ImportQueueItem, resultin
 			return nil
 		}
 
+		// Check sidecar ID file if not in proto (compatibility mode)
+		if meta.NzbdavId == "" {
+			if idData, err := os.ReadFile(path + ".id"); err == nil {
+				meta.NzbdavId = string(idData)
+			}
+		}
+
 		if meta.NzbdavId != "" {
 			// Calculate the virtual path from the metadata file path
 			relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
