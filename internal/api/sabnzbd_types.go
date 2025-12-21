@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/progress"
 )
 
@@ -273,6 +274,10 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 	var jobName string
 	if item.StoragePath != nil && *item.StoragePath != "" {
 		storagePath := filepath.ToSlash(*item.StoragePath)
+		// Determine the job folder
+		if utils.HasPopularExtension(storagePath) {
+			storagePath = filepath.Dir(storagePath)
+		}
 		jobName = filepath.Base(storagePath)
 
 		// Safety check: If the job name matches a generic category name, fallback to NZB name
@@ -367,10 +372,16 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		storagePath := filepath.ToSlash(*item.StoragePath)
 		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, storagePath))
 
+		// Determine the job folder
+		jobFolder := fullStoragePath
+		if utils.HasPopularExtension(fullStoragePath) {
+			jobFolder = filepath.Dir(fullStoragePath)
+		}
+
 		// SABnzbd reports 'path' as the absolute path to the JOB folder.
 		// Sonarr/Radarr will look INSIDE this folder for media files.
-		finalPath = fullStoragePath
-		jobName = filepath.Base(fullStoragePath)
+		finalPath = jobFolder
+		jobName = filepath.Base(jobFolder)
 
 		// Safety check: If the job name matches a generic category name, it means it was a flattened import.
 		// In this case, we need to report the category folder as the 'path' and the NZB name as the 'name'.
