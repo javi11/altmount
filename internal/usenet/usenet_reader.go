@@ -456,6 +456,7 @@ func (b *UsenetReader) downloadManager(
 							_ = cw.Close()
 						}
 					} else {
+						// Close writer on success to signal EOF to readers
 						if cw, ok := w.(io.Closer); ok {
 							if err := cw.Close(); err != nil {
 								b.log.ErrorContext(taskCtx, "Error closing segment buffer on success:", "error", err)

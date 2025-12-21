@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -170,6 +171,13 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("service is already started")
 	}
 
+	// Update database connection pool to match worker count
+	// This prevents connection starvation when multiple workers try to claim items
+	s.database.UpdateConnectionPool(s.config.Workers)
+	s.log.InfoContext(ctx, "Updated database connection pool",
+		"workers", s.config.Workers,
+		"max_connections", s.config.Workers+4)
+
 	// Reset any stale queue items from processing back to pending
 	if err := s.database.Repository.ResetStaleItems(ctx); err != nil {
 		s.log.ErrorContext(ctx, "Failed to reset stale queue items", "error", err)
@@ -227,8 +235,30 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.running = false
 	s.mu.Unlock()
 
-	// Wait for all goroutines to finish
-	s.wg.Wait()
+	// Release lock BEFORE waiting to avoid deadlock
+	// Workers call IsPaused() which needs this lock
+	s.mu.Unlock()
+
+	// Wait for all goroutines to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All goroutines finished
+	case <-time.After(30 * time.Second):
+		s.log.WarnContext(ctx, "Timeout waiting for workers to stop, some goroutines may still be running")
+	case <-ctx.Done():
+		s.log.WarnContext(ctx, "Context cancelled while waiting for workers to stop")
+		return ctx.Err()
+	}
+
+	// Re-acquire lock to update state
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Recreate context for potential restart
 	s.mu.Lock()
@@ -800,8 +830,10 @@ func isDatabaseContentionError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "database is locked") ||
-		strings.Contains(err.Error(), "database is busy")
+	errStr := err.Error()
+	return strings.Contains(errStr, "database is locked") ||
+		strings.Contains(errStr, "database is busy") ||
+		strings.Contains(errStr, "database table is locked")
 }
 
 // claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic using retry-go
@@ -818,22 +850,38 @@ func (s *Service) claimItemWithRetry(ctx context.Context, workerID int) (*databa
 			item = claimedItem
 			return nil
 		},
-		retry.Attempts(5),
-		retry.Delay(10*time.Millisecond),
-		retry.MaxDelay(500*time.Millisecond),
+		retry.Attempts(3), // Reduced from 5 - immediate transactions should succeed quickly
+		retry.Delay(50*time.Millisecond), // Increased from 10ms
+		retry.MaxDelay(5*time.Second),    // Increased from 500ms to allow better spreading
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(isDatabaseContentionError),
 		retry.OnRetry(func(n uint, err error) {
-			// Only log warnings after multiple retries to reduce noise
-			if n >= 2 {
+			// Add jitter to prevent synchronized retries across workers
+			// Jitter range: 0-1000ms to desynchronize worker retries
+			jitter := time.Duration(rand.Int63n(int64(time.Second)))
+			time.Sleep(jitter)
+
+			// Calculate exponential backoff for logging
+			baseDelay := 50 * time.Millisecond
+			backoffDelay := baseDelay * (1 << n) // Exponential: 50ms, 100ms, 200ms...
+			if backoffDelay > 5*time.Second {
+				backoffDelay = 5 * time.Second
+			}
+
+			// Only log warnings after first retry to reduce noise
+			if n >= 1 {
 				s.log.WarnContext(ctx, "Database contention, retrying claim",
 					"attempt", n+1,
 					"worker_id", workerID,
+					"backoff_ms", backoffDelay.Milliseconds(),
+					"jitter_ms", jitter.Milliseconds(),
 					"error", err)
 			} else {
 				s.log.DebugContext(ctx, "Database contention, retrying claim",
 					"attempt", n+1,
 					"worker_id", workerID,
+					"backoff_ms", backoffDelay.Milliseconds(),
+					"jitter_ms", jitter.Milliseconds(),
 					"error", err)
 			}
 		}),

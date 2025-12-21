@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -365,10 +366,13 @@ func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*Que
 
 // ResetStaleItems resets processing items back to pending on service startup
 func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
+	// Only reset items that have been stuck in processing for more than 10 minutes
+	// This prevents resetting items that are actively being processed during quick restarts
 	query := `
 		UPDATE import_queue
 		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
 		WHERE status = 'processing'
+		  AND (started_at IS NOT NULL AND datetime(started_at, '+10 minutes') < datetime('now'))
 	`
 
 	result, err := r.db.ExecContext(ctx, query)
@@ -382,8 +386,11 @@ func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 	}
 
 	if rowsAffected > 0 {
-		// Log the reset operation for operational visibility
-		fmt.Printf("Reset %d stale queue items from processing to pending\n", rowsAffected)
+		// Log the reset operation for operational visibility with structured logging
+		slog.InfoContext(ctx, "Reset stale queue items",
+			"count", rowsAffected,
+			"threshold_minutes", 10,
+			"component", "queue-repository")
 	}
 
 	return nil
