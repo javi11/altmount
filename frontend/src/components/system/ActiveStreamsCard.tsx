@@ -53,6 +53,10 @@ export function ActiveStreamsCard() {
 							const progress = stream.total_size > 0 
 								? Math.round((position / stream.total_size) * 100) 
 								: 0;
+							
+							const bufferedProgress = stream.total_size > 0 
+								? Math.round((stream.buffered_offset / stream.total_size) * 100) 
+								: 0;
 
 							return (
 								<div key={stream.id} className="flex flex-col gap-2 p-3 bg-base-200/50 rounded-lg group">
@@ -128,11 +132,25 @@ export function ActiveStreamsCard() {
 												)}
 											</div>
 										</div>
-										<progress 
-											className={`progress ${stream.bytes_per_second > 0 ? 'progress-primary' : 'progress-neutral'} w-full h-1.5`} 
-											value={position} 
-											max={stream.total_size}
-										></progress>
+										
+										{/* Custom progress bar with buffer */}
+										<div className="relative w-full h-1.5 bg-neutral rounded-full overflow-hidden">
+											{/* Buffer Bar */}
+											{bufferedProgress > progress && (
+												<div 
+													className="absolute top-0 left-0 h-full bg-primary/20 transition-all duration-500 ease-out"
+													style={{ width: `${bufferedProgress}%` }}
+												></div>
+											)}
+											{/* Playback Progress Bar */}
+											<div 
+												className={`absolute top-0 left-0 h-full transition-all duration-500 ease-out ${
+													stream.bytes_per_second > 0 ? 'bg-primary' : 'bg-base-content/20'
+												}`}
+												style={{ width: `${progress}%` }}
+											></div>
+										</div>
+
 										<div className="flex justify-end text-[9px] text-base-content/40 font-mono">
 											Avg: {formatBytes(stream.speed_avg)}/s
 										</div>

@@ -40,6 +40,7 @@ func (m *MonitoredFile) Read(p []byte) (n int, err error) {
 	n, err = m.file.Read(p)
 	if n > 0 {
 		atomic.AddInt64(&m.stream.BytesSent, int64(n))
+		atomic.AddInt64(&m.stream.CurrentOffset, int64(n))
 	}
 	return n, err
 }
@@ -48,7 +49,11 @@ func (m *MonitoredFile) Seek(offset int64, whence int) (int64, error) {
 	if err := m.ctx.Err(); err != nil {
 		return 0, err
 	}
-	return m.file.Seek(offset, whence)
+	newOffset, err := m.file.Seek(offset, whence)
+	if err == nil {
+		atomic.StoreInt64(&m.stream.CurrentOffset, newOffset)
+	}
+	return newOffset, err
 }
 
 func (m *MonitoredFile) Close() error {

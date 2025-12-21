@@ -23,6 +23,7 @@ type ActiveStream struct {
 	SpeedAvg         int64     `json:"speed_avg"`
 	ETA              int64     `json:"eta"` // Seconds remaining
 	TotalConnections int       `json:"total_connections"`
+	BufferedOffset   int64     `json:"buffered_offset"`
 	Status           string    `json:"status"` // e.g., "Buffering", "Streaming", "Stalled"
 }
 
@@ -30,6 +31,7 @@ type ActiveStream struct {
 type StreamTracker interface {
 	Add(filePath, source, userName, clientIP, userAgent string, totalSize int64) string
 	UpdateProgress(id string, bytesRead int64)
+	UpdateBufferedOffset(id string, offset int64)
 	Remove(id string)
 }
 

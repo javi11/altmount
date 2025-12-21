@@ -692,6 +692,11 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 
 		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
 			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
+
+			// Update buffered offset if available
+			if ur, ok := mvf.reader.(interface{ GetBufferedOffset() int64 }); ok {
+				mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, ur.GetBufferedOffset())
+			}
 		}
 
 		if readErr != nil {

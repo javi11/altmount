@@ -254,15 +254,21 @@ func (b *UsenetReader) isArticleNotFoundError(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFoundInProviders)
 }
 
-// isPoolUnavailableError checks if the error indicates the pool is unavailable or shutdown
-func (b *UsenetReader) isPoolUnavailableError(err error) bool {
-	if err == nil {
-		return false
+func (b *UsenetReader) GetBufferedOffset() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.nextToDownload == 0 || len(b.rg.segments) == 0 {
+		return 0
 	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "connection pool is shutdown") ||
-		strings.Contains(errStr, "connection pool not available") ||
-		strings.Contains(errStr, "NNTP connection pool not available")
+
+	idx := b.nextToDownload - 1
+	if idx >= len(b.rg.segments) {
+		idx = len(b.rg.segments) - 1
+	}
+
+	s := b.rg.segments[idx]
+	return s.StartOffset + int64(s.SegmentSize)
 }
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability

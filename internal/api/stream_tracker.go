@@ -166,6 +166,14 @@ func (t *StreamTracker) UpdateProgress(id string, bytesRead int64) {
 	}
 }
 
+// UpdateBufferedOffset updates the buffered offset for a stream by ID
+func (t *StreamTracker) UpdateBufferedOffset(id string, offset int64) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		atomic.StoreInt64(&stream.BufferedOffset, offset)
+	}
+}
+
 // Remove removes a stream by ID and adds it to history
 func (t *StreamTracker) Remove(id string) {
 	if val, ok := t.streams.Load(id); ok {
@@ -246,6 +254,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			if internal.lastReadAt.After(existing.LastActivity) {
 				existing.LastActivity = internal.lastReadAt
 				existing.CurrentOffset = atomic.LoadInt64(&s.CurrentOffset)
+				existing.BufferedOffset = atomic.LoadInt64(&s.BufferedOffset)
 			}
 			
 			// For ETA, use the stream with the longest remaining time or re-calculate based on totals?
@@ -282,6 +291,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 			// Load current atomic value
 			streamCopy.BytesSent = atomic.LoadInt64(&s.BytesSent)
 			streamCopy.CurrentOffset = atomic.LoadInt64(&s.CurrentOffset)
+			streamCopy.BufferedOffset = atomic.LoadInt64(&s.BufferedOffset)
 			streamCopy.LastActivity = internal.lastReadAt
 			streamCopy.BytesPerSecond = internal.BytesPerSecond
 			streamCopy.SpeedAvg = internal.SpeedAvg

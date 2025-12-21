@@ -323,6 +323,7 @@ export interface ActiveStream {
 	eta: number;
 	status: string;
 	total_connections: number;
+	buffered_offset: number;
 }
 
 export interface PoolMetrics {
