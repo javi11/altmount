@@ -906,6 +906,16 @@ func (r *HealthRepository) MarkAsHealthy(ctx context.Context, filePath string, n
 	return nil
 }
 
+// SetFileIgnored sets the status of a file to 'ignored'
+func (r *HealthRepository) SetFileIgnored(ctx context.Context, id int64) error {
+	query := `UPDATE file_health SET status = ?, updated_at = ? WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, HealthStatusIgnored, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("failed to set file ignored: %w", err)
+	}
+	return nil
+}
+
 // GetAllHealthCheckPaths returns all health check file paths (memory optimized)
 func (r *HealthRepository) GetAllHealthCheckPaths(ctx context.Context) ([]string, error) {
 	query := `
