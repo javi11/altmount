@@ -99,7 +99,7 @@ type segment struct {
 	writer        *bufpipe.PipeWriter
 	once          sync.Once
 	limitedReader io.Reader // Cached limited reader to prevent multiple LimitReader wraps
-	mx            sync.Mutex
+	sMx           sync.Mutex
 }
 
 func (s *segment) GetReader() io.Reader {
@@ -125,25 +125,25 @@ func (s *segment) Close() error {
 		return nil
 	}
 
-	s.mx.Lock()
-	defer s.mx.Unlock()
+	s.sMx.Lock()
+	defer s.sMx.Unlock()
 
 	var e1, e2 error
 
 	if s.reader != nil {
 		e1 = s.reader.Close()
-		s.reader = nil
 	}
 
 	if s.writer != nil {
 		e2 = s.writer.Close()
-		s.writer = nil
 	}
 
 	return errors.Join(e1, e2)
 }
 
 func (s *segment) Writer() io.Writer {
+	s.sMx.Lock()
+	defer s.sMx.Unlock()
 	return s.writer
 }
 

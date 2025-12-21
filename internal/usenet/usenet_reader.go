@@ -372,6 +372,11 @@ func (b *UsenetReader) downloadManager(
 
 		// Start continuous download monitoring
 		for ctx.Err() == nil {
+			b.mu.Lock()
+			if b.rg == nil {
+				b.mu.Unlock()
+				return
+			}
 			// Get current reading position
 			currentIndex := b.rg.GetCurrentIndex()
 
@@ -382,7 +387,6 @@ func (b *UsenetReader) downloadManager(
 			}
 
 			// Download segments that are not yet downloaded or downloading
-			b.mu.Lock()
 			segmentsToQueue := []int{}
 			for i := b.nextToDownload; i < targetDownload; i++ {
 				// Check for context cancellation frequently during segment selection
@@ -411,7 +415,13 @@ func (b *UsenetReader) downloadManager(
 				}
 
 				segmentIdx := idx // Capture for closure
+				b.mu.Lock()
+				if b.rg == nil || segmentIdx >= len(b.rg.segments) {
+					b.mu.Unlock()
+					continue
+				}
 				s := b.rg.segments[segmentIdx]
+				b.mu.Unlock()
 
 				pool.Go(func(c context.Context) (err error) {
 					defer func() {
@@ -427,19 +437,30 @@ func (b *UsenetReader) downloadManager(
 						b.mu.Unlock()
 					}()
 
-					w := s.writer
+					w := s.Writer()
+					if w == nil {
+						return fmt.Errorf("segment writer is nil")
+					}
+
 					taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
 					err = b.downloadSegmentWithRetry(taskCtx, s)
 
 					if err != nil {
-						cErr := w.CloseWithError(err)
-						if cErr != nil {
-							b.log.ErrorContext(taskCtx, "Error closing segment buffer:", "error", cErr)
+						// Check if writer supports CloseWithError (PipeWriter does)
+						if cew, ok := w.(interface{ CloseWithError(error) error }); ok {
+							cErr := cew.CloseWithError(err)
+							if cErr != nil {
+								b.log.ErrorContext(taskCtx, "Error closing segment buffer:", "error", cErr)
+							}
+						} else if cw, ok := w.(io.Closer); ok {
+							_ = cw.Close()
 						}
 					} else {
-						if err := w.Close(); err != nil {
-							b.log.ErrorContext(taskCtx, "Error closing segment buffer on success:", "error", err)
-							err = fmt.Errorf("failed to close segment writer: %w", err)
+						if cw, ok := w.(io.Closer); ok {
+							if err := cw.Close(); err != nil {
+								b.log.ErrorContext(taskCtx, "Error closing segment buffer on success:", "error", err)
+								err = fmt.Errorf("failed to close segment writer: %w", err)
+							}
 						}
 					}
 
