@@ -136,6 +136,7 @@ export interface HealthStats {
 	corrupted: number;
 	repair_triggered: number;
 	checking: number;
+	ignored: number;
 }
 
 export interface HealthRetryRequest {
