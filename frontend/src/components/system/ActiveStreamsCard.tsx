@@ -1,4 +1,4 @@
-import { Activity, FileVideo, MonitorPlay } from "lucide-react";
+import { Activity, FileVideo, MonitorPlay, User, Globe, Network } from "lucide-react";
 import { useActiveStreams } from "../../hooks/useApi";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { truncateText, formatBytes, formatDuration } from "../../lib/utils";
@@ -6,8 +6,10 @@ import { truncateText, formatBytes, formatDuration } from "../../lib/utils";
 export function ActiveStreamsCard() {
 	const { data: allStreams, isLoading, error } = useActiveStreams();
 
-	// Filter to show only WebDAV or FUSE streams (covers RClone, FUSE and external players)
-	const streams = allStreams?.filter((s) => s.source === "WebDAV" || s.source === "FUSE");
+	// Filter to show only active streaming sessions (WebDAV or FUSE)
+	const streams = allStreams?.filter(
+		(s) => (s.source === "WebDAV" || s.source === "FUSE") && s.status === "Streaming"
+	);
 
 	if (error) {
 		return (
@@ -62,7 +64,39 @@ export function ActiveStreamsCard() {
 											<div className="font-medium text-sm truncate" title={stream.file_path}>
 												{truncateText(stream.file_path.split("/").pop() || "", 40)}
 											</div>
-											<div className="text-[10px] flex items-center gap-2 mt-1">
+											
+											{/* User / Client Info */}
+											<div className="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] text-base-content/60">
+												{(stream.user_name || stream.client_ip) && (
+													<div className="flex items-center gap-1 bg-base-300/50 px-1.5 py-0.5 rounded">
+														{stream.user_name ? (
+															<User className="h-3 w-3" />
+														) : (
+															<Globe className="h-3 w-3" />
+														)}
+														<span className="truncate max-w-[100px]" title={stream.user_name || stream.client_ip}>
+															{stream.user_name || stream.client_ip}
+														</span>
+													</div>
+												)}
+												
+												{stream.user_agent && (
+													<div className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-base-content/10" title={stream.user_agent}>
+														<span className="truncate max-w-[80px]">
+															{stream.user_agent.split('/')[0]}
+														</span>
+													</div>
+												)}
+
+												{stream.total_connections > 1 && (
+													<div className="flex items-center gap-1 text-primary/80 font-mono">
+														<Network className="h-3 w-3" />
+														<span>{stream.total_connections}</span>
+													</div>
+												)}
+											</div>
+
+											<div className="text-[10px] flex items-center gap-2 mt-1.5">
 												{stream.bytes_per_second > 0 ? (
 													<span className="text-success font-bold animate-pulse">STREAMING</span>
 												) : (
