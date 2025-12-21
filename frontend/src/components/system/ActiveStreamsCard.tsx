@@ -1,31 +1,15 @@
-import { Activity, FileVideo, MonitorPlay, User, Globe, Network, X } from "lucide-react";
+import { Activity, FileVideo, MonitorPlay, User, Globe, Network } from "lucide-react";
 import { useActiveStreams } from "../../hooks/useApi";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { truncateText, formatBytes, formatDuration } from "../../lib/utils";
-import { apiClient } from "../../api/client";
-import { toast } from "sonner";
 
 export function ActiveStreamsCard() {
-	const { data: allStreams, isLoading, error, refetch } = useActiveStreams();
+	const { data: allStreams, isLoading, error } = useActiveStreams();
 
 	// Filter to show only active streaming sessions (WebDAV or FUSE)
 	const streams = allStreams?.filter(
 		(s) => (s.source === "WebDAV" || s.source === "FUSE") && s.status === "Streaming"
 	);
-
-	const handleKillStream = async (id: string) => {
-		try {
-			const success = await apiClient.killStream(id);
-			if (success) {
-				toast.success("Stream terminated");
-				refetch();
-			} else {
-				toast.error("Failed to terminate stream");
-			}
-		} catch (err) {
-			toast.error("Error terminating stream");
-		}
-	};
 
 	if (error) {
 		return (
@@ -122,13 +106,6 @@ export function ActiveStreamsCard() {
 												<span className="text-base-content/60">{formatBytes(stream.total_size)}</span>
 											</div>
 										</div>
-										<button 
-											onClick={() => handleKillStream(stream.id)}
-											className="btn btn-ghost btn-xs btn-circle text-base-content/20 hover:text-error hover:bg-error/10"
-											title="Kill Stream"
-										>
-											<X className="h-3.5 w-3.5" />
-										</button>
 									</div>
 									
 									<div className="space-y-1">
