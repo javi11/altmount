@@ -19,9 +19,19 @@ export function formatBytes(bytes: number, decimals = 2) {
 export function formatDuration(seconds: number) {
 	let s = seconds;
 
+	if (s >= 86400) {
+		const days = Math.floor(s / 86400);
+		const hours = Math.floor((s % 86400) / 3600);
+		return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+	}
+
+	if (s >= 3600) {
+		const hours = Math.floor(s / 3600);
+		const minutes = Math.floor((s % 3600) / 60);
+		return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+	}
+
 	const units = [
-		{ label: "d", seconds: 86400 },
-		{ label: "h", seconds: 3600 },
 		{ label: "m", seconds: 60 },
 		{ label: "s", seconds: 1 },
 	];
