@@ -1,11 +1,4 @@
-interface HealthStats {
-	total: number;
-	pending: number;
-	corrupted: number;
-	healthy: number;
-	repair_triggered: number;
-	checking: number;
-}
+import type { HealthStats } from "../../../types/api";
 
 interface HealthStatsCardsProps {
 	stats: HealthStats | undefined;
