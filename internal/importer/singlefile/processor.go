@@ -89,5 +89,5 @@ func ProcessSingleFile(
 		"virtual_path", virtualFilePath,
 		"size", file.Size)
 
-	return virtualFilePath, nil
+	return virtualDir, nil
 }
