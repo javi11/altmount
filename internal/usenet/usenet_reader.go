@@ -413,35 +413,35 @@ func (b *UsenetReader) downloadManager(
 				segmentIdx := idx // Capture for closure
 				s := b.rg.segments[segmentIdx]
 
-				pool.Go(func(c context.Context) error {
-					w := s.writer
+				pool.Go(func(c context.Context) (err error) {
+					defer func() {
+						if p := recover(); p != nil {
+							b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
+							err = fmt.Errorf("panic in download task: %v", p)
+						}
 
-					// Set the item ready to read
-					ctx = slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
-					err := b.downloadSegmentWithRetry(ctx, s)
+						// Mark download complete
+						b.mu.Lock()
+						delete(b.downloadingSegments, segmentIdx)
+						b.downloadCond.Signal()
+						b.mu.Unlock()
+					}()
+
+					w := s.writer
+					taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
+					err = b.downloadSegmentWithRetry(taskCtx, s)
 
 					if err != nil {
 						cErr := w.CloseWithError(err)
 						if cErr != nil {
-							b.log.ErrorContext(ctx, "Error closing segment buffer:", "error", cErr)
+							b.log.ErrorContext(taskCtx, "Error closing segment buffer:", "error", cErr)
 						}
 					} else {
 						if err := w.Close(); err != nil {
-							b.log.ErrorContext(ctx, "Error closing segment buffer on success:", "error", err)
-							// If we fail to close, we should probably treat it as an error for the flow?
-							// But the original code just returned err.
-							// We'll keep the return err logic but we need to update state first?
-							// Actually, if w.Close fails, we still downloaded it?
-							// Original code returned err.
+							b.log.ErrorContext(taskCtx, "Error closing segment buffer on success:", "error", err)
 							err = fmt.Errorf("failed to close segment writer: %w", err)
 						}
 					}
-
-					// Mark download complete
-					b.mu.Lock()
-					delete(b.downloadingSegments, segmentIdx)
-					b.downloadCond.Signal()
-					b.mu.Unlock()
 
 					return err
 				})

@@ -264,6 +264,7 @@ func (r *HealthRepository) SetCorrupted(ctx context.Context, filePath string, er
 		SET status = 'corrupted',
 		    last_error = ?,
 		    error_details = ?,
+		    scheduled_check_at = NULL,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
@@ -491,13 +492,13 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 			retry_count, max_retries, repair_retry_count, max_repair_retries,
 			created_at, updated_at, scheduled_check_at
 		)
-		VALUES (?, ?, 'corrupted', ?, ?, 0, 2, 0, 3, datetime('now'), datetime('now'), datetime('now'))
+		VALUES (?, ?, 'corrupted', ?, ?, 0, 2, 0, 3, datetime('now'), datetime('now'), NULL)
 		ON CONFLICT(file_path) DO UPDATE SET
 			library_path = COALESCE(excluded.library_path, library_path),
 			status = 'corrupted',
 			last_error = excluded.last_error,
 			error_details = excluded.error_details,
-			scheduled_check_at = datetime('now'),
+			scheduled_check_at = NULL,
 			updated_at = datetime('now')
 	`
 
@@ -968,6 +969,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	stmtCorrupted, err := tx.PrepareContext(ctx, `
 		UPDATE file_health 
 		SET status = 'corrupted', last_error = ?, error_details = ?, 
+		    scheduled_check_at = NULL,
 		    updated_at = datetime('now'), last_checked = datetime('now')
 		WHERE file_path = ?
 	`)
