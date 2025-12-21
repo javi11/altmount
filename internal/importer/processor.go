@@ -70,6 +70,50 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 	}
 }
 
+func (proc *Processor) isCategoryFolder(path string) bool {
+	cfg := proc.configGetter()
+	normalizedPath := strings.Trim(filepath.ToSlash(path), "/")
+	completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+
+	// Helper to check if a name matches a category
+	matchesCategory := func(name string) bool {
+		name = strings.Trim(filepath.ToSlash(name), "/")
+		if name == "" {
+			return false
+		}
+
+		// Check exact match
+		if normalizedPath == name {
+			return true
+		}
+
+		// Check match with complete_dir prefix (e.g. complete/tv)
+		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
+			return true
+		}
+
+		return false
+	}
+
+	// Check complete_dir itself
+	if normalizedPath == completeDir {
+		return true
+	}
+
+	// Check configured categories
+	for _, cat := range cfg.SABnzbd.Categories {
+		// Check both the category name and its specific directory if set
+		if matchesCategory(cat.Name) {
+			return true
+		}
+		if cat.Dir != "" && matchesCategory(cat.Dir) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // updateProgress emits a progress update if broadcaster is available
 func (proc *Processor) updateProgress(queueID int, percentage int) {
 	if proc.broadcaster != nil {
@@ -217,7 +261,14 @@ func (proc *Processor) processSingleFile(
 	if fileDir == "." || fileDir == "" {
 		// Only flatten when the enclosing folder is not the same real folder as the release name.
 		if !strings.EqualFold(nzbDirBase, releaseName) && !strings.EqualFold(nzbDirBase, strings.TrimSuffix(regularFiles[0].Filename, filepath.Ext(regularFiles[0].Filename))) {
-			virtualDir = normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
+			normalizedDir := normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
+			
+			// Only apply normalization if it doesn't result in a category root folder
+			// We want to avoid flattening 'movies/MovieName/Movie.mkv' into 'movies/Movie.mkv'
+			// because that confuses Sonarr/Radarr when they look for the job folder.
+			if !proc.isCategoryFolder(normalizedDir) {
+				virtualDir = normalizedDir
+			}
 		}
 	}
 
@@ -275,7 +326,9 @@ func (proc *Processor) processMultiFile(
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
 	// provided virtual directory (preserving any subpaths inside the NZB).
-	singleLike := len(regularFiles) == 1
+	// EXCEPTION: If the virtual directory is a category root (e.g. "movies"), we MUST create
+	// the NZB folder to ensure Radarr/Sonarr can find the job folder correctly.
+	singleLike := len(regularFiles) == 1 && !proc.isCategoryFolder(virtualDir)
 	targetBaseDir := virtualDir
 
 	if singleLike {
