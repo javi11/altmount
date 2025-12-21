@@ -90,6 +90,7 @@ type segment struct {
 	once          sync.Once
 	limitedReader io.Reader // Cached limited reader to prevent multiple LimitReader wraps
 	mx            sync.Mutex
+	closed        bool // Tracks if segment has been closed
 }
 
 func (s *segment) GetReader() io.Reader {
@@ -118,6 +119,12 @@ func (s *segment) Close() error {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
+	// Prevent multiple closes
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
 	var e1, e2 error
 
 	if s.reader != nil {
@@ -133,8 +140,26 @@ func (s *segment) Close() error {
 	return errors.Join(e1, e2)
 }
 
+// safeWriter wraps the segment writer and returns error if closed
+type safeWriter struct {
+	s *segment
+}
+
+func (sw *safeWriter) Write(p []byte) (n int, err error) {
+	sw.s.mx.Lock()
+	closed := sw.s.closed
+	writer := sw.s.writer
+	sw.s.mx.Unlock()
+
+	if closed || writer == nil {
+		return 0, io.ErrClosedPipe
+	}
+
+	return writer.Write(p)
+}
+
 func (s *segment) Writer() io.Writer {
-	return s.writer
+	return &safeWriter{s: s}
 }
 
 func (s *segment) ID() string {
