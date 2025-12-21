@@ -367,9 +367,9 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		storagePath := filepath.ToSlash(*item.StoragePath)
 		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, storagePath))
 
-		// Default reporting: path is the parent, name is the folder/file
-		// This is the standard SABnzbd format that Sonarr/Radarr expect
-		finalPath = filepath.Dir(fullStoragePath)
+		// SABnzbd reports 'path' as the absolute path to the JOB folder.
+		// Sonarr/Radarr will look INSIDE this folder for media files.
+		finalPath = fullStoragePath
 		jobName = filepath.Base(fullStoragePath)
 
 		// Safety check: If the job name matches a generic category name, it means it was a flattened import.
@@ -381,7 +381,6 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 
 		if isGeneric {
 			// It's a flattened import (media file sitting directly in category root)
-			finalPath = fullStoragePath
 			nzbName := filepath.Base(item.NzbPath)
 			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 		}
