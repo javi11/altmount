@@ -70,50 +70,6 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 	}
 }
 
-func (proc *Processor) isCategoryFolder(path string) bool {
-	cfg := proc.configGetter()
-	normalizedPath := strings.Trim(filepath.ToSlash(path), "/")
-	completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
-
-	// Helper to check if a name matches a category
-	matchesCategory := func(name string) bool {
-		name = strings.Trim(filepath.ToSlash(name), "/")
-		if name == "" {
-			return false
-		}
-
-		// Check exact match
-		if normalizedPath == name {
-			return true
-		}
-
-		// Check match with complete_dir prefix (e.g. complete/tv)
-		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
-			return true
-		}
-
-		return false
-	}
-
-	// Check complete_dir itself
-	if normalizedPath == completeDir {
-		return true
-	}
-
-	// Check configured categories
-	for _, cat := range cfg.SABnzbd.Categories {
-		// Check both the category name and its specific directory if set
-		if matchesCategory(cat.Name) {
-			return true
-		}
-		if cat.Dir != "" && matchesCategory(cat.Dir) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // updateProgress emits a progress update if broadcaster is available
 func (proc *Processor) updateProgress(queueID int, percentage int) {
 	if proc.broadcaster != nil {

@@ -613,9 +613,10 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			hw.updateStats(func(s *WorkerStats) {
 				s.CurrentRunFilesChecked++
 				s.TotalFilesChecked++
-				if event.Type == EventTypeFileHealthy {
+				switch event.Type {
+				case EventTypeFileHealthy:
 					s.TotalFilesHealthy++
-				} else if event.Type == EventTypeFileCorrupted {
+				case EventTypeFileCorrupted:
 					s.TotalFilesCorrupted++
 				}
 			})
@@ -650,9 +651,10 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			hw.updateStats(func(s *WorkerStats) {
 				s.CurrentRunFilesChecked++
 				s.TotalFilesChecked++
-				if event.Type == EventTypeFileHealthy {
+				switch event.Type {
+				case EventTypeFileHealthy:
 					s.TotalFilesHealthy++
-				} else if event.Type == EventTypeFileCorrupted {
+				case EventTypeFileCorrupted:
 					s.TotalFilesCorrupted++
 				}
 			})
