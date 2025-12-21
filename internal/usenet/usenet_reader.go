@@ -490,7 +490,13 @@ func (b *UsenetReader) downloadManager(
 
 		// Wait for all downloads to complete
 		if err := pool.Wait(); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				return
+			}
+
+			// Don't log "closed pipe" errors if we're shutting down or context is canceled
+			if strings.Contains(err.Error(), "closed pipe") {
+				b.log.DebugContext(ctx, "Suppressed closed pipe error during shutdown", "error", err)
 				return
 			}
 
