@@ -107,3 +107,23 @@ func (db *DB) Close() error {
 func (db *DB) Connection() *sql.DB {
 	return db.conn
 }
+
+// UpdateConnectionPool adjusts the database connection pool settings based on worker count
+// This should be called when the number of concurrent workers changes to prevent connection starvation
+func (db *DB) UpdateConnectionPool(workerCount int) {
+	if workerCount <= 0 {
+		workerCount = 2 // Default minimum
+	}
+
+	// Scale connection pool with worker count
+	// Formula: workers + 4 buffer for API/other operations
+	// Each worker needs 1 connection for queue claims + buffer for concurrent API requests
+	maxConns := workerCount + 4
+	idleConns := workerCount / 2
+	if idleConns < 2 {
+		idleConns = 2 // Minimum idle connections
+	}
+
+	db.conn.SetMaxOpenConns(maxConns)
+	db.conn.SetMaxIdleConns(idleConns)
+}
