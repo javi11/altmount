@@ -1,4 +1,4 @@
-import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
+import { Clock, Heart, HeartCrack, Loader, Wrench, EyeOff } from "lucide-react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
 import type { FileHealth } from "../../../../types/api";
@@ -11,11 +11,13 @@ interface HealthTableRowProps {
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
+	isIgnorePending: boolean;
 	onSelectChange: (filePath: string, checked: boolean) => void;
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onIgnore: (id: number) => void;
 	onSetPriority: (id: number, priority: boolean) => void;
 }
 
@@ -26,11 +28,13 @@ export function HealthTableRow({
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
+	isIgnorePending,
 	onSelectChange,
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onIgnore,
 	onSetPriority,
 }: HealthTableRowProps) {
 	let statusIcon;
@@ -52,6 +56,10 @@ export function HealthTableRow({
 		case "checking":
 			statusIcon = <Loader className="h-4 w-4 animate-spin" />;
 			iconColorClass = "text-warning";
+			break;
+		case "ignored":
+			statusIcon = <EyeOff className="h-4 w-4" />;
+			iconColorClass = "text-base-content/40";
 			break;
 		default:
 			statusIcon = <Clock className="h-4 w-4" />;
@@ -172,10 +180,12 @@ export function HealthTableRow({
 					isDirectCheckPending={isDirectCheckPending}
 					isRepairPending={isRepairPending}
 					isDeletePending={isDeletePending}
+					isIgnorePending={isIgnorePending}
 					onCancelCheck={onCancelCheck}
 					onManualCheck={onManualCheck}
 					onRepair={onRepair}
 					onDelete={onDelete}
+					onIgnore={onIgnore}
 				/>
 			</td>
 		</tr>

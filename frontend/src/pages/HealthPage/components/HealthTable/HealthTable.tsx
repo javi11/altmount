@@ -17,6 +17,7 @@ interface HealthTableProps {
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
+	isIgnorePending: boolean;
 	onSelectItem: (filePath: string, checked: boolean) => void;
 	onSelectAll: (checked: boolean) => void;
 	onSort: (column: SortBy) => void;
@@ -24,6 +25,7 @@ interface HealthTableProps {
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onIgnore: (id: number) => void;
 	onSetPriority: (id: number, priority: boolean) => void;
 }
 
@@ -39,6 +41,7 @@ export function HealthTable({
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
+	isIgnorePending,
 	onSelectItem,
 	onSelectAll,
 	onSort,
@@ -46,6 +49,7 @@ export function HealthTable({
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onIgnore,
 	onSetPriority,
 }: HealthTableProps) {
 	// Helper functions for select all checkbox state
@@ -79,11 +83,13 @@ export function HealthTable({
 										isDirectCheckPending={isDirectCheckPending}
 										isRepairPending={isRepairPending}
 										isDeletePending={isDeletePending}
+										isIgnorePending={isIgnorePending}
 										onSelectChange={onSelectItem}
 										onCancelCheck={onCancelCheck}
 										onManualCheck={onManualCheck}
 										onRepair={onRepair}
 										onDelete={onDelete}
+										onIgnore={onIgnore}
 										onSetPriority={onSetPriority}
 									/>
 								))}

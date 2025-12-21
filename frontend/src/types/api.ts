@@ -105,6 +105,7 @@ export const HealthStatus = {
 	HEALTHY: "healthy",
 	CORRUPTED: "corrupted",
 	REPAIR_TRIGGERED: "repair_triggered",
+	IGNORED: "ignored",
 } as const;
 
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];

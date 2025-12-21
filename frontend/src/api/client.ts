@@ -432,7 +432,21 @@ export class APIClient {
 		}>(`/health/${id}/cancel`, {
 			method: "POST",
 		});
-	}
+	},
+
+	async ignoreHealth(id: number) {
+		return this.request<{ success: boolean; message: string }>(`/health/${id}/ignore`, {
+			method: "POST",
+		});
+	},
+
+	async setHealthPriority(id: number, priority: boolean) {
+		return this.request<{ success: boolean; message: string }>(`/health/${id}/priority`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ priority }),
+		});
+	},
 
 	// File metadata endpoints
 	async getFileMetadata(path: string) {
