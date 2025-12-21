@@ -123,6 +123,11 @@ func (b *UsenetReader) Close() error {
 		}
 		close(b.init)
 
+		// Unblock any pending writes/reads
+		if b.rg != nil {
+			b.rg.CloseSegments()
+		}
+
 		// Wait synchronously with timeout to prevent goroutine leaks
 		// Use a separate goroutine to detect when cleanup completes
 		done := make(chan struct{})
