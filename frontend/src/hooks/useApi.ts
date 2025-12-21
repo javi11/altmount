@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import type { HealthCleanupRequest } from "../types/api";
+import type {
+	HealthCleanupRequest,
+	HealthPriority,
+} from "../types/api";
 
 // Queue hooks
 export const useQueue = (params?: {
@@ -267,11 +270,12 @@ export const useCleanupHealth = () => {
 	});
 };
 
+// ... surrounding code ...
 export const useAddHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: { file_path: string; source_nzb_path: string; priority?: boolean }) =>
+		mutationFn: (data: { file_path: string; source_nzb_path: string; priority?: HealthPriority }) =>
 			apiClient.addHealthCheck(data),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -320,7 +324,7 @@ export const useSetHealthPriority = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: ({ id, priority }: { id: number; priority: boolean }) =>
+		mutationFn: ({ id, priority }: { id: number; priority: HealthPriority }) =>
 			apiClient.setHealthPriority(id, priority),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });

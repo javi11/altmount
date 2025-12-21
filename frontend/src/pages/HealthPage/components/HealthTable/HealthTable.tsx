@@ -1,6 +1,6 @@
 import { Shield } from "lucide-react";
 import { LoadingTable } from "../../../../components/ui/LoadingSpinner";
-import type { FileHealth } from "../../../../types/api";
+import { HealthPriority, type FileHealth } from "../../../../types/api";
 import type { SortBy, SortOrder } from "../../types";
 import { HealthTableHeader } from "./HealthTableHeader";
 import { HealthTableRow } from "./HealthTableRow";
@@ -26,7 +26,7 @@ interface HealthTableProps {
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
 	onIgnore: (id: number) => void;
-	onSetPriority: (id: number, priority: boolean) => void;
+	onSetPriority: (id: number, priority: HealthPriority) => void;
 }
 
 export function HealthTable({

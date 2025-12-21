@@ -334,7 +334,7 @@ type HealthItemResponse struct {
 	CreatedAt        time.Time             `json:"created_at"`
 	UpdatedAt        time.Time             `json:"updated_at"`
 	ScheduledCheckAt *time.Time            `json:"scheduled_check_at,omitempty"`
-	Priority         bool                  `json:"priority"`
+	Priority         database.HealthPriority `json:"priority"`
 }
 
 // HealthListRequest represents request parameters for listing health records
@@ -376,7 +376,7 @@ type HealthCheckRequest struct {
 	FilePath   string  `json:"file_path"`
 	MaxRetries *int    `json:"max_retries,omitempty"`
 	SourceNzb  *string `json:"source_nzb_path,omitempty"`
-	Priority   bool    `json:"priority,omitempty"`
+	Priority   database.HealthPriority `json:"priority,omitempty"`
 }
 
 // HealthWorkerStatusResponse represents the current status of the health worker

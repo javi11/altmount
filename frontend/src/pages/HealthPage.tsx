@@ -18,6 +18,7 @@ import {
 	useSetHealthPriority,
 } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
+import { HealthPriority } from "../types/api";
 import {
 	useCancelLibrarySync,
 	useLibrarySyncStatus,
@@ -140,12 +141,16 @@ export function HealthPage() {
 		}
 	};
 
-	const handleSetPriority = async (id: number, priority: boolean) => {
+	const handleSetPriority = async (id: number, priority: HealthPriority) => {
 		try {
 			await setHealthPriority.mutateAsync({ id, priority });
+			const priorityLabel = 
+				priority === HealthPriority.Next ? "Next" : 
+				priority === HealthPriority.High ? "High" : "Normal";
+			
 			showToast({
 				title: "Priority Updated",
-				message: `File priority set to ${priority ? "High" : "Normal"}`,
+				message: `File priority set to ${priorityLabel}`,
 				type: "success",
 			});
 		} catch (err) {

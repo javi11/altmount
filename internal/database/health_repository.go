@@ -148,7 +148,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 }
 
 // SetPriority sets the priority for a file health record
-func (r *HealthRepository) SetPriority(ctx context.Context, id int64, priority bool) error {
+func (r *HealthRepository) SetPriority(ctx context.Context, id int64, priority HealthPriority) error {
 	query := `
 		UPDATE file_health
 		SET priority = ?,

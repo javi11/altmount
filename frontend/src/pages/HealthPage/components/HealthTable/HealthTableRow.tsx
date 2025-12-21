@@ -1,7 +1,7 @@
 import { Clock, Heart, HeartCrack, Loader, Wrench, EyeOff } from "lucide-react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
-import type { FileHealth } from "../../../../types/api";
+import { HealthPriority, type FileHealth } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 
 interface HealthTableRowProps {
@@ -18,7 +18,7 @@ interface HealthTableRowProps {
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
 	onIgnore: (id: number) => void;
-	onSetPriority: (id: number, priority: boolean) => void;
+	onSetPriority: (id: number, priority: HealthPriority) => void;
 }
 
 export function HealthTableRow({
@@ -37,6 +37,19 @@ export function HealthTableRow({
 	onIgnore,
 	onSetPriority,
 }: HealthTableRowProps) {
+	const getNextPriority = (current: HealthPriority): HealthPriority => {
+		switch (current) {
+			case HealthPriority.Normal:
+				return HealthPriority.High;
+			case HealthPriority.High:
+				return HealthPriority.Next;
+			case HealthPriority.Next:
+				return HealthPriority.Normal;
+			default:
+				return HealthPriority.Normal;
+		}
+	};
+
 	let statusIcon;
 	let iconColorClass = "text-base-content/50"; // Default color
 
@@ -125,17 +138,19 @@ export function HealthTableRow({
 			<td>
 				<div
 					className="cursor-pointer transition-transform hover:scale-110"
-					onClick={() => onSetPriority(item.id, !item.priority)}
-					title="Click to toggle priority"
+					onClick={() => onSetPriority(item.id, getNextPriority(item.priority))}
+					title="Click to cycle priority"
 					role="button"
 					tabIndex={0}
 					onKeyDown={(e) => {
 						if (e.key === "Enter" || e.key === " ") {
-							onSetPriority(item.id, !item.priority);
+							onSetPriority(item.id, getNextPriority(item.priority));
 						}
 					}}
 				>
-					{item.priority ? (
+					{item.priority === HealthPriority.Next ? (
+						<div className="badge badge-warning badge-sm">Next</div>
+					) : item.priority === HealthPriority.High ? (
 						<div className="badge badge-error badge-sm">High</div>
 					) : (
 						<div className="badge badge-ghost badge-sm">Normal</div>

@@ -1,12 +1,14 @@
 import type {
-	ActiveStream,
 	APIResponse,
+	ActiveStream,
 	AuthResponse,
 	FileHealth,
 	FileMetadata,
+	FuseStatus,
 	HealthCheckRequest,
 	HealthCleanupRequest,
 	HealthCleanupResponse,
+	HealthPriority,
 	HealthStats,
 	HealthWorkerStatus,
 	ImportStatusResponse,
@@ -20,10 +22,9 @@ import type {
 	SystemBrowseResponse,
 	User,
 	UserAdminUpdateRequest,
-	FuseStatus,
 } from "../types/api";
+import type { ConfigResponse } from "../types/config";
 import type {
-	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
 	ConfigValidateRequest,
@@ -406,14 +407,11 @@ export class APIClient {
 		});
 	}
 
-	async setHealthPriority(id: number, priority: boolean) {
+	async setHealthPriority(id: number, priority: HealthPriority) {
 		return this.request<{
+			success: boolean;
 			message: string;
-			id: number;
-			file_path: string;
-			priority: boolean;
-			updated_at: string;
-			health_data: FileHealth;
+			priority: HealthPriority;
 		}>(`/health/${id}/priority`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },

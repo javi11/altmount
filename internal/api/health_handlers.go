@@ -1231,7 +1231,7 @@ func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 
 	// Parse request body
 	var req struct {
-		Priority bool `json:"priority"`
+		Priority database.HealthPriority `json:"priority"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
