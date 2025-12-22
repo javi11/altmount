@@ -346,6 +346,8 @@ export interface ImportUpdateRequest {
 	max_processor_workers?: number;
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
 	allowed_file_extensions?: string[];
+	blocked_file_extensions?: string[];
+	blocked_file_patterns?: string[];
 	import_strategy?: ImportStrategy;
 	import_dir?: string;
 }
