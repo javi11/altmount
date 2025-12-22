@@ -597,7 +597,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
 		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
-		slog.DebugContext(c.Context(), "Reporting completed item to SABnzbd API",
+		slog.InfoContext(c.Context(), "Reporting completed item to SABnzbd API",
 			"name", slot.Name,
 			"path", slot.Path,
 			"status", slot.Status)
