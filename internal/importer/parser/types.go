@@ -53,4 +53,5 @@ type ParsedFile struct {
 	Salt          string            // Salt from NZB meta, nil if not encrypted
 	ReleaseDate   time.Time         // Release date from the Usenet post
 	OriginalIndex int               // Original position in the parsed NZB file list
+	NzbdavID      string            // Original ID from nzbdav (for backward compatibility)
 }

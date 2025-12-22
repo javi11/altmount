@@ -2,7 +2,7 @@ services:
   altmount:
     extra_hosts:
       - "host.docker.internal:host-gateway" # Optional if you rclone is outside the container
-    image: altmount:alpha6
+    image: altmount:latest
     container_name: altmount
     environment:
       - PUID=1000

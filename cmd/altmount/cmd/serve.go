@@ -96,6 +96,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rcloneRCClient = mountService.GetManager()
 	}
 
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
+
 	// 5. Initialize importer and filesystem
 	repos := setupRepositories(ctx, db)
 
@@ -103,10 +105,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	progressBroadcaster := progress.NewProgressBroadcaster()
 	defer progressBroadcaster.Close()
 
+	// Create stream tracker for monitoring active streams
+	streamTracker := api.NewStreamTracker()
+	defer streamTracker.Stop()
+
 	importerService, err := initializeImporter(ctx, cfg, metadataService, db, poolManager, rcloneRCClient, configManager.GetConfigGetter(), progressBroadcaster, repos.UserRepo, repos.HealthRepo)
 	if err != nil {
 		return err
 	}
+	// Wire ARRs service into importer for instant import triggers
+	importerService.SetArrsService(arrsService)
 	defer func() {
 		logger.Info("Closing importer service")
 		if err := importerService.Close(); err != nil {
@@ -114,18 +122,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, poolManager, configManager.GetConfigGetter())
+	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, poolManager, configManager.GetConfigGetter(), streamTracker)
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
 	authService := setupAuthService(ctx, repos.UserRepo)
 
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
-	// Wire ARRs service into importer for instant import triggers
-	importerService.SetArrsService(arrsService)
-
-	// Create stream tracker for monitoring active streams
-	streamTracker := api.NewStreamTracker()
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
@@ -161,6 +163,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if healthWorker != nil && librarySyncWorker != nil {
 		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker, ctx)
 		healthController.RegisterConfigChangeHandler(configManager)
+	}
+
+	// Start ARRs queue cleanup worker
+	if err := arrsService.StartWorker(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to start ARR queue cleanup worker", "error", err)
 	}
 
 	// ARRs service status logging
@@ -203,6 +210,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := startMountService(ctx, cfg, mountService, logger); err != nil {
 			logger.WarnContext(ctx, "Mount service failed to start", "err", err)
 		}
+
+		// Auto-start FUSE mount if enabled
+		apiServer.AutoStartFuse()
 	}()
 
 	// Wait for shutdown signal or server error
@@ -220,6 +230,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Start graceful shutdown sequence
 	logger.InfoContext(ctx, "Starting graceful shutdown sequence")
 
+	// Shutdown API server and its managed resources (like FUSE)
+	apiServer.Shutdown(ctx)
+
 	// Stop health worker if running
 	if healthWorker != nil {
 		if err := healthWorker.Stop(ctx); err != nil {
@@ -229,10 +242,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// ARRs service cleanup (no background processes to stop)
-	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
-		logger.InfoContext(ctx, "Arrs service cleanup completed")
-	}
+	// Stop ARRs queue cleanup worker
+	arrsService.StopWorker(ctx)
 
 	// Stop RClone mount service if running
 	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {
@@ -278,7 +289,7 @@ func setupSPARoutes(app *fiber.App) {
 
 	// Cli mode - use embedded filesystem
 	buildFS, err := frontend.GetBuildFS()
-	if err != nil {
+	if err != nil { //nolint:staticcheck
 		// Docker or development - serve static files with SPA fallback
 		app.All("/*", filesystem.New(filesystem.Config{
 			Root:         http.Dir(frontendPath),

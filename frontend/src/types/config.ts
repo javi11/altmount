@@ -10,6 +10,7 @@ export interface ConfigResponse {
 	streaming: StreamingConfig;
 	health: HealthConfig;
 	rclone: RCloneConfig;
+	fuse: FuseConfig;
 	import: ImportConfig;
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
@@ -104,6 +105,7 @@ export interface RCloneConfig {
 	// RC (Remote Control) Configuration
 	rc_enabled: boolean;
 	rc_url: string;
+	vfs_name: string;
 	rc_port: number;
 	rc_user: string;
 	rc_pass_set: boolean;
@@ -148,6 +150,19 @@ export interface RCloneConfig {
 	async_read: boolean;
 	vfs_fast_fingerprint: boolean;
 	use_mmap: boolean;
+}
+
+// Fuse configuration
+export interface FuseConfig {
+	mount_path: string;
+	enabled: boolean;
+	allow_other: boolean;
+	debug: boolean;
+	attr_timeout_seconds: number;
+	entry_timeout_seconds: number;
+	max_download_workers: number;
+	max_cache_size_mb: number;
+	max_read_ahead_mb: number;
 }
 
 // Import strategy type
@@ -219,6 +234,7 @@ export interface ConfigUpdateRequest {
 	streaming?: StreamingUpdateRequest;
 	health?: HealthUpdateRequest;
 	rclone?: RCloneUpdateRequest;
+	fuse?: Partial<FuseConfig>;
 	import?: ImportUpdateRequest;
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;
@@ -278,6 +294,7 @@ export interface RCloneUpdateRequest {
 	salt?: string;
 	rc_enabled?: boolean;
 	rc_url?: string;
+	vfs_name?: string;
 	rc_port?: number;
 	rc_user?: string;
 	rc_pass?: string;
@@ -391,6 +408,7 @@ export type ConfigSection =
 	| "import"
 	| "providers"
 	| "rclone"
+	| "fuse"
 	| "sabnzbd"
 	| "arrs"
 	| "system";
@@ -425,9 +443,9 @@ export interface StreamingFormData {
 
 export interface RCloneFormData {
 	password: string;
-	salt: string;
 	rc_enabled: boolean;
 	rc_url: string;
+	vfs_name: string;
 	rc_port: number;
 	rc_user: string;
 	rc_pass: string;
@@ -475,6 +493,7 @@ export interface RCloneFormData {
 export interface RCloneRCFormData {
 	rc_enabled: boolean;
 	rc_url: string;
+	vfs_name: string;
 	rc_port: number;
 	rc_user: string;
 	rc_pass: string;
@@ -596,6 +615,8 @@ export interface ArrsConfig {
 	max_workers: number;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
+	queue_cleanup_enabled?: boolean;
+	queue_cleanup_interval_seconds?: number;
 }
 
 // Sync status and progress types
@@ -639,6 +660,7 @@ export interface ConfigSectionInfo {
 	description: string;
 	icon: string;
 	canEdit: boolean;
+	hidden?: boolean;
 }
 
 // Configuration sections metadata
@@ -691,6 +713,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description: "RClone mount and VFS settings",
 		icon: "HardDrive",
 		canEdit: true,
+	},
+	fuse: {
+		title: "altmount Native Mount",
+		description: "Configure altmount native FUSE mount settings",
+		icon: "HardDrive",
+		canEdit: true,
+		hidden: true,
 	},
 	metadata: {
 		title: "Metadata",

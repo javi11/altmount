@@ -81,36 +81,6 @@ func insertQueueItemWithTime(t *testing.T, db *sql.DB, id int64, nzbPath, status
 	}
 }
 
-// insertQueueItemFull inserts item with all fields specified
-// Useful for comprehensive testing scenarios
-func insertQueueItemFull(t *testing.T, db *sql.DB, item *ImportQueueItem) {
-	t.Helper()
-
-	query := `
-		INSERT INTO import_queue (
-			id, nzb_path, relative_path, storage_path, priority, status,
-			created_at, updated_at, started_at, completed_at,
-			retry_count, max_retries, error_message, batch_id,
-			metadata, category, file_size
-		) VALUES (
-			?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?,
-			?, ?, ?, ?,
-			?, ?, ?
-		)
-	`
-
-	_, err := db.Exec(query,
-		item.ID, item.NzbPath, item.RelativePath, item.StoragePath, item.Priority, item.Status,
-		item.CreatedAt, item.UpdatedAt, item.StartedAt, item.CompletedAt,
-		item.RetryCount, item.MaxRetries, item.ErrorMessage, item.BatchID,
-		item.Metadata, item.Category, item.FileSize,
-	)
-	if err != nil {
-		t.Fatalf("Failed to insert full queue item: %v", err)
-	}
-}
-
 // getQueueItemStatus retrieves the status of a queue item by ID
 func getQueueItemStatus(t *testing.T, db *sql.DB, id int64) string {
 	t.Helper()
@@ -135,12 +105,3 @@ func countQueueItemsByStatus(t *testing.T, db *sql.DB, status string) int {
 	return count
 }
 
-// clearQueueTable removes all items from the queue
-func clearQueueTable(t *testing.T, db *sql.DB) {
-	t.Helper()
-
-	_, err := db.Exec("DELETE FROM import_queue")
-	if err != nil {
-		t.Fatalf("Failed to clear queue table: %v", err)
-	}
-}

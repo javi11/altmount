@@ -4,9 +4,11 @@ import type {
 	AuthResponse,
 	FileHealth,
 	FileMetadata,
+	FuseStatus,
 	HealthCheckRequest,
 	HealthCleanupRequest,
 	HealthCleanupResponse,
+	HealthPriority,
 	HealthStats,
 	HealthWorkerStatus,
 	ImportStatusResponse,
@@ -405,6 +407,18 @@ export class APIClient {
 		});
 	}
 
+	async setHealthPriority(id: number, priority: HealthPriority) {
+		return this.request<{
+			success: boolean;
+			message: string;
+			priority: HealthPriority;
+		}>(`/health/${id}/priority`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ priority }),
+		});
+	}
+
 	async cancelHealthCheck(id: number) {
 		return this.request<{
 			message: string;
@@ -697,6 +711,7 @@ export class APIClient {
 		file: File,
 		category?: string,
 		priority?: number,
+		relativePath?: string,
 	): Promise<APIResponse<QueueItem>> {
 		const formData = new FormData();
 		formData.append("file", file);
@@ -705,6 +720,9 @@ export class APIClient {
 		}
 		if (priority !== undefined) {
 			formData.append("priority", priority.toString());
+		}
+		if (relativePath) {
+			formData.append("relative_path", relativePath);
 		}
 
 		return this.request<APIResponse<QueueItem>>("/queue/upload", {
@@ -719,6 +737,25 @@ export class APIClient {
 		return this.request<APIResponse<QueueItem>>("/queue/test", {
 			method: "POST",
 			body: JSON.stringify({ size }),
+		});
+	}
+
+	// FUSE endpoints
+	async getFuseStatus() {
+		return this.request<FuseStatus>("/fuse/status");
+	}
+
+	async startFuseMount(path: string) {
+		return this.request<{ message: string }>("/fuse/start", {
+			method: "POST",
+			body: JSON.stringify({ path }),
+		});
+	}
+
+	async stopFuseMount() {
+		return this.request<{ message: string }>("/fuse/stop", {
+			method: "POST",
+			body: JSON.stringify({}),
 		});
 	}
 }

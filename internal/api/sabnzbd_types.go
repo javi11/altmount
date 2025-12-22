@@ -3,8 +3,10 @@ package api
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/progress"
 )
 
@@ -23,8 +25,14 @@ type SABnzbdResponse struct {
 
 // SABnzbdQueueObject represents the nested queue object in the response
 type SABnzbdQueueObject struct {
-	Paused bool               `json:"paused"`
-	Slots  []SABnzbdQueueSlot `json:"slots"`
+	Paused    bool               `json:"paused"`
+	Slots     []SABnzbdQueueSlot `json:"slots"`
+	Noofslots int                `json:"noofslots"`
+	Status    string             `json:"status"`
+	Mbleft    string             `json:"mbleft"`
+	Mb        string             `json:"mb"`
+	Kbpersec  string             `json:"kbpersec"`
+	Version   string             `json:"version"`
 }
 
 // SABnzbdQueueResponse represents the queue response structure
@@ -231,6 +239,20 @@ func formatSizeMB(bytes int64) string {
 	return fmt.Sprintf("%.2f", megabytes)
 }
 
+// formatHumanSize formats bytes as human-readable string (e.g., 1.2 GB)
+func formatHumanSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
 // ToSABnzbdQueueSlot converts an AltMount ImportQueueItem to SABnzbd format
 func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroadcaster *progress.ProgressBroadcaster) SABnzbdQueueSlot {
 	if item == nil {
@@ -267,18 +289,30 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		priority = "Normal"
 	}
 
-	// Extract filename from path
-	filename := item.NzbPath
-	if len(filename) > 0 {
-		// Get just the filename from the full path
-		if lastSlash := len(filename) - 1; lastSlash >= 0 {
-			for i := lastSlash; i >= 0; i-- {
-				if filename[i] == '/' || filename[i] == '\\' {
-					filename = filename[i+1:]
-					break
-				}
-			}
+	// Calculate job name
+	// SABnzbd 'filename' in queue is usually the job name
+	var jobName string
+	if item.StoragePath != nil && *item.StoragePath != "" {
+		storagePath := filepath.ToSlash(*item.StoragePath)
+		// Determine the job folder
+		if utils.HasPopularExtension(storagePath) {
+			storagePath = filepath.Dir(storagePath)
 		}
+		jobName = filepath.Base(storagePath)
+
+		// Safety check: If the job name matches a generic category name, fallback to NZB name
+		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete" || jobName == "."
+		if item.Category != nil && jobName == *item.Category {
+			isGeneric = true
+		}
+
+		if isGeneric {
+			nzbName := filepath.Base(item.NzbPath)
+			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		}
+	} else {
+		nzbName := filepath.Base(item.NzbPath)
+		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 	}
 
 	// Get category, default to "default" if not set
@@ -319,7 +353,7 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		Index:      index,
 		NzoID:      fmt.Sprintf("%d", item.ID),
 		Priority:   priority,
-		Filename:   filename,
+		Filename:   jobName,
 		Cat:        category,
 		Percentage: fmt.Sprintf("%d", progressPercentage),
 		Status:     status,
@@ -346,24 +380,51 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		status = "Unknown"
 	}
 
-	// Extract filename from path
-	filename := item.NzbPath
-	name := filename
-	if len(filename) > 0 {
-		// Get just the filename from the full path
-		if lastSlash := len(filename) - 1; lastSlash >= 0 {
-			for i := lastSlash; i >= 0; i-- {
-				if filename[i] == '/' || filename[i] == '\\' {
-					name = filename[i+1:]
-					break
-				}
-			}
+	// Calculate paths
+	// SABnzbd reports 'path' as the absolute path to the JOB folder.
+	// Sonarr/Radarr will look INSIDE this folder for media files.
+	var finalPath string
+	var jobName string
+
+	if item.StoragePath != nil && *item.StoragePath != "" {
+		// Construct the full absolute path on the mount
+		// We use filepath.ToSlash to ensure consistent forward slashes for the API
+		storagePath := filepath.ToSlash(*item.StoragePath)
+		// Ensure storagePath is treated as relative to basePath even if it starts with /
+		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, strings.TrimPrefix(storagePath, "/")))
+
+		// Determine the job folder
+		jobFolder := fullStoragePath
+		if utils.HasPopularExtension(fullStoragePath) {
+			jobFolder = filepath.Dir(fullStoragePath)
 		}
-		// Remove .nzb extension for display name
-		if len(name) > 4 && name[len(name)-4:] == ".nzb" {
-			name = name[:len(name)-4]
+
+		// SABnzbd reports 'path' as the absolute path to the JOB folder.
+		// Sonarr/Radarr will look INSIDE this folder for media files.
+		finalPath = jobFolder
+		jobName = filepath.Base(jobFolder)
+
+		// Safety check: If the job name matches a generic category name, it means it was a flattened import.
+		// In this case, we need to report the category folder as the 'path' and the NZB name as the 'name'.
+		isGeneric := jobName == "movies" || jobName == "tv" || jobName == "complete" || jobName == "."
+		if item.Category != nil && jobName == *item.Category {
+			isGeneric = true
 		}
+
+		if isGeneric {
+			// It's a flattened import (media file sitting directly in category root)
+			nzbName := filepath.Base(item.NzbPath)
+			jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+		}
+	} else {
+		finalPath = basePath
+		// Fallback to NZB name if no storage path yet
+		nzbName := filepath.Base(item.NzbPath)
+		jobName = strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
 	}
+
+	// Ensure nzb_name is just the filename
+	nzbFilename := filepath.Base(item.NzbPath)
 
 	var completetime int64
 	if item.CompletedAt != nil {
@@ -381,45 +442,47 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		category = *item.Category
 	}
 
-	// Calculate storage path using the provided base path (which includes category folder)
-	var storagePath string
-	if item.StoragePath != nil {
-		// Construct path: basePath/basename
-		storagePath = filepath.Join(basePath, *item.StoragePath)
-	} else {
-		storagePath = basePath
+	// Get file size if available
+	var sizeBytes int64
+	if item.FileSize != nil {
+		sizeBytes = *item.FileSize
+	}
+
+	downloaded := int64(0)
+	if item.Status == database.QueueStatusCompleted {
+		downloaded = sizeBytes
 	}
 
 	return SABnzbdHistorySlot{
 		Index:        index,
 		NzoID:        fmt.Sprintf("%d", item.ID),
-		Name:         name,
+		Name:         jobName,
 		Category:     category,
-		PP:           "",
+		PP:           "3",
 		Script:       "",
 		Report:       "",
 		URL:          "",
 		Status:       status,
-		NzbName:      filename,
-		Download:     name,
-		Storage:      storagePath,
-		Path:         storagePath,
+		NzbName:      nzbFilename,
+		Download:     jobName,
+		Storage:      finalPath,
+		Path:         finalPath,
 		Postproc:     "",
-		Downloaded:   0,
+		Downloaded:   downloaded,
 		Completetime: completetime,
 		NzbAvg:       "",
 		Script_log:   "",
-		DuplicateKey: name,
+		DuplicateKey: jobName,
 		Script_line:  "",
 		Fail_message: failMessage,
 		Url_info:     "",
-		Bytes:        0,
+		Bytes:        sizeBytes,
 		Meta:         []string{},
 		Series:       "",
 		Md5sum:       "",
 		Password:     "",
 		ActionLine:   "",
-		Size:         "0 B",
+		Size:         formatHumanSize(sizeBytes),
 		Loaded:       true,
 		Retry:        item.RetryCount,
 		StateLog:     []string{},

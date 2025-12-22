@@ -148,7 +148,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 }
 
 // SetPriority sets the priority for a file health record
-func (r *HealthRepository) SetPriority(ctx context.Context, id int64, priority bool) error {
+func (r *HealthRepository) SetPriority(ctx context.Context, id int64, priority HealthPriority) error {
 	query := `
 		UPDATE file_health
 		SET priority = ?,
@@ -208,18 +208,19 @@ func (r *HealthRepository) GetFilesForRepairNotification(ctx context.Context, li
 }
 
 // IncrementRetryCount increments the retry count and schedules next check
-func (r *HealthRepository) IncrementRetryCount(ctx context.Context, filePath string, errorMessage *string, nextCheck time.Time) error {
+func (r *HealthRepository) IncrementRetryCount(ctx context.Context, filePath string, errorMessage *string, errorDetails *string, nextCheck time.Time) error {
 	query := `
 		UPDATE file_health
 		SET retry_count = retry_count + 1,
 		    last_error = ?,
+		    error_details = ?,
 			status = 'pending',
 			scheduled_check_at = ?,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
 
-	_, err := r.db.ExecContext(ctx, query, errorMessage, nextCheck.UTC(), filePath)
+	_, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, nextCheck.UTC(), filePath)
 	if err != nil {
 		return fmt.Errorf("failed to increment retry count: %w", err)
 	}
@@ -228,17 +229,18 @@ func (r *HealthRepository) IncrementRetryCount(ctx context.Context, filePath str
 }
 
 // SetRepairTriggered sets a file's status to repair_triggered
-func (r *HealthRepository) SetRepairTriggered(ctx context.Context, filePath string, errorMessage *string) error {
+func (r *HealthRepository) SetRepairTriggered(ctx context.Context, filePath string, errorMessage *string, errorDetails *string) error {
 	query := `
 		UPDATE file_health
 		SET status = 'repair_triggered',
 		    last_error = ?,
+		    error_details = ?,
 			scheduled_check_at = datetime('now', '+1 hour'),
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, errorMessage, filePath)
+	result, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to update file status to repair_triggered: %w", err)
 	}
@@ -256,16 +258,18 @@ func (r *HealthRepository) SetRepairTriggered(ctx context.Context, filePath stri
 }
 
 // SetCorrupted sets a file's status to corrupted
-func (r *HealthRepository) SetCorrupted(ctx context.Context, filePath string, errorMessage *string) error {
+func (r *HealthRepository) SetCorrupted(ctx context.Context, filePath string, errorMessage *string, errorDetails *string) error {
 	query := `
 		UPDATE file_health
 		SET status = 'corrupted',
 		    last_error = ?,
+		    error_details = ?,
+		    scheduled_check_at = NULL,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, errorMessage, filePath)
+	result, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to update file status to corrupted: %w", err)
 	}
@@ -283,17 +287,18 @@ func (r *HealthRepository) SetCorrupted(ctx context.Context, filePath string, er
 }
 
 // IncrementRepairRetryCount increments the repair retry count
-func (r *HealthRepository) IncrementRepairRetryCount(ctx context.Context, filePath string, errorMessage *string) error {
+func (r *HealthRepository) IncrementRepairRetryCount(ctx context.Context, filePath string, errorMessage *string, errorDetails *string) error {
 	query := `
 		UPDATE file_health
 		SET repair_retry_count = repair_retry_count + 1,
 		    last_error = ?,
+		    error_details = ?,
 		    status = 'repair_triggered',
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
 
-	_, err := r.db.ExecContext(ctx, query, errorMessage, filePath)
+	_, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to increment repair retry count: %w", err)
 	}
@@ -302,16 +307,17 @@ func (r *HealthRepository) IncrementRepairRetryCount(ctx context.Context, filePa
 }
 
 // MarkAsCorrupted permanently marks a file as corrupted after all retries are exhausted
-func (r *HealthRepository) MarkAsCorrupted(ctx context.Context, filePath string, finalError *string) error {
+func (r *HealthRepository) MarkAsCorrupted(ctx context.Context, filePath string, finalError *string, errorDetails *string) error {
 	query := `
 		UPDATE file_health
 		SET status = 'corrupted',
 		    last_error = ?,
+		    error_details = ?,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, finalError, filePath)
+	result, err := r.db.ExecContext(ctx, query, finalError, errorDetails, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to mark file as corrupted: %w", err)
 	}
@@ -361,17 +367,18 @@ func (r *HealthRepository) GetHealthStats(ctx context.Context) (map[HealthStatus
 }
 
 // SetRepairTriggeredByID sets a file's status to repair_triggered by ID
-func (r *HealthRepository) SetRepairTriggeredByID(ctx context.Context, id int64, errorMessage *string) error {
+func (r *HealthRepository) SetRepairTriggeredByID(ctx context.Context, id int64, errorMessage *string, errorDetails *string) error {
 	query := `
 		UPDATE file_health
 		SET status = 'repair_triggered',
 		    last_error = ?,
+		    error_details = ?,
 			scheduled_check_at = datetime('now', '+1 hour'),
 		    updated_at = datetime('now')
 		WHERE id = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, errorMessage, id)
+	result, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, id)
 	if err != nil {
 		return fmt.Errorf("failed to update file status to repair_triggered by ID: %w", err)
 	}
@@ -485,13 +492,13 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 			retry_count, max_retries, repair_retry_count, max_repair_retries,
 			created_at, updated_at, scheduled_check_at
 		)
-		VALUES (?, ?, 'corrupted', ?, ?, 0, 2, 0, 3, datetime('now'), datetime('now'), datetime('now'))
+		VALUES (?, ?, 'corrupted', ?, ?, 0, 2, 0, 3, datetime('now'), datetime('now'), NULL)
 		ON CONFLICT(file_path) DO UPDATE SET
 			library_path = COALESCE(excluded.library_path, library_path),
 			status = 'corrupted',
 			last_error = excluded.last_error,
 			error_details = excluded.error_details,
-			scheduled_check_at = datetime('now'),
+			scheduled_check_at = NULL,
 			updated_at = datetime('now')
 	`
 
@@ -530,10 +537,12 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 	if sortBy != "" {
 		// Whitelist of allowed sort fields to prevent SQL injection
 		allowedFields := map[string]string{
-			"file_path":  "file_path",
-			"created_at": "created_at",
-			"status":     "status",
-			"priority":   "priority",
+			"file_path":          "file_path",
+			"created_at":         "created_at",
+			"status":             "status",
+			"priority":           "priority",
+			"last_checked":       "last_checked",
+			"scheduled_check_at": "scheduled_check_at",
 		}
 
 		if field, ok := allowedFields[sortBy]; ok {
@@ -896,6 +905,108 @@ func (r *HealthRepository) MarkAsHealthy(ctx context.Context, filePath string, n
 	}
 
 	return nil
+}
+
+// UpdateHealthStatusBulk updates multiple health records in a single transaction
+func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates []HealthStatusUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Prepare common statements
+	stmtHealthy, err := tx.PrepareContext(ctx, `
+		UPDATE file_health 
+		SET status = 'healthy', scheduled_check_at = ?, retry_count = 0, 
+		    repair_retry_count = 0, last_error = NULL, error_details = NULL, 
+		    updated_at = datetime('now'), last_checked = datetime('now')
+		WHERE file_path = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare healthy statement: %w", err)
+	}
+	defer stmtHealthy.Close()
+
+	stmtRetry, err := tx.PrepareContext(ctx, `
+		UPDATE file_health 
+		SET retry_count = retry_count + 1, last_error = ?, error_details = ?, 
+		    status = 'pending', scheduled_check_at = ?, 
+		    updated_at = datetime('now'), last_checked = datetime('now')
+		WHERE file_path = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare retry statement: %w", err)
+	}
+	defer stmtRetry.Close()
+
+	stmtRepair, err := tx.PrepareContext(ctx, `
+		UPDATE file_health 
+		SET repair_retry_count = repair_retry_count + 1, last_error = ?, 
+		    error_details = ?, status = 'repair_triggered', 
+		    updated_at = datetime('now'), last_checked = datetime('now')
+		WHERE file_path = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare repair statement: %w", err)
+	}
+	defer stmtRepair.Close()
+
+	stmtCorrupted, err := tx.PrepareContext(ctx, `
+		UPDATE file_health 
+		SET status = 'corrupted', last_error = ?, error_details = ?, 
+		    scheduled_check_at = NULL,
+		    updated_at = datetime('now'), last_checked = datetime('now')
+		WHERE file_path = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare corrupted statement: %w", err)
+	}
+	defer stmtCorrupted.Close()
+
+	for _, up := range updates {
+		var err error
+		switch up.Type {
+		case UpdateTypeHealthy:
+			_, err = stmtHealthy.ExecContext(ctx, up.ScheduledCheckAt.UTC(), up.FilePath)
+		case UpdateTypeRetry:
+			_, err = stmtRetry.ExecContext(ctx, up.ErrorMessage, up.ErrorDetails, up.ScheduledCheckAt.UTC(), up.FilePath)
+		case UpdateTypeRepairRetry:
+			_, err = stmtRepair.ExecContext(ctx, up.ErrorMessage, up.ErrorDetails, up.FilePath)
+		case UpdateTypeCorrupted:
+			_, err = stmtCorrupted.ExecContext(ctx, up.ErrorMessage, up.ErrorDetails, up.FilePath)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to execute update for %s: %w", up.FilePath, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// UpdateType represents the type of health update
+type UpdateType int
+
+const (
+	UpdateTypeHealthy     UpdateType = 1
+	UpdateTypeRetry       UpdateType = 2
+	UpdateTypeRepairRetry UpdateType = 3
+	UpdateTypeCorrupted   UpdateType = 4
+)
+
+// HealthStatusUpdate represents a single update request for batch processing
+type HealthStatusUpdate struct {
+	Type             UpdateType
+	FilePath         string
+	Status           HealthStatus
+	ErrorMessage     *string
+	ErrorDetails     *string
+	ScheduledCheckAt time.Time
 }
 
 // GetAllHealthCheckPaths returns all health check file paths (memory optimized)

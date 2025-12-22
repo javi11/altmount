@@ -103,9 +103,10 @@ func (h *RCloneHandlers) TestMountConfig(c *fiber.Ctx) error {
 func (h *RCloneHandlers) TestRCloneConnection(c *fiber.Ctx) error {
 	// Decode test request
 	var testReq struct {
-		RCUrl  string `json:"rc_url"`
-		RCUser string `json:"rc_user"`
-		RCPass string `json:"rc_pass"`
+		RCUrl   string `json:"rc_url"`
+		RCUser  string `json:"rc_user"`
+		RCPass  string `json:"rc_pass"`
+		VFSName string `json:"vfs_name"`
 	}
 
 	if err := c.BodyParser(&testReq); err != nil {
@@ -128,8 +129,8 @@ func (h *RCloneHandlers) TestRCloneConnection(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
 	defer cancel()
 
-	// Test external RC server connection
-	err := rclonecli.TestConnection(ctx, testReq.RCUrl, testReq.RCUser, testReq.RCPass, http.DefaultClient)
+	// Test external RC server connection including VFS name verification
+	err := rclonecli.TestConnection(ctx, testReq.RCUrl, testReq.RCUser, testReq.RCPass, testReq.VFSName, http.DefaultClient)
 	if err != nil {
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,

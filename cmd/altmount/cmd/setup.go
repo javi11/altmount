@@ -103,6 +103,7 @@ func initializeFilesystem(
 	healthRepo *database.HealthRepository,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
+	streamTracker nzbfilesystem.StreamTracker,
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
@@ -115,6 +116,7 @@ func initializeFilesystem(
 		healthRepo,
 		poolManager,
 		configGetter,
+		streamTracker,
 	)
 
 	// Create filesystem backed by metadata

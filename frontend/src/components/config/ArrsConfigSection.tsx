@@ -218,6 +218,61 @@ export function ArrsConfigSection({
 				</div>
 			</div>
 
+			{/* Queue Cleanup Settings */}
+			{formData.enabled && (
+				<div className="card bg-base-200">
+					<div className="card-body">
+						<h3 className="mb-4 font-semibold">Queue Cleanup</h3>
+						<p className="mb-4 text-base-content/70 text-sm">
+							Automatically clean up empty folders from import pending items in Radarr/Sonarr
+							queues. This removes stale queue entries where the download folder no longer contains
+							any files.
+						</p>
+
+						<div className="space-y-4">
+							<div className="flex items-center justify-between">
+								<div>
+									<span className="font-medium">Enable Queue Cleanup</span>
+									<p className="text-base-content/70 text-sm">
+										Periodically check for and remove empty import pending folders
+									</p>
+								</div>
+								<input
+									type="checkbox"
+									className="checkbox checkbox-primary"
+									checked={formData.queue_cleanup_enabled ?? true}
+									onChange={(e) => handleFormChange("queue_cleanup_enabled", e.target.checked)}
+									disabled={isReadOnly}
+								/>
+							</div>
+
+							{(formData.queue_cleanup_enabled ?? true) && (
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Cleanup Interval (seconds)</legend>
+									<input
+										type="number"
+										className="input w-full max-w-xs"
+										value={formData.queue_cleanup_interval_seconds ?? 10}
+										onChange={(e) =>
+											handleFormChange(
+												"queue_cleanup_interval_seconds",
+												Number.parseInt(e.target.value, 10) || 10,
+											)
+										}
+										min={1}
+										max={3600}
+										disabled={isReadOnly}
+									/>
+									<p className="label text-base-content/70">
+										How often to check for empty import pending folders (default: 10 seconds)
+									</p>
+								</fieldset>
+							)}
+						</div>
+					</div>
+				</div>
+			)}
+
 			{/* Radarr Instances */}
 			{formData.enabled && (
 				<div className="card bg-base-100">

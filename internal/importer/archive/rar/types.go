@@ -17,7 +17,7 @@ type Processor interface {
 	AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker) ([]Content, error)
 	// CreateFileMetadataFromRarContent creates FileMetadata from Content for the metadata
 	// system. This is used to convert Content into the protobuf format used by the metadata system.
-	CreateFileMetadataFromRarContent(content Content, sourceNzbPath string, releaseDate int64) *metapb.FileMetadata
+	CreateFileMetadataFromRarContent(content Content, sourceNzbPath string, releaseDate int64, nzbdavId string) *metapb.FileMetadata
 }
 
 // Content represents a file within a RAR archive for processing
@@ -29,4 +29,5 @@ type Content struct {
 	IsDirectory  bool                  `json:"is_directory,omitempty"` // Indicates if this is a directory
 	AesKey       []byte                `json:"aes_key,omitempty"`      // AES encryption key (if encrypted)
 	AesIV        []byte                `json:"aes_iv,omitempty"`       // AES initialization vector (if encrypted)
+	NzbdavID     string                `json:"nzbdav_id,omitempty"`    // Original ID from nzbdav
 }

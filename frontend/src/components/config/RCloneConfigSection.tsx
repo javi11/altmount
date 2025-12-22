@@ -32,6 +32,7 @@ export function RCloneConfigSection({
 	const [formData, setFormData] = useState<RCloneRCFormData>({
 		rc_enabled: config.rclone.rc_enabled,
 		rc_url: config.rclone.rc_url,
+		vfs_name: config.rclone.vfs_name || "altmount",
 		rc_port: config.rclone.rc_port,
 		rc_user: config.rclone.rc_user,
 		rc_pass: "",
@@ -103,6 +104,7 @@ export function RCloneConfigSection({
 		const newFormData = {
 			rc_enabled: config.rclone.rc_enabled,
 			rc_url: config.rclone.rc_url,
+			vfs_name: config.rclone.vfs_name || "altmount",
 			rc_port: config.rclone.rc_port,
 			rc_user: config.rclone.rc_user,
 			rc_pass: "",
@@ -189,6 +191,7 @@ export function RCloneConfigSection({
 		const configData = {
 			rc_enabled: config.rclone.rc_enabled,
 			rc_url: config.rclone.rc_url,
+			vfs_name: config.rclone.vfs_name || "altmount",
 			rc_port: config.rclone.rc_port,
 			rc_user: config.rclone.rc_user,
 			rc_pass: "",
@@ -200,6 +203,7 @@ export function RCloneConfigSection({
 		const otherFieldsChanged =
 			newData.rc_enabled !== configData.rc_enabled ||
 			newData.rc_url !== configData.rc_url ||
+			newData.vfs_name !== configData.vfs_name ||
 			newData.rc_port !== configData.rc_port ||
 			newData.rc_user !== configData.rc_user ||
 			JSON.stringify(newData.rc_options) !== JSON.stringify(configData.rc_options);
@@ -232,6 +236,7 @@ export function RCloneConfigSection({
 			const updateData: RCloneRCFormData = {
 				rc_enabled: formData.rc_enabled ?? false,
 				rc_url: formData.rc_url || "",
+				vfs_name: formData.vfs_name || "altmount",
 				rc_port: formData.rc_port || 5572,
 				rc_user: formData.rc_user || "",
 				rc_pass: formData.rc_pass.trim() !== "" ? formData.rc_pass : "",
@@ -259,6 +264,7 @@ export function RCloneConfigSection({
 			const updateData: RCloneRCFormData = {
 				rc_enabled: enabled,
 				rc_url: formData.rc_url || "",
+				vfs_name: formData.vfs_name || "altmount",
 				rc_port: formData.rc_port || 5572,
 				rc_user: formData.rc_user || "",
 				rc_pass: "", // Don't send password on toggle
@@ -510,6 +516,7 @@ export function RCloneConfigSection({
 				body: JSON.stringify({
 					rc_enabled: formData.rc_enabled,
 					rc_url: formData.rc_url,
+					vfs_name: formData.vfs_name,
 					rc_port: formData.rc_port,
 					rc_user: formData.rc_user,
 					rc_pass: formData.rc_pass,
@@ -1115,6 +1122,22 @@ export function RCloneConfigSection({
 								{mountFormData.mount_enabled
 									? "Using internal RC server managed by mount service"
 									: "External RClone RC server URL (leave empty to use internal RC server)"}
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">VFS Name</legend>
+							<input
+								type="text"
+								className="input"
+								value={formData.vfs_name}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("vfs_name", e.target.value)}
+								placeholder="altmount"
+							/>
+							<p className="label">
+								Name of the VFS in RClone (default: altmount). Change this if your external rclone
+								mount uses a different name.
 							</p>
 						</fieldset>
 

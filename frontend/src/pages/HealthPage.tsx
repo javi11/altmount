@@ -14,6 +14,7 @@ import {
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
+	useSetHealthPriority,
 } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
 import {
@@ -21,6 +22,7 @@ import {
 	useLibrarySyncStatus,
 	useStartLibrarySync,
 } from "../hooks/useLibrarySync";
+import { HealthPriority } from "../types/api";
 import { BulkActionsToolbar } from "./HealthPage/components/BulkActionsToolbar";
 import { CleanupModal } from "./HealthPage/components/CleanupModal";
 import { HealthFilters } from "./HealthPage/components/HealthFilters";
@@ -76,7 +78,8 @@ export function HealthPage() {
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
-	const { confirmDelete, confirmAction } = useConfirm();
+	const setHealthPriority = useSetHealthPriority();
+	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
 	// Config hook
@@ -93,9 +96,42 @@ export function HealthPage() {
 	const cancelLibrarySync = useCancelLibrarySync();
 
 	const handleDelete = async (id: number) => {
-		const confirmed = await confirmDelete("health record");
+		const confirmed = await confirmAction(
+			"Delete Health Record",
+			"Are you sure you want to delete this health record? The actual file won´t be deleted.",
+			{
+				type: "warning",
+				confirmText: "Delete",
+				confirmButtonClass: "btn-error",
+			},
+		);
 		if (confirmed) {
 			await deleteItem.mutateAsync(id);
+		}
+	};
+
+	const handleSetPriority = async (id: number, priority: HealthPriority) => {
+		try {
+			await setHealthPriority.mutateAsync({ id, priority });
+			const priorityLabel =
+				priority === HealthPriority.Next
+					? "Next"
+					: priority === HealthPriority.High
+						? "High"
+						: "Normal";
+
+			showToast({
+				title: "Priority Updated",
+				message: `File priority set to ${priorityLabel}`,
+				type: "success",
+			});
+		} catch (err) {
+			console.error("Failed to update priority:", err);
+			showToast({
+				title: "Update Failed",
+				message: "Failed to update file priority",
+				type: "error",
+			});
 		}
 	};
 
@@ -566,6 +602,7 @@ export function HealthPage() {
 						onManualCheck={handleManualCheck}
 						onRepair={handleRepair}
 						onDelete={handleDelete}
+						onSetPriority={handleSetPriority}
 					/>
 
 					{meta?.total && meta.total > pageSize && (

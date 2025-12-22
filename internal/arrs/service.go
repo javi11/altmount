@@ -50,6 +50,13 @@ type Service struct {
 	seriesCache  map[string][]*sonarr.Series // key: instance name
 	cacheExpiry  map[string]time.Time        // key: instance name
 	requestGroup singleflight.Group
+
+	// Queue cleanup worker state
+	workerCtx     context.Context
+	workerCancel  context.CancelFunc
+	workerWg      sync.WaitGroup
+	workerMu      sync.Mutex
+	workerRunning bool
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
@@ -145,76 +152,64 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string, relativePath string) (instanceType string, instanceName string, err error) {
 	slog.DebugContext(ctx, "Finding instance for file path", "file_path", filePath, "relative_path", relativePath)
 
+	instances := s.getConfigInstances()
+
 	// Strategy 1: Fast Path - Check Root Folders
-	// This is the preferred method as it's O(1) per instance with root folders loaded
-	for _, instance := range s.getConfigInstances() {
+	for _, instance := range instances {
 		if !instance.Enabled {
 			continue
 		}
 
-		slog.DebugContext(ctx, "Checking instance for file (Root Folder Strategy)",
-			"instance_name", instance.Name,
-			"instance_type", instance.Type,
-			"file_path", filePath)
-
-		switch instance.Type {
-		case "radarr":
-			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
-			if err != nil {
-				continue
-			}
-			if s.radarrManagesFile(ctx, client, filePath) {
-				return "radarr", instance.Name, nil
-			}
-
-		case "sonarr":
-			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
-			if err != nil {
-				continue
-			}
-			if s.sonarrManagesFile(ctx, client, filePath) {
-				return "sonarr", instance.Name, nil
+		if client, err := s.getOrCreateClient(instance); err == nil {
+			if s.managesFile(ctx, instance.Type, client, filePath) {
+				return instance.Type, instance.Name, nil
 			}
 		}
 	}
 
 	// Strategy 2: Slow Path - Search Cache by Relative Path
-	// If relativePath is provided, we can search our cached movies/series to see if any contain this file
 	if relativePath != "" {
 		slog.InfoContext(ctx, "Root folder match failed, attempting relative path search", "relative_path", relativePath)
 
-		for _, instance := range s.getConfigInstances() {
+		for _, instance := range instances {
 			if !instance.Enabled {
 				continue
 			}
 
-			switch instance.Type {
-			case "radarr":
-				client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
-				if err != nil {
-					continue
-				}
-				// Use helper that utilizes cache
-				if s.radarrHasFile(ctx, client, instance.Name, relativePath) {
-					slog.InfoContext(ctx, "Found managing Radarr instance by relative path", "instance", instance.Name)
-					return "radarr", instance.Name, nil
-				}
-
-			case "sonarr":
-				client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
-				if err != nil {
-					continue
-				}
-				// Use helper that utilizes cache
-				if s.sonarrHasFile(ctx, client, instance.Name, relativePath) {
-					slog.InfoContext(ctx, "Found managing Sonarr instance by relative path", "instance", instance.Name)
-					return "sonarr", instance.Name, nil
+			if client, err := s.getOrCreateClient(instance); err == nil {
+				if s.hasFile(ctx, instance.Type, client, instance.Name, relativePath) {
+					slog.InfoContext(ctx, "Found managing instance by relative path", "instance", instance.Name, "type", instance.Type)
+					return instance.Type, instance.Name, nil
 				}
 			}
 		}
 	}
 
 	return "", "", fmt.Errorf("no ARR instance found managing file path: %s", filePath)
+}
+
+// getOrCreateClient is a helper to get or create the appropriate client
+func (s *Service) getOrCreateClient(instance *ConfigInstance) (interface{}, error) {
+	if instance.Type == "radarr" {
+		return s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+	}
+	return s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+}
+
+// managesFile is a unified helper for radarrManagesFile and sonarrManagesFile
+func (s *Service) managesFile(ctx context.Context, instanceType string, client interface{}, filePath string) bool {
+	if instanceType == "radarr" {
+		return s.radarrManagesFile(ctx, client.(*radarr.Radarr), filePath)
+	}
+	return s.sonarrManagesFile(ctx, client.(*sonarr.Sonarr), filePath)
+}
+
+// hasFile is a unified helper for radarrHasFile and sonarrHasFile
+func (s *Service) hasFile(ctx context.Context, instanceType string, client interface{}, instanceName, relativePath string) bool {
+	if instanceType == "radarr" {
+		return s.radarrHasFile(ctx, client.(*radarr.Radarr), instanceName, relativePath)
+	}
+	return s.sonarrHasFile(ctx, client.(*sonarr.Sonarr), instanceName, relativePath)
 }
 
 // radarrHasFile checks if any movie in the instance contains the given relative path
@@ -225,9 +220,12 @@ func (s *Service) radarrHasFile(ctx context.Context, client *radarr.Radarr, inst
 		return false
 	}
 
+	strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+
 	for _, movie := range movies {
 		if movie.HasFile && movie.MovieFile != nil {
-			if strings.HasSuffix(movie.MovieFile.Path, relativePath) {
+			if strings.HasSuffix(movie.MovieFile.Path, relativePath) ||
+				strings.HasSuffix(strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)), strippedRelative) {
 				return true
 			}
 		}
@@ -249,6 +247,7 @@ func (s *Service) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, inst
 
 	// Normalize relative path for comparison
 	relativePath = filepath.ToSlash(relativePath)
+	strippedRelative := strings.TrimSuffix(relativePath, ".strm")
 
 	for _, series := range seriesList {
 		// Check if the series folder name is part of the relative path
@@ -256,7 +255,7 @@ func (s *Service) sonarrHasFile(ctx context.Context, client *sonarr.Sonarr, inst
 		// Series Path: "/mnt/media/TV/Show Name"
 		// Folder Name: "Show Name"
 		folderName := filepath.Base(series.Path)
-		if strings.Contains(relativePath, folderName) {
+		if strings.Contains(relativePath, folderName) || strings.Contains(strippedRelative, folderName) {
 			return true
 		}
 	}
@@ -445,13 +444,26 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 				targetMovie = movie
 				break
 			}
+			// Try match without .strm extension if filePath is a .strm file
+			if strings.HasSuffix(filePath, ".strm") {
+				strippedPath := strings.TrimSuffix(filePath, ".strm")
+				// Check if movie file path (without its own extension) matches stripped filePath
+				if strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)) == strippedPath {
+					targetMovie = movie
+					break
+				}
+			}
 			// Try suffix match with relative path if provided
-			if relativePath != "" && strings.HasSuffix(movie.MovieFile.Path, relativePath) {
-				slog.InfoContext(ctx, "Found Radarr movie match by relative path suffix",
-					"radarr_path", movie.MovieFile.Path,
-					"relative_path", relativePath)
-				targetMovie = movie
-				break
+			if relativePath != "" {
+				strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+				if strings.HasSuffix(movie.MovieFile.Path, relativePath) ||
+					strings.HasSuffix(strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)), strippedRelative) {
+					slog.InfoContext(ctx, "Found Radarr movie match by relative path suffix",
+						"radarr_path", movie.MovieFile.Path,
+						"relative_path", relativePath)
+					targetMovie = movie
+					break
+				}
 			}
 		}
 	}
@@ -631,13 +643,25 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 			targetEpisodeFile = episodeFile
 			break
 		}
+		// Try match without .strm extension
+		if strings.HasSuffix(filePath, ".strm") {
+			strippedPath := strings.TrimSuffix(filePath, ".strm")
+			if strings.TrimSuffix(episodeFile.Path, filepath.Ext(episodeFile.Path)) == strippedPath {
+				targetEpisodeFile = episodeFile
+				break
+			}
+		}
 		// Try match with relative path
-		if relativePath != "" && strings.HasSuffix(episodeFile.Path, relativePath) {
-			slog.InfoContext(ctx, "Found Sonarr episode match by relative path suffix",
-				"sonarr_path", episodeFile.Path,
-				"relative_path", relativePath)
-			targetEpisodeFile = episodeFile
-			break
+		if relativePath != "" {
+			strippedRelative := strings.TrimSuffix(relativePath, ".strm")
+			if strings.HasSuffix(episodeFile.Path, relativePath) ||
+				strings.HasSuffix(strings.TrimSuffix(episodeFile.Path, filepath.Ext(episodeFile.Path)), strippedRelative) {
+				slog.InfoContext(ctx, "Found Sonarr episode match by relative path suffix",
+					"sonarr_path", episodeFile.Path,
+					"relative_path", relativePath)
+				targetEpisodeFile = episodeFile
+				break
+			}
 		}
 	}
 
@@ -696,6 +720,69 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	return nil
 }
 
+// TriggerScanForFile finds the ARR instance managing the file and triggers a download scan on it.
+// Returns error if no instance manages the file.
+func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error {
+	// Try to find which instance manages this file path
+	instanceType, instanceName, err := s.findInstanceForFilePath(ctx, filePath, "")
+	if err != nil {
+		return err
+	}
+
+	instance, err := s.findConfigInstance(instanceType, instanceName)
+	if err != nil {
+		return err
+	}
+
+	if !instance.Enabled {
+		return fmt.Errorf("instance %s is disabled", instanceName)
+	}
+
+	slog.InfoContext(ctx, "Triggering download scan for specific instance", "instance", instanceName, "type", instanceType)
+
+	// Launch scan in background to not block caller
+	go func() {
+		// Use a new background context for the async call
+		bgCtx := context.Background()
+
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to create Radarr client for scan trigger", "instance", instance.Name, "error", err)
+				return
+			}
+			// Trigger RefreshMonitoredDownloads
+			_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			// Trigger DownloadedMoviesScan
+			_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "DownloadedMoviesScan"})
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedMoviesScan", "instance", instance.Name, "error", err)
+			} else {
+				slog.InfoContext(bgCtx, "Triggered DownloadedMoviesScan", "instance", instance.Name)
+			}
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", instance.Name, "error", err)
+				return
+			}
+			// Trigger RefreshMonitoredDownloads
+			_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			// Trigger DownloadedEpisodesScan
+			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "DownloadedEpisodesScan"})
+			if err != nil {
+				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedEpisodesScan", "instance", instance.Name, "error", err)
+			} else {
+				slog.InfoContext(bgCtx, "Triggered DownloadedEpisodesScan", "instance", instance.Name)
+			}
+		}
+	}()
+
+	return nil
+}
+
 // TriggerDownloadScan triggers the "Check For Finished Downloads" task in ARR instances
 func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) {
 	instances := s.getConfigInstances()
@@ -717,6 +804,8 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					slog.ErrorContext(bgCtx, "Failed to create Radarr client for scan trigger", "instance", inst.Name, "error", err)
 					return
 				}
+				// Trigger RefreshMonitoredDownloads
+				_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 				// Trigger DownloadedMoviesScan
 				_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "DownloadedMoviesScan"})
 				if err != nil {
@@ -731,6 +820,8 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", inst.Name, "error", err)
 					return
 				}
+				// Trigger RefreshMonitoredDownloads
+				_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 				// Trigger DownloadedEpisodesScan
 				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "DownloadedEpisodesScan"})
 				if err != nil {
@@ -1073,4 +1164,283 @@ func (s *Service) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 	slog.WarnContext(ctx, "No history record found for file, cannot blocklist", "series_id", seriesID, "file_id", fileID)
 	return nil
 }
+
+// StartWorker starts the queue cleanup worker
+func (s *Service) StartWorker(ctx context.Context) error {
+	s.workerMu.Lock()
+	defer s.workerMu.Unlock()
+
+	if s.workerRunning {
+		return nil
+	}
+
+	cfg := s.configGetter()
+
+	// ARRs must be enabled
+	if cfg.Arrs.Enabled == nil || !*cfg.Arrs.Enabled {
+		slog.InfoContext(ctx, "ARR queue cleanup disabled (ARRs disabled)")
+		return nil
+	}
+
+	// Queue cleanup is enabled by default (when nil or true)
+	if cfg.Arrs.QueueCleanupEnabled != nil && !*cfg.Arrs.QueueCleanupEnabled {
+		slog.InfoContext(ctx, "ARR queue cleanup disabled")
+		return nil
+	}
+
+	s.workerCtx, s.workerCancel = context.WithCancel(ctx)
+	s.workerRunning = true
+
+	interval := time.Duration(cfg.Arrs.QueueCleanupIntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+
+	s.workerWg.Add(1)
+	go s.runWorker(interval)
+
+	slog.InfoContext(ctx, "ARR queue cleanup worker started",
+		"interval_seconds", cfg.Arrs.QueueCleanupIntervalSeconds)
+	return nil
+}
+
+// StopWorker stops the queue cleanup worker
+func (s *Service) StopWorker(ctx context.Context) {
+	s.workerMu.Lock()
+	defer s.workerMu.Unlock()
+
+	if !s.workerRunning {
+		return
+	}
+
+	s.workerCancel()
+	s.workerWg.Wait()
+	s.workerRunning = false
+	slog.InfoContext(ctx, "ARR queue cleanup worker stopped")
+}
+
+func (s *Service) runWorker(interval time.Duration) {
+	defer s.workerWg.Done()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Initial delay before first run
+	select {
+	case <-time.After(30 * time.Second):
+	case <-s.workerCtx.Done():
+		return
+	}
+
+	// Run initial cleanup
+	s.safeCleanup()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.safeCleanup()
+		case <-s.workerCtx.Done():
+			return
+		}
+	}
+}
+
+func (s *Service) safeCleanup() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("Panic in queue cleanup", "panic", r)
+		}
+	}()
+	if err := s.CleanupQueue(s.workerCtx); err != nil {
+		slog.Error("Queue cleanup failed", "error", err)
+	}
+}
+
+// CleanupQueue checks all ARR instances for importPending items with empty folders
+// and removes them from the queue after deleting the empty folder
+func (s *Service) CleanupQueue(ctx context.Context) error {
+	cfg := s.configGetter()
+
+	slog.InfoContext(ctx, "Starting ARR queue cleanup")
+
+	// Process all Radarr instances
+	for _, instance := range cfg.Arrs.RadarrInstances {
+		if instance.Enabled == nil || !*instance.Enabled {
+			continue
+		}
+		if err := s.cleanupRadarrQueue(ctx, instance, cfg); err != nil {
+			slog.WarnContext(ctx, "Failed to cleanup Radarr queue",
+				"instance", instance.Name, "error", err)
+		}
+	}
+
+	// Process all Sonarr instances
+	for _, instance := range cfg.Arrs.SonarrInstances {
+		if instance.Enabled == nil || !*instance.Enabled {
+			continue
+		}
+		if err := s.cleanupSonarrQueue(ctx, instance, cfg); err != nil {
+			slog.WarnContext(ctx, "Failed to cleanup Sonarr queue",
+				"instance", instance.Name, "error", err)
+		}
+	}
+
+	slog.InfoContext(ctx, "ARR queue cleanup completed")
+	return nil
+}
+
+func (s *Service) cleanupRadarrQueue(ctx context.Context, instance config.ArrsInstanceConfig, cfg *config.Config) error {
+	client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+	if err != nil {
+		return fmt.Errorf("failed to get Radarr client: %w", err)
+	}
+
+	queue, err := client.GetQueueContext(ctx, 0, 100)
+	if err != nil {
+		return fmt.Errorf("failed to get Radarr queue: %w", err)
+	}
+
+	var idsToRemove []int64
+	for _, q := range queue.Records {
+		// Check for completed items with warning status that are pending import
+		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+			continue
+		}
+
+		// Check if path is within managed directories (import_dir or mount_path)
+		if !s.isPathManaged(q.OutputPath, cfg) {
+			continue
+		}
+
+		// Check status messages for known issues
+		shouldCleanup := false
+		for _, msg := range q.StatusMessages {
+			allMessages := strings.Join(msg.Messages, " ")
+			if strings.Contains(allMessages, "No files found are eligible") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
+				shouldCleanup = true
+				break
+			}
+		}
+
+		if shouldCleanup {
+			slog.InfoContext(ctx, "Found failed import pending item",
+				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+			idsToRemove = append(idsToRemove, q.ID)
+		}
+	}
+
+	// Remove from ARR queue with removeFromClient and blocklist flags
+	if len(idsToRemove) > 0 {
+		removeFromClient := true
+		opts := &starr.QueueDeleteOpts{
+			RemoveFromClient: &removeFromClient,
+			BlockList:        true,
+			SkipRedownload:   false,
+		}
+		for _, id := range idsToRemove {
+			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete queue item",
+					"id", id, "error", err)
+			}
+		}
+		slog.InfoContext(ctx, "Cleaned up Radarr queue items",
+			"instance", instance.Name, "count", len(idsToRemove))
+	}
+	return nil
+}
+
+func (s *Service) cleanupSonarrQueue(ctx context.Context, instance config.ArrsInstanceConfig, cfg *config.Config) error {
+	client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+	if err != nil {
+		return fmt.Errorf("failed to get Sonarr client: %w", err)
+	}
+
+	queue, err := client.GetQueueContext(ctx, 0, 100)
+	if err != nil {
+		return fmt.Errorf("failed to get Sonarr queue: %w", err)
+	}
+
+	var idsToRemove []int64
+	for _, q := range queue.Records {
+		// Check for completed items with warning status that are pending import
+		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+			continue
+		}
+
+		// Check if path is within managed directories (import_dir or mount_path)
+		if !s.isPathManaged(q.OutputPath, cfg) {
+			continue
+		}
+
+		// Check status messages for known issues
+		shouldCleanup := false
+		for _, msg := range q.StatusMessages {
+			allMessages := strings.Join(msg.Messages, " ")
+			if strings.Contains(allMessages, "No files found are eligible") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
+				shouldCleanup = true
+				break
+			}
+		}
+
+		if shouldCleanup {
+			slog.InfoContext(ctx, "Found failed import pending item",
+				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+			idsToRemove = append(idsToRemove, q.ID)
+		}
+	}
+
+	// Remove from ARR queue with removeFromClient and blocklist flags
+	if len(idsToRemove) > 0 {
+		removeFromClient := true
+		opts := &starr.QueueDeleteOpts{
+			RemoveFromClient: &removeFromClient,
+			BlockList:        true,
+			SkipRedownload:   false,
+		}
+		for _, id := range idsToRemove {
+			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete queue item",
+					"id", id, "error", err)
+			}
+		}
+		slog.InfoContext(ctx, "Cleaned up Sonarr queue items",
+			"instance", instance.Name, "count", len(idsToRemove))
+	}
+	return nil
+}
+
+func (s *Service) isPathManaged(path string, cfg *config.Config) bool {
+	if path == "" {
+		return false
+	}
+
+	cleanPath := filepath.Clean(path)
+
+	// Check import_dir
+	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		importDir := filepath.Clean(*cfg.Import.ImportDir)
+		if strings.HasPrefix(cleanPath, importDir) {
+			return true
+		}
+	}
+
+	// Check mount_path
+	if cfg.MountPath != "" {
+		mountPath := filepath.Clean(cfg.MountPath)
+		if strings.HasPrefix(cleanPath, mountPath) {
+			return true
+		}
+	}
+
+	return false
+}
+
 

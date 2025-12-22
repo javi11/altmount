@@ -29,9 +29,12 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 
 	// Validate sort parameters
 	validSortFields := map[string]bool{
-		"file_path":  true,
-		"created_at": true,
-		"status":     true,
+		"file_path":          true,
+		"created_at":         true,
+		"status":             true,
+		"priority":           true,
+		"last_checked":       true,
+		"scheduled_check_at": true,
 	}
 	if !validSortFields[sortBy] {
 		sortBy = "created_at"
@@ -412,14 +415,14 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	// Determine final path for ARR rescan
 	pathForRescan := libraryPath
 	if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = filepath.Join(*cfg.Import.ImportDir, item.FilePath)
+		pathForRescan = filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(item.FilePath, "/"))
 		slog.InfoContext(ctx, "Using symlink import path for manual repair",
 			"file_path", item.FilePath,
 			"symlink_path", pathForRescan)
 	}
 	if pathForRescan == "" {
 		// Fallback to mount path if no library path found
-		pathForRescan = filepath.Join(cfg.MountPath, item.FilePath)
+		pathForRescan = filepath.Join(cfg.MountPath, strings.TrimPrefix(item.FilePath, "/"))
 		slog.InfoContext(ctx, "Using mount path fallback for manual repair",
 			"file_path", item.FilePath,
 			"mount_path", pathForRescan)
@@ -445,8 +448,7 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	}
 
 	// Update status to repair_triggered instead of deleting
-	// This gives user feedback that the repair is in progress (waiting for ARR)
-	if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+	if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError, item.ErrorDetails); err != nil {
 		slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
 			"error", err,
 			"file_path", item.FilePath)
@@ -533,7 +535,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 
 		pathForRescan := libraryPath
 		if pathForRescan == "" {
-			pathForRescan = filepath.Join(cfg.MountPath, item.FilePath)
+			pathForRescan = filepath.Join(cfg.MountPath, strings.TrimPrefix(item.FilePath, "/"))
 		}
 
 		// Trigger rescan
@@ -553,7 +555,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 		}
 
 		// Update status to repair_triggered instead of deleting
-		if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError); err != nil {
+		if err := s.healthRepo.SetRepairTriggered(ctx, item.FilePath, item.LastError, item.ErrorDetails); err != nil {
 			slog.ErrorContext(ctx, "Failed to set repair_triggered status after repair trigger",
 				"error", err,
 				"file_path", item.FilePath)
@@ -1198,6 +1200,92 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 		"new_status":   string(updatedItem.Status),
 		"cancelled_at": time.Now().Format(time.RFC3339),
 		"health_data":  ToHealthItemResponse(updatedItem),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleSetHealthPriority handles POST /api/health/{id}/priority
+func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record identifier is required",
+		})
+	}
+
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid health record ID",
+			"details": "ID must be a valid integer",
+		})
+	}
+
+	// Parse request body
+	var req struct {
+		Priority database.HealthPriority `json:"priority"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+			"details": err.Error(),
+		})
+	}
+
+	// Check if item exists in health database
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to check health record",
+			"details": err.Error(),
+		})
+	}
+
+	if item == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Health record not found",
+		})
+	}
+
+	// Set priority
+	err = s.healthRepo.SetPriority(c.Context(), id, req.Priority)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to update priority",
+			"details": err.Error(),
+		})
+	}
+
+	// Get the updated health record
+	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to retrieve updated health record",
+			"details": err.Error(),
+		})
+	}
+
+	response := map[string]interface{}{
+		"message":     "Health priority updated",
+		"id":          id,
+		"file_path":   item.FilePath,
+		"priority":    updatedItem.Priority,
+		"updated_at":  time.Now().Format(time.RFC3339),
+		"health_data": ToHealthItemResponse(updatedItem),
 	}
 
 	return c.Status(200).JSON(fiber.Map{

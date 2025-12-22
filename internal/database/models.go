@@ -68,26 +68,35 @@ const (
 	HealthStatusCorrupted       HealthStatus = "corrupted"        // File has missing segments or is corrupted
 )
 
+// HealthPriority represents the priority level of a health check
+type HealthPriority int
+
+const (
+	HealthPriorityNormal HealthPriority = 0
+	HealthPriorityHigh   HealthPriority = 1
+	HealthPriorityNext   HealthPriority = 2
+)
+
 // FileHealth represents the health tracking of files in the filesystem
 type FileHealth struct {
-	ID               int64        `db:"id"`
-	FilePath         string       `db:"file_path"`
-	LibraryPath      *string      `db:"library_path"`      // Path to file in library directory (symlink or .strm file)
-	Status           HealthStatus `db:"status"`
-	LastChecked      time.Time    `db:"last_checked"`
-	LastError        *string      `db:"last_error"`
-	RetryCount       int          `db:"retry_count"`        // Health check retry count
-	MaxRetries       int          `db:"max_retries"`        // Max health check retries
-	RepairRetryCount int          `db:"repair_retry_count"` // Repair retry count
-	MaxRepairRetries int          `db:"max_repair_retries"` // Max repair retries
-	SourceNzbPath    *string      `db:"source_nzb_path"`
-	ErrorDetails     *string      `db:"error_details"` // JSON error details
-	CreatedAt        time.Time    `db:"created_at"`
-	UpdatedAt        time.Time    `db:"updated_at"`
+	ID               int64          `db:"id"`
+	FilePath         string         `db:"file_path"`
+	LibraryPath      *string        `db:"library_path"`      // Path to file in library directory (symlink or .strm file)
+	Status           HealthStatus   `db:"status"`
+	LastChecked      time.Time      `db:"last_checked"`
+	LastError        *string        `db:"last_error"`
+	RetryCount       int            `db:"retry_count"`        // Health check retry count
+	MaxRetries       int            `db:"max_retries"`        // Max health check retries
+	RepairRetryCount int            `db:"repair_retry_count"` // Repair retry count
+	MaxRepairRetries int            `db:"max_repair_retries"` // Max repair retries
+	SourceNzbPath    *string        `db:"source_nzb_path"`
+	ErrorDetails     *string        `db:"error_details"` // JSON error details
+	CreatedAt        time.Time      `db:"created_at"`
+	UpdatedAt        time.Time      `db:"updated_at"`
 	// Health check scheduling fields
-	ReleaseDate      *time.Time `db:"release_date"`       // Cached from metadata for scheduling
-	ScheduledCheckAt *time.Time `db:"scheduled_check_at"` // Next check time
-	Priority         bool       `db:"priority"`           // Priority flag for health checks
+	ReleaseDate      *time.Time     `db:"release_date"`       // Cached from metadata for scheduling
+	ScheduledCheckAt *time.Time     `db:"scheduled_check_at"` // Next check time
+	Priority         HealthPriority `db:"priority"`           // Priority level for health checks
 }
 
 // User represents a user account in the system

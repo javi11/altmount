@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import type { HealthCleanupRequest } from "../types/api";
+import type { HealthCleanupRequest, HealthPriority } from "../types/api";
 
 // Queue hooks
 export const useQueue = (params?: {
@@ -267,11 +267,12 @@ export const useCleanupHealth = () => {
 	});
 };
 
+// ... surrounding code ...
 export const useAddHealthCheck = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (data: { file_path: string; source_nzb_path: string; priority?: boolean }) =>
+		mutationFn: (data: { file_path: string; source_nzb_path: string; priority?: HealthPriority }) =>
 			apiClient.addHealthCheck(data),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["health"] });
@@ -312,6 +313,18 @@ export const useDirectHealthCheck = () => {
 			// Immediately refresh health data to show "checking" status
 			queryClient.invalidateQueries({ queryKey: ["health"] });
 			queryClient.invalidateQueries({ queryKey: ["health", "worker", "status"] });
+		},
+	});
+};
+
+export const useSetHealthPriority = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({ id, priority }: { id: number; priority: HealthPriority }) =>
+			apiClient.setHealthPriority(id, priority),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
 		},
 	});
 };
@@ -409,11 +422,13 @@ export const useUploadToQueue = () => {
 			file,
 			category,
 			priority,
+			relativePath,
 		}: {
 			file: File;
 			category?: string;
 			priority?: number;
-		}) => apiClient.uploadToQueue(file, category, priority),
+			relativePath?: string;
+		}) => apiClient.uploadToQueue(file, category, priority, relativePath),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
 			queryClient.invalidateQueries({ queryKey: ["queue"] });

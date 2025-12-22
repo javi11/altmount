@@ -42,6 +42,7 @@ type UsenetFileSystem struct {
 	progressTracker *progress.Tracker
 	filesCompleted  int32 // atomic counter
 	totalFiles      int
+	readTimeout     time.Duration
 }
 
 // UsenetFileInfo implements fs.FileInfo for RAR part files
@@ -51,7 +52,7 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int, progressTracker *progress.Tracker) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int, progressTracker *progress.Tracker, readTimeout time.Duration) *UsenetFileSystem {
 	filesMap := make(map[string]parser.ParsedFile)
 	for _, file := range files {
 		filesMap[file.Filename] = file
@@ -66,6 +67,7 @@ func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []
 		progressTracker: progressTracker,
 		filesCompleted:  0,
 		totalFiles:      len(files),
+		readTimeout:     readTimeout,
 	}
 }
 
@@ -96,6 +98,7 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 		position:       0,
 		closed:         false,
 		ufs:            ufs,
+		readTimeout:    ufs.readTimeout,
 	}, nil
 }
 
@@ -134,6 +137,7 @@ type UsenetFile struct {
 	position       int64
 	closed         bool
 	ufs            *UsenetFileSystem
+	readTimeout    time.Duration
 }
 
 // UsenetFile methods implementing fs.File interface
@@ -246,7 +250,11 @@ func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 
 	// Create a timeout context to prevent indefinite blocking
-	ctx, cancel := context.WithTimeout(uf.ctx, 5*time.Minute)
+	timeout := uf.readTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(uf.ctx, timeout)
 	defer cancel()
 
 	// Create a new reader for this specific range

@@ -54,16 +54,38 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	truncatedFilename := ms.truncateFilename(filename)
 	metadataPath := filepath.Join(metadataDir, truncatedFilename+".meta")
 
+	// Sidecar ID handling for compatibility
+	// We don't write NzbdavId to the proto to maintain compatibility with versions that don't have field 14.
+	// Instead, we store it in a sidecar .id file.
+	nzbdavId := metadata.NzbdavId
+	metadata.NzbdavId = "" // Clear for marshalling
+
 	// Marshal protobuf data
 	data, err := proto.Marshal(metadata)
 	if err != nil {
+		metadata.NzbdavId = nzbdavId // Restore on error
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
 	// Write directly to metadata file
 	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
+		metadata.NzbdavId = nzbdavId // Restore on error
 		return fmt.Errorf("failed to write metadata file: %w", err)
 	}
+
+	// Handle ID sidecar file
+	idPath := metadataPath + ".id"
+	if nzbdavId != "" {
+		if err := os.WriteFile(idPath, []byte(nzbdavId), 0644); err != nil {
+			// Log error but don't fail the operation
+			slog.Warn("Failed to write ID sidecar file", "path", idPath, "error", err)
+		}
+	} else {
+		// Clean up existing ID file if present
+		_ = os.Remove(idPath)
+	}
+
+	metadata.NzbdavId = nzbdavId // Restore for in-memory use
 
 	return nil
 }
@@ -88,6 +110,12 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 	metadata := &metapb.FileMetadata{}
 	if err := proto.Unmarshal(data, metadata); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	// Read ID from sidecar file (compatibility mode)
+	idPath := metadataPath + ".id"
+	if idData, err := os.ReadFile(idPath); err == nil {
+		metadata.NzbdavId = string(idData)
 	}
 
 	return metadata, nil
@@ -168,6 +196,7 @@ func (ms *MetadataService) CreateFileMetadata(
 	salt string,
 	releaseDate int64,
 	par2Files []*metapb.Par2FileReference,
+	nzbdavId string,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -183,6 +212,7 @@ func (ms *MetadataService) CreateFileMetadata(
 		ModifiedAt:    now,
 		ReleaseDate:   releaseDate,
 		Par2Files:     par2Files,
+		NzbdavId:      nzbdavId,
 	}
 }
 

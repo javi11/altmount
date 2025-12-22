@@ -32,6 +32,7 @@ type HealthEvent struct {
 	FilePath   string
 	Status     database.HealthStatus
 	Error      error
+	Details    *string
 	Timestamp  time.Time
 	RetryCount int
 	SourceNzb  *string
@@ -145,8 +146,8 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 
 	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", hc.getSegmentSamplePercentage())
 
-	// Validate segment availability using shared validation logic
-	checkErr := usenet.ValidateSegmentAvailability(
+	// Validate segment availability using detailed validation logic
+	result, err := usenet.ValidateSegmentAvailabilityDetailed(
 		ctx,
 		fileMeta.SegmentData,
 		hc.poolManager,
@@ -155,10 +156,23 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		nil, // No progress callback for health checks
 	)
 
-	if checkErr != nil {
+	if err != nil {
 		event.Type = EventTypeCheckFailed
 		event.Status = database.HealthStatusCorrupted
-		event.Error = fmt.Errorf("corrupted file some segments are missing: %w", checkErr)
+		event.Error = fmt.Errorf("failed to validate segments: %w", err)
+		return event
+	}
+
+	if result.MissingCount > 0 {
+		event.Type = EventTypeFileCorrupted
+		event.Status = database.HealthStatusCorrupted
+		event.Error = fmt.Errorf("file corrupted: missing %d/%d checked segments", result.MissingCount, result.TotalChecked)
+
+		// Create detailed JSON report
+		details := fmt.Sprintf(`{"missing_count": %d, "total_checked": %d, "missing_ids": %q}`,
+			result.MissingCount, result.TotalChecked, result.MissingIDs)
+		event.Details = &details
+
 		return event
 	}
 
@@ -189,11 +203,18 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		virtualDir := filepath.Dir(filePath)
 
 		// Use background context with timeout for VFS notification
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Increased timeout to 60 seconds as vfs/refresh can be slow
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
+		cfg := hc.configGetter()
+		vfsName := cfg.RClone.VFSName
+		if vfsName == "" {
+			vfsName = config.MountProvider
+		}
+
 		// Refresh cache asynchronously to avoid blocking health checks
-		err := hc.rcloneClient.RefreshDir(ctx, config.MountProvider, []string{virtualDir}) // Use RefreshDir with empty provider
+		err := hc.rcloneClient.RefreshDir(ctx, vfsName, []string{virtualDir})
 		if err != nil {
 			slog.ErrorContext(ctx, "Failed to notify rclone VFS about file status change", "file", filePath, "event", event.Type, "err", err)
 		}

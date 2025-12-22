@@ -40,6 +40,21 @@ func ProcessSingleFile(
 	virtualFilePath := filepath.Join(virtualDir, file.Filename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
 
+	// Check if file already exists and is healthy
+	if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
+		if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
+			slog.InfoContext(ctx, "Skipping re-import of healthy file",
+				"file", file.Filename,
+				"virtual_path", virtualFilePath)
+			return virtualDir, nil
+		}
+	}
+
+	// Double check if this specific file is allowed
+	if !utils.IsAllowedFile(file.Filename, file.Size, allowedFileExtensions) {
+		return "", fmt.Errorf("file '%s' is not allowed", file.Filename)
+	}
+
 	// Validate segments
 	if err := validation.ValidateSegmentsForFile(
 		ctx,
@@ -76,6 +91,7 @@ func ProcessSingleFile(
 		file.Salt,
 		file.ReleaseDate.Unix(),
 		par2Refs,
+		file.NzbdavID,
 	)
 
 	// Write file metadata to disk
@@ -88,5 +104,5 @@ func ProcessSingleFile(
 		"virtual_path", virtualFilePath,
 		"size", file.Size)
 
-	return virtualFilePath, nil
+	return virtualDir, nil
 }

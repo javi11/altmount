@@ -96,6 +96,7 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 			"", "", 
 			time.Now().Unix(), 
 			nil,
+			"",
 		)
 		err := metadataService.WriteFileMetadata(fileName, meta)
 		require.NoError(t, err)

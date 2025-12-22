@@ -33,6 +33,10 @@ func TestParser_Parse(t *testing.T) {
 			Id TEXT PRIMARY KEY,
 			SegmentIds TEXT
 		);
+		CREATE TABLE DavRarFiles (
+			Id TEXT PRIMARY KEY,
+			RarParts TEXT
+		);
 	`)
 	require.NoError(t, err)
 
@@ -68,7 +72,7 @@ func TestParser_Parse(t *testing.T) {
 
 		assert.Contains(t, xmlStr, `<meta type="name">My.Release.1080p</meta>`)
 		assert.Contains(t, xmlStr, `<file poster="AltMount"`)
-		assert.Contains(t, xmlStr, `subject="movie.mkv">`)
+		assert.Contains(t, xmlStr, `subject="NZBDAV_ID:file1 movie.mkv">`)
 		assert.Contains(t, xmlStr, `>msg1@test</segment>`)
 		assert.Contains(t, xmlStr, `>msg2@test</segment>`)
 

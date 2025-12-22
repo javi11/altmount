@@ -67,6 +67,16 @@ func (r *segmentRange) Next() (*segment, error) {
 	return r.Get()
 }
 
+func (r *segmentRange) CloseSegments() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, s := range r.segments {
+		if s != nil {
+			_ = s.Close()
+		}
+	}
+}
+
 func (r *segmentRange) Clear() error {
 	for _, s := range r.segments {
 		if err := s.Close(); err != nil {
@@ -129,12 +139,10 @@ func (s *segment) Close() error {
 
 	if s.reader != nil {
 		e1 = s.reader.Close()
-		s.reader = nil
 	}
 
 	if s.writer != nil {
 		e2 = s.writer.Close()
-		s.writer = nil
 	}
 
 	return errors.Join(e1, e2)

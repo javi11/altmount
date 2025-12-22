@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/importer/archive/rar"
 	"github.com/javi11/altmount/internal/importer/archive/sevenzip"
 	"github.com/javi11/altmount/internal/importer/filesystem"
@@ -32,9 +34,10 @@ type Processor struct {
 	rarProcessor            rar.Processor
 	sevenZipProcessor       sevenzip.Processor
 	poolManager             pool.Manager // Pool manager for dynamic pool access
-	maxImportConnections    int          // Maximum concurrent NNTP connections for validation and archive processing
-	segmentSamplePercentage int          // Percentage of segments to check when sampling (1-100)
-	allowedFileExtensions   []string     // Allowed file extensions for validation (empty = allow all)
+	configGetter            config.ConfigGetter
+	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
+	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
+	allowedFileExtensions   []string
 	log                     *slog.Logger
 	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
 
@@ -45,14 +48,15 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, broadcaster *progress.ProgressBroadcaster) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
 		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB),
+		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
 		poolManager:             poolManager,
+		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,
 		segmentSamplePercentage: segmentSamplePercentage,
 		allowedFileExtensions:   allowedFileExtensions,
@@ -64,6 +68,50 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		rarRPattern:       regexp.MustCompile(`^(.+)\.r(\d+)$`),         // filename.r00, filename.r01
 		rarNumericPattern: regexp.MustCompile(`^(.+)\.(\d+)$`),          // filename.001, filename.002
 	}
+}
+
+func (proc *Processor) isCategoryFolder(path string) bool {
+	cfg := proc.configGetter()
+	normalizedPath := strings.Trim(filepath.ToSlash(path), "/")
+	completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+
+	// Helper to check if a name matches a category
+	matchesCategory := func(name string) bool {
+		name = strings.Trim(filepath.ToSlash(name), "/")
+		if name == "" {
+			return false
+		}
+
+		// Check exact match
+		if normalizedPath == name {
+			return true
+		}
+
+		// Check match with complete_dir prefix (e.g. complete/tv)
+		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
+			return true
+		}
+
+		return false
+	}
+
+	// Check complete_dir itself
+	if normalizedPath == completeDir {
+		return true
+	}
+
+	// Check configured categories
+	for _, cat := range cfg.SABnzbd.Categories {
+		// Check both the category name and its specific directory if set
+		if matchesCategory(cat.Name) {
+			return true
+		}
+		if cat.Dir != "" && matchesCategory(cat.Dir) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // updateProgress emits a progress update if broadcaster is available
@@ -213,10 +261,25 @@ func (proc *Processor) processSingleFile(
 	if fileDir == "." || fileDir == "" {
 		// Only flatten when the enclosing folder is not the same real folder as the release name.
 		if !strings.EqualFold(nzbDirBase, releaseName) && !strings.EqualFold(nzbDirBase, strings.TrimSuffix(regularFiles[0].Filename, filepath.Ext(regularFiles[0].Filename))) {
-			virtualDir = normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
+			normalizedDir := normalizeSingleFileVirtualDir(virtualDir, releaseName, regularFiles[0].Filename)
+			
+			// Only apply normalization if it doesn't result in a category root folder
+			// We want to avoid flattening 'movies/MovieName/Movie.mkv' into 'movies/Movie.mkv'
+			// because that confuses Sonarr/Radarr when they look for the job folder.
+			if !proc.isCategoryFolder(normalizedDir) {
+				virtualDir = normalizedDir
+			}
 		}
 	}
 
+	// Ensure we don't put the file directly into a category root folder
+	// We MUST create a release folder so Sonarr/Radarr can find the "Job Folder"
+	if proc.isCategoryFolder(virtualDir) {
+		virtualDir = filepath.Join(virtualDir, releaseName)
+		virtualDir = strings.ReplaceAll(virtualDir, string(filepath.Separator), "/")
+	}
+
+	// Rename the file to match the NZB name to handle obfuscated filenames
 	// Keep NZB-provided subfolders but rename the leaf to the release name (preventing duplicate extensions)
 	originalDir := filepath.Dir(regularFiles[0].Filename)
 	normalizedBase := normalizeReleaseFilename(nzbName, filepath.Base(regularFiles[0].Filename))
@@ -270,7 +333,9 @@ func (proc *Processor) processMultiFile(
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
 	// provided virtual directory (preserving any subpaths inside the NZB).
-	singleLike := len(regularFiles) == 1
+	// EXCEPTION: If the virtual directory is a category root (e.g. "movies"), we MUST create
+	// the NZB folder to ensure Radarr/Sonarr can find the job folder correctly.
+	singleLike := len(regularFiles) == 1 && !proc.isCategoryFolder(virtualDir)
 	targetBaseDir := virtualDir
 
 	if singleLike {
@@ -427,55 +492,55 @@ func (proc *Processor) processSevenZipArchive(
 			return "", err
 		}
 
-		if err := multifile.ProcessRegularFiles(
-			ctx,
-			nzbFolder,
-			regularFiles,
-			nil, // No PAR2 files for archive imports
-			parsed.Path,
-			proc.metadataService,
-			proc.poolManager,
-			maxConnections,
-			proc.segmentSamplePercentage,
-			allowedExtensions,
-		); err != nil {
-			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
-		}
-	}
-
-	// Analyze and process 7zip archive
-	if len(archiveFiles) > 0 {
-		proc.updateProgress(queueID, 50)
-
-		// Create progress tracker for 50-80% range (archive analysis)
-		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
-
-		// Get release date from first archive file
-		var releaseDate int64
-		if len(archiveFiles) > 0 {
-			releaseDate = archiveFiles[0].ReleaseDate.Unix()
-		}
-
-		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
-		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-
-		// Process archive with unified aggregator
-		err := sevenzip.ProcessArchive(
-			ctx,
-			nzbFolder,
-			archiveFiles,
-			parsed.GetPassword(),
-			releaseDate,
-			parsed.Path,
-			proc.sevenZipProcessor,
-			proc.metadataService,
-			proc.poolManager,
-			archiveProgressTracker,
-			validationProgressTracker,
-			maxConnections,
-			proc.segmentSamplePercentage,
-			allowedExtensions,
-		)
+		        if err := multifile.ProcessRegularFiles(
+		            ctx,
+		            nzbFolder,
+		            regularFiles,
+		            nil, // No PAR2 files for archive imports
+		            parsed.Path,
+		            proc.metadataService,
+		            proc.poolManager,
+		            maxConnections,
+		            proc.segmentSamplePercentage,
+		            allowedExtensions,
+		        ); err != nil {
+		            slog.DebugContext(ctx, "Failed to process regular files", "error", err)
+		        }
+		    }
+		
+		    // Analyze and process 7zip archive
+		    if len(archiveFiles) > 0 {
+		        proc.updateProgress(queueID, 50)
+		
+		        // Create progress tracker for 50-80% range (archive analysis)
+		        archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
+		
+		        // Get release date from first archive file
+		        var releaseDate int64
+		        if len(archiveFiles) > 0 {
+		            releaseDate = archiveFiles[0].ReleaseDate.Unix()
+		        }
+		
+		        // Create progress tracker for 80-95% range (validation only, metadata handled separately)
+		        validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
+		
+		        // Process archive with unified aggregator
+		        err := sevenzip.ProcessArchive(
+		            ctx,
+		            nzbFolder,
+		            archiveFiles,
+		            parsed.GetPassword(),
+		            releaseDate,
+		            parsed.Path,
+		            proc.sevenZipProcessor,
+		            proc.metadataService,
+		            proc.poolManager,
+		            archiveProgressTracker,
+		            validationProgressTracker,
+		            maxConnections,
+		            proc.segmentSamplePercentage,
+		            allowedExtensions,
+		        )
 		if err != nil {
 			return "", err
 		}
@@ -484,6 +549,7 @@ func (proc *Processor) processSevenZipArchive(
 
 	return nzbFolder, nil
 }
+
 
 // normalizeReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
 // It avoids generating duplicate extensions like ".mp4.mp4" when the NZB name already contains the suffix.

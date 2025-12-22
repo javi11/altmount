@@ -66,15 +66,17 @@ type rarProcessor struct {
 	poolManager    pool.Manager
 	maxWorkers     int
 	maxCacheSizeMB int
+	readTimeout    time.Duration
 }
 
 // NewProcessor creates a new RAR processor
-func NewProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) Processor {
+func NewProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int, readTimeout time.Duration) Processor {
 	return &rarProcessor{
 		log:            slog.Default().With("component", "rar-processor"),
 		poolManager:    poolManager,
 		maxWorkers:     maxWorkers,
 		maxCacheSizeMB: maxCacheSizeMB,
+		readTimeout:    readTimeout,
 	}
 }
 
@@ -83,6 +85,7 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 	Content Content,
 	sourceNzbPath string,
 	releaseDate int64,
+	nzbdavId string,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -94,6 +97,7 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 		ModifiedAt:    now,
 		SegmentData:   Content.Segments,
 		ReleaseDate:   releaseDate,
+		NzbdavId:      nzbdavId,
 	}
 
 	// Set AES encryption if keys are present
@@ -146,7 +150,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 
 	// Create Usenet filesystem for RAR access - this enables the iterator to access
 	// RAR part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, rh.maxWorkers, rh.maxCacheSizeMB, progressTracker)
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, rh.maxWorkers, rh.maxCacheSizeMB, progressTracker, rh.readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(normalizedFiles))
@@ -401,11 +405,21 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 		// Extract AES credentials from this file's first part (if encrypted)
 		// Each file can have its own encryption credentials
 		var aesKey, aesIV []byte
+		var nzbdavID string
 		if len(af.Parts) > 0 {
 			firstPart := af.Parts[0]
 			if firstPart.AesKey != nil {
 				aesKey = firstPart.AesKey
 				aesIV = firstPart.AesIV
+			}
+
+			// Also extract ID from the first part
+			pf := fileIndex[firstPart.Path]
+			if pf == nil {
+				pf = fileIndex[filepath.Base(firstPart.Path)]
+			}
+			if pf != nil {
+				nzbdavID = pf.NzbdavID
 			}
 		}
 
@@ -415,6 +429,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 			Size:         af.TotalUnpackedSize,
 			AesKey:       aesKey,
 			AesIV:        aesIV,
+			NzbdavID:     nzbdavID,
 		}
 
 		var fileSegments []*metapb.SegmentData

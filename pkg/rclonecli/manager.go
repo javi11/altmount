@@ -312,7 +312,7 @@ func (m *Manager) cleanupMountDirectories(_ string) {
 func (m *Manager) waitForServer() {
 	maxAttempts := 30
 	for range maxAttempts {
-		if m.ctx.Err() != nil {
+		if err := m.ctx.Err(); err != nil {
 			return
 		}
 

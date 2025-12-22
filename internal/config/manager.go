@@ -30,6 +30,7 @@ type Config struct {
 	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
 	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
 	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
 	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
@@ -40,6 +41,19 @@ type WebDAVConfig struct {
 	Port     int    `yaml:"port" mapstructure:"port" json:"port"`
 	User     string `yaml:"user" mapstructure:"user" json:"user"`
 	Password string `yaml:"password" mapstructure:"password" json:"password"`
+}
+
+// FuseConfig represents FUSE mount configuration
+type FuseConfig struct {
+	MountPath           string `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	AllowOther          bool   `yaml:"allow_other" mapstructure:"allow_other" json:"allow_other"`
+	Debug               bool   `yaml:"debug" mapstructure:"debug" json:"debug"`
+	AttrTimeoutSeconds  int    `yaml:"attr_timeout_seconds" mapstructure:"attr_timeout_seconds" json:"attr_timeout_seconds"`
+	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
+	MaxDownloadWorkers  int    `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
+	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
+	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
 }
 
 // APIConfig represents REST API configuration
@@ -87,6 +101,7 @@ type RCloneConfig struct {
 
 	// Mount Configuration
 	MountEnabled *bool             `yaml:"mount_enabled" mapstructure:"mount_enabled" json:"mount_enabled"`
+	VFSName      string            `yaml:"vfs_name" mapstructure:"vfs_name" json:"vfs_name"`
 	MountOptions map[string]string `yaml:"mount_options" mapstructure:"mount_options" json:"mount_options"`
 	LogLevel     string            `yaml:"log_level" mapstructure:"log_level" json:"log_level"`
 	UID          int               `yaml:"uid" mapstructure:"uid" json:"uid"`
@@ -143,6 +158,7 @@ type ImportConfig struct {
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
 }
@@ -284,10 +300,12 @@ type SABnzbdCategory struct {
 
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
-	Enabled         *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MaxWorkers      int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	RadarrInstances []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
-	SonarrInstances []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
+	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
+	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -354,6 +372,12 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Import.ImportDir = &v
 	} else {
 		copyCfg.Import.ImportDir = nil
+	}
+
+	// Deep copy Import slices
+	if c.Import.AllowedFileExtensions != nil {
+		copyCfg.Import.AllowedFileExtensions = make([]string, len(c.Import.AllowedFileExtensions))
+		copy(copyCfg.Import.AllowedFileExtensions, c.Import.AllowedFileExtensions)
 	}
 
 	// Deep copy RClone.RCEnabled pointer
@@ -437,6 +461,22 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Arrs.Enabled = &v
 	} else {
 		copyCfg.Arrs.Enabled = nil
+	}
+
+	// Deep copy Arrs.QueueCleanupEnabled pointer
+	if c.Arrs.QueueCleanupEnabled != nil {
+		v := *c.Arrs.QueueCleanupEnabled
+		copyCfg.Arrs.QueueCleanupEnabled = &v
+	} else {
+		copyCfg.Arrs.QueueCleanupEnabled = nil
+	}
+
+	// DeepCopy Fuse.Enabled pointer
+	if c.Fuse.Enabled != nil {
+		v := *c.Fuse.Enabled
+		copyCfg.Fuse.Enabled = &v
+	} else {
+		copyCfg.Fuse.Enabled = nil
 	}
 
 	// Deep copy Scraper Radarr instances
@@ -526,6 +566,10 @@ func (c *Config) Validate() error {
 
 	if c.Import.SegmentSamplePercentage < 1 || c.Import.SegmentSamplePercentage > 100 {
 		return fmt.Errorf("import segment_sample_percentage must be between 1 and 100")
+	}
+
+	if c.Import.ReadTimeoutSeconds <= 0 {
+		c.Import.ReadTimeoutSeconds = 300
 	}
 
 	// Validate import strategy
@@ -714,6 +758,17 @@ func (c *Config) Validate() error {
 		if provider.MaxConnections <= 0 {
 			return fmt.Errorf("provider %d: max_connections must be greater than 0", i)
 		}
+	}
+
+	// Validate Fuse configuration
+	if c.Fuse.MaxDownloadWorkers <= 0 {
+		c.Fuse.MaxDownloadWorkers = 15 // Default
+	}
+	if c.Fuse.MaxCacheSizeMB <= 0 {
+		c.Fuse.MaxCacheSizeMB = 32 // Default
+	}
+	if c.Fuse.MaxReadAheadMB <= 0 {
+		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
 	}
 
 	return nil
@@ -1022,6 +1077,7 @@ func DefaultConfig(configDir ...string) *Config {
 	mountEnabled := false   // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
+	fuseEnabled := false
 	loginRequired := true // Require login by default
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
@@ -1080,6 +1136,7 @@ func DefaultConfig(configDir ...string) *Config {
 			RCUser:       "admin",
 			RCPass:       "admin",
 			RCPort:       5573, // Changed from 5572 to match your command
+			VFSName:      MountProvider,
 			MountEnabled: &mountEnabled,
 			MountOptions: map[string]string{},
 
@@ -1117,15 +1174,14 @@ func DefaultConfig(configDir ...string) *Config {
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
 			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
-			AllowedFileExtensions: []string{ // Default: common video file extensions
-				".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
-				".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264",
-				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
+			AllowedFileExtensions: []string{ // Default: common video extensions
+				".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
 			ImportCacheSizeMB:       64,                 // Default: 64MB cache for archive analysis
 			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
+			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
 		},
@@ -1159,6 +1215,17 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxWorkers:      5,                // Default to 5 concurrent workers
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+		},
+		Fuse: FuseConfig{
+			Enabled:             &fuseEnabled,
+			MountPath:           "",
+			AllowOther:          true,
+			Debug:               false,
+			AttrTimeoutSeconds:  1,
+			EntryTimeoutSeconds: 1,
+			MaxDownloadWorkers:  15,
+			MaxCacheSizeMB:      128,
+			MaxReadAheadMB:      128,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}

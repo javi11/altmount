@@ -86,6 +86,98 @@ func ValidateSegmentAvailability(
 	return nil
 }
 
+// ValidationResult holds detailed validation results
+type ValidationResult struct {
+	TotalChecked int
+	MissingCount int
+	MissingIDs   []string
+}
+
+// ValidateSegmentAvailabilityDetailed validates segments and returns detailed results
+// instead of failing fast on the first error.
+func ValidateSegmentAvailabilityDetailed(
+	ctx context.Context,
+	segments []*metapb.SegmentData,
+	poolManager pool.Manager,
+	maxConnections int,
+	samplePercentage int,
+	progressTracker progress.ProgressTracker,
+) (ValidationResult, error) {
+	result := ValidationResult{
+		MissingIDs: []string{},
+	}
+
+	if len(segments) == 0 {
+		return result, nil
+	}
+
+	// Verify that the connection pool is available
+	usenetPool, err := poolManager.GetPool()
+	if err != nil {
+		return result, fmt.Errorf("cannot validate segments: usenet connection pool unavailable: %w", err)
+	}
+
+	if usenetPool == nil {
+		return result, fmt.Errorf("cannot validate segments: usenet connection pool is nil")
+	}
+
+	// Select which segments to validate
+	segmentsToValidate := selectSegmentsForValidation(segments, samplePercentage)
+	result.TotalChecked = len(segmentsToValidate)
+
+	// Atomic counter for progress tracking (thread-safe for concurrent validation)
+	var validatedCount int32
+	var missingCount int32
+
+	// Mutex for missing IDs collection
+	// We use a channel to collect missing IDs to avoid locking
+	missingChan := make(chan string, len(segmentsToValidate))
+
+	// Validate segments concurrently with connection limit
+	// We don't use WithFirstError because we want to check all selected segments
+	pl := concpool.New().WithErrors().WithMaxGoroutines(maxConnections)
+	for _, segment := range segmentsToValidate {
+		seg := segment // Capture loop variable
+		pl.Go(func() error {
+			checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			if err != nil {
+				atomic.AddInt32(&missingCount, 1)
+				missingChan <- seg.Id
+				// We return nil here because we are collecting errors manually
+				// and we want other goroutines to continue
+				return nil
+			}
+
+			// Update progress after successful validation
+			if progressTracker != nil {
+				count := atomic.AddInt32(&validatedCount, 1)
+				progressTracker.Update(int(count), result.TotalChecked)
+			}
+
+			return nil
+		})
+	}
+
+	// Wait for all checks to complete
+	// We ignore the error return because we handled errors inside the goroutine
+	_ = pl.Wait()
+	close(missingChan)
+
+	// Collect results
+	result.MissingCount = int(missingCount)
+	for id := range missingChan {
+		// Limit the number of IDs we store to avoid huge metadata blobs
+		if len(result.MissingIDs) < 50 {
+			result.MissingIDs = append(result.MissingIDs, id)
+		}
+	}
+
+	return result, nil
+}
+
 // selectSegmentsForValidation determines which segments to validate based on validation mode and sample percentage.
 // For full validation, returns all segments. For sampling, uses a strategic approach that:
 // - Validates first 3 segments (DMCA/takedown detection)
@@ -105,6 +197,13 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 	// Enforce minimum of 5 segments for statistical validity
 	if targetSamples < 5 {
 		targetSamples = 5
+	}
+
+	// Optimization: Cap the number of samples for very large files to prevent 
+	// excessive network I/O. 50 random samples + 5 fixed samples is plenty 
+	// for a reliable health check even on 100GB+ files.
+	if targetSamples > 55 {
+		targetSamples = 55
 	}
 
 	// If target samples equals or exceeds total segments, validate all

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,7 @@ type MetadataRemoteFile struct {
 	configGetter     config.ConfigGetter // Dynamic config access
 	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
 	aesCipher        *aes.AesCipher      // For AES encryption/decryption
+	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -44,6 +46,7 @@ func NewMetadataRemoteFile(
 	healthRepository *database.HealthRepository,
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
+	streamTracker StreamTracker,
 ) *MetadataRemoteFile {
 	// Initialize rclone cipher with global credentials for encrypted files
 	cfg := configGetter()
@@ -64,6 +67,7 @@ func NewMetadataRemoteFile(
 		configGetter:     configGetter,
 		rcloneCipher:     rcloneCipher,
 		aesCipher:        aesCipher,
+		streamTracker:    streamTracker,
 	}
 }
 
@@ -115,19 +119,32 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
-		// Check if this could be a valid empty directory
-		if mrf.isValidEmptyDirectory(normalizedName) {
-			// Create a directory handle for empty directory
-			virtualDir := &MetadataVirtualDirectory{
-				name:            name,
-				normalizedPath:  normalizedName,
-				metadataService: mrf.metadataService,
-				showCorrupted:   showCorrupted,
+		// Check if it's a sharded ID path (.ids/...)
+		if strings.HasPrefix(normalizedName, ".ids/") {
+			// Resolve the ID path to the actual virtual path
+			resolvedPath, err := mrf.resolveIDPath(normalizedName)
+			if err == nil && resolvedPath != "" {
+				// Continue with the resolved path
+				normalizedName = resolvedPath
+				exists = true
 			}
-			return true, virtualDir, nil
 		}
-		// Neither file nor directory found
-		return false, nil, nil
+
+		if !exists {
+			// Check if this could be a valid empty directory
+			if mrf.isValidEmptyDirectory(normalizedName) {
+				// Create a directory handle for empty directory
+				virtualDir := &MetadataVirtualDirectory{
+					name:            name,
+					normalizedPath:  normalizedName,
+					metadataService: mrf.metadataService,
+					showCorrupted:   showCorrupted,
+				}
+				return true, virtualDir, nil
+			}
+			// Neither file nor directory found
+			return false, nil, nil
+		}
 	}
 
 	// Get file metadata using simplified schema
@@ -147,6 +164,49 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
+	// Extract workers and cache size from context if available (overrides global config)
+	maxWorkers := mrf.getMaxDownloadWorkers()
+	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
+
+	if size, ok := ctx.Value(utils.MaxCacheSizeKey).(int); ok && size > 0 {
+		maxCacheSizeMB = size
+	}
+
+	// Start tracking stream if tracker available
+	streamID := ""
+	if mrf.streamTracker != nil {
+		// Check if we already have a stream ID in context
+		if id, ok := ctx.Value(utils.StreamIDKey).(string); ok && id != "" {
+			streamID = id
+		} else if stream, ok := ctx.Value(utils.ActiveStreamKey).(*ActiveStream); ok {
+			streamID = stream.ID
+		} else {
+			// Check for source and username in context
+			source := "FUSE"
+			if s, ok := ctx.Value(utils.StreamSourceKey).(string); ok && s != "" {
+				source = s
+			}
+			
+			userName := "FUSE"
+			if u, ok := ctx.Value(utils.StreamUserNameKey).(string); ok && u != "" {
+				userName = u
+			}
+
+			clientIP := ""
+			if ip, ok := ctx.Value(utils.ClientIPKey).(string); ok {
+				clientIP = ip
+			}
+
+			userAgent := ""
+			if ua, ok := ctx.Value(utils.UserAgentKey).(string); ok {
+				userAgent = ua
+			}
+
+			// Fallback to FUSE if no tracking info in context
+			streamID = mrf.streamTracker.Add(normalizedName, source, userName, clientIP, userAgent, fileMeta.FileSize)
+		}
+	}
+
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -155,12 +215,14 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		healthRepository: mrf.healthRepository,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
-		maxWorkers:       mrf.getMaxDownloadWorkers(),
-		maxCacheSizeMB:   mrf.getMaxCacheSizeMB(),
+		maxWorkers:       maxWorkers,
+		maxCacheSizeMB:   maxCacheSizeMB,
 		rcloneCipher:     mrf.rcloneCipher,
 		aesCipher:        mrf.aesCipher,
 		globalPassword:   mrf.getGlobalPassword(),
 		globalSalt:       mrf.getGlobalSalt(),
+		streamTracker:    mrf.streamTracker,
+		streamID:         streamID,
 	}
 
 	return true, virtualFile, nil
@@ -174,6 +236,14 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 	// Prevent removal of root directory
 	if normalizedName == RootPath {
 		return false, ErrCannotRemoveRoot
+	}
+
+	// Prevent removal of category folders
+	if mrf.isCategoryFolder(normalizedName) {
+		slog.DebugContext(ctx, "Silently ignored removal request for category folder", "path", normalizedName)
+		// Return true (success) but do nothing. This prevents Sonarr/Radarr/rclone
+		// from logging "directory not empty" or "permission denied" errors.
+		return true, nil
 	}
 
 	// Check if this is a directory
@@ -203,11 +273,21 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	normalizedOld := normalizePath(oldName)
 	normalizedNew := normalizePath(newName)
 
+	slog.InfoContext(ctx, "MOVE operation requested", "source", normalizedOld, "destination", normalizedNew)
+
+	// Prevent renaming of category folders
+	if mrf.isCategoryFolder(normalizedOld) {
+		slog.WarnContext(ctx, "Prevented renaming of category folder", "path", normalizedOld)
+		return false, os.ErrPermission
+	}
+
 	// Check if old path is a directory
 	if mrf.metadataService.DirectoryExists(normalizedOld) {
 		// Get the filesystem paths for the directories
 		oldDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedOld)
 		newDirPath := mrf.metadataService.GetMetadataDirectoryPath(normalizedNew)
+
+		slog.InfoContext(ctx, "Moving metadata directory", "from", oldDirPath, "to", newDirPath)
 
 		// Rename the entire directory
 		if err := os.Rename(oldDirPath, newDirPath); err != nil {
@@ -219,7 +299,7 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	// Check if old path exists as a file
 	exists := mrf.metadataService.FileExists(normalizedOld)
 	if !exists {
-		// Neither file nor directory found
+		slog.WarnContext(ctx, "MOVE source not found", "path", normalizedOld)
 		return false, nil
 	}
 
@@ -239,7 +319,54 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		return false, fmt.Errorf("failed to delete old metadata: %w", err)
 	}
 
+	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
+
 	return true, nil
+}
+
+// isCategoryFolder checks if a path corresponds to a configured category folder
+func (mrf *MetadataRemoteFile) isCategoryFolder(path string) bool {
+	cfg := mrf.configGetter()
+	normalizedPath := strings.Trim(normalizePath(path), "/")
+	completeDir := strings.Trim(normalizePath(cfg.SABnzbd.CompleteDir), "/")
+
+	// Helper to check if a name matches a category
+	matchesCategory := func(name string) bool {
+		name = strings.Trim(normalizePath(name), "/")
+		if name == "" {
+			return false
+		}
+
+		// Check exact match
+		if normalizedPath == name {
+			return true
+		}
+
+		// Check match with complete_dir prefix (e.g. complete/tv)
+		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
+			return true
+		}
+
+		return false
+	}
+
+	// Check complete_dir itself
+	if normalizedPath == completeDir {
+		return true
+	}
+
+	// Check configured categories
+	for _, cat := range cfg.SABnzbd.Categories {
+		// Check both the category name and its specific directory if set
+		if matchesCategory(cat.Name) {
+			return true
+		}
+		if cat.Dir != "" && matchesCategory(cat.Dir) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Stat returns file information for a path using metadata
@@ -262,7 +389,20 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 	// Check if this path exists as a file in our metadata
 	exists := mrf.metadataService.FileExists(normalizedName)
 	if !exists {
-		return false, nil, fs.ErrNotExist
+		// Check if it's a sharded ID path (.ids/...)
+		if strings.HasPrefix(normalizedName, ".ids/") {
+			// Resolve the ID path to the actual virtual path
+			resolvedPath, err := mrf.resolveIDPath(normalizedName)
+			if err == nil && resolvedPath != "" {
+				// Continue with the resolved path
+				normalizedName = resolvedPath
+				exists = true
+			}
+		}
+
+		if !exists {
+			return false, nil, fs.ErrNotExist
+		}
 	}
 
 	// Get file metadata using simplified schema
@@ -487,6 +627,8 @@ type MetadataVirtualFile struct {
 	aesCipher        *aes.AesCipher
 	globalPassword   string
 	globalSalt       string
+	streamTracker    StreamTracker
+	streamID         string
 
 	// Reader state and position tracking
 	reader            io.ReadCloser
@@ -499,6 +641,37 @@ type MetadataVirtualFile struct {
 	mu sync.Mutex
 }
 
+// GetStreamID returns the active stream ID associated with this file handle
+func (mvf *MetadataVirtualFile) GetStreamID() string {
+	return mvf.streamID
+}
+
+// WarmUp triggers a background pre-fetch of the file start
+func (mvf *MetadataVirtualFile) WarmUp() {
+	go func() {
+		mvf.mu.Lock()
+		defer mvf.mu.Unlock()
+
+		// Skip if already initialized
+		if mvf.readerInitialized {
+			return
+		}
+
+		// Initialize reader for the beginning of the file
+		if err := mvf.ensureReader(); err != nil {
+			// Just log/ignore, the actual Read will handle it later
+			return
+		}
+
+		// If the reader supports manual starting (UsenetReader), trigger it
+		// This starts the background workers to fetch data into the cache
+		// without consuming any bytes from the stream.
+		if ur, ok := mvf.reader.(interface{ Start() }); ok {
+			ur.Start()
+		}
+	}()
+}
+
 // Read implements afero.File.Read
 func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
@@ -508,58 +681,46 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 
-	if err := mvf.ensureReader(); err != nil {
-		return 0, err
-	}
-
-	totalRead, err := mvf.reader.Read(p)
-	if err != nil {
-		// Check if this is EOF and we have more data to read
-		if errors.Is(err, io.EOF) && mvf.hasMoreDataToRead() {
-			// Close current reader and create a new one for the next range
-			mvf.closeCurrentReader()
-
-			// Try to create a new reader for the remaining data
-			if newReaderErr := mvf.ensureReader(); newReaderErr != nil {
-				// If we can't create a new reader, return what we have
-				mvf.position += int64(totalRead)
-				return totalRead, err
-			}
-
-			// Try to read more data with the new reader
-			if totalRead < len(p) {
-				additionalRead, newErr := mvf.reader.Read(p[totalRead:])
-				totalRead += additionalRead
-				if newErr != nil && !errors.Is(newErr, io.EOF) {
-					err = newErr
-				} else if newErr == nil {
-					err = nil // Clear EOF if we successfully read more
-				}
-			} else if totalRead == len(p) {
-				err = nil
-			}
+	for n < len(p) {
+		if err := mvf.ensureReader(); err != nil {
+			return n, err
 		}
 
-		var dataCorruptionErr *usenet.DataCorruptionError
-		// Handle UsenetReader errors the same way as VirtualFile
-		if errors.As(err, &dataCorruptionErr) {
-			// Update file health status and database tracking
-			mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
-			// No content read - return corrupted file error
-			return totalRead, &CorruptedFileError{
-				TotalExpected: mvf.fileMeta.FileSize,
-				UnderlyingErr: dataCorruptionErr,
-			}
-		}
-
-		// Update position even on error if we read some data
+		totalRead, readErr := mvf.reader.Read(p[n:])
+		n += totalRead
 		mvf.position += int64(totalRead)
-		return totalRead, err
+
+		if totalRead > 0 && mvf.streamTracker != nil && mvf.streamID != "" {
+			mvf.streamTracker.UpdateProgress(mvf.streamID, int64(totalRead))
+
+			// Update buffered offset if available
+			if ur, ok := mvf.reader.(interface{ GetBufferedOffset() int64 }); ok {
+				mvf.streamTracker.UpdateBufferedOffset(mvf.streamID, ur.GetBufferedOffset())
+			}
+		}
+
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) && mvf.hasMoreDataToRead() {
+				// Close current reader and try to get a new one for the next range in next iteration
+				mvf.closeCurrentReader()
+				continue
+			}
+
+			// For data corruption errors, report and mark as corrupted
+			var dataCorruptionErr *usenet.DataCorruptionError
+			if errors.As(readErr, &dataCorruptionErr) {
+				mvf.updateFileHealthOnError(dataCorruptionErr, dataCorruptionErr.NoRetry)
+				return n, &CorruptedFileError{
+					TotalExpected: mvf.fileMeta.FileSize,
+					UnderlyingErr: dataCorruptionErr,
+				}
+			}
+
+			return n, readErr
+		}
 	}
 
-	// Update the current position after reading
-	mvf.position += int64(totalRead)
-	return totalRead, nil
+	return n, nil
 }
 
 // ReadAt implements afero.File.ReadAt
@@ -606,6 +767,12 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 
 // Close implements afero.File.Close
 func (mvf *MetadataVirtualFile) Close() error {
+	// Remove from stream tracker if applicable
+	if mvf.streamTracker != nil && mvf.streamID != "" {
+		mvf.streamTracker.Remove(mvf.streamID)
+		mvf.streamID = ""
+	}
+
 	mvf.mu.Lock()
 	defer mvf.mu.Unlock()
 	if mvf.reader != nil {
@@ -761,7 +928,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 
 		// No range header, set unbounded
 		mvf.originalRangeEnd = -1
-		return 0, -1
+		return mvf.position, -1
 	}
 
 	// For subsequent reads, use current position and respect original range
@@ -774,7 +941,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 		targetEnd = mvf.originalRangeEnd
 	}
 
-	return 0, targetEnd
+	return mvf.position, targetEnd
 }
 
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
@@ -943,4 +1110,39 @@ func (mrf *MetadataRemoteFile) Mkdir(ctx context.Context, name string, perm os.F
 
 func (mrf *MetadataRemoteFile) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
 	return mrf.metadataService.CreateDirectory(name)
+}
+
+// resolveIDPath resolves a sharded ID path (.ids/...) to the actual virtual path
+func (mrf *MetadataRemoteFile) resolveIDPath(idPath string) (string, error) {
+	cfg := mrf.configGetter()
+	metadataRoot := cfg.Metadata.RootPath
+
+	// The idPath is like .ids/4/0/e/9/a/40e9a6c9-e922-4217-ab6c-9d2207528a78
+	// The metadata file is at metadataRoot/.ids/4/0/e/9/a/40e9a6c9-e922-4217-ab6c-9d2207528a78.meta
+	
+	// Ensure it has .meta extension for the check
+	fullIdPath := filepath.Join(metadataRoot, idPath+".meta")
+
+	// Read the symlink
+	target, err := os.Readlink(fullIdPath)
+	if err != nil {
+		return "", err
+	}
+
+	// The target is relative to the directory of the symlink
+	// e.g. ../../../../../movies/Spider-Man.../Spider-Man....meta
+	
+	// Calculate the absolute path of the target metadata file
+	absTarget := filepath.Join(filepath.Dir(fullIdPath), target)
+	
+	// Calculate the relative path from metadataRoot to get the virtual path
+	relPath, err := filepath.Rel(metadataRoot, absTarget)
+	if err != nil {
+		return "", err
+	}
+
+	// Remove .meta extension to get the virtual filename
+	virtualPath := strings.TrimSuffix(relPath, ".meta")
+
+	return virtualPath, nil
 }

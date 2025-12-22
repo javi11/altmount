@@ -11,6 +11,7 @@ export interface FileBrowserModalProps {
 	title?: string;
 	initialPath?: string;
 	filterExtension?: string; // e.g., ".sqlite", ".db", ".sqlite3"
+	allowDirectorySelection?: boolean;
 }
 
 export function FileBrowserModal({
@@ -20,6 +21,7 @@ export function FileBrowserModal({
 	title = "Browse Server Files",
 	initialPath = "/",
 	filterExtension,
+	allowDirectorySelection = false,
 }: FileBrowserModalProps) {
 	const modalRef = useRef<HTMLDialogElement>(null);
 	const [currentPath, setCurrentPath] = useState(initialPath);
@@ -69,18 +71,24 @@ export function FileBrowserModal({
 		refetch();
 	};
 
+	const handleSelectCurrentDir = () => {
+		onSelect(currentPath);
+		onClose();
+	};
+
 	// Filter files based on extension if provided
 	const filteredFiles = data?.files.filter((entry) => {
 		if (entry.is_dir) return true; // Always show directories
+		if (allowDirectorySelection) return false; // If selecting directories, hide files? No, maybe show them for context
 		if (!filterExtension) return true; // No filter, show all files
 		return entry.name.endsWith(filterExtension);
 	});
 
 	return (
 		<dialog ref={modalRef} className="modal" onClose={onClose}>
-			<div className="modal-box w-11/12 max-w-5xl">
+			<div className="modal-box flex max-h-[90vh] w-11/12 max-w-5xl flex-col">
 				{/* Header */}
-				<div className="mb-4 flex items-center justify-between">
+				<div className="mb-4 flex shrink-0 items-center justify-between">
 					<h3 className="font-bold text-lg">{title}</h3>
 					<button
 						type="button"
@@ -93,7 +101,7 @@ export function FileBrowserModal({
 				</div>
 
 				{/* Current Path & Navigation */}
-				<div className="mb-4 flex items-center gap-2">
+				<div className="mb-4 flex shrink-0 items-center gap-2">
 					<button
 						type="button"
 						className="btn btn-ghost btn-sm"
@@ -102,14 +110,16 @@ export function FileBrowserModal({
 					>
 						<Upload className="h-4 w-4 rotate-90" />
 					</button>
-					<span className="flex-1 font-mono text-sm">{currentPath}</span>
+					<span className="flex-1 truncate font-mono text-sm" title={currentPath}>
+						{currentPath}
+					</span>
 					<button type="button" className="btn btn-ghost btn-sm" onClick={handleRefresh}>
 						<RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
 					</button>
 				</div>
 
 				{/* File List */}
-				<div className="overflow-x-auto">
+				<div className="flex-1 overflow-x-auto overflow-y-auto">
 					{isLoading ? (
 						<div className="flex justify-center p-4">
 							<span className="loading loading-spinner" />
@@ -121,7 +131,7 @@ export function FileBrowserModal({
 						</div>
 					) : (
 						<table className="table-zebra table-sm table">
-							<thead>
+							<thead className="sticky top-0 z-10 bg-base-100">
 								<tr>
 									<th /> {/* Icon */}
 									<th>Name</th>
@@ -157,6 +167,17 @@ export function FileBrowserModal({
 						</table>
 					)}
 				</div>
+
+				{allowDirectorySelection && (
+					<div className="modal-action mt-4 shrink-0">
+						<button className="btn" onClick={onClose}>
+							Cancel
+						</button>
+						<button className="btn btn-primary" onClick={handleSelectCurrentDir}>
+							Select This Directory
+						</button>
+					</div>
+				)}
 			</div>
 
 			{/* Backdrop */}
