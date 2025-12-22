@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbdav"
@@ -717,6 +718,12 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 			return nil
 		}
 
+		// Check if already processed (metadata exists)
+		if s.isFileAlreadyProcessed(path, scanPath) {
+			s.log.DebugContext(ctx, "Skipping file - already processed", "file", path)
+			return nil
+		}
+
 		// Add to queue
 		if _, err := s.AddToQueue(path, &scanPath, nil, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
@@ -751,6 +758,47 @@ func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 		return false // Assume not in queue on error
 	}
 	return inQueue
+}
+
+// isFileAlreadyProcessed checks if a file has already been processed by checking metadata
+func (s *Service) isFileAlreadyProcessed(filePath string, scanRoot string) bool {
+	// Calculate virtual path
+	// Assuming scanRoot maps to root of virtual FS for simplicity in manual scan
+	// or use CalculateVirtualDirectory logic if needed
+	virtualPath := filesystem.CalculateVirtualDirectory(filePath, scanRoot)
+	
+	// Check if we have metadata for this path
+	// For single files: virtualPath/filename (minus .nzb)
+	// For multi files: virtualPath/filename (minus .nzb) as directory
+	
+	// Normalize filename (remove .nzb extension)
+	fileName := filepath.Base(filePath)
+	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	
+	// Construct potential virtual paths
+	// 1. As a file (single file import flattened or nested)
+	// We need to check if a file exists with the release name
+	// But we don't know the final extension... 
+	// However, metadata service stores files with their final names.
+	
+	// Better approach: Check if a directory exists with the release name
+	// Most imports create a folder with the release name
+	releaseDir := filepath.Join(virtualPath, baseName)
+	if s.metadataService.DirectoryExists(releaseDir) {
+		return true
+	}
+	
+	// Also check if any file exists that starts with the release name in that directory
+	// This covers flattened single files
+	if files, err := s.metadataService.ListDirectory(virtualPath); err == nil {
+		for _, f := range files {
+			if strings.HasPrefix(f, baseName) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
