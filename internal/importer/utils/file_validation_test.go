@@ -193,7 +193,6 @@ func TestHasAllowedFilesInRegular_EmptyExtensions(t *testing.T) {
 		})
 	}
 }
-
 func TestHasAllowedFilesInRegular_WithExtensions(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -325,7 +324,8 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			blockedPatterns := []string{"(?i)\b(sample|proof)\b"}
+			// Regex matching start/separator + word + separator/end
+			blockedPatterns := []string{"(?i)(^|[._\s-])(sample|proof)([._\s-]|$)"}
 			result := IsAllowedFile(tt.filename, 0, []string{}, blockedPatterns, []string{})
 			assert.Equal(t, tt.expected, result)
 		})

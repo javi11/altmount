@@ -8,6 +8,10 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 )
 
+// sampleProofPattern matches filenames that are likely just sample or proof files
+// It matches "sample" or "proof" as a standalone word.
+var sampleProofPattern = regexp.MustCompile(`(?i)\b(sample|proof)\b`)
+
 // isSampleOrProof checks if a filename looks like a sample or proof file
 func isSampleOrProof(filename string, size int64) bool {
 	// If file is larger than 200MB, it's likely not a sample/proof file
@@ -102,6 +106,16 @@ func createExtensionMap(extensions []string) map[string]bool {
 	return extMap
 }
 
+// whitelistedExtensions are extensions that should bypass sample/proof checks
+// These are typically small files where "sample" or "proof" might appear in the name
+// but don't indicate the file itself is a media sample/proof to be rejected.
+var whitelistedExtensions = map[string]bool{
+	// Subtitles
+	".srt": true, ".sub": true, ".idx": true, ".vtt": true, ".ass": true, ".ssa": true,
+	// Images (covers, fanart, nfo)
+	".jpg": true, ".jpeg": true, ".png": true, ".nfo": true, ".tbn": true,
+}
+
 // IsAllowedFile checks if a filename has an allowed extension and is not blocked
 // If allowedExtensions is empty, all files are allowed
 // blockedPatterns is a list of regex patterns to block files
@@ -124,10 +138,7 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string, bloc
 	}
 
 	// Always allow subtitle files (unless explicitly blocked above)
-	// These are typically small files where "sample" or "proof" might appear in the name
-	// but don't indicate the file itself is a media sample/proof to be rejected.
-	if ext == ".srt" || ext == ".sub" || ext == ".idx" || ext == ".vtt" || ext == ".ass" || ext == ".ssa" ||
-		ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".nfo" || ext == ".tbn" {
+	if whitelistedExtensions[ext] {
 		// Still check if the extension is in the allowed list if it's provided
 		if len(allowedExtensions) > 0 {
 			normalizedExt := strings.TrimPrefix(ext, ".")
