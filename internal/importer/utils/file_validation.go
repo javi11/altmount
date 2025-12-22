@@ -73,6 +73,11 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool
 		return true
 	}
 
+	// Support for obfuscated files (no extension) that are large
+	if ext == "" && size > 100*1024*1024 {
+		return true
+	}
+
 	normalizedExt := strings.TrimPrefix(ext, ".")
 	extMap := createExtensionMap(allowedExtensions)
 	return extMap[normalizedExt]

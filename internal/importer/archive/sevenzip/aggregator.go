@@ -114,7 +114,19 @@ func ProcessArchive(
 
 	// Validate file extensions before processing
 	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions) {
-		slog.WarnContext(ctx, "7zip archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
+		// Log some of the files found to help diagnose why none were allowed
+		fileList := ""
+		for i, c := range sevenZipContents {
+			if i >= 10 {
+				fileList += "..."
+				break
+			}
+			fileList += fmt.Sprintf("%s (%d bytes), ", c.InternalPath, c.Size)
+		}
+		slog.WarnContext(ctx, "7zip archive contains no files with allowed extensions",
+			"allowed_extensions", allowedFileExtensions,
+			"files_found_count", len(sevenZipContents),
+			"sample_files", fileList)
 		return ErrNoAllowedFiles
 	}
 
