@@ -30,8 +30,13 @@ func TestIsAllowedFile_EmptyExtensions(t *testing.T) {
 		},
 		{
 			name:     "empty extensions rejects file with sample in middle",
-			filename: "sample.movie.mkv",
+			filename: "movie.sample.mkv",
 			expected: false,
+		},
+		{
+			name:     "empty extensions allows file with merged sample",
+			filename: "samplemovie.mkv",
+			expected: true,
 		},
 		{
 			name:     "empty extensions rejects file with SAMPLE uppercase",
@@ -228,13 +233,13 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "sample at word boundary",
-			filename: "movie-sample.mkv",
+			name:     "sample at dot boundary",
+			filename: "movie.sample.mkv",
 			expected: false,
 		},
 		{
-			name:     "proof at word boundary",
-			filename: "movie_proof.mkv",
+			name:     "proof at dash boundary",
+			filename: "movie-proof.mkv",
 			expected: false,
 		},
 		{
@@ -248,14 +253,39 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "sample at start of filename is rejected",
-			filename: "samplemovie.mkv",
+			name:     "sample at start of filename with dot is rejected",
+			filename: "sample.movie.mkv",
 			expected: false,
 		},
 		{
-			name:     "proof at start of filename is rejected",
-			filename: "prooftest.mkv",
+			name:     "proof at start of filename with underscore is rejected",
+			filename: "proof_test.mkv",
 			expected: false,
+		},
+		{
+			name:     "sample merged with word is allowed",
+			filename: "samplemovie.mkv",
+			expected: true,
+		},
+		{
+			name:     "proof merged with word is allowed",
+			filename: "prooftest.mkv",
+			expected: true,
+		},
+		{
+			name:     "title with Proof is allowed",
+			filename: "Bye.Bye.Earth.S01E04.Spell.of.Proof.Still.Distant.1080p.mkv",
+			expected: true,
+		},
+		{
+			name:     "title with of proof is allowed",
+			filename: "the.spell.of.proof.mkv",
+			expected: true,
+		},
+		{
+			name:     "title with Samples is allowed",
+			filename: "SpongeBob.SquarePants.S08E18.Free.Samples.mkv",
+			expected: true,
 		},
 		{
 			name:     "file without sample or proof passes",
