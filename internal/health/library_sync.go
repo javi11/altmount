@@ -1070,7 +1070,7 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMount
 // It checks both the full mount path and the relative path (for STRM files)
 func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[string]string) *string {
 	cfg := lsw.configGetter()
-	mountPath := filepath.Join(cfg.MountPath, metaPath)
+	mountPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(metaPath, "/"))
 
 	if libPath, ok := filesInUse[mountPath]; ok {
 		return &libPath

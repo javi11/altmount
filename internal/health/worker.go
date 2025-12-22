@@ -726,21 +726,12 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 		return fmt.Errorf("failed to get health record for library path lookup: %w", err)
 	}
 
-	pathForRescan := ""
-	if healthRecord.LibraryPath != nil && *healthRecord.LibraryPath != "" {
-		pathForRescan = *healthRecord.LibraryPath
-	} else if cfg := hw.configGetter(); cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = filepath.Join(*cfg.Import.ImportDir, filePath)
-		slog.InfoContext(ctx, "Using symlink import path for repair trigger",
-			"file_path", filePath,
-			"symlink_path", pathForRescan)
+		if item.LibraryPath != nil && *item.LibraryPath != "" {
+		pathForRescan = *item.LibraryPath
+	} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		pathForRescan = filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(filePath, "/"))
 	} else {
-		// Fallback to mount path if no library path found
-		// This is common for ImportStrategyNone or if metadata scan failed before determining library path
-		pathForRescan = filepath.Join(hw.configGetter().MountPath, filePath)
-		slog.InfoContext(ctx, "Using mount path fallback for repair trigger",
-			"file_path", filePath,
-			"mount_path", pathForRescan)
+		pathForRescan = filepath.Join(hw.configGetter().MountPath, strings.TrimPrefix(filePath, "/"))
 	}
 
 	// Step 4: Trigger rescan through the ARR service

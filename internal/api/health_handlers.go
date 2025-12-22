@@ -415,14 +415,14 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	// Determine final path for ARR rescan
 	pathForRescan := libraryPath
 	if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = filepath.Join(*cfg.Import.ImportDir, item.FilePath)
+		pathForRescan = filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(item.FilePath, "/"))
 		slog.InfoContext(ctx, "Using symlink import path for manual repair",
 			"file_path", item.FilePath,
 			"symlink_path", pathForRescan)
 	}
 	if pathForRescan == "" {
 		// Fallback to mount path if no library path found
-		pathForRescan = filepath.Join(cfg.MountPath, item.FilePath)
+		pathForRescan = filepath.Join(cfg.MountPath, strings.TrimPrefix(item.FilePath, "/"))
 		slog.InfoContext(ctx, "Using mount path fallback for manual repair",
 			"file_path", item.FilePath,
 			"mount_path", pathForRescan)
@@ -535,7 +535,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 
 		pathForRescan := libraryPath
 		if pathForRescan == "" {
-			pathForRescan = filepath.Join(cfg.MountPath, item.FilePath)
+			pathForRescan = filepath.Join(cfg.MountPath, strings.TrimPrefix(item.FilePath, "/"))
 		}
 
 		// Trigger rescan

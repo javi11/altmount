@@ -96,6 +96,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rcloneRCClient = mountService.GetManager()
 	}
 
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
+
 	// 5. Initialize importer and filesystem
 	repos := setupRepositories(ctx, db)
 
@@ -111,6 +113,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Wire ARRs service into importer for instant import triggers
+	importerService.SetArrsService(arrsService)
 	defer func() {
 		logger.Info("Closing importer service")
 		if err := importerService.Close(); err != nil {
@@ -123,10 +127,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
 	authService := setupAuthService(ctx, repos.UserRepo)
-
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
-	// Wire ARRs service into importer for instant import triggers
-	importerService.SetArrsService(arrsService)
 
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 

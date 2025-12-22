@@ -300,9 +300,9 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, file.Filename)
+		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), categoryPath, file.Filename)
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, file.Filename)
+		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), file.Filename)
 	}
 
 	// Save the uploaded file to temporary location
@@ -384,9 +384,9 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, completeDir, categoryPath, filename)
+		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), categoryPath, filename)
 	} else {
-		tempFile = filepath.Join(tempDir, completeDir, filename)
+		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), filename)
 	}
 
 	outFile, err := os.Create(tempFile)
@@ -565,6 +565,10 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
 		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
+		slog.DebugContext(c.Context(), "Reporting completed item to SABnzbd API",
+			"name", slot.Name,
+			"path", slot.Path,
+			"status", slot.Status)
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 		index++
@@ -885,13 +889,13 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	}
 
 	// Create in mount path
-	mountDir := filepath.Join(config.Metadata.RootPath, config.SABnzbd.CompleteDir, categoryPath)
+	mountDir := filepath.Join(config.Metadata.RootPath, strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
 		return fmt.Errorf("failed to create category mount directory: %w", err)
 	}
 
 	// Create in temp path
-	tempDir := filepath.Join(os.TempDir(), config.SABnzbd.CompleteDir, categoryPath)
+	tempDir := filepath.Join(os.TempDir(), strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}

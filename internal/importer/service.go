@@ -903,7 +903,7 @@ func (s *Service) refreshMountPathIfNeeded(ctx context.Context, resultingPath st
 		return
 	}
 
-	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
+	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(strings.TrimPrefix(resultingPath, "/")))
 	if _, err := os.Stat(mountPath); err != nil {
 		if os.IsNotExist(err) {
 			cfg := s.configGetter()
@@ -997,10 +997,11 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		// Try to trigger scan on the specific instance that manages this file
 		// resultingPath is the virtual path, e.g. "movies/MovieName/Movie.mkv"
 		// This uses the Root Folder check which is fast and accurate
-		if err := s.arrsService.TriggerScanForFile(ctx, resultingPath); err != nil {
+		fullMountPath := filepath.Join(s.configGetter().MountPath, strings.TrimPrefix(resultingPath, "/"))
+		if err := s.arrsService.TriggerScanForFile(ctx, fullMountPath); err != nil {
 			// Fallback: If we couldn't find a specific owner, broadcast to all instances of the type
 			s.log.DebugContext(ctx, "Could not find specific ARR instance for file, broadcasting scan",
-				"path", resultingPath, "error", err)
+				"path", fullMountPath, "error", err)
 
 			category := strings.ToLower(*item.Category)
 			if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
@@ -1407,11 +1408,11 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	}
 
 	// Get the actual metadata/mount path (where the content actually lives)
-	actualPath := filepath.Join(cfg.MountPath, resultingPath)
+	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
 
 	// Check the metadata directory to determine if this is a file or directory
 	// (Don't use os.Stat on mount path as it might not be immediately available)
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
@@ -1467,7 +1468,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 		relPath = strings.TrimSuffix(relPath, ".meta")
 
 		// Build the actual file path in the mount (mount root + virtual path)
-		actualFilePath := filepath.Join(cfg.MountPath, relPath)
+		actualFilePath := filepath.Join(cfg.MountPath, strings.TrimPrefix(relPath, "/"))
 
 		// The relPath already IS the full virtual path from root, so use it directly
 		fileResultingPath := relPath
@@ -1505,14 +1506,14 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
 	cfg := s.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(resultingPath))
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(resultingPath, "/")))
 
 	// Ensure category directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
 
-	symlinkPath := filepath.Join(*cfg.Import.ImportDir, resultingPath)
+	symlinkPath := filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(resultingPath, "/"))
 
 	// Check if symlink already exists
 	if _, err := os.Lstat(symlinkPath); err == nil {
@@ -1544,7 +1545,7 @@ func (s *Service) createStrmFiles(item *database.ImportQueueItem, resultingPath 
 	}
 
 	// Check the metadata directory to determine if this is a file or directory
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
@@ -1711,7 +1712,7 @@ func (s *Service) handleIdMetadataLinks(item *database.ImportQueueItem, resultin
 
 	// 2. Check individual files for IDs
 	cfg := s.configGetter()
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
 
 	_ = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".meta") {
