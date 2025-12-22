@@ -374,6 +374,20 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Import.ImportDir = nil
 	}
 
+	// Deep copy Import slices
+	if c.Import.AllowedFileExtensions != nil {
+		copyCfg.Import.AllowedFileExtensions = make([]string, len(c.Import.AllowedFileExtensions))
+		copy(copyCfg.Import.AllowedFileExtensions, c.Import.AllowedFileExtensions)
+	}
+	if c.Import.BlockedFileExtensions != nil {
+		copyCfg.Import.BlockedFileExtensions = make([]string, len(c.Import.BlockedFileExtensions))
+		copy(copyCfg.Import.BlockedFileExtensions, c.Import.BlockedFileExtensions)
+	}
+	if c.Import.BlockedFilePatterns != nil {
+		copyCfg.Import.BlockedFilePatterns = make([]string, len(c.Import.BlockedFilePatterns))
+		copy(copyCfg.Import.BlockedFilePatterns, c.Import.BlockedFilePatterns)
+	}
+
 	// Deep copy RClone.RCEnabled pointer
 	if c.RClone.RCEnabled != nil {
 		v := *c.RClone.RCEnabled
