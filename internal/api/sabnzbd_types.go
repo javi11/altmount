@@ -25,8 +25,14 @@ type SABnzbdResponse struct {
 
 // SABnzbdQueueObject represents the nested queue object in the response
 type SABnzbdQueueObject struct {
-	Paused bool               `json:"paused"`
-	Slots  []SABnzbdQueueSlot `json:"slots"`
+	Paused    bool               `json:"paused"`
+	Slots     []SABnzbdQueueSlot `json:"slots"`
+	Noofslots int                `json:"noofslots"`
+	Status    string             `json:"status"`
+	Mbleft    string             `json:"mbleft"`
+	Mb        string             `json:"mb"`
+	Kbpersec  string             `json:"kbpersec"`
+	Version   string             `json:"version"`
 }
 
 // SABnzbdQueueResponse represents the queue response structure
@@ -233,6 +239,20 @@ func formatSizeMB(bytes int64) string {
 	return fmt.Sprintf("%.2f", megabytes)
 }
 
+// formatHumanSize formats bytes as human-readable string (e.g., 1.2 GB)
+func formatHumanSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
 // ToSABnzbdQueueSlot converts an AltMount ImportQueueItem to SABnzbd format
 func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroadcaster *progress.ProgressBroadcaster) SABnzbdQueueSlot {
 	if item == nil {
@@ -428,12 +448,23 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		category = *item.Category
 	}
 
+	// Get file size if available
+	var sizeBytes int64
+	if item.FileSize != nil {
+		sizeBytes = *item.FileSize
+	}
+
+	downloaded := int64(0)
+	if item.Status == database.QueueStatusCompleted {
+		downloaded = sizeBytes
+	}
+
 	return SABnzbdHistorySlot{
 		Index:        index,
 		NzoID:        fmt.Sprintf("%d", item.ID),
 		Name:         jobName,
 		Category:     category,
-		PP:           "",
+		PP:           "3",
 		Script:       "",
 		Report:       "",
 		URL:          "",
@@ -443,7 +474,7 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		Storage:      finalPath,
 		Path:         finalPath,
 		Postproc:     "",
-		Downloaded:   0,
+		Downloaded:   downloaded,
 		Completetime: completetime,
 		NzbAvg:       "",
 		Script_log:   "",
@@ -451,13 +482,13 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		Script_line:  "",
 		Fail_message: failMessage,
 		Url_info:     "",
-		Bytes:        0,
+		Bytes:        sizeBytes,
 		Meta:         []string{},
 		Series:       "",
 		Md5sum:       "",
 		Password:     "",
 		ActionLine:   "",
-		Size:         "0 B",
+		Size:         formatHumanSize(sizeBytes),
 		Loaded:       true,
 		Retry:        item.RetryCount,
 		StateLog:     []string{},
