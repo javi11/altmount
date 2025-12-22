@@ -89,9 +89,7 @@ function UploadSection() {
 		if (!files || files.length === 0) return;
 
 		// Filter for NZB files
-		const nzbFiles = Array.from(files).filter((f) =>
-			f.name.toLowerCase().endsWith(".nzb"),
-		);
+		const nzbFiles = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".nzb"));
 
 		if (nzbFiles.length === 0) {
 			showToast({
@@ -173,7 +171,7 @@ function UploadSection() {
 						</label>
 						<input
 							type="file"
-							// @ts-ignore - webkitdirectory is non-standard but supported
+							// @ts-expect-error - webkitdirectory is non-standard but supported
 							webkitdirectory=""
 							directory=""
 							className="file-input file-input-bordered w-full"
@@ -199,8 +197,8 @@ function UploadSection() {
 							className="progress progress-primary w-full"
 							value={progress.current}
 							max={progress.total}
-						></progress>
-						<div className="text-xs text-base-content/70">
+						/>
+						<div className="text-base-content/70 text-xs">
 							Success: {progress.successes} | Failed: {progress.failures}
 						</div>
 					</div>
@@ -237,7 +235,7 @@ function NzbDavImportSection() {
 
 		const formData = new FormData();
 		formData.append("rootFolder", rootFolder);
-		
+
 		if (inputMethod === "server") {
 			formData.append("dbPath", selectedDbPath);
 		} else if (selectedFile) {
@@ -317,7 +315,7 @@ function NzbDavImportSection() {
 						Import your existing NZBDav database to populate the library.
 					</p>
 
-					{(isRunning || isCanceling) ? (
+					{isRunning || isCanceling ? (
 						<div className="space-y-4 rounded-lg bg-base-200 p-6">
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-3">
@@ -330,13 +328,13 @@ function NzbDavImportSection() {
 										<h3 className="font-bold">
 											{isCanceling ? "Canceling Import..." : "Importing Database..."}
 										</h3>
-										<p className="text-xs text-base-content/70">
+										<p className="text-base-content/70 text-xs">
 											This process runs in the background.
 										</p>
 									</div>
 								</div>
 								{!isCanceling && (
-									<button 
+									<button
 										className="btn btn-sm btn-warning"
 										onClick={handleCancel}
 										disabled={cancelImport.isPending}
@@ -353,11 +351,13 @@ function NzbDavImportSection() {
 								</div>
 								<div className="stat place-items-center">
 									<div className="stat-title">Added</div>
-									<div className="stat-value text-success text-base">{importStatus?.added || 0}</div>
+									<div className="stat-value text-base text-success">
+										{importStatus?.added || 0}
+									</div>
 								</div>
 								<div className="stat place-items-center">
 									<div className="stat-title">Failed</div>
-									<div className="stat-value text-error text-base">{importStatus?.failed || 0}</div>
+									<div className="stat-value text-base text-error">{importStatus?.failed || 0}</div>
 								</div>
 							</div>
 
@@ -388,7 +388,7 @@ function NzbDavImportSection() {
 								</p>
 							</fieldset>
 
-							<div className="flex gap-4 mb-2">
+							<div className="mb-2 flex gap-4">
 								<label className="label cursor-pointer gap-2">
 									<input
 										type="radio"
@@ -455,7 +455,11 @@ function NzbDavImportSection() {
 								<button
 									type="submit"
 									className="btn btn-primary"
-									disabled={isLoading || !rootFolder || (inputMethod === "server" ? !selectedDbPath : !selectedFile)}
+									disabled={
+										isLoading ||
+										!rootFolder ||
+										(inputMethod === "server" ? !selectedDbPath : !selectedFile)
+									}
 								>
 									{isLoading ? (
 										<span className="loading loading-spinner" />

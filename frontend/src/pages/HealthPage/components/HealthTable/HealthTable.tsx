@@ -1,6 +1,6 @@
 import { Shield } from "lucide-react";
 import { LoadingTable } from "../../../../components/ui/LoadingSpinner";
-import { HealthPriority, type FileHealth } from "../../../../types/api";
+import type { FileHealth, HealthPriority } from "../../../../types/api";
 import type { SortBy, SortOrder } from "../../types";
 import { HealthTableHeader } from "./HealthTableHeader";
 import { HealthTableRow } from "./HealthTableRow";

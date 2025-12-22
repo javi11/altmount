@@ -1,9 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import type {
-	HealthCleanupRequest,
-	HealthPriority,
-} from "../types/api";
+import type { HealthCleanupRequest, HealthPriority } from "../types/api";
 
 // Queue hooks
 export const useQueue = (params?: {

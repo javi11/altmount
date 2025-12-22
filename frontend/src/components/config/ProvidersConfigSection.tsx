@@ -1,3 +1,4 @@
+import { formatDistanceToNowStrict } from "date-fns";
 import {
 	Edit,
 	Gauge,
@@ -10,7 +11,6 @@ import {
 	WifiOff,
 } from "lucide-react";
 import { useState } from "react";
-import { formatDistanceToNowStrict } from "date-fns";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
@@ -318,9 +318,7 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													className="btn btn-sm btn-info join-item"
 													onClick={() => handleSpeedTest(provider)}
 													title="Speed Test"
-													disabled={
-														testingSpeedProviderId === provider.id || !provider.enabled
-													}
+													disabled={testingSpeedProviderId === provider.id || !provider.enabled}
 												>
 													{testingSpeedProviderId === provider.id ? (
 														<span className="loading loading-spinner loading-xs" />

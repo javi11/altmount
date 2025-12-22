@@ -50,6 +50,13 @@ type Service struct {
 	seriesCache  map[string][]*sonarr.Series // key: instance name
 	cacheExpiry  map[string]time.Time        // key: instance name
 	requestGroup singleflight.Group
+
+	// Queue cleanup worker state
+	workerCtx     context.Context
+	workerCancel  context.CancelFunc
+	workerWg      sync.WaitGroup
+	workerMu      sync.Mutex
+	workerRunning bool
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
@@ -1157,4 +1164,283 @@ func (s *Service) blocklistSonarrEpisodeFile(ctx context.Context, client *sonarr
 	slog.WarnContext(ctx, "No history record found for file, cannot blocklist", "series_id", seriesID, "file_id", fileID)
 	return nil
 }
+
+// StartWorker starts the queue cleanup worker
+func (s *Service) StartWorker(ctx context.Context) error {
+	s.workerMu.Lock()
+	defer s.workerMu.Unlock()
+
+	if s.workerRunning {
+		return nil
+	}
+
+	cfg := s.configGetter()
+
+	// ARRs must be enabled
+	if cfg.Arrs.Enabled == nil || !*cfg.Arrs.Enabled {
+		slog.InfoContext(ctx, "ARR queue cleanup disabled (ARRs disabled)")
+		return nil
+	}
+
+	// Queue cleanup is enabled by default (when nil or true)
+	if cfg.Arrs.QueueCleanupEnabled != nil && !*cfg.Arrs.QueueCleanupEnabled {
+		slog.InfoContext(ctx, "ARR queue cleanup disabled")
+		return nil
+	}
+
+	s.workerCtx, s.workerCancel = context.WithCancel(ctx)
+	s.workerRunning = true
+
+	interval := time.Duration(cfg.Arrs.QueueCleanupIntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+
+	s.workerWg.Add(1)
+	go s.runWorker(interval)
+
+	slog.InfoContext(ctx, "ARR queue cleanup worker started",
+		"interval_seconds", cfg.Arrs.QueueCleanupIntervalSeconds)
+	return nil
+}
+
+// StopWorker stops the queue cleanup worker
+func (s *Service) StopWorker(ctx context.Context) {
+	s.workerMu.Lock()
+	defer s.workerMu.Unlock()
+
+	if !s.workerRunning {
+		return
+	}
+
+	s.workerCancel()
+	s.workerWg.Wait()
+	s.workerRunning = false
+	slog.InfoContext(ctx, "ARR queue cleanup worker stopped")
+}
+
+func (s *Service) runWorker(interval time.Duration) {
+	defer s.workerWg.Done()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Initial delay before first run
+	select {
+	case <-time.After(30 * time.Second):
+	case <-s.workerCtx.Done():
+		return
+	}
+
+	// Run initial cleanup
+	s.safeCleanup()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.safeCleanup()
+		case <-s.workerCtx.Done():
+			return
+		}
+	}
+}
+
+func (s *Service) safeCleanup() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("Panic in queue cleanup", "panic", r)
+		}
+	}()
+	if err := s.CleanupQueue(s.workerCtx); err != nil {
+		slog.Error("Queue cleanup failed", "error", err)
+	}
+}
+
+// CleanupQueue checks all ARR instances for importPending items with empty folders
+// and removes them from the queue after deleting the empty folder
+func (s *Service) CleanupQueue(ctx context.Context) error {
+	cfg := s.configGetter()
+
+	slog.InfoContext(ctx, "Starting ARR queue cleanup")
+
+	// Process all Radarr instances
+	for _, instance := range cfg.Arrs.RadarrInstances {
+		if instance.Enabled == nil || !*instance.Enabled {
+			continue
+		}
+		if err := s.cleanupRadarrQueue(ctx, instance, cfg); err != nil {
+			slog.WarnContext(ctx, "Failed to cleanup Radarr queue",
+				"instance", instance.Name, "error", err)
+		}
+	}
+
+	// Process all Sonarr instances
+	for _, instance := range cfg.Arrs.SonarrInstances {
+		if instance.Enabled == nil || !*instance.Enabled {
+			continue
+		}
+		if err := s.cleanupSonarrQueue(ctx, instance, cfg); err != nil {
+			slog.WarnContext(ctx, "Failed to cleanup Sonarr queue",
+				"instance", instance.Name, "error", err)
+		}
+	}
+
+	slog.InfoContext(ctx, "ARR queue cleanup completed")
+	return nil
+}
+
+func (s *Service) cleanupRadarrQueue(ctx context.Context, instance config.ArrsInstanceConfig, cfg *config.Config) error {
+	client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+	if err != nil {
+		return fmt.Errorf("failed to get Radarr client: %w", err)
+	}
+
+	queue, err := client.GetQueueContext(ctx, 0, 100)
+	if err != nil {
+		return fmt.Errorf("failed to get Radarr queue: %w", err)
+	}
+
+	var idsToRemove []int64
+	for _, q := range queue.Records {
+		// Check for completed items with warning status that are pending import
+		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+			continue
+		}
+
+		// Check if path is within managed directories (import_dir or mount_path)
+		if !s.isPathManaged(q.OutputPath, cfg) {
+			continue
+		}
+
+		// Check status messages for known issues
+		shouldCleanup := false
+		for _, msg := range q.StatusMessages {
+			allMessages := strings.Join(msg.Messages, " ")
+			if strings.Contains(allMessages, "No files found are eligible") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
+				shouldCleanup = true
+				break
+			}
+		}
+
+		if shouldCleanup {
+			slog.InfoContext(ctx, "Found failed import pending item",
+				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+			idsToRemove = append(idsToRemove, q.ID)
+		}
+	}
+
+	// Remove from ARR queue with removeFromClient and blocklist flags
+	if len(idsToRemove) > 0 {
+		removeFromClient := true
+		opts := &starr.QueueDeleteOpts{
+			RemoveFromClient: &removeFromClient,
+			BlockList:        true,
+			SkipRedownload:   false,
+		}
+		for _, id := range idsToRemove {
+			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete queue item",
+					"id", id, "error", err)
+			}
+		}
+		slog.InfoContext(ctx, "Cleaned up Radarr queue items",
+			"instance", instance.Name, "count", len(idsToRemove))
+	}
+	return nil
+}
+
+func (s *Service) cleanupSonarrQueue(ctx context.Context, instance config.ArrsInstanceConfig, cfg *config.Config) error {
+	client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+	if err != nil {
+		return fmt.Errorf("failed to get Sonarr client: %w", err)
+	}
+
+	queue, err := client.GetQueueContext(ctx, 0, 100)
+	if err != nil {
+		return fmt.Errorf("failed to get Sonarr queue: %w", err)
+	}
+
+	var idsToRemove []int64
+	for _, q := range queue.Records {
+		// Check for completed items with warning status that are pending import
+		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+			continue
+		}
+
+		// Check if path is within managed directories (import_dir or mount_path)
+		if !s.isPathManaged(q.OutputPath, cfg) {
+			continue
+		}
+
+		// Check status messages for known issues
+		shouldCleanup := false
+		for _, msg := range q.StatusMessages {
+			allMessages := strings.Join(msg.Messages, " ")
+			if strings.Contains(allMessages, "No files found are eligible") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
+				shouldCleanup = true
+				break
+			}
+		}
+
+		if shouldCleanup {
+			slog.InfoContext(ctx, "Found failed import pending item",
+				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+			idsToRemove = append(idsToRemove, q.ID)
+		}
+	}
+
+	// Remove from ARR queue with removeFromClient and blocklist flags
+	if len(idsToRemove) > 0 {
+		removeFromClient := true
+		opts := &starr.QueueDeleteOpts{
+			RemoveFromClient: &removeFromClient,
+			BlockList:        true,
+			SkipRedownload:   false,
+		}
+		for _, id := range idsToRemove {
+			if err := client.DeleteQueueContext(ctx, id, opts); err != nil {
+				slog.ErrorContext(ctx, "Failed to delete queue item",
+					"id", id, "error", err)
+			}
+		}
+		slog.InfoContext(ctx, "Cleaned up Sonarr queue items",
+			"instance", instance.Name, "count", len(idsToRemove))
+	}
+	return nil
+}
+
+func (s *Service) isPathManaged(path string, cfg *config.Config) bool {
+	if path == "" {
+		return false
+	}
+
+	cleanPath := filepath.Clean(path)
+
+	// Check import_dir
+	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		importDir := filepath.Clean(*cfg.Import.ImportDir)
+		if strings.HasPrefix(cleanPath, importDir) {
+			return true
+		}
+	}
+
+	// Check mount_path
+	if cfg.MountPath != "" {
+		mountPath := filepath.Clean(cfg.MountPath)
+		if strings.HasPrefix(cleanPath, mountPath) {
+			return true
+		}
+	}
+
+	return false
+}
+
 

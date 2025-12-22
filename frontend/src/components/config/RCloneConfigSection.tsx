@@ -1136,8 +1136,8 @@ export function RCloneConfigSection({
 								placeholder="altmount"
 							/>
 							<p className="label">
-								Name of the VFS in RClone (default: altmount). Change this if your external rclone mount
-								uses a different name.
+								Name of the VFS in RClone (default: altmount). Change this if your external rclone
+								mount uses a different name.
 							</p>
 						</fieldset>
 

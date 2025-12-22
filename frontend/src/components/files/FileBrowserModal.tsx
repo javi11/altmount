@@ -86,9 +86,9 @@ export function FileBrowserModal({
 
 	return (
 		<dialog ref={modalRef} className="modal" onClose={onClose}>
-			<div className="modal-box w-11/12 max-w-5xl flex flex-col max-h-[90vh]">
+			<div className="modal-box flex max-h-[90vh] w-11/12 max-w-5xl flex-col">
 				{/* Header */}
-				<div className="mb-4 flex items-center justify-between shrink-0">
+				<div className="mb-4 flex shrink-0 items-center justify-between">
 					<h3 className="font-bold text-lg">{title}</h3>
 					<button
 						type="button"
@@ -101,7 +101,7 @@ export function FileBrowserModal({
 				</div>
 
 				{/* Current Path & Navigation */}
-				<div className="mb-4 flex items-center gap-2 shrink-0">
+				<div className="mb-4 flex shrink-0 items-center gap-2">
 					<button
 						type="button"
 						className="btn btn-ghost btn-sm"
@@ -110,7 +110,7 @@ export function FileBrowserModal({
 					>
 						<Upload className="h-4 w-4 rotate-90" />
 					</button>
-					<span className="flex-1 font-mono text-sm truncate" title={currentPath}>
+					<span className="flex-1 truncate font-mono text-sm" title={currentPath}>
 						{currentPath}
 					</span>
 					<button type="button" className="btn btn-ghost btn-sm" onClick={handleRefresh}>
@@ -119,7 +119,7 @@ export function FileBrowserModal({
 				</div>
 
 				{/* File List */}
-				<div className="overflow-x-auto overflow-y-auto flex-1">
+				<div className="flex-1 overflow-x-auto overflow-y-auto">
 					{isLoading ? (
 						<div className="flex justify-center p-4">
 							<span className="loading loading-spinner" />
@@ -131,7 +131,7 @@ export function FileBrowserModal({
 						</div>
 					) : (
 						<table className="table-zebra table-sm table">
-							<thead className="sticky top-0 bg-base-100 z-10">
+							<thead className="sticky top-0 z-10 bg-base-100">
 								<tr>
 									<th /> {/* Icon */}
 									<th>Name</th>

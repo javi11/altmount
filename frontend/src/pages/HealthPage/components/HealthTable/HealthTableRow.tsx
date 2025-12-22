@@ -1,7 +1,7 @@
 import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
-import { HealthPriority, type FileHealth } from "../../../../types/api";
+import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 
 interface HealthTableRowProps {

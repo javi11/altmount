@@ -453,9 +453,7 @@ export function ConfigurationPage() {
 													<IconComponent className="h-5 w-5" />
 													<div className="min-w-0 flex-1">
 														<div className="font-medium">{section.title}</div>
-														<div className="truncate text-xs opacity-70">
-															{section.description}
-														</div>
+														<div className="truncate text-xs opacity-70">{section.description}</div>
 													</div>
 													{!section.canEdit && (
 														<span className="badge badge-ghost badge-xs">Read Only</span>

@@ -1,6 +1,6 @@
 import type {
-	APIResponse,
 	ActiveStream,
+	APIResponse,
 	AuthResponse,
 	FileHealth,
 	FileMetadata,
@@ -23,8 +23,8 @@ import type {
 	User,
 	UserAdminUpdateRequest,
 } from "../types/api";
-import type { ConfigResponse } from "../types/config";
 import type {
+	ConfigResponse,
 	ConfigSection,
 	ConfigUpdateRequest,
 	ConfigValidateRequest,

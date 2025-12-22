@@ -300,10 +300,12 @@ type SABnzbdCategory struct {
 
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
-	Enabled         *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MaxWorkers      int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	RadarrInstances []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
-	SonarrInstances []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
+	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
+	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -459,6 +461,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Arrs.Enabled = &v
 	} else {
 		copyCfg.Arrs.Enabled = nil
+	}
+
+	// Deep copy Arrs.QueueCleanupEnabled pointer
+	if c.Arrs.QueueCleanupEnabled != nil {
+		v := *c.Arrs.QueueCleanupEnabled
+		copyCfg.Arrs.QueueCleanupEnabled = &v
+	} else {
+		copyCfg.Arrs.QueueCleanupEnabled = nil
 	}
 
 	// DeepCopy Fuse.Enabled pointer

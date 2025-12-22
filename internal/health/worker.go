@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -719,7 +720,11 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string, errorDetails *string) error {
 	slog.InfoContext(ctx, "Triggering file repair using direct ARR API approach", "file_path", filePath)
 
-	healthRecord, err := hw.healthRepo.GetFileHealth(ctx, filePath)
+	cfg := hw.configGetter()
+
+	var pathForRescan string
+
+	item, err := hw.healthRepo.GetFileHealth(ctx, filePath)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to get health record for library path lookup",
 			"file_path", filePath,
@@ -728,7 +733,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 		return fmt.Errorf("failed to get health record for library path lookup: %w", err)
 	}
 
-		if item.LibraryPath != nil && *item.LibraryPath != "" {
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
 		pathForRescan = *item.LibraryPath
 	} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 		pathForRescan = filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(filePath, "/"))

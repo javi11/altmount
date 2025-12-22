@@ -165,6 +165,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		healthController.RegisterConfigChangeHandler(configManager)
 	}
 
+	// Start ARRs queue cleanup worker
+	if err := arrsService.StartWorker(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to start ARR queue cleanup worker", "error", err)
+	}
+
 	// ARRs service status logging
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
 		logger.InfoContext(ctx, "Arrs service ready for health monitoring and repair")
@@ -237,10 +242,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// ARRs service cleanup (no background processes to stop)
-	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
-		logger.InfoContext(ctx, "Arrs service cleanup completed")
-	}
+	// Stop ARRs queue cleanup worker
+	arrsService.StopWorker(ctx)
 
 	// Stop RClone mount service if running
 	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {

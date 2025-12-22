@@ -615,6 +615,8 @@ export interface ArrsConfig {
 	max_workers: number;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
+	queue_cleanup_enabled?: boolean;
+	queue_cleanup_interval_seconds?: number;
 }
 
 // Sync status and progress types
