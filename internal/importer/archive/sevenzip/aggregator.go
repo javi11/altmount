@@ -69,7 +69,7 @@ func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) boo
 		}
 		// Check both the internal path and filename
 		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
-		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) || utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
 			return true
 		}
 	}
@@ -136,7 +136,7 @@ func ProcessArchive(
 	// Only do this if there's exactly one media file in the archive
 	mediaFilesCount := 0
 	for _, content := range sevenZipContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, allowedFileExtensions) || utils.IsAllowedFile(content.Filename, allowedFileExtensions)) {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) || utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
 			mediaFilesCount++
 		}
 	}
@@ -156,7 +156,7 @@ func ProcessArchive(
 		baseFilename := filepath.Base(normalizedInternalPath)
 
 		// Normalize filename to match NZB if it's the only media file
-		if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, allowedFileExtensions) || utils.IsAllowedFile(sevenZipContent.Filename, allowedFileExtensions)) {
+		if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) || utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions)) {
 			// Extract release name and combine with original extension
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",
@@ -167,6 +167,17 @@ func ProcessArchive(
 		// Create the virtual file path directly in the 7zip directory (flattened)
 		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+		// Check if file already exists and is healthy
+		if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
+			if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
+				slog.InfoContext(ctx, "Skipping re-import of healthy 7zip-extracted file",
+					"file", baseFilename,
+					"virtual_path", virtualFilePath)
+				filesProcessed++
+				continue
+			}
+		}
 
 		// Create offset tracker for real-time segment-level progress
 		// This maps individual file segment progress (0→N) to cumulative progress across all files

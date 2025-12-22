@@ -13,7 +13,13 @@ import (
 var sampleProofPattern = regexp.MustCompile(`(?i)\b(sample|proof)\b`)
 
 // isSampleOrProof checks if a filename looks like a sample or proof file
-func isSampleOrProof(filename string) bool {
+func isSampleOrProof(filename string, size int64) bool {
+	// If file is larger than 200MB, it's likely not a sample/proof file
+	// even if it has "sample" or "proof" in the name.
+	if size > 200*1024*1024 {
+		return false
+	}
+
 	lower := strings.ToLower(filename)
 	
 	// Standalone "sample" or "proof" check with common separators
@@ -102,13 +108,14 @@ func createExtensionMap(extensions []string) map[string]bool {
 
 // IsAllowedFile checks if a filename has an allowed extension
 // If allowedExtensions is empty, all files are allowed
-func IsAllowedFile(filename string, allowedExtensions []string) bool {
+// size is used to prevent false positives for sample/proof checks on large files
+func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool {
 	if filename == "" {
 		return false
 	}
 
 	// Reject files with sample/proof in their name
-	if isSampleOrProof(filename) {
+	if isSampleOrProof(filename, size) {
 		return false
 	}
 
@@ -126,7 +133,7 @@ func IsAllowedFile(filename string, allowedExtensions []string) bool {
 // If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
 func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtensions []string) bool {
 	for _, file := range regularFiles {
-		if IsAllowedFile(file.Filename, allowedExtensions) {
+		if IsAllowedFile(file.Filename, file.Size, allowedExtensions) {
 			return true
 		}
 	}

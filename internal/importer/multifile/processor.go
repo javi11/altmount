@@ -64,6 +64,16 @@ func ProcessRegularFiles(
 		virtualPath := filepath.Join(parentPath, filename)
 		virtualPath = strings.ReplaceAll(virtualPath, string(filepath.Separator), "/")
 
+		// Check if file already exists and is healthy
+		if existingMeta, err := metadataService.ReadFileMetadata(virtualPath); err == nil && existingMeta != nil {
+			if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
+				slog.InfoContext(ctx, "Skipping re-import of healthy file",
+					"file", filename,
+					"virtual_path", virtualPath)
+				continue
+			}
+		}
+
 		// Validate segments
 		if err := validation.ValidateSegmentsForFile(
 			ctx,

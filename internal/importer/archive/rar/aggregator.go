@@ -70,7 +70,7 @@ func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
 		}
 		// Check both the internal path and filename
 		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
-		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) || utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
 			return true
 		}
 	}
@@ -135,7 +135,7 @@ func ProcessArchive(
 	// Only do this if there's exactly one media file in the archive
 	mediaFilesCount := 0
 	for _, content := range rarContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, allowedFileExtensions) || utils.IsAllowedFile(content.Filename, allowedFileExtensions)) {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) || utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
 			mediaFilesCount++
 		}
 	}
@@ -155,7 +155,7 @@ func ProcessArchive(
 		baseFilename := filepath.Base(normalizedInternalPath)
 
 		// Normalize filename to match NZB if it's the only media file
-		if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, allowedFileExtensions) || utils.IsAllowedFile(rarContent.Filename, allowedFileExtensions)) {
+		if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) || utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions)) {
 			// Extract release name and combine with original extension
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in RAR archive",
