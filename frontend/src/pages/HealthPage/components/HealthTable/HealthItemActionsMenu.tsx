@@ -1,4 +1,4 @@
-import { MoreHorizontal, PlayCircle, Trash2, Wrench, X, EyeOff } from "lucide-react";
+import { MoreHorizontal, PlayCircle, Trash2, Wrench, X } from "lucide-react";
 import type { FileHealth } from "../../../../types/api";
 
 interface HealthItemActionsMenuProps {
@@ -7,12 +7,10 @@ interface HealthItemActionsMenuProps {
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
-	isIgnorePending: boolean;
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
-	onIgnore: (id: number) => void;
 }
 
 export function HealthItemActionsMenu({
@@ -21,12 +19,10 @@ export function HealthItemActionsMenu({
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
-	isIgnorePending,
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
 	onDelete,
-	onIgnore,
 }: HealthItemActionsMenuProps) {
 	return (
 		<div className="dropdown dropdown-end">
@@ -69,19 +65,6 @@ export function HealthItemActionsMenu({
 						Trigger Repair
 					</button>
 				</li>
-				{item.status !== "ignored" && (
-					<li>
-						<button
-							type="button"
-							onClick={() => onIgnore(item.id)}
-							disabled={isIgnorePending}
-							className="text-base-content/60"
-						>
-							<EyeOff className="h-4 w-4" />
-							Ignore
-						</button>
-					</li>
-				)}
 				<li>
 					<button
 						type="button"

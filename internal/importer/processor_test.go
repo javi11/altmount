@@ -7,6 +7,110 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 )
 
+func TestNormalizeReleaseFilename(t *testing.T) {
+	tests := []struct {
+		name             string
+		nzbFilename      string
+		originalFilename string
+		expected         string
+	}{
+		{
+			name:             "keeps single extension",
+			nzbFilename:      "file.mkv.nzb",
+			originalFilename: "file.mkv",
+			expected:         "file.mkv",
+		},
+		{
+			name:             "adds missing extension from original",
+			nzbFilename:      "obfuscated.nzb",
+			originalFilename: "video.mkv",
+			expected:         "obfuscated.mkv",
+		},
+		{
+			name:             "avoids duplicate when nzb already has ext",
+			nzbFilename:      "[TEST].mp4.nzb",
+			originalFilename: "random.mp4",
+			expected:         "[TEST].mp4",
+		},
+		{
+			name:             "preserves nzb basename but uses original ext",
+			nzbFilename:      "movie.1080p.NZB",
+			originalFilename: "source.mkv",
+			expected:         "movie.1080p.mkv",
+		},
+		{
+			name:             "no extension in original",
+			nzbFilename:      "sample.nzb",
+			originalFilename: "filename",
+			expected:         "sample",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeReleaseFilename(tt.nzbFilename, tt.originalFilename)
+			if got != tt.expected {
+				t.Fatalf("normalizeReleaseFilename(%q, %q) = %q, want %q", tt.nzbFilename, tt.originalFilename, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizeSingleFileVirtualDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		virtualDir  string
+		releaseName string
+		filename    string
+		expected    string
+	}{
+		{
+			name:        "keeps season folder",
+			virtualDir:  "/Media/Animes/Show/Season 01",
+			releaseName: "Show.S01E01.1080p",
+			filename:    "Show.S01E01.1080p.mkv",
+			expected:    "/Media/Animes/Show/Season 01",
+		},
+		{
+			name:        "flattens when ends with filename",
+			virtualDir:  "/Media/Animes/Show/Season 01/Show.S01E01.1080p.mkv",
+			releaseName: "Show.S01E01.1080p",
+			filename:    "Show.S01E01.1080p.mkv",
+			expected:    "/Media/Animes/Show/Season 01",
+		},
+		{
+			name:        "flattens when ends with release name",
+			virtualDir:  "/Media/Animes/Show/Season 01/Show.S01E01.1080p",
+			releaseName: "Show.S01E01.1080p",
+			filename:    "episode.mkv",
+			expected:    "/Media/Animes/Show/Season 01",
+		},
+		{
+			name:        "root stays root",
+			virtualDir:  "/",
+			releaseName: "Anything",
+			filename:    "file.mkv",
+			expected:    "/",
+		},
+		{
+			name:        "does not flatten when file has path",
+			virtualDir:  "/Media/Animes/Show/Season 01",
+			releaseName: "Show.S01E01.1080p",
+			filename:    "sub/Show.S01E01.1080p.mkv",
+			expected:    "/Media/Animes/Show/Season 01",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeSingleFileVirtualDir(tt.virtualDir, tt.releaseName, tt.filename)
+			if got != tt.expected {
+				t.Fatalf("normalizeSingleFileVirtualDir(%q, %q, %q) = %q, want %q", tt.virtualDir, tt.releaseName, tt.filename, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestDetermineFileLocation(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -45,7 +149,7 @@ func TestDetermineFileLocation(t *testing.T) {
 		},
 		{
 			name:           "redundant folder with backslashes",
-			filename:       `movie.mkv\movie.mkv`,
+			filename:       `movie.mkv\\movie.mkv`,
 			baseDir:        "/base",
 			expectedParent: "/base",
 			expectedName:   "movie.mkv",
@@ -91,7 +195,7 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 			name:         "file in root of relative path",
 			nzbPath:      "/downloads/sonarr/Movie.mkv",
 			relativePath: "/downloads/sonarr",
-			expected:     "/Movie",
+			expected:     "/",
 		},
 		{
 			name:         "file in subfolder",
@@ -109,7 +213,7 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 			name:         "file with spaces",
 			nzbPath:      "/downloads/sonarr/Movie Name (2023).mkv",
 			relativePath: "/downloads/sonarr",
-			expected:     "/Movie Name (2023)",
+			expected:     "/",
 		},
 	}
 

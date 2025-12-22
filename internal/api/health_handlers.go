@@ -51,7 +51,7 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 		status := database.HealthStatus(statusStr)
 		// Validate status
 		switch status {
-		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy, database.HealthStatusIgnored:
+		case database.HealthStatusPending, database.HealthStatusChecking, database.HealthStatusCorrupted, database.HealthStatusRepairTriggered, database.HealthStatusHealthy:
 			statusFilter = &status
 		default:
 			return c.Status(400).JSON(fiber.Map{
@@ -59,7 +59,7 @@ func (s *Server) handleListHealth(c *fiber.Ctx) error {
 				"error": fiber.Map{
 					"code":    "VALIDATION_ERROR",
 					"message": fmt.Sprintf("Invalid status filter: '%s'", statusStr),
-					"details": "Valid values: pending, checking, corrupted, repair_triggered, healthy, ignored",
+					"details": "Valid values: pending, checking, corrupted, repair_triggered, healthy",
 				},
 			})
 		}
@@ -1284,85 +1284,6 @@ func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 		"id":          id,
 		"file_path":   item.FilePath,
 		"priority":    updatedItem.Priority,
-		"updated_at":  time.Now().Format(time.RFC3339),
-		"health_data": ToHealthItemResponse(updatedItem),
-	}
-
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
-}
-
-// handleIgnoreHealth handles POST /api/health/{id}/ignore
-func (s *Server) handleIgnoreHealth(c *fiber.Ctx) error {
-	// Extract ID from path parameter
-	idStr := c.Params("id")
-	if idStr == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Health record identifier is required",
-		})
-	}
-
-	// Parse as numeric ID
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid health record ID",
-			"details": "ID must be a valid integer",
-		})
-	}
-
-	// Check if item exists
-	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to check health record",
-			"details": err.Error(),
-		})
-	}
-
-	if item == nil {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"message": "Health record not found",
-		})
-	}
-
-	// Cancel any active check
-	if s.healthWorker != nil && item.Status == database.HealthStatusChecking {
-		if s.healthWorker.IsCheckActive(item.FilePath) {
-			_ = s.healthWorker.CancelHealthCheck(c.Context(), item.FilePath)
-		}
-	}
-
-	// Set status to ignored
-	err = s.healthRepo.SetFileIgnored(c.Context(), id)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to set ignored status",
-			"details": err.Error(),
-		})
-	}
-
-	// Get updated item
-	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to retrieve updated health record",
-			"details": err.Error(),
-		})
-	}
-
-	response := map[string]interface{}{
-		"message":     "Health record ignored",
-		"id":          id,
-		"file_path":   item.FilePath,
 		"updated_at":  time.Now().Format(time.RFC3339),
 		"health_data": ToHealthItemResponse(updatedItem),
 	}

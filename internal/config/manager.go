@@ -155,8 +155,6 @@ type ImportConfig struct {
 	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	BlockedFileExtensions          []string       `yaml:"blocked_file_extensions" mapstructure:"blocked_file_extensions" json:"blocked_file_extensions"`
-	BlockedFilePatterns            []string       `yaml:"blocked_file_patterns" mapstructure:"blocked_file_patterns" json:"blocked_file_patterns"`
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
@@ -378,14 +376,6 @@ func (c *Config) DeepCopy() *Config {
 	if c.Import.AllowedFileExtensions != nil {
 		copyCfg.Import.AllowedFileExtensions = make([]string, len(c.Import.AllowedFileExtensions))
 		copy(copyCfg.Import.AllowedFileExtensions, c.Import.AllowedFileExtensions)
-	}
-	if c.Import.BlockedFileExtensions != nil {
-		copyCfg.Import.BlockedFileExtensions = make([]string, len(c.Import.BlockedFileExtensions))
-		copy(copyCfg.Import.BlockedFileExtensions, c.Import.BlockedFileExtensions)
-	}
-	if c.Import.BlockedFilePatterns != nil {
-		copyCfg.Import.BlockedFilePatterns = make([]string, len(c.Import.BlockedFilePatterns))
-		copy(copyCfg.Import.BlockedFilePatterns, c.Import.BlockedFilePatterns)
 	}
 
 	// Deep copy RClone.RCEnabled pointer
@@ -1174,17 +1164,9 @@ func DefaultConfig(configDir ...string) *Config {
 		Import: ImportConfig{
 			MaxProcessorWorkers:            2, // Default: 2 processor workers
 			QueueProcessingIntervalSeconds: 5, // Default: check for work every 5 seconds
-			AllowedFileExtensions: []string{ // Default: common video file extensions
-				".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
-				".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264",
-				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
+			AllowedFileExtensions: []string{ // Default: common video extensions
+				".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
-			},
-			BlockedFileExtensions: []string{ // Default: common blocked extensions
-				".exe", ".txt", ".nfo", ".jpg", ".jpeg", ".png",
-			},
-			BlockedFilePatterns: []string{ // Default: common sample/proof patterns
-				"(?i)\\b(sample|proof)\\b",
 			},
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
 			ImportCacheSizeMB:       64,                 // Default: 64MB cache for archive analysis

@@ -105,7 +105,6 @@ export const HealthStatus = {
 	HEALTHY: "healthy",
 	CORRUPTED: "corrupted",
 	REPAIR_TRIGGERED: "repair_triggered",
-	IGNORED: "ignored",
 } as const;
 
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
@@ -144,7 +143,6 @@ export interface HealthStats {
 	corrupted: number;
 	repair_triggered: number;
 	checking: number;
-	ignored: number;
 }
 
 export interface HealthRetryRequest {

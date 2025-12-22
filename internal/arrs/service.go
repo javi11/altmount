@@ -145,36 +145,12 @@ func (s *Service) getOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 func (s *Service) findInstanceForFilePath(ctx context.Context, filePath string, relativePath string) (instanceType string, instanceName string, err error) {
 	slog.DebugContext(ctx, "Finding instance for file path", "file_path", filePath, "relative_path", relativePath)
 
-	// Determine preferred instance type based on file patterns
-	preferredType := ""
-	if s.isMovie(filePath) || (relativePath != "" && s.isMovie(relativePath)) {
-		preferredType = "radarr"
-	} else if s.isEpisode(filePath) || (relativePath != "" && s.isEpisode(relativePath)) {
-		preferredType = "sonarr"
-	}
-
 	instances := s.getConfigInstances()
 
 	// Strategy 1: Fast Path - Check Root Folders
-	// If we have a preferred type, check those instances first
-	if preferredType != "" {
-		for _, instance := range instances {
-			if !instance.Enabled || instance.Type != preferredType {
-				continue
-			}
-
-			if client, err := s.getOrCreateClient(instance); err == nil {
-				if s.managesFile(ctx, instance.Type, client, filePath) {
-					return instance.Type, instance.Name, nil
-				}
-			}
-		}
-	}
-
-	// Fallback to checking all enabled instances
 	for _, instance := range instances {
-		if !instance.Enabled || instance.Type == preferredType {
-			continue // Already checked or disabled
+		if !instance.Enabled {
+			continue
 		}
 
 		if client, err := s.getOrCreateClient(instance); err == nil {
@@ -227,41 +203,6 @@ func (s *Service) hasFile(ctx context.Context, instanceType string, client inter
 		return s.radarrHasFile(ctx, client.(*radarr.Radarr), instanceName, relativePath)
 	}
 	return s.sonarrHasFile(ctx, client.(*sonarr.Sonarr), instanceName, relativePath)
-}
-
-func (s *Service) isMovie(path string) bool {
-	lowerPath := strings.ToLower(path)
-	// Common movie patterns in scene names
-	moviePatterns := []string{"movie", "film", "2160p", "1080p", "720p", "bluray", "web-dl", "webrip", "dvdrip"}
-	for _, pattern := range moviePatterns {
-		if strings.Contains(lowerPath, pattern) {
-			// Check it's not also an episode (episodes often have these too)
-			if !s.isEpisode(path) {
-				return true
-			}
-		}
-	}
-	// Also check directory structure
-	if strings.Contains(lowerPath, "/movies/") || strings.Contains(lowerPath, "/movie/") {
-		return true
-	}
-	return false
-}
-
-func (s *Service) isEpisode(path string) bool {
-	lowerPath := strings.ToLower(path)
-	// Common TV show patterns (S01E01, 1x01, etc.)
-	// Simple check for S00E00 pattern
-	for i := 0; i < 100; i++ {
-		sStr := fmt.Sprintf("s%02d", i)
-		if strings.Contains(lowerPath, sStr) {
-			return true
-		}
-	}
-	if strings.Contains(lowerPath, "/tv/") || strings.Contains(lowerPath, "/series/") || strings.Contains(lowerPath, "/shows/") {
-		return true
-	}
-	return false
 }
 
 // radarrHasFile checks if any movie in the instance contains the given relative path
@@ -805,11 +746,13 @@ func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error
 				return
 			}
 			// Trigger RefreshMonitoredDownloads
-			_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			// Trigger DownloadedMoviesScan
+			_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "DownloadedMoviesScan"})
 			if err != nil {
-				slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", instance.Name, "error", err)
+				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedMoviesScan", "instance", instance.Name, "error", err)
 			} else {
-				slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", instance.Name)
+				slog.InfoContext(bgCtx, "Triggered DownloadedMoviesScan", "instance", instance.Name)
 			}
 
 		case "sonarr":
@@ -819,11 +762,13 @@ func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error
 				return
 			}
 			// Trigger RefreshMonitoredDownloads
-			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			// Trigger DownloadedEpisodesScan
+			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "DownloadedEpisodesScan"})
 			if err != nil {
-				slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", instance.Name, "error", err)
+				slog.ErrorContext(bgCtx, "Failed to trigger DownloadedEpisodesScan", "instance", instance.Name, "error", err)
 			} else {
-				slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", instance.Name)
+				slog.InfoContext(bgCtx, "Triggered DownloadedEpisodesScan", "instance", instance.Name)
 			}
 		}
 	}()
@@ -853,11 +798,13 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					return
 				}
 				// Trigger RefreshMonitoredDownloads
-				_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+				_, _ = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+				// Trigger DownloadedMoviesScan
+				_, err = client.SendCommandContext(bgCtx, &radarr.CommandRequest{Name: "DownloadedMoviesScan"})
 				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
+					slog.ErrorContext(bgCtx, "Failed to trigger DownloadedMoviesScan", "instance", inst.Name, "error", err)
 				} else {
-					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
+					slog.InfoContext(bgCtx, "Triggered DownloadedMoviesScan", "instance", inst.Name)
 				}
 
 			case "sonarr":
@@ -867,11 +814,13 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					return
 				}
 				// Trigger RefreshMonitoredDownloads
-				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+				_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+				// Trigger DownloadedEpisodesScan
+				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "DownloadedEpisodesScan"})
 				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
+					slog.ErrorContext(bgCtx, "Failed to trigger DownloadedEpisodesScan", "instance", inst.Name, "error", err)
 				} else {
-					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
+					slog.InfoContext(bgCtx, "Triggered DownloadedEpisodesScan", "instance", inst.Name)
 				}
 			}
 		}(instance)

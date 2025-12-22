@@ -345,17 +345,6 @@ export const useCancelHealthCheck = () => {
 	});
 };
 
-export const useIgnoreHealthItem = () => {
-	const queryClient = useQueryClient();
-
-	return useMutation({
-		mutationFn: (id: number) => apiClient.ignoreHealth(id),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["health"] });
-		},
-	});
-};
-
 // Manual Scan hooks
 export const useScanStatus = (refetchInterval?: number) => {
 	return useQuery({

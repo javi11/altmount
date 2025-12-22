@@ -11,7 +11,6 @@ import {
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
-	useIgnoreHealthItem,
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
 	useRestartBulkHealthItems,
@@ -80,7 +79,6 @@ export function HealthPage() {
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
 	const setHealthPriority = useSetHealthPriority();
-	const ignoreHealthItem = useIgnoreHealthItem();
 	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
@@ -109,35 +107,6 @@ export function HealthPage() {
 		);
 		if (confirmed) {
 			await deleteItem.mutateAsync(id);
-		}
-	};
-
-	const handleIgnore = async (id: number) => {
-		const confirmed = await confirmAction(
-			"Ignore File",
-			"This file will be marked as ignored and will not be checked for health issues or re-added by sync.",
-			{
-				type: "info",
-				confirmText: "Ignore",
-				confirmButtonClass: "btn-ghost",
-			},
-		);
-		if (confirmed) {
-			try {
-				await ignoreHealthItem.mutateAsync(id);
-				showToast({
-					title: "File Ignored",
-					message: "File has been marked as ignored",
-					type: "success",
-				});
-			} catch (err) {
-				console.error("Failed to ignore file:", err);
-				showToast({
-					title: "Failed to ignore file",
-					message: "Could not ignore file. Please try again.",
-					type: "error",
-				});
-			}
 		}
 	};
 
@@ -623,7 +592,6 @@ export function HealthPage() {
 						isDirectCheckPending={directHealthCheck.isPending}
 						isRepairPending={repairHealthItem.isPending}
 						isDeletePending={deleteItem.isPending}
-						isIgnorePending={ignoreHealthItem.isPending}
 						onSelectItem={handleSelectItem}
 						onSelectAll={handleSelectAll}
 						onSort={handleSort}
@@ -631,7 +599,6 @@ export function HealthPage() {
 						onManualCheck={handleManualCheck}
 						onRepair={handleRepair}
 						onDelete={handleDelete}
-						onIgnore={handleIgnore}
 						onSetPriority={handleSetPriority}
 					/>
 

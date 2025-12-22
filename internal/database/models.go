@@ -66,7 +66,6 @@ const (
 	HealthStatusHealthy         HealthStatus = "healthy"          // File passed health check
 	HealthStatusRepairTriggered HealthStatus = "repair_triggered" // File repair has been triggered in Arrs
 	HealthStatusCorrupted       HealthStatus = "corrupted"        // File has missing segments or is corrupted
-	HealthStatusIgnored         HealthStatus = "ignored"          // File is ignored and will not be checked
 )
 
 // HealthPriority represents the priority level of a health check

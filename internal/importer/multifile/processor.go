@@ -29,15 +29,13 @@ func ProcessRegularFiles(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
-	blockedFileExtensions []string,
-	blockedFilePatterns []string,
 ) error {
 	if len(files) == 0 {
 		return nil
 	}
 
 	// Validate file extensions before processing
-	if !utils.HasAllowedFilesInRegular(files, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) {
+	if !utils.HasAllowedFilesInRegular(files, allowedFileExtensions) {
 		slog.WarnContext(ctx, "No files with allowed extensions found",
 			"allowed_extensions", allowedFileExtensions,
 			"file_count", len(files))
@@ -76,8 +74,8 @@ func ProcessRegularFiles(
 			}
 		}
 
-		// Double check if this specific file is allowed/blocked
-		if !utils.IsAllowedFile(filename, file.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) {
+		// Double check if this specific file is allowed
+		if !utils.IsAllowedFile(filename, file.Size, allowedFileExtensions) {
 			continue
 		}
 

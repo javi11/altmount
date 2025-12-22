@@ -128,6 +128,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	app, debugMode := createFiberApp(ctx, cfg)
 	authService := setupAuthService(ctx, repos.UserRepo)
 
+	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
+
 	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)

@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbdav"
@@ -170,6 +172,13 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("service is already started")
 	}
 
+	// Update database connection pool to match worker count
+	// This prevents connection starvation when multiple workers try to claim items
+	s.database.UpdateConnectionPool(s.config.Workers)
+	s.log.InfoContext(ctx, "Updated database connection pool",
+		"workers", s.config.Workers,
+		"max_connections", s.config.Workers+4)
+
 	// Reset any stale queue items from processing back to pending
 	if err := s.database.Repository.ResetStaleItems(ctx); err != nil {
 		s.log.ErrorContext(ctx, "Failed to reset stale queue items", "error", err)
@@ -227,8 +236,30 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.running = false
 	s.mu.Unlock()
 
-	// Wait for all goroutines to finish
-	s.wg.Wait()
+	// Release lock BEFORE waiting to avoid deadlock
+	// Workers call IsPaused() which needs this lock
+	s.mu.Unlock()
+
+	// Wait for all goroutines to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All goroutines finished
+	case <-time.After(30 * time.Second):
+		s.log.WarnContext(ctx, "Timeout waiting for workers to stop, some goroutines may still be running")
+	case <-ctx.Done():
+		s.log.WarnContext(ctx, "Context cancelled while waiting for workers to stop")
+		return ctx.Err()
+	}
+
+	// Re-acquire lock to update state
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Recreate context for potential restart
 	s.mu.Lock()
@@ -687,6 +718,12 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 			return nil
 		}
 
+		// Check if already processed (metadata exists)
+		if s.isFileAlreadyProcessed(path, scanPath) {
+			s.log.DebugContext(ctx, "Skipping file - already processed", "file", path)
+			return nil
+		}
+
 		// Add to queue
 		if _, err := s.AddToQueue(path, &scanPath, nil, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
@@ -721,6 +758,47 @@ func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 		return false // Assume not in queue on error
 	}
 	return inQueue
+}
+
+// isFileAlreadyProcessed checks if a file has already been processed by checking metadata
+func (s *Service) isFileAlreadyProcessed(filePath string, scanRoot string) bool {
+	// Calculate virtual path
+	// Assuming scanRoot maps to root of virtual FS for simplicity in manual scan
+	// or use CalculateVirtualDirectory logic if needed
+	virtualPath := filesystem.CalculateVirtualDirectory(filePath, scanRoot)
+	
+	// Check if we have metadata for this path
+	// For single files: virtualPath/filename (minus .nzb)
+	// For multi files: virtualPath/filename (minus .nzb) as directory
+	
+	// Normalize filename (remove .nzb extension)
+	fileName := filepath.Base(filePath)
+	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	
+	// Construct potential virtual paths
+	// 1. As a file (single file import flattened or nested)
+	// We need to check if a file exists with the release name
+	// But we don't know the final extension... 
+	// However, metadata service stores files with their final names.
+	
+	// Better approach: Check if a directory exists with the release name
+	// Most imports create a folder with the release name
+	releaseDir := filepath.Join(virtualPath, baseName)
+	if s.metadataService.DirectoryExists(releaseDir) {
+		return true
+	}
+	
+	// Also check if any file exists that starts with the release name in that directory
+	// This covers flattened single files
+	if files, err := s.metadataService.ListDirectory(virtualPath); err == nil {
+		for _, f := range files {
+			if strings.HasPrefix(f, baseName) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
@@ -800,8 +878,10 @@ func isDatabaseContentionError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "database is locked") ||
-		strings.Contains(err.Error(), "database is busy")
+	errStr := err.Error()
+	return strings.Contains(errStr, "database is locked") ||
+		strings.Contains(errStr, "database is busy") ||
+		strings.Contains(errStr, "database table is locked")
 }
 
 // claimItemWithRetry attempts to claim a queue item with exponential backoff retry logic using retry-go
@@ -818,22 +898,38 @@ func (s *Service) claimItemWithRetry(ctx context.Context, workerID int) (*databa
 			item = claimedItem
 			return nil
 		},
-		retry.Attempts(5),
-		retry.Delay(10*time.Millisecond),
-		retry.MaxDelay(500*time.Millisecond),
+		retry.Attempts(3), // Reduced from 5 - immediate transactions should succeed quickly
+		retry.Delay(50*time.Millisecond), // Increased from 10ms
+		retry.MaxDelay(5*time.Second),    // Increased from 500ms to allow better spreading
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(isDatabaseContentionError),
 		retry.OnRetry(func(n uint, err error) {
-			// Only log warnings after multiple retries to reduce noise
-			if n >= 2 {
+			// Add jitter to prevent synchronized retries across workers
+			// Jitter range: 0-1000ms to desynchronize worker retries
+			jitter := time.Duration(rand.Int63n(int64(time.Second)))
+			time.Sleep(jitter)
+
+			// Calculate exponential backoff for logging
+			baseDelay := 50 * time.Millisecond
+			backoffDelay := baseDelay * (1 << n) // Exponential: 50ms, 100ms, 200ms...
+			if backoffDelay > 5*time.Second {
+				backoffDelay = 5 * time.Second
+			}
+
+			// Only log warnings after first retry to reduce noise
+			if n >= 1 {
 				s.log.WarnContext(ctx, "Database contention, retrying claim",
 					"attempt", n+1,
 					"worker_id", workerID,
+					"backoff_ms", backoffDelay.Milliseconds(),
+					"jitter_ms", jitter.Milliseconds(),
 					"error", err)
 			} else {
 				s.log.DebugContext(ctx, "Database contention, retrying claim",
 					"attempt", n+1,
 					"worker_id", workerID,
+					"backoff_ms", backoffDelay.Milliseconds(),
+					"jitter_ms", jitter.Milliseconds(),
 					"error", err)
 			}
 		}),

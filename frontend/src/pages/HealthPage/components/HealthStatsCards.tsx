@@ -42,11 +42,6 @@ export function HealthStatsCards({ stats }: HealthStatsCardsProps) {
 				<div className="stat-desc">Triggered</div>
 			</div>
 			<div className="stat rounded-box bg-base-100 shadow">
-				<div className="stat-title">Ignored</div>
-				<div className="stat-value text-base-content/50">{stats.ignored || 0}</div>
-				<div className="stat-desc">Excluded</div>
-			</div>
-			<div className="stat rounded-box bg-base-100 shadow">
 				<div className="stat-title">Corrupted</div>
 				<div className="stat-value text-error">{stats.corrupted}</div>
 				<div className="stat-desc font-bold text-error">

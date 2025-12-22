@@ -61,17 +61,16 @@ func calculateSegmentsToValidate(rarContents []Content, samplePercentage int) in
 }
 
 // hasAllowedFiles checks if any files within RAR archive contents match allowed extensions
-// If allowedExtensions is empty, all file types are allowed but blocked files are still rejected
-func hasAllowedFiles(rarContents []Content, allowedExtensions []string, blockedFileExtensions []string, blockedFilePatterns []string) bool {
+// If allowedExtensions is empty, all file types are allowed
+func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
 	for _, content := range rarContents {
 		// Skip directories
 		if content.IsDirectory {
 			continue
 		}
 		// Check both the internal path and filename
-		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
-		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions, blockedFilePatterns, blockedFileExtensions) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions, blockedFilePatterns, blockedFileExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
 			return true
 		}
 	}
@@ -95,8 +94,6 @@ func ProcessArchive(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
-	blockedFileExtensions []string,
-	blockedFilePatterns []string,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -115,7 +112,7 @@ func ProcessArchive(
 	}
 
 	// Validate file extensions before processing
-	if !hasAllowedFiles(rarContents, allowedFileExtensions, blockedFileExtensions, blockedFilePatterns) {
+	if !hasAllowedFiles(rarContents, allowedFileExtensions) {
 		slog.WarnContext(ctx, "RAR archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
 		return ErrNoAllowedFiles
 	}
@@ -138,8 +135,8 @@ func ProcessArchive(
 	// Only do this if there's exactly one media file in the archive
 	mediaFilesCount := 0
 	for _, content := range rarContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) ||
-			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions)) {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
 			mediaFilesCount++
 		}
 	}
@@ -158,15 +155,15 @@ func ProcessArchive(
 		normalizedInternalPath := strings.ReplaceAll(rarContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
 
-		// Double check if this specific file is allowed/blocked
-		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) &&
-			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) {
+		// Double check if this specific file is allowed
+		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) &&
+			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions) {
 			continue
 		}
 
 		// Normalize filename to match NZB if it's the only media file
-		if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) ||
-			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions)) {
+		if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) ||
+			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions)) {
 			// Extract release name and combine with original extension
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in RAR archive",
@@ -176,6 +173,17 @@ func ProcessArchive(
 		// Create the virtual file path directly in the RAR directory (flattened)
 		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+		// Check if file already exists and is healthy
+		if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
+			if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
+				slog.InfoContext(ctx, "Skipping re-import of healthy RAR-extracted file",
+					"file", baseFilename,
+					"virtual_path", virtualFilePath)
+				filesProcessed++
+				continue
+			}
+		}
 
 		// Create offset tracker for real-time segment-level progress
 		// This maps individual file segment progress (0→N) to cumulative progress across all files
