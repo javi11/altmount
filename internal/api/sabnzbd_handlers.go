@@ -559,17 +559,22 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Combine and convert to SABnzbd format
 	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
 	index := 0
+	var totalBytes int64
 
 	for _, item := range completed {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
+		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
+		slots = append(slots, slot)
+		totalBytes += slot.Bytes
 		index++
 	}
 	for _, item := range failed {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
-		slots = append(slots, ToSABnzbdHistorySlot(item, index, itemBasePath))
+		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
+		slots = append(slots, slot)
+		totalBytes += slot.Bytes
 		index++
 	}
 
@@ -577,7 +582,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	response := SABnzbdCompleteHistoryResponse{
 		History: SABnzbdHistoryObject{
 			Slots:     slots,
-			TotalSize: "0 B",
+			TotalSize: formatHumanSize(totalBytes),
 			MonthSize: "0 B",
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
