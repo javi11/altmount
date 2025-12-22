@@ -133,9 +133,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		})
 	}
 
-	slog.DebugContext(c.Context(), "Updating configuration", 
-		"blocked_extensions", newConfig.Import.BlockedFileExtensions,
-		"blocked_patterns", newConfig.Import.BlockedFilePatterns)
+	slog.DebugContext(c.Context(), "Updating configuration")
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
@@ -224,9 +222,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	}
 
 	slog.DebugContext(c.Context(), "Patching configuration section", 
-		"section", section,
-		"blocked_extensions", newConfig.Import.BlockedFileExtensions,
-		"blocked_patterns", newConfig.Import.BlockedFilePatterns)
+		"section", section)
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {

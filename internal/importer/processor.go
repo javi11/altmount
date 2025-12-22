@@ -142,10 +142,6 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		allowedExtensions = *allowedExtensionsOverride
 	}
 
-	cfg := proc.configGetter()
-	blockedExtensions := cfg.Import.BlockedFileExtensions
-	blockedPatterns := cfg.Import.BlockedFilePatterns
-
 	// Update progress: starting
 	proc.updateProgress(queueID, 0)
 	// Step 1: Open and parse the file
@@ -212,23 +208,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
 
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -251,8 +247,6 @@ func (proc *Processor) processSingleFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
-	blockedExtensions []string,
-	blockedPatterns []string,
 ) (string, error) {
 	if len(regularFiles) == 0 {
 		return "", fmt.Errorf("no regular files to process")
@@ -318,8 +312,6 @@ func (proc *Processor) processSingleFile(
 		maxConnections,
 		proc.segmentSamplePercentage,
 		allowedExtensions,
-		blockedExtensions,
-		blockedPatterns,
 	)
 	if err != nil {
 		return "", err
@@ -337,8 +329,6 @@ func (proc *Processor) processMultiFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
-	blockedExtensions []string,
-	blockedPatterns []string,
 ) (string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
@@ -391,8 +381,6 @@ func (proc *Processor) processMultiFile(
 		maxConnections,
 		proc.segmentSamplePercentage,
 		allowedExtensions,
-		blockedExtensions,
-		blockedPatterns,
 	); err != nil {
 		return "", err
 	}
@@ -410,8 +398,6 @@ func (proc *Processor) processRarArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
-	blockedExtensions []string,
-	blockedPatterns []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -436,8 +422,6 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
-			blockedExtensions,
-			blockedPatterns,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -475,8 +459,6 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
-			blockedExtensions,
-			blockedPatterns,
 		)
 		if err != nil {
 			return "", err
@@ -497,8 +479,6 @@ func (proc *Processor) processSevenZipArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
-	blockedExtensions []string,
-	blockedPatterns []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -512,59 +492,55 @@ func (proc *Processor) processSevenZipArchive(
 			return "", err
 		}
 
-		if err := multifile.ProcessRegularFiles(
-			ctx,
-			nzbFolder,
-			regularFiles,
-			nil, // No PAR2 files for archive imports
-			parsed.Path,
-			proc.metadataService,
-			proc.poolManager,
-			maxConnections,
-			proc.segmentSamplePercentage,
-			allowedExtensions,
-			blockedExtensions,
-			blockedPatterns,
-		); err != nil {
-			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
-		}
-	}
-
-	// Analyze and process 7zip archive
-	if len(archiveFiles) > 0 {
-		proc.updateProgress(queueID, 50)
-
-		// Create progress tracker for 50-80% range (archive analysis)
-		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
-
-		// Get release date from first archive file
-		var releaseDate int64
-		if len(archiveFiles) > 0 {
-			releaseDate = archiveFiles[0].ReleaseDate.Unix()
-		}
-
-		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
-		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-
-		// Process archive with unified aggregator
-		err := sevenzip.ProcessArchive(
-			ctx,
-			nzbFolder,
-			archiveFiles,
-			parsed.GetPassword(),
-			releaseDate,
-			parsed.Path,
-			proc.sevenZipProcessor,
-			proc.metadataService,
-			proc.poolManager,
-			archiveProgressTracker,
-			validationProgressTracker,
-			maxConnections,
-			proc.segmentSamplePercentage,
-			allowedExtensions,
-			blockedExtensions,
-			blockedPatterns,
-		)
+		        if err := multifile.ProcessRegularFiles(
+		            ctx,
+		            nzbFolder,
+		            regularFiles,
+		            nil, // No PAR2 files for archive imports
+		            parsed.Path,
+		            proc.metadataService,
+		            proc.poolManager,
+		            maxConnections,
+		            proc.segmentSamplePercentage,
+		            allowedExtensions,
+		        ); err != nil {
+		            slog.DebugContext(ctx, "Failed to process regular files", "error", err)
+		        }
+		    }
+		
+		    // Analyze and process 7zip archive
+		    if len(archiveFiles) > 0 {
+		        proc.updateProgress(queueID, 50)
+		
+		        // Create progress tracker for 50-80% range (archive analysis)
+		        archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
+		
+		        // Get release date from first archive file
+		        var releaseDate int64
+		        if len(archiveFiles) > 0 {
+		            releaseDate = archiveFiles[0].ReleaseDate.Unix()
+		        }
+		
+		        // Create progress tracker for 80-95% range (validation only, metadata handled separately)
+		        validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
+		
+		        // Process archive with unified aggregator
+		        err := sevenzip.ProcessArchive(
+		            ctx,
+		            nzbFolder,
+		            archiveFiles,
+		            parsed.GetPassword(),
+		            releaseDate,
+		            parsed.Path,
+		            proc.sevenZipProcessor,
+		            proc.metadataService,
+		            proc.poolManager,
+		            archiveProgressTracker,
+		            validationProgressTracker,
+		            maxConnections,
+		            proc.segmentSamplePercentage,
+		            allowedExtensions,
+		        )
 		if err != nil {
 			return "", err
 		}

@@ -103,8 +103,6 @@ type ImportAPIResponse struct {
 	MaxProcessorWorkers            int                   `json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
 	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
-	BlockedFileExtensions          []string              `json:"blocked_file_extensions"`
-	BlockedFilePatterns            []string              `json:"blocked_file_patterns"`
 	MaxImportConnections           int                   `json:"max_import_connections"`
 	ImportCacheSizeMB              int                   `json:"import_cache_size_mb"`
 	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
@@ -230,8 +228,6 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		MaxProcessorWorkers:            importConfig.MaxProcessorWorkers,
 		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
-		BlockedFileExtensions:          importConfig.BlockedFileExtensions,
-		BlockedFilePatterns:            importConfig.BlockedFilePatterns,
 		MaxImportConnections:           importConfig.MaxImportConnections,
 		ImportCacheSizeMB:              importConfig.ImportCacheSizeMB,
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
