@@ -109,6 +109,7 @@ type SABnzbdHistorySlot struct {
 	Fail_message string   `json:"fail_message"`
 	Url_info     string   `json:"url_info"`
 	Bytes        int64    `json:"bytes"`
+	StatusInt    int      `json:"status_int"`
 	PPStatus     int      `json:"ppstatus"`
 	Meta         []string `json:"meta"`
 	Series       string   `json:"series"`
@@ -475,14 +476,17 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 	actionLine := ""
 	postproc := ""
 	ppStatus := 0
+	statusInt := 0
 	if item.Status == database.QueueStatusCompleted {
 		actionLine = "Finished"
 		postproc = "OK"
 		ppStatus = 0
+		statusInt = 3
 	} else if item.Status == database.QueueStatusFailed {
 		actionLine = "Failed"
 		postproc = "FAILED"
 		ppStatus = 1
+		statusInt = 1
 	}
 
 	return SABnzbdHistorySlot{
@@ -509,6 +513,7 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		Fail_message: failMessage,
 		Url_info:     "",
 		Bytes:        sizeBytes,
+		StatusInt:    statusInt,
 		PPStatus:     ppStatus,
 		Meta:         []string{},
 		Series:       "",
