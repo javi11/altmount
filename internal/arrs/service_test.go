@@ -1,20 +1,11 @@
 package arrs
 
 import (
-	"context"
 	"testing"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/stretchr/testify/assert"
 )
-
-type mockConfigGetter struct {
-	cfg *config.Config
-}
-
-func (m *mockConfigGetter) GetConfig() *config.Config {
-	return m.cfg
-}
 
 func TestFindInstanceForFilePath(t *testing.T) {
 	// This test is limited because it requires actual Radarr/Sonarr clients or complex mocks
