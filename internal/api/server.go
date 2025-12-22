@@ -193,7 +193,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/:id/check-now", s.handleDirectHealthCheck)
 	api.Post("/health/:id/priority", s.handleSetHealthPriority)
 	api.Post("/health/:id/cancel", s.handleCancelHealthCheck)
-	api.Post("/health/:id/ignore", s.handleIgnoreHealth)
 	api.Get("/health/:id", s.handleGetHealth)
 	api.Delete("/health/:id", s.handleDeleteHealth)
 

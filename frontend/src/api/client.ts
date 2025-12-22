@@ -433,12 +433,6 @@ export class APIClient {
 		});
 	}
 
-	async ignoreHealth(id: number) {
-		return this.request<{ success: boolean; message: string }>(`/health/${id}/ignore`, {
-			method: "POST",
-		});
-	}
-
 	// File metadata endpoints
 	async getFileMetadata(path: string) {
 		return this.request<FileMetadata>(`/files/info?path=${encodeURIComponent(path)}`);
