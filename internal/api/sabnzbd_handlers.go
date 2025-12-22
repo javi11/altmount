@@ -30,6 +30,11 @@ var defaultCategory = config.SABnzbdCategory{
 
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
+	slog.InfoContext(c.Context(), "Incoming SABnzbd API request",
+		"mode", c.Query("mode"),
+		"ip", c.IP(),
+		"user_agent", c.Get("User-Agent"))
+
 	// Check if SABnzbd API is enabled
 	if s.configManager != nil {
 		config := s.configManager.GetConfig()
