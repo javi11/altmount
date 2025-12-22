@@ -370,6 +370,13 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		// Construct the full absolute path on the mount
 		// We use filepath.ToSlash to ensure consistent forward slashes for the API
 		storagePath := filepath.ToSlash(*item.StoragePath)
+		
+		// Ensure storagePath is treated as relative to basePath if not absolute
+		// or if it's just a clean relative path from the root
+		if !filepath.IsAbs(storagePath) && !strings.HasPrefix(storagePath, "/") {
+			storagePath = "/" + storagePath
+		}
+		
 		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, storagePath))
 
 		// Determine the job folder
