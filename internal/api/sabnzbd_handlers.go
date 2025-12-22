@@ -497,10 +497,11 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	response := SABnzbdQueueResponse{
 		Status: true,
 		Queue: SABnzbdQueueObject{
+			Status:    true,
 			Paused:    s.importerService.IsPaused(),
 			Slots:     slots,
 			Noofslots: len(slots),
-			Status:    status,
+			StatusStr: status,
 			Mbleft:    fmt.Sprintf("%.2f", totalMbLeft),
 			Mb:        fmt.Sprintf("%.2f", totalMb),
 			Kbpersec:  kbPerSec,
@@ -556,6 +557,8 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 
 	// Get category filter from query parameter
 	categoryFilter := c.Query("category", "")
+	nzoIDFilter := c.Query("nzo_id", "")
+	nameFilter := c.Query("name", "")
 
 	// Get completed items
 	completedStatus := database.QueueStatusCompleted
@@ -576,7 +579,21 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	index := 0
 	var totalBytes int64
 
-	for _, item := range completed {
+	allItems := append(completed, failed...)
+	for _, item := range allItems {
+		// Apply NZO ID filter if present
+		if nzoIDFilter != "" && fmt.Sprintf("%d", item.ID) != nzoIDFilter {
+			continue
+		}
+
+		// Apply Name filter if present (checks against original NZB name or storage path)
+		if nameFilter != "" && !strings.Contains(strings.ToLower(item.NzbPath), strings.ToLower(nameFilter)) {
+			// Also check storage path if available
+			if item.StoragePath == nil || !strings.Contains(strings.ToLower(*item.StoragePath), strings.ToLower(nameFilter)) {
+				continue
+			}
+		}
+
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
 		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
@@ -588,18 +605,11 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		totalBytes += slot.Bytes
 		index++
 	}
-	for _, item := range failed {
-		// Calculate category-specific base path for this item
-		itemBasePath := s.calculateItemBasePath()
-		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
-		slots = append(slots, slot)
-		totalBytes += slot.Bytes
-		index++
-	}
 
 	// Create the proper history response structure using the new struct
 	response := SABnzbdCompleteHistoryResponse{
 		History: SABnzbdHistoryObject{
+			Status:    true,
 			Slots:     slots,
 			TotalSize: formatHumanSize(totalBytes),
 			MonthSize: "0 B",

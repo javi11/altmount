@@ -40,10 +40,11 @@ type SABnzbdServerStatsResponse struct {
 
 // SABnzbdQueueObject represents the nested queue object in the response
 type SABnzbdQueueObject struct {
+	Status    bool               `json:"status"`
 	Paused    bool               `json:"paused"`
 	Slots     []SABnzbdQueueSlot `json:"slots"`
 	Noofslots int                `json:"noofslots"`
-	Status    string             `json:"status"`
+	StatusStr string             `json:"status"`
 	Mbleft    string             `json:"mbleft"`
 	Mb        string             `json:"mb"`
 	Kbpersec  string             `json:"kbpersec"`
@@ -108,6 +109,7 @@ type SABnzbdHistorySlot struct {
 	Fail_message string   `json:"fail_message"`
 	Url_info     string   `json:"url_info"`
 	Bytes        int64    `json:"bytes"`
+	PPStatus     int      `json:"ppstatus"`
 	Meta         []string `json:"meta"`
 	Series       string   `json:"series"`
 	Md5sum       string   `json:"md5sum"`
@@ -228,6 +230,7 @@ type SABnzbdDeleteResponse struct {
 
 // SABnzbdHistoryObject represents the nested history object in the complete response
 type SABnzbdHistoryObject struct {
+	Status            bool                 `json:"status"`
 	Slots             []SABnzbdHistorySlot `json:"slots"`
 	TotalSize         string               `json:"total_size"`
 	MonthSize         string               `json:"month_size"`
@@ -469,6 +472,19 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		downloaded = sizeBytes
 	}
 
+	actionLine := ""
+	postproc := ""
+	ppStatus := 0
+	if item.Status == database.QueueStatusCompleted {
+		actionLine = "Finished"
+		postproc = "OK"
+		ppStatus = 0
+	} else if item.Status == database.QueueStatusFailed {
+		actionLine = "Failed"
+		postproc = "FAILED"
+		ppStatus = 1
+	}
+
 	return SABnzbdHistorySlot{
 		Index:        index,
 		NzoID:        fmt.Sprintf("%d", item.ID),
@@ -483,7 +499,7 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		Download:     jobName,
 		Storage:      finalPath,
 		Path:         finalPath,
-		Postproc:     "",
+		Postproc:     postproc,
 		Downloaded:   downloaded,
 		Completetime: completetime,
 		NzbAvg:       "",
@@ -493,11 +509,12 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		Fail_message: failMessage,
 		Url_info:     "",
 		Bytes:        sizeBytes,
+		PPStatus:     ppStatus,
 		Meta:         []string{},
 		Series:       "",
 		Md5sum:       "",
 		Password:     "",
-		ActionLine:   "",
+		ActionLine:   actionLine,
 		Size:         formatHumanSize(sizeBytes),
 		Loaded:       true,
 		Retry:        item.RetryCount,
