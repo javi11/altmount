@@ -1367,7 +1367,7 @@ func (s *Service) cleanupSonarrQueue(ctx context.Context, instance config.ArrsIn
 	var idsToRemove []int64
 	for _, q := range queue.Records {
 		// Check for completed items with warning status that are pending import
-		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
 			continue
 		}
 
@@ -1385,6 +1385,22 @@ func (s *Service) cleanupSonarrQueue(ctx context.Context, instance config.ArrsIn
 				break
 			}
 			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "No video files were found in the selected folder") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "Could not find file") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "Unexpected error processing file") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "Download doesn't contain intermediate path") {
 				shouldCleanup = true
 				break
 			}
@@ -1442,5 +1458,3 @@ func (s *Service) isPathManaged(path string, cfg *config.Config) bool {
 
 	return false
 }
-
-

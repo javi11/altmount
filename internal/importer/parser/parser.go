@@ -392,8 +392,10 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	// Fetch first segment of each file in parallel
 	for idx, file := range files {
 		// Capture the index and file for the goroutine
+		// Use &file to heap-allocate the copy, preventing use-after-free
+		// when the goroutine accesses it after the loop iteration ends
 		originalIndex := idx
-		fileToFetch := file
+		fileToFetch := &file
 
 		concPool.Go(func(ctx context.Context) (fetchResult, error) {
 			ctx = slogutil.With(ctx, "file", fileToFetch.Filename)
@@ -403,7 +405,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				return fetchResult{
 					segmentID: fileToFetch.Subject,
 					data: &FirstSegmentData{
-						File:                &fileToFetch,
+						File:                fileToFetch,
 						MissingFirstSegment: true,
 						OriginalIndex:       originalIndex,
 					},
@@ -423,7 +425,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				return fetchResult{
 					segmentID: firstSegment.ID,
 					data: &FirstSegmentData{
-						File:                &fileToFetch,
+						File:                fileToFetch,
 						MissingFirstSegment: true,
 						OriginalIndex:       originalIndex,
 					},
@@ -438,7 +440,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				return fetchResult{
 					segmentID: firstSegment.ID,
 					data: &FirstSegmentData{
-						File:                &fileToFetch,
+						File:                fileToFetch,
 						MissingFirstSegment: true,
 						OriginalIndex:       originalIndex,
 					},
@@ -460,7 +462,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				return fetchResult{
 					segmentID: firstSegment.ID,
 					data: &FirstSegmentData{
-						File:                &fileToFetch,
+						File:                fileToFetch,
 						MissingFirstSegment: true,
 						OriginalIndex:       originalIndex,
 					},
@@ -533,7 +535,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			return fetchResult{
 				segmentID: firstSegment.ID,
 				data: &FirstSegmentData{
-					File:          &fileToFetch,
+					File:          fileToFetch,
 					Headers:       headers,
 					RawBytes:      rawBytes,
 					OriginalIndex: originalIndex,
