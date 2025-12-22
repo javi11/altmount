@@ -8,87 +8,6 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 )
 
-// sampleProofPattern matches filenames that are likely just sample or proof files
-// It matches "sample" or "proof" as a standalone word.
-var sampleProofPattern = regexp.MustCompile(`(?i)\b(sample|proof)\b`)
-
-// isSampleOrProof checks if a filename looks like a sample or proof file
-func isSampleOrProof(filename string, size int64) bool {
-	// If file is larger than 200MB, it's likely not a sample/proof file
-	// even if it has "sample" or "proof" in the name.
-	if size > 200*1024*1024 {
-		return false
-	}
-
-	lower := strings.ToLower(filename)
-	
-	// Standalone "sample" or "proof" check with common separators
-	for _, word := range []string{"sample", "proof"} {
-		// Use a simple check for common patterns: 
-		// .word., -word-, _word_, word., .word, etc.
-		// We want to avoid matching words like "Proof" inside a larger title if it's not a standalone component.
-		
-		// Pattern: Word must be at the start or preceded by a separator
-		// AND must be at the end or followed by a separator
-		
-		startIdx := strings.Index(lower, word)
-		for startIdx != -1 {
-			endIdx := startIdx + len(word)
-			
-			// Check preceding character
-			validStart := startIdx == 0
-			if !validStart {
-				prevChar := lower[startIdx-1]
-				if prevChar == '.' || prevChar == '_' || prevChar == '-' || prevChar == ' ' {
-					validStart = true
-				}
-			}
-			
-			// Check following character
-			validEnd := endIdx == len(lower)
-			if !validEnd {
-				nextChar := lower[endIdx]
-				// Include dot, underscore, dash, space AND the extension dot
-				if nextChar == '.' || nextChar == '_' || nextChar == '-' || nextChar == ' ' {
-					validEnd = true
-				}
-			}
-			
-			if validStart && validEnd {
-				// Special case: If it's a long filename and the word is "proof" or "sample",
-				// it might still be a title. However, usually samples are short or have 
-				// "sample" very near the end.
-				
-				// For "Proof" specifically, it's very common in titles like "Spell of Proof".
-				// We'll allow it if it's preceded by "of ", "the ", etc.
-				if word == "proof" && startIdx >= 3 {
-					prefix := lower[max(0, startIdx-4) : startIdx]
-					if strings.Contains(prefix, "of ") || strings.Contains(prefix, ".of.") || 
-					   strings.Contains(prefix, "the ") || strings.Contains(prefix, ".the.") {
-						// Likely part of a title, skip this match and continue searching
-						startIdx = strings.Index(lower[endIdx:], word)
-						if startIdx != -1 {
-							startIdx += endIdx
-						}
-						continue
-					}
-				}
-
-				return true
-			}
-			
-			// Move to next occurrence
-			nextMatch := strings.Index(lower[endIdx:], word)
-			if nextMatch == -1 {
-				break
-			}
-			startIdx = endIdx + nextMatch
-		}
-	}
-	
-	return false
-}
-
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -104,16 +23,6 @@ func createExtensionMap(extensions []string) map[string]bool {
 		extMap[ext] = true
 	}
 	return extMap
-}
-
-// whitelistedExtensions are extensions that should bypass sample/proof checks
-// These are typically small files where "sample" or "proof" might appear in the name
-// but don't indicate the file itself is a media sample/proof to be rejected.
-var whitelistedExtensions = map[string]bool{
-	// Subtitles
-	".srt": true, ".sub": true, ".idx": true, ".vtt": true, ".ass": true, ".ssa": true,
-	// Images (covers, fanart, nfo)
-	".jpg": true, ".jpeg": true, ".png": true, ".nfo": true, ".tbn": true,
 }
 
 // IsAllowedFile checks if a filename has an allowed extension and is not blocked
@@ -138,7 +47,10 @@ func IsAllowedFile(filename string, size int64, allowedExtensions []string, bloc
 	}
 
 	// Always allow subtitle files (unless explicitly blocked above)
-	if ext == ".srt" || ext == ".sub" || ext == ".idx" || ext == ".vtt" || ext == ".ass" || ext == ".ssa" {
+	// These are typically small files where "sample" or "proof" might appear in the name
+	// but don't indicate the file itself is a media sample/proof to be rejected.
+	if ext == ".srt" || ext == ".sub" || ext == ".idx" || ext == ".vtt" || ext == ".ass" || ext == ".ssa" ||
+		ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".nfo" || ext == ".tbn" {
 		// Still check if the extension is in the allowed list if it's provided
 		if len(allowedExtensions) > 0 {
 			normalizedExt := strings.TrimPrefix(ext, ".")
