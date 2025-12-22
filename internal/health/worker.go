@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -728,12 +729,14 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 		return fmt.Errorf("failed to get health record for library path lookup: %w", err)
 	}
 
-		if item.LibraryPath != nil && *item.LibraryPath != "" {
-		pathForRescan = *item.LibraryPath
+	cfg := hw.configGetter()
+	var pathForRescan string
+	if healthRecord != nil && healthRecord.LibraryPath != nil && *healthRecord.LibraryPath != "" {
+		pathForRescan = *healthRecord.LibraryPath
 	} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 		pathForRescan = filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(filePath, "/"))
 	} else {
-		pathForRescan = filepath.Join(hw.configGetter().MountPath, strings.TrimPrefix(filePath, "/"))
+		pathForRescan = filepath.Join(cfg.MountPath, strings.TrimPrefix(filePath, "/"))
 	}
 
 	// Step 4: Trigger rescan through the ARR service
