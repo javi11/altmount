@@ -142,6 +142,10 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		allowedExtensions = *allowedExtensionsOverride
 	}
 
+	cfg := proc.configGetter()
+	blockedExtensions := cfg.Import.BlockedFileExtensions
+	blockedPatterns := cfg.Import.BlockedFilePatterns
+
 	// Update progress: starting
 	proc.updateProgress(queueID, 0)
 	// Step 1: Open and parse the file
@@ -208,23 +212,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -238,7 +242,6 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	return result, err
 }
 
-// processSingleFile handles single file imports
 func (proc *Processor) processSingleFile(
 	ctx context.Context,
 	virtualDir string,
@@ -247,6 +250,8 @@ func (proc *Processor) processSingleFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedExtensions []string,
+	blockedPatterns []string,
 ) (string, error) {
 	if len(regularFiles) == 0 {
 		return "", fmt.Errorf("no regular files to process")
@@ -280,6 +285,8 @@ func (proc *Processor) processSingleFile(
 		maxConnections,
 		proc.segmentSamplePercentage,
 		allowedExtensions,
+		blockedExtensions,
+		blockedPatterns,
 	)
 	if err != nil {
 		return "", err
@@ -297,6 +304,8 @@ func (proc *Processor) processMultiFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedExtensions []string,
+	blockedPatterns []string,
 ) (string, error) {
 	// Create NZB folder for multiple files
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(nzbPath), proc.metadataService)
@@ -321,6 +330,8 @@ func (proc *Processor) processMultiFile(
 		maxConnections,
 		proc.segmentSamplePercentage,
 		allowedExtensions,
+		blockedExtensions,
+		blockedPatterns,
 	); err != nil {
 		return "", err
 	}
@@ -338,6 +349,8 @@ func (proc *Processor) processRarArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedExtensions []string,
+	blockedPatterns []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -362,6 +375,8 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedExtensions,
+			blockedPatterns,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -399,6 +414,8 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedExtensions,
+			blockedPatterns,
 		)
 		if err != nil {
 			return "", err
@@ -419,6 +436,8 @@ func (proc *Processor) processSevenZipArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedFileExtensions []string,
+	blockedFilePatterns []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -443,6 +462,8 @@ func (proc *Processor) processSevenZipArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedFileExtensions,
+			blockedFilePatterns,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -480,6 +501,8 @@ func (proc *Processor) processSevenZipArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedFileExtensions,
+			blockedFilePatterns,
 		)
 		if err != nil {
 			return "", err

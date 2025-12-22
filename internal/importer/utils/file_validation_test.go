@@ -48,15 +48,29 @@ func TestIsAllowedFile_EmptyExtensions(t *testing.T) {
 			filename: "proof.movie.mkv",
 			expected: false,
 		},
-		{
-			name:     "empty filename is rejected",
-			filename: "",
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		        {
+		            name:     "empty filename is rejected",
+		            filename: "",
+		            expected: false,
+		        },
+		        {
+		            name:     "large file with sample name is allowed",
+		            filename: "movie.sample.mkv",
+		            expected: true,
+		        },
+		        		{
+		        			name:     "sample subtitle file is allowed",
+		        			filename: "movie.sample.srt",
+		        			expected: true,
+		        		},
+		        		{
+		        			name:     "sample image file is allowed",
+		        			filename: "proof.jpg",
+		        			expected: true,
+		        		},
+		        	}
+		        
+		        	for _, tt := range tests {		t.Run(tt.name, func(t *testing.T) {
 			result := IsAllowedFile(tt.filename, []string{})
 			assert.Equal(t, tt.expected, result)
 		})
@@ -64,7 +78,7 @@ func TestIsAllowedFile_EmptyExtensions(t *testing.T) {
 }
 
 func TestIsAllowedFile_WithExtensions(t *testing.T) {
-	allowedExts := []string{".mkv", ".mp4"}
+	allowedExts := []string{".mkv", ".mp4", ".srt"}
 
 	tests := []struct {
 		name     string
@@ -85,6 +99,11 @@ func TestIsAllowedFile_WithExtensions(t *testing.T) {
 			name:     "proof file with allowed extension is rejected",
 			filename: "movie.proof.mkv",
 			expected: false,
+		},
+		{
+			name:     "subtitle sample file is allowed",
+			filename: "movie.sample.srt",
+			expected: true,
 		},
 		{
 			name:     "disallowed extension fails",
@@ -115,7 +134,7 @@ func TestIsAllowedFile_WithExtensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsAllowedFile(tt.filename, allowedExts)
+			result := IsAllowedFile(tt.filename, 0, allowedExts)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -296,7 +315,7 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsAllowedFile(tt.filename, []string{})
+			result := IsAllowedFile(tt.filename, 0, []string{})
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -331,7 +350,7 @@ func TestIsAllowedFile_MixedDotFormats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsAllowedFile(tt.filename, tt.allowed)
+			result := IsAllowedFile(tt.filename, 0, tt.allowed)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

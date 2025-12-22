@@ -13,7 +13,13 @@ import (
 var sampleProofPattern = regexp.MustCompile(`(?i)\b(sample|proof)\b`)
 
 // isSampleOrProof checks if a filename looks like a sample or proof file
-func isSampleOrProof(filename string) bool {
+func isSampleOrProof(filename string, size int64) bool {
+	// If file is larger than 200MB, it's likely not a sample/proof file
+	// even if it has "sample" or "proof" in the name.
+	if size > 200*1024*1024 {
+		return false
+	}
+
 	lower := strings.ToLower(filename)
 	
 	// Standalone "sample" or "proof" check with common separators
@@ -100,16 +106,68 @@ func createExtensionMap(extensions []string) map[string]bool {
 	return extMap
 }
 
-// IsAllowedFile checks if a filename has an allowed extension
+// whitelistedExtensions are extensions that should bypass sample/proof checks
+// These are typically small files where "sample" or "proof" might appear in the name
+// but don't indicate the file itself is a media sample/proof to be rejected.
+var whitelistedExtensions = map[string]bool{
+	// Subtitles
+	".srt": true, ".sub": true, ".idx": true, ".vtt": true, ".ass": true, ".ssa": true,
+	// Images (covers, fanart, nfo)
+	".jpg": true, ".jpeg": true, ".png": true, ".nfo": true, ".tbn": true,
+}
+
+// IsAllowedFile checks if a filename has an allowed extension and is not blocked
 // If allowedExtensions is empty, all files are allowed
-func IsAllowedFile(filename string, allowedExtensions []string) bool {
+// blockedPatterns is a list of regex patterns to block files
+// blockedExtensions is a list of file extensions to block
+// size is used to prevent false positives for sample/proof checks on large files
+func IsAllowedFile(filename string, size int64, allowedExtensions []string, blockedPatterns []string, blockedExtensions []string) bool {
 	if filename == "" {
 		return false
 	}
 
-	// Reject files with sample/proof in their name
-	if isSampleOrProof(filename) {
-		return false
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	// Check if extension is explicitly blocked
+	if len(blockedExtensions) > 0 {
+		blockedExtMap := createExtensionMap(blockedExtensions)
+		normalizedExt := strings.TrimPrefix(ext, ".")
+		if blockedExtMap[normalizedExt] {
+			return false
+		}
+	}
+
+	// Always allow subtitle files (unless explicitly blocked above)
+	if ext == ".srt" || ext == ".sub" || ext == ".idx" || ext == ".vtt" || ext == ".ass" || ext == ".ssa" {
+		// Still check if the extension is in the allowed list if it's provided
+		if len(allowedExtensions) > 0 {
+			normalizedExt := strings.TrimPrefix(ext, ".")
+			extMap := createExtensionMap(allowedExtensions)
+			return extMap[normalizedExt]
+		}
+		return true
+	}
+
+	// Check blocked patterns (skip for large files if pattern is sample/proof related)
+	for _, pattern := range blockedPatterns {
+		// If the pattern is specifically for sample/proof, apply size check
+		if strings.Contains(strings.ToLower(pattern), "sample") || strings.Contains(strings.ToLower(pattern), "proof") {
+			if size > 200*1024*1024 {
+				continue
+			}
+		}
+		
+		if matched, _ := regexp.MatchString(pattern, filename); matched {
+			// Apply exceptions logic for common titles like "Spell of Proof"
+			lower := strings.ToLower(filename)
+			if strings.Contains(strings.ToLower(pattern), "proof") {
+				if strings.Contains(lower, "of proof") || strings.Contains(lower, ".of.proof") || 
+				   strings.Contains(lower, "the proof") || strings.Contains(lower, ".the.proof") {
+					continue
+				}
+			}
+			return false
+		}
 	}
 
 	// Empty list = allow all files
@@ -117,16 +175,16 @@ func IsAllowedFile(filename string, allowedExtensions []string) bool {
 		return true
 	}
 
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
+	normalizedExt := strings.TrimPrefix(ext, ".")
 	extMap := createExtensionMap(allowedExtensions)
-	return extMap[ext]
+	return extMap[normalizedExt]
 }
 
 // HasAllowedFilesInRegular checks if any regular (non-archive) files match allowed extensions
-// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
-func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtensions []string) bool {
+// If allowedExtensions is empty, all file types are allowed but blocked files are still rejected
+func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtensions []string, blockedPatterns []string, blockedExtensions []string) bool {
 	for _, file := range regularFiles {
-		if IsAllowedFile(file.Filename, allowedExtensions) {
+		if IsAllowedFile(file.Filename, file.Size, allowedExtensions, blockedPatterns, blockedExtensions) {
 			return true
 		}
 	}

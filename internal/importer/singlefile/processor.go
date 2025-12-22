@@ -27,18 +27,35 @@ func ProcessSingleFile(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
+	blockedFileExtensions []string,
+	blockedFilePatterns []string,
 ) (string, error) {
 	// Validate file extension before processing
-	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions) {
-		slog.WarnContext(ctx, "File does not match allowed extensions",
+	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) {
+		slog.WarnContext(ctx, "File does not match allowed extensions or is blocked",
 			"filename", file.Filename,
 			"allowed_extensions", allowedFileExtensions)
-		return "", fmt.Errorf("file '%s' does not match allowed extensions (allowed: %v)", file.Filename, allowedFileExtensions)
+		return "", fmt.Errorf("file '%s' does not match allowed extensions or is blocked (allowed: %v)", file.Filename, allowedFileExtensions)
 	}
 
 	// Create virtual file path
 	virtualFilePath := filepath.Join(virtualDir, file.Filename)
 	virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+	// Check if file already exists and is healthy
+	if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
+		if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
+			slog.InfoContext(ctx, "Skipping re-import of healthy file",
+				"file", file.Filename,
+				"virtual_path", virtualFilePath)
+			return virtualDir, nil
+		}
+	}
+
+	// Double check if this specific file is allowed/blocked
+	if !utils.IsAllowedFile(file.Filename, file.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) {
+		return "", fmt.Errorf("file '%s' is blocked", file.Filename)
+	}
 
 	// Validate segments
 	if err := validation.ValidateSegmentsForFile(
