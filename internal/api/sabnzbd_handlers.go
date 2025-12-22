@@ -452,19 +452,44 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 
 	// Convert to SABnzbd format
 	slots := make([]SABnzbdQueueSlot, 0, len(items))
+	var totalMb float64
+	var totalMbLeft float64
+
 	for i, item := range items {
 		if item.Status == database.QueueStatusFallback {
 			continue
 		}
 
-		slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
+		slot := ToSABnzbdQueueSlot(item, i, s.progressBroadcaster)
+		slots = append(slots, slot)
+
+		if mb, err := strconv.ParseFloat(slot.Mb, 64); err == nil {
+			totalMb += mb
+		}
+		if mbLeft, err := strconv.ParseFloat(slot.Mbleft, 64); err == nil {
+			totalMbLeft += mbLeft
+		}
+	}
+
+	status := "Idle"
+	if len(slots) > 0 {
+		status = "Downloading"
+	}
+	if s.importerService.IsPaused() {
+		status = "Paused"
 	}
 
 	response := SABnzbdQueueResponse{
 		Status: true,
 		Queue: SABnzbdQueueObject{
-			Paused: s.importerService.IsPaused(),
-			Slots:  slots,
+			Paused:    s.importerService.IsPaused(),
+			Slots:     slots,
+			Noofslots: len(slots),
+			Status:    status,
+			Mbleft:    fmt.Sprintf("%.2f", totalMbLeft),
+			Mb:        fmt.Sprintf("%.2f", totalMb),
+			Kbpersec:  "0.00",
+			Version:   "4.5.0",
 		},
 	}
 
@@ -557,6 +582,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
 			DaySize:   "0 B",
+			Noofslots: len(slots),
 		},
 	}
 
@@ -604,11 +630,18 @@ func (s *Server) handleSABnzbdHistoryDelete(c *fiber.Ctx) error {
 func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	// Get queue information
 	var slots []SABnzbdQueueSlot
+	var totalMbLeft float64
 	if s.queueRepo != nil {
 		items, err := s.queueRepo.ListActiveQueueItems(c.Context(), "", "", 50, 0, "updated_at", "desc")
 		if err == nil {
 			for i, item := range items {
-				slots = append(slots, ToSABnzbdQueueSlot(item, i, s.progressBroadcaster))
+				slot := ToSABnzbdQueueSlot(item, i, s.progressBroadcaster)
+				slots = append(slots, slot)
+
+				// Parse mbleft from slot
+				if mbLeft, err := strconv.ParseFloat(slot.Mbleft, 64); err == nil {
+					totalMbLeft += mbLeft
+				}
 			}
 		}
 	}
@@ -625,8 +658,8 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		ActiveDownload:  len(slots) > 0,
 		Paused:          s.importerService != nil && s.importerService.IsPaused(),
 		PauseInt:        0,
-		Remaining:       "0 B",
-		MbLeft:          0,
+		Remaining:       fmt.Sprintf("%.1f MB", totalMbLeft),
+		MbLeft:          totalMbLeft,
 		Diskspace1:      "0 B",
 		Diskspace2:      "0 B",
 		DiskspaceTotal1: "0 B",
@@ -656,8 +689,9 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 		cfg := s.configManager.GetConfig()
 
 		// Build misc configuration
+		itemBasePath := s.calculateItemBasePath()
 		sabnzbdConfig.Misc = SABnzbdMiscConfig{
-			CompleteDir:            filepath.Join(cfg.MountPath, cfg.SABnzbd.CompleteDir),
+			CompleteDir:            itemBasePath,
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",
