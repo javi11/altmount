@@ -439,27 +439,29 @@ export function ConfigurationPage() {
 						<div className="card-body p-4">
 							<h3 className="mb-4 font-semibold">Configuration Sections</h3>
 							<ul className="menu rounded-box bg-base-200">
-								{sections.map(([key, section]) => {
-									const IconComponent = getIconComponent(section.icon);
-									return (
-										<li key={key}>
-											<button
-												type="button"
-												className={activeSection === key ? "active" : ""}
-												onClick={() => navigate(`/config/${key}`)}
-											>
-												<IconComponent className="h-5 w-5" />
-												<div className="min-w-0 flex-1">
-													<div className="font-medium">{section.title}</div>
-													<div className="truncate text-xs opacity-70">{section.description}</div>
-												</div>
-												{!section.canEdit && (
-													<span className="badge badge-ghost badge-xs">Read Only</span>
-												)}
-											</button>
-										</li>
-									);
-								})}
+								{sections
+									.filter(([_, section]) => !section.hidden)
+									.map(([key, section]) => {
+										const IconComponent = getIconComponent(section.icon);
+										return (
+											<li key={key}>
+												<button
+													type="button"
+													className={activeSection === key ? "active" : ""}
+													onClick={() => navigate(`/config/${key}`)}
+												>
+													<IconComponent className="h-5 w-5" />
+													<div className="min-w-0 flex-1">
+														<div className="font-medium">{section.title}</div>
+														<div className="truncate text-xs opacity-70">{section.description}</div>
+													</div>
+													{!section.canEdit && (
+														<span className="badge badge-ghost badge-xs">Read Only</span>
+													)}
+												</button>
+											</li>
+										);
+									})}
 							</ul>
 						</div>
 					</div>

@@ -30,8 +30,13 @@ func TestIsAllowedFile_EmptyExtensions(t *testing.T) {
 		},
 		{
 			name:     "empty extensions rejects file with sample in middle",
-			filename: "sample.movie.mkv",
+			filename: "movie.sample.mkv",
 			expected: false,
+		},
+		{
+			name:     "empty extensions allows file with merged sample",
+			filename: "samplemovie.mkv",
+			expected: true,
 		},
 		{
 			name:     "empty extensions rejects file with SAMPLE uppercase",
@@ -48,18 +53,37 @@ func TestIsAllowedFile_EmptyExtensions(t *testing.T) {
 			filename: "",
 			expected: false,
 		},
+		{
+			name:     "large file with sample name is allowed",
+			filename: "movie.sample.mkv",
+			expected: true,
+		},
+		{
+			name:     "sample subtitle file is allowed",
+			filename: "movie.sample.srt",
+			expected: true,
+		},
+		{
+			name:     "sample image file is allowed",
+			filename: "proof.jpg",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsAllowedFile(tt.filename, []string{})
+			size := int64(0)
+			if tt.name == "large file with sample name is allowed" {
+				size = 201 * 1024 * 1024 // > 200MB
+			}
+			result := IsAllowedFile(tt.filename, size, []string{})
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestIsAllowedFile_WithExtensions(t *testing.T) {
-	allowedExts := []string{".mkv", ".mp4"}
+	allowedExts := []string{".mkv", ".mp4", ".srt"}
 
 	tests := []struct {
 		name     string
@@ -80,6 +104,11 @@ func TestIsAllowedFile_WithExtensions(t *testing.T) {
 			name:     "proof file with allowed extension is rejected",
 			filename: "movie.proof.mkv",
 			expected: false,
+		},
+		{
+			name:     "subtitle sample file is allowed",
+			filename: "movie.sample.srt",
+			expected: true,
 		},
 		{
 			name:     "disallowed extension fails",
@@ -110,7 +139,7 @@ func TestIsAllowedFile_WithExtensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsAllowedFile(tt.filename, allowedExts)
+			result := IsAllowedFile(tt.filename, 0, allowedExts)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -125,24 +154,24 @@ func TestHasAllowedFilesInRegular_EmptyExtensions(t *testing.T) {
 		{
 			name: "empty extensions allows regular files",
 			files: []parser.ParsedFile{
-				{Filename: "movie.mkv"},
-				{Filename: "video.mp4"},
+				{Filename: "movie.mkv", Size: 500 * 1024 * 1024},
+				{Filename: "video.mp4", Size: 500 * 1024 * 1024},
 			},
 			expected: true,
 		},
 		{
 			name: "empty extensions rejects only sample files",
 			files: []parser.ParsedFile{
-				{Filename: "sample.movie.mkv"},
-				{Filename: "proof.video.mp4"},
+				{Filename: "sample.movie.mkv", Size: 10 * 1024 * 1024},
+				{Filename: "proof.video.mp4", Size: 10 * 1024 * 1024},
 			},
 			expected: false,
 		},
 		{
 			name: "empty extensions allows at least one non-sample",
 			files: []parser.ParsedFile{
-				{Filename: "movie.mkv"},
-				{Filename: "sample.movie.mkv"},
+				{Filename: "movie.mkv", Size: 500 * 1024 * 1024},
+				{Filename: "sample.movie.mkv", Size: 10 * 1024 * 1024},
 			},
 			expected: true,
 		},
@@ -160,7 +189,6 @@ func TestHasAllowedFilesInRegular_EmptyExtensions(t *testing.T) {
 		})
 	}
 }
-
 func TestHasAllowedFilesInRegular_WithExtensions(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -171,8 +199,8 @@ func TestHasAllowedFilesInRegular_WithExtensions(t *testing.T) {
 		{
 			name: "has matching file",
 			files: []parser.ParsedFile{
-				{Filename: "movie.mkv"},
-				{Filename: "video.mp4"},
+				{Filename: "movie.mkv", Size: 500 * 1024 * 1024},
+				{Filename: "video.mp4", Size: 500 * 1024 * 1024},
 			},
 			allowed:  []string{".mkv"},
 			expected: true,
@@ -180,8 +208,8 @@ func TestHasAllowedFilesInRegular_WithExtensions(t *testing.T) {
 		{
 			name: "no matching files",
 			files: []parser.ParsedFile{
-				{Filename: "movie.avi"},
-				{Filename: "video.wmv"},
+				{Filename: "movie.avi", Size: 500 * 1024 * 1024},
+				{Filename: "video.wmv", Size: 500 * 1024 * 1024},
 			},
 			allowed:  []string{".mkv", ".mp4"},
 			expected: false,
@@ -189,8 +217,8 @@ func TestHasAllowedFilesInRegular_WithExtensions(t *testing.T) {
 		{
 			name: "sample files are filtered out",
 			files: []parser.ParsedFile{
-				{Filename: "movie.sample.mkv"},
-				{Filename: "video.proof.mkv"},
+				{Filename: "movie.sample.mkv", Size: 10 * 1024 * 1024},
+				{Filename: "video.proof.mkv", Size: 10 * 1024 * 1024},
 			},
 			allowed:  []string{".mkv"},
 			expected: false,
@@ -198,9 +226,9 @@ func TestHasAllowedFilesInRegular_WithExtensions(t *testing.T) {
 		{
 			name: "mixed files with at least one valid",
 			files: []parser.ParsedFile{
-				{Filename: "movie.mkv"},
-				{Filename: "video.avi"},
-				{Filename: "sample.mkv"},
+				{Filename: "movie.mkv", Size: 500 * 1024 * 1024},
+				{Filename: "video.avi", Size: 500 * 1024 * 1024},
+				{Filename: "sample.mkv", Size: 10 * 1024 * 1024},
 			},
 			allowed:  []string{".mkv"},
 			expected: true,
@@ -228,13 +256,13 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "sample at word boundary",
-			filename: "movie-sample.mkv",
+			name:     "sample at dot boundary",
+			filename: "movie.sample.mkv",
 			expected: false,
 		},
 		{
-			name:     "proof at word boundary",
-			filename: "movie_proof.mkv",
+			name:     "proof at dash boundary",
+			filename: "movie-proof.mkv",
 			expected: false,
 		},
 		{
@@ -248,14 +276,39 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "sample at start of filename is rejected",
-			filename: "samplemovie.mkv",
+			name:     "sample at start of filename with dot is rejected",
+			filename: "sample.movie.mkv",
 			expected: false,
 		},
 		{
-			name:     "proof at start of filename is rejected",
+			name:     "proof at start of filename with underscore is allowed (word char)",
+			filename: "proof_test.mkv",
+			expected: true,
+		},
+		{
+			name:     "sample merged with word is allowed",
+			filename: "samplemovie.mkv",
+			expected: true,
+		},
+		{
+			name:     "proof merged with word is allowed",
 			filename: "prooftest.mkv",
+			expected: true,
+		},
+		{
+			name:     "title with Proof is rejected",
+			filename: "Bye.Bye.Earth.S01E04.Spell.of.Proof.Still.Distant.1080p.mkv",
 			expected: false,
+		},
+		{
+			name:     "title with of proof is rejected",
+			filename: "the.spell.of.proof.mkv",
+			expected: false,
+		},
+		{
+			name:     "title with Samples is allowed",
+			filename: "SpongeBob.SquarePants.S08E18.Free.Samples.mkv",
+			expected: true,
 		},
 		{
 			name:     "file without sample or proof passes",
@@ -266,7 +319,7 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsAllowedFile(tt.filename, []string{})
+			result := IsAllowedFile(tt.filename, 0, []string{})
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -301,7 +354,7 @@ func TestIsAllowedFile_MixedDotFormats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsAllowedFile(tt.filename, tt.allowed)
+			result := IsAllowedFile(tt.filename, 0, tt.allowed)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

@@ -20,6 +20,9 @@ import { PathDisplay } from "../components/ui/PathDisplay";
 import { StatusBadge } from "../components/ui/StatusBadge";
 import { useConfirm } from "../contexts/ModalContext";
 import {
+	useAddTestQueueItem,
+	useBulkCancelQueueItems,
+	useCancelQueueItem,
 	useClearCompletedQueue,
 	useClearFailedQueue,
 	useClearPendingQueue,
@@ -29,9 +32,6 @@ import {
 	useQueueStats,
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
-	useBulkCancelQueueItems,
-	useCancelQueueItem,
-	useAddTestQueueItem,
 } from "../hooks/useApi";
 import { useProgressStream } from "../hooks/useProgressStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
@@ -503,10 +503,7 @@ export function QueuePage() {
 							<PlayCircle className="h-4 w-4" />
 							Add Test NZB
 						</div>
-						<ul
-							tabIndex={0}
-							className="menu dropdown-content z-[1] w-36 rounded-box bg-base-100 p-2 shadow"
-						>
+						<ul className="menu dropdown-content z-[1] w-36 rounded-box bg-base-100 p-2 shadow">
 							<li>
 								<button
 									type="button"

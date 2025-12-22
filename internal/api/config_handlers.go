@@ -120,9 +120,12 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get current config to use as base for defaults/missing fields
+	currentConfig := s.configManager.GetConfig()
+	newConfig := currentConfig.DeepCopy()
+
 	// Decode directly into config structure
-	var newConfig config.Config
-	if err := c.BodyParser(&newConfig); err != nil {
+	if err := c.BodyParser(newConfig); err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Invalid JSON in request body",
@@ -130,8 +133,10 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 		})
 	}
 
+	slog.DebugContext(c.Context(), "Updating configuration")
+
 	// Validate the new configuration with API restrictions
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Configuration validation failed",
@@ -140,7 +145,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	}
 
 	// Update the configuration
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
 			"message": "Failed to update configuration",
@@ -149,7 +154,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	}
 
 	// Ensure SABnzbd category directories exist
-	if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
+	if err := s.ensureSABnzbdCategoryDirectories(newConfig); err != nil {
 		// Log the error but don't fail the update
 		slog.WarnContext(c.Context(), "Failed to create SABnzbd category directories", "error", err)
 	}
@@ -169,7 +174,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	// Get API key for response
 	apiKey := s.getAPIKeyForConfig(c)
 
-	response := ToConfigAPIResponse(&newConfig, apiKey)
+	response := ToConfigAPIResponse(newConfig, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,
@@ -207,8 +212,8 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	}
 
 	// Create a copy and decode partial updates directly
-	newConfig := *currentConfig // Start with current config
-	if err := c.BodyParser(&newConfig); err != nil {
+	newConfig := currentConfig.DeepCopy()
+	if err := c.BodyParser(newConfig); err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Invalid JSON in request body",
@@ -216,8 +221,11 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		})
 	}
 
+	slog.DebugContext(c.Context(), "Patching configuration section", 
+		"section", section)
+
 	// Validate the new configuration with API restrictions
-	if err := s.configManager.ValidateConfigUpdate(&newConfig); err != nil {
+	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Configuration validation failed",
@@ -226,7 +234,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	}
 
 	// Update the configuration
-	if err := s.configManager.UpdateConfig(&newConfig); err != nil {
+	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
 			"message": "Failed to update configuration",
@@ -236,7 +244,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 
 	// Ensure SABnzbd category directories exist if SABnzbd section was updated
 	if section == "sabnzbd" || section == "" {
-		if err := s.ensureSABnzbdCategoryDirectories(&newConfig); err != nil {
+		if err := s.ensureSABnzbdCategoryDirectories(newConfig); err != nil {
 			// Log the error but don't fail the update
 			slog.WarnContext(c.Context(), "Failed to create SABnzbd category directories", "error", err)
 		}
@@ -259,7 +267,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	// Get API key for response
 	apiKey := s.getAPIKeyForConfig(c)
 
-	response := ToConfigAPIResponse(&newConfig, apiKey)
+	response := ToConfigAPIResponse(newConfig, apiKey)
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    response,

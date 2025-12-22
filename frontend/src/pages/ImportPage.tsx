@@ -8,8 +8,9 @@ import {
 	Play,
 	Square,
 	Upload,
+	UploadCloud,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileBrowserModal } from "../components/files/FileBrowserModal";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { useToast } from "../contexts/ToastContext";
@@ -19,10 +20,11 @@ import {
 	useNzbdavImportStatus,
 	useScanStatus,
 	useStartManualScan,
+	useUploadToQueue,
 } from "../hooks/useApi";
 import { ScanStatus } from "../types/api";
 
-type ImportTab = "nzbdav" | "directory";
+type ImportTab = "nzbdav" | "directory" | "upload";
 
 export function ImportPage() {
 	const [activeTab, setActiveTab] = useState<ImportTab>("nzbdav");
@@ -32,7 +34,7 @@ export function ImportPage() {
 			<div>
 				<h1 className="font-bold text-3xl">Import</h1>
 				<p className="text-base-content/70">
-					Import existing data from NZBDav database or scan a directory for NZB files.
+					Import existing data from NZBDav database, scan a directory, or upload NZB files.
 				</p>
 			</div>
 
@@ -56,11 +58,152 @@ export function ImportPage() {
 					<FolderOpen className="h-4 w-4" />
 					From Directory
 				</button>
+				<button
+					type="button"
+					role="tab"
+					className={`tab gap-2 ${activeTab === "upload" ? "tab-active" : ""}`}
+					onClick={() => setActiveTab("upload")}
+				>
+					<UploadCloud className="h-4 w-4" />
+					Upload NZBs
+				</button>
 			</div>
 
 			{/* Tab Content */}
 			{activeTab === "nzbdav" && <NzbDavImportSection />}
 			{activeTab === "directory" && <DirectoryScanSection />}
+			{activeTab === "upload" && <UploadSection />}
+		</div>
+	);
+}
+
+function UploadSection() {
+	const [isUploading, setIsUploading] = useState(false);
+	const [progress, setProgress] = useState({ current: 0, total: 0, successes: 0, failures: 0 });
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const dirInputRef = useRef<HTMLInputElement>(null);
+	const { showToast } = useToast();
+	const uploadMutation = useUploadToQueue();
+
+	const handleUpload = async (files: FileList | null) => {
+		if (!files || files.length === 0) return;
+
+		// Filter for NZB files
+		const nzbFiles = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".nzb"));
+
+		if (nzbFiles.length === 0) {
+			showToast({
+				title: "No NZB Files Found",
+				message: "Please select files with .nzb extension.",
+				type: "warning",
+			});
+			return;
+		}
+
+		setIsUploading(true);
+		setProgress({ current: 0, total: nzbFiles.length, successes: 0, failures: 0 });
+
+		let successes = 0;
+		let failures = 0;
+
+		for (let i = 0; i < nzbFiles.length; i++) {
+			const file = nzbFiles[i];
+			try {
+				await uploadMutation.mutateAsync({
+					file: file,
+					priority: 0, // Normal priority
+				});
+				successes++;
+			} catch (error) {
+				console.error(`Failed to upload ${file.name}:`, error);
+				failures++;
+			}
+			setProgress((prev) => ({ ...prev, current: i + 1, successes, failures }));
+		}
+
+		setIsUploading(false);
+		showToast({
+			title: "Upload Complete",
+			message: `Successfully uploaded ${successes} files. ${failures} failed.`,
+			type: failures > 0 ? "warning" : "success",
+		});
+
+		// Reset inputs
+		if (fileInputRef.current) fileInputRef.current.value = "";
+		if (dirInputRef.current) dirInputRef.current.value = "";
+	};
+
+	return (
+		<div className="card max-w-2xl bg-base-100 shadow-lg">
+			<div className="card-body">
+				<div className="mb-4 flex items-center gap-2">
+					<UploadCloud className="h-5 w-5 text-primary" />
+					<h2 className="card-title">Upload NZB Files</h2>
+				</div>
+				<p className="mb-4 text-base-content/70 text-sm">
+					Upload NZB files directly from your computer. You can select multiple files or a folder.
+				</p>
+
+				<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+					{/* Select Files */}
+					<div className="form-control">
+						<label className="label">
+							<span className="label-text font-medium">Select Files</span>
+						</label>
+						<input
+							type="file"
+							multiple
+							accept=".nzb"
+							className="file-input file-input-bordered w-full"
+							onChange={(e) => handleUpload(e.target.files)}
+							disabled={isUploading}
+							ref={fileInputRef}
+						/>
+						<label className="label">
+							<span className="label-text-alt">Select individual .nzb files</span>
+						</label>
+					</div>
+
+					{/* Select Folder */}
+					<div className="form-control">
+						<label className="label">
+							<span className="label-text font-medium">Select Folder</span>
+						</label>
+						<input
+							type="file"
+							// @ts-expect-error - webkitdirectory is non-standard but supported
+							webkitdirectory=""
+							directory=""
+							className="file-input file-input-bordered w-full"
+							onChange={(e) => handleUpload(e.target.files)}
+							disabled={isUploading}
+							ref={dirInputRef}
+						/>
+						<label className="label">
+							<span className="label-text-alt">Upload all .nzb files in a folder</span>
+						</label>
+					</div>
+				</div>
+
+				{isUploading && (
+					<div className="mt-6 space-y-2">
+						<div className="flex justify-between text-sm">
+							<span>Uploading...</span>
+							<span>
+								{progress.current} / {progress.total}
+							</span>
+						</div>
+						<progress
+							className="progress progress-primary w-full"
+							value={progress.current}
+							max={progress.total}
+						/>
+						<div className="text-base-content/70 text-xs">
+							Success: {progress.successes} | Failed: {progress.failures}
+						</div>
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }
@@ -92,7 +235,7 @@ function NzbDavImportSection() {
 
 		const formData = new FormData();
 		formData.append("rootFolder", rootFolder);
-		
+
 		if (inputMethod === "server") {
 			formData.append("dbPath", selectedDbPath);
 		} else if (selectedFile) {
@@ -172,7 +315,7 @@ function NzbDavImportSection() {
 						Import your existing NZBDav database to populate the library.
 					</p>
 
-					{(isRunning || isCanceling) ? (
+					{isRunning || isCanceling ? (
 						<div className="space-y-4 rounded-lg bg-base-200 p-6">
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-3">
@@ -185,13 +328,13 @@ function NzbDavImportSection() {
 										<h3 className="font-bold">
 											{isCanceling ? "Canceling Import..." : "Importing Database..."}
 										</h3>
-										<p className="text-xs text-base-content/70">
+										<p className="text-base-content/70 text-xs">
 											This process runs in the background.
 										</p>
 									</div>
 								</div>
 								{!isCanceling && (
-									<button 
+									<button
 										className="btn btn-sm btn-warning"
 										onClick={handleCancel}
 										disabled={cancelImport.isPending}
@@ -208,11 +351,13 @@ function NzbDavImportSection() {
 								</div>
 								<div className="stat place-items-center">
 									<div className="stat-title">Added</div>
-									<div className="stat-value text-success text-base">{importStatus?.added || 0}</div>
+									<div className="stat-value text-base text-success">
+										{importStatus?.added || 0}
+									</div>
 								</div>
 								<div className="stat place-items-center">
 									<div className="stat-title">Failed</div>
-									<div className="stat-value text-error text-base">{importStatus?.failed || 0}</div>
+									<div className="stat-value text-base text-error">{importStatus?.failed || 0}</div>
 								</div>
 							</div>
 
@@ -243,7 +388,7 @@ function NzbDavImportSection() {
 								</p>
 							</fieldset>
 
-							<div className="flex gap-4 mb-2">
+							<div className="mb-2 flex gap-4">
 								<label className="label cursor-pointer gap-2">
 									<input
 										type="radio"
@@ -310,7 +455,11 @@ function NzbDavImportSection() {
 								<button
 									type="submit"
 									className="btn btn-primary"
-									disabled={isLoading || !rootFolder || (inputMethod === "server" ? !selectedDbPath : !selectedFile)}
+									disabled={
+										isLoading ||
+										!rootFolder ||
+										(inputMethod === "server" ? !selectedDbPath : !selectedFile)
+									}
 								>
 									{isLoading ? (
 										<span className="loading loading-spinner" />
@@ -338,6 +487,7 @@ function NzbDavImportSection() {
 function DirectoryScanSection() {
 	const [scanPath, setScanPath] = useState("");
 	const [validationError, setValidationError] = useState("");
+	const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);
 
 	const { data: scanStatus } = useScanStatus(2000);
 	const startScan = useStartManualScan();
@@ -388,6 +538,10 @@ function DirectoryScanSection() {
 		}
 	};
 
+	const handlePathSelect = (path: string) => {
+		setScanPath(path);
+	};
+
 	const getProgressPercentage = (): number => {
 		if (!scanStatus || scanStatus.files_found === 0) return 0;
 		return Math.min((scanStatus.files_added / scanStatus.files_found) * 100, 100);
@@ -422,14 +576,24 @@ function DirectoryScanSection() {
 				<div className="mb-4 flex flex-col gap-4 sm:flex-row">
 					<fieldset className="fieldset flex-1">
 						<legend className="fieldset-legend">Directory Path</legend>
-						<input
-							type="text"
-							placeholder="/path/to/directory"
-							className={`input ${validationError ? "input-error" : ""}`}
-							value={scanPath}
-							onChange={(e) => setScanPath(e.target.value)}
-							disabled={isScanning || isCanceling}
-						/>
+						<div className="join w-full">
+							<input
+								type="text"
+								placeholder="/path/to/directory"
+								className={`input join-item w-full ${validationError ? "input-error" : ""}`}
+								value={scanPath}
+								onChange={(e) => setScanPath(e.target.value)}
+								disabled={isScanning || isCanceling}
+							/>
+							<button
+								type="button"
+								className="btn btn-primary join-item"
+								onClick={() => setIsFileBrowserOpen(true)}
+								disabled={isScanning || isCanceling}
+							>
+								Browse
+							</button>
+						</div>
 						{validationError && <p className="label text-error">{validationError}</p>}
 					</fieldset>
 
@@ -534,6 +698,14 @@ function DirectoryScanSection() {
 					)}
 				</div>
 			</div>
+
+			<FileBrowserModal
+				isOpen={isFileBrowserOpen}
+				onClose={() => setIsFileBrowserOpen(false)}
+				onSelect={handlePathSelect}
+				title="Select Directory to Scan"
+				allowDirectorySelection={true}
+			/>
 		</div>
 	);
 }

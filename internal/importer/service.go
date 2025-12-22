@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -23,13 +24,16 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/nzbdav"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/javi11/nzbparser"
+	"google.golang.org/protobuf/proto"
 )
 
 // ServiceConfig holds configuration for the NZB import service
@@ -126,9 +130,13 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
+	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
+	if readTimeout == 0 {
+		readTimeout = 5 * time.Minute
+	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, broadcaster)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -225,6 +233,8 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	// Cancel all goroutines
 	s.cancel()
+	s.running = false
+	s.mu.Unlock()
 
 	// Release lock BEFORE waiting to avoid deadlock
 	// Workers call IsPaused() which needs this lock
@@ -252,9 +262,10 @@ func (s *Service) Stop(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	// Recreate context for potential restart
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
-	s.running = false
 	s.log.InfoContext(ctx, "NZB import service stopped")
 
 	return nil
@@ -441,92 +452,183 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 			return
 		}
 
-		for {
-			select {
-			case <-importCtx.Done():
-				s.log.InfoContext(importCtx, "Import cancelled")
-				return // defer will drain remaining channel items
-			case res, ok := <-nzbChan:
-				if !ok {
-					nzbChan = nil
-					break
-				}
+		// Create workers
+		numWorkers := 20 // 20 parallel workers for file creation
+		var workerWg sync.WaitGroup
+		batchChan := make(chan *database.ImportQueueItem, 100)
 
+		// Start batch processor
+		var batchWg sync.WaitGroup
+		batchWg.Add(1)
+		go func() {
+			defer batchWg.Done()
+			s.processQueueBatch(importCtx, batchChan)
+		}()
+
+		// Start workers
+		for i := 0; i < numWorkers; i++ {
+			workerWg.Add(1)
+			go func() {
+				defer workerWg.Done()
+				for {
+					select {
+					case <-importCtx.Done():
+						return
+					case res, ok := <-nzbChan:
+						if !ok {
+							return
+						}
+
+						s.importMu.Lock()
+						s.importInfo.Total++
+						s.importMu.Unlock()
+
+						item, err := s.createNzbFileAndPrepareItem(res, rootFolder, nzbTempDir)
+						if err != nil {
+							s.log.ErrorContext(importCtx, "Failed to prepare item", "file", res.Name, "error", err)
+							s.importMu.Lock()
+							s.importInfo.Failed++
+							s.importMu.Unlock()
+							continue
+						}
+
+						select {
+						case batchChan <- item:
+						case <-importCtx.Done():
+							return
+						}
+					}
+				}
+			}()
+		}
+
+		// Wait for workers to finish processing nzbChan
+		workerWg.Wait()
+		close(batchChan)
+		batchWg.Wait()
+
+		// Check for parser errors
+		select {
+		case err := <-errChan:
+			if err != nil {
+				s.log.ErrorContext(importCtx, "Error during NZBDav parsing", "error", err)
 				s.importMu.Lock()
-				s.importInfo.Total++
+				msg := err.Error()
+				s.importInfo.LastError = &msg
 				s.importMu.Unlock()
-
-				// Create Temp NZB File
-				nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
-				nzbPath := filepath.Join(nzbTempDir, nzbFileName)
-
-				outFile, err := os.Create(nzbPath)
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to create temp NZB file", "file", nzbFileName, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					continue
-				}
-
-				_, err = io.Copy(outFile, res.Content)
-				outFile.Close()
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to write temp NZB file content", "file", nzbFileName, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					os.Remove(nzbPath)
-					continue
-				}
-
-				// Determine Category and Relative Path
-				targetCategory := "other"
-				lowerCat := strings.ToLower(res.Category)
-				if strings.Contains(lowerCat, "movie") {
-					targetCategory = "movies"
-				} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
-					targetCategory = "tv"
-				}
-
-				if res.RelPath != "" {
-					targetCategory = filepath.Join(targetCategory, res.RelPath)
-				}
-
-				relPath := rootFolder
-				priority := database.QueuePriorityNormal
-
-				_, err = s.AddToQueue(nzbPath, &relPath, &targetCategory, &priority)
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Failed to add to queue", "release", res.Name, "error", err)
-					s.importMu.Lock()
-					s.importInfo.Failed++
-					s.importMu.Unlock()
-					os.Remove(nzbPath)
-				} else {
-					s.importMu.Lock()
-					s.importInfo.Added++
-					s.importMu.Unlock()
-				}
-
-			case err := <-errChan:
-				if err != nil {
-					s.log.ErrorContext(importCtx, "Error during NZBDav parsing", "error", err)
-					s.importMu.Lock()
-					msg := err.Error()
-					s.importInfo.LastError = &msg
-					s.importMu.Unlock()
-				}
-				errChan = nil
 			}
-
-			if nzbChan == nil && errChan == nil {
-				break
-			}
+		default:
 		}
 	}()
 
 	return nil
+}
+
+func (s *Service) processQueueBatch(ctx context.Context, batchChan <-chan *database.ImportQueueItem) {
+	var batch []*database.ImportQueueItem
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	insertBatch := func() {
+		if len(batch) > 0 {
+			if err := s.database.Repository.AddBatchToQueue(ctx, batch); err != nil {
+				s.log.ErrorContext(ctx, "Failed to add batch to queue", "count", len(batch), "error", err)
+				s.importMu.Lock()
+				s.importInfo.Failed += len(batch)
+				s.importMu.Unlock()
+			} else {
+				s.importMu.Lock()
+				s.importInfo.Added += len(batch)
+				s.importMu.Unlock()
+			}
+			batch = nil // Reset batch
+		}
+	}
+
+	for {
+		select {
+		case item, ok := <-batchChan:
+			if !ok {
+				// Channel closed, drain remaining batch
+				insertBatch()
+				return
+			}
+			batch = append(batch, item)
+			if len(batch) >= 100 { // Batch size
+				insertBatch()
+			}
+		case <-ticker.C:
+			insertBatch()
+		case <-ctx.Done():
+			insertBatch()
+			return
+		}
+	}
+}
+
+func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
+	// Create Temp NZB File
+	// Use ID to ensure uniqueness and avoid collisions with releases having the same name in the temp directory
+	// but don't include it in the filename to avoid it appearing in the final folder/file names
+	nzbSubDir := filepath.Join(nzbTempDir, sanitizeFilename(res.ID))
+	if err := os.MkdirAll(nzbSubDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create temp NZB subdirectory: %w", err)
+	}
+
+	nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
+	nzbPath := filepath.Join(nzbSubDir, nzbFileName)
+
+	outFile, err := os.Create(nzbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp NZB file: %w", err)
+	}
+
+	// Copy content
+	_, err = io.Copy(outFile, res.Content)
+	outFile.Close()
+	if err != nil {
+		os.Remove(nzbPath)
+		return nil, fmt.Errorf("failed to write temp NZB file content: %w", err)
+	}
+
+	// Determine Category and Relative Path
+	targetCategory := "other"
+	lowerCat := strings.ToLower(res.Category)
+	if strings.Contains(lowerCat, "movie") {
+		targetCategory = "movies"
+	} else if strings.Contains(lowerCat, "tv") || strings.Contains(lowerCat, "series") {
+		targetCategory = "tv"
+	}
+
+	if res.RelPath != "" {
+		targetCategory = filepath.Join(targetCategory, res.RelPath)
+	}
+
+	relPath := rootFolder
+	priority := database.QueuePriorityNormal
+
+	// Store original ID in metadata
+	metaJSON := fmt.Sprintf(`{"nzbdav_id": "%s"}`, res.ID)
+
+	// Prepare item struct
+	item := &database.ImportQueueItem{
+		NzbPath:      nzbPath,
+		RelativePath: &relPath,
+		Category:     &targetCategory,
+		Priority:     priority,
+		Status:       database.QueueStatusPending,
+		RetryCount:   0,
+		MaxRetries:   3,
+		CreatedAt:    time.Now(),
+		Metadata:     &metaJSON,
+	}
+
+	// Calculate file size
+	if size, err := s.CalculateFileSizeOnly(nzbPath); err == nil {
+		item.FileSize = &size
+	}
+
+	return item, nil
 }
 
 // GetImportStatus returns the current import status
@@ -616,6 +718,12 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 			return nil
 		}
 
+		// Check if already processed (metadata exists)
+		if s.isFileAlreadyProcessed(path, scanPath) {
+			s.log.DebugContext(ctx, "Skipping file - already processed", "file", path)
+			return nil
+		}
+
 		// Add to queue
 		if _, err := s.AddToQueue(path, &scanPath, nil, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
@@ -650,6 +758,47 @@ func (s *Service) isFileAlreadyInQueue(filePath string) bool {
 		return false // Assume not in queue on error
 	}
 	return inQueue
+}
+
+// isFileAlreadyProcessed checks if a file has already been processed by checking metadata
+func (s *Service) isFileAlreadyProcessed(filePath string, scanRoot string) bool {
+	// Calculate virtual path
+	// Assuming scanRoot maps to root of virtual FS for simplicity in manual scan
+	// or use CalculateVirtualDirectory logic if needed
+	virtualPath := filesystem.CalculateVirtualDirectory(filePath, scanRoot)
+	
+	// Check if we have metadata for this path
+	// For single files: virtualPath/filename (minus .nzb)
+	// For multi files: virtualPath/filename (minus .nzb) as directory
+	
+	// Normalize filename (remove .nzb extension)
+	fileName := filepath.Base(filePath)
+	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	
+	// Construct potential virtual paths
+	// 1. As a file (single file import flattened or nested)
+	// We need to check if a file exists with the release name
+	// But we don't know the final extension... 
+	// However, metadata service stores files with their final names.
+	
+	// Better approach: Check if a directory exists with the release name
+	// Most imports create a folder with the release name
+	releaseDir := filepath.Join(virtualPath, baseName)
+	if s.metadataService.DirectoryExists(releaseDir) {
+		return true
+	}
+	
+	// Also check if any file exists that starts with the release name in that directory
+	// This covers flattened single files
+	if files, err := s.metadataService.ListDirectory(virtualPath); err == nil {
+		for _, f := range files {
+			if strings.HasPrefix(f, baseName) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
@@ -850,11 +999,17 @@ func (s *Service) refreshMountPathIfNeeded(ctx context.Context, resultingPath st
 		return
 	}
 
-	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(resultingPath))
+	mountPath := filepath.Join(s.configGetter().MountPath, filepath.Dir(strings.TrimPrefix(resultingPath, "/")))
 	if _, err := os.Stat(mountPath); err != nil {
 		if os.IsNotExist(err) {
+			cfg := s.configGetter()
+			vfsName := cfg.RClone.VFSName
+			if vfsName == "" {
+				vfsName = config.MountProvider
+			}
+
 			// Refresh the root path if the mount path is not found
-			err := s.rcloneClient.RefreshDir(s.ctx, config.MountProvider, []string{"/"})
+			err := s.rcloneClient.RefreshDir(s.ctx, vfsName, []string{"/"})
 			if err != nil {
 				s.log.ErrorContext(ctx, "Failed to refresh mount path", "queue_id", itemID, "path", mountPath, "error", err)
 			}
@@ -896,8 +1051,8 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	// Refresh mount path if needed
 	s.refreshMountPathIfNeeded(ctx, resultingPath, item.ID)
 
-	// Notify rclone VFS about the new import (async, don't fail on error)
-	s.notifyRcloneVFS(ctx, resultingPath)
+	// Notify rclone VFS about the new import (blocking, ensures visibility for ARRs)
+	s.notifyRcloneVFS(ctx, resultingPath, false)
 
 	// Create category symlink (non-blocking)
 	if err := s.createSymlinks(item, resultingPath); err != nil {
@@ -908,6 +1063,9 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 		return err
 	}
+
+	// Create ID metadata links if applicable (for nzbdav compatibility)
+	s.handleIdMetadataLinks(item, resultingPath)
 
 	// Create STRM files (non-blocking)
 	if err := s.createStrmFiles(item, resultingPath); err != nil {
@@ -932,14 +1090,21 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 	// Trigger ARR download scan if applicable
 	if s.arrsService != nil && item.Category != nil {
-		category := strings.ToLower(*item.Category)
-		// Determine instance type based on category
-		// Note: This assumes standard "tv" and "movies" categories.
-		// Ideally we should match against configured categories in config.SABnzbd.Categories
-		if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
-			s.arrsService.TriggerDownloadScan(ctx, "sonarr")
-		} else if category == "movies" || strings.Contains(category, "movie") {
-			s.arrsService.TriggerDownloadScan(ctx, "radarr")
+		// Try to trigger scan on the specific instance that manages this file
+		// resultingPath is the virtual path, e.g. "movies/MovieName/Movie.mkv"
+		// This uses the Root Folder check which is fast and accurate
+		fullMountPath := filepath.Join(s.configGetter().MountPath, strings.TrimPrefix(resultingPath, "/"))
+		if err := s.arrsService.TriggerScanForFile(ctx, fullMountPath); err != nil {
+			// Fallback: If we couldn't find a specific owner, broadcast to all instances of the type
+			s.log.DebugContext(ctx, "Could not find specific ARR instance for file, broadcasting scan",
+				"path", fullMountPath, "error", err)
+
+			category := strings.ToLower(*item.Category)
+			if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
+				s.arrsService.TriggerDownloadScan(ctx, "sonarr")
+			} else if category == "movies" || strings.Contains(category, "movie") {
+				s.arrsService.TriggerDownloadScan(ctx, "radarr")
+			}
 		}
 	}
 
@@ -1124,23 +1289,63 @@ func (s *Service) CancelProcessing(itemID int64) error {
 	return nil
 }
 
-// notifyRcloneVFS notifies rclone VFS about a new import (async, non-blocking)
-func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string) {
+// notifyRcloneVFS notifies rclone VFS about a new import
+func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string, async bool) {
 	if s.rcloneClient == nil {
 		return // No rclone client configured or RClone RC is disabled
 	}
 
-	refreshCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 10 second timeout
-	defer cancel()
+	refreshFunc := func(path string) {
+		// Use background context with timeout for VFS notification
+		// Increased timeout to 60 seconds as vfs/refresh can be slow
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
 
-	err := s.rcloneClient.RefreshDir(refreshCtx, config.MountProvider, []string{resultingPath}) // Use RefreshDir with empty provider
-	if err != nil {
-		s.log.WarnContext(ctx, "Failed to notify rclone VFS about new import",
-			"virtual_dir", resultingPath,
-			"error", err)
+		cfg := s.configGetter()
+		vfsName := cfg.RClone.VFSName
+		if vfsName == "" {
+			vfsName = config.MountProvider
+		}
+
+		// Refresh both the path and its parent to ensure visibility
+		// Ensure paths are relative to the rclone remote root (no leading slash)
+		normalizeForRclone := func(p string) string {
+			p = strings.TrimPrefix(p, "/")
+			if p == "" {
+				return "."
+			}
+			return p
+		}
+
+		dirsToRefresh := []string{normalizeForRclone(path)}
+		parentDir := filepath.Dir(path)
+		if parentDir != "." && parentDir != "/" {
+			dirsToRefresh = append(dirsToRefresh, normalizeForRclone(parentDir))
+
+			// Also refresh grandparent if parent might be new (e.g. /complete/tv)
+			grandParent := filepath.Dir(parentDir)
+			if grandParent != "." && grandParent != "/" {
+				dirsToRefresh = append(dirsToRefresh, normalizeForRclone(grandParent))
+			}
+		}
+
+		slog.DebugContext(refreshCtx, "Notifying rclone VFS refresh", "dirs", dirsToRefresh, "vfs", vfsName)
+
+		err := s.rcloneClient.RefreshDir(refreshCtx, vfsName, dirsToRefresh)
+		if err != nil {
+			slog.WarnContext(refreshCtx, "Failed to notify rclone VFS refresh",
+				"dirs", dirsToRefresh,
+				"error", err)
+		} else {
+			slog.InfoContext(refreshCtx, "Successfully notified rclone VFS refresh",
+				"dirs", dirsToRefresh)
+		}
+	}
+
+	if async {
+		go refreshFunc(resultingPath)
 	} else {
-		s.log.InfoContext(ctx, "Successfully notified rclone VFS about new import",
-			"virtual_dir", resultingPath)
+		refreshFunc(resultingPath)
 	}
 }
 
@@ -1299,11 +1504,11 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 	}
 
 	// Get the actual metadata/mount path (where the content actually lives)
-	actualPath := filepath.Join(cfg.MountPath, resultingPath)
+	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
 
 	// Check the metadata directory to determine if this is a file or directory
 	// (Don't use os.Stat on mount path as it might not be immediately available)
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
@@ -1359,7 +1564,7 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 		relPath = strings.TrimSuffix(relPath, ".meta")
 
 		// Build the actual file path in the mount (mount root + virtual path)
-		actualFilePath := filepath.Join(cfg.MountPath, relPath)
+		actualFilePath := filepath.Join(cfg.MountPath, strings.TrimPrefix(relPath, "/"))
 
 		// The relPath already IS the full virtual path from root, so use it directly
 		fileResultingPath := relPath
@@ -1397,14 +1602,14 @@ func (s *Service) createSymlinks(item *database.ImportQueueItem, resultingPath s
 func (s *Service) createSingleSymlink(actualPath, resultingPath string) error {
 	cfg := s.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(resultingPath))
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(resultingPath, "/")))
 
 	// Ensure category directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
 
-	symlinkPath := filepath.Join(*cfg.Import.ImportDir, resultingPath)
+	symlinkPath := filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(resultingPath, "/"))
 
 	// Check if symlink already exists
 	if _, err := os.Lstat(symlinkPath); err == nil {
@@ -1436,7 +1641,7 @@ func (s *Service) createStrmFiles(item *database.ImportQueueItem, resultingPath 
 	}
 
 	// Check the metadata directory to determine if this is a file or directory
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, resultingPath)
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
@@ -1586,4 +1791,97 @@ func (s *Service) createSingleStrmFile(virtualPath string, port int) error {
 func hashAPIKey(apiKey string) string {
 	hash := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(hash[:])
+}
+
+func (s *Service) handleIdMetadataLinks(item *database.ImportQueueItem, resultingPath string) {
+	// 1. Check if the queue item itself has a release-level ID in its metadata
+	if item.Metadata != nil && *item.Metadata != "" {
+		var meta struct {
+			NzbdavID string `json:"nzbdav_id"`
+		}
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil && meta.NzbdavID != "" {
+			if err := s.createIDMetadataLink(meta.NzbdavID, resultingPath); err != nil {
+				s.log.Warn("Failed to create release ID metadata link", "id", meta.NzbdavID, "error", err)
+			}
+		}
+	}
+
+	// 2. Check individual files for IDs
+	cfg := s.configGetter()
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
+
+	_ = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		// Read the metadata file to find the ID
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		// Parse the protobuf metadata to get the ID
+		meta := &metapb.FileMetadata{}
+		if err := proto.Unmarshal(data, meta); err != nil {
+			return nil
+		}
+
+		// Check sidecar ID file if not in proto (compatibility mode)
+		if meta.NzbdavId == "" {
+			if idData, err := os.ReadFile(path + ".id"); err == nil {
+				meta.NzbdavId = string(idData)
+			}
+		}
+
+		if meta.NzbdavId != "" {
+			// Calculate the virtual path from the metadata file path
+			relPath, err := filepath.Rel(cfg.Metadata.RootPath, path)
+			if err != nil {
+				return nil
+			}
+			// Remove .meta extension
+			virtualPath := strings.TrimSuffix(relPath, ".meta")
+
+			if err := s.createIDMetadataLink(meta.NzbdavId, virtualPath); err != nil {
+				s.log.Warn("Failed to create file ID metadata link", "id", meta.NzbdavId, "error", err)
+			}
+		}
+
+		return nil
+	})
+}
+
+func (s *Service) createIDMetadataLink(nzbdavID, resultingPath string) error {
+	cfg := s.configGetter()
+	metadataRoot := cfg.Metadata.RootPath
+
+	// Calculate sharded path
+	// 04db0bde-7ad0-46a3-a2f4-9ef8efd0d7d7 -> .ids/0/4/d/b/0/04db0bde-7ad0-46a3-a2f4-9ef8efd0d7d7.meta
+	id := strings.ToLower(nzbdavID)
+	if len(id) < 5 {
+		return nil // Invalid ID for sharding
+	}
+
+	shardPath := filepath.Join(".ids", string(id[0]), string(id[1]), string(id[2]), string(id[3]), string(id[4]))
+	fullShardDir := filepath.Join(metadataRoot, shardPath)
+
+	if err := os.MkdirAll(fullShardDir, 0755); err != nil {
+		return err
+	}
+
+	targetMetaPath := s.metadataService.GetMetadataFilePath(resultingPath)
+	linkPath := filepath.Join(fullShardDir, id+".meta")
+
+	// Remove if exists
+	os.Remove(linkPath)
+
+	// Create relative symlink if possible, or absolute
+	// Relative is better if metadataRoot moves
+	relTarget, err := filepath.Rel(fullShardDir, targetMetaPath)
+	if err != nil {
+		return os.Symlink(targetMetaPath, linkPath)
+	}
+
+	return os.Symlink(relTarget, linkPath)
 }

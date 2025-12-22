@@ -1,7 +1,7 @@
 import { Clock, Heart, HeartCrack, Loader, Wrench } from "lucide-react";
 import { HealthBadge } from "../../../../components/ui/StatusBadge";
 import { formatFutureTime, formatRelativeTime, truncateText } from "../../../../lib/utils";
-import type { FileHealth } from "../../../../types/api";
+import { type FileHealth, HealthPriority } from "../../../../types/api";
 import { HealthItemActionsMenu } from "./HealthItemActionsMenu";
 
 interface HealthTableRowProps {
@@ -16,6 +16,7 @@ interface HealthTableRowProps {
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onSetPriority: (id: number, priority: HealthPriority) => void;
 }
 
 export function HealthTableRow({
@@ -30,7 +31,21 @@ export function HealthTableRow({
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onSetPriority,
 }: HealthTableRowProps) {
+	const getNextPriority = (current: HealthPriority): HealthPriority => {
+		switch (current) {
+			case HealthPriority.Normal:
+				return HealthPriority.High;
+			case HealthPriority.High:
+				return HealthPriority.Next;
+			case HealthPriority.Next:
+				return HealthPriority.Normal;
+			default:
+				return HealthPriority.Normal;
+		}
+	};
+
 	let statusIcon;
 	let iconColorClass = "text-base-content/50"; // Default color
 
@@ -113,11 +128,26 @@ export function HealthTableRow({
 				)}
 			</td>
 			<td>
-				{item.priority ? (
-					<div className="badge badge-error badge-sm">High</div>
-				) : (
-					<div className="badge badge-ghost badge-sm">Normal</div>
-				)}
+				<div
+					className="cursor-pointer transition-transform hover:scale-110"
+					onClick={() => onSetPriority(item.id, getNextPriority(item.priority))}
+					title="Click to cycle priority"
+					role="button"
+					tabIndex={0}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							onSetPriority(item.id, getNextPriority(item.priority));
+						}
+					}}
+				>
+					{item.priority === HealthPriority.Next ? (
+						<div className="badge badge-warning badge-sm">Next</div>
+					) : item.priority === HealthPriority.High ? (
+						<div className="badge badge-error badge-sm">High</div>
+					) : (
+						<div className="badge badge-ghost badge-sm">Normal</div>
+					)}
+				</div>
 			</td>
 			<td>
 				<div className="flex flex-col gap-1">

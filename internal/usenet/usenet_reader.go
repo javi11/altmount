@@ -3,6 +3,7 @@ package usenet
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -21,7 +22,7 @@ const (
 )
 
 var (
-	_ io.ReadCloser = &usenetReader{}
+	_ io.ReadCloser = &UsenetReader{}
 )
 
 type DataCorruptionError struct {
@@ -38,7 +39,7 @@ func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
-type usenetReader struct {
+type UsenetReader struct {
 	log                *slog.Logger
 	wg                 sync.WaitGroup
 	cancel             context.CancelFunc
@@ -47,6 +48,7 @@ type usenetReader struct {
 	maxCacheSize       int64 // Maximum cache size in bytes
 	init               chan any
 	initDownload       sync.Once
+	closeOnce          sync.Once
 	totalBytesRead     int64
 	poolGetter         func() (nntppool.UsenetConnectionPool, error) // Dynamic pool getter
 
@@ -64,7 +66,7 @@ func NewUsenetReader(
 	rg *segmentRange,
 	maxDownloadWorkers int,
 	maxCacheSizeMB int,
-) (io.ReadCloser, error) {
+) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -74,7 +76,7 @@ func NewUsenetReader(
 		maxCacheSize = defaultMaxCacheSize
 	}
 
-	ur := &usenetReader{
+	ur := &UsenetReader{
 		log:                 log,
 		cancel:              cancel,
 		rg:                  rg,
@@ -98,32 +100,61 @@ func NewUsenetReader(
 	return ur, nil
 }
 
-func (b *usenetReader) Close() error {
-	b.cancel()
-	close(b.init)
+// Start triggers the background download process manually.
+// This is useful for pre-fetching data before the first Read call.
+func (b *UsenetReader) Start() {
+	b.initDownload.Do(func() {
+		// Use select to avoid blocking or panicking if closed
+		select {
+		case b.init <- struct{}{}:
+		default:
+		}
+	})
+}
 
-	// Wait synchronously with timeout to prevent goroutine leaks
-	// Use a separate goroutine to detect when cleanup completes
-	done := make(chan struct{})
-	go func() {
-		b.wg.Wait()
-		close(done)
-	}()
+func (b *UsenetReader) Close() error {
+	b.closeOnce.Do(func() {
+		b.cancel()
+		
+		// Drain and close init channel safely
+		select {
+		case <-b.init:
+		default:
+		}
+		close(b.init)
 
-	// Wait for cleanup with reasonable timeout
-	select {
-	case <-done:
-		// Cleanup completed successfully
-		_ = b.rg.Clear()
-		b.rg = nil
-	case <-time.After(30 * time.Second):
-		// Timeout waiting for downloads to complete
-		// This prevents hanging but logs the issue
-		b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
-		// Still attempt to clear resources
-		_ = b.rg.Clear()
-		b.rg = nil
-	}
+		// Unblock any pending writes/reads
+		if b.rg != nil {
+			b.rg.CloseSegments()
+		}
+
+		// Wait synchronously with timeout to prevent goroutine leaks
+		// Use a separate goroutine to detect when cleanup completes
+		done := make(chan struct{})
+		go func() {
+			b.wg.Wait()
+			close(done)
+		}()
+
+		// Wait for cleanup with reasonable timeout
+		select {
+		case <-done:
+			// Cleanup completed successfully
+			if b.rg != nil {
+				_ = b.rg.Clear()
+				b.rg = nil
+			}
+		case <-time.After(30 * time.Second):
+			// Timeout waiting for downloads to complete
+			// This prevents hanging but logs the issue
+			b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
+			// Still attempt to clear resources
+			if b.rg != nil {
+				_ = b.rg.Clear()
+				b.rg = nil
+			}
+		}
+	})
 
 	return nil
 }
@@ -131,13 +162,17 @@ func (b *usenetReader) Close() error {
 // Read reads len(p) byte from the Buffer starting at the current offset.
 // It returns the number of bytes read and an error if any.
 // Returns io.EOF error if pointer is at the end of the Buffer.
-func (b *usenetReader) Read(p []byte) (int, error) {
+func (b *UsenetReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 
 	b.initDownload.Do(func() {
-		b.init <- struct{}{}
+		// Use select to avoid blocking or panicking if closed
+		select {
+		case b.init <- struct{}{}:
+		default:
+		}
 	})
 
 	s, err := b.rg.Get()
@@ -220,12 +255,29 @@ func (b *usenetReader) Read(p []byte) (int, error) {
 }
 
 // isArticleNotFoundError checks if the error indicates articles were not found in providers
-func (b *usenetReader) isArticleNotFoundError(err error) bool {
+func (b *UsenetReader) isArticleNotFoundError(err error) bool {
 	return errors.Is(err, nntppool.ErrArticleNotFoundInProviders)
 }
 
+func (b *UsenetReader) GetBufferedOffset() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.nextToDownload == 0 || len(b.rg.segments) == 0 {
+		return 0
+	}
+
+	idx := b.nextToDownload - 1
+	if idx >= len(b.rg.segments) {
+		idx = len(b.rg.segments) - 1
+	}
+
+	s := b.rg.segments[idx]
+	return s.Start + int64(s.SegmentSize)
+}
+
 // isPoolUnavailableError checks if the error indicates the pool is unavailable or shutdown
-func (b *usenetReader) isPoolUnavailableError(err error) bool {
+func (b *UsenetReader) isPoolUnavailableError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -236,7 +288,7 @@ func (b *usenetReader) isPoolUnavailableError(err error) bool {
 }
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
-func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
+func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
 	return retry.Do(
 		func() error {
 			// Get current pool
@@ -281,7 +333,7 @@ func (b *usenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 	)
 }
 
-func (b *usenetReader) downloadManager(
+func (b *UsenetReader) downloadManager(
 	ctx context.Context,
 ) {
 	select {
@@ -320,6 +372,11 @@ func (b *usenetReader) downloadManager(
 
 		// Start continuous download monitoring
 		for ctx.Err() == nil {
+			b.mu.Lock()
+			if b.rg == nil {
+				b.mu.Unlock()
+				return
+			}
 			// Get current reading position
 			currentIndex := b.rg.GetCurrentIndex()
 
@@ -330,7 +387,6 @@ func (b *usenetReader) downloadManager(
 			}
 
 			// Download segments that are not yet downloaded or downloading
-			b.mu.Lock()
 			segmentsToQueue := []int{}
 			for i := b.nextToDownload; i < targetDownload; i++ {
 				// Check for context cancellation frequently during segment selection
@@ -359,36 +415,57 @@ func (b *usenetReader) downloadManager(
 				}
 
 				segmentIdx := idx // Capture for closure
-				s := b.rg.segments[segmentIdx]
-
-				pool.Go(func(c context.Context) error {
-					w := s.writer
-
-					// Set the item ready to read
-					ctx = slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
-					err := b.downloadSegmentWithRetry(ctx, s)
-
-					// Mark download complete
-					b.mu.Lock()
-					delete(b.downloadingSegments, segmentIdx)
-					b.downloadCond.Signal()
+				b.mu.Lock()
+				if b.rg == nil || segmentIdx >= len(b.rg.segments) {
 					b.mu.Unlock()
+					continue
+				}
+				s := b.rg.segments[segmentIdx]
+				b.mu.Unlock()
 
-					if err != nil {
-						cErr := w.CloseWithError(err)
-						if cErr != nil {
-							b.log.ErrorContext(ctx, "Error closing segment buffer:", "error", cErr)
+				pool.Go(func(c context.Context) (err error) {
+					defer func() {
+						if p := recover(); p != nil {
+							b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
+							err = fmt.Errorf("panic in download task: %v", p)
 						}
 
-						return err
+						// Mark download complete
+						b.mu.Lock()
+						delete(b.downloadingSegments, segmentIdx)
+						b.downloadCond.Signal()
+						b.mu.Unlock()
+					}()
+
+					w := s.Writer()
+					if w == nil {
+						return fmt.Errorf("segment writer is nil")
 					}
 
-					// Close writer on success to signal EOF to readers
-					if cErr := w.Close(); cErr != nil {
-						b.log.ErrorContext(ctx, "Error closing segment buffer on success:", "error", cErr)
+					taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
+					err = b.downloadSegmentWithRetry(taskCtx, s)
+
+					if err != nil {
+						// Check if writer supports CloseWithError (PipeWriter does)
+						if cew, ok := w.(interface{ CloseWithError(error) error }); ok {
+							cErr := cew.CloseWithError(err)
+							if cErr != nil {
+								b.log.ErrorContext(taskCtx, "Error closing segment buffer:", "error", cErr)
+							}
+						} else if cw, ok := w.(io.Closer); ok {
+							_ = cw.Close()
+						}
+					} else {
+						// Close writer on success to signal EOF to readers
+						if cw, ok := w.(io.Closer); ok {
+							if cErr := cw.Close(); cErr != nil {
+								b.log.ErrorContext(taskCtx, "Error closing segment buffer on success:", "error", cErr)
+								err = fmt.Errorf("failed to close segment writer: %w", cErr)
+							}
+						}
 					}
 
-					return nil
+					return err
 				})
 			}
 
@@ -413,7 +490,13 @@ func (b *usenetReader) downloadManager(
 
 		// Wait for all downloads to complete
 		if err := pool.Wait(); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				return
+			}
+
+			// Don't log "closed pipe" errors if we're shutting down or context is canceled
+			if strings.Contains(err.Error(), "closed pipe") {
+				b.log.DebugContext(ctx, "Suppressed closed pipe error during shutdown", "error", err)
 				return
 			}
 

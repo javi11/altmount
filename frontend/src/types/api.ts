@@ -109,6 +109,14 @@ export const HealthStatus = {
 
 export type HealthStatus = (typeof HealthStatus)[keyof typeof HealthStatus];
 
+export const HealthPriority = {
+	Normal: 0,
+	High: 1,
+	Next: 2,
+} as const;
+
+export type HealthPriority = (typeof HealthPriority)[keyof typeof HealthPriority];
+
 export interface FileHealth {
 	id: number;
 	file_path: string;
@@ -125,7 +133,7 @@ export interface FileHealth {
 	created_at: string;
 	updated_at: string;
 	scheduled_check_at?: string;
-	priority: boolean;
+	priority: HealthPriority;
 }
 
 export interface HealthStats {
@@ -249,11 +257,21 @@ export interface UserAdminUpdateRequest {
 	is_admin: boolean;
 }
 
+export interface ManualImportRequest {
+	file_path: string;
+	relative_path?: string;
+}
+
+export interface ManualImportResponse {
+	queue_id: number;
+	message: string;
+}
+
 // Health Worker types
 export interface HealthCheckRequest {
 	file_path: string;
 	source_nzb_path: string;
-	priority?: boolean;
+	priority?: HealthPriority;
 }
 
 export interface HealthWorkerStatus {
@@ -310,11 +328,20 @@ export interface ProviderStatus {
 export interface ActiveStream {
 	id: string;
 	file_path: string;
-	client_ip: string;
 	started_at: string;
-	user_agent: string;
-	range?: string;
 	source: string;
+	user_name?: string;
+	client_ip?: string;
+	user_agent?: string;
+	bytes_sent: number;
+	current_offset: number;
+	bytes_per_second: number;
+	speed_avg: number;
+	total_size: number;
+	eta: number;
+	status: string;
+	total_connections: number;
+	buffered_offset: number;
 }
 
 export interface PoolMetrics {
@@ -355,4 +382,10 @@ export interface SystemBrowseResponse {
 	current_path: string;
 	parent_path: string;
 	files: FileEntry[];
+}
+
+// FUSE types
+export interface FuseStatus {
+	status: "stopped" | "starting" | "running" | "error";
+	path: string;
 }

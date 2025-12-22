@@ -690,6 +690,9 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	// Get optional category from form
 	category := c.FormValue("category")
 
+	// Get optional relative_path from form
+	relativePath := c.FormValue("relative_path")
+
 	// Get optional priority from form
 	priorityStr := c.FormValue("priority")
 	var priority database.QueuePriority
@@ -756,7 +759,11 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	if s.configManager != nil {
 		completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 		if completeDir != "" {
-			basePath = &completeDir
+			p := completeDir
+			if relativePath != "" {
+				p = filepath.Join(p, relativePath)
+			}
+			basePath = &p
 		}
 	}
 

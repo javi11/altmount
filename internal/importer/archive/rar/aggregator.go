@@ -61,7 +61,7 @@ func calculateSegmentsToValidate(rarContents []Content, samplePercentage int) in
 }
 
 // hasAllowedFiles checks if any files within RAR archive contents match allowed extensions
-// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
+// If allowedExtensions is empty, all file types are allowed
 func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
 	for _, content := range rarContents {
 		// Skip directories
@@ -69,8 +69,8 @@ func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
 			continue
 		}
 		// Check both the internal path and filename
-		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
-		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
 			return true
 		}
 	}
@@ -130,6 +130,20 @@ func ProcessArchive(
 	// Process extracted files with segment-based progress tracking
 	// 80-95% for validation loop, 95-100% for metadata finalization
 	filesProcessed := 0
+
+	// Determine if we should rename the file to match the NZB basename
+	// Only do this if there's exactly one media file in the archive
+	mediaFilesCount := 0
+	for _, content := range rarContents {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
+			mediaFilesCount++
+		}
+	}
+
+	nzbName := filepath.Base(nzbPath)
+	shouldNormalizeName := mediaFilesCount == 1
+
 	for _, rarContent := range rarContents {
 		// Skip directories
 		if rarContent.IsDirectory {
@@ -141,9 +155,35 @@ func ProcessArchive(
 		normalizedInternalPath := strings.ReplaceAll(rarContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
 
+		// Double check if this specific file is allowed
+		if !utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) &&
+			!utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions) {
+			continue
+		}
+
+		// Normalize filename to match NZB if it's the only media file
+		if shouldNormalizeName && (utils.IsAllowedFile(rarContent.InternalPath, rarContent.Size, allowedFileExtensions) ||
+			utils.IsAllowedFile(rarContent.Filename, rarContent.Size, allowedFileExtensions)) {
+			// Extract release name and combine with original extension
+			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
+			slog.InfoContext(ctx, "Normalizing obfuscated filename in RAR archive",
+				"original", rarContent.Filename,
+				"normalized", baseFilename)
+		}
 		// Create the virtual file path directly in the RAR directory (flattened)
 		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+		// Check if file already exists and is healthy
+		if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
+			if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
+				slog.InfoContext(ctx, "Skipping re-import of healthy RAR-extracted file",
+					"file", baseFilename,
+					"virtual_path", virtualFilePath)
+				filesProcessed++
+				continue
+			}
+		}
 
 		// Create offset tracker for real-time segment-level progress
 		// This maps individual file segment progress (0→N) to cumulative progress across all files
@@ -202,7 +242,7 @@ func ProcessArchive(
 		validatedSegmentsCount += fileSegmentsValidated
 
 		// Create file metadata using the RAR handler's helper function
-		fileMeta := rarProcessor.CreateFileMetadataFromRarContent(rarContent, nzbPath, releaseDate)
+		fileMeta := rarProcessor.CreateFileMetadataFromRarContent(rarContent, nzbPath, releaseDate, rarContent.NzbdavID)
 
 		// Delete old metadata if exists (simple collision handling)
 		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
@@ -215,13 +255,10 @@ func ProcessArchive(
 			return fmt.Errorf("failed to write metadata for RAR file %s: %w", rarContent.Filename, err)
 		}
 
-		slog.DebugContext(ctx, "Created metadata for RAR extracted file",
+		slog.InfoContext(ctx, "Created metadata for RAR extracted file",
 			"file", baseFilename,
-			"original_internal_path", rarContent.InternalPath,
 			"virtual_path", virtualFilePath,
-			"size", rarContent.Size,
-			"segments", len(rarContent.Segments),
-			"validated_segments", fileSegmentsValidated)
+			"size", rarContent.Size)
 
 		filesProcessed++
 	}
@@ -245,4 +282,21 @@ func ProcessArchive(
 	slog.InfoContext(ctx, "Successfully processed RAR archive files", "files_processed", filesProcessed)
 
 	return nil
+}
+
+// normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
+func normalizeArchiveReleaseFilename(nzbFilename, originalFilename string) string {
+	releaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	fileExt := filepath.Ext(originalFilename)
+
+	if fileExt == "" {
+		return releaseName
+	}
+
+	// If release name already contains the extension (e.g. Movie.mkv.nzb -> Movie.mkv), don't duplicate
+	if strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
+		return releaseName
+	}
+
+	return releaseName + fileExt
 }

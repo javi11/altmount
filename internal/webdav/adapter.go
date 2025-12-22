@@ -43,8 +43,13 @@ func NewHandler(
 		fileSystem: nzbToWebdavFS(fs),
 	}
 
+	var finalFS webdav.FileSystem = errorHandler
+	if streamTracker != nil {
+		finalFS = &monitoredFileSystem{fs: errorHandler}
+	}
+
 	webdavHandler := &webdav.Handler{
-		FileSystem: errorHandler,
+		FileSystem: finalFS,
 		LockSystem: webdav.NewMemLS(),
 		Prefix:     config.Prefix,
 		Logger: func(r *http.Request, err error) {
@@ -60,6 +65,8 @@ func NewHandler(
 		username, password, hasBasicAuth := r.BasicAuth()
 
 		var authenticated bool
+		var effectiveUser string
+
 		if !hasBasicAuth {
 			// Try JWT token authentication first (if services are available)
 			if tokenService != nil && userRepo != nil {
@@ -75,6 +82,11 @@ func NewHandler(
 						user, err := userRepo.GetUserByID(r.Context(), userID)
 						if err == nil && user != nil {
 							authenticated = true
+							if user.Name != nil && *user.Name != "" {
+								effectiveUser = *user.Name
+							} else {
+								effectiveUser = user.UserID
+							}
 						}
 					}
 				}
@@ -84,6 +96,7 @@ func NewHandler(
 			currentUser, currentPass := authCreds.GetCredentials()
 			if username == currentUser && password == currentPass {
 				authenticated = true
+				effectiveUser = username
 			}
 		}
 
@@ -95,6 +108,10 @@ func NewHandler(
 				slog.ErrorContext(r.Context(), "Error writing the response to the client", "err", err)
 			}
 			return
+		}
+
+		if effectiveUser == "" {
+			effectiveUser = "WebDAV"
 		}
 
 		// This will prevent webdav internal seeks which is not supported by usenet reader
@@ -114,6 +131,8 @@ func NewHandler(
 		r = r.WithContext(context.WithValue(r.Context(), utils.IsCopy, r.Method == "COPY"))
 		r = r.WithContext(context.WithValue(r.Context(), utils.Origin, r.RequestURI))
 		r = r.WithContext(context.WithValue(r.Context(), utils.ShowCorrupted, r.Header.Get("X-Show-Corrupted") == "true"))
+		r = r.WithContext(context.WithValue(r.Context(), utils.ClientIPKey, r.RemoteAddr))
+		r = r.WithContext(context.WithValue(r.Context(), utils.UserAgentKey, r.UserAgent()))
 
 		// Log MOVE and COPY operations to understand client behavior
 		switch r.Method {
@@ -154,10 +173,28 @@ func NewHandler(
 		// Track active streams for GET requests
 		if r.Method == http.MethodGet && streamTracker != nil {
 			// Extract path (this includes prefix, but that's fine for display)
-			// Or we could strip prefix if we want cleaner display
 			// r.URL.Path contains the full path including prefix
-			streamID := streamTracker.Add(r.URL.Path, r.RemoteAddr, r.UserAgent(), r.Header.Get("Range"), "WebDAV")
-			defer streamTracker.Remove(streamID)
+			// Create cancellable context
+			streamCtx, cancel := context.WithCancel(r.Context())
+			defer cancel() // Ensure cleanup for this specific stream context
+			
+			// Add to tracker with full metadata
+			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, r.RemoteAddr, r.UserAgent(), 0)
+			defer streamTracker.Remove(stream)
+			
+			// Register cancel function in tracker
+			streamTracker.SetCancelFunc(stream, cancel)
+
+			// Add stream ID to context for low-level tracking
+			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, stream)
+
+			// Inject stream into context for monitoredFileSystem
+			if sObj := streamTracker.GetStream(stream); sObj != nil {
+				r = r.WithContext(context.WithValue(streamCtx, utils.ActiveStreamKey, sObj)) // Use streamCtx for the new context
+			} else {
+				// If streamObj is nil, we still need to use streamCtx for the request
+				r = r.WithContext(streamCtx)
+			}
 		}
 
 		webdavHandler.ServeHTTP(w, r)

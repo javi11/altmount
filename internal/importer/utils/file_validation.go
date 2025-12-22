@@ -8,9 +8,19 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 )
 
-// sampleProofPattern matches filenames containing "sample" or "proof" at word boundaries
-// Pattern: (^|[\W_])(sample|proof) - matches at start or after non-word/underscore
-var sampleProofPattern = regexp.MustCompile(`(?i)(^|[\W_])(sample|proof)`)
+// sampleProofPattern matches filenames that are likely just sample or proof files
+// It matches "sample" or "proof" as a standalone word.
+var sampleProofPattern = regexp.MustCompile(`(?i)\b(sample|proof)\b`)
+
+// isSampleOrProof checks if a filename looks like a sample or proof file
+func isSampleOrProof(filename string, size int64) bool {
+	// If file is larger than 200MB, it's likely not a sample/proof file
+	if size > 200*1024*1024 {
+		return false
+	}
+
+	return sampleProofPattern.MatchString(filename)
+}
 
 // createExtensionMap converts a slice of extensions to a map for O(1) lookups
 func createExtensionMap(extensions []string) map[string]bool {
@@ -22,15 +32,39 @@ func createExtensionMap(extensions []string) map[string]bool {
 	return extMap
 }
 
+// whitelistedExtensions are extensions that should bypass sample/proof checks
+// These are typically small files where "sample" or "proof" might appear in the name
+// but don't indicate the file itself is a media sample/proof to be rejected.
+var whitelistedExtensions = map[string]bool{
+	// Subtitles
+	".srt": true, ".sub": true, ".idx": true, ".vtt": true, ".ass": true, ".ssa": true,
+	// Images (covers, fanart, nfo)
+	".jpg": true, ".jpeg": true, ".png": true, ".nfo": true, ".tbn": true,
+}
+
 // IsAllowedFile checks if a filename has an allowed extension
 // If allowedExtensions is empty, all files are allowed
-func IsAllowedFile(filename string, allowedExtensions []string) bool {
+// size is used to prevent false positives for sample/proof checks on large files
+func IsAllowedFile(filename string, size int64, allowedExtensions []string) bool {
 	if filename == "" {
 		return false
 	}
 
-	// Reject files with sample/proof in their name
-	if sampleProofPattern.MatchString(filename) {
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	// Always allow subtitle files
+	if whitelistedExtensions[ext] {
+		// Still check if the extension is in the allowed list if it's provided
+		if len(allowedExtensions) > 0 {
+			normalizedExt := strings.TrimPrefix(ext, ".")
+			extMap := createExtensionMap(allowedExtensions)
+			return extMap[normalizedExt]
+		}
+		return true
+	}
+
+	// Check if file is a sample or proof
+	if isSampleOrProof(filename, size) {
 		return false
 	}
 
@@ -39,16 +73,16 @@ func IsAllowedFile(filename string, allowedExtensions []string) bool {
 		return true
 	}
 
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
+	normalizedExt := strings.TrimPrefix(ext, ".")
 	extMap := createExtensionMap(allowedExtensions)
-	return extMap[ext]
+	return extMap[normalizedExt]
 }
 
 // HasAllowedFilesInRegular checks if any regular (non-archive) files match allowed extensions
-// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
+// If allowedExtensions is empty, all file types are allowed
 func HasAllowedFilesInRegular(regularFiles []parser.ParsedFile, allowedExtensions []string) bool {
 	for _, file := range regularFiles {
-		if IsAllowedFile(file.Filename, allowedExtensions) {
+		if IsAllowedFile(file.Filename, file.Size, allowedExtensions) {
 			return true
 		}
 	}

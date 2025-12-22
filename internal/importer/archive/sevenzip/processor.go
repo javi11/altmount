@@ -38,15 +38,17 @@ type sevenZipProcessor struct {
 	poolManager    pool.Manager
 	maxWorkers     int
 	maxCacheSizeMB int
+	readTimeout    time.Duration
 }
 
 // NewProcessor creates a new 7zip processor
-func NewProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int) Processor {
+func NewProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int, readTimeout time.Duration) Processor {
 	return &sevenZipProcessor{
 		log:            slog.Default().With("component", "7z-processor"),
 		poolManager:    poolManager,
 		maxWorkers:     maxWorkers,
 		maxCacheSizeMB: maxCacheSizeMB,
+		readTimeout:    readTimeout,
 	}
 }
 
@@ -63,6 +65,7 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 	content Content,
 	sourceNzbPath string,
 	releaseDate int64,
+	nzbdavId string,
 ) *metapb.FileMetadata {
 	now := time.Now().Unix()
 
@@ -74,6 +77,7 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 		ModifiedAt:    now,
 		SegmentData:   content.Segments,
 		ReleaseDate:   releaseDate,
+		NzbdavId:      nzbdavId,
 	}
 
 	// Set AES encryption if keys are present
@@ -130,7 +134,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
 	// 7zip part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB, progressTracker)
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB, progressTracker, sz.readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))
@@ -344,6 +348,12 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 			aesKey = derivedKey
 		}
 
+		// Extract ID from the first part of the archive
+		var nzbdavID string
+		if len(sevenZipFiles) > 0 {
+			nzbdavID = sevenZipFiles[0].NzbdavID
+		}
+
 		content := Content{
 			InternalPath: normalizedName,
 			Filename:     filepath.Base(normalizedName),
@@ -351,6 +361,7 @@ func (sz *sevenZipProcessor) convertFileInfosToSevenZipContent(fileInfos []seven
 			IsDirectory:  isDirectory,
 			AesKey:       aesKey,
 			AesIV:        aesIV,
+			NzbdavID:     nzbdavID,
 		}
 
 		// Map the file's offset and size to segments from the 7z parts

@@ -57,6 +57,7 @@ rclone:
 
   # Mount configuration - production-optimized defaults
   mount_enabled: false # Enable RClone mount (automatically enables rc_enabled when true)
+  vfs_name: 'altmount' # Name of the VFS mount (default: altmount)
   mount_options: {} # Custom mount options (override specific settings below)
 
   # Mount-specific settings - matching production command defaults

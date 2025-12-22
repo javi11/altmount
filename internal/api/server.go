@@ -54,6 +54,7 @@ type Server struct {
 	startTime           time.Time
 	progressBroadcaster *progress.ProgressBroadcaster
 	streamTracker       *StreamTracker
+	fuseManager         *FuseManager
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -95,6 +96,7 @@ func NewServer(
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
+		fuseManager:         NewFuseManager(),
 	}
 
 	return server
@@ -189,6 +191,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/health/worker/status", s.handleGetHealthWorkerStatus)
 	api.Post("/health/:id/repair", s.handleRepairHealth)
 	api.Post("/health/:id/check-now", s.handleDirectHealthCheck)
+	api.Post("/health/:id/priority", s.handleSetHealthPriority)
 	api.Post("/health/:id/cancel", s.handleCancelHealthCheck)
 	api.Get("/health/:id", s.handleGetHealth)
 	api.Delete("/health/:id", s.handleDeleteHealth)
@@ -202,6 +205,8 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	api.Get("/files/info", s.handleGetFileMetadata)
 	api.Get("/files/active-streams", s.handleGetActiveStreams)
+	api.Delete("/files/active-streams/:id", s.handleKillStream)
+	api.Get("/files/streams/history", s.handleGetStreamHistory)
 	api.Get("/files/export-nzb", s.handleExportMetadataToNZB)
 	api.Post("/files/export-batch", s.handleBatchExportNZB)
 	// Note: /files/stream is handled by StreamHandler at HTTP server level
@@ -222,6 +227,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Patch("/config/:section", s.handlePatchConfigSection)
 	api.Post("/config/reload", s.handleReloadConfig)
 	api.Post("/config/validate", s.handleValidateConfig)
+
+	// FUSE endpoints
+	api.Post("/fuse/start", s.handleStartFuseMount)
+	api.Post("/fuse/stop", s.handleStopFuseMount)
+	api.Get("/fuse/status", s.handleGetFuseStatus)
 
 	// Provider management endpoints
 	api.Post("/providers/test", s.handleTestProvider)
@@ -254,16 +264,38 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
 }
 
+// Shutdown shuts down the API server and its managed resources
+func (s *Server) Shutdown(ctx context.Context) {
+	if s.fuseManager != nil {
+		s.fuseManager.Stop()
+	}
+}
+
 // handleGetActiveStreams handles GET /api/files/active-streams
 func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	if s.streamTracker == nil {
 		return c.Status(200).JSON(fiber.Map{
 			"success": true,
-			"data":    []ActiveStream{},
+			"data":    []nzbfilesystem.ActiveStream{},
 		})
 	}
 
 	streams := s.streamTracker.GetAll()
+	
+	// Check for filter parameter
+	filterType := c.Query("type") // e.g., type=file
+
+	if filterType == "file" {
+		filteredStreams := make([]nzbfilesystem.ActiveStream, 0)
+		for _, stream := range streams {
+			// Assuming "API" and "WebDAV" are the desired "file being streams"
+			if stream.Source == "API" || stream.Source == "WebDAV" {
+				filteredStreams = append(filteredStreams, stream)
+			}
+		}
+		streams = filteredStreams
+	}
+
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    streams,
@@ -372,4 +404,42 @@ func (s *Server) handleDryRunLibrarySync(c *fiber.Ctx) error {
 func (s *Server) handleGetSyncNeeded(c *fiber.Ctx) error {
 	handlers := NewLibrarySyncHandlers(s.librarySyncWorker, s.configManager)
 	return handlers.handleGetSyncNeeded(c)
+}
+
+// handleKillStream handles DELETE /api/files/active-streams/:id
+func (s *Server) handleKillStream(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if s.streamTracker == nil {
+		return c.Status(404).JSON(fiber.Map{
+			"success": false,
+			"message": "Stream tracker not available",
+		})
+	}
+
+	if s.streamTracker.KillStream(id) {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"message": "Stream termination requested",
+		})
+	}
+
+	return c.Status(404).JSON(fiber.Map{
+		"success": false,
+		"message": "Stream not found or cannot be killed",
+	})
+}
+
+// handleGetStreamHistory handles GET /api/files/streams/history
+func (s *Server) handleGetStreamHistory(c *fiber.Ctx) error {
+	if s.streamTracker == nil {
+		return c.JSON(fiber.Map{
+			"success": true,
+			"data":    []nzbfilesystem.ActiveStream{},
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    s.streamTracker.GetHistory(),
+	})
 }

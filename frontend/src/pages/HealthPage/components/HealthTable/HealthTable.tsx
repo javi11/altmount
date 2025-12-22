@@ -1,6 +1,6 @@
 import { Shield } from "lucide-react";
 import { LoadingTable } from "../../../../components/ui/LoadingSpinner";
-import type { FileHealth } from "../../../../types/api";
+import type { FileHealth, HealthPriority } from "../../../../types/api";
 import type { SortBy, SortOrder } from "../../types";
 import { HealthTableHeader } from "./HealthTableHeader";
 import { HealthTableRow } from "./HealthTableRow";
@@ -24,6 +24,7 @@ interface HealthTableProps {
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onSetPriority: (id: number, priority: HealthPriority) => void;
 }
 
 export function HealthTable({
@@ -45,6 +46,7 @@ export function HealthTable({
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onSetPriority,
 }: HealthTableProps) {
 	// Helper functions for select all checkbox state
 	const isAllSelected =
@@ -82,6 +84,7 @@ export function HealthTable({
 										onManualCheck={onManualCheck}
 										onRepair={onRepair}
 										onDelete={onDelete}
+										onSetPriority={onSetPriority}
 									/>
 								))}
 							</tbody>

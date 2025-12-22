@@ -25,7 +25,7 @@ func NewNzbFilesystem(remoteFile *MetadataRemoteFile) *NzbFilesystem {
 
 // Name returns the filesystem name
 func (nfs *NzbFilesystem) Name() string {
-	return "NzbFilesystem"
+	return "altmount"
 }
 
 // Open opens a file for reading

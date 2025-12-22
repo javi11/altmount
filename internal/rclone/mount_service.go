@@ -69,7 +69,11 @@ func (s *MountService) Mount(ctx context.Context) error {
 	}
 
 	// Always create new mount instance with fresh config values
-	s.mount = rclonecli.NewMount(config.MountProvider, cfg.MountPath, webdavURL, s.manager)
+	vfsName := cfg.RClone.VFSName
+	if vfsName == "" {
+		vfsName = config.MountProvider
+	}
+	s.mount = rclonecli.NewMount(vfsName, cfg.MountPath, webdavURL, s.manager)
 
 	if err := s.mount.Mount(ctx); err != nil {
 		return fmt.Errorf("failed to mount: %w", err)

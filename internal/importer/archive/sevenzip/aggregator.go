@@ -60,7 +60,7 @@ func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage in
 }
 
 // hasAllowedFiles checks if any files within 7zip archive contents match allowed extensions
-// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
+// If allowedExtensions is empty, all file types are allowed
 func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) bool {
 	for _, content := range sevenZipContents {
 		// Skip directories
@@ -68,8 +68,8 @@ func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) boo
 			continue
 		}
 		// Check both the internal path and filename
-		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
-		if utils.IsAllowedFile(content.InternalPath, allowedExtensions) || utils.IsAllowedFile(content.Filename, allowedExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
 			return true
 		}
 	}
@@ -131,6 +131,20 @@ func ProcessArchive(
 	// Process extracted files with segment-based progress tracking
 	// 80-95% for validation loop, 95-100% for metadata finalization
 	filesProcessed := 0
+
+	// Determine if we should rename the file to match the NZB basename
+	// Only do this if there's exactly one media file in the archive
+	mediaFilesCount := 0
+	for _, content := range sevenZipContents {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
+			mediaFilesCount++
+		}
+	}
+
+	nzbName := filepath.Base(nzbPath)
+	shouldNormalizeName := mediaFilesCount == 1
+
 	for _, sevenZipContent := range sevenZipContents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
@@ -142,9 +156,36 @@ func ProcessArchive(
 		normalizedInternalPath := strings.ReplaceAll(sevenZipContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
 
+		// Double check if this specific file is allowed
+		if !utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) &&
+			!utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions) {
+			continue
+		}
+
+		// Normalize filename to match NZB if it's the only media file
+		if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) ||
+			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions)) {
+			// Extract release name and combine with original extension
+			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
+			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",
+				"original", sevenZipContent.Filename,
+				"normalized", baseFilename)
+		}
+
 		// Create the virtual file path directly in the 7zip directory (flattened)
 		virtualFilePath := filepath.Join(virtualDir, baseFilename)
 		virtualFilePath = strings.ReplaceAll(virtualFilePath, string(filepath.Separator), "/")
+
+		// Check if file already exists and is healthy
+		if existingMeta, err := metadataService.ReadFileMetadata(virtualFilePath); err == nil && existingMeta != nil {
+			if existingMeta.Status == metapb.FileStatus_FILE_STATUS_HEALTHY {
+				slog.InfoContext(ctx, "Skipping re-import of healthy 7zip-extracted file",
+					"file", baseFilename,
+					"virtual_path", virtualFilePath)
+				filesProcessed++
+				continue
+			}
+		}
 
 		// Create offset tracker for real-time segment-level progress
 		// This maps individual file segment progress (0→N) to cumulative progress across all files
@@ -196,7 +237,7 @@ func ProcessArchive(
 		validatedSegmentsCount += fileSegmentsValidated
 
 		// Create file metadata using the 7zip handler's helper function
-		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate)
+		fileMeta := sevenZipProcessor.CreateFileMetadataFromSevenZipContent(sevenZipContent, nzbPath, releaseDate, sevenZipContent.NzbdavID)
 
 		// Delete old metadata if exists (simple collision handling)
 		metadataPath := metadataService.GetMetadataFilePath(virtualFilePath)
@@ -209,13 +250,10 @@ func ProcessArchive(
 			return fmt.Errorf("failed to write metadata for 7zip file %s: %w", sevenZipContent.Filename, err)
 		}
 
-		slog.DebugContext(ctx, "Created metadata for 7zip extracted file",
+		slog.InfoContext(ctx, "Created metadata for 7zip extracted file",
 			"file", baseFilename,
-			"original_internal_path", sevenZipContent.InternalPath,
 			"virtual_path", virtualFilePath,
-			"size", sevenZipContent.Size,
-			"segments", len(sevenZipContent.Segments),
-			"validated_segments", fileSegmentsValidated)
+			"size", sevenZipContent.Size)
 
 		filesProcessed++
 	}
@@ -239,4 +277,21 @@ func ProcessArchive(
 	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", filesProcessed)
 
 	return nil
+}
+
+// normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
+func normalizeArchiveReleaseFilename(nzbFilename, originalFilename string) string {
+	releaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	fileExt := filepath.Ext(originalFilename)
+
+	if fileExt == "" {
+		return releaseName
+	}
+
+	// If release name already contains the extension (e.g. Movie.mkv.nzb -> Movie.mkv), don't duplicate
+	if strings.HasSuffix(strings.ToLower(releaseName), strings.ToLower(fileExt)) {
+		return releaseName
+	}
+
+	return releaseName + fileExt
 }
