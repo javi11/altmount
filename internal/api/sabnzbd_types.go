@@ -23,6 +23,21 @@ type SABnzbdResponse struct {
 	Error   *string     `json:"error,omitempty"`
 }
 
+// SABnzbdServerStats represents the download statistics for all servers
+type SABnzbdServerStats struct {
+	Total   int64            `json:"total"`
+	Month   int64            `json:"month"`
+	Week    int64            `json:"week"`
+	Day     int64            `json:"day"`
+	Servers map[string]int64 `json:"servers"`
+}
+
+// SABnzbdServerStatsResponse represents the response for server_stats mode
+type SABnzbdServerStatsResponse struct {
+	Status      bool               `json:"status"`
+	ServerStats SABnzbdServerStats `json:"server_stats"`
+}
+
 // SABnzbdQueueObject represents the nested queue object in the response
 type SABnzbdQueueObject struct {
 	Paused    bool               `json:"paused"`
@@ -119,6 +134,7 @@ type SABnzbdStatusResponse struct {
 	PauseInt        int     `json:"pause_int"`
 	Remaining       string  `json:"remaining"`
 	MbLeft          float64 `json:"mbleft"`
+	KbPerSec        string  `json:"kbpersec"`
 	Diskspace1      string  `json:"diskspace1"`
 	Diskspace2      string  `json:"diskspace2"`
 	DiskspaceTotal1 string  `json:"diskspacetotal1"`

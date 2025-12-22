@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/utils"
 )
 
 var defaultCategory = config.SABnzbdCategory{
@@ -100,6 +101,8 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 		return s.handleSABnzbdGetConfig(c)
 	case "version":
 		return s.handleSABnzbdVersion(c)
+	case "server_stats":
+		return s.handleSABnzbdServerStats(c)
 	default:
 		return s.writeSABnzbdErrorFiber(c, fmt.Sprintf("Unknown mode: %s", mode))
 	}
@@ -484,6 +487,13 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 		status = "Paused"
 	}
 
+	kbPerSec := "0.00"
+	if s.poolManager != nil {
+		if metrics, err := s.poolManager.GetMetrics(); err == nil {
+			kbPerSec = fmt.Sprintf("%.2f", metrics.DownloadSpeedBytesPerSec/1024.0)
+		}
+	}
+
 	response := SABnzbdQueueResponse{
 		Status: true,
 		Queue: SABnzbdQueueObject{
@@ -493,7 +503,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 			Status:    status,
 			Mbleft:    fmt.Sprintf("%.2f", totalMbLeft),
 			Mb:        fmt.Sprintf("%.2f", totalMb),
-			Kbpersec:  "0.00",
+			Kbpersec:  kbPerSec,
 			Version:   "4.5.0",
 		},
 	}
@@ -660,6 +670,24 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		}
 	}
 
+	var kbPerSec float64
+	if s.poolManager != nil {
+		if metrics, err := s.poolManager.GetMetrics(); err == nil {
+			kbPerSec = metrics.DownloadSpeedBytesPerSec / 1024.0
+		}
+	}
+
+	// Get actual disk space
+	diskFree := "0 B"
+	diskTotal := "0 B"
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if info, err := utils.GetDiskSpace(cfg.Metadata.RootPath); err == nil {
+			diskFree = formatHumanSize(info.Free)
+			diskTotal = formatHumanSize(info.Total)
+		}
+	}
+
 	response := SABnzbdStatusResponse{
 		Status:          true,
 		Version:         "4.5.0",
@@ -674,10 +702,11 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		PauseInt:        0,
 		Remaining:       fmt.Sprintf("%.1f MB", totalMbLeft),
 		MbLeft:          totalMbLeft,
-		Diskspace1:      "0 B",
-		Diskspace2:      "0 B",
-		DiskspaceTotal1: "0 B",
-		DiskspaceTotal2: "0 B",
+		KbPerSec:        fmt.Sprintf("%.2f", kbPerSec),
+		Diskspace1:      diskFree,
+		Diskspace2:      diskFree,
+		DiskspaceTotal1: diskTotal,
+		DiskspaceTotal2: diskTotal,
 		Loadavg:         "0.0",
 		Cache: struct {
 			Max  int `json:"max"`
@@ -690,6 +719,40 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		},
 		Folders: []string{},
 		Slots:   slots,
+	}
+
+	return s.writeSABnzbdResponseFiber(c, response)
+}
+
+// handleSABnzbdServerStats handles server stats request
+func (s *Server) handleSABnzbdServerStats(c *fiber.Ctx) error {
+	if s.poolManager == nil {
+		return s.writeSABnzbdErrorFiber(c, "Pool manager not available")
+	}
+
+	metrics, err := s.poolManager.GetMetrics()
+	if err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Failed to get metrics")
+	}
+
+	// Map AltMount metrics to SABnzbd format
+	// SABnzbd 'servers' map uses server name/host as key and total bytes as value
+	servers := make(map[string]int64)
+	// We don't have per-server total metrics easily available here, so we'll mock it
+	// based on whether the pool is active.
+	if s.poolManager.HasPool() {
+		servers["AltMount"] = metrics.BytesDownloaded
+	}
+
+	response := SABnzbdServerStatsResponse{
+		Status: true,
+		ServerStats: SABnzbdServerStats{
+			Total:   metrics.BytesDownloaded,
+			Month:   metrics.BytesDownloaded, // Simplified
+			Week:    metrics.BytesDownloaded,
+			Day:     metrics.BytesDownloaded,
+			Servers: servers,
+		},
 	}
 
 	return s.writeSABnzbdResponseFiber(c, response)
