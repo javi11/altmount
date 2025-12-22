@@ -60,8 +60,8 @@ func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage in
 }
 
 // hasAllowedFiles checks if any files within 7zip archive contents match allowed extensions
-// If allowedExtensions is empty, all file types are allowed but sample/proof files are still rejected
-func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) bool {
+// If allowedExtensions is empty, all file types are allowed but blocked files are still rejected
+func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string, blockedFileExtensions []string, blockedFilePatterns []string) bool {
 	for _, content := range sevenZipContents {
 		// Skip directories
 		if content.IsDirectory {
@@ -69,7 +69,8 @@ func hasAllowedFiles(sevenZipContents []Content, allowedExtensions []string) boo
 		}
 		// Check both the internal path and filename
 		// utils.IsAllowedFile handles empty extensions AND sample filtering correctly
-		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions) || utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions) {
+		if utils.IsAllowedFile(content.InternalPath, content.Size, allowedExtensions, blockedFilePatterns, blockedFileExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedExtensions, blockedFilePatterns, blockedFileExtensions) {
 			return true
 		}
 	}
@@ -93,6 +94,8 @@ func ProcessArchive(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
+	blockedFileExtensions []string,
+	blockedFilePatterns []string,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -113,7 +116,7 @@ func ProcessArchive(
 	slog.InfoContext(ctx, "Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
 
 	// Validate file extensions before processing
-	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions) {
+	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions, blockedFileExtensions, blockedFilePatterns) {
 		slog.WarnContext(ctx, "7zip archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
 		return ErrNoAllowedFiles
 	}
@@ -136,7 +139,8 @@ func ProcessArchive(
 	// Only do this if there's exactly one media file in the archive
 	mediaFilesCount := 0
 	for _, content := range sevenZipContents {
-		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions) || utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions)) {
+		if !content.IsDirectory && (utils.IsAllowedFile(content.InternalPath, content.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) ||
+			utils.IsAllowedFile(content.Filename, content.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions)) {
 			mediaFilesCount++
 		}
 	}
@@ -155,8 +159,15 @@ func ProcessArchive(
 		normalizedInternalPath := strings.ReplaceAll(sevenZipContent.InternalPath, "\\", "/")
 		baseFilename := filepath.Base(normalizedInternalPath)
 
+		// Double check if this specific file is allowed/blocked
+		if !utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) &&
+			!utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) {
+			continue
+		}
+
 		// Normalize filename to match NZB if it's the only media file
-		if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) || utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions)) {
+		if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions) ||
+			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions, blockedFilePatterns, blockedFileExtensions)) {
 			// Extract release name and combine with original extension
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",

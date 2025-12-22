@@ -142,6 +142,10 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		allowedExtensions = *allowedExtensionsOverride
 	}
 
+	cfg := proc.configGetter()
+	blockedExtensions := cfg.Import.BlockedFileExtensions
+	blockedPatterns := cfg.Import.BlockedFilePatterns
+
 	// Update progress: starting
 	proc.updateProgress(queueID, 0)
 	// Step 1: Open and parse the file
@@ -208,23 +212,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, blockedExtensions, blockedPatterns)
 
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -247,6 +251,8 @@ func (proc *Processor) processSingleFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedExtensions []string,
+	blockedPatterns []string,
 ) (string, error) {
 	if len(regularFiles) == 0 {
 		return "", fmt.Errorf("no regular files to process")
@@ -270,6 +276,13 @@ func (proc *Processor) processSingleFile(
 				virtualDir = normalizedDir
 			}
 		}
+	}
+
+	// Ensure we don't put the file directly into a category root folder
+	// We MUST create a release folder so Sonarr/Radarr can find the "Job Folder"
+	if proc.isCategoryFolder(virtualDir) {
+		virtualDir = filepath.Join(virtualDir, releaseName)
+		virtualDir = strings.ReplaceAll(virtualDir, string(filepath.Separator), "/")
 	}
 
 	// Rename the file to match the NZB name to handle obfuscated filenames
@@ -305,6 +318,8 @@ func (proc *Processor) processSingleFile(
 		maxConnections,
 		proc.segmentSamplePercentage,
 		allowedExtensions,
+		blockedExtensions,
+		blockedPatterns,
 	)
 	if err != nil {
 		return "", err
@@ -322,6 +337,8 @@ func (proc *Processor) processMultiFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedExtensions []string,
+	blockedPatterns []string,
 ) (string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
@@ -374,6 +391,8 @@ func (proc *Processor) processMultiFile(
 		maxConnections,
 		proc.segmentSamplePercentage,
 		allowedExtensions,
+		blockedExtensions,
+		blockedPatterns,
 	); err != nil {
 		return "", err
 	}
@@ -391,6 +410,8 @@ func (proc *Processor) processRarArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedExtensions []string,
+	blockedPatterns []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -415,6 +436,8 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedExtensions,
+			blockedPatterns,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -452,6 +475,8 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedExtensions,
+			blockedPatterns,
 		)
 		if err != nil {
 			return "", err
@@ -472,6 +497,8 @@ func (proc *Processor) processSevenZipArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
+	blockedExtensions []string,
+	blockedPatterns []string,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -496,6 +523,8 @@ func (proc *Processor) processSevenZipArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedExtensions,
+			blockedPatterns,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -533,6 +562,8 @@ func (proc *Processor) processSevenZipArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			blockedExtensions,
+			blockedPatterns,
 		)
 		if err != nil {
 			return "", err
@@ -542,6 +573,7 @@ func (proc *Processor) processSevenZipArchive(
 
 	return nzbFolder, nil
 }
+
 
 // normalizeReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
 // It avoids generating duplicate extensions like ".mp4.mp4" when the NZB name already contains the suffix.

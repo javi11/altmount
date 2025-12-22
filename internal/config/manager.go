@@ -155,6 +155,8 @@ type ImportConfig struct {
 	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
 	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	BlockedFileExtensions          []string       `yaml:"blocked_file_extensions" mapstructure:"blocked_file_extensions" json:"blocked_file_extensions"`
+	BlockedFilePatterns            []string       `yaml:"blocked_file_patterns" mapstructure:"blocked_file_patterns" json:"blocked_file_patterns"`
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
 	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
@@ -1163,6 +1165,12 @@ func DefaultConfig(configDir ...string) *Config {
 				".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264",
 				".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx",
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
+			},
+			BlockedFileExtensions: []string{ // Default: common blocked extensions
+				".exe", ".txt", ".nfo", ".jpg", ".jpeg", ".png",
+			},
+			BlockedFilePatterns: []string{ // Default: common sample/proof patterns
+				"(?i)\\b(sample|proof)\\b",
 			},
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
 			ImportCacheSizeMB:       64,                 // Default: 64MB cache for archive analysis
