@@ -1,7 +1,7 @@
 package usenet
 
 import (
-	"github.com/acomagu/bufpipe"
+	"io"
 )
 
 type SegmentLoader interface {
@@ -84,7 +84,7 @@ func GetSegmentsInRange(start, end int64, ml SegmentLoader) *segmentRange {
 			continue
 		}
 
-		r, w := bufpipe.New(nil)
+		r, w := io.Pipe()
 		seg := &segment{
 			Id:          src.Id,
 			Start:       readStart,
