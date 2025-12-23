@@ -6,8 +6,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/acomagu/bufpipe"
 )
 
 // TestSegmentWriter_WriteAfterClose verifies that writes after close return io.ErrClosedPipe
@@ -15,7 +13,7 @@ func TestSegmentWriter_WriteAfterClose(t *testing.T) {
 	t.Parallel()
 
 	// Create a segment with a pipe
-	reader, writer := bufpipe.New(nil)
+	reader, writer := io.Pipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
@@ -47,7 +45,7 @@ func TestSegmentWriter_ConcurrentWriteAndClose(t *testing.T) {
 
 	// Run this test multiple times to increase chance of catching race
 	for i := 0; i < 10; i++ {
-		reader, writer := bufpipe.New(nil)
+		reader, writer := io.Pipe()
 		seg := &segment{
 			Id:     "test-segment",
 			reader: reader,
@@ -94,7 +92,7 @@ func TestSegmentWriter_ConcurrentWriteAndClose(t *testing.T) {
 func TestSegmentClose_Idempotent(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := bufpipe.New(nil)
+	reader, writer := io.Pipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
@@ -120,7 +118,7 @@ func TestSegmentClose_Idempotent(t *testing.T) {
 func TestSafeWriter_ReturnsErrorWhenClosed(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := bufpipe.New(nil)
+	reader, writer := io.Pipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
@@ -153,7 +151,7 @@ func TestSafeWriter_ReturnsErrorWhenClosed(t *testing.T) {
 func TestSegmentWriter_ConcurrentWrites(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := bufpipe.New(nil)
+	reader, writer := io.Pipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
@@ -236,7 +234,7 @@ func TestSegmentWriter_RaceDetection(t *testing.T) {
 	// This test is specifically designed to catch data races
 	// Run with: go test -race -run TestSegmentWriter_RaceDetection
 	for iteration := 0; iteration < 20; iteration++ {
-		reader, writer := bufpipe.New(nil)
+		reader, writer := io.Pipe()
 		seg := &segment{
 			Id:     "test-segment",
 			reader: reader,

@@ -11,7 +11,6 @@ tool (
 
 require (
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
-	github.com/acomagu/bufpipe v1.0.4
 	github.com/avast/retry-go/v4 v4.6.1
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
