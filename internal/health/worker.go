@@ -419,7 +419,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			update.Type = database.UpdateTypeRepairRetry // This will set status to repair_triggered
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Health check retries exhausted, triggering repair", "file_path", fh.FilePath)
-				return hw.triggerFileRepair(ctx, fh.FilePath, errorMsg, event.Details)
+				return hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
 			}
 		} else {
 			// Increment health check retry count
@@ -717,21 +717,13 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file
 // It directly queries ARR APIs to find which instance manages the file and triggers repair
-func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, errorMsg *string, errorDetails *string) error {
+func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.FileHealth, errorMsg *string, errorDetails *string) error {
+	filePath := item.FilePath
 	slog.InfoContext(ctx, "Triggering file repair using direct ARR API approach", "file_path", filePath)
 
 	cfg := hw.configGetter()
 
 	var pathForRescan string
-
-	item, err := hw.healthRepo.GetFileHealth(ctx, filePath)
-	if err != nil {
-		slog.ErrorContext(ctx, "Failed to get health record for library path lookup",
-			"file_path", filePath,
-			"error", err)
-
-		return fmt.Errorf("failed to get health record for library path lookup: %w", err)
-	}
 
 	if item.LibraryPath != nil && *item.LibraryPath != "" {
 		pathForRescan = *item.LibraryPath
@@ -742,7 +734,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, filePath string, 
 	}
 
 	// Step 4: Trigger rescan through the ARR service
-	err = hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
+	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
 	if err != nil {
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
 			"file_path", filePath,
