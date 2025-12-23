@@ -1025,9 +1025,12 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		basePath = *item.RelativePath
 	}
 
-	// If category is specified, append it to the base path
+	// If category is specified, resolve to configured directory path
 	if item.Category != nil && *item.Category != "" {
-		basePath = filepath.Join(basePath, *item.Category)
+		categoryPath := s.buildCategoryPath(*item.Category)
+		if categoryPath != "" {
+			basePath = filepath.Join(basePath, categoryPath)
+		}
 	}
 
 	// Determine if allowed extensions override is needed
@@ -1038,6 +1041,30 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 	}
 
 	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
+}
+
+// buildCategoryPath resolves a category name to its configured directory path.
+// Returns the category's Dir if configured, otherwise falls back to the category name.
+func (s *Service) buildCategoryPath(category string) string {
+	if category == "" || category == "default" {
+		return ""
+	}
+
+	cfg := s.configGetter()
+	if cfg == nil || len(cfg.SABnzbd.Categories) == 0 {
+		return category
+	}
+
+	for _, cat := range cfg.SABnzbd.Categories {
+		if cat.Name == category {
+			if cat.Dir != "" {
+				return cat.Dir
+			}
+			return category
+		}
+	}
+
+	return category
 }
 
 // handleProcessingSuccess handles all steps after successful NZB processing
