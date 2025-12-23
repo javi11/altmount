@@ -408,6 +408,16 @@ func (sz *sevenZipProcessor) mapOffsetToSegments(
 	offset := int64(fi.Offset)
 	size := int64(fi.Size)
 
+	// For AES-encrypted files, the data in the archive is padded to 16-byte blocks.
+	// We need to include the padding bytes in our segment mapping so the AES decrypt
+	// reader can read the complete encrypted data.
+	if fi.Encrypted && len(fi.AESIV) > 0 {
+		const aesBlockSize = 16
+		if size%aesBlockSize != 0 {
+			size = size + (aesBlockSize - (size % aesBlockSize))
+		}
+	}
+
 	slicedSegments, covered, err := sliceSegmentsForRange(allSegments, offset, size)
 	if err != nil {
 		return nil, fmt.Errorf("failed to slice segments: %w", err)

@@ -198,13 +198,19 @@ func ProcessArchive(
 			)
 		}
 
+		// Determine encryption type for validation
+		encryption := metapb.Encryption_NONE
+		if len(sevenZipContent.AesKey) > 0 {
+			encryption = metapb.Encryption_AES
+		}
+
 		// Validate segments with real-time progress updates
 		if err := validation.ValidateSegmentsForFile(
 			ctx,
 			baseFilename,
 			sevenZipContent.Size,
 			sevenZipContent.Segments,
-			metapb.Encryption_NONE,
+			encryption,
 			poolManager,
 			maxValidationGoroutines,
 			segmentSamplePercentage,
