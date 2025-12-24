@@ -296,6 +296,7 @@ type SABnzbdCategory struct {
 	Order    int    `yaml:"order" mapstructure:"order" json:"order"`
 	Priority int    `yaml:"priority" mapstructure:"priority" json:"priority"`
 	Dir      string `yaml:"dir" mapstructure:"dir" json:"dir"`
+	Type     string `yaml:"type" mapstructure:"type" json:"type"` // "sonarr" or "radarr"
 }
 
 // ArrsConfig represents arrs configuration

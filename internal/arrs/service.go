@@ -693,6 +693,12 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 					"episode_file_id", targetEpisodeFile.ID,
 					"error", err)
 			}
+
+			// Trigger rescan for the series
+			_, _ = client.SendCommandContext(ctx, &sonarr.CommandRequest{
+				Name:     "RescanSeries",
+				SeriesID: targetSeries.ID,
+			})
 		}
 	}
 
@@ -766,12 +772,12 @@ func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error
 				slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", instance.Name, "error", err)
 				return
 			}
-			// Trigger RefreshMonitoredDownloads
-			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+			// Trigger CheckForFinishedDownload
+			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "CheckForFinishedDownload"})
 			if err != nil {
-				slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", instance.Name, "error", err)
+				slog.ErrorContext(bgCtx, "Failed to trigger CheckForFinishedDownload", "instance", instance.Name, "error", err)
 			} else {
-				slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", instance.Name)
+				slog.InfoContext(bgCtx, "Triggered CheckForFinishedDownload", "instance", instance.Name)
 			}
 		}
 	}()
@@ -814,14 +820,13 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", inst.Name, "error", err)
 					return
 				}
-				// Trigger RefreshMonitoredDownloads
-				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
-				if err != nil {
-					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
-				} else {
-					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
-				}
-			}
+							// Trigger CheckForFinishedDownload
+							_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "CheckForFinishedDownload"})
+							if err != nil {
+								slog.ErrorContext(bgCtx, "Failed to trigger CheckForFinishedDownload", "instance", inst.Name, "error", err)
+							} else {
+								slog.InfoContext(bgCtx, "Triggered CheckForFinishedDownload", "instance", inst.Name)
+							}			}
 		}(instance)
 	}
 }
