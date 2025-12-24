@@ -693,6 +693,12 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 					"episode_file_id", targetEpisodeFile.ID,
 					"error", err)
 			}
+
+			// Trigger rescan for the series
+			_, _ = client.SendCommandContext(ctx, &sonarr.CommandRequest{
+				Name:     "RescanSeries",
+				SeriesID: targetSeries.ID,
+			})
 		}
 	}
 
