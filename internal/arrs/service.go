@@ -774,12 +774,12 @@ func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error
 				slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", instance.Name, "error", err)
 				return
 			}
-			// Trigger CheckForFinishedDownload
-			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "CheckForFinishedDownload"})
+			// Trigger RefreshMonitoredDownloads
+			_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
 			if err != nil {
-				slog.ErrorContext(bgCtx, "Failed to trigger CheckForFinishedDownload", "instance", instance.Name, "error", err)
+				slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", instance.Name, "error", err)
 			} else {
-				slog.InfoContext(bgCtx, "Triggered CheckForFinishedDownload", "instance", instance.Name)
+				slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", instance.Name)
 			}
 		}
 	}()
@@ -822,15 +822,60 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", inst.Name, "error", err)
 					return
 				}
-							// Trigger CheckForFinishedDownload
-							_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "CheckForFinishedDownload"})
-							if err != nil {
-								slog.ErrorContext(bgCtx, "Failed to trigger CheckForFinishedDownload", "instance", inst.Name, "error", err)
-							} else {
-								slog.InfoContext(bgCtx, "Triggered CheckForFinishedDownload", "instance", inst.Name)
-							}			}
+				// Trigger RefreshMonitoredDownloads
+				_, err = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
+				if err != nil {
+					slog.ErrorContext(bgCtx, "Failed to trigger RefreshMonitoredDownloads", "instance", inst.Name, "error", err)
+				} else {
+					slog.InfoContext(bgCtx, "Triggered RefreshMonitoredDownloads", "instance", inst.Name)
+				}
+			}
 		}(instance)
 	}
+}
+
+// GetHealth retrieves health checks from all enabled ARR instances
+func (s *Service) GetHealth(ctx context.Context) (map[string]interface{}, error) {
+	instances := s.getConfigInstances()
+	results := make(map[string]interface{})
+
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+
+		var health interface{}
+
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Radarr client for health check", "instance", instance.Name, "error", err)
+				continue
+			}
+			err = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Radarr health", "instance", instance.Name, "error", err)
+				continue
+			}
+			results[instance.Name] = health
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Sonarr client for health check", "instance", instance.Name, "error", err)
+				continue
+			}
+			err = client.GetInto(ctx, starr.Request{URI: "/health"}, &health)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Sonarr health", "instance", instance.Name, "error", err)
+				continue
+			}
+			results[instance.Name] = health
+		}
+	}
+
+	return results, nil
 }
 
 // GetAllInstances returns all arrs instances from configuration
@@ -1323,6 +1368,18 @@ func (s *Service) cleanupRadarrQueue(ctx context.Context, instance config.ArrsIn
 				shouldCleanup = true
 				break
 			}
+			if strings.Contains(allMessages, "is not a valid video file") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(allMessages, "Sample file") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(msg.Title, "No video files were found in the selected folder") {
+				shouldCleanup = true
+				break
+			}
 		}
 
 		if shouldCleanup {
@@ -1400,6 +1457,14 @@ func (s *Service) cleanupSonarrQueue(ctx context.Context, instance config.ArrsIn
 				break
 			}
 			if strings.Contains(msg.Title, "Download doesn't contain intermediate path") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(allMessages, "is not a valid video file") {
+				shouldCleanup = true
+				break
+			}
+			if strings.Contains(allMessages, "Sample file") {
 				shouldCleanup = true
 				break
 			}

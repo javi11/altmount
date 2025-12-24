@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer/utils"
@@ -32,6 +33,7 @@ type SABnzbdQueueObject struct {
 	Mbleft    string             `json:"mbleft"`
 	Mb        string             `json:"mb"`
 	Kbpersec  string             `json:"kbpersec"`
+	Speed     string             `json:"speed"`
 	Version   string             `json:"version"`
 }
 
@@ -51,6 +53,9 @@ type SABnzbdQueueSlot struct {
 	Percentage string `json:"percentage"`
 	Status     string `json:"status"`
 	Timeleft   string `json:"timeleft"`
+	Eta        string `json:"eta"`
+	Size       string `json:"size"`
+	Sizeleft   string `json:"sizeleft"`
 	Mb         string `json:"mb"`
 	Mbleft     string `json:"mbleft"`
 }
@@ -341,6 +346,28 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		progressPercentage = 100
 	}
 
+	// Calculate Timeleft and Eta
+	timeLeft := "0:00:00"
+	eta := "unknown"
+	if item.Status == database.QueueStatusProcessing && item.StartedAt != nil && progressPercentage > 0 && progressPercentage < 100 {
+		elapsed := time.Since(*item.StartedAt)
+		totalEstimated := time.Duration(float64(elapsed) / float64(progressPercentage) * 100)
+		remaining := totalEstimated - elapsed
+
+		if remaining > 0 {
+			hours := int(remaining.Hours())
+			minutes := int(remaining.Minutes()) % 60
+			seconds := int(remaining.Seconds()) % 60
+			timeLeft = fmt.Sprintf("%d:%02d:%02d", hours/24, hours%24, minutes) // SABnzbd format: d:h:m
+			if hours < 24 {
+				timeLeft = fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
+			}
+
+			etaTime := time.Now().Add(remaining)
+			eta = etaTime.Format("15:04 Mon 02 Jan")
+		}
+	}
+
 	// Mock total size (could be enhanced to track actual file sizes)
 	var totalSizeBytes int64
 	if item.FileSize != nil {
@@ -357,7 +384,10 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		Cat:        category,
 		Percentage: fmt.Sprintf("%d", progressPercentage),
 		Status:     status,
-		Timeleft:   "0:0:0:0", // Format: d:h:m:s
+		Timeleft:   timeLeft,
+		Eta:        eta,
+		Size:       formatHumanSize(totalSizeBytes),
+		Sizeleft:   formatHumanSize(sizeLeftBytes),
 		Mb:         formatSizeMB(totalSizeBytes),
 		Mbleft:     formatSizeMB(sizeLeftBytes),
 	}
@@ -442,49 +472,110 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		category = *item.Category
 	}
 
-	// Get file size if available
-	var sizeBytes int64
-	if item.FileSize != nil {
-		sizeBytes = *item.FileSize
+		// Get file size if available
+
+		var sizeBytes int64
+
+		if item.FileSize != nil {
+
+			sizeBytes = *item.FileSize
+
+		}
+
+	
+
+		downloaded := int64(0)
+
+		actionLine := ""
+
+		if item.Status == database.QueueStatusCompleted {
+
+			downloaded = sizeBytes
+
+			actionLine = "Finished"
+
+		} else if item.Status == database.QueueStatusFailed {
+
+			actionLine = "Failed"
+
+			if item.ErrorMessage != nil {
+
+				actionLine = fmt.Sprintf("Failed: %s", *item.ErrorMessage)
+
+			}
+
+		}
+
+	
+
+		return SABnzbdHistorySlot{
+
+			Index:        index,
+
+			NzoID:        fmt.Sprintf("%d", item.ID),
+
+			Name:         jobName,
+
+			Category:     category,
+
+			PP:           "3",
+
+			Script:       "",
+
+			Report:       "",
+
+			URL:          "",
+
+			Status:       status,
+
+			NzbName:      nzbFilename,
+
+			Download:     jobName,
+
+			Storage:      finalPath,
+
+			Path:         finalPath,
+
+			Postproc:     "",
+
+			Downloaded:   downloaded,
+
+			Completetime: completetime,
+
+			NzbAvg:       "",
+
+			Script_log:   "",
+
+			DuplicateKey: jobName,
+
+			Script_line:  "",
+
+			Fail_message: failMessage,
+
+			Url_info:     "",
+
+			Bytes:        sizeBytes,
+
+			Meta:         []string{},
+
+			Series:       "",
+
+			Md5sum:       "",
+
+			Password:     "",
+
+			ActionLine:   actionLine,
+
+			Size:         formatHumanSize(sizeBytes),
+
+			Loaded:       true,
+
+			Retry:        item.RetryCount,
+
+			StateLog:     []string{},
+
+		}
+
 	}
 
-	downloaded := int64(0)
-	if item.Status == database.QueueStatusCompleted {
-		downloaded = sizeBytes
-	}
-
-	return SABnzbdHistorySlot{
-		Index:        index,
-		NzoID:        fmt.Sprintf("%d", item.ID),
-		Name:         jobName,
-		Category:     category,
-		PP:           "3",
-		Script:       "",
-		Report:       "",
-		URL:          "",
-		Status:       status,
-		NzbName:      nzbFilename,
-		Download:     jobName,
-		Storage:      finalPath,
-		Path:         finalPath,
-		Postproc:     "",
-		Downloaded:   downloaded,
-		Completetime: completetime,
-		NzbAvg:       "",
-		Script_log:   "",
-		DuplicateKey: jobName,
-		Script_line:  "",
-		Fail_message: failMessage,
-		Url_info:     "",
-		Bytes:        sizeBytes,
-		Meta:         []string{},
-		Series:       "",
-		Md5sum:       "",
-		Password:     "",
-		ActionLine:   "",
-		Size:         formatHumanSize(sizeBytes),
-		Loaded:       true,
-		Retry:        item.RetryCount,
-		StateLog:     []string{},
-	}
-}
+	

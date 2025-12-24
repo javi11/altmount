@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -444,10 +445,30 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	// Get category filter from query parameter
 	categoryFilter := c.Query("category", "")
 
+	// Get pagination parameters
+	start := 0
+	if s := c.Query("start"); s != "" {
+		if val, err := strconv.Atoi(s); err == nil {
+			start = val
+		}
+	}
+	limit := 100
+	if l := c.Query("limit"); l != "" {
+		if val, err := strconv.Atoi(l); err == nil {
+			limit = val
+		}
+	}
+
 	// Get pending and processing items
-	items, err := s.queueRepo.ListActiveQueueItems(c.Context(), "", categoryFilter, 100, 0, "updated_at", "desc")
+	items, err := s.queueRepo.ListActiveQueueItems(c.Context(), "", categoryFilter, limit, start, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get queue")
+	}
+
+	// Get total count for pagination info
+	totalCount, err := s.queueRepo.CountQueueItems(c.Context(), nil, "", categoryFilter)
+	if err != nil {
+		totalCount = len(items) // Fallback
 	}
 
 	// Convert to SABnzbd format
@@ -460,7 +481,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 			continue
 		}
 
-		slot := ToSABnzbdQueueSlot(item, i, s.progressBroadcaster)
+		slot := ToSABnzbdQueueSlot(item, start+i, s.progressBroadcaster)
 		slots = append(slots, slot)
 
 		if mb, err := strconv.ParseFloat(slot.Mb, 64); err == nil {
@@ -479,16 +500,27 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 		status = "Paused"
 	}
 
+	// Get download speed from pool manager
+	kbpersec := "0.00"
+	speed := "0"
+	if s.poolManager != nil {
+		if metrics, err := s.poolManager.GetMetrics(); err == nil {
+			kbpersec = fmt.Sprintf("%.2f", metrics.DownloadSpeedBytesPerSec/1024.0)
+			speed = fmt.Sprintf("%.0f", metrics.DownloadSpeedBytesPerSec)
+		}
+	}
+
 	response := SABnzbdQueueResponse{
 		Status: true,
 		Queue: SABnzbdQueueObject{
 			Paused:    s.importerService.IsPaused(),
 			Slots:     slots,
-			Noofslots: len(slots),
+			Noofslots: totalCount,
 			Status:    status,
 			Mbleft:    fmt.Sprintf("%.2f", totalMbLeft),
 			Mb:        fmt.Sprintf("%.2f", totalMb),
-			Kbpersec:  "0.00",
+			Kbpersec:  kbpersec,
+			Speed:     speed,
 			Version:   "4.5.0",
 		},
 	}
@@ -542,18 +574,44 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	// Get category filter from query parameter
 	categoryFilter := c.Query("category", "")
 
+	// Get pagination parameters
+	start := 0
+	if s := c.Query("start"); s != "" {
+		if val, err := strconv.Atoi(s); err == nil {
+			start = val
+		}
+	}
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		if val, err := strconv.Atoi(l); err == nil {
+			limit = val
+		}
+	}
+
 	// Get completed items
 	completedStatus := database.QueueStatusCompleted
-	completed, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, 50, 0, "updated_at", "desc")
+	completed, err := s.queueRepo.ListQueueItems(c.Context(), &completedStatus, "", categoryFilter, limit, start, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get completed items")
 	}
 
+	// Get total completed count
+	totalCompleted, err := s.queueRepo.CountQueueItems(c.Context(), &completedStatus, "", categoryFilter)
+	if err != nil {
+		totalCompleted = len(completed)
+	}
+
 	// Get failed items
 	failedStatus := database.QueueStatusFailed
-	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, 50, 0, "updated_at", "desc")
+	failed, err := s.queueRepo.ListQueueItems(c.Context(), &failedStatus, "", categoryFilter, limit, start, "updated_at", "desc")
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to get failed items")
+	}
+
+	// Get total failed count
+	totalFailed, err := s.queueRepo.CountQueueItems(c.Context(), &failedStatus, "", categoryFilter)
+	if err != nil {
+		totalFailed = len(failed)
 	}
 
 	// Combine and convert to SABnzbd format
@@ -564,7 +622,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	for _, item := range completed {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
-		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
+		slot := ToSABnzbdHistorySlot(item, start+index, itemBasePath)
 		slog.DebugContext(c.Context(), "Reporting completed item to SABnzbd API",
 			"name", slot.Name,
 			"path", slot.Path,
@@ -576,7 +634,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	for _, item := range failed {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
-		slot := ToSABnzbdHistorySlot(item, index, itemBasePath)
+		slot := ToSABnzbdHistorySlot(item, start+index, itemBasePath)
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 		index++
@@ -591,7 +649,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
 			DaySize:   "0 B",
-			Noofslots: len(slots),
+			Noofslots: totalCompleted + totalFailed,
 		},
 	}
 
@@ -655,6 +713,10 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		}
 	}
 
+	// Get actual disk space for temp directory
+	tempDir := os.TempDir()
+	diskFree, diskTotal := getDiskSpace(tempDir)
+
 	response := SABnzbdStatusResponse{
 		Status:          true,
 		Version:         "4.5.0",
@@ -669,9 +731,9 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		PauseInt:        0,
 		Remaining:       fmt.Sprintf("%.1f MB", totalMbLeft),
 		MbLeft:          totalMbLeft,
-		Diskspace1:      "0 B",
+		Diskspace1:      formatHumanSize(int64(diskFree)),
 		Diskspace2:      "0 B",
-		DiskspaceTotal1: "0 B",
+		DiskspaceTotal1: formatHumanSize(int64(diskTotal)),
 		DiskspaceTotal2: "0 B",
 		Loadavg:         "0.0",
 		Cache: struct {
@@ -948,4 +1010,21 @@ func (s *Server) findARRInstanceByURL(checkURL string) *arrs.ConfigInstance {
 	}
 
 	return nil
+}
+
+// getDiskSpace returns free and total disk space in bytes for the given path
+func getDiskSpace(path string) (free, total uint64) {
+	// For Linux/Unix
+	if runtime.GOOS != "windows" {
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs(path, &stat); err == nil {
+			// Available blocks * size per block = available space in bytes
+			free = stat.Bavail * uint64(stat.Bsize)
+			total = stat.Blocks * uint64(stat.Bsize)
+			return
+		}
+	}
+
+	// Fallback/Default
+	return 0, 0
 }
