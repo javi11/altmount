@@ -413,7 +413,8 @@ func (s *Service) radarrManagesFile(ctx context.Context, client *radarr.Radarr, 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Radarr root folder", "folder_path", folder.Path, "file_path", filePath)
-		if strings.HasPrefix(filePath, folder.Path) {
+		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
+		if strings.HasPrefix(filePath, folder.Path) || strings.Contains(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Radarr root folder", "folder_path", folder.Path)
 			return true
 		}
@@ -546,7 +547,8 @@ func (s *Service) sonarrManagesFile(ctx context.Context, client *sonarr.Sonarr, 
 	// Check if file path starts with any root folder path
 	for _, folder := range rootFolders {
 		slog.DebugContext(ctx, "Checking Sonarr root folder", "folder_path", folder.Path, "file_path", filePath)
-		if strings.HasPrefix(filePath, folder.Path) {
+		// Check for direct prefix match or if the filePath contains the folder.Path (common in Docker/Remote setups)
+		if strings.HasPrefix(filePath, folder.Path) || strings.Contains(filePath, folder.Path) {
 			slog.DebugContext(ctx, "File matches Sonarr root folder", "folder_path", folder.Path)
 			return true
 		}
