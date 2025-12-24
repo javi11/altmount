@@ -760,9 +760,8 @@ func (s *Service) TriggerScanForFile(ctx context.Context, filePath string) error
 				slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", instance.Name, "error", err)
 				return
 			}
-			// Trigger RefreshMonitoredDownloads
-			_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
-		}
+			// Trigger CheckForFinishedDownload
+			_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "CheckForFinishedDownload"})		}
 	}()
 
 	return nil
@@ -798,9 +797,8 @@ func (s *Service) TriggerDownloadScan(ctx context.Context, instanceType string) 
 					slog.ErrorContext(bgCtx, "Failed to create Sonarr client for scan trigger", "instance", inst.Name, "error", err)
 					return
 				}
-				// Trigger RefreshMonitoredDownloads
-				_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "RefreshMonitoredDownloads"})
-			}
+				// Trigger CheckForFinishedDownload
+				_, _ = client.SendCommandContext(bgCtx, &sonarr.CommandRequest{Name: "CheckForFinishedDownload"})			}
 		}(instance)
 	}
 }
