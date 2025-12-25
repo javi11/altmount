@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/auth"
@@ -90,6 +91,9 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	var pathsToScan []string
 
 	switch req.EventType {
+	case "Test":
+		slog.InfoContext(c.Context(), "Received ARR test webhook")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
 	case "Download": // OnImport (renamed from Download in v3/v4 but webhooks might use either)
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
@@ -123,6 +127,16 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				pathsToScan = append(pathsToScan, deleted.Path)
 			}
 		}
+	case "MovieDelete", "SeriesDelete":
+		if req.Movie.FolderPath != "" {
+			pathsToScan = append(pathsToScan, req.Movie.FolderPath)
+		} else if req.Series.Path != "" {
+			pathsToScan = append(pathsToScan, req.Series.Path)
+		}
+	case "EpisodeFileDelete":
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		}
 	default:
 		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
@@ -135,50 +149,34 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 	// Trigger scan for each path
 	// We use TriggerScanForFile which launches a background task
+	cfg := s.configManager.GetConfig()
+	mountPath := cfg.MountPath
+	importDir := ""
+	if cfg.Import.ImportDir != nil {
+		importDir = *cfg.Import.ImportDir
+	}
+
 	for _, path := range pathsToScan {
-		// Since we don't know exactly which instance sent this, we might want to broadcast
-		// or rely on path matching. TriggerScanForFile attempts path matching.
-		// However, for webhooks, we might want a specific method that refreshes 
-		// metadata for that path directly in AltMount if it's a file deletion/addition.
-		// BUT: AltMount's main job is serving files. If a file is added/removed by ARR,
-		// AltMount needs to update its internal metadata/VFS.
-		
-		// Ideally, we would tell the MetadataService or ImportService to re-scan this path.
-		// But TriggerScanForFile in arrsService currently tells the ARR to rescan (circular?).
-		// Wait, TriggerScanForFile sends "RefreshMonitoredDownloads" command to ARR. 
-		// That's for when we import a file and want ARR to notice it.
-		
-		// Here, ARR is telling US it changed a file. We need to update OUR view.
-		// We should call the library sync worker or metadata service directly.
-		
-		slog.InfoContext(c.Context(), "Processing webhook file update", "path", path)
-		
-		// If it's a file path, check/update metadata
-		// We can use the health worker to "check" this file, which will fix metadata if needed?
-		// Or better: Use the library sync worker to sync just this file/folder?
-		// LibrarySyncWorker doesn't expose single-file sync publically yet, 
-		// but we can add a health check which will verify the file existence/metadata.
-		
-		// Add to health check queue with high priority
-		// This will verify if the file exists, read its metadata, update DB.
-		// If it was deleted, health check might fail or mark as corrupted/missing.
-		
-		// Actually, if it's an Upgrade, the old file is gone and new one is there.
-		// We should probably trigger a library sync for efficiency if many files change,
-		// but for single file, a health check is a good start.
-		
-		// Use health repo to add check
-		// We need to resolve the s struct to access healthRepo which isn't directly on Server struct here
-		// But Server has healthRepo.
-		// Wait, this function is on Server (*Server).
+		// Normalize path to relative
+		normalizedPath := path
+		if mountPath != "" && strings.HasPrefix(normalizedPath, mountPath) {
+			normalizedPath = strings.TrimPrefix(normalizedPath, mountPath)
+		} else if importDir != "" && strings.HasPrefix(normalizedPath, importDir) {
+			normalizedPath = strings.TrimPrefix(normalizedPath, importDir)
+		}
+		normalizedPath = strings.TrimPrefix(normalizedPath, "/")
+
+		slog.InfoContext(c.Context(), "Processing webhook file update", 
+			"original_path", path, 
+			"normalized_path", normalizedPath)
 		
 		if s.healthRepo != nil {
 			// Add to health check (pending status)
-			err := s.healthRepo.AddFileToHealthCheck(c.Context(), path, 1, nil)
+			err := s.healthRepo.AddFileToHealthCheck(c.Context(), normalizedPath, 1, nil)
 			if err != nil {
-				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", path, "error", err)
+				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {
-				slog.InfoContext(c.Context(), "Added file to health check queue from webhook", "path", path)
+				slog.InfoContext(c.Context(), "Added file to health check queue from webhook", "path", normalizedPath)
 			}
 		}
 	}
