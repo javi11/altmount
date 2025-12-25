@@ -311,6 +311,120 @@ func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 	}
 }
 
+// EnsureWebhookRegistration ensures that the AltMount webhook is registered in all enabled ARR instances
+func (s *Service) EnsureWebhookRegistration(ctx context.Context, altmountURL string, apiKey string) error {
+	instances := s.getConfigInstances()
+	webhookName := "AltMount Webhook"
+	webhookURL := fmt.Sprintf("%s/api/arrs/webhook?apikey=%s", altmountURL, apiKey)
+
+	slog.InfoContext(ctx, "Ensuring webhook registration in ARR instances", "webhook_url", webhookURL)
+
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+
+		slog.DebugContext(ctx, "Checking webhook for instance", "instance", instance.Name, "type", instance.Type)
+
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Radarr client for webhook check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			notifications, err := client.GetNotificationsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Radarr notifications", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, n := range notifications {
+				if n.Name == webhookName {
+					exists = true
+					// potentially update if needed, but for now just skip
+					break
+				}
+			}
+
+			if !exists {
+				notif := &radarr.NotificationInput{
+					Name:             webhookName,
+					Implementation:   "Webhook",
+					ConfigContract:   "WebhookSettings",
+					OnGrab:           false,
+					OnDownload:       true, // OnImport
+					OnUpgrade:        true,
+					OnRename:         true,
+					OnMovieDelete:    true,
+					OnMovieFileDelete: true,
+					OnMovieFileDeleteForUpgrade: true,
+					Fields: []*starr.FieldInput{
+						{Name: "url", Value: webhookURL},
+						{Name: "method", Value: "1"}, // 1 = POST
+					},
+				}
+				_, err := client.AddNotificationContext(ctx, notif)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Radarr webhook", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount webhook to Radarr", "instance", instance.Name)
+				}
+			}
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Sonarr client for webhook check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			notifications, err := client.GetNotificationsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Sonarr notifications", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, n := range notifications {
+				if n.Name == webhookName {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				notif := &sonarr.NotificationInput{
+					Name:             webhookName,
+					Implementation:   "Webhook",
+					ConfigContract:   "WebhookSettings",
+					OnGrab:           false,
+					OnDownload:       true, // OnImport
+					OnUpgrade:        true,
+					OnRename:         true,
+					OnSeriesDelete:   true,
+					OnEpisodeFileDelete: true,
+					OnEpisodeFileDeleteForUpgrade: true,
+					Fields: []*starr.FieldInput{
+						{Name: "url", Value: webhookURL},
+						{Name: "method", Value: "1"}, // 1 = POST
+					},
+				}
+				_, err := client.AddNotificationContext(ctx, notif)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Sonarr webhook", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount webhook to Sonarr", "instance", instance.Name)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // getMovies retrieves all movies from Radarr, using a cache if available and valid
 func (s *Service) getMovies(ctx context.Context, client *radarr.Radarr, instanceName string) ([]*radarr.Movie, error) {
 	// 1. Check cache (read lock)
@@ -479,7 +593,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			"instance", instanceName,
 			"file_path", filePath)
 
-		return fmt.Errorf("no movie found with file path: %s. Check if the movie has any files", filePath)
+		return fmt.Errorf("no movie found with file path %s: %w", filePath, ErrPathMatchFailed)
 	}
 
 	slog.DebugContext(ctx, "Found matching movie for file",
@@ -710,7 +824,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	if len(episodeIDs) == 0 {
-		return fmt.Errorf("no episodes found for file: %s (path match failed)", filePath)
+		return fmt.Errorf("no episodes found for file: %s: %w", filePath, ErrPathMatchFailed)
 	}
 
 	// Trigger episode search for all episodes in this file
