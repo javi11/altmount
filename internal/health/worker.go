@@ -375,6 +375,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 		nextCheck := calculateNextCheck(*releaseDate, time.Now())
 		update.Type = database.UpdateTypeHealthy
+		update.Status = database.HealthStatusHealthy
 		update.ScheduledCheckAt = nextCheck
 
 		sideEffect = func() error {
@@ -398,12 +399,14 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	case database.HealthStatusRepairTriggered:
 		if fh.RepairRetryCount >= fh.MaxRepairRetries-1 {
 			update.Type = database.UpdateTypeCorrupted
+			update.Status = database.HealthStatusCorrupted
 			sideEffect = func() error {
 				slog.ErrorContext(ctx, "File permanently marked as corrupted after repair retries exhausted", "file_path", fh.FilePath)
 				return nil
 			}
 		} else {
 			update.Type = database.UpdateTypeRepairRetry
+			update.Status = database.HealthStatusRepairTriggered
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Repair retry scheduled",
 					"file_path", fh.FilePath,
@@ -417,6 +420,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		if fh.RetryCount >= fh.MaxRetries-1 {
 			// Trigger repair phase
 			update.Type = database.UpdateTypeRepairRetry // This will set status to repair_triggered
+			update.Status = database.HealthStatusRepairTriggered
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Health check retries exhausted, triggering repair", "file_path", fh.FilePath)
 				return hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
@@ -427,6 +431,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			nextCheck := time.Now().Add(time.Duration(backoffMinutes) * time.Minute)
 
 			update.Type = database.UpdateTypeRetry
+			update.Status = database.HealthStatusPending
 			update.ScheduledCheckAt = nextCheck
 
 			sideEffect = func() error {
