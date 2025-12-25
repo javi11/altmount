@@ -472,19 +472,17 @@ func (b *UsenetReader) downloadManager(
 			// Check if all segments are downloaded
 			b.mu.Lock()
 			allDownloaded := b.nextToDownload >= len(b.rg.segments)
+
+			if len(segmentsToQueue) == 0 && !allDownloaded {
+				// Wait for signal (reader advanced or download finished)
+				b.downloadCond.Wait()
+				b.mu.Unlock()
+				continue
+			}
 			b.mu.Unlock()
 
 			if allDownloaded {
 				break
-			}
-
-			// Wait a bit before checking again to avoid busy-waiting
-			select {
-			case <-time.After(100 * time.Millisecond):
-				continue
-			case <-ctx.Done():
-				// Context is done, next iteration will break the loop
-				continue
 			}
 		}
 
