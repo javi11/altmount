@@ -132,6 +132,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/nzbdav", s.handleImportNzbdav)
 	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
 	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
+	api.Post("/arrs/webhook", s.handleArrsWebhook)
 
 	// Apply global middleware
 	api.Use(cors.New())
@@ -154,7 +155,6 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 				s.config.Prefix + "/auth/register",
 				s.config.Prefix + "/auth/registration-status",
 				s.config.Prefix + "/auth/config",
-				s.config.Prefix + "/arrs/webhook",
 			}
 
 			// Apply authentication middleware with skip paths
@@ -248,7 +248,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/arrs/instances/test", s.handleTestArrsConnection)
 	api.Get("/arrs/stats", s.handleGetArrsStats)
 	api.Get("/arrs/health", s.handleGetArrsHealth)
-	api.Post("/arrs/webhook", s.handleArrsWebhook)
+	api.Post("/arrs/webhook/register", s.handleRegisterArrsWebhooks)
 
 	// Direct authentication endpoints (converted to native Fiber)
 	api.Post("/auth/login", s.handleDirectLogin)
