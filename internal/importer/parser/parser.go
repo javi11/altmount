@@ -68,6 +68,11 @@ func NewParser(poolManager pool.Manager) *Parser {
 func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	ctx = slogutil.With(ctx, "nzb_path", nzbPath)
 
+	// Add a safety timeout for the entire parsing process
+	// Parsing large NZBs with many missing articles can sometimes hang in NNTP body fetching
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
 	n, err := nzbparser.Parse(r)
 	if err != nil {
 		return nil, NewNonRetryableError("failed to parse NZB XML", err)
