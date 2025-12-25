@@ -741,6 +741,26 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	// Step 4: Trigger rescan through the ARR service
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
 	if err != nil {
+		if errors.Is(err, arrs.ErrPathMatchFailed) {
+			slog.WarnContext(ctx, "File not found in ARR (likely upgraded/deleted), removing orphan from AltMount",
+				"file_path", filePath)
+
+			// Delete health record
+			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
+				slog.ErrorContext(ctx, "Failed to delete orphaned health record", "error", delErr)
+			}
+
+			// Delete metadata file
+			// We need the relative path for metadata deletion
+			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
+			relativePath = strings.TrimPrefix(relativePath, "/")
+			if delMetaErr := hw.metadataService.DeleteFileMetadata(relativePath); delMetaErr != nil {
+				slog.ErrorContext(ctx, "Failed to delete orphaned metadata file", "error", delMetaErr)
+			}
+
+			return nil
+		}
+
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
 			"file_path", filePath,
 			"path_for_rescan", pathForRescan,
