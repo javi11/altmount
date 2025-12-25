@@ -1126,11 +1126,30 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 			s.log.DebugContext(ctx, "Could not find specific ARR instance for file, broadcasting scan",
 				"path", fullMountPath, "error", err)
 
-			category := strings.ToLower(*item.Category)
-			if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
-				s.arrsService.TriggerDownloadScan(ctx, "sonarr")
-			} else if category == "movies" || strings.Contains(category, "movie") {
-				s.arrsService.TriggerDownloadScan(ctx, "radarr")
+			categoryName := *item.Category
+			category := strings.ToLower(categoryName)
+			arrType := ""
+
+			// Try to find an explicit mapping in SABnzbd categories
+			cfg := s.configGetter()
+			for _, cat := range cfg.SABnzbd.Categories {
+				if strings.EqualFold(cat.Name, categoryName) && cat.Type != "" {
+					arrType = strings.ToLower(cat.Type)
+					break
+				}
+			}
+
+			// Fallback to heuristic if no explicit type is mapped
+			if arrType == "" {
+				if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") || category == "sonarr" {
+					arrType = "sonarr"
+				} else if category == "movies" || strings.Contains(category, "movie") || category == "radarr" {
+					arrType = "radarr"
+				}
+			}
+
+			if arrType != "" {
+				s.arrsService.TriggerDownloadScan(ctx, arrType)
 			}
 		}
 	}

@@ -87,6 +87,7 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 		DelayType:      nntppool.DelayTypeFixed,
 		RetryDelay:     10 * time.Millisecond,
 		MinConnections: 0,
+		DrainTimeout:   5 * time.Second,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create NNTP connection pool: %w", err)
