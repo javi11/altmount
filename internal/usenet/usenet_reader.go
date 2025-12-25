@@ -342,6 +342,14 @@ func (b *UsenetReader) downloadManager(
 			return
 		}
 
+		// Ensure any pending Wait() is woken up on context cancellation
+		go func() {
+			<-ctx.Done()
+			b.mu.Lock()
+			b.downloadCond.Broadcast()
+			b.mu.Unlock()
+		}()
+
 		downloadWorkers := b.maxDownloadWorkers
 		if downloadWorkers == 0 {
 			downloadWorkers = defaultDownloadWorkers
@@ -474,7 +482,12 @@ func (b *UsenetReader) downloadManager(
 			allDownloaded := b.nextToDownload >= len(b.rg.segments)
 
 			if len(segmentsToQueue) == 0 && !allDownloaded {
-				// Wait for signal (reader advanced or download finished)
+				// Check for cancellation before waiting
+				if ctx.Err() != nil {
+					b.mu.Unlock()
+					break
+				}
+				// Wait for signal (reader advanced, download finished, or context canceled)
 				b.downloadCond.Wait()
 				b.mu.Unlock()
 				continue
