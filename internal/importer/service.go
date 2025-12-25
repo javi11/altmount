@@ -1141,9 +1141,9 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 
 			// Fallback to heuristic if no explicit type is mapped
 			if arrType == "" {
-				if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") {
+				if category == "tv" || strings.Contains(category, "tv") || strings.Contains(category, "show") || category == "sonarr" {
 					arrType = "sonarr"
-				} else if category == "movies" || strings.Contains(category, "movie") {
+				} else if category == "movies" || strings.Contains(category, "movie") || category == "radarr" {
 					arrType = "radarr"
 				}
 			}
