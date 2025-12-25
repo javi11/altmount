@@ -43,6 +43,28 @@ type ArrsWebhookRequest struct {
 
 // handleArrsWebhook handles webhooks from Radarr/Sonarr
 func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
+	// Check for API key authentication
+	// Try query param first, then header
+	apiKey := c.Query("apikey")
+	if apiKey == "" {
+		apiKey = c.Get("X-Api-Key")
+	}
+
+	if apiKey == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "API key required",
+		})
+	}
+
+	// Validate API key
+	if !s.validateAPIKey(c, apiKey) {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid API key",
+		})
+	}
+
 	if s.arrsService == nil {
 		slog.ErrorContext(c.Context(), "Arrs service is not available for webhook")
 		return c.Status(503).JSON(fiber.Map{
