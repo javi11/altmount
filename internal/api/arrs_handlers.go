@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/auth"
 )
 
 // ArrsInstanceRequest represents a request to create/update an arrs instance
@@ -425,5 +427,49 @@ func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    health,
+	})
+}
+
+// handleRegisterArrsWebhooks triggers automatic registration of webhooks in ARR instances
+func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	user := auth.GetUserFromContext(c)
+	if user == nil {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "User not authenticated",
+		})
+	}
+
+	// Get configured base URL or use default
+	baseURL := "http://altmount:8080"
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg.Arrs.WebhookBaseURL != "" {
+			baseURL = cfg.Arrs.WebhookBaseURL
+		}
+	}
+	
+	// Launch in background to not block
+	go func() {
+		ctx := context.Background()
+		apiKey := ""
+		if user.APIKey != nil {
+			apiKey = *user.APIKey
+		}
+		if err := s.arrsService.EnsureWebhookRegistration(ctx, baseURL, apiKey); err != nil {
+			slog.ErrorContext(ctx, "Failed to register webhooks", "error", err)
+		}
+	}()
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Webhook registration triggered in background",
 	})
 }

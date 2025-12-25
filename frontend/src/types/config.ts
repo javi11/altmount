@@ -615,6 +615,7 @@ export interface ArrsInstance {
 export interface ArrsConfig {
 	enabled: boolean;
 	max_workers: number;
+	webhook_base_url?: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
@@ -652,6 +653,7 @@ export interface SyncResult {
 export interface ArrsFormData {
 	enabled: boolean;
 	max_workers: number;
+	webhook_base_url?: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 }

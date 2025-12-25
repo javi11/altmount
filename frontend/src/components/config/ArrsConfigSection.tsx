@@ -240,7 +240,7 @@ export function ArrsConfigSection({
 			{formData.enabled && (
 				<div className="card bg-base-200">
 					<div className="card-body">
-						<div className="flex items-center justify-between">
+						<div className="flex flex-col space-y-4">
 							<div>
 								<h3 className="font-semibold">Connect Webhooks</h3>
 								<p className="text-base-content/70 text-sm">
@@ -248,19 +248,38 @@ export function ArrsConfigSection({
 									instances. This ensures AltMount is notified when files are upgraded or renamed.
 								</p>
 							</div>
-							<button
-								type="button"
-								className="btn btn-primary"
-								onClick={handleRegisterWebhooks}
-								disabled={isReadOnly || registerWebhooks.isPending}
-							>
-								{registerWebhooks.isPending ? (
-									<span className="loading loading-spinner loading-sm" />
-								) : (
-									<Webhook className="h-4 w-4" />
-								)}
-								Register Webhooks
-							</button>
+
+							<div className="flex flex-col space-y-4 md:flex-row md:items-end md:space-x-4 md:space-y-0">
+								<fieldset className="fieldset flex-1">
+									<legend className="fieldset-legend">AltMount URL (for webhooks)</legend>
+									<input
+										type="url"
+										className="input w-full"
+										value={formData.webhook_base_url ?? "http://altmount:8080"}
+										onChange={(e) => handleFormChange("webhook_base_url", e.target.value)}
+										placeholder="http://altmount:8080"
+										disabled={isReadOnly}
+									/>
+									<p className="label text-base-content/70 text-xs">
+										The URL ARR instances will use to talk back to AltMount.
+									</p>
+								</fieldset>
+
+								<button
+									type="button"
+									className="btn btn-primary"
+									onClick={handleRegisterWebhooks}
+									disabled={isReadOnly || registerWebhooks.isPending || hasChanges}
+									title={hasChanges ? "Save changes before registering webhooks" : ""}
+								>
+									{registerWebhooks.isPending ? (
+										<span className="loading loading-spinner loading-sm" />
+									) : (
+										<Webhook className="h-4 w-4" />
+									)}
+									Register Webhooks
+								</button>
+							</div>
 						</div>
 						{webhookSuccess && <div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>}
 						{webhookError && <div className="alert alert-error mt-4 py-2">{webhookError}</div>}
