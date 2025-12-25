@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/database"
 	"golang.org/x/sync/singleflight"
 	"golift.io/starr"
 	"golift.io/starr/radarr"
@@ -45,6 +46,7 @@ type ConfigManager interface {
 type Service struct {
 	configGetter  config.ConfigGetter
 	configManager ConfigManager
+	userRepo      *database.UserRepository
 	mu            sync.RWMutex
 	radarrClients map[string]*radarr.Radarr // key: instance name
 	sonarrClients map[string]*sonarr.Sonarr // key: instance name
@@ -65,10 +67,11 @@ type Service struct {
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
-func NewService(configGetter config.ConfigGetter, configManager ConfigManager) *Service {
+func NewService(configGetter config.ConfigGetter, configManager ConfigManager, userRepo *database.UserRepository) *Service {
 	return &Service{
 		configGetter:  configGetter,
 		configManager: configManager,
+		userRepo:      userRepo,
 		radarrClients: make(map[string]*radarr.Radarr),
 		sonarrClients: make(map[string]*sonarr.Sonarr),
 		movieCache:    make(map[string][]*radarr.Movie),
@@ -1089,6 +1092,29 @@ func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 	return "", fmt.Errorf("unable to detect ARR type for URL %s - neither Radarr nor Sonarr responded successfully", arrURL)
 }
 
+func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
+	if s.userRepo == nil {
+		return ""
+	}
+	users, err := s.userRepo.ListUsers(ctx, 100, 0)
+	if err != nil || len(users) == 0 {
+		return ""
+	}
+	
+	for _, user := range users {
+		if user.IsAdmin && user.APIKey != nil {
+			return *user.APIKey
+		}
+	}
+	
+	// Fallback to first user with a key
+	if users[0].APIKey != nil {
+		return *users[0].APIKey
+	}
+	
+	return ""
+}
+
 // RegisterInstance attempts to automatically register an ARR instance
 // If the instance already exists (by URL), it returns nil without error
 // Also creates the appropriate category in SABnzbd configuration based on ARR type:
@@ -1174,6 +1200,19 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 		"type", arrType,
 		"url", arrURL,
 		"category", category)
+
+	// Automatically register webhook for the new instance
+	go func() {
+		// Small delay to ensure DB/Config is fully settled
+		time.Sleep(2 * time.Second)
+		bgCtx := context.Background()
+		
+		key := s.GetFirstAdminAPIKey(bgCtx)
+		if key != "" {
+			// Use default internal URL
+			_ = s.EnsureWebhookRegistration(bgCtx, "http://altmount:8080", key)
+		}
+	}()
 
 	return nil
 }
