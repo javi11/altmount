@@ -530,6 +530,16 @@ export class APIClient {
 		});
 	}
 
+	async getArrsHealth() {
+		return this.request<Record<string, any>>("/arrs/health");
+	}
+
+	async registerArrsWebhooks() {
+		return this.request<{ message: string }>("/arrs/webhook/register", {
+			method: "POST",
+		});
+	}
+
 	// Direct authentication methods
 	async login(username: string, password: string) {
 		return this.request<AuthResponse>("/auth/login", {

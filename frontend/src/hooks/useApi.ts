@@ -450,10 +450,16 @@ export const useAddTestQueueItem = () => {
 	});
 };
 
-// System Browse hooks
 export const useSystemBrowse = (path?: string) => {
 	return useQuery({
 		queryKey: ["system", "browse", path],
 		queryFn: () => apiClient.getSystemBrowse(path),
+	});
+};
+
+// ARR Webhook Registration hook
+export const useRegisterArrsWebhooks = () => {
+	return useMutation({
+		mutationFn: () => apiClient.registerArrsWebhooks(),
 	});
 };

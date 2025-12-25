@@ -1,5 +1,6 @@
-import { AlertTriangle, Plus, Save } from "lucide-react";
+import { AlertTriangle, Plus, Save, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useRegisterArrsWebhooks } from "../../hooks/useApi";
 import type { ArrsConfig, ArrsInstanceConfig, ArrsType, ConfigResponse } from "../../types/config";
 import ArrsInstanceCard from "./ArrsInstanceCard";
 
@@ -38,6 +39,10 @@ export function ArrsConfigSection({
 	const [newInstance, setNewInstance] = useState<NewInstanceForm>(DEFAULT_NEW_INSTANCE);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
+	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
+	const [webhookError, setWebhookError] = useState<string | null>(null);
+
+	const registerWebhooks = useRegisterArrsWebhooks();
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -45,6 +50,19 @@ export function ArrsConfigSection({
 		setHasChanges(false);
 		setValidationErrors([]);
 	}, [config.arrs]);
+
+	const handleRegisterWebhooks = async () => {
+		setWebhookSuccess(null);
+		setWebhookError(null);
+		try {
+			await registerWebhooks.mutateAsync();
+			setWebhookSuccess("Webhook registration triggered successfully.");
+			// Hide success message after 5 seconds
+			setTimeout(() => setWebhookSuccess(null), 5000);
+		} catch (error) {
+			setWebhookError(error instanceof Error ? error.message : "Failed to register webhooks.");
+		}
+	};
 
 	const validateForm = (data: ArrsConfig): string[] => {
 		const errors: string[] = [];
@@ -217,6 +235,38 @@ export function ArrsConfigSection({
 					</div>
 				</div>
 			</div>
+
+			{/* Webhooks Auto-Registration */}
+			{formData.enabled && (
+				<div className="card bg-base-200">
+					<div className="card-body">
+						<div className="flex items-center justify-between">
+							<div>
+								<h3 className="font-semibold">Connect Webhooks</h3>
+								<p className="text-base-content/70 text-sm">
+									Automatically configure AltMount webhooks in all enabled Radarr and Sonarr
+									instances. This ensures AltMount is notified when files are upgraded or renamed.
+								</p>
+							</div>
+							<button
+								type="button"
+								className="btn btn-primary"
+								onClick={handleRegisterWebhooks}
+								disabled={isReadOnly || registerWebhooks.isPending}
+							>
+								{registerWebhooks.isPending ? (
+									<span className="loading loading-spinner loading-sm" />
+								) : (
+									<Webhook className="h-4 w-4" />
+								)}
+								Register Webhooks
+							</button>
+						</div>
+						{webhookSuccess && <div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>}
+						{webhookError && <div className="alert alert-error mt-4 py-2">{webhookError}</div>}
+					</div>
+				</div>
+			)}
 
 			{/* Queue Cleanup Settings */}
 			{formData.enabled && (
