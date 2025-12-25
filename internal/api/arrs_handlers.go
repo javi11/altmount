@@ -232,3 +232,27 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 		"data":    response,
 	})
 }
+
+// handleGetArrsHealth returns health checks from all ARR instances
+func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	health, err := s.arrsService.GetHealth(c.Context())
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to get ARR health",
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    health,
+	})
+}
