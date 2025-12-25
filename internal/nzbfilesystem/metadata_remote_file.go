@@ -321,6 +321,30 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 
 	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
 
+	// Clean up any health records for the new location and optionally for the directory
+	if mrf.healthRepository != nil {
+		// Remove health record for the specific resulting file (the new one)
+		_ = mrf.healthRepository.DeleteHealthRecord(ctx, normalizedNew)
+
+		// Check if we should resolve other repairs in the same directory
+		cfg := mrf.configGetter()
+		resolveRepairs := true
+		if cfg.Health.ResolveRepairOnImport != nil {
+			resolveRepairs = *cfg.Health.ResolveRepairOnImport
+		}
+
+		if resolveRepairs {
+			parentDir := filepath.Dir(normalizedNew)
+			if parentDir != "." && parentDir != "/" {
+				if count, err := mrf.healthRepository.ResolvePendingRepairsInDirectory(ctx, parentDir); err == nil && count > 0 {
+					slog.InfoContext(ctx, "Resolved pending repairs in directory due to MOVE operation",
+						"directory", parentDir,
+						"resolved_count", count)
+				}
+			}
+		}
+	}
+
 	return true, nil
 }
 
