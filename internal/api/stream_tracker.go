@@ -105,8 +105,9 @@ func (t *StreamTracker) snapshotLoop() {
 				s := value.(*streamInternal)
 				now := time.Now()
 
-				// Cleanup stale streams (no activity for 5 minutes)
-				if !s.lastSnapshot.IsZero() && now.Sub(s.lastSnapshot) > 5*time.Minute {
+				// Cleanup stale streams (no activity for 30 minutes)
+				// This handles cases where clients disconnect without properly closing the stream
+				if !s.lastSnapshot.IsZero() && now.Sub(s.lastSnapshot) > 30*time.Minute {
 					t.Remove(key.(string))
 					return true
 				}
@@ -159,11 +160,11 @@ func (t *StreamTracker) snapshotLoop() {
 					s.ETA = -1 // Unknown or Infinite
 				}
 
-				s.lastBytesSent = currentBytes
 				// Only update lastSnapshot if bytes were actually sent, otherwise it keeps the time of last activity
 				if currentBytes > s.lastBytesSent || s.lastSnapshot.IsZero() {
 					s.lastSnapshot = now
 				}
+				s.lastBytesSent = currentBytes
 				return true
 			})
 		}
@@ -229,12 +230,17 @@ func (t *StreamTracker) UpdateBufferedOffset(id string, offset int64) {
 func (t *StreamTracker) Remove(id string) {
 	if val, ok := t.streams.Load(id); ok {
 		internal := valueToInternal(val)
-		
+
+		// Cancel the context to stop underlying readers and release resources
+		if internal.cancel != nil {
+			internal.cancel()
+		}
+
 		// Capture final stats
 		finalStream := *internal.ActiveStream
 		finalStream.BytesSent = atomic.LoadInt64(&internal.BytesSent)
 		finalStream.Status = "Completed"
-		
+
 		t.mu.Lock()
 		// Keep last 50 streams in history
 		if len(t.history) >= 50 {
