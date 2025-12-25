@@ -315,6 +315,41 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 			filename: "regular_movie.mkv",
 			expected: true,
 		},
+		{
+			name:     "underscore prefix sample is rejected",
+			filename: "_sample.mkv",
+			expected: false,
+		},
+		{
+			name:     "underscore separator sample is rejected",
+			filename: "movie_sample.mkv",
+			expected: false,
+		},
+		{
+			name:     "underscore prefix proof is rejected",
+			filename: "_proof.mkv",
+			expected: false,
+		},
+		{
+			name:     "underscore separator proof is rejected",
+			filename: "movie_proof.mkv",
+			expected: false,
+		},
+		{
+			name:     "sample followed by underscore is allowed",
+			filename: "sample_test.mkv",
+			expected: true,
+		},
+		{
+			name:     "sample in directory path is rejected",
+			filename: "sample/movie.mkv",
+			expected: false,
+		},
+		{
+			name:     "sample with space prefix is rejected",
+			filename: "movie sample.mkv",
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {

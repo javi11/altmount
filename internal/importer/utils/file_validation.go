@@ -8,9 +8,11 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser"
 )
 
-// sampleProofPattern matches filenames that are likely just sample or proof files
-// It matches "sample" or "proof" as a standalone word.
-var sampleProofPattern = regexp.MustCompile(`(?i)\b(sample|proof)\b`)
+// sampleProofPattern matches filenames containing "sample" or "proof" as a standalone word.
+// Uses leading non-alphanumeric boundary (including underscore) and trailing word boundary.
+// Examples matched: "movie.sample.mkv", "_sample.mkv", "movie_sample.mkv"
+// Examples not matched: "samplemovie.mkv", "Free.Samples.mkv" (plural)
+var sampleProofPattern = regexp.MustCompile(`(?i)(^|[^a-zA-Z0-9])(sample|proof)\b`)
 
 // isSampleOrProof checks if a filename looks like a sample or proof file
 func isSampleOrProof(filename string, size int64) bool {
