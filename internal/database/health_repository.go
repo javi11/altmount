@@ -1173,3 +1173,29 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 
 	return nil
 }
+
+// ResolvePendingRepairsInDirectory removes health records with repair_triggered or corrupted status
+// that exist in the specified directory. This is used when a new file is imported
+// into a directory, implying it is a replacement for the broken file.
+func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context, dirPath string) (int64, error) {
+	// Ensure directory path ends with separator to match files inside it
+	if !strings.HasSuffix(dirPath, "/") {
+		dirPath = dirPath + "/"
+	}
+
+	query := `
+		DELETE FROM file_health 
+		WHERE file_path LIKE ? 
+		AND status IN ('repair_triggered', 'corrupted')
+	`
+
+	// Match paths starting with the directory
+	likePattern := dirPath + "%"
+
+	result, err := r.db.ExecContext(ctx, query, likePattern)
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve pending repairs in %s: %w", dirPath, err)
+	}
+
+	return result.RowsAffected()
+}
