@@ -247,6 +247,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/arrs/instances/test", s.handleTestArrsConnection)
 	api.Get("/arrs/stats", s.handleGetArrsStats)
 	api.Get("/arrs/health", s.handleGetArrsHealth)
+	api.Post("/arrs/webhook", s.handleArrsWebhook)
 
 	// Direct authentication endpoints (converted to native Fiber)
 	api.Post("/auth/login", s.handleDirectLogin)

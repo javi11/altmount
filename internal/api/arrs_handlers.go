@@ -16,6 +16,155 @@ type ArrsInstanceRequest struct {
 	SyncIntervalHours int    `json:"sync_interval_hours"`
 }
 
+// ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
+type ArrsWebhookRequest struct {
+	EventType string `json:"eventType"`
+	FilePath  string `json:"filePath,omitempty"`
+	// For upgrades/renames, the file path might be in other fields or need to be inferred
+	Movie struct {
+		FolderPath string `json:"folderPath"`
+	} `json:"movie,omitempty"`
+	Series struct {
+		Path string `json:"path"`
+	} `json:"series,omitempty"`
+	EpisodeFile struct {
+		Path string `json:"path"`
+	} `json:"episodeFile,omitempty"`
+	UpgradeTopics []struct {
+		EntryId     int    `json:"entryId"`
+		EpisodeId   int    `json:"episodeId"`
+		LanguageId  int    `json:"languageId"`
+		QualityName string `json:"qualityName"`
+	} `json:"upgradeTopics,omitempty"`
+	DeletedFiles []struct {
+		Path string `json:"path"`
+	} `json:"deletedFiles,omitempty"`
+}
+
+// handleArrsWebhook handles webhooks from Radarr/Sonarr
+func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		slog.ErrorContext(c.Context(), "Arrs service is not available for webhook")
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	var req ArrsWebhookRequest
+	if err := c.BodyParser(&req); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to parse webhook body", "error", err)
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+		})
+	}
+
+	slog.InfoContext(c.Context(), "Received ARR webhook", "event_type", req.EventType)
+
+	// Determine file path to scan based on event type
+	var pathsToScan []string
+
+	switch req.EventType {
+	case "Download": // OnImport (renamed from Download in v3/v4 but webhooks might use either)
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.FilePath != "" {
+			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+	case "Rename":
+		// For rename, we want to scan the new file
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.FilePath != "" {
+			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+		// Also scan the series/movie folder to pick up changes
+		if req.Series.Path != "" {
+			pathsToScan = append(pathsToScan, req.Series.Path)
+		} else if req.Movie.FolderPath != "" {
+			pathsToScan = append(pathsToScan, req.Movie.FolderPath)
+		}
+	case "Upgrade":
+		// For upgrade, scan the new file
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.FilePath != "" {
+			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+		
+		// If we have deleted files information (sometimes sent in payload), scan those too to remove them
+		for _, deleted := range req.DeletedFiles {
+			if deleted.Path != "" {
+				pathsToScan = append(pathsToScan, deleted.Path)
+			}
+		}
+	default:
+		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
+	}
+
+	if len(pathsToScan) == 0 {
+		slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
+	}
+
+	// Trigger scan for each path
+	// We use TriggerScanForFile which launches a background task
+	for _, path := range pathsToScan {
+		// Since we don't know exactly which instance sent this, we might want to broadcast
+		// or rely on path matching. TriggerScanForFile attempts path matching.
+		// However, for webhooks, we might want a specific method that refreshes 
+		// metadata for that path directly in AltMount if it's a file deletion/addition.
+		// BUT: AltMount's main job is serving files. If a file is added/removed by ARR,
+		// AltMount needs to update its internal metadata/VFS.
+		
+		// Ideally, we would tell the MetadataService or ImportService to re-scan this path.
+		// But TriggerScanForFile in arrsService currently tells the ARR to rescan (circular?).
+		// Wait, TriggerScanForFile sends "RefreshMonitoredDownloads" command to ARR. 
+		// That's for when we import a file and want ARR to notice it.
+		
+		// Here, ARR is telling US it changed a file. We need to update OUR view.
+		// We should call the library sync worker or metadata service directly.
+		
+		slog.InfoContext(c.Context(), "Processing webhook file update", "path", path)
+		
+		// If it's a file path, check/update metadata
+		// We can use the health worker to "check" this file, which will fix metadata if needed?
+		// Or better: Use the library sync worker to sync just this file/folder?
+		// LibrarySyncWorker doesn't expose single-file sync publically yet, 
+		// but we can add a health check which will verify the file existence/metadata.
+		
+		// Add to health check queue with high priority
+		// This will verify if the file exists, read its metadata, update DB.
+		// If it was deleted, health check might fail or mark as corrupted/missing.
+		
+		// Actually, if it's an Upgrade, the old file is gone and new one is there.
+		// We should probably trigger a library sync for efficiency if many files change,
+		// but for single file, a health check is a good start.
+		
+		// Use health repo to add check
+		// We need to resolve the s struct to access healthRepo which isn't directly on Server struct here
+		// But Server has healthRepo.
+		// Wait, this function is on Server (*Server).
+		
+		if s.healthRepo != nil {
+			// Add to health check (pending status)
+			err := s.healthRepo.AddFileToHealthCheck(c.Context(), path, 1, nil)
+			if err != nil {
+				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", path, "error", err)
+			} else {
+				slog.InfoContext(c.Context(), "Added file to health check queue from webhook", "path", path)
+			}
+		}
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Webhook processed",
+	})
+}
+
 // ArrsInstanceResponse represents an arrs instance in API responses
 type ArrsInstanceResponse struct {
 	Name    string `json:"name"`
