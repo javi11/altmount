@@ -154,6 +154,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 				s.config.Prefix + "/auth/register",
 				s.config.Prefix + "/auth/registration-status",
 				s.config.Prefix + "/auth/config",
+				s.config.Prefix + "/arrs/webhook",
 			}
 
 			// Apply authentication middleware with skip paths
