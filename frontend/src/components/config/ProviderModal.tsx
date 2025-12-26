@@ -19,6 +19,7 @@ const defaultFormData: ProviderFormData = {
 	max_connections: 10,
 	tls: false,
 	insecure_tls: false,
+	proxy_url: "",
 	enabled: true,
 	is_backup_provider: false,
 };
@@ -46,6 +47,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				max_connections: provider.max_connections,
 				tls: provider.tls,
 				insecure_tls: provider.insecure_tls,
+				proxy_url: provider.proxy_url || "",
 				enabled: provider.enabled,
 				is_backup_provider: provider.is_backup_provider,
 			});
@@ -62,7 +64,9 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 		setFormData((prev) => ({ ...prev, [field]: value }));
 
 		// Reset connection test if connection-related fields change
-		if (["host", "port", "username", "password", "tls", "insecure_tls"].includes(field)) {
+		if (
+			["host", "port", "username", "password", "tls", "insecure_tls", "proxy_url"].includes(field)
+		) {
 			setConnectionTestResult(null);
 			setCanSave(false);
 		}
@@ -89,6 +93,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				password: formData.password,
 				tls: formData.tls,
 				insecure_tls: formData.insecure_tls,
+				proxy_url: formData.proxy_url || undefined,
 			});
 
 			setConnectionTestResult({
@@ -120,7 +125,10 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 		try {
 			if (mode === "create") {
-				await createProvider.mutateAsync(formData);
+				await createProvider.mutateAsync({
+					...formData,
+					proxy_url: formData.proxy_url || undefined,
+				});
 			} else if (mode === "edit" && provider) {
 				// Only send changed fields for update
 				const updateData: Partial<ProviderFormData> = {};
@@ -134,6 +142,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				if (formData.tls !== provider.tls) updateData.tls = formData.tls;
 				if (formData.insecure_tls !== provider.insecure_tls)
 					updateData.insecure_tls = formData.insecure_tls;
+				if (formData.proxy_url !== (provider.proxy_url || ""))
+					updateData.proxy_url = formData.proxy_url;
 				if (formData.enabled !== provider.enabled) updateData.enabled = formData.enabled;
 				if (formData.is_backup_provider !== provider.is_backup_provider)
 					updateData.is_backup_provider = formData.is_backup_provider;
@@ -290,6 +300,22 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								</div>
 							</div>
 						</label>
+					</fieldset>
+
+					{/* Proxy Settings */}
+					<fieldset className="rounded-lg border border-base-300 p-4">
+						<legend className="px-2 font-medium">Proxy (Optional)</legend>
+						<input
+							id="proxy_url"
+							type="text"
+							className="input input-bordered w-full"
+							value={formData.proxy_url}
+							onChange={(e) => handleInputChange("proxy_url", e.target.value)}
+							placeholder="socks5://proxy.example.com:1080"
+						/>
+						<p className="mt-2 text-base-content/60 text-xs">
+							Optional SOCKS5 proxy URL. Format: socks5://[user:pass@]host:port
+						</p>
 					</fieldset>
 
 					{/* Connection Test */}
