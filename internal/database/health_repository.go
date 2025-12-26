@@ -683,7 +683,8 @@ func (r *HealthRepository) ResetFileAllChecking(ctx context.Context) error {
 	query := `
 		UPDATE file_health
 		SET status = ?,
-		    updated_at = datetime('now')
+		    updated_at = datetime('now'),
+			scheduled_check_at = datetime('now')
 		WHERE status = ?
 	`
 
