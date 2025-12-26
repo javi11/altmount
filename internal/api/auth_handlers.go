@@ -399,11 +399,38 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 		}
 	}
 
+	// If still no user, and authentication is disabled, let's create a default admin user
+	if user == nil && s.userRepo != nil {
+		cfg := s.configManager.GetConfig()
+		loginRequired := true
+		if cfg.Auth.LoginRequired != nil {
+			loginRequired = *cfg.Auth.LoginRequired
+		}
+
+		if !loginRequired {
+			// Auto-bootstrap a default admin user when auth is disabled
+			user = &database.User{
+				UserID:   "admin",
+				Provider: "direct",
+				IsAdmin:  true,
+			}
+			err := s.userRepo.CreateUser(c.Context(), user)
+			if err != nil {
+				return c.Status(500).JSON(fiber.Map{
+					"success": false,
+					"message": "Failed to bootstrap default admin user",
+					"details": err.Error(),
+				})
+			}
+			slog.InfoContext(c.Context(), "Bootstrapped default admin user for API key generation")
+		}
+	}
+
 	// If still no user, return error
 	if user == nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "No user found to regenerate API key for",
+			"message": "No user found to regenerate API key for. Please register first.",
 		})
 	}
 

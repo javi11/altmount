@@ -1289,6 +1289,30 @@ func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
 		return ""
 	}
 	users, err := s.userRepo.ListUsers(ctx, 100, 0)
+	
+	// If no users exist and auth is disabled, bootstrap a default admin
+	if (err == nil && len(users) == 0) || (err != nil && strings.Contains(err.Error(), "no such table")) {
+		cfg := s.configGetter()
+		loginRequired := true
+		if cfg.Auth.LoginRequired != nil {
+			loginRequired = *cfg.Auth.LoginRequired
+		}
+
+		if !loginRequired {
+			slog.InfoContext(ctx, "Bootstrapping default admin user for automatic background tasks")
+			user := &database.User{
+				UserID:   "admin",
+				Provider: "direct",
+				IsAdmin:  true,
+			}
+			if err := s.userRepo.CreateUser(ctx, user); err == nil {
+				if key, err := s.userRepo.RegenerateAPIKey(ctx, user.UserID); err == nil {
+					return key
+				}
+			}
+		}
+	}
+
 	if err != nil || len(users) == 0 {
 		return ""
 	}
@@ -1299,6 +1323,15 @@ func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
 		}
 	}
 	
+	// Fallback: if we have an admin but no key, generate one automatically
+	for _, user := range users {
+		if user.IsAdmin {
+			if key, err := s.userRepo.RegenerateAPIKey(ctx, user.UserID); err == nil {
+				return key
+			}
+		}
+	}
+
 	// Fallback to first user with a key
 	if users[0].APIKey != nil {
 		return *users[0].APIKey
