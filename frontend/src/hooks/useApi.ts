@@ -188,6 +188,18 @@ export const useHealthStats = () => {
 	});
 };
 
+export const useResetAllHealthChecks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.resetAllHealthChecks(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+			queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
+		},
+	});
+};
+
 export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 
