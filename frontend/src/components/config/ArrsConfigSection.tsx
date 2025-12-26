@@ -277,7 +277,7 @@ export function ArrsConfigSection({
 									) : (
 										<Webhook className="h-4 w-4" />
 									)}
-									Register Webhooks
+									Auto-Setup ARR Webhooks
 								</button>
 							</div>
 						</div>

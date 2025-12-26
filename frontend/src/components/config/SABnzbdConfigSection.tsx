@@ -540,7 +540,7 @@ export function SABnzbdConfigSection({
 							) : (
 								<CheckCircle className="h-4 w-4" />
 							)}
-							{testDownloadClient.isPending ? "Testing..." : "Test in ARR"}
+							{testDownloadClient.isPending ? "Testing..." : "Test ARR Connectivity"}
 						</button>
 						<button
 							type="button"
@@ -554,7 +554,7 @@ export function SABnzbdConfigSection({
 							) : (
 								<Download className="h-4 w-4" />
 							)}
-							{registerDownloadClient.isPending ? "Registering..." : "Register in ARR"}
+							{registerDownloadClient.isPending ? "Registering..." : "Auto-Setup ARR Clients"}
 						</button>
 						<button
 							type="button"
