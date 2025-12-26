@@ -114,7 +114,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.24.5
+          go-version: 1.25.1
 
       # checkout
       - name: Checkout
