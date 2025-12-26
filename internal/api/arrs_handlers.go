@@ -507,6 +507,10 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 					if portVal, err := strconv.Atoi(p); err == nil {
 						port = portVal
 					}
+				} else if u.Scheme == "https" {
+					port = 443
+				} else if u.Scheme == "http" {
+					port = 80
 				}
 				if u.Path != "" && u.Path != "/" {
 					urlBase = strings.Trim(u.Path, "/")
@@ -568,6 +572,10 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 					if portVal, err := strconv.Atoi(p); err == nil {
 						port = portVal
 					}
+				} else if u.Scheme == "https" {
+					port = 443
+				} else if u.Scheme == "http" {
+					port = 80
 				}
 				if u.Path != "" && u.Path != "/" {
 					urlBase = strings.Trim(u.Path, "/")
