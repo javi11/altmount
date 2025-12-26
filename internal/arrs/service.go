@@ -20,6 +20,11 @@ import (
 
 const cacheTTL = 10 * time.Minute
 
+var (
+	ErrPathMatchFailed  = fmt.Errorf("path match failed")
+	ErrInstanceNotFound = fmt.Errorf("instance not found")
+)
+
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
 	Name    string `json:"name"`
