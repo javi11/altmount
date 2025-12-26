@@ -476,7 +476,7 @@ func (s *Service) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					RemoveCompletedDownloads: true,
 					RemoveFailedDownloads:    true,
 					Priority:                 1,
-					Protocol:                 "usenet",
+Protocol: "Usenet",
 					Fields: []*starr.FieldInput{
 						{Name: "host", Value: altmountHost},
 						{Name: "port", Value: altmountPort},
@@ -524,7 +524,7 @@ func (s *Service) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					RemoveCompletedDownloads: true,
 					RemoveFailedDownloads:    true,
 					Priority:                 1,
-					Protocol:                 "usenet",
+Protocol: "Usenet",
 					Fields: []*starr.FieldInput{
 						{Name: "host", Value: altmountHost},
 						{Name: "port", Value: altmountPort},
@@ -571,6 +571,8 @@ func (s *Service) TestDownloadClientRegistration(ctx context.Context, altmountHo
 				Implementation: "SABnzbd",
 				ConfigContract: "SABnzbdSettings",
 				Enable:         true,
+				Priority:       1,
+				Protocol:       "Usenet",
 				Fields: []*starr.FieldInput{
 					{Name: "host", Value: altmountHost},
 					{Name: "port", Value: altmountPort},
@@ -594,6 +596,8 @@ func (s *Service) TestDownloadClientRegistration(ctx context.Context, altmountHo
 				Implementation: "SABnzbd",
 				ConfigContract: "SABnzbdSettings",
 				Enable:         true,
+				Priority:       1,
+				Protocol:       "Usenet",
 				Fields: []*starr.FieldInput{
 					{Name: "host", Value: altmountHost},
 					{Name: "port", Value: altmountPort},
