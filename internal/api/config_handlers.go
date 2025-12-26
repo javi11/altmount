@@ -211,9 +211,47 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		})
 	}
 
-	// Create a copy and decode partial updates directly
+	// Create a copy to apply updates to
 	newConfig := currentConfig.DeepCopy()
-	if err := c.BodyParser(newConfig); err != nil {
+
+	// Decode into the specific section based on the URL parameter
+	var err error
+	switch section {
+	case "webdav":
+		err = c.BodyParser(&newConfig.WebDAV)
+	case "api":
+		err = c.BodyParser(&newConfig.API)
+	case "auth":
+		err = c.BodyParser(&newConfig.Auth)
+	case "database":
+		err = c.BodyParser(&newConfig.Database)
+	case "metadata":
+		err = c.BodyParser(&newConfig.Metadata)
+	case "streaming":
+		err = c.BodyParser(&newConfig.Streaming)
+	case "health":
+		err = c.BodyParser(&newConfig.Health)
+	case "rclone":
+		err = c.BodyParser(&newConfig.RClone)
+	case "import":
+		err = c.BodyParser(&newConfig.Import)
+	case "log":
+		err = c.BodyParser(&newConfig.Log)
+	case "sabnzbd":
+		err = c.BodyParser(&newConfig.SABnzbd)
+	case "arrs":
+		err = c.BodyParser(&newConfig.Arrs)
+	case "fuse":
+		err = c.BodyParser(&newConfig.Fuse)
+	default:
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": fmt.Sprintf("Unknown configuration section: %s", section),
+			"details": "INVALID_SECTION",
+		})
+	}
+
+	if err != nil {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "Invalid JSON in request body",
@@ -221,7 +259,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		})
 	}
 
-	slog.DebugContext(c.Context(), "Patching configuration section", 
+	slog.DebugContext(c.Context(), "Patching configuration section",
 		"section", section)
 
 	// Validate the new configuration with API restrictions
@@ -1022,7 +1060,14 @@ func (s *Server) getAPIKeyForConfig(c *fiber.Ctx) string {
 		return *user.APIKey
 	}
 
-	// If no authenticated user, try to get first admin user (for non-auth mode)
+	// Try to get from Arrs service which handles bootstrapping default admin if needed
+	if s.arrsService != nil {
+		if key := s.arrsService.GetFirstAdminAPIKey(c.Context()); key != "" {
+			return key
+		}
+	}
+
+	// If no authenticated user and arrs service didn't return one, try manual DB check
 	if s.userRepo != nil {
 		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
 		if err == nil && len(users) > 0 && users[0].APIKey != nil {

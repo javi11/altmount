@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/database"
 )
 
@@ -440,11 +439,11 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 		})
 	}
 
-	user := auth.GetUserFromContext(c)
-	if user == nil {
+	apiKey := s.getAPIKeyForConfig(c)
+	if apiKey == "" {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "User not authenticated",
+			"message": "User not authenticated or no API key available",
 		})
 	}
 
@@ -460,10 +459,6 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	// Launch in background to not block
 	go func() {
 		ctx := context.Background()
-		apiKey := ""
-		if user.APIKey != nil {
-			apiKey = *user.APIKey
-		}
 		if err := s.arrsService.EnsureWebhookRegistration(ctx, baseURL, apiKey); err != nil {
 			slog.ErrorContext(ctx, "Failed to register webhooks", "error", err)
 		}
@@ -484,11 +479,11 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 		})
 	}
 
-	user := auth.GetUserFromContext(c)
-	if user == nil {
+	apiKey := s.getAPIKeyForConfig(c)
+	if apiKey == "" {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "User not authenticated",
+			"message": "User not authenticated or no API key available",
 		})
 	}
 
@@ -525,10 +520,6 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 	// Launch in background to not block
 	go func() {
 		ctx := context.Background()
-		apiKey := ""
-		if user.APIKey != nil {
-			apiKey = *user.APIKey
-		}
 		if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
 			slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
 		}
@@ -549,11 +540,11 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		})
 	}
 
-	user := auth.GetUserFromContext(c)
-	if user == nil {
+	apiKey := s.getAPIKeyForConfig(c)
+	if apiKey == "" {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "User not authenticated",
+			"message": "User not authenticated or no API key available",
 		})
 	}
 
@@ -585,11 +576,6 @@ func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 		} else {
 			port = cfg.WebDAV.Port
 		}
-	}
-
-	apiKey := ""
-	if user.APIKey != nil {
-		apiKey = *user.APIKey
 	}
 
 	results, err := s.arrsService.TestDownloadClientRegistration(c.Context(), host, port, urlBase, apiKey)
