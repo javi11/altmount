@@ -554,7 +554,7 @@ export function SABnzbdConfigSection({
 							) : (
 								<Download className="h-4 w-4" />
 							)}
-							{registerDownloadClient.isPending ? "Registering..." : "Auto-Setup ARR Clients"}
+							{registerDownloadClient.isPending ? "Registering..." : "Auto-Setup ARR Download Clients"}
 						</button>
 						<button
 							type="button"
