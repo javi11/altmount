@@ -199,6 +199,7 @@ export interface ProviderConfig {
 	max_connections: number;
 	tls: boolean;
 	insecure_tls: boolean;
+	proxy_url?: string;
 	password_set: boolean;
 	enabled: boolean;
 	is_backup_provider: boolean;
@@ -368,6 +369,7 @@ export interface ProviderUpdateRequest {
 	max_connections?: number;
 	tls?: boolean;
 	insecure_tls?: boolean;
+	proxy_url?: string;
 	enabled?: boolean;
 	is_backup_provider?: boolean;
 }
@@ -556,6 +558,7 @@ export interface ProviderFormData {
 	max_connections: number;
 	tls: boolean;
 	insecure_tls: boolean;
+	proxy_url: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
 }
@@ -672,6 +675,7 @@ export interface ProviderTestRequest {
 	password: string;
 	tls: boolean;
 	insecure_tls: boolean;
+	proxy_url?: string;
 }
 
 export interface ProviderTestResponse {
@@ -687,6 +691,7 @@ export interface ProviderCreateRequest {
 	max_connections: number;
 	tls: boolean;
 	insecure_tls: boolean;
+	proxy_url?: string;
 	enabled: boolean;
 	is_backup_provider: boolean;
 }

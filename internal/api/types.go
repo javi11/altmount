@@ -84,17 +84,18 @@ type RCloneAPIResponse struct {
 
 // ProviderAPIResponse sanitizes Provider config for API responses
 type ProviderAPIResponse struct {
-	ID               string `json:"id"`
-	Host             string `json:"host"`
-	Port             int    `json:"port"`
-	Username         string `json:"username"`
-	MaxConnections   int    `json:"max_connections"`
-	TLS              bool   `json:"tls"`
-	InsecureTLS      bool   `json:"insecure_tls"`
-	PasswordSet      bool   `json:"password_set"`
-	Enabled          bool   `json:"enabled"`
-	IsBackupProvider bool   `json:"is_backup_provider"`
-	LastSpeedTestMbps float64 `json:"last_speed_test_mbps"`
+	ID                string     `json:"id"`
+	Host              string     `json:"host"`
+	Port              int        `json:"port"`
+	Username          string     `json:"username"`
+	MaxConnections    int        `json:"max_connections"`
+	TLS               bool       `json:"tls"`
+	InsecureTLS       bool       `json:"insecure_tls"`
+	ProxyURL          string     `json:"proxy_url,omitempty"`
+	PasswordSet       bool       `json:"password_set"`
+	Enabled           bool       `json:"enabled"`
+	IsBackupProvider  bool       `json:"is_backup_provider"`
+	LastSpeedTestMbps float64    `json:"last_speed_test_mbps"`
 	LastSpeedTestTime *time.Time `json:"last_speed_test_time,omitempty"`
 }
 
@@ -132,16 +133,17 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	providers := make([]ProviderAPIResponse, len(cfg.Providers))
 	for i, p := range cfg.Providers {
 		providers[i] = ProviderAPIResponse{
-			ID:               p.ID,
-			Host:             p.Host,
-			Port:             p.Port,
-			Username:         p.Username,
-			MaxConnections:   p.MaxConnections,
-			TLS:              p.TLS,
-			InsecureTLS:      p.InsecureTLS,
-			PasswordSet:      p.Password != "",
-			Enabled:          p.Enabled != nil && *p.Enabled,
-			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
+			ID:                p.ID,
+			Host:              p.Host,
+			Port:              p.Port,
+			Username:          p.Username,
+			MaxConnections:    p.MaxConnections,
+			TLS:               p.TLS,
+			InsecureTLS:       p.InsecureTLS,
+			ProxyURL:          p.ProxyURL,
+			PasswordSet:       p.Password != "",
+			Enabled:           p.Enabled != nil && *p.Enabled,
+			IsBackupProvider:  p.IsBackupProvider != nil && *p.IsBackupProvider,
 			LastSpeedTestMbps: p.LastSpeedTestMbps,
 			LastSpeedTestTime: p.LastSpeedTestTime,
 		}
@@ -589,6 +591,7 @@ type ProviderTestRequest struct {
 	Password    string `json:"password"`
 	TLS         bool   `json:"tls"`
 	InsecureTLS bool   `json:"insecure_tls"`
+	ProxyURL    string `json:"proxy_url,omitempty"`
 }
 
 // ProviderTestResponse represents the result of testing provider connectivity
@@ -606,6 +609,7 @@ type ProviderCreateRequest struct {
 	MaxConnections   int    `json:"max_connections"`
 	TLS              bool   `json:"tls"`
 	InsecureTLS      bool   `json:"insecure_tls"`
+	ProxyURL         string `json:"proxy_url,omitempty"`
 	Enabled          bool   `json:"enabled"`
 	IsBackupProvider bool   `json:"is_backup_provider"`
 }
@@ -619,6 +623,7 @@ type ProviderUpdateRequest struct {
 	MaxConnections   *int    `json:"max_connections,omitempty"`
 	TLS              *bool   `json:"tls,omitempty"`
 	InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
+	ProxyURL         *string `json:"proxy_url,omitempty"`
 	Enabled          *bool   `json:"enabled,omitempty"`
 	IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
 }
