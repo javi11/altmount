@@ -373,7 +373,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			releaseDate = &fh.CreatedAt
 		}
 
-		nextCheck := calculateNextCheck(*releaseDate, time.Now())
+		nextCheck := calculateNextCheck(*releaseDate, time.Now().UTC())
 		update.Type = database.UpdateTypeHealthy
 		update.Status = database.HealthStatusHealthy
 		update.ScheduledCheckAt = nextCheck
@@ -428,7 +428,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		} else {
 			// Increment health check retry count
 			backoffMinutes := 15 * (1 << fh.RetryCount)
-			nextCheck := time.Now().Add(time.Duration(backoffMinutes) * time.Minute)
+			nextCheck := time.Now().UTC().Add(time.Duration(backoffMinutes) * time.Minute)
 
 			update.Type = database.UpdateTypeRetry
 			update.Status = database.HealthStatusPending
@@ -538,7 +538,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		hw.mu.Unlock()
 	}()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	hw.updateStats(func(s *WorkerStats) {
 		s.CurrentRunStartTime = &now
 		s.CurrentRunFilesChecked = 0

@@ -986,11 +986,13 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 
 	for _, update := range updates {
 		filePath := strings.TrimPrefix(update.FilePath, "/")
+		scheduledCheckAtUTC := update.ScheduledCheckAt.UTC()
+
 		switch update.Status {
 		case HealthStatusHealthy:
-			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath)
+			_, err = stmtHealthy.ExecContext(ctx, scheduledCheckAtUTC, filePath)
 		case HealthStatusPending:
-			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
+			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, scheduledCheckAtUTC, filePath)
 		case HealthStatusRepairTriggered:
 			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
 		case HealthStatusCorrupted:
