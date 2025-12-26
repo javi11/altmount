@@ -521,6 +521,11 @@ func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath st
 		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, created_at, updated_at, scheduled_check_at)
 		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, ?, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
+		status = excluded.status,
+		retry_count = 0,
+		repair_retry_count = 0,
+		last_error = NULL,
+		error_details = NULL,
 		max_retries = excluded.max_retries,
 		max_repair_retries = excluded.max_repair_retries,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),

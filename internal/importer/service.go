@@ -1154,13 +1154,23 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		}
 	}
 
-	// Remove any existing health record for this file (in case it was corrupted and now replaced)
+	// Schedule immediate health check for the new file
 	if s.healthRepo != nil {
 		// Calculate the mount relative path
 		// resultingPath is the virtual path (e.g. "movies/Movie (Year)/Movie.mkv")
-		// We can try to delete any health record matching this path
-		if err := s.healthRepo.DeleteHealthRecord(ctx, resultingPath); err == nil {
-			slog.InfoContext(ctx, "Removed health record for replaced file", "path", resultingPath)
+		
+		// Read metadata to get SourceNzbPath needed for health check
+		fileMeta, err := s.metadataService.ReadFileMetadata(resultingPath)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to read metadata for health check scheduling", "path", resultingPath, "error", err)
+		} else if fileMeta != nil {
+			// Add/Update health record with high priority to ensure it's processed right away
+			err := s.healthRepo.AddFileToHealthCheck(ctx, resultingPath, 2, &fileMeta.SourceNzbPath, database.HealthPriorityNext)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to schedule immediate health check for imported file", "path", resultingPath, "error", err)
+			} else {
+				slog.InfoContext(ctx, "Scheduled immediate health check for imported file", "path", resultingPath)
+			}
 		}
 
 		// Also check for OTHER files in the same directory that were marked for repair.
