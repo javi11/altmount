@@ -384,10 +384,17 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	// Try to get user from context (auth enabled case)
 	user := auth.GetUserFromContext(c)
 
-	// If no user in context, try to get first admin user (auth disabled case)
+	// If no user in context, try to get first user (auth disabled case)
 	if user == nil && s.userRepo != nil {
 		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
-		if err == nil && len(users) > 0 {
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"success": false,
+				"message": "Failed to retrieve user list",
+				"details": err.Error(),
+			})
+		}
+		if len(users) > 0 {
 			user = users[0]
 		}
 	}
@@ -396,7 +403,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	if user == nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "No user found",
+			"message": "No user found to regenerate API key for",
 		})
 	}
 
