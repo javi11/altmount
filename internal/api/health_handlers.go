@@ -1309,3 +1309,27 @@ func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 		"data":    response,
 	})
 }
+
+// handleResetAllHealthChecks handles POST /api/health/reset-all
+func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
+	// Reset all items to pending status using repository method
+	restartedCount, err := s.healthRepo.ResetAllHealthChecks(c.Context())
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to reset all health checks",
+			"details": err.Error(),
+		})
+	}
+
+	response := map[string]interface{}{
+		"message":         "All health checks reset successfully",
+		"restarted_count": restartedCount,
+		"restarted_at":    time.Now().Format(time.RFC3339),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
