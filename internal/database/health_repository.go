@@ -24,8 +24,8 @@ func NewHealthRepository(db *sql.DB) *HealthRepository {
 func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error {
 	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		status = excluded.status,
 		last_checked = datetime('now'),
@@ -34,7 +34,8 @@ func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string
 		error_details = excluded.error_details,
 		retry_count = CASE WHEN ? THEN max_retries ELSE retry_count END,
 		max_retries = excluded.max_retries,
-		updated_at = datetime('now')
+		updated_at = datetime('now'),
+		scheduled_check_at = datetime('now')
 	`
 
 	_, err := r.db.ExecContext(ctx, query, filePath, status, errorMessage, sourceNzbPath, errorDetails, noRetry, noRetry)
@@ -516,13 +517,14 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 // AddFileToHealthCheck adds a file to the health database for checking
 func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, maxRetries int, sourceNzbPath *string) error {
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		max_retries = excluded.max_retries,
 		max_repair_retries = excluded.max_repair_retries,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
-		updated_at = datetime('now')
+		updated_at = datetime('now'),
+		scheduled_check_at = datetime('now')
 	`
 
 	_, err := r.db.ExecContext(ctx, query, filePath, HealthStatusPending, maxRetries, sourceNzbPath)
@@ -747,7 +749,8 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 		    repair_retry_count = 0,
 		    last_error = NULL,
 		    error_details = NULL,
-		    updated_at = datetime('now')
+		    updated_at = datetime('now'),
+			scheduled_check_at = datetime('now')
 		WHERE file_path IN (%s)
 	`, HealthStatusPending, strings.Join(placeholders, ","))
 
@@ -773,7 +776,8 @@ func (r *HealthRepository) ResetAllHealthChecks(ctx context.Context) (int, error
 		    repair_retry_count = 0,
 		    last_error = NULL,
 		    error_details = NULL,
-		    updated_at = datetime('now')
+		    updated_at = datetime('now'),
+			scheduled_check_at = datetime('now')
 	`
 
 	result, err := r.db.ExecContext(ctx, query)
