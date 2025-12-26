@@ -270,6 +270,8 @@ export function SABnzbdConfigSection({
 							<legend className="fieldset-legend">Fallback SABnzbd Host</legend>
 							<input
 								type="text"
+								name="fallback_host"
+								autoComplete="off"
 								className="input"
 								value={formData.fallback_host || ""}
 								readOnly={isReadOnly}
@@ -285,6 +287,8 @@ export function SABnzbdConfigSection({
 							<legend className="fieldset-legend">Fallback SABnzbd API Key</legend>
 							<input
 								type="password"
+								name="fallback_api_key"
+								autoComplete="new-password"
 								className="input"
 								value={fallbackApiKey}
 								readOnly={isReadOnly}
