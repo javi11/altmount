@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"log/slog"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -469,5 +471,137 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"message": "Webhook registration triggered in background",
+	})
+}
+
+// handleRegisterArrsDownloadClients triggers automatic registration of AltMount as a download client in ARR instances
+func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	user := auth.GetUserFromContext(c)
+	if user == nil {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "User not authenticated",
+		})
+	}
+
+	// Get configured host/port or use default
+	host := "altmount"
+	port := 8080
+	urlBase := "sabnzbd"
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg.SABnzbd.DownloadClientBaseURL != "" {
+			rawURL := cfg.SABnzbd.DownloadClientBaseURL
+			if !strings.Contains(rawURL, "://") {
+				rawURL = "http://" + rawURL
+			}
+			if u, err := url.Parse(rawURL); err == nil {
+				host = u.Hostname()
+				if host == "" {
+					host = "altmount"
+				}
+				if p := u.Port(); p != "" {
+					if portVal, err := strconv.Atoi(p); err == nil {
+						port = portVal
+					}
+				}
+				if u.Path != "" && u.Path != "/" {
+					urlBase = strings.Trim(u.Path, "/")
+				}
+			}
+		} else {
+			port = cfg.WebDAV.Port
+		}
+	}
+
+	// Launch in background to not block
+	go func() {
+		ctx := context.Background()
+		apiKey := ""
+		if user.APIKey != nil {
+			apiKey = *user.APIKey
+		}
+		if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
+			slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
+		}
+	}()
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Download client registration triggered in background",
+	})
+}
+
+// handleTestArrsDownloadClients tests the connection from ARR instances to AltMount
+func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	user := auth.GetUserFromContext(c)
+	if user == nil {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "User not authenticated",
+		})
+	}
+
+	// Get configured host/port or use default
+	host := "altmount"
+	port := 8080
+	urlBase := "sabnzbd"
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg.SABnzbd.DownloadClientBaseURL != "" {
+			rawURL := cfg.SABnzbd.DownloadClientBaseURL
+			if !strings.Contains(rawURL, "://") {
+				rawURL = "http://" + rawURL
+			}
+			if u, err := url.Parse(rawURL); err == nil {
+				host = u.Hostname()
+				if host == "" {
+					host = "altmount"
+				}
+				if p := u.Port(); p != "" {
+					if portVal, err := strconv.Atoi(p); err == nil {
+						port = portVal
+					}
+				}
+				if u.Path != "" && u.Path != "/" {
+					urlBase = strings.Trim(u.Path, "/")
+				}
+			}
+		} else {
+			port = cfg.WebDAV.Port
+		}
+	}
+
+	apiKey := ""
+	if user.APIKey != nil {
+		apiKey = *user.APIKey
+	}
+
+	results, err := s.arrsService.TestDownloadClientRegistration(c.Context(), host, port, urlBase, apiKey)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to test connections",
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    results,
 	})
 }

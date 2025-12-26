@@ -211,6 +211,7 @@ export interface ProviderConfig {
 export interface SABnzbdConfig {
 	enabled: boolean;
 	complete_dir: string;
+	download_client_base_url?: string;
 	categories: SABnzbdCategory[];
 	fallback_host?: string;
 	fallback_api_key?: string; // Obfuscated when returned from API

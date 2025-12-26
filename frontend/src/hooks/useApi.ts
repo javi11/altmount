@@ -463,3 +463,17 @@ export const useRegisterArrsWebhooks = () => {
 		mutationFn: () => apiClient.registerArrsWebhooks(),
 	});
 };
+
+// ARR Download Client Registration hook
+export const useRegisterArrsDownloadClients = () => {
+	return useMutation({
+		mutationFn: () => apiClient.registerArrsDownloadClients(),
+	});
+};
+
+// ARR Download Client Test hook
+export const useTestArrsDownloadClients = () => {
+	return useMutation({
+		mutationFn: () => apiClient.testArrsDownloadClients(),
+	});
+};

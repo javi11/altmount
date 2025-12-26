@@ -428,6 +428,194 @@ func (s *Service) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 	return nil
 }
 
+// EnsureDownloadClientRegistration ensures that AltMount is registered as a SABnzbd download client in all enabled ARR instances
+func (s *Service) EnsureDownloadClientRegistration(ctx context.Context, altmountHost string, altmountPort int, urlBase string, apiKey string) error {
+	instances := s.getConfigInstances()
+	clientName := "AltMount (SABnzbd)"
+
+	slog.InfoContext(ctx, "Ensuring AltMount download client registration in ARR instances",
+		"host", altmountHost,
+		"port", altmountPort,
+		"url_base", urlBase)
+
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+
+		slog.DebugContext(ctx, "Checking download client for instance", "instance", instance.Name, "type", instance.Type)
+
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Radarr client for download client check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			clients, err := client.GetDownloadClientsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Radarr download clients", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, c := range clients {
+				if c.Name == clientName {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				dc := &radarr.DownloadClientInput{
+					Name:                     clientName,
+					Implementation:           "SABnzbd",
+					ConfigContract:           "SABnzbdSettings",
+					Enable:                   true,
+					RemoveCompletedDownloads: true,
+					RemoveFailedDownloads:    true,
+					Priority:                 1,
+					Protocol:                 "usenet",
+					Fields: []*starr.FieldInput{
+						{Name: "host", Value: altmountHost},
+						{Name: "port", Value: altmountPort},
+						{Name: "urlBase", Value: urlBase},
+						{Name: "apiKey", Value: apiKey},
+						{Name: "movieCategory", Value: "movies"},
+						{Name: "useSsl", Value: false},
+					},
+				}
+				_, err := client.AddDownloadClientContext(ctx, dc)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Radarr download client", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount download client to Radarr", "instance", instance.Name)
+				}
+			}
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Sonarr client for download client check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			clients, err := client.GetDownloadClientsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Sonarr download clients", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, c := range clients {
+				if c.Name == clientName {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				dc := &sonarr.DownloadClientInput{
+					Name:                     clientName,
+					Implementation:           "SABnzbd",
+					ConfigContract:           "SABnzbdSettings",
+					Enable:                   true,
+					RemoveCompletedDownloads: true,
+					RemoveFailedDownloads:    true,
+					Priority:                 1,
+					Protocol:                 "usenet",
+					Fields: []*starr.FieldInput{
+						{Name: "host", Value: altmountHost},
+						{Name: "port", Value: altmountPort},
+						{Name: "urlBase", Value: urlBase},
+						{Name: "apiKey", Value: apiKey},
+						{Name: "tvCategory", Value: "tv"},
+						{Name: "useSsl", Value: false},
+					},
+				}
+				_, err := client.AddDownloadClientContext(ctx, dc)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Sonarr download client", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount download client to Sonarr", "instance", instance.Name)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// TestDownloadClientRegistration tests the connection from ARR instances back to AltMount
+func (s *Service) TestDownloadClientRegistration(ctx context.Context, altmountHost string, altmountPort int, urlBase string, apiKey string) (map[string]string, error) {
+	instances := s.getConfigInstances()
+	results := make(map[string]string)
+
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+
+		var testErr error
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
+				continue
+			}
+
+			dc := &radarr.DownloadClientInput{
+				Name:           "AltMount Test",
+				Implementation: "SABnzbd",
+				ConfigContract: "SABnzbdSettings",
+				Enable:         true,
+				Fields: []*starr.FieldInput{
+					{Name: "host", Value: altmountHost},
+					{Name: "port", Value: altmountPort},
+					{Name: "urlBase", Value: urlBase},
+					{Name: "apiKey", Value: apiKey},
+					{Name: "movieCategory", Value: "movies"},
+					{Name: "useSsl", Value: false},
+				},
+			}
+			testErr = client.TestDownloadClientContext(ctx, dc)
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
+				continue
+			}
+
+			dc := &sonarr.DownloadClientInput{
+				Name:           "AltMount Test",
+				Implementation: "SABnzbd",
+				ConfigContract: "SABnzbdSettings",
+				Enable:         true,
+				Fields: []*starr.FieldInput{
+					{Name: "host", Value: altmountHost},
+					{Name: "port", Value: altmountPort},
+					{Name: "urlBase", Value: urlBase},
+					{Name: "apiKey", Value: apiKey},
+					{Name: "tvCategory", Value: "tv"},
+					{Name: "useSsl", Value: false},
+				},
+			}
+			testErr = client.TestDownloadClientContext(ctx, dc)
+		}
+
+		if testErr != nil {
+			results[instance.Name] = testErr.Error()
+		} else {
+			results[instance.Name] = "OK"
+		}
+	}
+
+	return results, nil
+}
+
 // getMovies retrieves all movies from Radarr, using a cache if available and valid
 func (s *Service) getMovies(ctx context.Context, client *radarr.Radarr, instanceName string) ([]*radarr.Movie, error) {
 	// 1. Check cache (read lock)

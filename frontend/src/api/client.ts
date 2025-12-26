@@ -540,6 +540,18 @@ export class APIClient {
 		});
 	}
 
+	async registerArrsDownloadClients() {
+		return this.request<{ message: string }>("/arrs/download-client/register", {
+			method: "POST",
+		});
+	}
+
+	async testArrsDownloadClients() {
+		return this.request<Record<string, string>>("/arrs/download-client/test", {
+			method: "POST",
+		});
+	}
+
 	// Direct authentication methods
 	async login(username: string, password: string) {
 		return this.request<AuthResponse>("/auth/login", {

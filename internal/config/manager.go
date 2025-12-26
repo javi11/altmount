@@ -283,9 +283,10 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
-	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled               *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir           string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	DownloadClientBaseURL string            `yaml:"download_client_base_url" mapstructure:"download_client_base_url" json:"download_client_base_url,omitempty"`
+	Categories            []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
@@ -1216,11 +1217,12 @@ func DefaultConfig(configDir ...string) *Config {
 			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
 		},
 		SABnzbd: SABnzbdConfig{
-			Enabled:        &sabnzbdEnabled,
-			CompleteDir:    "/complete",
-			Categories:     []SABnzbdCategory{},
-			FallbackHost:   "",
-			FallbackAPIKey: "",
+			Enabled:               &sabnzbdEnabled,
+			CompleteDir:           "/complete",
+			DownloadClientBaseURL: "http://altmount:8080/sabnzbd",
+			Categories:            []SABnzbdCategory{},
+			FallbackHost:          "",
+			FallbackAPIKey:        "",
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
