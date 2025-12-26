@@ -217,32 +217,8 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	// Decode into the specific section based on the URL parameter
 	var err error
 	switch section {
-	case "webdav":
-		err = c.BodyParser(&newConfig.WebDAV)
-	case "api":
-		err = c.BodyParser(&newConfig.API)
-	case "auth":
-		err = c.BodyParser(&newConfig.Auth)
-	case "database":
-		err = c.BodyParser(&newConfig.Database)
-	case "metadata":
-		err = c.BodyParser(&newConfig.Metadata)
-	case "streaming":
-		err = c.BodyParser(&newConfig.Streaming)
-	case "health":
-		err = c.BodyParser(&newConfig.Health)
-	case "rclone":
-		err = c.BodyParser(&newConfig.RClone)
-	case "import":
-		err = c.BodyParser(&newConfig.Import)
-	case "log":
-		err = c.BodyParser(&newConfig.Log)
-	case "sabnzbd":
-		err = c.BodyParser(&newConfig.SABnzbd)
-	case "arrs":
-		err = c.BodyParser(&newConfig.Arrs)
-	case "fuse":
-		err = c.BodyParser(&newConfig.Fuse)
+	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "system", "mount_path":
+		err = c.BodyParser(newConfig)
 	default:
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
