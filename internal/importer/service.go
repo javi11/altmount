@@ -1162,6 +1162,26 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		if err := s.healthRepo.DeleteHealthRecord(ctx, resultingPath); err == nil {
 			slog.InfoContext(ctx, "Removed health record for replaced file", "path", resultingPath)
 		}
+
+		// Also check for OTHER files in the same directory that were marked for repair.
+		// This handles the case where "Movie.2020.mkv" (corrupted) is replaced by "Movie.REPACK.mkv".
+		// The directory would be "movies/Movie (Year)".
+		cfg := s.configGetter()
+		resolveRepairs := true
+		if cfg.Health.ResolveRepairOnImport != nil {
+			resolveRepairs = *cfg.Health.ResolveRepairOnImport
+		}
+
+		if resolveRepairs {
+			parentDir := filepath.Dir(resultingPath)
+			if parentDir != "." && parentDir != "/" {
+				if count, err := s.healthRepo.ResolvePendingRepairsInDirectory(ctx, parentDir); err == nil && count > 0 {
+					slog.InfoContext(ctx, "Resolved pending repairs in directory due to new import",
+						"directory", parentDir,
+						"resolved_count", count)
+				}
+			}
+		}
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)

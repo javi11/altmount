@@ -184,6 +184,7 @@ type HealthConfig struct {
 	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
 	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 	LibrarySyncConcurrency        int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
+	ResolveRepairOnImport         *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -357,6 +358,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.CleanupOrphanedFiles = &v
 	} else {
 		copyCfg.Health.CleanupOrphanedFiles = nil
+	}
+
+	// Deep copy Health.ResolveRepairOnImport pointer
+	if c.Health.ResolveRepairOnImport != nil {
+		v := *c.Health.ResolveRepairOnImport
+		copyCfg.Health.ResolveRepairOnImport = &v
+	} else {
+		copyCfg.Health.ResolveRepairOnImport = nil
 	}
 
 	// Deep copy Metadata.DeleteSourceNzbOnRemoval pointer
@@ -1073,6 +1082,7 @@ func isRunningInDocker() bool {
 func DefaultConfig(configDir ...string) *Config {
 	healthEnabled := false            // Health system disabled by default
 	cleanupOrphanedFiles := false     // Cleanup orphaned files disabled by default
+	resolveRepairOnImport := false    // Disable smart replacement detection by default
 	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
 	mountEnabled := false   // Disabled by default
@@ -1202,6 +1212,7 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxConcurrentJobs:             1,   // Default: 1 concurrent job
 			SegmentSamplePercentage:       5,   // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:    360, // Default: sync every 6 hours
+			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:        &sabnzbdEnabled,
