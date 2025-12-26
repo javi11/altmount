@@ -5,7 +5,7 @@
 # syntax=docker/dockerfile:1.11
 
 # Custom base stage with pre-installed packages
-FROM ghcr.io/linuxserver/baseimage-ubuntu:jammy AS custom-base
+FROM lscr.io/linuxserver/baseimage-ubuntu:jammy AS custom-base
 
 ARG DEBIAN_FRONTEND="noninteractive"
 
