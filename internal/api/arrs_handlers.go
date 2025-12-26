@@ -175,7 +175,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		
 		if s.healthRepo != nil {
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
-			err := s.healthRepo.AddFileToHealthCheck(c.Context(), normalizedPath, 1, nil, database.HealthPriorityNext)
+			err := s.healthRepo.AddFileToHealthCheck(c.Context(), normalizedPath, 2, nil, database.HealthPriorityNext)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {
