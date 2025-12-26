@@ -41,6 +41,7 @@ export function ArrsConfigSection({
 	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
 	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
 	const [webhookError, setWebhookError] = useState<string | null>(null);
+	const [saveError, setSaveError] = useState<string | null>(null);
 
 	const registerWebhooks = useRegisterArrsWebhooks();
 
@@ -49,6 +50,7 @@ export function ArrsConfigSection({
 		setFormData(config.arrs);
 		setHasChanges(false);
 		setValidationErrors([]);
+		setSaveError(null);
 	}, [config.arrs]);
 
 	const handleRegisterWebhooks = async () => {
@@ -68,7 +70,10 @@ export function ArrsConfigSection({
 		const errors: string[] = [];
 
 		if (data.enabled) {
-			// Note: mount_path validation is now handled at the root config level
+			// Validate mount_path is configured
+			if (!config.mount_path) {
+				errors.push("Mount Path must be configured in General/System settings before enabling Arrs service");
+			}
 
 			// Validate instances
 			const allInstanceNames = [
@@ -177,12 +182,14 @@ export function ArrsConfigSection({
 
 	const handleSave = async () => {
 		if (!onUpdate || validationErrors.length > 0) return;
+		setSaveError(null);
 
 		try {
 			await onUpdate("arrs", formData);
 			setHasChanges(false);
 		} catch (error) {
 			console.error("Failed to save arrs configuration:", error);
+			setSaveError(error instanceof Error ? error.message : "Failed to save configuration");
 		}
 	};
 
@@ -507,6 +514,17 @@ export function ArrsConfigSection({
 								</li>
 							))}
 						</ul>
+					</div>
+				</div>
+			)}
+
+			{/* Save Error */}
+			{saveError && (
+				<div className="alert alert-error">
+					<AlertTriangle className="h-6 w-6" />
+					<div>
+						<div className="font-bold">Save Failed</div>
+						<div className="text-sm">{saveError}</div>
 					</div>
 				</div>
 			)}
