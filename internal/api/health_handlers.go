@@ -748,6 +748,9 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 	fileErrors := make([]string, 0)
 	offset := 0
 
+	cfg := s.configManager.GetConfig()
+	mountPath := cfg.MountPath
+
 	// Process records in batches until no more records found
 	for {
 		// Fetch next batch of records
@@ -779,8 +782,21 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 		for _, item := range oldItemsInBatch {
 			allFilePaths = append(allFilePaths, item.FilePath)
 
+			// Determine path to delete
+			var pathToDelete string
+			if item.LibraryPath != nil && *item.LibraryPath != "" {
+				pathToDelete = *item.LibraryPath
+			} else {
+				// Fallback to mount path
+				if filepath.IsAbs(item.FilePath) {
+					pathToDelete = item.FilePath
+				} else {
+					pathToDelete = filepath.Join(mountPath, item.FilePath)
+				}
+			}
+
 			// Attempt to delete the physical file using os.Remove
-			if deleteErr := os.Remove(item.FilePath); deleteErr != nil {
+			if deleteErr := os.Remove(pathToDelete); deleteErr != nil {
 				// Track error but continue with other files
 				fileErrors = append(fileErrors, fmt.Sprintf("%s: %v", item.FilePath, deleteErr))
 			} else {

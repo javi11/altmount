@@ -114,6 +114,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
 		  AND retry_count < max_retries
+		  AND status NOT IN ('repair_triggered', 'corrupted')
 		ORDER BY priority DESC, scheduled_check_at ASC
 		LIMIT ?
 	`
@@ -1116,8 +1117,8 @@ func (r *HealthRepository) BatchAddAutomaticHealthChecks(ctx context.Context, re
 	}
 
 	// SQLite has a limit on the number of parameters (typically 999)
-	// Process in batches of 200 records (4 params each = 800 params per batch)
-	const batchSize = 200
+	// Process in batches of 150 records (6 params each = 900 params per batch)
+	const batchSize = 150
 
 	for i := 0; i < len(records); i += batchSize {
 		end := i + batchSize
@@ -1145,7 +1146,7 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 	args := make([]interface{}, 0, len(records)*5)
 
 	for i, record := range records {
-		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
+		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 2, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
 		var releaseDateUTC, scheduledCheckAtUTC *time.Time
 		if record.ReleaseDate != nil {
 			t := record.ReleaseDate.UTC()
