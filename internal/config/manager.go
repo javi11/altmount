@@ -266,17 +266,18 @@ func checkFileDirectoryWritable(filePath string, fileType string) error {
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
-	ID               string `yaml:"id" mapstructure:"id" json:"id"`
-	Host             string `yaml:"host" mapstructure:"host" json:"host"`
-	Port             int    `yaml:"port" mapstructure:"port" json:"port"`
-	Username         string `yaml:"username" mapstructure:"username" json:"username"`
-	Password         string `yaml:"password" mapstructure:"password" json:"-"`
-	MaxConnections   int    `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
-	TLS              bool   `yaml:"tls" mapstructure:"tls" json:"tls"`
-	InsecureTLS      bool   `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
-	Enabled          *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	IsBackupProvider *bool  `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
-	LastSpeedTestMbps float64 `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
+	ID                string     `yaml:"id" mapstructure:"id" json:"id"`
+	Host              string     `yaml:"host" mapstructure:"host" json:"host"`
+	Port              int        `yaml:"port" mapstructure:"port" json:"port"`
+	Username          string     `yaml:"username" mapstructure:"username" json:"username"`
+	Password          string     `yaml:"password" mapstructure:"password" json:"-"`
+	MaxConnections    int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	TLS               bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
+	InsecureTLS       bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
+	ProxyURL          string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
+	Enabled           *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	IsBackupProvider  *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
+	LastSpeedTestMbps float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
 }
 
@@ -830,6 +831,7 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 			oldProvider.MaxConnections != newProvider.MaxConnections ||
 			oldProvider.TLS != newProvider.TLS ||
 			oldProvider.InsecureTLS != newProvider.InsecureTLS ||
+			oldProvider.ProxyURL != newProvider.ProxyURL ||
 			*oldProvider.Enabled != *newProvider.Enabled ||
 			*oldProvider.IsBackupProvider != *newProvider.IsBackupProvider {
 			return false // Provider modified
@@ -865,6 +867,7 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 				MaxConnectionIdleTimeInSeconds: 60, // Default idle timeout
 				TLS:                            p.TLS,
 				InsecureSSL:                    p.InsecureTLS,
+				ProxyURL:                       p.ProxyURL,
 				MaxConnectionTTLInSeconds:      60, // Default connection TTL
 				IsBackupProvider:               isBackup,
 			})

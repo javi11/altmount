@@ -375,6 +375,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		Password    string `json:"password"`
 		TLS         bool   `json:"tls"`
 		InsecureTLS bool   `json:"insecure_tls"`
+		ProxyURL    string `json:"proxy_url"`
 	}
 
 	if err := c.BodyParser(&testReq); err != nil {
@@ -410,6 +411,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		Username: testReq.Username,
 		Password: testReq.Password,
 		TLS:      testReq.TLS,
+		ProxyURL: testReq.ProxyURL,
 	}, slog.Default(), nil)
 	if err != nil {
 		return c.Status(200).JSON(fiber.Map{
@@ -461,6 +463,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		MaxConnections   int    `json:"max_connections"`
 		TLS              bool   `json:"tls"`
 		InsecureTLS      bool   `json:"insecure_tls"`
+		ProxyURL         string `json:"proxy_url"`
 		Enabled          bool   `json:"enabled"`
 		IsBackupProvider bool   `json:"is_backup_provider"`
 	}
@@ -512,6 +515,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		MaxConnections:   createReq.MaxConnections,
 		TLS:              createReq.TLS,
 		InsecureTLS:      createReq.InsecureTLS,
+		ProxyURL:         createReq.ProxyURL,
 		Enabled:          &createReq.Enabled,
 		IsBackupProvider: &createReq.IsBackupProvider,
 	}
@@ -554,6 +558,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		MaxConnections:   newProvider.MaxConnections,
 		TLS:              newProvider.TLS,
 		InsecureTLS:      newProvider.InsecureTLS,
+		ProxyURL:         newProvider.ProxyURL,
 		PasswordSet:      newProvider.Password != "",
 		Enabled:          newProvider.Enabled != nil && *newProvider.Enabled,
 		IsBackupProvider: newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
@@ -621,6 +626,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		MaxConnections   *int    `json:"max_connections,omitempty"`
 		TLS              *bool   `json:"tls,omitempty"`
 		InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
+		ProxyURL         *string `json:"proxy_url,omitempty"`
 		Enabled          *bool   `json:"enabled,omitempty"`
 		IsBackupProvider *bool   `json:"is_backup_provider,omitempty"`
 	}
@@ -689,6 +695,9 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if updateReq.InsecureTLS != nil {
 		provider.InsecureTLS = *updateReq.InsecureTLS
 	}
+	if updateReq.ProxyURL != nil {
+		provider.ProxyURL = *updateReq.ProxyURL
+	}
 	if updateReq.Enabled != nil {
 		provider.Enabled = updateReq.Enabled
 	}
@@ -733,6 +742,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		MaxConnections:   provider.MaxConnections,
 		TLS:              provider.TLS,
 		InsecureTLS:      provider.InsecureTLS,
+		ProxyURL:         provider.ProxyURL,
 		PasswordSet:      provider.Password != "",
 		Enabled:          provider.Enabled != nil && *provider.Enabled,
 		IsBackupProvider: provider.IsBackupProvider != nil && *provider.IsBackupProvider,
@@ -942,6 +952,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 			MaxConnections:   p.MaxConnections,
 			TLS:              p.TLS,
 			InsecureTLS:      p.InsecureTLS,
+			ProxyURL:         p.ProxyURL,
 			PasswordSet:      p.Password != "",
 			Enabled:          p.Enabled != nil && *p.Enabled,
 			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
