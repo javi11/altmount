@@ -865,7 +865,7 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Add file to health database
-	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, maxRetries, req.SourceNzb)
+	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, maxRetries, req.SourceNzb, req.Priority)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,

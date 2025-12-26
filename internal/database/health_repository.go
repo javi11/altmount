@@ -516,19 +516,20 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 }
 
 // AddFileToHealthCheck adds a file to the health database for checking
-func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, maxRetries int, sourceNzbPath *string) error {
+func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, maxRetries int, sourceNzbPath *string, priority HealthPriority) error {
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, created_at, updated_at, scheduled_check_at)
-		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, datetime('now'), datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, ?, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		max_retries = excluded.max_retries,
 		max_repair_retries = excluded.max_repair_retries,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
+		priority = excluded.priority,
 		updated_at = datetime('now'),
 		scheduled_check_at = datetime('now')
 	`
 
-	_, err := r.db.ExecContext(ctx, query, filePath, HealthStatusPending, maxRetries, sourceNzbPath)
+	_, err := r.db.ExecContext(ctx, query, filePath, HealthStatusPending, maxRetries, sourceNzbPath, priority)
 	if err != nil {
 		return fmt.Errorf("failed to add file to health check: %w", err)
 	}

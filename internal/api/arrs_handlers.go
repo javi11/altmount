@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/auth"
+	"github.com/javi11/altmount/internal/database"
 )
 
 // ArrsInstanceRequest represents a request to create/update an arrs instance
@@ -173,12 +174,12 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			"normalized_path", normalizedPath)
 		
 		if s.healthRepo != nil {
-			// Add to health check (pending status)
-			err := s.healthRepo.AddFileToHealthCheck(c.Context(), normalizedPath, 1, nil)
+			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
+			err := s.healthRepo.AddFileToHealthCheck(c.Context(), normalizedPath, 1, nil, database.HealthPriorityNext)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {
-				slog.InfoContext(c.Context(), "Added file to health check queue from webhook", "path", normalizedPath)
+				slog.InfoContext(c.Context(), "Added file to health check queue from webhook with high priority", "path", normalizedPath)
 			}
 		}
 	}
