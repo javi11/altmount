@@ -373,6 +373,14 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.ResolveRepairOnImport = nil
 	}
 
+	// Deep copy Health.ResolveRepairOnImport pointer
+	if c.Health.ResolveRepairOnImport != nil {
+		v := *c.Health.ResolveRepairOnImport
+		copyCfg.Health.ResolveRepairOnImport = &v
+	} else {
+		copyCfg.Health.ResolveRepairOnImport = nil
+	}
+
 	// Deep copy Metadata.DeleteSourceNzbOnRemoval pointer
 	if c.Metadata.DeleteSourceNzbOnRemoval != nil {
 		v := *c.Metadata.DeleteSourceNzbOnRemoval
@@ -1100,7 +1108,7 @@ func isRunningInDocker() bool {
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
 	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
+	cleanupOrphanedFiles := false     // Cleanup orphaned files disabled by default
 	resolveRepairOnImport := false    // Disable smart replacement detection by default
 	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
