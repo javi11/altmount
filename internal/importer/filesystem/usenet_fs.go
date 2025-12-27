@@ -265,24 +265,7 @@ func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 	defer reader.Close()
 
-	// Read from the reader with timeout handling
-	type readResult struct {
-		n   int
-		err error
-	}
-	done := make(chan readResult, 1)
-
-	go func() {
-		n, err := io.ReadFull(reader, p)
-		done <- readResult{n, err}
-	}()
-
-	select {
-	case result := <-done:
-		return result.n, result.err
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	}
+	return io.ReadFull(reader, p)
 }
 
 // createUsenetReader creates a Usenet reader for the specified range
