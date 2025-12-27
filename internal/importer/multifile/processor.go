@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -29,6 +30,7 @@ func ProcessRegularFiles(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
+	timeout time.Duration,
 ) error {
 	if len(files) == 0 {
 		return nil
@@ -90,6 +92,7 @@ func ProcessRegularFiles(
 			maxValidationGoroutines,
 			segmentSamplePercentage,
 			nil, // No progress callback for multi-file imports
+			timeout,
 		); err != nil {
 			return err
 		}

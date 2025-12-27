@@ -34,6 +34,7 @@ func ValidateSegmentAvailability(
 	maxConnections int,
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
+	timeout time.Duration,
 ) error {
 	if len(segments) == 0 {
 		return nil
@@ -61,7 +62,7 @@ func ValidateSegmentAvailability(
 	for _, segment := range segmentsToValidate {
 		seg := segment // Capture loop variable
 		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
@@ -102,6 +103,7 @@ func ValidateSegmentAvailabilityDetailed(
 	maxConnections int,
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
+	timeout time.Duration,
 ) (ValidationResult, error) {
 	result := ValidationResult{
 		MissingIDs: []string{},
@@ -139,7 +141,7 @@ func ValidateSegmentAvailabilityDetailed(
 	for _, segment := range segmentsToValidate {
 		seg := segment // Capture loop variable
 		pl.Go(func() error {
-			checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})

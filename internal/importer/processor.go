@@ -38,6 +38,7 @@ type Processor struct {
 	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
 	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
 	skipHealthCheck         bool
+	validationTimeout       time.Duration
 	allowedFileExtensions   []string
 	log                     *slog.Logger
 	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
@@ -61,6 +62,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		maxImportConnections:    maxImportConnections,
 		segmentSamplePercentage: segmentSamplePercentage,
 		skipHealthCheck:         skipHealthCheck,
+		validationTimeout:       5 * time.Second, // Default validation timeout for imports
 		allowedFileExtensions:   allowedFileExtensions,
 		log:                     slog.Default().With("component", "nzb-processor"),
 		broadcaster:             broadcaster,
@@ -218,23 +220,23 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, proc.validationTimeout)
 
 	case parser.NzbTypeMultiFile:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processMultiFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, proc.validationTimeout)
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions)
+		result, err = proc.processSingleFile(ctx, virtualDir, regularFiles, par2Files, parsed.Path, maxConnections, allowedExtensions, proc.validationTimeout)
 
 	default:
 		return "", NewNonRetryableError(fmt.Sprintf("unknown file type: %s", parsed.Type), nil)
@@ -257,6 +259,7 @@ func (proc *Processor) processSingleFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
+	timeout time.Duration,
 ) (string, error) {
 	if len(regularFiles) == 0 {
 		return "", fmt.Errorf("no regular files to process")
@@ -328,6 +331,7 @@ func (proc *Processor) processSingleFile(
 		maxConnections,
 		samplePercentage,
 		allowedExtensions,
+		timeout,
 	)
 	if err != nil {
 		return "", err
@@ -345,6 +349,7 @@ func (proc *Processor) processMultiFile(
 	nzbPath string,
 	maxConnections int,
 	allowedExtensions []string,
+	timeout time.Duration,
 ) (string, error) {
 	// If there's only one regular file (and the rest are likely PAR2s), avoid creating a redundant
 	// NZB-named directory that matches the file itself. Instead, keep the file directly under the
@@ -403,6 +408,7 @@ func (proc *Processor) processMultiFile(
 		maxConnections,
 		samplePercentage,
 		allowedExtensions,
+		timeout,
 	); err != nil {
 		return "", err
 	}
@@ -420,6 +426,7 @@ func (proc *Processor) processRarArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
+	timeout time.Duration,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -444,6 +451,7 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			proc.segmentSamplePercentage,
 			allowedExtensions,
+			proc.validationTimeout,
 		); err != nil {
 			slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		}
@@ -487,6 +495,7 @@ func (proc *Processor) processRarArchive(
 			maxConnections,
 			samplePercentage,
 			allowedExtensions,
+			timeout,
 		)
 		if err != nil {
 			return "", err
@@ -507,6 +516,7 @@ func (proc *Processor) processSevenZipArchive(
 	queueID int,
 	maxConnections int,
 	allowedExtensions []string,
+	timeout time.Duration,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -520,19 +530,19 @@ func (proc *Processor) processSevenZipArchive(
 			return "", err
 		}
 
-		        if err := multifile.ProcessRegularFiles(
-		            ctx,
-		            nzbFolder,
-		            regularFiles,
-		            nil, // No PAR2 files for archive imports
-		            parsed.Path,
-		            proc.metadataService,
-		            proc.poolManager,
-		            maxConnections,
-		            proc.segmentSamplePercentage,
-		            allowedExtensions,
-		        ); err != nil {
-		            slog.DebugContext(ctx, "Failed to process regular files", "error", err)
+		        		if err := multifile.ProcessRegularFiles(
+		        			ctx,
+		        			nzbFolder,
+		        			regularFiles,
+		        			nil, // No PAR2 files for archive imports
+		        			parsed.Path,
+		        			proc.metadataService,
+		        			proc.poolManager,
+		        			maxConnections,
+		        			proc.segmentSamplePercentage,
+		        			allowedExtensions,
+		        			proc.validationTimeout,
+		        		); err != nil {		            slog.DebugContext(ctx, "Failed to process regular files", "error", err)
 		        }
 		    }
 		
@@ -574,6 +584,7 @@ func (proc *Processor) processSevenZipArchive(
 			maxConnections,
 			samplePercentage,
 			allowedExtensions,
+			timeout,
 		)
 		if err != nil {
 			return "", err
