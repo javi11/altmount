@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	infiniteDepth = -1
-	invalidDepth  = -2
+	infiniteDepth   = -1
+	invalidDepth    = -2
+	completeDirName = "complete"
 )
 
 var (
@@ -201,6 +202,13 @@ func walkFS(ctx context.Context, fs webdav.FileSystem, depth int, name string, i
 	}
 
 	for _, fileInfo := range fileInfos {
+		// Filter out the 'complete' folder from listings at the root level
+		// This prevents Plex/Rclone from scanning the temp download folder
+		// but still allows direct access via path (for Sonarr/Radarr imports)
+		if name == "/" && fileInfo.IsDir() && fileInfo.Name() == completeDirName {
+			continue
+		}
+
 		filename := path.Join(name, fileInfo.Name())
 
 		err = walkFS(ctx, fs, depth, filename, fileInfo, walkFn)
