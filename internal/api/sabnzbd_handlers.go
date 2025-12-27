@@ -295,15 +295,16 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	}
 
 	// Build category path and create temporary file with category subdirectory
-	tempDir := os.TempDir()
-	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+	config := s.configManager.GetConfig()
+	storageDir := config.Metadata.RootPath
+	completeDir := config.SABnzbd.CompleteDir
 
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), categoryPath, file.Filename)
+		tempFile = filepath.Join(storageDir, strings.TrimPrefix(completeDir, "/"), categoryPath, file.Filename)
 	} else {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), file.Filename)
+		tempFile = filepath.Join(storageDir, strings.TrimPrefix(completeDir, "/"), file.Filename)
 	}
 
 	// Save the uploaded file to temporary location
@@ -365,8 +366,9 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	}
 
 	// Create temporary file with category path
-	tempDir := os.TempDir()
-	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+	config := s.configManager.GetConfig()
+	storageDir := config.Metadata.RootPath
+	completeDir := config.SABnzbd.CompleteDir
 
 	// Extract filename from URL or use default
 	filename := "downloaded.nzb"
@@ -385,9 +387,9 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), categoryPath, filename)
+		tempFile = filepath.Join(storageDir, strings.TrimPrefix(completeDir, "/"), categoryPath, filename)
 	} else {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), filename)
+		tempFile = filepath.Join(storageDir, strings.TrimPrefix(completeDir, "/"), filename)
 	}
 
 	outFile, err := os.Create(tempFile)
@@ -715,9 +717,10 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		}
 	}
 
-	// Get actual disk space for temp directory
-	tempDir := os.TempDir()
-	diskFree, diskTotal := getDiskSpace(tempDir)
+	// Get actual disk space for storage directory
+	config := s.configManager.GetConfig()
+	storageDir := config.Metadata.RootPath
+	diskFree, diskTotal := getDiskSpace(storageDir)
 
 	response := SABnzbdStatusResponse{
 		Status:          true,
@@ -956,12 +959,6 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	mountDir := filepath.Join(config.Metadata.RootPath, strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
 		return fmt.Errorf("failed to create category mount directory: %w", err)
-	}
-
-	// Create in temp path
-	tempDir := filepath.Join(os.TempDir(), strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
 	return nil
