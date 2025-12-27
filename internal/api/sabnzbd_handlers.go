@@ -958,7 +958,6 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 		return fmt.Errorf("config manager not available")
 	}
 
-	config := s.configManager.GetConfig()
 	categoryPath := s.buildCategoryPath(category)
 
 	// Don't create directory for default category (empty path)
