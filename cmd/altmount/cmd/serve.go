@@ -130,7 +130,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {

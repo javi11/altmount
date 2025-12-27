@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
@@ -173,8 +174,25 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			"normalized_path", normalizedPath)
 		
 		if s.healthRepo != nil {
+			var releaseDate *time.Time
+			var sourceNzb *string
+
+			// Try to read metadata to get release date
+			if s.metadataService != nil {
+				meta, err := s.metadataService.ReadFileMetadata(normalizedPath)
+				if err == nil && meta != nil {
+					if meta.ReleaseDate != 0 {
+						t := time.Unix(meta.ReleaseDate, 0)
+						releaseDate = &t
+					}
+					if meta.SourceNzbPath != "" {
+						sourceNzb = &meta.SourceNzbPath
+					}
+				}
+			}
+
 			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
-			err := s.healthRepo.AddFileToHealthCheck(c.Context(), normalizedPath, 2, nil, database.HealthPriorityNext)
+			err := s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, 2, sourceNzb, database.HealthPriorityNext, releaseDate)
 			if err != nil {
 				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
 			} else {

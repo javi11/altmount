@@ -43,6 +43,7 @@ type Server struct {
 	userRepo            *database.UserRepository
 	configManager       ConfigManager
 	metadataReader      *metadata.MetadataReader
+	metadataService     *metadata.MetadataService
 	nzbFilesystem       *nzbfilesystem.NzbFilesystem
 	healthWorker        *health.HealthWorker
 	librarySyncWorker   *health.LibrarySyncWorker
@@ -67,6 +68,7 @@ func NewServer(
 	userRepo *database.UserRepository,
 	configManager ConfigManager,
 	metadataReader *metadata.MetadataReader,
+	metadataService *metadata.MetadataService,
 	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	poolManager pool.Manager,
 	importService *importer.Service,
@@ -88,6 +90,7 @@ func NewServer(
 		userRepo:            userRepo,
 		configManager:       configManager,
 		metadataReader:      metadataReader,
+		metadataService:     metadataService,
 		nzbFilesystem:       nzbFilesystem,
 		importerService:     importService, // Will be set later via SetImporterService
 		poolManager:         poolManager,
