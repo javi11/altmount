@@ -36,43 +36,48 @@ func (hsc *HealthSystemController) SyncMetadataDates(ctx context.Context) {
 	go func() {
 		slog.InfoContext(ctx, "Starting background release date backfill")
 
-		paths, err := hsc.healthWorker.healthRepo.GetFilesMissingReleaseDate(ctx)
+		// Get items missing release dates in a large batch
+		items, err := hsc.healthWorker.healthRepo.GetFilesMissingReleaseDate(ctx, 10000)
 		if err != nil {
 			slog.ErrorContext(ctx, "Failed to get files missing release date", "error", err)
 			return
 		}
 
-		if len(paths) == 0 {
+		if len(items) == 0 {
 			slog.InfoContext(ctx, "No files missing release date found")
 			return
 		}
 
-		slog.InfoContext(ctx, "Found files missing release date", "count", len(paths))
+		slog.InfoContext(ctx, "Found files missing release date", "count", len(items))
 
-		var records []database.BackfillRecord
-		for _, path := range paths {
-			meta, err := hsc.healthWorker.metadataService.ReadFileMetadata(path)
+		var updates []database.BackfillUpdate
+		for _, item := range items {
+			meta, err := hsc.healthWorker.metadataService.ReadFileMetadata(item.FilePath)
 			if err != nil || meta == nil || meta.ReleaseDate == 0 {
 				continue
 			}
 
-			records = append(records, database.BackfillRecord{
-				FilePath:    path,
-				ReleaseDate: time.Unix(meta.ReleaseDate, 0),
+			releaseDate := time.Unix(meta.ReleaseDate, 0)
+			nextCheck := CalculateNextCheck(releaseDate, time.Now()) // initial check based on age
+
+			updates = append(updates, database.BackfillUpdate{
+				ID:               item.ID,
+				ReleaseDate:      releaseDate,
+				ScheduledCheckAt: nextCheck,
 			})
 
 			// Process in small batches to not lock the DB for too long
-			if len(records) >= 100 {
-				if err := hsc.healthWorker.healthRepo.BackfillReleaseDates(ctx, records); err != nil {
+			if len(updates) >= 100 {
+				if err := hsc.healthWorker.healthRepo.BackfillReleaseDates(ctx, updates); err != nil {
 					slog.ErrorContext(ctx, "Failed to backfill release dates batch", "error", err)
 				}
-				records = nil
+				updates = nil
 			}
 		}
 
 		// Final batch
-		if len(records) > 0 {
-			if err := hsc.healthWorker.healthRepo.BackfillReleaseDates(ctx, records); err != nil {
+		if len(updates) > 0 {
+			if err := hsc.healthWorker.healthRepo.BackfillReleaseDates(ctx, updates); err != nil {
 				slog.ErrorContext(ctx, "Failed to backfill final release dates batch", "error", err)
 			}
 		}

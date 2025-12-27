@@ -1107,10 +1107,10 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedFiles := false     // Cleanup orphaned files disabled by default
-	resolveRepairOnImport := false    // Disable smart replacement detection by default
-	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
+	healthEnabled := false               // Health system disabled by default
+	cleanupOrphanedMetadata := false     // Cleanup orphaned metadata disabled by default
+	resolveRepairOnImport := false       // Disable smart replacement detection by default
+	deleteSourceNzbOnRemoval := false    // Delete source NZB on removal disabled by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false

@@ -1036,6 +1036,19 @@ type HealthStatusUpdate struct {
 	ScheduledCheckAt time.Time
 }
 
+// BackfillRecord represents a record used for metadata backfilling
+type BackfillRecord struct {
+	ID       int64
+	FilePath string
+}
+
+// BackfillUpdate represents an update for release date backfilling
+type BackfillUpdate struct {
+	ID               int64
+	ReleaseDate      time.Time
+	ScheduledCheckAt time.Time
+}
+
 // GetAllHealthCheckPaths returns all health check file paths (memory optimized)
 func (r *HealthRepository) GetAllHealthCheckPaths(ctx context.Context) ([]string, error) {
 	query := `
@@ -1115,6 +1128,67 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 	}
 
 	return records, nil
+}
+
+// GetFilesMissingReleaseDate returns a list of files that don't have a release date cached
+func (r *HealthRepository) GetFilesMissingReleaseDate(ctx context.Context, limit int) ([]BackfillRecord, error) {
+	query := `
+		SELECT id, file_path
+		FROM file_health
+		WHERE release_date IS NULL
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []BackfillRecord
+	for rows.Next() {
+		var rec BackfillRecord
+		if err := rows.Scan(&rec.ID, &rec.FilePath); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+
+	return records, nil
+}
+
+// BackfillReleaseDates updates multiple health records with their release dates and next check times
+func (r *HealthRepository) BackfillReleaseDates(ctx context.Context, updates []BackfillUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		UPDATE file_health
+		SET release_date = ?,
+		    scheduled_check_at = ?,
+		    updated_at = datetime('now')
+		WHERE id = ?
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, up := range updates {
+		_, err = stmt.ExecContext(ctx, up.ReleaseDate.UTC().Format("2006-01-02 15:04:05"), up.ScheduledCheckAt.UTC().Format("2006-01-02 15:04:05"), up.ID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // AutomaticHealthCheckRecord represents a batch insert record
