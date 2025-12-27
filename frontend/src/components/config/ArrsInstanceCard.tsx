@@ -142,6 +142,21 @@ export function ArrsInstanceCard({
 					</fieldset>
 
 					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Download Category (Optional)</legend>
+						<input
+							type="text"
+							className="input"
+							value={instance.category || ""}
+							onChange={(e) => handleInstanceChange("category", e.target.value)}
+							placeholder={type === "radarr" ? "movies" : "tv"}
+							disabled={isReadOnly}
+						/>
+						<p className="label text-base-content/70 text-xs">
+							SABnzbd category to use for this instance. Defaults to "{type === "radarr" ? "movies" : "tv"}".
+						</p>
+					</fieldset>
+
+					<fieldset className="fieldset">
 						<legend className="fieldset-legend">API Key</legend>
 						<div className="flex">
 							<input

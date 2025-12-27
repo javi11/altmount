@@ -598,6 +598,7 @@ export interface ArrsInstanceConfig {
 	name: string;
 	url: string;
 	api_key: string;
+	category?: string;
 	enabled: boolean;
 	sync_interval_hours: number;
 }
@@ -609,6 +610,7 @@ export interface ArrsInstance {
 	type: ArrsType;
 	url: string;
 	api_key: string;
+	category?: string;
 	enabled: boolean;
 	sync_interval_hours: number;
 	last_sync_at?: string;

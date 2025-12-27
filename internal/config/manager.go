@@ -318,6 +318,7 @@ type ArrsInstanceConfig struct {
 	Name              string `yaml:"name" mapstructure:"name" json:"name"`
 	URL               string `yaml:"url" mapstructure:"url" json:"url"`
 	APIKey            string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Category          string `yaml:"category" mapstructure:"category" json:"category,omitempty"`
 	Enabled           *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	SyncIntervalHours *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
 }

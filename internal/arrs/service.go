@@ -468,6 +468,10 @@ func (s *Service) EnsureDownloadClientRegistration(ctx context.Context, altmount
 			}
 
 			if !exists {
+				category := instance.Category
+				if category == "" {
+					category = "movies"
+				}
 				dc := &radarr.DownloadClientInput{
 					Name:                     clientName,
 					Implementation:           "SABnzbd",
@@ -476,13 +480,13 @@ func (s *Service) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					RemoveCompletedDownloads: true,
 					RemoveFailedDownloads:    true,
 					Priority:                 1,
-Protocol: "Usenet",
+					Protocol:                 "Usenet",
 					Fields: []*starr.FieldInput{
 						{Name: "host", Value: altmountHost},
 						{Name: "port", Value: altmountPort},
 						{Name: "urlBase", Value: urlBase},
 						{Name: "apiKey", Value: apiKey},
-						{Name: "movieCategory", Value: "movies"},
+						{Name: "movieCategory", Value: category},
 						{Name: "useSsl", Value: false},
 					},
 				}
@@ -516,6 +520,10 @@ Protocol: "Usenet",
 			}
 
 			if !exists {
+				category := instance.Category
+				if category == "" {
+					category = "tv"
+				}
 				dc := &sonarr.DownloadClientInput{
 					Name:                     clientName,
 					Implementation:           "SABnzbd",
@@ -524,13 +532,13 @@ Protocol: "Usenet",
 					RemoveCompletedDownloads: true,
 					RemoveFailedDownloads:    true,
 					Priority:                 1,
-Protocol: "Usenet",
+					Protocol:                 "Usenet",
 					Fields: []*starr.FieldInput{
 						{Name: "host", Value: altmountHost},
 						{Name: "port", Value: altmountPort},
 						{Name: "urlBase", Value: urlBase},
 						{Name: "apiKey", Value: apiKey},
-						{Name: "tvCategory", Value: "tv"},
+						{Name: "tvCategory", Value: category},
 						{Name: "useSsl", Value: false},
 					},
 				}
@@ -1242,6 +1250,35 @@ func (s *Service) instanceExistsByURL(checkURL string) bool {
 	return false
 }
 
+// categoryUsedByOtherInstance checks if a category is already used by another instance of the same type
+func (s *Service) categoryUsedByOtherInstance(arrType, category string) bool {
+	var instances []config.ArrsInstanceConfig
+	cfg := s.configManager.GetConfig()
+
+	if arrType == "radarr" {
+		instances = cfg.Arrs.RadarrInstances
+	} else if arrType == "sonarr" {
+		instances = cfg.Arrs.SonarrInstances
+	}
+
+	for _, instance := range instances {
+		instanceCat := instance.Category
+		if instanceCat == "" {
+			if arrType == "radarr" {
+				instanceCat = "movies"
+			} else {
+				instanceCat = "tv"
+			}
+		}
+
+		if instanceCat == category {
+			return true
+		}
+	}
+
+	return false
+}
+
 // detectARRType attempts to detect if a URL points to Radarr or Sonarr
 // Returns "radarr", "sonarr", or an error if neither can be determined
 func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (string, error) {
@@ -1381,6 +1418,11 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 		return fmt.Errorf("failed to generate instance name: %w", err)
 	}
 
+	// If default category is already used by another instance, generate a unique one
+	if s.categoryUsedByOtherInstance(arrType, category) {
+		category = fmt.Sprintf("%s-%s", category, instanceName)
+	}
+
 	slog.InfoContext(ctx, "Registering new ARR instance",
 		"name", instanceName,
 		"type", arrType,
@@ -1394,10 +1436,11 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 	// Create new instance config
 	enabled := true
 	newInstance := config.ArrsInstanceConfig{
-		Name:    instanceName,
-		URL:     arrURL,
-		APIKey:  apiKey,
-		Enabled: &enabled,
+		Name:     instanceName,
+		URL:      arrURL,
+		APIKey:   apiKey,
+		Category: category,
+		Enabled:  &enabled,
 	}
 
 	// Add to appropriate array

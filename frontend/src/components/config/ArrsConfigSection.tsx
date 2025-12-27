@@ -16,6 +16,7 @@ interface NewInstanceForm {
 	type: ArrsType;
 	url: string;
 	api_key: string;
+	category: string;
 	enabled: boolean;
 }
 
@@ -24,6 +25,7 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 	type: "radarr",
 	url: "",
 	api_key: "",
+	category: "",
 	enabled: true,
 };
 
@@ -166,7 +168,9 @@ export function ArrsConfigSection({
 				name: newInstance.name,
 				url: newInstance.url,
 				api_key: newInstance.api_key,
+				category: newInstance.category,
 				enabled: newInstance.enabled,
+				sync_interval_hours: 1,
 			},
 		];
 
@@ -458,6 +462,17 @@ export function ArrsConfigSection({
 									value={newInstance.api_key}
 									onChange={(e) => setNewInstance((prev) => ({ ...prev, api_key: e.target.value }))}
 									placeholder="API key from settings"
+								/>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Download Category (Optional)</legend>
+								<input
+									type="text"
+									className="input"
+									value={newInstance.category}
+									onChange={(e) => setNewInstance((prev) => ({ ...prev, category: e.target.value }))}
+									placeholder={newInstance.type === "radarr" ? "movies" : "tv"}
 								/>
 							</fieldset>
 
