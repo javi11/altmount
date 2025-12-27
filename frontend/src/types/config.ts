@@ -56,10 +56,10 @@ export interface StreamingConfig {
 
 // Health configuration
 export interface HealthConfig {
-	enabled: boolean;
+	enabled?: boolean;
 	library_dir?: string;
-	cleanup_orphaned_files?: boolean; // Clean up orphaned library files and metadata
-	check_interval_seconds?: number; // Interval in seconds (optional)
+	cleanup_orphaned_metadata?: boolean;
+	check_interval_seconds?: number;
 	max_connections_for_health_checks?: number;
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)

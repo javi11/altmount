@@ -33,7 +33,7 @@ export function HealthConfigSection({
 		if (data.enabled && !data.library_dir?.trim()) {
 			return "Library Directory is required when Health System is enabled";
 		}
-		if (data.cleanup_orphaned_files && !data.library_dir?.trim()) {
+		if (data.cleanup_orphaned_metadata && !data.library_dir?.trim()) {
 			return "Library Directory is required when file cleanup is enabled";
 		}
 		return "";
@@ -170,12 +170,12 @@ export function HealthConfigSection({
 						<input
 							type="checkbox"
 							className="checkbox"
-							checked={formData.cleanup_orphaned_files ?? false}
+							checked={formData.cleanup_orphaned_metadata ?? false}
 							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("cleanup_orphaned_files", e.target.checked)}
+							onChange={(e) => handleInputChange("cleanup_orphaned_metadata", e.target.checked)}
 						/>
 					</label>
-					{formData.cleanup_orphaned_files && !formData.library_dir?.trim() && (
+					{formData.cleanup_orphaned_metadata && !formData.library_dir?.trim() && (
 						<div className="alert alert-warning mt-2">
 							<AlertTriangle className="h-4 w-4" />
 							<span className="text-sm">
@@ -183,7 +183,7 @@ export function HealthConfigSection({
 							</span>
 						</div>
 					)}
-					{formData.cleanup_orphaned_files && formData.library_dir?.trim() && (
+					{formData.cleanup_orphaned_metadata && formData.library_dir?.trim() && (
 						<div className="alert alert-warning mt-2">
 							<AlertTriangle className="h-4 w-4" />
 							<div className="text-sm">
@@ -196,7 +196,7 @@ export function HealthConfigSection({
 					<p className="label text-sm">
 						Automatically delete orphaned library files and metadata during library sync. When
 						disabled, no files will be deleted.
-						{formData.cleanup_orphaned_files && (
+						{formData.cleanup_orphaned_metadata && (
 							<strong className="text-warning">
 								{" "}
 								Requires Library Directory to be configured.

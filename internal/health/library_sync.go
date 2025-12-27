@@ -640,7 +640,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Additional cleanup of orphaned metadata files if enabled
 	metadataDeletedCount := 0
-	if cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles {
+	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
 		// We already have libraryFiles from earlier in the function
 		for relativeMountPath := range metaFileSet {
 			select {
@@ -668,7 +668,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	// Cleanup orphaned library files (symlinks and STRM files without metadata)
 	libraryFilesDeletedCount := 0
 
-	if cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles {
+	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
 		for metaPath, file := range filesInUse {
 			select {
 			case <-ctx.Done():
@@ -699,7 +699,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Return dry run results or record sync results
 	if dryRun {
-		wouldCleanup := cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles
+		wouldCleanup := cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata
 		return &DryRunResult{
 			OrphanedMetadataCount:  metadataDeletedCount,
 			OrphanedLibraryFiles:   libraryFilesDeletedCount,
@@ -1303,7 +1303,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 
 	// Return dry run results or record sync results
 	if dryRun {
-		wouldCleanup := cfg.Health.CleanupOrphanedFiles != nil && *cfg.Health.CleanupOrphanedFiles
+		wouldCleanup := cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata
 		return &DryRunResult{
 			OrphanedMetadataCount:  0, // No orphaned metadata in NONE strategy
 			OrphanedLibraryFiles:   0, // No library files in NONE strategy
