@@ -267,6 +267,17 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		totalSize = *info.FileSize
 	}
 
+	// Sanity check: Ensure totalSize is at least the sum of its segments.
+	// This prevents "seek beyond file size" errors when yEnc headers report incorrect sizes.
+	var segmentSum int64
+	for _, seg := range info.NzbFile.Segments {
+		segmentSum += int64(seg.Bytes)
+	}
+
+	if totalSize < segmentSum {
+		totalSize = segmentSum
+	}
+
 	// Usenet Drive files parsing
 	var (
 		password string
