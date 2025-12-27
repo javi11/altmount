@@ -163,6 +163,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if healthWorker != nil && librarySyncWorker != nil {
 		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker, ctx)
 		healthController.RegisterConfigChangeHandler(configManager)
+
+		// Trigger initial metadata date sync if health is enabled
+		if cfg.Health.Enabled != nil && *cfg.Health.Enabled {
+			healthController.SyncMetadataDates(ctx)
+		}
 	}
 
 	// Start ARRs queue cleanup worker

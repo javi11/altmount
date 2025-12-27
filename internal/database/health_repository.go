@@ -1201,6 +1201,71 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 	return nil
 }
 
+// BackfillRecord represents a record for release date backfilling
+type BackfillRecord struct {
+	FilePath    string
+	ReleaseDate time.Time
+}
+
+// BackfillReleaseDates updates release dates for multiple health records in a single transaction
+func (r *HealthRepository) BackfillReleaseDates(ctx context.Context, records []BackfillRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		UPDATE file_health 
+		SET release_date = ?, 
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare update statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, record := range records {
+		_, err = stmt.ExecContext(ctx, record.ReleaseDate.UTC().Format("2006-01-02 15:04:05"), record.FilePath)
+		if err != nil {
+			return fmt.Errorf("failed to update release date for %s: %w", record.FilePath, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetFilesMissingReleaseDate returns all file paths that are missing a release date
+func (r *HealthRepository) GetFilesMissingReleaseDate(ctx context.Context) ([]string, error) {
+	query := `
+		SELECT file_path 
+		FROM file_health 
+		WHERE release_date IS NULL OR release_date = ''
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files missing release date: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("failed to scan file path: %w", err)
+		}
+		paths = append(paths, path)
+	}
+
+	return paths, nil
+}
+
 // ResolvePendingRepairsInDirectory removes health records with repair_triggered or corrupted status
 // that exist in the specified directory. This is used when a new file is imported
 // into a directory, implying it is a replacement for the broken file.

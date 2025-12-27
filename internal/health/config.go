@@ -4,8 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/database"
 )
 
 // HealthSystemController manages dynamic enable/disable of the health system
@@ -27,6 +29,56 @@ func NewHealthSystemController(
 		librarySyncWorker: librarySyncWorker,
 		ctx:               ctx,
 	}
+}
+
+// SyncMetadataDates performs a background backfill of missing release dates from metadata
+func (hsc *HealthSystemController) SyncMetadataDates(ctx context.Context) {
+	go func() {
+		slog.InfoContext(ctx, "Starting background release date backfill")
+
+		paths, err := hsc.healthWorker.healthRepo.GetFilesMissingReleaseDate(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to get files missing release date", "error", err)
+			return
+		}
+
+		if len(paths) == 0 {
+			slog.InfoContext(ctx, "No files missing release date found")
+			return
+		}
+
+		slog.InfoContext(ctx, "Found files missing release date", "count", len(paths))
+
+		var records []database.BackfillRecord
+		for _, path := range paths {
+			meta, err := hsc.healthWorker.metadataService.ReadFileMetadata(path)
+			if err != nil || meta == nil || meta.ReleaseDate == 0 {
+				continue
+			}
+
+			records = append(records, database.BackfillRecord{
+				FilePath:    path,
+				ReleaseDate: time.Unix(meta.ReleaseDate, 0),
+			})
+
+			// Process in small batches to not lock the DB for too long
+			if len(records) >= 100 {
+				if err := hsc.healthWorker.healthRepo.BackfillReleaseDates(ctx, records); err != nil {
+					slog.ErrorContext(ctx, "Failed to backfill release dates batch", "error", err)
+				}
+				records = nil
+			}
+		}
+
+		// Final batch
+		if len(records) > 0 {
+			if err := hsc.healthWorker.healthRepo.BackfillReleaseDates(ctx, records); err != nil {
+				slog.ErrorContext(ctx, "Failed to backfill final release dates batch", "error", err)
+			}
+		}
+
+		slog.InfoContext(ctx, "Finished background release date backfill")
+	}()
 }
 
 // RegisterConfigChangeHandler registers a callback to handle health system enable/disable changes
@@ -60,6 +112,9 @@ func (hsc *HealthSystemController) RegisterConfigChangeHandler(configManager *co
 			if !hsc.librarySyncWorker.IsRunning() {
 				hsc.librarySyncWorker.StartLibrarySync(hsc.ctx)
 			}
+
+			// Run background backfill
+			hsc.SyncMetadataDates(hsc.ctx)
 
 			slog.InfoContext(hsc.ctx, "Health system started successfully")
 		} else {
