@@ -20,7 +20,6 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/nntppool/v2"
 	"github.com/javi11/nntppool/v2/pkg/nntpcli"
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
@@ -246,10 +245,6 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 			p.log.WarnContext(ctx, "Failed to normalize segment sizes with yEnc headers",
 				"error", err,
 				"segments", len(info.NzbFile.Segments))
-
-			if errors.Is(err, nntppool.ErrArticleNotFoundInProviders) {
-				return nil, NewNonRetryableError(fmt.Sprintf("failed to fetch yEnc headers: missing articles in all providers: %s", info.NzbFile.Subject), err)
-			}
 		}
 	}
 
