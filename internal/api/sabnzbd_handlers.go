@@ -466,7 +466,9 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	}
 
 	// Get total count for pagination info
-	totalCount, err := s.queueRepo.CountQueueItems(c.Context(), nil, "", categoryFilter)
+	
+	// Let's just use a simple approach for now:
+	totalCount, err := s.queueRepo.CountActiveQueueItems(c.Context(), "", categoryFilter)
 	if err != nil {
 		totalCount = len(items) // Fallback
 	}

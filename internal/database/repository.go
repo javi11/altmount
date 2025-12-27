@@ -767,6 +767,44 @@ func (r *Repository) CountQueueItems(ctx context.Context, status *QueueStatus, s
 	return count, nil
 }
 
+// CountActiveQueueItems counts the total number of pending and processing queue items
+func (r *Repository) CountActiveQueueItems(ctx context.Context, search string, category string) (int, error) {
+	var query string
+	var args []interface{}
+
+	baseQuery := `SELECT COUNT(*) FROM import_queue WHERE status IN ('pending', 'processing')`
+
+	var conditions []string
+	var conditionArgs []interface{}
+
+	if search != "" {
+		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
+		searchPattern := "%" + search + "%"
+		conditionArgs = append(conditionArgs, searchPattern, searchPattern)
+	}
+
+	if category != "" {
+		conditions = append(conditions, "category = ?")
+		conditionArgs = append(conditionArgs, category)
+	}
+
+	if len(conditions) > 0 {
+		query = baseQuery + " AND " + strings.Join(conditions, " AND ")
+	} else {
+		query = baseQuery
+	}
+
+	args = conditionArgs
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active queue items: %w", err)
+	}
+
+	return count, nil
+}
+
 // ClearCompletedQueueItems removes completed and failed items from the queue
 func (r *Repository) ClearCompletedQueueItems(ctx context.Context) (int, error) {
 	query := `
