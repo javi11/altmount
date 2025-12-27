@@ -177,8 +177,10 @@ export interface ImportConfig {
 	max_import_connections: number;
 	import_cache_size_mb: number;
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
+	read_timeout_seconds: number;
 	import_strategy: ImportStrategy;
-	import_dir?: string;
+	import_dir?: string | null;
+	skip_health_check?: boolean;
 }
 
 // Log configuration
@@ -349,7 +351,8 @@ export interface ImportUpdateRequest {
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
 	allowed_file_extensions?: string[];
 	import_strategy?: ImportStrategy;
-	import_dir?: string;
+	import_dir?: string | null;
+	skip_health_check?: boolean;
 }
 
 // Log update request

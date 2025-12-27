@@ -161,6 +161,7 @@ type ImportConfig struct {
 	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	SkipHealthCheck                *bool          `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -392,6 +393,14 @@ func (c *Config) DeepCopy() *Config {
 	if c.Import.AllowedFileExtensions != nil {
 		copyCfg.Import.AllowedFileExtensions = make([]string, len(c.Import.AllowedFileExtensions))
 		copy(copyCfg.Import.AllowedFileExtensions, c.Import.AllowedFileExtensions)
+	}
+
+	// Deep copy Import.SkipHealthCheck pointer
+	if c.Import.SkipHealthCheck != nil {
+		v := *c.Import.SkipHealthCheck
+		copyCfg.Import.SkipHealthCheck = &v
+	} else {
+		copyCfg.Import.SkipHealthCheck = nil
 	}
 
 	// Deep copy RClone.RCEnabled pointer
@@ -1095,11 +1104,12 @@ func DefaultConfig(configDir ...string) *Config {
 	resolveRepairOnImport := false    // Disable smart replacement detection by default
 	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
-	mountEnabled := false   // Disabled by default
+	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
 	loginRequired := true // Require login by default
+	skipHealthCheck := false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -1205,6 +1215,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
+			SkipHealthCheck:         &skipHealthCheck,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

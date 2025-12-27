@@ -37,6 +37,7 @@ type Processor struct {
 	configGetter            config.ConfigGetter
 	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
 	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
+	skipHealthCheck         bool
 	allowedFileExtensions   []string
 	log                     *slog.Logger
 	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
@@ -48,7 +49,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, skipHealthCheck bool) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -59,6 +60,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,
 		segmentSamplePercentage: segmentSamplePercentage,
+		skipHealthCheck:         skipHealthCheck,
 		allowedFileExtensions:   allowedFileExtensions,
 		log:                     slog.Default().With("component", "nzb-processor"),
 		broadcaster:             broadcaster,
@@ -68,6 +70,14 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		rarRPattern:       regexp.MustCompile(`^(.+)\.r(\d+)$`),         // filename.r00, filename.r01
 		rarNumericPattern: regexp.MustCompile(`^(.+)\.(\d+)$`),          // filename.001, filename.002
 	}
+}
+
+func (proc *Processor) SetSkipHealthCheck(skip bool) {
+	proc.skipHealthCheck = skip
+}
+
+func (proc *Processor) SetSegmentSamplePercentage(percentage int) {
+	proc.segmentSamplePercentage = percentage
 }
 
 func (proc *Processor) isCategoryFolder(path string) bool {
@@ -300,6 +310,12 @@ func (proc *Processor) processSingleFile(
 	// Use the final name for processing
 	regularFiles[0].Filename = finalName
 
+	// Determine sample percentage based on skipHealthCheck
+	samplePercentage := proc.segmentSamplePercentage
+	if proc.skipHealthCheck {
+		samplePercentage = 0
+	}
+
 	// Process the single file at the resolved parentPath
 	result, err := singlefile.ProcessSingleFile(
 		ctx,
@@ -310,7 +326,7 @@ func (proc *Processor) processSingleFile(
 		proc.metadataService,
 		proc.poolManager,
 		maxConnections,
-		proc.segmentSamplePercentage,
+		samplePercentage,
 		allowedExtensions,
 	)
 	if err != nil {
@@ -369,6 +385,12 @@ func (proc *Processor) processMultiFile(
 		targetBaseDir = nzbFolder
 	}
 
+	// Determine sample percentage based on skipHealthCheck
+	samplePercentage := proc.segmentSamplePercentage
+	if proc.skipHealthCheck {
+		samplePercentage = 0
+	}
+
 	// Process all regular files
 	if err := multifile.ProcessRegularFiles(
 		ctx,
@@ -379,7 +401,7 @@ func (proc *Processor) processMultiFile(
 		proc.metadataService,
 		proc.poolManager,
 		maxConnections,
-		proc.segmentSamplePercentage,
+		samplePercentage,
 		allowedExtensions,
 	); err != nil {
 		return "", err
@@ -443,6 +465,12 @@ func (proc *Processor) processRarArchive(
 		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
 		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
 
+		// Determine sample percentage based on skipHealthCheck
+		samplePercentage := proc.segmentSamplePercentage
+		if proc.skipHealthCheck {
+			samplePercentage = 0
+		}
+
 		// Process archive with unified aggregator
 		err := rar.ProcessArchive(
 			ctx,
@@ -457,7 +485,7 @@ func (proc *Processor) processRarArchive(
 			archiveProgressTracker,
 			validationProgressTracker,
 			maxConnections,
-			proc.segmentSamplePercentage,
+			samplePercentage,
 			allowedExtensions,
 		)
 		if err != nil {
@@ -521,26 +549,32 @@ func (proc *Processor) processSevenZipArchive(
 		            releaseDate = archiveFiles[0].ReleaseDate.Unix()
 		        }
 		
-		        // Create progress tracker for 80-95% range (validation only, metadata handled separately)
-		        validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-		
-		        // Process archive with unified aggregator
-		        err := sevenzip.ProcessArchive(
-		            ctx,
-		            nzbFolder,
-		            archiveFiles,
-		            parsed.GetPassword(),
-		            releaseDate,
-		            parsed.Path,
-		            proc.sevenZipProcessor,
-		            proc.metadataService,
-		            proc.poolManager,
-		            archiveProgressTracker,
-		            validationProgressTracker,
-		            maxConnections,
-		            proc.segmentSamplePercentage,
-		            allowedExtensions,
-		        )
+		        		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
+		        		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
+		        
+		        		// Determine sample percentage based on skipHealthCheck
+		        		samplePercentage := proc.segmentSamplePercentage
+		        		if proc.skipHealthCheck {
+		        			samplePercentage = 0
+		        		}
+		        
+		        		// Process archive with unified aggregator
+		err := sevenzip.ProcessArchive(
+			ctx,
+			nzbFolder,
+			archiveFiles,
+			parsed.GetPassword(),
+			releaseDate,
+			parsed.Path,
+			proc.sevenZipProcessor,
+			proc.metadataService,
+			proc.poolManager,
+			archiveProgressTracker,
+			validationProgressTracker,
+			maxConnections,
+			samplePercentage,
+			allowedExtensions,
+		)
 		if err != nil {
 			return "", err
 		}

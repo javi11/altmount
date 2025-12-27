@@ -109,6 +109,7 @@ type ImportAPIResponse struct {
 	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
 	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
 	ImportDir                      *string               `json:"import_dir,omitempty"`
+	SkipHealthCheck                bool                  `json:"skip_health_check"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -235,6 +236,7 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
 		ImportStrategy:                 importConfig.ImportStrategy,
 		ImportDir:                      importConfig.ImportDir,
+		SkipHealthCheck:                importConfig.SkipHealthCheck != nil && *importConfig.SkipHealthCheck,
 	}
 }
 

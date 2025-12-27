@@ -115,6 +115,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	// Wire ARRs service into importer for instant import triggers
 	importerService.SetArrsService(arrsService)
+	importerService.RegisterConfigChangeHandler(configManager)
 	defer func() {
 		logger.Info("Closing importer service")
 		if err := importerService.Close(); err != nil {
