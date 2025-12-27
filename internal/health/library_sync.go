@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -544,99 +545,90 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	}
 
 	// Create a worker pool for parallel metadata reading
-	jobChan := make(chan string, concurrency*2)
-	var wg sync.WaitGroup
+	p := pool.New().WithMaxGoroutines(concurrency)
 
-	// Start workers
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range jobChan {
-				// Check if needs to be added
-				if it, exists := dbPathSet[path]; !exists || it.LibraryPath == nil {
-					// Read metadata to get release date
-					fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
-					if err != nil {
-						slog.ErrorContext(ctx, "Failed to read metadata",
-							"mount_relative_path", path,
-							"error", err)
+	for mountRelativePath := range metaFileSet {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
 
-						// Register as corrupted so HealthWorker can pick it up and trigger repair
-						// Look up library path from our map
-						libPath := lsw.getLibraryPath(path, filesInUse)
-						if libPath != nil {
-							regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, libPath, err.Error())
-							if regErr != nil {
-								slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
-							}
-						}
-						continue
-					}
+		// Capture loop variable for goroutine
+		path := mountRelativePath
 
-					if fileMeta == nil {
-						continue
-					}
+		p.Go(func() {
+			// Check if needs to be added
+			if it, exists := dbPathSet[path]; !exists || it.LibraryPath == nil {
+				// Read metadata to get release date
+				fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to read metadata",
+						"mount_relative_path", path,
+						"error", err)
 
-					// Use CreatedAt if ReleaseDate is missing
-					releaseDate := fileMeta.ReleaseDate
-					if releaseDate == 0 {
-						releaseDate = fileMeta.CreatedAt
-						// Update metadata file with the CreatedAt as release date
-						fileMeta.ReleaseDate = releaseDate
-						if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
-							slog.ErrorContext(ctx, "Failed to update metadata with release date",
-								"path", path,
-								"error", err)
-						} else {
-							slog.InfoContext(ctx, "Set release date from CreatedAt",
-								"path", path,
-								"release_date", time.Unix(releaseDate, 0))
-						}
-					}
-
-					// Convert Unix timestamp to time.Time
-					releaseDateAsTime := time.Unix(releaseDate, 0)
-
-					// Calculate initial check time
-					scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
-
+					// Register as corrupted so HealthWorker can pick it up and trigger repair
 					// Look up library path from our map
-					libraryPath := lsw.getLibraryPath(path, filesInUse)
-
-					// Protect shared slice with mutex
-					filesToAddMu.Lock()
-					filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
-						FilePath:         path,
-						LibraryPath:      libraryPath,
-						ReleaseDate:      &releaseDateAsTime,
-						ScheduledCheckAt: &scheduledCheckAt,
-						SourceNzbPath:    &fileMeta.SourceNzbPath,
-					})
-					filesToAddMu.Unlock()
+					libPath := lsw.getLibraryPath(path, filesInUse)
+					if libPath != nil {
+						regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, libPath, err.Error())
+						if regErr != nil {
+							slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
+						}
+					}
+					return
 				}
 
-				if lsw.progress != nil {
-					lsw.progress.ProcessedFiles.Add(1)
+				if fileMeta == nil {
+					return
 				}
+
+				// Use CreatedAt if ReleaseDate is missing
+				releaseDate := fileMeta.ReleaseDate
+				if releaseDate == 0 {
+					releaseDate = fileMeta.CreatedAt
+					// Update metadata file with the CreatedAt as release date
+					fileMeta.ReleaseDate = releaseDate
+					if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
+						slog.ErrorContext(ctx, "Failed to update metadata with release date",
+							"path", path,
+							"error", err)
+					} else {
+						slog.InfoContext(ctx, "Set release date from CreatedAt",
+							"path", path,
+							"release_date", time.Unix(releaseDate, 0))
+					}
+				}
+
+				// Convert Unix timestamp to time.Time
+				releaseDateAsTime := time.Unix(releaseDate, 0)
+
+				// Calculate initial check time
+				scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
+
+				// Look up library path from our map
+				libraryPath := lsw.getLibraryPath(path, filesInUse)
+
+				// Protect shared slice with mutex
+				filesToAddMu.Lock()
+				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
+					FilePath:         path,
+					LibraryPath:      libraryPath,
+					ReleaseDate:      &releaseDateAsTime,
+					ScheduledCheckAt: &scheduledCheckAt,
+					SourceNzbPath:    &fileMeta.SourceNzbPath,
+				})
+				filesToAddMu.Unlock()
 			}
-		}()
+
+			if lsw.progress != nil {
+				lsw.progress.ProcessedFiles.Add(1)
+			}
+		})
 	}
 
-	// Feed the workers
-	go func() {
-		for mountRelativePath := range metaFileSet {
-			select {
-			case <-ctx.Done():
-				return
-			case jobChan <- mountRelativePath:
-			}
-		}
-		close(jobChan)
-	}()
-
 	// Wait for all workers to complete
-	wg.Wait()
+	p.Wait()
 
 	// Additional cleanup of orphaned metadata files if enabled
 	metadataDeletedCount := 0
@@ -667,6 +659,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Cleanup orphaned library files (symlinks and STRM files without metadata)
 	libraryFilesDeletedCount := 0
+	libraryDirsDeletedCount := 0
 
 	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
 		for metaPath, file := range filesInUse {
@@ -687,6 +680,17 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 					}
 				}
 				libraryFilesDeletedCount++
+			}
+		}
+
+		// Remove empty directories after file cleanup (only if not dry run)
+		if !dryRun {
+			var err error
+			libraryDirsDeletedCount, err = lsw.removeEmptyDirectories(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					slog.ErrorContext(ctx, "Failed to remove empty directories", "error", err)
+				}
 			}
 		}
 	}
@@ -713,6 +717,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		metadataDeleted:     metadataDeletedCount,
 		libraryFilesDeleted: libraryFilesDeletedCount,
 		symlinksUpdated:     totalSymlinksUpdated,
+		libraryDirsDeleted:  libraryDirsDeletedCount,
 	}
 	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
 	return nil
@@ -1084,6 +1089,87 @@ func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[str
 	return nil
 }
 
+// removeEmptyDirectories removes empty directories from the library directory
+func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, error) {
+	cfg := lsw.configGetter()
+	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
+		return 0, fmt.Errorf("library directory is not configured")
+	}
+
+	libraryDir := *cfg.Health.LibraryDir
+	slog.InfoContext(ctx, "Starting empty directory cleanup", "library_dir", libraryDir)
+
+	// Helper function to get directory depth
+	getDepth := func(path string) int {
+		return strings.Count(path, string(filepath.Separator))
+	}
+
+	// Collect all directories
+	var dirs []string
+	err := filepath.WalkDir(libraryDir, func(path string, d os.DirEntry, err error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // Continue on errors
+		}
+
+		if d.IsDir() && path != libraryDir {
+			dirs = append(dirs, path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		slog.ErrorContext(ctx, "Error during directory scan", "error", err)
+		return 0, err
+	}
+
+	// Sort by depth (deepest first)
+	sort.Slice(dirs, func(i, j int) bool {
+		return getDepth(dirs[i]) > getDepth(dirs[j])
+	})
+
+	// Iteratively remove empty directories
+	deletedCount := 0
+	maxIterations := 10 // Prevent infinite loops
+	for range maxIterations {
+		removedThisIteration := 0
+
+		for _, dir := range dirs {
+			select {
+			case <-ctx.Done():
+				return deletedCount, ctx.Err()
+			default:
+			}
+
+			// Try to remove the directory
+			if err := os.Remove(dir); err != nil {
+				// Directory not empty or permission error - skip silently
+				continue
+			}
+
+			slog.InfoContext(ctx, "Removed empty directory", "path", dir)
+			removedThisIteration++
+			deletedCount++
+		}
+
+		// If no directories were removed, we're done
+		if removedThisIteration == 0 {
+			break
+		}
+	}
+
+	slog.InfoContext(ctx, "Empty directory cleanup completed",
+		"deleted_count", deletedCount)
+
+	return deletedCount, nil
+}
+
 // syncMetadataOnly performs a simplified sync for NONE import strategy
 // It only synchronizes database records with metadata files, skipping all
 // library directory scanning and cleanup operations. If dryRun is true,
@@ -1134,45 +1220,9 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		dbPathSet[path] = struct{}{}
 	}
 
-	// Channel for streaming inserts to avoid holding all new records in memory
-	insertChan := make(chan database.AutomaticHealthCheckRecord, 100)
-	var dbAddedCount atomic.Int32
-	var insertWg sync.WaitGroup
-
-	// Start background batch inserter
-	insertWg.Add(1)
-	go func() {
-		defer insertWg.Done()
-		batchSize := 200
-		batch := make([]database.AutomaticHealthCheckRecord, 0, batchSize)
-
-		flushBatch := func() {
-			if len(batch) > 0 {
-				if !dryRun {
-					if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, batch); err != nil {
-						slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
-							"count", len(batch),
-							"error", err)
-					} else {
-						dbAddedCount.Add(int32(len(batch)))
-					}
-				} else {
-					dbAddedCount.Add(int32(len(batch)))
-				}
-				// Clear batch but keep capacity
-				batch = batch[:0]
-			}
-		}
-
-		for record := range insertChan {
-			batch = append(batch, record)
-			if len(batch) >= batchSize {
-				flushBatch()
-			}
-		}
-		// Flush remaining items
-		flushBatch()
-	}()
+	// Find files to add (in filesystem but not in database)
+	var filesToAdd []database.AutomaticHealthCheckRecord
+	var filesToAddMu sync.Mutex
 
 	// Get concurrency setting (default to 10 if not set)
 	concurrency := cfg.Health.LibrarySyncConcurrency
@@ -1181,96 +1231,87 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	}
 
 	// Create a worker pool for parallel metadata reading
-	jobChan := make(chan string, concurrency*2)
-	var wg sync.WaitGroup
+	p := pool.New().WithMaxGoroutines(concurrency)
 
-	// Start workers
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range jobChan {
-				// Check if needs to be added
-				if _, exists := dbPathSet[path]; !exists {
-					// Read metadata to get release date
-					fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
-					if err != nil {
-						slog.ErrorContext(ctx, "Failed to read metadata",
-							"mount_relative_path", path,
+	for mountRelativePath := range metaFileSet {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		// Capture loop variable for goroutine
+		path := mountRelativePath
+
+		p.Go(func() {
+			// Check if needs to be added
+			if _, exists := dbPathSet[path]; !exists {
+				// Read metadata to get release date
+				fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to read metadata",
+						"mount_relative_path", path,
+						"error", err)
+
+					// Register as corrupted so HealthWorker can pick it up and trigger repair
+					// For NONE strategy, library path is effectively the mount path or nil
+					regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, nil, err.Error())
+					if regErr != nil {
+						slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
+					}
+					return
+				}
+				if fileMeta == nil {
+					return
+				}
+
+				// Use CreatedAt if ReleaseDate is missing
+				releaseDate := fileMeta.ReleaseDate
+				if releaseDate == 0 {
+					releaseDate = fileMeta.CreatedAt
+					// Update metadata file with the CreatedAt as release date
+					fileMeta.ReleaseDate = releaseDate
+					if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
+						slog.ErrorContext(ctx, "Failed to update metadata with release date",
+							"path", path,
 							"error", err)
-
-						// Register as corrupted so HealthWorker can pick it up and trigger repair
-						// For NONE strategy, library path is effectively the mount path or nil
-						regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, nil, err.Error())
-						if regErr != nil {
-							slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
-						}
-						continue
-					}
-					if fileMeta == nil {
-						continue
-					}
-
-					// Use CreatedAt if ReleaseDate is missing
-					releaseDate := fileMeta.ReleaseDate
-					if releaseDate == 0 {
-						releaseDate = fileMeta.CreatedAt
-						// Update metadata file with the CreatedAt as release date
-						fileMeta.ReleaseDate = releaseDate
-						if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
-							slog.ErrorContext(ctx, "Failed to update metadata with release date",
-								"path", path,
-								"error", err)
-						} else {
-							slog.InfoContext(ctx, "Set release date from CreatedAt",
-								"path", path,
-								"release_date", time.Unix(releaseDate, 0))
-						}
-					}
-
-					// Convert Unix timestamp to time.Time
-					releaseDateAsTime := time.Unix(releaseDate, 0)
-
-					// Calculate initial check time
-					scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
-
-					// For NONE strategy, library path is always nil
-					// since files are accessed directly via mount
-					var libraryPath *string = nil
-
-					// Stream to insert channel
-					insertChan <- database.AutomaticHealthCheckRecord{
-						FilePath:         path,
-						LibraryPath:      libraryPath,
-						ReleaseDate:      &releaseDateAsTime,
-						ScheduledCheckAt: &scheduledCheckAt,
-						SourceNzbPath:    &fileMeta.SourceNzbPath,
+					} else {
+						slog.InfoContext(ctx, "Set release date from CreatedAt",
+							"path", path,
+							"release_date", time.Unix(releaseDate, 0))
 					}
 				}
 
-				if lsw.progress != nil {
-					lsw.progress.ProcessedFiles.Add(1)
-				}
+				// Convert Unix timestamp to time.Time
+				releaseDateAsTime := time.Unix(releaseDate, 0)
+
+				// Calculate initial check time
+				scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
+
+				// For NONE strategy, library path is always nil
+				// since files are accessed directly via mount
+				var libraryPath *string = nil
+
+				// Protect shared slice with mutex
+				filesToAddMu.Lock()
+				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
+					FilePath:         path,
+					LibraryPath:      libraryPath,
+					ReleaseDate:      &releaseDateAsTime,
+					ScheduledCheckAt: &scheduledCheckAt,
+					SourceNzbPath:    &fileMeta.SourceNzbPath,
+				})
+				filesToAddMu.Unlock()
 			}
-		}()
+
+			if lsw.progress != nil {
+				lsw.progress.ProcessedFiles.Add(1)
+			}
+		})
 	}
 
-	// Feed the workers
-	go func() {
-		for mountRelativePath := range metaFileSet {
-			select {
-			case <-ctx.Done():
-				return
-			case jobChan <- mountRelativePath:
-			}
-		}
-		close(jobChan)
-	}()
-
 	// Wait for all workers to complete
-	wg.Wait()
-	close(insertChan)
-	insertWg.Wait() // Wait for batch inserter to finish
+	p.Wait()
 
 	// Find files to delete (in database but not in filesystem)
 	// Pass nil for filesInUse since metadata-only sync doesn't check library usage
@@ -1314,7 +1355,7 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 
 	// Record sync results (no cleanup operations for metadata-only sync)
 	dbCounts := syncCounts{
-		added:   int(dbAddedCount.Load()),
+		added:   len(filesToAdd),
 		deleted: deletedCount,
 	}
 	cleanup := cleanupCounts{
