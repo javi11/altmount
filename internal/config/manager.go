@@ -672,23 +672,27 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("health segment_sample_percentage must be between 1 and 100")
 	}
 
-	// Validate health configuration - requires library_dir when enabled
+	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
 	if c.Health.Enabled != nil && *c.Health.Enabled {
-		if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
-			return fmt.Errorf("health library_dir is required when health system is enabled")
-		}
-		if !filepath.IsAbs(*c.Health.LibraryDir) {
-			return fmt.Errorf("health library_dir must be an absolute path")
+		if c.Import.ImportStrategy != ImportStrategyNone {
+			if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
+				return fmt.Errorf("health library_dir is required when health system is enabled with %s strategy", c.Import.ImportStrategy)
+			}
+			if !filepath.IsAbs(*c.Health.LibraryDir) {
+				return fmt.Errorf("health library_dir must be an absolute path")
+			}
 		}
 	}
 
-	// Validate cleanup orphaned metadata - requires library_dir when enabled
+	// Validate cleanup orphaned metadata - requires library_dir when enabled and using a strategy other than NONE
 	if c.Health.CleanupOrphanedMetadata != nil && *c.Health.CleanupOrphanedMetadata {
-		if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
-			return fmt.Errorf("health library_dir is required when cleanup_orphaned_metadata is enabled")
-		}
-		if !filepath.IsAbs(*c.Health.LibraryDir) {
-			return fmt.Errorf("health library_dir must be an absolute path")
+		if c.Import.ImportStrategy != ImportStrategyNone {
+			if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
+				return fmt.Errorf("health library_dir is required when cleanup_orphaned_metadata is enabled with %s strategy", c.Import.ImportStrategy)
+			}
+			if !filepath.IsAbs(*c.Health.LibraryDir) {
+				return fmt.Errorf("health library_dir must be an absolute path")
+			}
 		}
 	}
 
