@@ -152,6 +152,7 @@ health:
   segment_sample_percentage: 5 # Percentage of segments to sample for health validation (1-100, default: 5)
   library_sync_interval_minutes: 360 # Library synchronization interval in minutes (default: 360 = 6 hours)
   library_sync_concurrency: 1 # Number of concurrent library sync operations (default: 1)
+  resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
 
 # WebDAV mount path configuration
 mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. Must be an absolute path starting with /

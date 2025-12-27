@@ -22,6 +22,7 @@ func NewHealthRepository(db *sql.DB) *HealthRepository {
 
 // UpdateFileHealth updates or inserts a file health record
 func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error {
+	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
 		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at)
 		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'))
@@ -46,6 +47,7 @@ func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string
 
 // GetFileHealth retrieves health record for a specific file
 func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (*FileHealth, error) {
+	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
 		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
@@ -435,6 +437,7 @@ func (r *HealthRepository) DeleteHealthRecordByID(ctx context.Context, id int64)
 
 // DeleteHealthRecord removes a specific health record from the database
 func (r *HealthRepository) DeleteHealthRecord(ctx context.Context, filePath string) error {
+	filePath = strings.TrimPrefix(filePath, "/")
 	query := `DELETE FROM file_health WHERE file_path = ?`
 
 	result, err := r.db.ExecContext(ctx, query, filePath)
@@ -701,7 +704,7 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePath
 	args := make([]interface{}, len(filePaths))
 	for i, path := range filePaths {
 		placeholders[i] = "?"
-		args[i] = path
+		args[i] = strings.TrimPrefix(path, "/")
 	}
 
 	query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
@@ -849,8 +852,9 @@ func (r *HealthRepository) AddHealthCheck(
 	return nil
 }
 
-// UpdateScheduledCheckTime updates the scheduled check time and sets status to healthy
+// UpdateScheduledCheckTime updates the scheduled check time for a file
 func (r *HealthRepository) UpdateScheduledCheckTime(ctx context.Context, filePath string, nextCheckTime time.Time) error {
+	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
 		UPDATE file_health
 		SET status = ?,
@@ -968,21 +972,21 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	}
 	defer stmtCorrupted.Close()
 
-	for _, up := range updates {
-		var err error
-		switch up.Type {
-		case UpdateTypeHealthy:
-			_, err = stmtHealthy.ExecContext(ctx, up.ScheduledCheckAt.UTC(), up.FilePath)
-		case UpdateTypeRetry:
-			_, err = stmtRetry.ExecContext(ctx, up.ErrorMessage, up.ErrorDetails, up.ScheduledCheckAt.UTC(), up.FilePath)
-		case UpdateTypeRepairRetry:
-			_, err = stmtRepair.ExecContext(ctx, up.ErrorMessage, up.ErrorDetails, up.FilePath)
-		case UpdateTypeCorrupted:
-			_, err = stmtCorrupted.ExecContext(ctx, up.ErrorMessage, up.ErrorDetails, up.FilePath)
+	for _, update := range updates {
+		filePath := strings.TrimPrefix(update.FilePath, "/")
+		switch update.Status {
+		case HealthStatusHealthy:
+			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath)
+		case HealthStatusPending:
+			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
+		case HealthStatusRepairTriggered:
+			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
+		case HealthStatusCorrupted:
+			_, err = stmtCorrupted.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
 		}
 
 		if err != nil {
-			return fmt.Errorf("failed to execute update for %s: %w", up.FilePath, err)
+			return fmt.Errorf("failed to execute update for %s: %w", update.FilePath, err)
 		}
 	}
 
@@ -1172,4 +1176,34 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 	}
 
 	return nil
+}
+
+// ResolvePendingRepairsInDirectory removes health records with repair_triggered or corrupted status
+// that exist in the specified directory. This is used when a new file is imported
+// into a directory, implying it is a replacement for the broken file.
+func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context, dirPath string) (int64, error) {
+	dirPath = strings.TrimPrefix(dirPath, "/")
+	if dirPath == "" {
+		return 0, nil
+	}
+	// Ensure directory path ends with separator to match files inside it
+	if !strings.HasSuffix(dirPath, "/") {
+		dirPath = dirPath + "/"
+	}
+
+	query := `
+		DELETE FROM file_health 
+		WHERE file_path LIKE ? 
+		AND status IN ('repair_triggered', 'corrupted')
+	`
+
+	// Match paths starting with the directory
+	likePattern := dirPath + "%"
+
+	result, err := r.db.ExecContext(ctx, query, likePattern)
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve pending repairs in %s: %w", dirPath, err)
+	}
+
+	return result.RowsAffected()
 }
