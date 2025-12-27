@@ -213,9 +213,10 @@ func (uf *UsenetFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, fmt.Errorf("negative seek position: %d", abs)
 	}
 
-	if abs > uf.size {
-		return 0, fmt.Errorf("seek position beyond file size: %d > %d", abs, uf.size)
-	}
+	// Standard os.File allows seeking beyond the end of the file.
+	// We should allow it too to be compatible with archive readers that might
+	// attempt to seek past the end of a partial volume.
+	// If reading occurs at this position, it will naturally return io.EOF.
 
 	// If seeking to a different position, close current reader so it gets recreated
 	if abs != uf.position && uf.reader != nil {
