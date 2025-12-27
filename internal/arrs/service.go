@@ -28,11 +28,12 @@ var (
 
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"` // "radarr" or "sonarr"
-	URL     string `json:"url"`
-	APIKey  string `json:"api_key"`
-	Enabled bool   `json:"enabled"`
+	Name     string `json:"name"`
+	Type     string `json:"type"` // "radarr" or "sonarr"
+	URL      string `json:"url"`
+	APIKey   string `json:"api_key"`
+	Category string `json:"category"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // ConfigManager interface defines methods needed for configuration management
@@ -89,11 +90,12 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 	if len(cfg.Arrs.RadarrInstances) > 0 {
 		for _, radarrConfig := range cfg.Arrs.RadarrInstances {
 			instance := &ConfigInstance{
-				Name:    radarrConfig.Name,
-				Type:    "radarr",
-				URL:     radarrConfig.URL,
-				APIKey:  radarrConfig.APIKey,
-				Enabled: radarrConfig.Enabled != nil && *radarrConfig.Enabled,
+				Name:     radarrConfig.Name,
+				Type:     "radarr",
+				URL:      radarrConfig.URL,
+				APIKey:   radarrConfig.APIKey,
+				Category: radarrConfig.Category,
+				Enabled:  radarrConfig.Enabled != nil && *radarrConfig.Enabled,
 			}
 			instances = append(instances, instance)
 		}
@@ -103,11 +105,12 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 	if len(cfg.Arrs.SonarrInstances) > 0 {
 		for _, sonarrConfig := range cfg.Arrs.SonarrInstances {
 			instance := &ConfigInstance{
-				Name:    sonarrConfig.Name,
-				Type:    "sonarr",
-				URL:     sonarrConfig.URL,
-				APIKey:  sonarrConfig.APIKey,
-				Enabled: sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
+				Name:     sonarrConfig.Name,
+				Type:     "sonarr",
+				URL:      sonarrConfig.URL,
+				APIKey:   sonarrConfig.APIKey,
+				Category: sonarrConfig.Category,
+				Enabled:  sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
 			}
 			instances = append(instances, instance)
 		}
