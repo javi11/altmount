@@ -26,7 +26,7 @@ func TestFindInstanceForFilePath(t *testing.T) {
 	}
 
 	getter := func() *config.Config { return cfg }
-	s := NewService(getter, nil)
+	s := NewService(getter, nil, nil)
 
 	assert.NotNil(t, s)
 }

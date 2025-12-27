@@ -161,6 +161,7 @@ type ImportConfig struct {
 	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	SkipHealthCheck                *bool          `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -177,7 +178,7 @@ type LogConfig struct {
 type HealthConfig struct {
 	Enabled                       *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	LibraryDir                    *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedFiles          *bool   `yaml:"cleanup_orphaned_files" mapstructure:"cleanup_orphaned_files" json:"cleanup_orphaned_files,omitempty"`
+	CleanupOrphanedMetadata       *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
 	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
 	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
 	MaxConcurrentJobs             int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
@@ -284,9 +285,10 @@ type ProviderConfig struct {
 
 // SABnzbdConfig represents SABnzbd-compatible API configuration
 type SABnzbdConfig struct {
-	Enabled     *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CompleteDir string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
-	Categories  []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
+	Enabled               *bool             `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CompleteDir           string            `yaml:"complete_dir" mapstructure:"complete_dir" json:"complete_dir"`
+	DownloadClientBaseURL string            `yaml:"download_client_base_url" mapstructure:"download_client_base_url" json:"download_client_base_url,omitempty"`
+	Categories            []SABnzbdCategory `yaml:"categories" mapstructure:"categories" json:"categories"`
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
@@ -305,6 +307,7 @@ type SABnzbdCategory struct {
 type ArrsConfig struct {
 	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
@@ -316,6 +319,7 @@ type ArrsInstanceConfig struct {
 	Name              string `yaml:"name" mapstructure:"name" json:"name"`
 	URL               string `yaml:"url" mapstructure:"url" json:"url"`
 	APIKey            string `yaml:"api_key" mapstructure:"api_key" json:"api_key"`
+	Category          string `yaml:"category" mapstructure:"category" json:"category,omitempty"`
 	Enabled           *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	SyncIntervalHours *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
 }
@@ -353,12 +357,20 @@ func (c *Config) DeepCopy() *Config {
 		copyCfg.Health.LibraryDir = nil
 	}
 
-	// Deep copy Health.CleanupOrphanedFiles pointer
-	if c.Health.CleanupOrphanedFiles != nil {
-		v := *c.Health.CleanupOrphanedFiles
-		copyCfg.Health.CleanupOrphanedFiles = &v
+	// Deep copy Health.CleanupOrphanedMetadata pointer
+	if c.Health.CleanupOrphanedMetadata != nil {
+		v := *c.Health.CleanupOrphanedMetadata
+		copyCfg.Health.CleanupOrphanedMetadata = &v
 	} else {
-		copyCfg.Health.CleanupOrphanedFiles = nil
+		copyCfg.Health.CleanupOrphanedMetadata = nil
+	}
+
+	// Deep copy Health.ResolveRepairOnImport pointer
+	if c.Health.ResolveRepairOnImport != nil {
+		v := *c.Health.ResolveRepairOnImport
+		copyCfg.Health.ResolveRepairOnImport = &v
+	} else {
+		copyCfg.Health.ResolveRepairOnImport = nil
 	}
 
 	// Deep copy Health.ResolveRepairOnImport pointer
@@ -389,6 +401,14 @@ func (c *Config) DeepCopy() *Config {
 	if c.Import.AllowedFileExtensions != nil {
 		copyCfg.Import.AllowedFileExtensions = make([]string, len(c.Import.AllowedFileExtensions))
 		copy(copyCfg.Import.AllowedFileExtensions, c.Import.AllowedFileExtensions)
+	}
+
+	// Deep copy Import.SkipHealthCheck pointer
+	if c.Import.SkipHealthCheck != nil {
+		v := *c.Import.SkipHealthCheck
+		copyCfg.Import.SkipHealthCheck = &v
+	} else {
+		copyCfg.Import.SkipHealthCheck = nil
 	}
 
 	// Deep copy RClone.RCEnabled pointer
@@ -669,23 +689,27 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("health segment_sample_percentage must be between 1 and 100")
 	}
 
-	// Validate health configuration - requires library_dir when enabled
+	// Validate health configuration - requires library_dir when enabled and using a strategy other than NONE
 	if c.Health.Enabled != nil && *c.Health.Enabled {
-		if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
-			return fmt.Errorf("health library_dir is required when health system is enabled")
-		}
-		if !filepath.IsAbs(*c.Health.LibraryDir) {
-			return fmt.Errorf("health library_dir must be an absolute path")
+		if c.Import.ImportStrategy != ImportStrategyNone {
+			if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
+				return fmt.Errorf("health library_dir is required when health system is enabled with %s strategy", c.Import.ImportStrategy)
+			}
+			if !filepath.IsAbs(*c.Health.LibraryDir) {
+				return fmt.Errorf("health library_dir must be an absolute path")
+			}
 		}
 	}
 
-	// Validate cleanup orphaned files - requires library_dir when enabled
-	if c.Health.CleanupOrphanedFiles != nil && *c.Health.CleanupOrphanedFiles {
-		if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
-			return fmt.Errorf("health library_dir is required when cleanup_orphaned_files is enabled")
-		}
-		if !filepath.IsAbs(*c.Health.LibraryDir) {
-			return fmt.Errorf("health library_dir must be an absolute path")
+	// Validate cleanup orphaned metadata - requires library_dir when enabled and using a strategy other than NONE
+	if c.Health.CleanupOrphanedMetadata != nil && *c.Health.CleanupOrphanedMetadata {
+		if c.Import.ImportStrategy != ImportStrategyNone {
+			if c.Health.LibraryDir == nil || *c.Health.LibraryDir == "" {
+				return fmt.Errorf("health library_dir is required when cleanup_orphaned_metadata is enabled with %s strategy", c.Import.ImportStrategy)
+			}
+			if !filepath.IsAbs(*c.Health.LibraryDir) {
+				return fmt.Errorf("health library_dir must be an absolute path")
+			}
 		}
 	}
 
@@ -1083,16 +1107,17 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false            // Health system disabled by default
-	cleanupOrphanedFiles := false     // Cleanup orphaned files disabled by default
-	resolveRepairOnImport := false    // Disable smart replacement detection by default
-	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
+	healthEnabled := false               // Health system disabled by default
+	cleanupOrphanedMetadata := false     // Cleanup orphaned metadata disabled by default
+	resolveRepairOnImport := false       // Disable smart replacement detection by default
+	deleteSourceNzbOnRemoval := false    // Delete source NZB on removal disabled by default
 	vfsEnabled := false
-	mountEnabled := false   // Disabled by default
+	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
 	loginRequired := true // Require login by default
+	skipHealthCheck := false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -1198,6 +1223,7 @@ func DefaultConfig(configDir ...string) *Config {
 			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
+			SkipHealthCheck:         &skipHealthCheck,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
@@ -1208,8 +1234,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Compress:   true,    // Compress old files
 		},
 		Health: HealthConfig{
-			Enabled:                       &healthEnabled,         // Disabled by default
-			CleanupOrphanedFiles:          &cleanupOrphanedFiles, // Disabled by default
+			Enabled:                       &healthEnabled,           // Disabled by default
+			CleanupOrphanedMetadata:       &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:          5,
 			MaxConnectionsForHealthChecks: 5,
 			MaxConcurrentJobs:             1,   // Default: 1 concurrent job
@@ -1218,16 +1244,18 @@ func DefaultConfig(configDir ...string) *Config {
 			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
 		},
 		SABnzbd: SABnzbdConfig{
-			Enabled:        &sabnzbdEnabled,
-			CompleteDir:    "/complete",
-			Categories:     []SABnzbdCategory{},
-			FallbackHost:   "",
-			FallbackAPIKey: "",
+			Enabled:               &sabnzbdEnabled,
+			CompleteDir:           "/complete",
+			DownloadClientBaseURL: "http://altmount:8080/sabnzbd",
+			Categories:            []SABnzbdCategory{},
+			FallbackHost:          "",
+			FallbackAPIKey:        "",
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
 			Enabled:         &scrapperEnabled, // Disabled by default
 			MaxWorkers:      5,                // Default to 5 concurrent workers
+			WebhookBaseURL:  "http://altmount:8080",
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
 		},

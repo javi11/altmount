@@ -46,6 +46,13 @@ type ImportQueueItem struct {
 	FileSize     *int64        `db:"file_size"` // Total size in bytes calculated from segments
 }
 
+// BulkOperationResult represents the result of a bulk queue operation
+type BulkOperationResult struct {
+	DeletedCount    int
+	ProcessingCount int
+	FailedIDs       []int64
+}
+
 // QueueStats represents statistics about the import queue
 type QueueStats struct {
 	ID                  int64     `db:"id"`

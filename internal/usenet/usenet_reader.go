@@ -291,15 +291,23 @@ func (b *UsenetReader) isPoolUnavailableError(err error) bool {
 func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
 	return retry.Do(
 		func() error {
+			// Create a per-attempt timeout context to prevent hanging on network/DNS issues
+			attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
 			// Get current pool
 			cp, err := b.poolGetter()
 			if err != nil {
 				return err
 			}
 
-			// Attempt download
-			bytesWritten, err := cp.Body(ctx, segment.Id, segment.Writer(), segment.groups)
+			// Attempt download using the timeout context
+			bytesWritten, err := cp.Body(attemptCtx, segment.Id, segment.Writer(), segment.groups)
 			if err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					b.log.DebugContext(ctx, "Segment download attempt timed out after 30s", "segment_id", segment.Id)
+				}
+
 				if strings.Contains(err.Error(), "data corruption detected") {
 					return &DataCorruptionError{
 						UnderlyingErr: err,
@@ -320,11 +328,11 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 			if b.isArticleNotFoundError(err) {
 				return false
 			}
-			// Only retry if error is pool-related
-			return b.isPoolUnavailableError(err)
+			// Retry on pool-related errors OR timeout errors
+			return b.isPoolUnavailableError(err) || errors.Is(err, context.DeadlineExceeded)
 		}),
 		retry.OnRetry(func(n uint, err error) {
-			b.log.DebugContext(ctx, "Pool unavailable, retrying segment download",
+			b.log.DebugContext(ctx, "Pool unavailable or timeout, retrying segment download",
 				"attempt", n+1,
 				"segment_id", segment.Id,
 				"error", err)

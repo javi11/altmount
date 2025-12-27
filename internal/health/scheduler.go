@@ -16,12 +16,12 @@ const (
 // calculateInitialCheck calculates the first check time for a newly discovered file
 func calculateInitialCheck(releaseDate time.Time) time.Time {
 	// Always schedule initial check immediately (with a small buffer)
-	return time.Now().Add(1 * time.Minute)
+	return time.Now().UTC().Add(1 * time.Minute)
 }
 
-// calculateNextCheck calculates the next check time after a successful health check
+// CalculateNextCheck calculates the next check time after a successful health check
 // Implements a tiered scheduling strategy based on file age.
-func calculateNextCheck(releaseDate, lastCheck time.Time) time.Time {
+func CalculateNextCheck(releaseDate, lastCheck time.Time) time.Time {
 	age := lastCheck.Sub(releaseDate) // Age at the time of the last successful check
 
 	var interval time.Duration

@@ -1,5 +1,6 @@
-import { AlertTriangle, Plus, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle, Download, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useRegisterArrsDownloadClients, useTestArrsDownloadClients } from "../../hooks/useApi";
 import type { ConfigResponse, SABnzbdCategory, SABnzbdConfig } from "../../types/config";
 
 interface SABnzbdConfigSectionProps {
@@ -35,6 +36,12 @@ export function SABnzbdConfigSection({
 	const [newCategory, setNewCategory] = useState<NewCategoryForm>(DEFAULT_NEW_CATEGORY);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [fallbackApiKey, setFallbackApiKey] = useState<string>("");
+	const [regSuccess, setRegSuccess] = useState<string | null>(null);
+	const [regError, setRegError] = useState<string | null>(null);
+	const [testResults, setTestResults] = useState<Record<string, string> | null>(null);
+
+	const registerDownloadClient = useRegisterArrsDownloadClients();
+	const testDownloadClient = useTestArrsDownloadClients();
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
@@ -42,7 +49,34 @@ export function SABnzbdConfigSection({
 		setHasChanges(false);
 		setValidationErrors([]);
 		setFallbackApiKey(""); // Reset API key field on config reload
+		setTestResults(null);
 	}, [config.sabnzbd]);
+
+	const handleRegisterDownloadClient = async () => {
+		setRegSuccess(null);
+		setRegError(null);
+		setTestResults(null);
+		try {
+			await registerDownloadClient.mutateAsync();
+			setRegSuccess("Download client registration triggered successfully.");
+			// Hide success message after 5 seconds
+			setTimeout(() => setRegSuccess(null), 5000);
+		} catch (error) {
+			setRegError(error instanceof Error ? error.message : "Failed to register download client.");
+		}
+	};
+
+	const handleTestDownloadClient = async () => {
+		setRegSuccess(null);
+		setRegError(null);
+		setTestResults(null);
+		try {
+			const results = await testDownloadClient.mutateAsync();
+			setTestResults(results);
+		} catch (error) {
+			setRegError(error instanceof Error ? error.message : "Failed to test connections.");
+		}
+	};
 
 	const validateForm = (data: SABnzbdConfig): string[] => {
 		const errors: string[] = [];
@@ -206,6 +240,22 @@ export function SABnzbdConfigSection({
 						</p>
 					</fieldset>
 
+					{/* Download Client Base URL */}
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">AltMount URL (for download clients)</legend>
+						<input
+							type="url"
+							className="input"
+							value={formData.download_client_base_url || ""}
+							onChange={(e) => updateFormData({ download_client_base_url: e.target.value })}
+							placeholder="http://altmount:8080/sabnzbd"
+							disabled={isReadOnly}
+						/>
+						<p className="label">
+							The URL ARR instances will use to talk back to AltMount SABnzbd API. Default: <code>http://altmount:8080/sabnzbd</code>
+						</p>
+					</fieldset>
+
 					{/* Fallback SABnzbd Configuration */}
 					<div className="space-y-4">
 						<div>
@@ -220,6 +270,8 @@ export function SABnzbdConfigSection({
 							<legend className="fieldset-legend">Fallback SABnzbd Host</legend>
 							<input
 								type="text"
+								name="fallback_host"
+								autoComplete="off"
 								className="input"
 								value={formData.fallback_host || ""}
 								readOnly={isReadOnly}
@@ -235,6 +287,8 @@ export function SABnzbdConfigSection({
 							<legend className="fieldset-legend">Fallback SABnzbd API Key</legend>
 							<input
 								type="password"
+								name="fallback_api_key"
+								autoComplete="new-password"
 								className="input"
 								value={fallbackApiKey}
 								readOnly={isReadOnly}
@@ -472,20 +526,69 @@ export function SABnzbdConfigSection({
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end">
-					<button
-						type="button"
-						className="btn btn-primary"
-						onClick={handleSave}
-						disabled={!canSave}
-					>
-						{isUpdating ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Save className="h-4 w-4" />
-						)}
-						{isUpdating ? "Saving..." : "Save Changes"}
-					</button>
+				<div className="flex flex-col space-y-4">
+					<div className="flex justify-end space-x-2">
+						<button
+							type="button"
+							className="btn btn-outline btn-secondary"
+							onClick={handleTestDownloadClient}
+							disabled={testDownloadClient.isPending}
+							title="Test if enabled ARR instances can connect back to AltMount"
+						>
+							{testDownloadClient.isPending ? (
+								<span className="loading loading-spinner loading-sm" />
+							) : (
+								<CheckCircle className="h-4 w-4" />
+							)}
+							{testDownloadClient.isPending ? "Testing..." : "Test ARR Connectivity"}
+						</button>
+						<button
+							type="button"
+							className="btn btn-outline btn-info"
+							onClick={handleRegisterDownloadClient}
+							disabled={registerDownloadClient.isPending}
+							title="Register AltMount as a SABnzbd download client in all enabled ARR instances"
+						>
+							{registerDownloadClient.isPending ? (
+								<span className="loading loading-spinner loading-sm" />
+							) : (
+								<Download className="h-4 w-4" />
+							)}
+							{registerDownloadClient.isPending ? "Registering..." : "Auto-Setup ARR Download Clients"}
+						</button>
+						<button
+							type="button"
+							className="btn btn-primary"
+							onClick={handleSave}
+							disabled={!canSave}
+						>
+							{isUpdating ? (
+								<span className="loading loading-spinner loading-sm" />
+							) : (
+								<Save className="h-4 w-4" />
+							)}
+							{isUpdating ? "Saving..." : "Save Changes"}
+						</button>
+					</div>
+					{regSuccess && <div className="alert alert-success py-2">{regSuccess}</div>}
+					{regError && <div className="alert alert-error py-2">{regError}</div>}
+					{testResults && (
+						<div className="alert bg-base-200 border-base-300 py-2">
+							<div className="flex flex-col w-full">
+								<div className="font-bold mb-1">Connection Test Results:</div>
+								<div className="space-y-1">
+									{Object.entries(testResults).map(([instance, result]) => (
+										<div key={instance} className="flex justify-between text-sm">
+											<span>{instance}:</span>
+											<span className={result === "OK" ? "text-success" : "text-error font-mono"}>
+												{result}
+											</span>
+										</div>
+									))}
+								</div>
+							</div>
+						</div>
+					)}
 				</div>
 			)}
 

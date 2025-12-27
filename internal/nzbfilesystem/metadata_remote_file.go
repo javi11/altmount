@@ -975,7 +975,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	}
 
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
-	rg := usenet.GetSegmentsInRange(start, end, loader)
+	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
 
 	if !rg.HasSegments() {
 		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download", "start", start, "end", end)

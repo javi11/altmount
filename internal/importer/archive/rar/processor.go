@@ -184,24 +184,13 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Create iterator for memory-efficient archive traversal
 	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
 	if err != nil {
-		// Check for specific rardecode errors with user-friendly messages
-		if errors.Is(err, rardecode.ErrNoSig) {
-			return nil, NewNonRetryableError(
-				"invalid RAR archive: RAR signature not found. The file may be corrupted or not a valid RAR archive",
-				err)
-		}
-		if errors.Is(err, rardecode.ErrBadPassword) {
-			return nil, NewNonRetryableError(
-				"RAR archive is password protected. Please provide the correct password",
-				err)
-		}
+		// Log the strict failure and fallback to a more lenient analysis
+		rh.log.WarnContext(ctx, "Failed to analyze RAR archive strictly, falling back to lenient analysis",
+			"error", err,
+			"main_file", mainRarFile)
+
 		// Check if error indicates incomplete RAR archive with missing volume segments
-		if isIncompleteRarError(err) {
-			return nil, NewNonRetryableError(
-				"incomplete RAR archive: missing one or more segments",
-				err)
-		}
-		return nil, NewNonRetryableError("failed to create archive iterator", err)
+		return rh.fallbackAnalyzeRarContent(ctx, normalizedFiles)
 	}
 
 	if len(aggregatedFiles) == 0 {
@@ -224,6 +213,65 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	return Contents, nil
+}
+
+// fallbackAnalyzeRarContent provides a basic reconstruction of RAR contents when standard analysis fails.
+// This is used as a last resort to allow imports to proceed for damaged archives.
+func (rh *rarProcessor) fallbackAnalyzeRarContent(ctx context.Context, rarFiles []parser.ParsedFile) ([]Content, error) {
+	// Group parts by their suspected internal filename
+	// We'll assume everything belongs to one main file for the fallback
+	// This is common for scene releases where you have part01.rar, part02.rar etc.
+	if len(rarFiles) == 0 {
+		return nil, fmt.Errorf("no RAR files to analyze")
+	}
+
+	// Try to find a reasonable filename from the first RAR part
+	// e.g. "Show.S01E01.part01.rar" -> "Show.S01E01.mkv"
+	baseName := rarFiles[0].Filename
+	if idx := strings.Index(baseName, ".part"); idx != -1 {
+		baseName = baseName[:idx]
+	} else if idx := strings.Index(baseName, ".r00"); idx != -1 {
+		baseName = baseName[:idx]
+	} else if idx := strings.LastIndex(baseName, "."); idx != -1 {
+		baseName = baseName[:idx]
+	}
+
+	// Add .mkv as a guess if it's missing an extension
+	if !strings.Contains(baseName, ".") {
+		baseName += ".mkv"
+	}
+
+	var totalSize int64
+	var allSegments []*metapb.SegmentData
+
+	// Sort files to ensure segments are in order
+	slices.SortFunc(rarFiles, func(a, b parser.ParsedFile) int {
+		return strings.Compare(a.Filename, b.Filename)
+	})
+
+	for _, rf := range rarFiles {
+		// Calculate current offset for this part's segments
+		offset := totalSize
+		for _, seg := range rf.Segments {
+			allSegments = append(allSegments, &metapb.SegmentData{
+				Id:          seg.Id,
+				StartOffset: offset + seg.StartOffset,
+				EndOffset:   offset + seg.EndOffset,
+				SegmentSize: seg.SegmentSize,
+			})
+		}
+		totalSize += rf.Size
+	}
+
+	return []Content{
+		{
+			InternalPath: baseName,
+			Filename:     filepath.Base(baseName),
+			Size:         totalSize,
+			Segments:     allSegments,
+			NzbdavID:     rarFiles[0].NzbdavID,
+		},
+	}, nil
 }
 
 // checkForCompressedFiles validates that no files in the archive are compressed

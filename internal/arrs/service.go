@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/database"
 	"golang.org/x/sync/singleflight"
 	"golift.io/starr"
 	"golift.io/starr/radarr"
@@ -20,13 +21,19 @@ import (
 
 const cacheTTL = 10 * time.Minute
 
+var (
+	ErrPathMatchFailed  = fmt.Errorf("path match failed")
+	ErrInstanceNotFound = fmt.Errorf("instance not found")
+)
+
 // ConfigInstance represents an arrs instance from configuration
 type ConfigInstance struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"` // "radarr" or "sonarr"
-	URL     string `json:"url"`
-	APIKey  string `json:"api_key"`
-	Enabled bool   `json:"enabled"`
+	Name     string `json:"name"`
+	Type     string `json:"type"` // "radarr" or "sonarr"
+	URL      string `json:"url"`
+	APIKey   string `json:"api_key"`
+	Category string `json:"category"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // ConfigManager interface defines methods needed for configuration management
@@ -40,6 +47,7 @@ type ConfigManager interface {
 type Service struct {
 	configGetter  config.ConfigGetter
 	configManager ConfigManager
+	userRepo      *database.UserRepository
 	mu            sync.RWMutex
 	radarrClients map[string]*radarr.Radarr // key: instance name
 	sonarrClients map[string]*sonarr.Sonarr // key: instance name
@@ -60,10 +68,11 @@ type Service struct {
 }
 
 // NewService creates a new arrs service for health monitoring and file repair
-func NewService(configGetter config.ConfigGetter, configManager ConfigManager) *Service {
+func NewService(configGetter config.ConfigGetter, configManager ConfigManager, userRepo *database.UserRepository) *Service {
 	return &Service{
 		configGetter:  configGetter,
 		configManager: configManager,
+		userRepo:      userRepo,
 		radarrClients: make(map[string]*radarr.Radarr),
 		sonarrClients: make(map[string]*sonarr.Sonarr),
 		movieCache:    make(map[string][]*radarr.Movie),
@@ -81,11 +90,12 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 	if len(cfg.Arrs.RadarrInstances) > 0 {
 		for _, radarrConfig := range cfg.Arrs.RadarrInstances {
 			instance := &ConfigInstance{
-				Name:    radarrConfig.Name,
-				Type:    "radarr",
-				URL:     radarrConfig.URL,
-				APIKey:  radarrConfig.APIKey,
-				Enabled: radarrConfig.Enabled != nil && *radarrConfig.Enabled,
+				Name:     radarrConfig.Name,
+				Type:     "radarr",
+				URL:      radarrConfig.URL,
+				APIKey:   radarrConfig.APIKey,
+				Category: radarrConfig.Category,
+				Enabled:  radarrConfig.Enabled != nil && *radarrConfig.Enabled,
 			}
 			instances = append(instances, instance)
 		}
@@ -95,11 +105,12 @@ func (s *Service) getConfigInstances() []*ConfigInstance {
 	if len(cfg.Arrs.SonarrInstances) > 0 {
 		for _, sonarrConfig := range cfg.Arrs.SonarrInstances {
 			instance := &ConfigInstance{
-				Name:    sonarrConfig.Name,
-				Type:    "sonarr",
-				URL:     sonarrConfig.URL,
-				APIKey:  sonarrConfig.APIKey,
-				Enabled: sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
+				Name:     sonarrConfig.Name,
+				Type:     "sonarr",
+				URL:      sonarrConfig.URL,
+				APIKey:   sonarrConfig.APIKey,
+				Category: sonarrConfig.Category,
+				Enabled:  sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
 			}
 			instances = append(instances, instance)
 		}
@@ -306,6 +317,320 @@ func (s *Service) TriggerFileRescan(ctx context.Context, pathForRescan string, r
 	}
 }
 
+// EnsureWebhookRegistration ensures that the AltMount webhook is registered in all enabled ARR instances
+func (s *Service) EnsureWebhookRegistration(ctx context.Context, altmountURL string, apiKey string) error {
+	instances := s.getConfigInstances()
+	webhookName := "AltMount Webhook"
+	webhookURL := fmt.Sprintf("%s/api/arrs/webhook?apikey=%s", altmountURL, apiKey)
+
+	slog.InfoContext(ctx, "Ensuring webhook registration in ARR instances", "webhook_url", webhookURL)
+
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+
+		slog.DebugContext(ctx, "Checking webhook for instance", "instance", instance.Name, "type", instance.Type)
+
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Radarr client for webhook check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			notifications, err := client.GetNotificationsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Radarr notifications", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, n := range notifications {
+				if n.Name == webhookName {
+					exists = true
+					// potentially update if needed, but for now just skip
+					break
+				}
+			}
+
+			if !exists {
+				notif := &radarr.NotificationInput{
+					Name:             webhookName,
+					Implementation:   "Webhook",
+					ConfigContract:   "WebhookSettings",
+					OnGrab:           false,
+					OnDownload:       true, // OnImport
+					OnUpgrade:        true,
+					OnRename:         true,
+					OnMovieDelete:    true,
+					OnMovieFileDelete: true,
+					OnMovieFileDeleteForUpgrade: true,
+					Fields: []*starr.FieldInput{
+						{Name: "url", Value: webhookURL},
+						{Name: "method", Value: "1"}, // 1 = POST
+					},
+				}
+				_, err := client.AddNotificationContext(ctx, notif)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Radarr webhook", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount webhook to Radarr", "instance", instance.Name)
+				}
+			}
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Sonarr client for webhook check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			notifications, err := client.GetNotificationsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Sonarr notifications", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, n := range notifications {
+				if n.Name == webhookName {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				notif := &sonarr.NotificationInput{
+					Name:             webhookName,
+					Implementation:   "Webhook",
+					ConfigContract:   "WebhookSettings",
+					OnGrab:           false,
+					OnDownload:       true, // OnImport
+					OnUpgrade:        true,
+					OnRename:         true,
+					OnSeriesDelete:   true,
+					OnEpisodeFileDelete: true,
+					OnEpisodeFileDeleteForUpgrade: true,
+					Fields: []*starr.FieldInput{
+						{Name: "url", Value: webhookURL},
+						{Name: "method", Value: "1"}, // 1 = POST
+					},
+				}
+				_, err := client.AddNotificationContext(ctx, notif)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Sonarr webhook", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount webhook to Sonarr", "instance", instance.Name)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// EnsureDownloadClientRegistration ensures that AltMount is registered as a SABnzbd download client in all enabled ARR instances
+func (s *Service) EnsureDownloadClientRegistration(ctx context.Context, altmountHost string, altmountPort int, urlBase string, apiKey string) error {
+	instances := s.getConfigInstances()
+	clientName := "AltMount (SABnzbd)"
+
+	slog.InfoContext(ctx, "Ensuring AltMount download client registration in ARR instances",
+		"host", altmountHost,
+		"port", altmountPort,
+		"url_base", urlBase)
+
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+
+		slog.DebugContext(ctx, "Checking download client for instance", "instance", instance.Name, "type", instance.Type)
+
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Radarr client for download client check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			clients, err := client.GetDownloadClientsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Radarr download clients", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, c := range clients {
+				if c.Name == clientName {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				category := instance.Category
+				if category == "" {
+					category = "movies"
+				}
+				dc := &radarr.DownloadClientInput{
+					Name:                     clientName,
+					Implementation:           "SABnzbd",
+					ConfigContract:           "SABnzbdSettings",
+					Enable:                   true,
+					RemoveCompletedDownloads: true,
+					RemoveFailedDownloads:    true,
+					Priority:                 1,
+					Protocol:                 "Usenet",
+					Fields: []*starr.FieldInput{
+						{Name: "host", Value: altmountHost},
+						{Name: "port", Value: altmountPort},
+						{Name: "urlBase", Value: urlBase},
+						{Name: "apiKey", Value: apiKey},
+						{Name: "movieCategory", Value: category},
+						{Name: "useSsl", Value: false},
+					},
+				}
+				_, err := client.AddDownloadClientContext(ctx, dc)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Radarr download client", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount download client to Radarr", "instance", instance.Name)
+				}
+			}
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to create Sonarr client for download client check", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			clients, err := client.GetDownloadClientsContext(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to get Sonarr download clients", "instance", instance.Name, "error", err)
+				continue
+			}
+
+			exists := false
+			for _, c := range clients {
+				if c.Name == clientName {
+					exists = true
+					break
+				}
+			}
+
+			if !exists {
+				category := instance.Category
+				if category == "" {
+					category = "tv"
+				}
+				dc := &sonarr.DownloadClientInput{
+					Name:                     clientName,
+					Implementation:           "SABnzbd",
+					ConfigContract:           "SABnzbdSettings",
+					Enable:                   true,
+					RemoveCompletedDownloads: true,
+					RemoveFailedDownloads:    true,
+					Priority:                 1,
+					Protocol:                 "Usenet",
+					Fields: []*starr.FieldInput{
+						{Name: "host", Value: altmountHost},
+						{Name: "port", Value: altmountPort},
+						{Name: "urlBase", Value: urlBase},
+						{Name: "apiKey", Value: apiKey},
+						{Name: "tvCategory", Value: category},
+						{Name: "useSsl", Value: false},
+					},
+				}
+				_, err := client.AddDownloadClientContext(ctx, dc)
+				if err != nil {
+					slog.ErrorContext(ctx, "Failed to add Sonarr download client", "instance", instance.Name, "error", err)
+				} else {
+					slog.InfoContext(ctx, "Added AltMount download client to Sonarr", "instance", instance.Name)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// TestDownloadClientRegistration tests the connection from ARR instances back to AltMount
+func (s *Service) TestDownloadClientRegistration(ctx context.Context, altmountHost string, altmountPort int, urlBase string, apiKey string) (map[string]string, error) {
+	instances := s.getConfigInstances()
+	results := make(map[string]string)
+
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+
+		var testErr error
+		switch instance.Type {
+		case "radarr":
+			client, err := s.getOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
+				continue
+			}
+
+			dc := &radarr.DownloadClientInput{
+				Name:           "AltMount Test",
+				Implementation: "SABnzbd",
+				ConfigContract: "SABnzbdSettings",
+				Enable:         true,
+				Priority:       1,
+				Protocol:       "Usenet",
+				Fields: []*starr.FieldInput{
+					{Name: "host", Value: altmountHost},
+					{Name: "port", Value: altmountPort},
+					{Name: "urlBase", Value: urlBase},
+					{Name: "apiKey", Value: apiKey},
+					{Name: "movieCategory", Value: "movies"},
+					{Name: "useSsl", Value: false},
+				},
+			}
+			testErr = client.TestDownloadClientContext(ctx, dc)
+
+		case "sonarr":
+			client, err := s.getOrCreateSonarrClient(instance.Name, instance.URL, instance.APIKey)
+			if err != nil {
+				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
+				continue
+			}
+
+			dc := &sonarr.DownloadClientInput{
+				Name:           "AltMount Test",
+				Implementation: "SABnzbd",
+				ConfigContract: "SABnzbdSettings",
+				Enable:         true,
+				Priority:       1,
+				Protocol:       "Usenet",
+				Fields: []*starr.FieldInput{
+					{Name: "host", Value: altmountHost},
+					{Name: "port", Value: altmountPort},
+					{Name: "urlBase", Value: urlBase},
+					{Name: "apiKey", Value: apiKey},
+					{Name: "tvCategory", Value: "tv"},
+					{Name: "useSsl", Value: false},
+				},
+			}
+			testErr = client.TestDownloadClientContext(ctx, dc)
+		}
+
+		if testErr != nil {
+			results[instance.Name] = testErr.Error()
+		} else {
+			results[instance.Name] = "OK"
+		}
+	}
+
+	return results, nil
+}
+
 // getMovies retrieves all movies from Radarr, using a cache if available and valid
 func (s *Service) getMovies(ctx context.Context, client *radarr.Radarr, instanceName string) ([]*radarr.Movie, error) {
 	// 1. Check cache (read lock)
@@ -474,7 +799,7 @@ func (s *Service) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			"instance", instanceName,
 			"file_path", filePath)
 
-		return fmt.Errorf("no movie found with file path: %s. Check if the movie has any files", filePath)
+		return fmt.Errorf("no movie found with file path %s: %w", filePath, ErrPathMatchFailed)
 	}
 
 	slog.DebugContext(ctx, "Found matching movie for file",
@@ -705,7 +1030,7 @@ func (s *Service) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	if len(episodeIDs) == 0 {
-		return fmt.Errorf("no episodes found for file: %s (path match failed)", filePath)
+		return fmt.Errorf("no episodes found for file: %s: %w", filePath, ErrPathMatchFailed)
 	}
 
 	// Trigger episode search for all episodes in this file
@@ -928,6 +1253,35 @@ func (s *Service) instanceExistsByURL(checkURL string) bool {
 	return false
 }
 
+// categoryUsedByOtherInstance checks if a category is already used by another instance of the same type
+func (s *Service) categoryUsedByOtherInstance(arrType, category string) bool {
+	var instances []config.ArrsInstanceConfig
+	cfg := s.configManager.GetConfig()
+
+	if arrType == "radarr" {
+		instances = cfg.Arrs.RadarrInstances
+	} else if arrType == "sonarr" {
+		instances = cfg.Arrs.SonarrInstances
+	}
+
+	for _, instance := range instances {
+		instanceCat := instance.Category
+		if instanceCat == "" {
+			if arrType == "radarr" {
+				instanceCat = "movies"
+			} else {
+				instanceCat = "tv"
+			}
+		}
+
+		if instanceCat == category {
+			return true
+		}
+	}
+
+	return false
+}
+
 // detectARRType attempts to detect if a URL points to Radarr or Sonarr
 // Returns "radarr", "sonarr", or an error if neither can be determined
 func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (string, error) {
@@ -968,6 +1322,62 @@ func (s *Service) detectARRType(ctx context.Context, arrURL, apiKey string) (str
 	}
 
 	return "", fmt.Errorf("unable to detect ARR type for URL %s - neither Radarr nor Sonarr responded successfully", arrURL)
+}
+
+func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
+	if s.userRepo == nil {
+		return ""
+	}
+	users, err := s.userRepo.ListUsers(ctx, 100, 0)
+	
+	// If no users exist and auth is disabled, bootstrap a default admin
+	if (err == nil && len(users) == 0) || (err != nil && strings.Contains(err.Error(), "no such table")) {
+		cfg := s.configGetter()
+		loginRequired := true
+		if cfg.Auth.LoginRequired != nil {
+			loginRequired = *cfg.Auth.LoginRequired
+		}
+
+		if !loginRequired {
+			slog.InfoContext(ctx, "Bootstrapping default admin user for automatic background tasks")
+			user := &database.User{
+				UserID:   "admin",
+				Provider: "direct",
+				IsAdmin:  true,
+			}
+			if err := s.userRepo.CreateUser(ctx, user); err == nil {
+				if key, err := s.userRepo.RegenerateAPIKey(ctx, user.UserID); err == nil {
+					return key
+				}
+			}
+		}
+	}
+
+	if err != nil || len(users) == 0 {
+		return ""
+	}
+	
+	for _, user := range users {
+		if user.IsAdmin && user.APIKey != nil {
+			return *user.APIKey
+		}
+	}
+	
+	// Fallback: if we have an admin but no key, generate one automatically
+	for _, user := range users {
+		if user.IsAdmin {
+			if key, err := s.userRepo.RegenerateAPIKey(ctx, user.UserID); err == nil {
+				return key
+			}
+		}
+	}
+
+	// Fallback to first user with a key
+	if users[0].APIKey != nil {
+		return *users[0].APIKey
+	}
+	
+	return ""
 }
 
 // RegisterInstance attempts to automatically register an ARR instance
@@ -1011,6 +1421,11 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 		return fmt.Errorf("failed to generate instance name: %w", err)
 	}
 
+	// If default category is already used by another instance, generate a unique one
+	if s.categoryUsedByOtherInstance(arrType, category) {
+		category = fmt.Sprintf("%s-%s", category, instanceName)
+	}
+
 	slog.InfoContext(ctx, "Registering new ARR instance",
 		"name", instanceName,
 		"type", arrType,
@@ -1024,10 +1439,11 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 	// Create new instance config
 	enabled := true
 	newInstance := config.ArrsInstanceConfig{
-		Name:    instanceName,
-		URL:     arrURL,
-		APIKey:  apiKey,
-		Enabled: &enabled,
+		Name:     instanceName,
+		URL:      arrURL,
+		APIKey:   apiKey,
+		Category: category,
+		Enabled:  &enabled,
 	}
 
 	// Add to appropriate array
@@ -1055,6 +1471,19 @@ func (s *Service) RegisterInstance(ctx context.Context, arrURL, apiKey string) e
 		"type", arrType,
 		"url", arrURL,
 		"category", category)
+
+	// Automatically register webhook for the new instance
+	go func() {
+		// Small delay to ensure DB/Config is fully settled
+		time.Sleep(2 * time.Second)
+		bgCtx := context.Background()
+		
+		key := s.GetFirstAdminAPIKey(bgCtx)
+		if key != "" {
+			// Use default internal URL
+			_ = s.EnsureWebhookRegistration(bgCtx, "http://altmount:8080", key)
+		}
+	}()
 
 	return nil
 }
