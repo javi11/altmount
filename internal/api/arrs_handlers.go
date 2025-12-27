@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -174,6 +175,20 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			normalizedPath = strings.TrimPrefix(normalizedPath, libraryDir)
 		}
 		normalizedPath = strings.TrimPrefix(normalizedPath, "/")
+
+		// Special handling for STRM files
+		if strings.HasSuffix(normalizedPath, ".strm") {
+			// Resolve the real path from the .strm file content
+			content, err := os.ReadFile(path)
+			if err == nil {
+				urlStr := strings.TrimSpace(string(content))
+				if u, err := url.Parse(urlStr); err == nil {
+					if p := u.Query().Get("path"); p != "" {
+						normalizedPath = strings.TrimPrefix(p, "/")
+					}
+				}
+			}
+		}
 
 		slog.InfoContext(c.Context(), "Processing webhook file update", 
 			"original_path", path, 
