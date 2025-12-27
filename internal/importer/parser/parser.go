@@ -159,6 +159,12 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	// This already filters out PAR2 files
 	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors)
 	if len(fileInfos) == 0 {
+		p.log.WarnContext(ctx, "Failed to get file infos from network, falling back to NZB XML data",
+			"nzb_path", nzbPath)
+		fileInfos = p.fallbackGetFileInfos(n.Files)
+	}
+
+	if len(fileInfos) == 0 {
 		return nil, NewNonRetryableError("NZB file contains no valid files. This can be caused because the file has missing segments in your providers.", nil)
 	}
 
@@ -662,7 +668,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	if err != nil {
 		return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
 	}
-	lastPartSize := int64(lastPartHeaders.PartSize)
 
 	// Apply the sizes:
 	// - First segment: use its actual size
@@ -674,9 +679,44 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	}
 
 	// - Last segment: use its actual size
-	segments[lastSegmentIndex].Bytes = int(lastPartSize)
+	segments[lastSegmentIndex].Bytes = int(lastPartHeaders.PartSize)
 
 	return nil
+}
+
+// fallbackGetFileInfos is a "dumb" fallback that extracts file info directly from NZB XML
+// without any network validation. This is used when the first segments are missing.
+func (p *Parser) fallbackGetFileInfos(files []nzbparser.NzbFile) []*fileinfo.FileInfo {
+	fileInfos := make([]*fileinfo.FileInfo, 0)
+
+	for i, file := range files {
+		// Basic PAR2 skip
+		if fileinfo.IsPar2File(file.Filename) {
+			continue
+		}
+
+		// Calculate basic size from segments
+		var size int64
+		for _, seg := range file.Segments {
+			size += int64(seg.Bytes)
+		}
+
+		// Create a basic FileInfo
+		info := &fileinfo.FileInfo{
+			NzbFile:       file,
+			Filename:      file.Filename,
+			ReleaseDate:   time.Unix(int64(file.Date), 0),
+			IsPar2Archive: false,
+			FileSize:      &size,
+			IsRar:         fileinfo.HasRarMagic(nil) || fileinfo.IsRarFile(file.Filename),
+			Is7z:          fileinfo.Is7zFile(file.Filename),
+			OriginalIndex: i,
+		}
+
+		fileInfos = append(fileInfos, info)
+	}
+
+	return fileInfos
 }
 
 // determineNzbType analyzes the parsed files to determine the NZB type
