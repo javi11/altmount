@@ -158,6 +158,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	if cfg.Import.ImportDir != nil {
 		importDir = *cfg.Import.ImportDir
 	}
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil {
+		libraryDir = *cfg.Health.LibraryDir
+	}
 
 	for _, path := range pathsToScan {
 		// Normalize path to relative
@@ -166,6 +170,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			normalizedPath = strings.TrimPrefix(normalizedPath, mountPath)
 		} else if importDir != "" && strings.HasPrefix(normalizedPath, importDir) {
 			normalizedPath = strings.TrimPrefix(normalizedPath, importDir)
+		} else if libraryDir != "" && strings.HasPrefix(normalizedPath, libraryDir) {
+			normalizedPath = strings.TrimPrefix(normalizedPath, libraryDir)
 		}
 		normalizedPath = strings.TrimPrefix(normalizedPath, "/")
 
