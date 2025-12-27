@@ -65,6 +65,7 @@ export interface HealthConfig {
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
+	resolve_repair_on_import?: boolean; // Automatically resolve pending repairs in the same directory when a new file is imported
 }
 
 // Library sync types
@@ -287,6 +288,7 @@ export interface HealthUpdateRequest {
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
+	resolve_repair_on_import?: boolean;
 }
 
 // RClone update request

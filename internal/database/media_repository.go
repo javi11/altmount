@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -57,6 +58,7 @@ func (r *MediaRepository) SyncMediaFiles(ctx context.Context, instanceName, inst
 	// Step 1: Upsert all current files
 	if len(files) > 0 {
 		for _, file := range files {
+			file.FilePath = strings.TrimPrefix(file.FilePath, "/")
 			var exists bool
 			err := tx.QueryRowContext(ctx, `
 				SELECT EXISTS(
@@ -141,6 +143,7 @@ func (r *MediaRepository) SyncMediaFiles(ctx context.Context, instanceName, inst
 // GetMediaFilesByPath returns media files matching a file path
 // This can be used for health correlation
 func (r *MediaRepository) GetMediaFilesByPath(ctx context.Context, filePath string) ([]MediaFile, error) {
+	filePath = strings.TrimPrefix(filePath, "/")
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, instance_name, instance_type, external_id, file_id, file_path, file_size, created_at, updated_at
 		FROM media_files 
