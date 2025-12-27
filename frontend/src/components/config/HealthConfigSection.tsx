@@ -155,24 +155,26 @@ export function HealthConfigSection({
 							<span className="text-sm">{validationError}</span>
 						</div>
 					)}
-					<p className="label text-sm">
-						Path to your organized media library that contains symlinks pointing to altmount files.
-						When a repair is triggered, the system will search for symlinks in this directory and
-						use the library path for ARR rescan instead of the mount path.
+					<div className="label text-sm whitespace-normal flex-col items-start">
+						<div>
+							Path to your organized media library that contains symlinks pointing to
+							altmount files. When a repair is triggered, the system will search for
+							symlinks in this directory and use the library path for ARR rescan instead
+							of the mount path.
+						</div>
 						{config.import.import_strategy === "NONE" && (
-							<span className="block mt-1 text-info">
-								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy, you
-								can leave this empty. The system will use your mount path for repairs.
+							<span className="mt-1 text-info">
+								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy,
+								you can leave this empty. The system will use your mount path for repairs.
 							</span>
 						)}
 						{formData.enabled && config.import.import_strategy !== "NONE" && (
-							<strong className="text-error">
-								{" "}
+							<strong className="text-error mt-1">
 								Required when Health System is enabled with {config.import.import_strategy}{" "}
 								strategy.
 							</strong>
 						)}
-					</p>
+					</div>
 				</fieldset>
 
 				<fieldset className="fieldset">
@@ -205,23 +207,24 @@ export function HealthConfigSection({
 							</div>
 						</div>
 					)}
-					<p className="label text-sm">
-						Automatically delete orphaned library files and metadata during library sync. When
-						disabled, no files will be deleted.
+					<div className="label text-sm whitespace-normal flex-col items-start">
+						<div>
+							Automatically delete orphaned library files and metadata during library sync.
+							When disabled, no files will be deleted.
+						</div>
 						{formData.cleanup_orphaned_metadata &&
 							config.import.import_strategy !== "NONE" && (
-								<strong className="text-warning">
-									{" "}
+								<strong className="text-warning mt-1">
 									Requires Library Directory to be configured.
 								</strong>
 							)}
 						{config.import.import_strategy === "NONE" && (
-							<span className="block mt-1 text-info">
+							<span className="mt-1 text-info">
 								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system only
 								performs metadata-only sync. It will not delete library files.
 							</span>
 						)}
-					</p>
+					</div>
 
 					{/* Dry Run Button */}
 					<div className="mt-4">
