@@ -79,6 +79,29 @@ func (r *QueueRepository) RemoveFromQueueBulk(ctx context.Context, ids []int64) 
 	return result, nil
 }
 
+// RestartQueueItemsBulk resets multiple queue items back to pending status
+func (r *QueueRepository) RestartQueueItemsBulk(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	return r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
+		for _, id := range ids {
+			// Only allow restart of failed or completed items
+			query := `
+				UPDATE import_queue 
+				SET status = 'pending', started_at = NULL, completed_at = NULL, error_message = NULL, updated_at = datetime('now')
+				WHERE id = ? AND status != 'processing'
+			`
+			_, err := txRepo.db.ExecContext(ctx, query, id)
+			if err != nil {
+				return fmt.Errorf("failed to restart item %d: %w", id, err)
+			}
+		}
+		return nil
+	})
+}
+
 // AddToQueue adds a new NZB file to the import queue
 func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem) error {
 	query := `
