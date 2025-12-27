@@ -296,7 +296,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 
 	// Build category path and create temporary file with category subdirectory
 	config := s.configManager.GetConfig()
-	storageDir := config.Metadata.RootPath
+	storageDir := filepath.Dir(config.Metadata.RootPath)
 	completeDir := config.SABnzbd.CompleteDir
 
 	categoryPath := s.buildCategoryPath(validatedCategory)
@@ -367,7 +367,7 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 
 	// Create temporary file with category path
 	config := s.configManager.GetConfig()
-	storageDir := config.Metadata.RootPath
+	storageDir := filepath.Dir(config.Metadata.RootPath)
 	completeDir := config.SABnzbd.CompleteDir
 
 	// Extract filename from URL or use default
@@ -719,7 +719,7 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 
 	// Get actual disk space for storage directory
 	config := s.configManager.GetConfig()
-	storageDir := config.Metadata.RootPath
+	storageDir := filepath.Dir(config.Metadata.RootPath)
 	diskFree, diskTotal := getDiskSpace(storageDir)
 
 	response := SABnzbdStatusResponse{
@@ -955,10 +955,10 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 		return nil
 	}
 
-	// Create in mount path
-	mountDir := filepath.Join(config.Metadata.RootPath, strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
+	// Create in storage path (next to metadata)
+	mountDir := filepath.Join(filepath.Dir(config.Metadata.RootPath), strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
 	if err := os.MkdirAll(mountDir, 0755); err != nil {
-		return fmt.Errorf("failed to create category mount directory: %w", err)
+		return fmt.Errorf("failed to create category storage directory: %w", err)
 	}
 
 	return nil
