@@ -350,8 +350,8 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/javi11/nntp-server-mock v0.0.1 h1:05KbUlFSnzk82CG/sHWLp9s6Vg8exL3wvdAetX8Bwhc=
 github.com/javi11/nntp-server-mock v0.0.1/go.mod h1:+QBpPor0q44ttab8kWo08+/t5C26IHhUpBTC1lZqujA=
-github.com/javi11/nntppool/v2 v2.3.1 h1:eMm/GSbGPTyQuR+3yXLfTQIPq64XwKoObDVnKR4SsTQ=
-github.com/javi11/nntppool/v2 v2.3.1/go.mod h1:MiVgxT+c+qj7vGT3IdOQ3ZeKBEalIfA4Ab+3stBKesA=
+github.com/javi11/nntppool/v2 v2.3.0 h1:6Jb5/8HHq741Tn1DxiyZ21Wsi401s3WTGa5cp73Qjo8=
+github.com/javi11/nntppool/v2 v2.3.0/go.mod h1:941UHsGeGtbZrHxmOZBS1hUPf9jITbojuRJlvUbMR/4=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=
 github.com/javi11/nxg v0.1.0/go.mod h1:+GvYpp+y1oq+qBOWxFMvfTjtin/0zCeomWfjiPkiu8A=
 github.com/javi11/nzbparser v0.5.4 h1:0aYyORZipp7iX8eNpT/efnzCeVO+9C0sE2HWCGc/JaI=
@@ -445,8 +445,8 @@ github.com/mgechev/revive v1.11.0 h1:b/gLLpBE427o+Xmd8G58gSA+KtBwxWinH/A565Awh0w
 github.com/mgechev/revive v1.11.0/go.mod h1:tI0oLF/2uj+InHCBLrrqfTKfjtFTBCFFfG05auyzgdw=
 github.com/mitchellh/go-homedir v1.1.0 h1:lukF9ziXFxDFPkA1vsr5zpc1XuPDn/wFntq5mG+4E0Y=
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
-github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c h1:UFEKx2AsNb8Tx80rlOwUCCz4lDxSsZ1tjq2+QDBNOUA=
-github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c/go.mod h1:7KM6S+qWTq1757nqywpgj5SxykojksJepW+a28MEDdk=
+github.com/mnightingale/rapidyenc v0.0.0-20250628164132-aaf36ba945ef h1:LFK5FupkzCnQqAYEhvy3JMQwCMC6gXDJQe2+jeJyGAM=
+github.com/mnightingale/rapidyenc v0.0.0-20250628164132-aaf36ba945ef/go.mod h1:OwCiJ/ffT27hY2V+WIU4Q6JgCFzGxP89/6UR/WZtJ+E=
 github.com/moby/sys/mountinfo v0.7.2 h1:1shs6aH5s4o5H2zQLn796ADW1wMrIwHsyJ2v9KouLrg=
 github.com/moby/sys/mountinfo v0.7.2/go.mod h1:1YOa8w8Ih7uW0wALDUgT1dTTSBrZ+HiBLGws92L2RU4=
 github.com/montanaflynn/stats v0.0.0-20171201202039-1bf9dbcd8cbe/go.mod h1:wL8QJuTMNUDYhXwkmfOly8iTdp5TEcJFWZD2D7SIkUc=
