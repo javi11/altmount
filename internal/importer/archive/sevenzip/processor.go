@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -23,14 +24,6 @@ import (
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 )
-
-// NewNonRetryableError creates a non-retryable error (defined here to avoid import cycles)
-func NewNonRetryableError(message string, cause error) error {
-	if cause != nil {
-		return fmt.Errorf("%s: %w", message, cause)
-	}
-	return fmt.Errorf("%s", message)
-}
 
 // sevenZipProcessor handles 7zip archive analysis and content extraction
 type sevenZipProcessor struct {
@@ -126,7 +119,7 @@ func (sz *sevenZipProcessor) deriveAESKey(password string, fileInfo sevenzip.Fil
 // Returns an array of files to be added to the metadata with all the info and segments for each file
 func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, sevenZipFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker) ([]Content, error) {
 	if sz.poolManager == nil {
-		return nil, NewNonRetryableError("no pool manager available", nil)
+		return nil, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
 	// Rename 7zip files to match the first file's base name and sort
@@ -169,13 +162,13 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	if password != "" {
 		reader, err = sevenzip.OpenReaderWithPassword(mainSevenZipFile, password, aferoFS)
 		if err != nil {
-			return nil, NewNonRetryableError("failed to open password-protected 7zip archive", err)
+			return nil, errors.NewNonRetryableError("failed to open password-protected 7zip archive", err)
 		}
 		sz.log.InfoContext(ctx, "Using password to unlock 7zip archive")
 	} else {
 		reader, err = sevenzip.OpenReader(mainSevenZipFile, aferoFS)
 		if err != nil {
-			return nil, NewNonRetryableError("failed to open 7zip archive", err)
+			return nil, errors.NewNonRetryableError("failed to open 7zip archive", err)
 		}
 	}
 	defer reader.Close()
@@ -183,11 +176,11 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// List files with their offsets
 	fileInfos, err := reader.ListFilesWithOffsets()
 	if err != nil {
-		return nil, NewNonRetryableError("failed to list files in 7zip archive", err)
+		return nil, errors.NewNonRetryableError("failed to list files in 7zip archive", err)
 	}
 
 	if len(fileInfos) == 0 {
-		return nil, NewNonRetryableError("no valid files found in 7zip archive. Compressed or encrypted archives are not supported", nil)
+		return nil, errors.NewNonRetryableError("no valid files found in 7zip archive. Compressed or encrypted archives are not supported", nil)
 	}
 
 	sz.log.DebugContext(ctx, "Successfully analyzed 7zip archive",
@@ -205,12 +198,12 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// Note: AES credentials are extracted per-file, not per-archive
 	contents, err := sz.convertFileInfosToSevenZipContent(fileInfos, sevenZipFiles, password)
 	if err != nil {
-		return nil, NewNonRetryableError("failed to convert 7zip results to content", err)
+		return nil, errors.NewNonRetryableError("failed to convert 7zip results to content", err)
 	}
 
 	// Verify we have valid files after filtering
 	if len(contents) == 0 {
-		return nil, NewNonRetryableError("no valid files found in 7zip archive after filtering. Only uncompressed files are supported", nil)
+		return nil, errors.NewNonRetryableError("no valid files found in 7zip archive after filtering. Only uncompressed files are supported", nil)
 	}
 
 	return contents, nil
@@ -220,7 +213,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 // This method prioritizes .7z files over .7z.001 files
 func (sz *sevenZipProcessor) getFirstSevenZipPart(sevenZipFileNames []string) (string, error) {
 	if len(sevenZipFileNames) == 0 {
-		return "", NewNonRetryableError("no 7zip files provided", nil)
+		return "", errors.NewNonRetryableError("no 7zip files provided", nil)
 	}
 
 	// If only one file, return it
@@ -258,7 +251,7 @@ func (sz *sevenZipProcessor) getFirstSevenZipPart(sevenZipFileNames []string) (s
 	}
 
 	if len(candidates) == 0 {
-		return "", NewNonRetryableError("no valid first 7zip part found in archive", nil)
+		return "", errors.NewNonRetryableError("no valid first 7zip part found in archive", nil)
 	}
 
 	// Sort by priority (lower number = higher priority), then by filename for consistency
@@ -455,7 +448,7 @@ func sliceSegmentsForRange(segments []*metapb.SegmentData, offset int64, size in
 		return nil, 0, nil
 	}
 	if offset < 0 {
-		return nil, 0, NewNonRetryableError("negative offset", nil)
+		return nil, 0, errors.NewNonRetryableError("negative offset", nil)
 	}
 
 	targetStart := offset

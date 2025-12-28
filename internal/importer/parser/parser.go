@@ -2,7 +2,7 @@ package parser
 
 import (
 	"context"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
+	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -24,14 +25,6 @@ import (
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
 )
-
-// NewNonRetryableError creates a non-retryable error (defined here to avoid import cycles)
-func NewNonRetryableError(message string, cause error) error {
-	if cause != nil {
-		return fmt.Errorf("%s: %w", message, cause)
-	}
-	return fmt.Errorf("%s", message)
-}
 
 // FirstSegmentData holds cached data from the first segment of an NZB file
 // This avoids redundant fetching when both PAR2 extraction and file parsing need the same data
@@ -74,11 +67,11 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 
 	n, err := nzbparser.Parse(r)
 	if err != nil {
-		return nil, NewNonRetryableError("failed to parse NZB XML", err)
+		return nil, errors.NewNonRetryableError("failed to parse NZB XML", err)
 	}
 
 	if len(n.Files) == 0 {
-		return nil, NewNonRetryableError("NZB file contains no files", nil)
+		return nil, errors.NewNonRetryableError("NZB file contains no files", nil)
 	}
 
 	parsed := &ParsedNzb{
@@ -128,8 +121,8 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 
 	par2Descriptors, err := par2.GetFileDescriptors(ctx, par2Cache, p.poolManager)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, NewNonRetryableError("extracting PAR2 file descriptors canceled", err)
+		if stderrors.Is(err, context.Canceled) {
+			return nil, errors.NewNonRetryableError("extracting PAR2 file descriptors canceled", err)
 		}
 
 		p.log.WarnContext(ctx, "Failed to extract PAR2 file descriptors", "error", err)
@@ -165,7 +158,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	}
 
 	if len(fileInfos) == 0 {
-		return nil, NewNonRetryableError("NZB file contains no valid files. This can be caused because the file has missing segments in your providers.", nil)
+		return nil, errors.NewNonRetryableError("NZB file contains no valid files. This can be caused because the file has missing segments in your providers.", nil)
 	}
 
 	concPool := concpool.NewWithResults[fileResult]().WithMaxGoroutines(runtime.NumCPU()).WithContext(ctx)
@@ -185,11 +178,11 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	// Wait for all goroutines to complete and collect results
 	results, err := concPool.Wait()
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, NewNonRetryableError("parsing canceled", err)
+		if stderrors.Is(err, context.Canceled) {
+			return nil, errors.NewNonRetryableError("parsing canceled", err)
 		}
 
-		return nil, NewNonRetryableError("failed to get file infos", err)
+		return nil, errors.NewNonRetryableError("failed to get file infos", err)
 	}
 
 	// Check for errors and collect valid results
@@ -213,7 +206,7 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 		}
 
 		if allPar2 {
-			return nil, NewNonRetryableError("NZB file contains only PAR2 files. This indicates that there are missing segments in your providers.", nil)
+			return nil, errors.NewNonRetryableError("NZB file contains only PAR2 files. This indicates that there are missing segments in your providers.", nil)
 		}
 	}
 
@@ -331,7 +324,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 				fSizeInt, err := strconv.ParseInt(fSize, 10, 64)
 				if err != nil {
-					return nil, NewNonRetryableError("failed to parse file size", err)
+					return nil, errors.NewNonRetryableError("failed to parse file size", err)
 				}
 
 				totalSize = fSizeInt
@@ -344,7 +337,7 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 				decSize, err := rclone.DecryptedSize(totalSize)
 				if err != nil {
-					return nil, NewNonRetryableError("failed to get decrypted size", err)
+					return nil, errors.NewNonRetryableError("failed to get decrypted size", err)
 				}
 
 				totalSize = decSize
@@ -564,11 +557,11 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	// Wait for all fetches to complete
 	results, err := concPool.Wait()
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, NewNonRetryableError("fetching first segments canceled", err)
+		if stderrors.Is(err, context.Canceled) {
+			return nil, errors.NewNonRetryableError("fetching first segments canceled", err)
 		}
 
-		return nil, NewNonRetryableError("failed to fetch first segments", err)
+		return nil, errors.NewNonRetryableError("failed to fetch first segments", err)
 	}
 
 	// Build cache from all fetches (successful and failed)
@@ -601,17 +594,17 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 // fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment
 func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegment, groups []string) (nntpcli.YencHeaders, error) {
 	if p.poolManager == nil {
-		return nntpcli.YencHeaders{}, NewNonRetryableError("no pool manager available", nil)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
-		return nntpcli.YencHeaders{}, NewNonRetryableError("no connection pool available", err)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("no connection pool available", err)
 	}
 
 	r, err := cp.BodyReader(ctx, segment.ID, nil)
 	if err != nil {
-		return nntpcli.YencHeaders{}, NewNonRetryableError("failed to get body reader: %w", err)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("failed to get body reader: %w", err)
 	}
 	defer r.Close()
 
@@ -621,7 +614,7 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 	}
 
 	if headers.PartSize <= 0 {
-		return nntpcli.YencHeaders{}, NewNonRetryableError("invalid part size from yenc header", nil)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
 	}
 
 	return headers, nil
@@ -769,24 +762,24 @@ func (p *Parser) GetMetadata(nzbXML *nzbparser.Nzb) map[string]string {
 // ValidateNzb performs basic validation on the parsed NZB
 func (p *Parser) ValidateNzb(parsed *ParsedNzb) error {
 	if parsed.TotalSize <= 0 {
-		return NewNonRetryableError("invalid NZB: total size is zero", nil)
+		return errors.NewNonRetryableError("invalid NZB: total size is zero", nil)
 	}
 
 	if parsed.SegmentsCount <= 0 {
-		return NewNonRetryableError("invalid NZB: no segments found", nil)
+		return errors.NewNonRetryableError("invalid NZB: no segments found", nil)
 	}
 
 	for i, file := range parsed.Files {
 		if len(file.Segments) == 0 {
-			return NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has no segments", i), nil)
+			return errors.NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has no segments", i), nil)
 		}
 
 		if file.Size <= 0 {
-			return NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has invalid size", i), nil)
+			return errors.NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has invalid size", i), nil)
 		}
 
 		if len(file.Groups) == 0 {
-			return NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has no groups", i), nil)
+			return errors.NewNonRetryableError(fmt.Sprintf("invalid NZB: file %d has no groups", i), nil)
 		}
 	}
 

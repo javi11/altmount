@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/javi11/altmount/internal/httpclient"
 )
 
 // SABnzbdClient handles communication with external SABnzbd instances
@@ -22,9 +24,7 @@ type SABnzbdClient struct {
 // NewSABnzbdClient creates a new SABnzbd client with reasonable timeouts
 func NewSABnzbdClient() *SABnzbdClient {
 	return &SABnzbdClient{
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second, // 60 second timeout for file uploads
-		},
+		httpClient: httpclient.NewLong(), // 60 second timeout for file uploads
 	}
 }
 

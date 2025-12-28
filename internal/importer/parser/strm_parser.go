@@ -13,6 +13,7 @@ import (
 
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
+	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/parser/fileinfo"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/nxg"
@@ -45,17 +46,17 @@ func (p *StrmParser) ParseStrmFile(r io.Reader, strmPath string) (*ParsedNzb, er
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, NewNonRetryableError("failed to read STRM file", err)
+		return nil, errors.NewNonRetryableError("failed to read STRM file", err)
 	}
 
 	if nxgLink == "" {
-		return nil, NewNonRetryableError("no valid NXG link found in STRM file", nil)
+		return nil, errors.NewNonRetryableError("no valid NXG link found in STRM file", nil)
 	}
 
 	// Parse the NXG link
 	parsedFile, err := p.parseNxgLink(nxgLink)
 	if err != nil {
-		return nil, NewNonRetryableError("failed to parse NXG link", err)
+		return nil, errors.NewNonRetryableError("failed to parse NXG link", err)
 	}
 
 	// Create ParsedNzb structure
@@ -76,11 +77,11 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 	// Parse the URL
 	u, err := url.Parse(nxgLink)
 	if err != nil {
-		return nil, NewNonRetryableError("invalid NXG URL", err)
+		return nil, errors.NewNonRetryableError("invalid NXG URL", err)
 	}
 
 	if u.Scheme != "nxglnk" {
-		return nil, NewNonRetryableError(fmt.Sprintf("invalid URL scheme: %s, expected nxglnk", u.Scheme), nil)
+		return nil, errors.NewNonRetryableError(fmt.Sprintf("invalid URL scheme: %s, expected nxglnk", u.Scheme), nil)
 	}
 
 	// Extract query parameters
@@ -89,30 +90,30 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 	// Extract required parameters
 	h := params.Get("h")
 	if h == "" {
-		return nil, NewNonRetryableError("missing required parameter 'h'", nil)
+		return nil, errors.NewNonRetryableError("missing required parameter 'h'", nil)
 	}
 
 	chunkSizeStr := params.Get("chunk_size")
 	if chunkSizeStr == "" {
-		return nil, NewNonRetryableError("missing required parameter 'chunk_size'", nil)
+		return nil, errors.NewNonRetryableError("missing required parameter 'chunk_size'", nil)
 	}
 	chunkSize, err := strconv.ParseInt(chunkSizeStr, 10, 64)
 	if err != nil {
-		return nil, NewNonRetryableError("invalid chunk_size", err)
+		return nil, errors.NewNonRetryableError("invalid chunk_size", err)
 	}
 
 	fileSizeStr := params.Get("file_size")
 	if fileSizeStr == "" {
-		return nil, NewNonRetryableError("missing required parameter 'file_size'", nil)
+		return nil, errors.NewNonRetryableError("missing required parameter 'file_size'", nil)
 	}
 	fileSize, err := strconv.ParseInt(fileSizeStr, 10, 64)
 	if err != nil {
-		return nil, NewNonRetryableError("invalid file_size", err)
+		return nil, errors.NewNonRetryableError("invalid file_size", err)
 	}
 
 	filename := params.Get("name")
 	if filename == "" {
-		return nil, NewNonRetryableError("missing required parameter 'name'", nil)
+		return nil, errors.NewNonRetryableError("missing required parameter 'name'", nil)
 	}
 
 	cipher := params.Get("cipher")
@@ -122,7 +123,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 	// Decode NXG header using the nxg library to validate it
 	ngxh, err := nxg.DecodeNXGHeader(h)
 	if err != nil {
-		return nil, NewNonRetryableError("failed to decode NXG header", err)
+		return nil, errors.NewNonRetryableError("failed to decode NXG header", err)
 	}
 
 	// Create header from the h parameter (h is the base64 encoded header string)
@@ -136,7 +137,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 	for i := int64(0); i < numSegments; i++ {
 		segmentID, err := header.GenerateSegmentID(nxg.PartTypeData, i+1)
 		if err != nil {
-			return nil, NewNonRetryableError(fmt.Sprintf("failed to generate segment ID for part %d", i+1), err)
+			return nil, errors.NewNonRetryableError(fmt.Sprintf("failed to generate segment ID for part %d", i+1), err)
 		}
 
 		segmentIDs[i] = segmentID
@@ -169,7 +170,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 			actualFilename = filename[:len(filename)-4]
 			decSize, err := rclone.DecryptedSize(fileSize)
 			if err != nil {
-				return nil, NewNonRetryableError("failed to calculate decrypted size", err)
+				return nil, errors.NewNonRetryableError("failed to calculate decrypted size", err)
 			}
 			actualFileSize = decSize
 		}
@@ -199,28 +200,28 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 // ValidateStrmFile performs basic validation on the parsed STRM file
 func (p *StrmParser) ValidateStrmFile(parsed *ParsedNzb) error {
 	if parsed.Type != NzbTypeStrm {
-		return NewNonRetryableError(fmt.Sprintf("invalid STRM: wrong type %s", parsed.Type), nil)
+		return errors.NewNonRetryableError(fmt.Sprintf("invalid STRM: wrong type %s", parsed.Type), nil)
 	}
 
 	if len(parsed.Files) != 1 {
-		return NewNonRetryableError(fmt.Sprintf("invalid STRM: should contain exactly one file, got %d", len(parsed.Files)), nil)
+		return errors.NewNonRetryableError(fmt.Sprintf("invalid STRM: should contain exactly one file, got %d", len(parsed.Files)), nil)
 	}
 
 	if parsed.TotalSize <= 0 {
-		return NewNonRetryableError("invalid STRM: total size is zero", nil)
+		return errors.NewNonRetryableError("invalid STRM: total size is zero", nil)
 	}
 
 	if parsed.SegmentsCount <= 0 {
-		return NewNonRetryableError("invalid STRM: no segments found", nil)
+		return errors.NewNonRetryableError("invalid STRM: no segments found", nil)
 	}
 
 	file := parsed.Files[0]
 	if len(file.Segments) == 0 {
-		return NewNonRetryableError("invalid STRM: file has no segments", nil)
+		return errors.NewNonRetryableError("invalid STRM: file has no segments", nil)
 	}
 
 	if file.Size <= 0 {
-		return NewNonRetryableError("invalid STRM: file has invalid size", nil)
+		return errors.NewNonRetryableError("invalid STRM: file has invalid size", nil)
 	}
 
 	return nil

@@ -84,40 +84,25 @@ func RegisterLogLevelHandler(ctx context.Context, configManager *config.Manager,
 // handleGetConfig returns the current configuration
 func (s *Server) handleGetConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	config := s.configManager.GetConfig()
 	if config == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration not available",
-			"details": "CONFIG_NOT_FOUND",
-		})
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
 	}
 
 	// Get API key from authenticated user or first admin user
 	apiKey := s.getAPIKeyForConfig(c)
 
 	response := ToConfigAPIResponse(config, apiKey)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleUpdateConfig updates the entire configuration
 func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Get current config to use as base for defaults/missing fields
@@ -126,31 +111,19 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 
 	// Decode directly into config structure
 	if err := c.BodyParser(newConfig); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	slog.DebugContext(c.Context(), "Updating configuration")
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration validation failed",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
 
 	// Update the configuration
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to update configuration", err.Error())
 	}
 
 	// Ensure SABnzbd category directories exist
@@ -161,11 +134,7 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 
 	// Save to file
 	if err := s.configManager.SaveConfig(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to save configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
 	// Try to start RC server if RClone is enabled but RC is not running
@@ -175,40 +144,25 @@ func (s *Server) handleUpdateConfig(c *fiber.Ctx) error {
 	apiKey := s.getAPIKeyForConfig(c)
 
 	response := ToConfigAPIResponse(newConfig, apiKey)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handlePatchConfigSection updates a specific configuration section
 func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Extract section from URL path parameter
 	section := c.Params("section")
 	if section == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid configuration section path",
-			"details": "INVALID_PATH",
-		})
+		return RespondValidationError(c, "Invalid configuration section path", "INVALID_PATH")
 	}
 
 	// Get current config to merge with updates
 	currentConfig := s.configManager.GetConfig()
 	if currentConfig == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration not available",
-			"details": "CONFIG_NOT_FOUND",
-		})
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
 	}
 
 	// Create a copy to apply updates to
@@ -220,19 +174,11 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "system", "mount_path":
 		err = c.BodyParser(newConfig)
 	default:
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": fmt.Sprintf("Unknown configuration section: %s", section),
-			"details": "INVALID_SECTION",
-		})
+		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
 	}
 
 	if err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	slog.DebugContext(c.Context(), "Patching configuration section",
@@ -240,20 +186,12 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 
 	// Validate the new configuration with API restrictions
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration validation failed",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
 
 	// Update the configuration
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to update configuration", err.Error())
 	}
 
 	// Ensure SABnzbd category directories exist if SABnzbd section was updated
@@ -266,11 +204,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 
 	// Save to file
 	if err := s.configManager.SaveConfig(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to save configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
 	// Try to start RC server if RClone section was updated or full config update
@@ -282,28 +216,17 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	apiKey := s.getAPIKeyForConfig(c)
 
 	response := ToConfigAPIResponse(newConfig, apiKey)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleReloadConfig reloads configuration from file
 func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	if err := s.configManager.ReloadConfig(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to reload configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to reload configuration", err.Error())
 	}
 
 	config := s.configManager.GetConfig()
@@ -312,30 +235,19 @@ func (s *Server) handleReloadConfig(c *fiber.Ctx) error {
 	apiKey := s.getAPIKeyForConfig(c)
 
 	response := ToConfigAPIResponse(config, apiKey)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleValidateConfig validates configuration without applying changes
 func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Decode directly into config structure
 	var cfg config.Config
 	if err := c.BodyParser(&cfg); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	// Validate the configuration
@@ -363,10 +275,7 @@ func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // Provider Management Handlers
@@ -374,11 +283,7 @@ func (s *Server) handleValidateConfig(c *fiber.Ctx) error {
 // handleTestProvider tests NNTP provider connectivity
 func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Decode test request
@@ -393,27 +298,15 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&testReq); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	// Basic validation
 	if testReq.Host == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Host is required",
-			"details": "MISSING_HOST",
-		})
+		return RespondValidationError(c, "Host is required", "MISSING_HOST")
 	}
 	if testReq.Port <= 0 || testReq.Port > 65535 {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Valid port is required (1-65535)",
-			"details": "INVALID_PORT",
-		})
+		return RespondValidationError(c, "Valid port is required (1-65535)", "INVALID_PORT")
 	}
 
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
@@ -428,12 +321,9 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		ProxyURL: testReq.ProxyURL,
 	}, slog.Default(), nil)
 	if err != nil {
-		return c.Status(200).JSON(fiber.Map{
-			"success": true,
-			"data": TestProviderResponse{
-				Success:      false,
-				ErrorMessage: err.Error(),
-			},
+		return RespondSuccess(c, TestProviderResponse{
+			Success:      false,
+			ErrorMessage: err.Error(),
 		})
 	}
 
@@ -442,30 +332,19 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		ErrorMessage: "",
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleCreateProvider creates a new NNTP provider
 func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Get current config
 	currentConfig := s.configManager.GetConfig()
 	if currentConfig == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration not available",
-			"details": "CONFIG_NOT_FOUND",
-		})
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
 	}
 
 	// Decode create request
@@ -483,34 +362,18 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&createReq); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	// Validation
 	if createReq.Host == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Host is required",
-			"details": "MISSING_HOST",
-		})
+		return RespondValidationError(c, "Host is required", "MISSING_HOST")
 	}
 	if createReq.Port <= 0 || createReq.Port > 65535 {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Valid port is required (1-65535)",
-			"details": "INVALID_PORT",
-		})
+		return RespondValidationError(c, "Valid port is required (1-65535)", "INVALID_PORT")
 	}
 	if createReq.Username == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Username is required",
-			"details": "MISSING_USERNAME",
-		})
+		return RespondValidationError(c, "Username is required", "MISSING_USERNAME")
 	}
 	if createReq.MaxConnections <= 0 {
 		createReq.MaxConnections = 1 // Default
@@ -540,27 +403,15 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 
 	// Validate and save
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration validation failed",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
 
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to update configuration", err.Error())
 	}
 
 	if err := s.configManager.SaveConfig(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to save configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
 	// Return sanitized provider
@@ -578,40 +429,25 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		IsBackupProvider: newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleUpdateProvider updates an existing NNTP provider
 func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Get provider ID from URL
 	providerID := c.Params("id")
 	if providerID == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider ID is required",
-			"details": "MISSING_PROVIDER_ID",
-		})
+		return RespondValidationError(c, "Provider ID is required", "MISSING_PROVIDER_ID")
 	}
 
 	// Get current config
 	currentConfig := s.configManager.GetConfig()
 	if currentConfig == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration not available",
-			"details": "CONFIG_NOT_FOUND",
-		})
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
 	}
 
 	// Find provider
@@ -624,11 +460,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	}
 
 	if providerIndex == -1 {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider not found",
-			"details": "PROVIDER_NOT_FOUND",
-		})
+		return RespondNotFound(c, "Provider", "PROVIDER_NOT_FOUND")
 	}
 
 	// Decode update request (partial update)
@@ -646,11 +478,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&updateReq); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	// Create updated config with proper deep copy
@@ -662,31 +490,19 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	// Apply updates
 	if updateReq.Host != nil {
 		if *updateReq.Host == "" {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "Host cannot be empty",
-				"details": "INVALID_HOST",
-			})
+			return RespondValidationError(c, "Host cannot be empty", "INVALID_HOST")
 		}
 		provider.Host = *updateReq.Host
 	}
 	if updateReq.Port != nil {
 		if *updateReq.Port <= 0 || *updateReq.Port > 65535 {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "Valid port is required (1-65535)",
-				"details": "INVALID_PORT",
-			})
+			return RespondValidationError(c, "Valid port is required (1-65535)", "INVALID_PORT")
 		}
 		provider.Port = *updateReq.Port
 	}
 	if updateReq.Username != nil {
 		if *updateReq.Username == "" {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "Username cannot be empty",
-				"details": "INVALID_USERNAME",
-			})
+			return RespondValidationError(c, "Username cannot be empty", "INVALID_USERNAME")
 		}
 		provider.Username = *updateReq.Username
 	}
@@ -695,11 +511,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 	}
 	if updateReq.MaxConnections != nil {
 		if *updateReq.MaxConnections <= 0 {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": "MaxConnections must be positive",
-				"details": "INVALID_MAX_CONNECTIONS",
-			})
+			return RespondValidationError(c, "MaxConnections must be positive", "INVALID_MAX_CONNECTIONS")
 		}
 		provider.MaxConnections = *updateReq.MaxConnections
 	}
@@ -724,27 +536,15 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 
 	// Validate and save
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration validation failed",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
 
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to update configuration", err.Error())
 	}
 
 	if err := s.configManager.SaveConfig(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to save configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
 	// Return sanitized provider
@@ -762,40 +562,25 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		IsBackupProvider: provider.IsBackupProvider != nil && *provider.IsBackupProvider,
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleDeleteProvider removes an NNTP provider
 func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Get provider ID from URL
 	providerID := c.Params("id")
 	if providerID == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider ID is required",
-			"details": "MISSING_PROVIDER_ID",
-		})
+		return RespondValidationError(c, "Provider ID is required", "MISSING_PROVIDER_ID")
 	}
 
 	// Get current config
 	currentConfig := s.configManager.GetConfig()
 	if currentConfig == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration not available",
-			"details": "CONFIG_NOT_FOUND",
-		})
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
 	}
 
 	// Find provider
@@ -808,11 +593,7 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 	}
 
 	if providerIndex == -1 {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider not found",
-			"details": "PROVIDER_NOT_FOUND",
-		})
+		return RespondNotFound(c, "Provider", "PROVIDER_NOT_FOUND")
 	}
 
 	// Create new config without the provider
@@ -822,27 +603,15 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 
 	// Validate and save
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration validation failed",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
 
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to update configuration", err.Error())
 	}
 
 	if err := s.configManager.SaveConfig(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to save configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
 	response := struct {
@@ -851,20 +620,13 @@ func (s *Server) handleDeleteProvider(c *fiber.Ctx) error {
 		Message: "Provider deleted successfully",
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleReorderProviders reorders the provider list
 func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-			"details": "CONFIG_UNAVAILABLE",
-		})
+		return RespondServiceUnavailable(c, "Configuration management not available", "CONFIG_UNAVAILABLE")
 	}
 
 	// Decode reorder request
@@ -873,29 +635,17 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&reorderReq); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON in request body",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Invalid JSON in request body", err.Error())
 	}
 
 	if len(reorderReq.ProviderIDs) == 0 {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider IDs array is required",
-			"details": "MISSING_PROVIDER_IDS",
-		})
+		return RespondValidationError(c, "Provider IDs array is required", "MISSING_PROVIDER_IDS")
 	}
 
 	// Get current config
 	currentConfig := s.configManager.GetConfig()
 	if currentConfig == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration not available",
-			"details": "CONFIG_NOT_FOUND",
-		})
+		return RespondInternalError(c, "Configuration not available", "CONFIG_NOT_FOUND")
 	}
 
 	// Validate that all IDs exist and no duplicates
@@ -905,11 +655,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	}
 
 	if len(reorderReq.ProviderIDs) != len(currentConfig.Providers) {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider IDs count mismatch",
-			"details": "INVALID_PROVIDER_COUNT",
-		})
+		return RespondValidationError(c, "Provider IDs count mismatch", "INVALID_PROVIDER_COUNT")
 	}
 
 	// Build new ordered providers list
@@ -917,11 +663,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 	for _, id := range reorderReq.ProviderIDs {
 		provider, exists := providerMap[id]
 		if !exists {
-			return c.Status(422).JSON(fiber.Map{
-				"success": false,
-				"message": fmt.Sprintf("Provider ID '%s' not found", id),
-				"details": "PROVIDER_NOT_FOUND",
-			})
+			return RespondNotFound(c, fmt.Sprintf("Provider ID '%s'", id), "PROVIDER_NOT_FOUND")
 		}
 		newProviders = append(newProviders, provider)
 	}
@@ -932,27 +674,15 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 
 	// Validate and save
 	if err := s.configManager.ValidateConfigUpdate(newConfig); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration validation failed",
-			"details": err.Error(),
-		})
+		return RespondValidationError(c, "Configuration validation failed", err.Error())
 	}
 
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to update configuration", err.Error())
 	}
 
 	if err := s.configManager.SaveConfig(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to save configuration",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
 	// Return sanitized providers in new order
@@ -973,10 +703,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    providers,
-	})
+	return RespondSuccess(c, providers)
 }
 
 // startRCServerIfNeeded starts the RC server if RClone is enabled and RC is not running

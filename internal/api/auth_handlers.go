@@ -47,27 +47,17 @@ type RegisterRequest struct {
 func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	var req LoginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
 	if req.Username == "" || req.Password == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Username and password are required",
-		})
+		return RespondBadRequest(c, "Username and password are required", "")
 	}
 
 	// Authenticate user
 	user, err := s.authService.AuthenticateUser(c.Context(), req.Username, req.Password)
 	if err != nil {
-		return c.Status(401).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid credentials",
-		})
+		return RespondUnauthorized(c, "Invalid credentials", "")
 	}
 
 	// Create JWT token
@@ -77,21 +67,13 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 	// Generate JWT token string
 	tokenString, err := tokenService.Token(claims)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to create token",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to create token", err.Error())
 	}
 
 	// Set JWT cookie using Fiber's native API  (merged config)
 	err = s.setJWTCookie(c, tokenString)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to set cookie",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to set cookie", err.Error())
 	}
 
 	// Update last login
@@ -105,65 +87,39 @@ func (s *Server) handleDirectLogin(c *fiber.Ctx) error {
 		User:    s.mapUserToResponse(user),
 		Message: "Login successful",
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleRegister handles user registration (first user only)
 func (s *Server) handleRegister(c *fiber.Ctx) error {
 	var req RegisterRequest
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
 	if req.Username == "" || req.Password == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Username and password are required",
-		})
+		return RespondBadRequest(c, "Username and password are required", "")
 	}
 
 	// Validate username (basic validation)
 	if len(req.Username) < 3 {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Username must be at least 3 characters",
-		})
+		return RespondValidationError(c, "Username must be at least 3 characters", "")
 	}
 
 	// Validate password (basic validation)
 	if len(req.Password) < 8 {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Password must be at least 8 characters",
-		})
+		return RespondValidationError(c, "Password must be at least 8 characters", "")
 	}
 
 	// Create user
 	user, err := s.authService.RegisterUser(c.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
 		if err.Error() == "user registration is currently disabled" {
-			return c.Status(403).JSON(fiber.Map{
-				"success": false,
-				"message": "User registration is disabled",
-			})
+			return RespondForbidden(c, "User registration is disabled", "")
 		} else if err.Error() == "username already exists" || err.Error() == "email already exists" {
-			return c.Status(409).JSON(fiber.Map{
-				"success": false,
-				"message": err.Error(),
-			})
+			return RespondConflict(c, err.Error(), "")
 		} else {
-			return c.Status(500).JSON(fiber.Map{
-				"success": false,
-				"message": "Failed to register user",
-				"details": err.Error(),
-			})
+			return RespondInternalError(c, "Failed to register user", err.Error())
 		}
 	}
 
@@ -171,31 +127,21 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 		User:    s.mapUserToResponse(user),
 		Message: "Registration successful. API key generated automatically.",
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleCheckRegistration checks if registration is allowed
 func (s *Server) handleCheckRegistration(c *fiber.Ctx) error {
 	userCount, err := s.userRepo.GetUserCount(c.Context())
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to check registration status",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to check registration status", err.Error())
 	}
 
 	response := fiber.Map{
 		"registration_enabled": userCount == 0,
 		"user_count":           userCount,
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleGetAuthConfig returns authentication configuration (public endpoint)
@@ -209,27 +155,18 @@ func (s *Server) handleGetAuthConfig(c *fiber.Ctx) error {
 	response := fiber.Map{
 		"login_required": loginRequired,
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleAuthUser returns current authenticated user information
 func (s *Server) handleAuthUser(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
 	if user == nil {
-		return c.Status(401).JSON(fiber.Map{
-			"success": false,
-			"message": "Not authenticated",
-		})
+		return RespondUnauthorized(c, "Not authenticated", "")
 	}
 
 	response := s.mapUserToResponse(user)
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    *response,
-	})
+	return RespondSuccess(c, *response)
 }
 
 // handleAuthLogout logs out the current user
@@ -240,10 +177,7 @@ func (s *Server) handleAuthLogout(c *fiber.Ctx) error {
 	response := AuthResponse{
 		Message: "Logged out successfully",
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleAuthRefresh refreshes the current JWT token
@@ -253,69 +187,44 @@ func (s *Server) handleAuthRefresh(c *fiber.Ctx) error {
 	// Convert Fiber request to HTTP request for token service
 	httpReq, err := adaptor.ConvertRequest(c, false)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to convert request",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to convert request", err.Error())
 	}
 
 	// Get current token
 	claims, _, err := tokenService.Get(httpReq)
 	if err != nil {
-		return c.Status(401).JSON(fiber.Map{
-			"success": false,
-			"message": "No valid token found",
-		})
+		return RespondUnauthorized(c, "No valid token found", "")
 	}
 
 	// Generate new token string
 	tokenString, err := tokenService.Token(claims)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to create token",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to create token", err.Error())
 	}
 
 	// Set JWT cookie using Fiber's native API
 	err = s.setJWTCookie(c, tokenString)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to set cookie",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to set cookie", err.Error())
 	}
 
 	response := AuthResponse{
 		Message: "Token refreshed successfully",
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleListUsers returns a list of users (admin only)
 func (s *Server) handleListUsers(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
 	if user == nil || !user.IsAdmin {
-		return c.Status(403).JSON(fiber.Map{
-			"success": false,
-			"message": "Admin privileges required",
-		})
+		return RespondForbidden(c, "Admin privileges required", "")
 	}
 
 	pagination := ParsePaginationFiber(c)
 	users, err := s.userRepo.ListUsers(c.Context(), pagination.Limit, pagination.Offset)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to list users",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to list users", err.Error())
 	}
 
 	// Convert to response format
@@ -324,28 +233,19 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 		userResponses = append(userResponses, s.mapUserToResponse(user))
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    userResponses,
-	})
+	return RespondSuccess(c, userResponses)
 }
 
 // handleUpdateUserAdmin updates a user's admin status (admin only)
 func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
 	if user == nil || !user.IsAdmin {
-		return c.Status(403).JSON(fiber.Map{
-			"success": false,
-			"message": "Admin privileges required",
-		})
+		return RespondForbidden(c, "Admin privileges required", "")
 	}
 
 	userID := c.Params("user_id")
 	if userID == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "User ID is required",
-		})
+		return RespondBadRequest(c, "User ID is required", "")
 	}
 
 	// Parse request body
@@ -353,30 +253,19 @@ func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 		IsAdmin bool `json:"is_admin"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-			"details": err.Error(),
-		})
+		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
 
 	// Update admin status
 	err := s.userRepo.SetAdminStatus(c.Context(), userID, req.IsAdmin)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to update user admin status",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to update user admin status", err.Error())
 	}
 
 	response := AuthResponse{
 		Message: "User admin status updated successfully",
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // handleRegenerateAPIKey regenerates API key for the authenticated user
@@ -388,11 +277,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	if user == nil && s.userRepo != nil {
 		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"success": false,
-				"message": "Failed to retrieve user list",
-				"details": err.Error(),
-			})
+			return RespondInternalError(c, "Failed to retrieve user list", err.Error())
 		}
 		if len(users) > 0 {
 			user = users[0]
@@ -416,11 +301,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 			}
 			err := s.userRepo.CreateUser(c.Context(), user)
 			if err != nil {
-				return c.Status(500).JSON(fiber.Map{
-					"success": false,
-					"message": "Failed to bootstrap default admin user",
-					"details": err.Error(),
-				})
+				return RespondInternalError(c, "Failed to bootstrap default admin user", err.Error())
 			}
 			slog.InfoContext(c.Context(), "Bootstrapped default admin user for API key generation")
 		}
@@ -428,30 +309,20 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 
 	// If still no user, return error
 	if user == nil {
-		return c.Status(401).JSON(fiber.Map{
-			"success": false,
-			"message": "No user found to regenerate API key for. Please register first.",
-		})
+		return RespondUnauthorized(c, "No user found to regenerate API key for. Please register first.", "")
 	}
 
 	// Regenerate API key
 	apiKey, err := s.userRepo.RegenerateAPIKey(c.Context(), user.UserID)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to regenerate API key",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to regenerate API key", err.Error())
 	}
 
 	response := fiber.Map{
 		"api_key": apiKey,
 		"message": "API key regenerated successfully",
 	}
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data":    response,
-	})
+	return RespondSuccess(c, response)
 }
 
 // mapUserToResponse converts database User to API UserResponse

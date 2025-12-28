@@ -705,19 +705,11 @@ func (hw *HealthWorker) updateStats(updateFunc func(*WorkerStats)) {
 
 // Helper methods to get dynamic health config values
 func (hw *HealthWorker) getCheckInterval() time.Duration {
-	intervalSeconds := hw.configGetter().Health.CheckIntervalSeconds
-	if intervalSeconds <= 0 {
-		return 5 * time.Second // Default
-	}
-	return time.Duration(intervalSeconds) * time.Second
+	return hw.configGetter().GetCheckInterval()
 }
 
 func (hw *HealthWorker) getMaxConcurrentJobs() int {
-	jobs := hw.configGetter().Health.MaxConcurrentJobs
-	if jobs <= 0 {
-		return 1 // Default
-	}
-	return jobs
+	return hw.configGetter().GetMaxConcurrentJobs()
 }
 
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file

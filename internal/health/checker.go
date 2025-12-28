@@ -84,19 +84,11 @@ func NewHealthChecker(
 }
 
 func (hc *HealthChecker) getMaxConnectionsForHealthChecks() int {
-	connections := hc.configGetter().Health.MaxConnectionsForHealthChecks
-	if connections <= 0 {
-		return 5 // Default
-	}
-	return connections
+	return hc.configGetter().GetMaxConnectionsForHealthChecks()
 }
 
 func (hc *HealthChecker) getSegmentSamplePercentage() int {
-	percentage := hc.configGetter().Health.SegmentSamplePercentage
-	if percentage < 1 || percentage > 100 {
-		return 5 // Default: 5%
-	}
-	return percentage
+	return hc.configGetter().GetSegmentSamplePercentage()
 }
 
 // CheckFile checks the health of a specific file
