@@ -1,9 +1,16 @@
 package api
 
 import (
+	"context"
 	"log/slog"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/database"
 )
 
 // ArrsInstanceRequest represents a request to create/update an arrs instance
@@ -14,6 +21,211 @@ type ArrsInstanceRequest struct {
 	APIKey            string `json:"api_key"`
 	Enabled           bool   `json:"enabled"`
 	SyncIntervalHours int    `json:"sync_interval_hours"`
+}
+
+// ArrsWebhookRequest represents a webhook payload from Radarr/Sonarr
+type ArrsWebhookRequest struct {
+	EventType string `json:"eventType"`
+	FilePath  string `json:"filePath,omitempty"`
+	// For upgrades/renames, the file path might be in other fields or need to be inferred
+	Movie struct {
+		FolderPath string `json:"folderPath"`
+	} `json:"movie,omitempty"`
+	Series struct {
+		Path string `json:"path"`
+	} `json:"series,omitempty"`
+	EpisodeFile struct {
+		Path string `json:"path"`
+	} `json:"episodeFile,omitempty"`
+	UpgradeTopics []struct {
+		EntryId     int    `json:"entryId"`
+		EpisodeId   int    `json:"episodeId"`
+		LanguageId  int    `json:"languageId"`
+		QualityName string `json:"qualityName"`
+	} `json:"upgradeTopics,omitempty"`
+	DeletedFiles []struct {
+		Path string `json:"path"`
+	} `json:"deletedFiles,omitempty"`
+}
+
+// handleArrsWebhook handles webhooks from Radarr/Sonarr
+func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
+	// Check for API key authentication
+	// Try query param first, then header
+	apiKey := c.Query("apikey")
+	if apiKey == "" {
+		apiKey = c.Get("X-Api-Key")
+	}
+
+	if apiKey == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "API key required",
+		})
+	}
+
+	// Validate API key
+	if !s.validateAPIKey(c, apiKey) {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid API key",
+		})
+	}
+
+	if s.arrsService == nil {
+		slog.ErrorContext(c.Context(), "Arrs service is not available for webhook")
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	var req ArrsWebhookRequest
+	if err := c.BodyParser(&req); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to parse webhook body", "error", err)
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Invalid request body",
+		})
+	}
+
+	slog.InfoContext(c.Context(), "Received ARR webhook", "event_type", req.EventType)
+
+	// Determine file path to scan based on event type
+	var pathsToScan []string
+
+	switch req.EventType {
+	case "Test":
+		slog.InfoContext(c.Context(), "Received ARR test webhook")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
+	case "Download": // OnImport (renamed from Download in v3/v4 but webhooks might use either)
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.FilePath != "" {
+			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+	case "Rename":
+		// For rename, we want to scan the new file
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.FilePath != "" {
+			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+		// Also scan the series/movie folder to pick up changes
+		if req.Series.Path != "" {
+			pathsToScan = append(pathsToScan, req.Series.Path)
+		} else if req.Movie.FolderPath != "" {
+			pathsToScan = append(pathsToScan, req.Movie.FolderPath)
+		}
+	case "Upgrade":
+		// For upgrade, scan the new file
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.FilePath != "" {
+			pathsToScan = append(pathsToScan, req.FilePath)
+		}
+		
+		// If we have deleted files information (sometimes sent in payload), scan those too to remove them
+		for _, deleted := range req.DeletedFiles {
+			if deleted.Path != "" {
+				pathsToScan = append(pathsToScan, deleted.Path)
+			}
+		}
+	case "MovieDelete", "SeriesDelete":
+		if req.Movie.FolderPath != "" {
+			pathsToScan = append(pathsToScan, req.Movie.FolderPath)
+		} else if req.Series.Path != "" {
+			pathsToScan = append(pathsToScan, req.Series.Path)
+		}
+	case "EpisodeFileDelete":
+		if req.EpisodeFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		}
+	default:
+		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
+	}
+
+	if len(pathsToScan) == 0 {
+		slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
+	}
+
+	// Trigger scan for each path
+	// We use TriggerScanForFile which launches a background task
+	cfg := s.configManager.GetConfig()
+	mountPath := cfg.MountPath
+	importDir := ""
+	if cfg.Import.ImportDir != nil {
+		importDir = *cfg.Import.ImportDir
+	}
+	libraryDir := ""
+	if cfg.Health.LibraryDir != nil {
+		libraryDir = *cfg.Health.LibraryDir
+	}
+
+	for _, path := range pathsToScan {
+		// Normalize path to relative
+		normalizedPath := path
+		if mountPath != "" && strings.HasPrefix(normalizedPath, mountPath) {
+			normalizedPath = strings.TrimPrefix(normalizedPath, mountPath)
+		} else if importDir != "" && strings.HasPrefix(normalizedPath, importDir) {
+			normalizedPath = strings.TrimPrefix(normalizedPath, importDir)
+		} else if libraryDir != "" && strings.HasPrefix(normalizedPath, libraryDir) {
+			normalizedPath = strings.TrimPrefix(normalizedPath, libraryDir)
+		}
+		normalizedPath = strings.TrimPrefix(normalizedPath, "/")
+
+		// Special handling for STRM files
+		if strings.HasSuffix(normalizedPath, ".strm") {
+			// Resolve the real path from the .strm file content
+			content, err := os.ReadFile(path)
+			if err == nil {
+				urlStr := strings.TrimSpace(string(content))
+				if u, err := url.Parse(urlStr); err == nil {
+					if p := u.Query().Get("path"); p != "" {
+						normalizedPath = strings.TrimPrefix(p, "/")
+					}
+				}
+			}
+		}
+
+		slog.InfoContext(c.Context(), "Processing webhook file update", 
+			"original_path", path, 
+			"normalized_path", normalizedPath)
+		
+		if s.healthRepo != nil {
+			var releaseDate *time.Time
+			var sourceNzb *string
+
+			// Try to read metadata to get release date
+			if s.metadataService != nil {
+				meta, err := s.metadataService.ReadFileMetadata(normalizedPath)
+				if err == nil && meta != nil {
+					if meta.ReleaseDate != 0 {
+						t := time.Unix(meta.ReleaseDate, 0)
+						releaseDate = &t
+					}
+					if meta.SourceNzbPath != "" {
+						sourceNzb = &meta.SourceNzbPath
+					}
+				}
+			}
+
+			// Add to health check (pending status) with high priority (Next) to ensure it's processed right away
+			err := s.healthRepo.AddFileToHealthCheckWithMetadata(c.Context(), normalizedPath, 2, sourceNzb, database.HealthPriorityNext, releaseDate)
+			if err != nil {
+				slog.ErrorContext(c.Context(), "Failed to add webhook file to health check", "path", normalizedPath, "error", err)
+			} else {
+				slog.InfoContext(c.Context(), "Added file to health check queue from webhook with high priority", "path", normalizedPath)
+			}
+		}
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Webhook processed",
+	})
 }
 
 // ArrsInstanceResponse represents an arrs instance in API responses
@@ -254,5 +466,176 @@ func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
 		"data":    health,
+	})
+}
+
+// handleRegisterArrsWebhooks triggers automatic registration of webhooks in ARR instances
+func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	apiKey := s.getAPIKeyForConfig(c)
+	if apiKey == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "User not authenticated or no API key available",
+		})
+	}
+
+	// Get configured base URL or use default
+	baseURL := "http://altmount:8080"
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg.Arrs.WebhookBaseURL != "" {
+			baseURL = cfg.Arrs.WebhookBaseURL
+		}
+	}
+	
+	// Launch in background to not block
+	go func() {
+		ctx := context.Background()
+		if err := s.arrsService.EnsureWebhookRegistration(ctx, baseURL, apiKey); err != nil {
+			slog.ErrorContext(ctx, "Failed to register webhooks", "error", err)
+		}
+	}()
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Webhook registration triggered in background",
+	})
+}
+
+// handleRegisterArrsDownloadClients triggers automatic registration of AltMount as a download client in ARR instances
+func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	apiKey := s.getAPIKeyForConfig(c)
+	if apiKey == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "User not authenticated or no API key available",
+		})
+	}
+
+	// Get configured host/port or use default
+	host := "altmount"
+	port := 8080
+	urlBase := "sabnzbd"
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg.SABnzbd.DownloadClientBaseURL != "" {
+			rawURL := cfg.SABnzbd.DownloadClientBaseURL
+			if !strings.Contains(rawURL, "://") {
+				rawURL = "http://" + rawURL
+			}
+			if u, err := url.Parse(rawURL); err == nil {
+				host = u.Hostname()
+				if host == "" {
+					host = "altmount"
+				}
+				if p := u.Port(); p != "" {
+					if portVal, err := strconv.Atoi(p); err == nil {
+						port = portVal
+					}
+				} else if u.Scheme == "https" {
+					port = 443
+				} else if u.Scheme == "http" {
+					port = 80
+				}
+				if u.Path != "" && u.Path != "/" {
+					urlBase = strings.Trim(u.Path, "/")
+				}
+			}
+		} else {
+			port = cfg.WebDAV.Port
+		}
+	}
+
+	// Launch in background to not block
+	go func() {
+		ctx := context.Background()
+		if err := s.arrsService.EnsureDownloadClientRegistration(ctx, host, port, urlBase, apiKey); err != nil {
+			slog.ErrorContext(ctx, "Failed to register download clients", "error", err)
+		}
+	}()
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Download client registration triggered in background",
+	})
+}
+
+// handleTestArrsDownloadClients tests the connection from ARR instances to AltMount
+func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
+	if s.arrsService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"success": false,
+			"message": "Arrs not available",
+		})
+	}
+
+	apiKey := s.getAPIKeyForConfig(c)
+	if apiKey == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"success": false,
+			"message": "User not authenticated or no API key available",
+		})
+	}
+
+	// Get configured host/port or use default
+	host := "altmount"
+	port := 8080
+	urlBase := "sabnzbd"
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg.SABnzbd.DownloadClientBaseURL != "" {
+			rawURL := cfg.SABnzbd.DownloadClientBaseURL
+			if !strings.Contains(rawURL, "://") {
+				rawURL = "http://" + rawURL
+			}
+			if u, err := url.Parse(rawURL); err == nil {
+				host = u.Hostname()
+				if host == "" {
+					host = "altmount"
+				}
+				if p := u.Port(); p != "" {
+					if portVal, err := strconv.Atoi(p); err == nil {
+						port = portVal
+					}
+				} else if u.Scheme == "https" {
+					port = 443
+				} else if u.Scheme == "http" {
+					port = 80
+				}
+				if u.Path != "" && u.Path != "/" {
+					urlBase = strings.Trim(u.Path, "/")
+				}
+			}
+		} else {
+			port = cfg.WebDAV.Port
+		}
+	}
+
+	results, err := s.arrsService.TestDownloadClientRegistration(c.Context(), host, port, urlBase, apiKey)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to test connections",
+			"error":   err.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    results,
 	})
 }

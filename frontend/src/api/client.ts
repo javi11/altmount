@@ -355,6 +355,16 @@ export class APIClient {
 		return this.request<HealthStats>("/health/stats");
 	}
 
+	async resetAllHealthChecks() {
+		return this.request<{
+			message: string;
+			restarted_count: number;
+			restarted_at: string;
+		}>("/health/reset-all", {
+			method: "POST",
+		});
+	}
+
 	async cleanupHealth(params?: HealthCleanupRequest) {
 		return this.request<HealthCleanupResponse>("/health/cleanup", {
 			method: "DELETE",
@@ -527,6 +537,28 @@ export class APIClient {
 		return this.request<AuthResponse>(`/users/${userId}/admin`, {
 			method: "PUT",
 			body: JSON.stringify(data),
+		});
+	}
+
+	async getArrsHealth() {
+		return this.request<Record<string, any>>("/arrs/health");
+	}
+
+	async registerArrsWebhooks() {
+		return this.request<{ message: string }>("/arrs/webhook/register", {
+			method: "POST",
+		});
+	}
+
+	async registerArrsDownloadClients() {
+		return this.request<{ message: string }>("/arrs/download-client/register", {
+			method: "POST",
+		});
+	}
+
+	async testArrsDownloadClients() {
+		return this.request<Record<string, string>>("/arrs/download-client/test", {
+			method: "POST",
 		});
 	}
 

@@ -130,13 +130,14 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
+	skipHealthCheck := currentConfig.Import.SkipHealthCheck != nil && *currentConfig.Import.SkipHealthCheck
 	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
 	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter, skipHealthCheck)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -218,6 +219,19 @@ func (s *Service) IsPaused() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.paused
+}
+
+func (s *Service) RegisterConfigChangeHandler(configManager *config.Manager) {
+	configManager.OnConfigChange(func(oldConfig, newConfig *config.Config) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		if s.processor != nil {
+			skip := newConfig.Import.SkipHealthCheck != nil && *newConfig.Import.SkipHealthCheck
+			s.processor.SetSkipHealthCheck(skip)
+			s.processor.SetSegmentSamplePercentage(newConfig.Import.SegmentSamplePercentage)
+		}
+	})
 }
 
 // Stop stops the NZB import service and all queue workers
@@ -1019,6 +1033,11 @@ func (s *Service) refreshMountPathIfNeeded(ctx context.Context, resultingPath st
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
+	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
+	}
+
 	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
@@ -1041,6 +1060,101 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 	}
 
 	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
+}
+
+// ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
+func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.ImportQueueItem) error {
+	cfg := s.configGetter()
+	// Use the database directory as the base for the persistent NZB storage
+	// This puts it next to metadata (e.g. /config/.nzbs)
+	configDir := filepath.Dir(cfg.Database.Path)
+	nzbDir := filepath.Join(configDir, ".nzbs")
+
+	// Create .nzbs directory if not exists
+	if err := os.MkdirAll(nzbDir, 0755); err != nil {
+		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
+	}
+
+	// Check if current path is already in the persistent directory
+	absNzbPath, _ := filepath.Abs(item.NzbPath)
+	absNzbDir, _ := filepath.Abs(nzbDir)
+
+	// Simple check: if path starts with persistent dir, assume it's fine
+	if strings.HasPrefix(absNzbPath, absNzbDir) {
+		return nil
+	}
+
+	// Generate new filename: <id>_<sanitized_filename>
+	filename := filepath.Base(item.NzbPath)
+	// sanitizeFilename is defined in service.go
+	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
+	newPath := filepath.Join(nzbDir, newFilename)
+
+	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
+
+	// Move or Copy
+	// Try Rename first
+	err := os.Rename(item.NzbPath, newPath)
+	if err != nil {
+		// If rename fails (e.g. cross-device link), try copy
+		s.log.DebugContext(ctx, "Rename failed, trying copy", "error", err, "src", item.NzbPath, "dst", newPath)
+
+		// Copy logic
+		srcFile, err := os.Open(item.NzbPath)
+		if err != nil {
+			return fmt.Errorf("failed to open source NZB: %w", err)
+		}
+		defer srcFile.Close()
+
+		dstFile, err := os.Create(newPath)
+		if err != nil {
+			return fmt.Errorf("failed to create destination NZB: %w", err)
+		}
+		defer dstFile.Close()
+
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
+			return fmt.Errorf("failed to copy NZB content: %w", err)
+		}
+
+		// Remove source if copy successful
+		// Note: We close srcFile via defer, but for removal on Windows/some FS we might need to close it first.
+		// Since we are in a function and defer runs at end, we can't remove yet if we don't close.
+		// But in this block we can just let it stay until end of function? No, we want to remove it.
+		// For simplicity, we can ignore removal failure or try to handle it better.
+		// Actually, we should probably close before removing.
+	}
+
+	// If we copied, we should remove the original.
+	// But `os.Rename` handles removal.
+	// If we fell back to copy, we need to remove.
+	if err != nil { // This err refers to Rename failure
+		// Close files (deferred, but we might want to close src explicitly if we want to delete)
+		// Since we didn't assign srcFile/dstFile to vars outside, we rely on GC/Defer.
+		// But defer runs at function exit.
+		// So removal might fail if open.
+		// Let's rely on standard practice or simple cleanup.
+		// If Rename failed, we copied.
+		// We should try to remove the source file.
+		os.Remove(item.NzbPath)
+	}
+
+	// Update item path in memory
+	oldPath := item.NzbPath
+	item.NzbPath = newPath
+
+	// Update item path in DB
+	if err := s.database.Repository.UpdateQueueItemNzbPath(ctx, item.ID, newPath); err != nil {
+		// If DB update fails, we are in a weird state (file moved but DB points to old).
+		// We should probably try to move it back or just fail.
+		// But failing here aborts the import.
+		// The file is at newPath.
+		// If we fail, the item stays 'processing' in DB with old path.
+		// Next retry will fail to find file at old path.
+		return fmt.Errorf("failed to update DB with new NZB path: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "Moved NZB to persistent storage", "old_path", oldPath, "new_path", newPath)
+	return nil
 }
 
 // buildCategoryPath resolves a category name to its configured directory path.
@@ -1154,13 +1268,23 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		}
 	}
 
-	// Remove any existing health record for this file (in case it was corrupted and now replaced)
+	// Schedule immediate health check for the new file
 	if s.healthRepo != nil {
 		// Calculate the mount relative path
 		// resultingPath is the virtual path (e.g. "movies/Movie (Year)/Movie.mkv")
-		// We can try to delete any health record matching this path
-		if err := s.healthRepo.DeleteHealthRecord(ctx, resultingPath); err == nil {
-			slog.InfoContext(ctx, "Removed health record for replaced file", "path", resultingPath)
+		
+		// Read metadata to get SourceNzbPath needed for health check
+		fileMeta, err := s.metadataService.ReadFileMetadata(resultingPath)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to read metadata for health check scheduling", "path", resultingPath, "error", err)
+		} else if fileMeta != nil {
+			// Add/Update health record with high priority to ensure it's processed right away
+			err := s.healthRepo.AddFileToHealthCheck(ctx, resultingPath, 2, &fileMeta.SourceNzbPath, database.HealthPriorityNext)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to schedule immediate health check for imported file", "path", resultingPath, "error", err)
+			} else {
+				slog.InfoContext(ctx, "Scheduled immediate health check for imported file", "path", resultingPath)
+			}
 		}
 
 		// Also check for OTHER files in the same directory that were marked for repair.

@@ -10,6 +10,7 @@ interface HealthPageHeaderProps {
 	onToggleAutoRefresh: () => void;
 	onRefreshIntervalChange: (interval: number) => void;
 	onRefresh: () => void;
+	onResetAll: () => void;
 	onCleanup: () => void;
 	onUserInteractionStart: () => void;
 	onUserInteractionEnd: () => void;
@@ -25,6 +26,7 @@ export function HealthPageHeader({
 	onToggleAutoRefresh,
 	onRefreshIntervalChange,
 	onRefresh,
+	onResetAll,
 	onCleanup,
 	onUserInteractionStart,
 	onUserInteractionEnd,
@@ -75,6 +77,10 @@ export function HealthPageHeader({
 				<button type="button" className="btn btn-outline" onClick={onRefresh} disabled={isLoading}>
 					<RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
 					Refresh
+				</button>
+				<button type="button" className="btn btn-outline" onClick={onResetAll}>
+					<RefreshCw className="h-4 w-4" />
+					Reset All Checks
 				</button>
 				<button
 					type="button"

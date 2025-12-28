@@ -1,6 +1,7 @@
 package usenet
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -23,6 +24,7 @@ type segmentRange struct {
 	end      int64
 	segments []*segment
 	current  int
+	ctx      context.Context
 	mu       sync.RWMutex
 }
 
@@ -63,6 +65,16 @@ func (r *segmentRange) Next() (*segment, error) {
 	r.mu.Unlock()
 
 	return r.Get()
+}
+
+func (r *segmentRange) CloseWithError(err error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, s := range r.segments {
+		if s != nil {
+			_ = s.CloseWithError(err)
+		}
+	}
 }
 
 func (r *segmentRange) CloseSegments() {
@@ -146,6 +158,33 @@ func (s *segment) Close() error {
 	return errors.Join(e1, e2)
 }
 
+func (s *segment) CloseWithError(err error) error {
+	if s == nil {
+		return nil
+	}
+
+	s.mx.Lock()
+	defer s.mx.Unlock()
+
+	// Prevent multiple closes
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
+	var e1, e2 error
+
+	if s.reader != nil {
+		e1 = s.reader.CloseWithError(err)
+	}
+
+	if s.writer != nil {
+		e2 = s.writer.CloseWithError(err)
+	}
+
+	return errors.Join(e1, e2)
+}
+
 // safeWriter wraps the segment writer and returns error if closed
 type safeWriter struct {
 	s *segment
@@ -162,6 +201,34 @@ func (sw *safeWriter) Write(p []byte) (n int, err error) {
 	}
 
 	return writer.Write(p)
+}
+
+func (sw *safeWriter) Close() error {
+	return sw.s.Close()
+}
+
+func (sw *safeWriter) CloseWithError(err error) error {
+	if sw.s == nil {
+		return nil
+	}
+
+	sw.s.mx.Lock()
+	defer sw.s.mx.Unlock()
+
+	if sw.s.closed {
+		return nil
+	}
+	sw.s.closed = true
+
+	var e1, e2 error
+	if sw.s.reader != nil {
+		e1 = sw.s.reader.CloseWithError(err)
+	}
+	if sw.s.writer != nil {
+		e2 = sw.s.writer.CloseWithError(err)
+	}
+
+	return errors.Join(e1, e2)
 }
 
 func (s *segment) Writer() io.Writer {

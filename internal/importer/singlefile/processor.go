@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
@@ -27,6 +28,7 @@ func ProcessSingleFile(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
+	timeout time.Duration,
 ) (string, error) {
 	// Validate file extension before processing
 	if !utils.HasAllowedFilesInRegular([]parser.ParsedFile{file}, allowedFileExtensions) {
@@ -66,6 +68,7 @@ func ProcessSingleFile(
 		maxValidationGoroutines,
 		segmentSamplePercentage,
 		nil, // No progress callback for single file imports
+		timeout,
 	); err != nil {
 		return "", err
 	}

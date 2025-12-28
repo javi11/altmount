@@ -13,6 +13,7 @@ import {
 	useHealthStats,
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
+	useResetAllHealthChecks,
 	useRestartBulkHealthItems,
 	useSetHealthPriority,
 } from "../hooks/useApi";
@@ -75,6 +76,7 @@ export function HealthPage() {
 	const restartBulkItems = useRestartBulkHealthItems();
 	const repairBulkItems = useRepairBulkHealthItems();
 	const cleanupHealth = useCleanupHealth();
+	const resetAllHealth = useResetAllHealthChecks();
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
@@ -141,6 +143,36 @@ export function HealthPage() {
 			delete_files: false,
 		});
 		setShowCleanupModal(true);
+	};
+
+	const handleResetAll = async () => {
+		const confirmed = await confirmAction(
+			"Reset All Health Checks",
+			"Are you sure you want to reset all health checks? All files will be set to 'Pending' status and scheduled for immediate check.",
+			{
+				type: "warning",
+				confirmText: "Reset All",
+				confirmButtonClass: "btn-warning",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const result = await resetAllHealth.mutateAsync();
+				showToast({
+					title: "Reset Successful",
+					message: `Successfully reset ${result.restarted_count} health checks`,
+					type: "success",
+				});
+			} catch (error) {
+				console.error("Failed to reset all health checks:", error);
+				showToast({
+					title: "Reset Failed",
+					message: "Failed to reset all health checks",
+					type: "error",
+				});
+			}
+		}
 	};
 
 	const handleCleanupConfirm = async () => {
@@ -525,6 +557,7 @@ export function HealthPage() {
 				onToggleAutoRefresh={toggleAutoRefresh}
 				onRefreshIntervalChange={handleRefreshIntervalChange}
 				onRefresh={() => refetch()}
+				onResetAll={handleResetAll}
 				onCleanup={handleCleanup}
 				onUserInteractionStart={handleUserInteractionStart}
 				onUserInteractionEnd={handleUserInteractionEnd}

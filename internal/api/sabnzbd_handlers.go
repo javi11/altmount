@@ -296,14 +296,21 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 
 	// Build category path and create temporary file with category subdirectory
 	tempDir := os.TempDir()
-	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+	uploadDir := filepath.Join(tempDir, "altmount-uploads")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Failed to create upload directory")
+	}
 
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), categoryPath, file.Filename)
+		tempFile = filepath.Join(uploadDir, categoryPath, file.Filename)
+		// Ensure category subfolder exists in temp
+		if err := os.MkdirAll(filepath.Dir(tempFile), 0755); err != nil {
+			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
+		}
 	} else {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), file.Filename)
+		tempFile = filepath.Join(uploadDir, file.Filename)
 	}
 
 	// Save the uploaded file to temporary location
@@ -317,7 +324,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	}
 
 	// Add the file to the processing queue using centralized method
-	// Pass completeDir as the base path (not tempDir) so files are placed in the correct location
+	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.FormValue("priority"))
 	item, err := s.importerService.AddToQueue(tempFile, &completeDir, &validatedCategory, &priority)
 	if err != nil {
@@ -366,7 +373,10 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 
 	// Create temporary file with category path
 	tempDir := os.TempDir()
-	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+	uploadDir := filepath.Join(tempDir, "altmount-uploads")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Failed to create upload directory")
+	}
 
 	// Extract filename from URL or use default
 	filename := "downloaded.nzb"
@@ -385,9 +395,13 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	categoryPath := s.buildCategoryPath(validatedCategory)
 	var tempFile string
 	if categoryPath != "" {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), categoryPath, filename)
+		tempFile = filepath.Join(uploadDir, categoryPath, filename)
+		// Ensure category subfolder exists in temp
+		if err := os.MkdirAll(filepath.Dir(tempFile), 0755); err != nil {
+			return s.writeSABnzbdErrorFiber(c, "Failed to create category directory")
+		}
 	} else {
-		tempFile = filepath.Join(tempDir, strings.TrimPrefix(completeDir, "/"), filename)
+		tempFile = filepath.Join(uploadDir, filename)
 	}
 
 	outFile, err := os.Create(tempFile)
@@ -408,7 +422,7 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	}
 
 	// Add the file to the processing queue using centralized method
-	// Pass completeDir as the base path (not tempDir) so files are placed in the correct location
+	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.Query("priority"))
 	item, err := s.importerService.AddToQueue(tempFile, &completeDir, &validatedCategory, &priority)
 	if err != nil {
@@ -466,7 +480,9 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	}
 
 	// Get total count for pagination info
-	totalCount, err := s.queueRepo.CountQueueItems(c.Context(), nil, "", categoryFilter)
+	
+	// Let's just use a simple approach for now:
+	totalCount, err := s.queueRepo.CountActiveQueueItems(c.Context(), "", categoryFilter)
 	if err != nil {
 		totalCount = len(items) // Fallback
 	}
@@ -713,8 +729,8 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 		}
 	}
 
-	// Get actual disk space for temp directory
-	tempDir := os.TempDir()
+	// Get actual disk space for storage directory
+	tempDir := filepath.Join(os.TempDir(), "altmount-uploads")
 	diskFree, diskTotal := getDiskSpace(tempDir)
 
 	response := SABnzbdStatusResponse{
@@ -942,7 +958,6 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 		return fmt.Errorf("config manager not available")
 	}
 
-	config := s.configManager.GetConfig()
 	categoryPath := s.buildCategoryPath(category)
 
 	// Don't create directory for default category (empty path)
@@ -950,14 +965,8 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 		return nil
 	}
 
-	// Create in mount path
-	mountDir := filepath.Join(config.Metadata.RootPath, strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
-	if err := os.MkdirAll(mountDir, 0755); err != nil {
-		return fmt.Errorf("failed to create category mount directory: %w", err)
-	}
-
 	// Create in temp path
-	tempDir := filepath.Join(os.TempDir(), strings.TrimPrefix(config.SABnzbd.CompleteDir, "/"), categoryPath)
+	tempDir := filepath.Join(os.TempDir(), "altmount-uploads", categoryPath)
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}

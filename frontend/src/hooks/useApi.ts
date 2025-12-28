@@ -188,6 +188,18 @@ export const useHealthStats = () => {
 	});
 };
 
+export const useResetAllHealthChecks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.resetAllHealthChecks(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+			queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
+		},
+	});
+};
+
 export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 
@@ -450,10 +462,30 @@ export const useAddTestQueueItem = () => {
 	});
 };
 
-// System Browse hooks
 export const useSystemBrowse = (path?: string) => {
 	return useQuery({
 		queryKey: ["system", "browse", path],
 		queryFn: () => apiClient.getSystemBrowse(path),
+	});
+};
+
+// ARR Webhook Registration hook
+export const useRegisterArrsWebhooks = () => {
+	return useMutation({
+		mutationFn: () => apiClient.registerArrsWebhooks(),
+	});
+};
+
+// ARR Download Client Registration hook
+export const useRegisterArrsDownloadClients = () => {
+	return useMutation({
+		mutationFn: () => apiClient.registerArrsDownloadClients(),
+	});
+};
+
+// ARR Download Client Test hook
+export const useTestArrsDownloadClients = () => {
+	return useMutation({
+		mutationFn: () => apiClient.testArrsDownloadClients(),
 	});
 };

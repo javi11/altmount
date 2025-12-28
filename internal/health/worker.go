@@ -373,8 +373,9 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			releaseDate = &fh.CreatedAt
 		}
 
-		nextCheck := calculateNextCheck(*releaseDate, time.Now())
+		nextCheck := CalculateNextCheck(*releaseDate, time.Now().UTC())
 		update.Type = database.UpdateTypeHealthy
+		update.Status = database.HealthStatusHealthy
 		update.ScheduledCheckAt = nextCheck
 
 		sideEffect = func() error {
@@ -398,12 +399,14 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	case database.HealthStatusRepairTriggered:
 		if fh.RepairRetryCount >= fh.MaxRepairRetries-1 {
 			update.Type = database.UpdateTypeCorrupted
+			update.Status = database.HealthStatusCorrupted
 			sideEffect = func() error {
 				slog.ErrorContext(ctx, "File permanently marked as corrupted after repair retries exhausted", "file_path", fh.FilePath)
 				return nil
 			}
 		} else {
 			update.Type = database.UpdateTypeRepairRetry
+			update.Status = database.HealthStatusRepairTriggered
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Repair retry scheduled",
 					"file_path", fh.FilePath,
@@ -417,6 +420,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		if fh.RetryCount >= fh.MaxRetries-1 {
 			// Trigger repair phase
 			update.Type = database.UpdateTypeRepairRetry // This will set status to repair_triggered
+			update.Status = database.HealthStatusRepairTriggered
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Health check retries exhausted, triggering repair", "file_path", fh.FilePath)
 				return hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
@@ -424,9 +428,10 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		} else {
 			// Increment health check retry count
 			backoffMinutes := 15 * (1 << fh.RetryCount)
-			nextCheck := time.Now().Add(time.Duration(backoffMinutes) * time.Minute)
+			nextCheck := time.Now().UTC().Add(time.Duration(backoffMinutes) * time.Minute)
 
 			update.Type = database.UpdateTypeRetry
+			update.Status = database.HealthStatusPending
 			update.ScheduledCheckAt = nextCheck
 
 			sideEffect = func() error {
@@ -533,7 +538,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		hw.mu.Unlock()
 	}()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	hw.updateStats(func(s *WorkerStats) {
 		s.CurrentRunStartTime = &now
 		s.CurrentRunFilesChecked = 0
@@ -736,6 +741,26 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	// Step 4: Trigger rescan through the ARR service
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
 	if err != nil {
+		if errors.Is(err, arrs.ErrPathMatchFailed) {
+			slog.WarnContext(ctx, "File not found in ARR (likely upgraded/deleted), removing orphan from AltMount",
+				"file_path", filePath)
+
+			// Delete health record
+			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
+				slog.ErrorContext(ctx, "Failed to delete orphaned health record", "error", delErr)
+			}
+
+			// Delete metadata file
+			// We need the relative path for metadata deletion
+			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
+			relativePath = strings.TrimPrefix(relativePath, "/")
+			if delMetaErr := hw.metadataService.DeleteFileMetadata(relativePath); delMetaErr != nil {
+				slog.ErrorContext(ctx, "Failed to delete orphaned metadata file", "error", delMetaErr)
+			}
+
+			return nil
+		}
+
 		slog.ErrorContext(ctx, "Failed to trigger ARR rescan",
 			"file_path", filePath,
 			"path_for_rescan", pathForRescan,

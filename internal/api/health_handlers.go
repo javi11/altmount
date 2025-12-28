@@ -748,6 +748,9 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 	fileErrors := make([]string, 0)
 	offset := 0
 
+	cfg := s.configManager.GetConfig()
+	mountPath := cfg.MountPath
+
 	// Process records in batches until no more records found
 	for {
 		// Fetch next batch of records
@@ -779,8 +782,21 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 		for _, item := range oldItemsInBatch {
 			allFilePaths = append(allFilePaths, item.FilePath)
 
+			// Determine path to delete
+			var pathToDelete string
+			if item.LibraryPath != nil && *item.LibraryPath != "" {
+				pathToDelete = *item.LibraryPath
+			} else {
+				// Fallback to mount path
+				if filepath.IsAbs(item.FilePath) {
+					pathToDelete = item.FilePath
+				} else {
+					pathToDelete = filepath.Join(mountPath, item.FilePath)
+				}
+			}
+
 			// Attempt to delete the physical file using os.Remove
-			if deleteErr := os.Remove(item.FilePath); deleteErr != nil {
+			if deleteErr := os.Remove(pathToDelete); deleteErr != nil {
 				// Track error but continue with other files
 				fileErrors = append(fileErrors, fmt.Sprintf("%s: %v", item.FilePath, deleteErr))
 			} else {
@@ -849,7 +865,7 @@ func (s *Server) handleAddHealthCheck(c *fiber.Ctx) error {
 	}
 
 	// Add file to health database
-	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, maxRetries, req.SourceNzb)
+	err := s.healthRepo.AddFileToHealthCheck(c.Context(), req.FilePath, maxRetries, req.SourceNzb, req.Priority)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -1286,6 +1302,30 @@ func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 		"priority":    updatedItem.Priority,
 		"updated_at":  time.Now().Format(time.RFC3339),
 		"health_data": ToHealthItemResponse(updatedItem),
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// handleResetAllHealthChecks handles POST /api/health/reset-all
+func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
+	// Reset all items to pending status using repository method
+	restartedCount, err := s.healthRepo.ResetAllHealthChecks(c.Context())
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to reset all health checks",
+			"details": err.Error(),
+		})
+	}
+
+	response := map[string]interface{}{
+		"message":         "All health checks reset successfully",
+		"restarted_count": restartedCount,
+		"restarted_at":    time.Now().Format(time.RFC3339),
 	}
 
 	return c.Status(200).JSON(fiber.Map{

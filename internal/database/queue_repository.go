@@ -26,6 +26,82 @@ func (r *QueueRepository) RemoveFromQueue(ctx context.Context, id int64) error {
 	return err
 }
 
+// RemoveFromQueueBulk removes multiple items from the queue in bulk
+func (r *QueueRepository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*BulkOperationResult, error) {
+	if len(ids) == 0 {
+		return &BulkOperationResult{}, nil
+	}
+
+	result := &BulkOperationResult{
+		FailedIDs: []int64{},
+	}
+
+	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
+		for _, id := range ids {
+			// Check status first - we can't delete processing items
+			var status QueueStatus
+			checkQuery := `SELECT status FROM import_queue WHERE id = ?`
+			err := txRepo.db.QueryRowContext(ctx, checkQuery, id).Scan(&status)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					continue // Already gone, ignore
+				}
+				return fmt.Errorf("failed to check status for item %d: %w", id, err)
+			}
+
+			if status == QueueStatusProcessing {
+				result.ProcessingCount++
+				result.FailedIDs = append(result.FailedIDs, id)
+				continue
+			}
+
+			// Perform deletion
+			deleteQuery := `DELETE FROM import_queue WHERE id = ?`
+			_, err = txRepo.db.ExecContext(ctx, deleteQuery, id)
+			if err != nil {
+				return fmt.Errorf("failed to delete item %d: %w", id, err)
+			}
+			result.DeletedCount++
+		}
+		return nil
+	})
+
+	if err != nil {
+		return result, err
+	}
+
+	// If we couldn't delete some items because they were processing, return an error
+	// so the API handler knows to return a conflict status
+	if result.ProcessingCount > 0 {
+		return result, fmt.Errorf("%d items were in processing status and could not be deleted", result.ProcessingCount)
+	}
+
+	return result, nil
+}
+
+// RestartQueueItemsBulk resets multiple queue items back to pending status
+func (r *QueueRepository) RestartQueueItemsBulk(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	return r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
+		for _, id := range ids {
+			// Only allow restart of failed or completed items
+			query := `
+				UPDATE import_queue 
+				SET status = 'pending', started_at = NULL, completed_at = NULL, error_message = NULL, updated_at = datetime('now')
+				WHERE id = ? AND status != 'processing'
+			`
+			_, err := txRepo.db.ExecContext(ctx, query, id)
+			if err != nil {
+				return fmt.Errorf("failed to restart item %d: %w", id, err)
+			}
+		}
+		return nil
+	})
+}
+
 // AddToQueue adds a new NZB file to the import queue
 func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem) error {
 	query := `
@@ -204,6 +280,16 @@ func (r *QueueRepository) UpdateQueueItemPriority(ctx context.Context, id int64,
 	_, err := r.db.ExecContext(ctx, query, priority, id)
 	if err != nil {
 		return fmt.Errorf("failed to update queue item priority: %w", err)
+	}
+	return nil
+}
+
+// UpdateQueueItemNzbPath updates the NZB path of a queue item
+func (r *QueueRepository) UpdateQueueItemNzbPath(ctx context.Context, id int64, nzbPath string) error {
+	query := `UPDATE import_queue SET nzb_path = ?, updated_at = datetime('now') WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, nzbPath, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item nzb path: %w", err)
 	}
 	return nil
 }

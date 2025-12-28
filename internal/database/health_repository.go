@@ -24,8 +24,8 @@ func NewHealthRepository(db *sql.DB) *HealthRepository {
 func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error {
 	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
 		status = excluded.status,
 		last_checked = datetime('now'),
@@ -34,7 +34,8 @@ func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string
 		error_details = excluded.error_details,
 		retry_count = CASE WHEN ? THEN max_retries ELSE retry_count END,
 		max_retries = excluded.max_retries,
-		updated_at = datetime('now')
+		updated_at = datetime('now'),
+		scheduled_check_at = datetime('now')
 	`
 
 	_, err := r.db.ExecContext(ctx, query, filePath, status, errorMessage, sourceNzbPath, errorDetails, noRetry, noRetry)
@@ -113,6 +114,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
 		  AND retry_count < max_retries
+		  AND status NOT IN ('repair_triggered', 'corrupted', 'checking', 'healthy')
 		ORDER BY priority DESC, scheduled_check_at ASC
 		LIMIT ?
 	`
@@ -222,7 +224,7 @@ func (r *HealthRepository) IncrementRetryCount(ctx context.Context, filePath str
 		WHERE file_path = ?
 	`
 
-	_, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, nextCheck.UTC(), filePath)
+	_, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, nextCheck.UTC().Format("2006-01-02 15:04:05"), filePath)
 	if err != nil {
 		return fmt.Errorf("failed to increment retry count: %w", err)
 	}
@@ -514,18 +516,36 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 }
 
 // AddFileToHealthCheck adds a file to the health database for checking
-func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, maxRetries int, sourceNzbPath *string) error {
+func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath string, maxRetries int, sourceNzbPath *string, priority HealthPriority) error {
+	return r.AddFileToHealthCheckWithMetadata(ctx, filePath, maxRetries, sourceNzbPath, priority, nil)
+}
+
+// AddFileToHealthCheckWithMetadata adds a file to the health database for checking with metadata
+func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, maxRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time) error {
+	var releaseDateStr interface{} = nil
+	if releaseDate != nil {
+		releaseDateStr = releaseDate.UTC().Format("2006-01-02 15:04:05")
+	}
+
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, created_at, updated_at)
-		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, retry_count, max_retries, repair_retry_count, max_repair_retries, source_nzb_path, priority, release_date, created_at, updated_at, scheduled_check_at)
+		VALUES (?, ?, datetime('now'), 0, ?, 0, 3, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
 		ON CONFLICT(file_path) DO UPDATE SET
+		status = excluded.status,
+		retry_count = 0,
+		repair_retry_count = 0,
+		last_error = NULL,
+		error_details = NULL,
 		max_retries = excluded.max_retries,
 		max_repair_retries = excluded.max_repair_retries,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
-		updated_at = datetime('now')
+		priority = excluded.priority,
+		release_date = COALESCE(excluded.release_date, release_date),
+		updated_at = datetime('now'),
+		scheduled_check_at = datetime('now')
 	`
 
-	_, err := r.db.ExecContext(ctx, query, filePath, HealthStatusPending, maxRetries, sourceNzbPath)
+	_, err := r.db.ExecContext(ctx, query, filePath, HealthStatusPending, maxRetries, sourceNzbPath, priority, releaseDateStr)
 	if err != nil {
 		return fmt.Errorf("failed to add file to health check: %w", err)
 	}
@@ -681,7 +701,8 @@ func (r *HealthRepository) ResetFileAllChecking(ctx context.Context) error {
 	query := `
 		UPDATE file_health
 		SET status = ?,
-		    updated_at = datetime('now')
+		    updated_at = datetime('now'),
+			scheduled_check_at = datetime('now')
 		WHERE status = ?
 	`
 
@@ -747,7 +768,8 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 		    repair_retry_count = 0,
 		    last_error = NULL,
 		    error_details = NULL,
-		    updated_at = datetime('now')
+		    updated_at = datetime('now'),
+			scheduled_check_at = datetime('now')
 		WHERE file_path IN (%s)
 	`, HealthStatusPending, strings.Join(placeholders, ","))
 
@@ -773,7 +795,8 @@ func (r *HealthRepository) ResetAllHealthChecks(ctx context.Context) (int, error
 		    repair_retry_count = 0,
 		    last_error = NULL,
 		    error_details = NULL,
-		    updated_at = datetime('now')
+		    updated_at = datetime('now'),
+			scheduled_check_at = datetime('now')
 	`
 
 	result, err := r.db.ExecContext(ctx, query)
@@ -863,7 +886,7 @@ func (r *HealthRepository) UpdateScheduledCheckTime(ctx context.Context, filePat
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime.UTC(), filePath)
+	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime.UTC().Format("2006-01-02 15:04:05"), filePath)
 	if err != nil {
 		return fmt.Errorf("failed to update scheduled check time: %w", err)
 	}
@@ -894,7 +917,7 @@ func (r *HealthRepository) MarkAsHealthy(ctx context.Context, filePath string, n
 		WHERE file_path = ?
 	`
 
-	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime.UTC(), filePath)
+	result, err := r.db.ExecContext(ctx, query, HealthStatusHealthy, nextCheckTime.UTC().Format("2006-01-02 15:04:05"), filePath)
 	if err != nil {
 		return fmt.Errorf("failed to mark file as healthy: %w", err)
 	}
@@ -1013,6 +1036,19 @@ type HealthStatusUpdate struct {
 	ScheduledCheckAt time.Time
 }
 
+// BackfillRecord represents a record used for metadata backfilling
+type BackfillRecord struct {
+	ID       int64
+	FilePath string
+}
+
+// BackfillUpdate represents an update for release date backfilling
+type BackfillUpdate struct {
+	ID               int64
+	ReleaseDate      time.Time
+	ScheduledCheckAt time.Time
+}
+
 // GetAllHealthCheckPaths returns all health check file paths (memory optimized)
 func (r *HealthRepository) GetAllHealthCheckPaths(ctx context.Context) ([]string, error) {
 	query := `
@@ -1094,6 +1130,67 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 	return records, nil
 }
 
+// GetFilesMissingReleaseDate returns a list of files that don't have a release date cached
+func (r *HealthRepository) GetFilesMissingReleaseDate(ctx context.Context, limit int) ([]BackfillRecord, error) {
+	query := `
+		SELECT id, file_path
+		FROM file_health
+		WHERE release_date IS NULL
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []BackfillRecord
+	for rows.Next() {
+		var rec BackfillRecord
+		if err := rows.Scan(&rec.ID, &rec.FilePath); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+
+	return records, nil
+}
+
+// BackfillReleaseDates updates multiple health records with their release dates and next check times
+func (r *HealthRepository) BackfillReleaseDates(ctx context.Context, updates []BackfillUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		UPDATE file_health
+		SET release_date = ?,
+		    scheduled_check_at = ?,
+		    updated_at = datetime('now')
+		WHERE id = ?
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, up := range updates {
+		_, err = stmt.ExecContext(ctx, up.ReleaseDate.UTC().Format("2006-01-02 15:04:05"), up.ScheduledCheckAt.UTC().Format("2006-01-02 15:04:05"), up.ID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 // AutomaticHealthCheckRecord represents a batch insert record
 type AutomaticHealthCheckRecord struct {
 	FilePath         string
@@ -1111,8 +1208,8 @@ func (r *HealthRepository) BatchAddAutomaticHealthChecks(ctx context.Context, re
 	}
 
 	// SQLite has a limit on the number of parameters (typically 999)
-	// Process in batches of 200 records (4 params each = 800 params per batch)
-	const batchSize = 200
+	// Process in batches of 150 records (6 params each = 900 params per batch)
+	const batchSize = 150
 
 	for i := 0; i < len(records); i += batchSize {
 		end := i + batchSize
@@ -1140,18 +1237,16 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 	args := make([]interface{}, 0, len(records)*5)
 
 	for i, record := range records {
-		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 1, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
-		var releaseDateUTC, scheduledCheckAtUTC *time.Time
+		valueStrings[i] = "(?, ?, ?, datetime('now'), 0, 2, 0, 3, ?, ?, ?, datetime('now'), datetime('now'))"
+		var releaseDateStr, scheduledCheckAtStr interface{} = nil, nil
 		if record.ReleaseDate != nil {
-			t := record.ReleaseDate.UTC()
-			releaseDateUTC = &t
+			releaseDateStr = record.ReleaseDate.UTC().Format("2006-01-02 15:04:05")
 		}
 		if record.ScheduledCheckAt != nil {
-			t := record.ScheduledCheckAt.UTC()
-			scheduledCheckAtUTC = &t
+			scheduledCheckAtStr = record.ScheduledCheckAt.UTC().Format("2006-01-02 15:04:05")
 		}
 
-		args = append(args, record.FilePath, record.LibraryPath, HealthStatusHealthy, record.SourceNzbPath, releaseDateUTC, scheduledCheckAtUTC)
+		args = append(args, record.FilePath, record.LibraryPath, HealthStatusHealthy, record.SourceNzbPath, releaseDateStr, scheduledCheckAtStr)
 	}
 
 	query := fmt.Sprintf(`

@@ -1,5 +1,6 @@
-import { AlertTriangle, Plus, Save } from "lucide-react";
+import { AlertTriangle, Plus, Save, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useRegisterArrsWebhooks } from "../../hooks/useApi";
 import type { ArrsConfig, ArrsInstanceConfig, ArrsType, ConfigResponse } from "../../types/config";
 import ArrsInstanceCard from "./ArrsInstanceCard";
 
@@ -15,6 +16,7 @@ interface NewInstanceForm {
 	type: ArrsType;
 	url: string;
 	api_key: string;
+	category: string;
 	enabled: boolean;
 }
 
@@ -23,6 +25,7 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 	type: "radarr",
 	url: "",
 	api_key: "",
+	category: "",
 	enabled: true,
 };
 
@@ -38,19 +41,41 @@ export function ArrsConfigSection({
 	const [newInstance, setNewInstance] = useState<NewInstanceForm>(DEFAULT_NEW_INSTANCE);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
+	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
+	const [webhookError, setWebhookError] = useState<string | null>(null);
+	const [saveError, setSaveError] = useState<string | null>(null);
+
+	const registerWebhooks = useRegisterArrsWebhooks();
 
 	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		setFormData(config.arrs);
 		setHasChanges(false);
 		setValidationErrors([]);
+		setSaveError(null);
 	}, [config.arrs]);
+
+	const handleRegisterWebhooks = async () => {
+		setWebhookSuccess(null);
+		setWebhookError(null);
+		try {
+			await registerWebhooks.mutateAsync();
+			setWebhookSuccess("Webhook registration triggered successfully.");
+			// Hide success message after 5 seconds
+			setTimeout(() => setWebhookSuccess(null), 5000);
+		} catch (error) {
+			setWebhookError(error instanceof Error ? error.message : "Failed to register webhooks.");
+		}
+	};
 
 	const validateForm = (data: ArrsConfig): string[] => {
 		const errors: string[] = [];
 
 		if (data.enabled) {
-			// Note: mount_path validation is now handled at the root config level
+			// Validate mount_path is configured
+			if (!config.mount_path) {
+				errors.push("Mount Path must be configured in General/System settings before enabling Arrs service");
+			}
 
 			// Validate instances
 			const allInstanceNames = [
@@ -143,7 +168,9 @@ export function ArrsConfigSection({
 				name: newInstance.name,
 				url: newInstance.url,
 				api_key: newInstance.api_key,
+				category: newInstance.category,
 				enabled: newInstance.enabled,
+				sync_interval_hours: 1,
 			},
 		];
 
@@ -159,12 +186,14 @@ export function ArrsConfigSection({
 
 	const handleSave = async () => {
 		if (!onUpdate || validationErrors.length > 0) return;
+		setSaveError(null);
 
 		try {
 			await onUpdate("arrs", formData);
 			setHasChanges(false);
 		} catch (error) {
 			console.error("Failed to save arrs configuration:", error);
+			setSaveError(error instanceof Error ? error.message : "Failed to save configuration");
 		}
 	};
 
@@ -217,6 +246,57 @@ export function ArrsConfigSection({
 					</div>
 				</div>
 			</div>
+
+			{/* Webhooks Auto-Registration */}
+			{formData.enabled && (
+				<div className="card bg-base-200">
+					<div className="card-body">
+						<div className="flex flex-col space-y-4">
+							<div>
+								<h3 className="font-semibold">Connect Webhooks</h3>
+								<p className="text-base-content/70 text-sm">
+									Automatically configure AltMount webhooks in all enabled Radarr and Sonarr
+									instances. This ensures AltMount is notified when files are upgraded or renamed.
+								</p>
+							</div>
+
+							<div className="flex flex-col space-y-4 md:flex-row md:items-end md:space-x-4 md:space-y-0">
+								<fieldset className="fieldset flex-1">
+									<legend className="fieldset-legend">AltMount URL (for webhooks)</legend>
+									<input
+										type="url"
+										className="input w-full"
+										value={formData.webhook_base_url ?? "http://altmount:8080"}
+										onChange={(e) => handleFormChange("webhook_base_url", e.target.value)}
+										placeholder="http://altmount:8080"
+										disabled={isReadOnly}
+									/>
+									<p className="label text-base-content/70 text-xs">
+										The URL ARR instances will use to talk back to AltMount.
+									</p>
+								</fieldset>
+
+								<button
+									type="button"
+									className="btn btn-primary"
+									onClick={handleRegisterWebhooks}
+									disabled={isReadOnly || registerWebhooks.isPending || hasChanges}
+									title={hasChanges ? "Save changes before registering webhooks" : ""}
+								>
+									{registerWebhooks.isPending ? (
+										<span className="loading loading-spinner loading-sm" />
+									) : (
+										<Webhook className="h-4 w-4" />
+									)}
+									Auto-Setup ARR Webhooks
+								</button>
+							</div>
+						</div>
+						{webhookSuccess && <div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>}
+						{webhookError && <div className="alert alert-error mt-4 py-2">{webhookError}</div>}
+					</div>
+				</div>
+			)}
 
 			{/* Queue Cleanup Settings */}
 			{formData.enabled && (
@@ -385,6 +465,17 @@ export function ArrsConfigSection({
 								/>
 							</fieldset>
 
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Download Category (Optional)</legend>
+								<input
+									type="text"
+									className="input"
+									value={newInstance.category}
+									onChange={(e) => setNewInstance((prev) => ({ ...prev, category: e.target.value }))}
+									placeholder={newInstance.type === "radarr" ? "movies" : "tv"}
+								/>
+							</fieldset>
+
 							<label className="label cursor-pointer">
 								<span className="label-text">Enable this instance</span>
 								<input
@@ -438,6 +529,17 @@ export function ArrsConfigSection({
 								</li>
 							))}
 						</ul>
+					</div>
+				</div>
+			)}
+
+			{/* Save Error */}
+			{saveError && (
+				<div className="alert alert-error">
+					<AlertTriangle className="h-6 w-6" />
+					<div>
+						<div className="font-bold">Save Failed</div>
+						<div className="text-sm">{saveError}</div>
 					</div>
 				</div>
 			)}

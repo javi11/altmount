@@ -11,11 +11,12 @@ AltMount's health monitoring system continuously watches for file corruption and
 ### Core Health Settings
 
 Configure health monitoring through the System Configuration interface:
-
-```yaml
-health:
-  enabled: true # Enable health monitoring service
-  library_dir: "/path/to/library" # Path to library directory (required)
+ 
++![Health Monitoring](../../static/img/health_config.png)
++
+ ```yaml
+ health:
+   enabled: true # Enable health monitoring service  library_dir: "/path/to/library" # Path to library directory (required)
   cleanup_orphaned_metadata: false # Enable bidirectional cleanup during sync
   check_interval_seconds: 5 # Worker check interval (default: 5)
   max_connections_for_health_checks: 5 # NNTP connections per check
@@ -67,33 +68,47 @@ When "Cleanup Orphaned Metadata Files" is enabled, the system performs bidirecti
 - **Metadata Cleanup**: Metadata files without corresponding library files are permanently deleted
 - **Library Cleanup**: Files in the library pointing to missing metadata are also deleted
 - **Bidirectional Process**: This ensures consistency between metadata and library:
-  - If library file exists but metadata is missing → library file deleted
-  - If metadata exists but library file is missing → metadata deleted
-- **Use Case**: Keeps your system clean when files are intentionally removed from either side
-
-**⚠️ Important Considerations:**
-
-- Enable cleanup only if you're certain you want automatic removal of orphaned files
-- Library Directory must be properly configured for cleanup to work
-- Files will be permanently deleted during cleanup operations
-
-**Metadata-Only Sync (Import Strategy: NONE)**
-
-When your import strategy is set to `NONE`, the system performs a simplified metadata-only sync:
-
-- **Metadata-Based Discovery**: Only syncs database with metadata files
-- **Direct Access**: Files accessed directly via WebDAV mount without library intermediary
-- **No Cleanup Operations**: Bidirectional cleanup is not performed since is not needed
-
-**Sync Behavior Comparison:**
-
-| Feature                | Full Sync (Symlinks/STRM) | Metadata-Only (NONE) |
-| ---------------------- | ------------------------- | -------------------- |
-| Library Directory Scan | ✅ Yes                    | ❌ No                |
-| Metadata Scan          | ✅ Yes                    | ✅ Yes               |
-| Import Directory Scan  | ✅ Yes                    | ❌ No                |
-| Bidirectional Cleanup  | ✅ Optional               | ❌ N/A               |
-| Performance            | Moderate                  | Fast                 |
+   - If library file exists but metadata is missing → library file deleted
+   - If metadata exists but library file is missing → metadata deleted
++- **Recovery**: Metadata can be recreated during re-import if files are re-downloaded
+ - **Use Case**: Keeps your system clean when files are intentionally removed from either side
+ 
+ **⚠️ Important Considerations:**
+@@ -76,24 +79,29 @@ When "Cleanup Orphaned Metadata Files" is enabled, the system performs bidirecti
+ - Enable cleanup only if you're certain you want automatic removal of orphaned files
+ - Library Directory must be properly configured for cleanup to work
+ - Files will be permanently deleted during cleanup operations
++- Consider disabling during migration or testing phases
+ 
+ **Metadata-Only Sync (Import Strategy: NONE)**
+ 
+ When your import strategy is set to `NONE`, the system performs a simplified metadata-only sync:
+ 
++- **No Library Scanning**: Skips library directory scanning entirely
+ - **Metadata-Based Discovery**: Only syncs database with metadata files
+ - **Direct Access**: Files accessed directly via WebDAV mount without library intermediary
+-- **No Cleanup Operations**: Bidirectional cleanup is not performed since is not needed
++- **Library Path**: Health records have `library_path` set to `null`
++- **No Cleanup Operations**: Bidirectional cleanup is not performed (no library to sync with)
++- **Use Case**: Ideal when using WebDAV mount directly without symlinks or STRM files
+ 
+ **Sync Behavior Comparison:**
+ 
+-| Feature                | Full Sync (Symlinks/STRM) | Metadata-Only (NONE) |
+-| ---------------------- | ------------------------- | -------------------- |
+-| Library Directory Scan | ✅ Yes                    | ❌ No                |
+-| Metadata Scan          | ✅ Yes                    | ✅ Yes               |
+-| Import Directory Scan  | ✅ Yes                    | ❌ No                |
+-| Bidirectional Cleanup  | ✅ Optional               | ❌ N/A               |
+-| Performance            | Moderate                  | Fast                 |
++| Feature | Full Sync (Symlinks/STRM) | Metadata-Only (NONE) |
++---------|---------------------------|----------------------|
++| Library Directory Scan | ✅ Yes | ❌ No |
++| Metadata Scan | ✅ Yes | ✅ Yes |
++| Import Directory Scan | ✅ Yes | ❌ No |
++| Bidirectional Cleanup | ✅ Optional | ❌ N/A |
++| Library Path Tracking | ✅ Yes | ❌ Null |
++| Performance | Moderate | Fast |
 
 ### Health Check Scheduling
 

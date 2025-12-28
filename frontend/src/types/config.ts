@@ -56,10 +56,10 @@ export interface StreamingConfig {
 
 // Health configuration
 export interface HealthConfig {
-	enabled: boolean;
+	enabled?: boolean;
 	library_dir?: string;
-	cleanup_orphaned_files?: boolean; // Clean up orphaned library files and metadata
-	check_interval_seconds?: number; // Interval in seconds (optional)
+	cleanup_orphaned_metadata?: boolean;
+	check_interval_seconds?: number;
 	max_connections_for_health_checks?: number;
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
@@ -177,8 +177,10 @@ export interface ImportConfig {
 	max_import_connections: number;
 	import_cache_size_mb: number;
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
+	read_timeout_seconds: number;
 	import_strategy: ImportStrategy;
-	import_dir?: string;
+	import_dir?: string | null;
+	skip_health_check?: boolean;
 }
 
 // Log configuration
@@ -212,6 +214,7 @@ export interface ProviderConfig {
 export interface SABnzbdConfig {
 	enabled: boolean;
 	complete_dir: string;
+	download_client_base_url?: string;
 	categories: SABnzbdCategory[];
 	fallback_host?: string;
 	fallback_api_key?: string; // Obfuscated when returned from API
@@ -348,7 +351,8 @@ export interface ImportUpdateRequest {
 	queue_processing_interval_seconds?: number; // Interval in seconds for queue processing
 	allowed_file_extensions?: string[];
 	import_strategy?: ImportStrategy;
-	import_dir?: string;
+	import_dir?: string | null;
+	skip_health_check?: boolean;
 }
 
 // Log update request
@@ -597,6 +601,7 @@ export interface ArrsInstanceConfig {
 	name: string;
 	url: string;
 	api_key: string;
+	category?: string;
 	enabled: boolean;
 	sync_interval_hours: number;
 }
@@ -608,6 +613,7 @@ export interface ArrsInstance {
 	type: ArrsType;
 	url: string;
 	api_key: string;
+	category?: string;
 	enabled: boolean;
 	sync_interval_hours: number;
 	last_sync_at?: string;
@@ -618,6 +624,7 @@ export interface ArrsInstance {
 export interface ArrsConfig {
 	enabled: boolean;
 	max_workers: number;
+	webhook_base_url?: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
@@ -655,6 +662,7 @@ export interface SyncResult {
 export interface ArrsFormData {
 	enabled: boolean;
 	max_workers: number;
+	webhook_base_url?: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
 }

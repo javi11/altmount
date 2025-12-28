@@ -43,6 +43,7 @@ type Server struct {
 	userRepo            *database.UserRepository
 	configManager       ConfigManager
 	metadataReader      *metadata.MetadataReader
+	metadataService     *metadata.MetadataService
 	nzbFilesystem       *nzbfilesystem.NzbFilesystem
 	healthWorker        *health.HealthWorker
 	librarySyncWorker   *health.LibrarySyncWorker
@@ -67,6 +68,7 @@ func NewServer(
 	userRepo *database.UserRepository,
 	configManager ConfigManager,
 	metadataReader *metadata.MetadataReader,
+	metadataService *metadata.MetadataService,
 	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	poolManager pool.Manager,
 	importService *importer.Service,
@@ -88,6 +90,7 @@ func NewServer(
 		userRepo:            userRepo,
 		configManager:       configManager,
 		metadataReader:      metadataReader,
+		metadataService:     metadataService,
 		nzbFilesystem:       nzbFilesystem,
 		importerService:     importService, // Will be set later via SetImporterService
 		poolManager:         poolManager,
@@ -132,6 +135,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/nzbdav", s.handleImportNzbdav)
 	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
 	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
+	api.Post("/arrs/webhook", s.handleArrsWebhook)
 
 	// Apply global middleware
 	api.Use(cors.New())
@@ -187,6 +191,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/health/corrupted", s.handleListCorrupted)
 	api.Get("/health/stats", s.handleGetHealthStats)
 	api.Delete("/health/cleanup", s.handleCleanupHealth)
+	api.Post("/health/reset-all", s.handleResetAllHealthChecks)
 	api.Post("/health/check", s.handleAddHealthCheck)
 	api.Get("/health/worker/status", s.handleGetHealthWorkerStatus)
 	api.Post("/health/:id/repair", s.handleRepairHealth)
@@ -247,6 +252,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/arrs/instances/test", s.handleTestArrsConnection)
 	api.Get("/arrs/stats", s.handleGetArrsStats)
 	api.Get("/arrs/health", s.handleGetArrsHealth)
+	api.Post("/arrs/webhook/register", s.handleRegisterArrsWebhooks)
+	api.Post("/arrs/download-client/register", s.handleRegisterArrsDownloadClients)
+	api.Post("/arrs/download-client/test", s.handleTestArrsDownloadClients)
 
 	// Direct authentication endpoints (converted to native Fiber)
 	api.Post("/auth/login", s.handleDirectLogin)

@@ -20,7 +20,6 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/nntppool/v2"
 	"github.com/javi11/nntppool/v2/pkg/nntpcli"
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
@@ -67,6 +66,11 @@ func NewParser(poolManager pool.Manager) *Parser {
 // ParseFile parses an NZB file from a reader
 func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*ParsedNzb, error) {
 	ctx = slogutil.With(ctx, "nzb_path", nzbPath)
+
+	// Add a safety timeout for the entire parsing process
+	// Parsing large NZBs with many missing articles can sometimes hang in NNTP body fetching
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 
 	n, err := nzbparser.Parse(r)
 	if err != nil {
@@ -155,6 +159,12 @@ func (p *Parser) ParseFile(ctx context.Context, r io.Reader, nzbPath string) (*P
 	// This already filters out PAR2 files
 	fileInfos := fileinfo.GetFileInfos(filesWithFirstSegment, par2Descriptors)
 	if len(fileInfos) == 0 {
+		p.log.WarnContext(ctx, "Failed to get file infos from network, falling back to NZB XML data",
+			"nzb_path", nzbPath)
+		fileInfos = p.fallbackGetFileInfos(n.Files)
+	}
+
+	if len(fileInfos) == 0 {
 		return nil, NewNonRetryableError("NZB file contains no valid files. This can be caused because the file has missing segments in your providers.", nil)
 	}
 
@@ -241,10 +251,6 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 			p.log.WarnContext(ctx, "Failed to normalize segment sizes with yEnc headers",
 				"error", err,
 				"segments", len(info.NzbFile.Segments))
-
-			if errors.Is(err, nntppool.ErrArticleNotFoundInProviders) {
-				return nil, NewNonRetryableError(fmt.Sprintf("failed to fetch yEnc headers: missing articles in all providers: %s", info.NzbFile.Subject), err)
-			}
 		}
 	}
 
@@ -265,6 +271,17 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 	if info.FileSize != nil {
 		totalSize = *info.FileSize
+	}
+
+	// Sanity check: Ensure totalSize is at least the sum of its segments.
+	// This prevents "seek beyond file size" errors when yEnc headers report incorrect sizes.
+	var segmentSum int64
+	for _, seg := range info.NzbFile.Segments {
+		segmentSum += int64(seg.Bytes)
+	}
+
+	if totalSize < segmentSum {
+		totalSize = segmentSum
 	}
 
 	// Usenet Drive files parsing
@@ -651,7 +668,6 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	if err != nil {
 		return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
 	}
-	lastPartSize := int64(lastPartHeaders.PartSize)
 
 	// Apply the sizes:
 	// - First segment: use its actual size
@@ -663,9 +679,44 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 	}
 
 	// - Last segment: use its actual size
-	segments[lastSegmentIndex].Bytes = int(lastPartSize)
+	segments[lastSegmentIndex].Bytes = int(lastPartHeaders.PartSize)
 
 	return nil
+}
+
+// fallbackGetFileInfos is a "dumb" fallback that extracts file info directly from NZB XML
+// without any network validation. This is used when the first segments are missing.
+func (p *Parser) fallbackGetFileInfos(files []nzbparser.NzbFile) []*fileinfo.FileInfo {
+	fileInfos := make([]*fileinfo.FileInfo, 0)
+
+	for i, file := range files {
+		// Basic PAR2 skip
+		if fileinfo.IsPar2File(file.Filename) {
+			continue
+		}
+
+		// Calculate basic size from segments
+		var size int64
+		for _, seg := range file.Segments {
+			size += int64(seg.Bytes)
+		}
+
+		// Create a basic FileInfo
+		info := &fileinfo.FileInfo{
+			NzbFile:       file,
+			Filename:      file.Filename,
+			ReleaseDate:   time.Unix(int64(file.Date), 0),
+			IsPar2Archive: false,
+			FileSize:      &size,
+			IsRar:         fileinfo.HasRarMagic(nil) || fileinfo.IsRarFile(file.Filename),
+			Is7z:          fileinfo.Is7zFile(file.Filename),
+			OriginalIndex: i,
+		}
+
+		fileInfos = append(fileInfos, info)
+	}
+
+	return fileInfos
 }
 
 // determineNzbType analyzes the parsed files to determine the NZB type

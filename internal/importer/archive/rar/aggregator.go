@@ -94,6 +94,7 @@ func ProcessArchive(
 	maxValidationGoroutines int,
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
+	timeout time.Duration,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -214,6 +215,7 @@ func ProcessArchive(
 			maxValidationGoroutines,
 			segmentSamplePercentage,
 			offsetTracker, // Real-time segment progress with cumulative offset
+			timeout,
 		); err != nil {
 			slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", baseFilename)
 
