@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -28,6 +29,7 @@ func ValidateSegmentsForFile(
 	maxGoroutines int,
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
+	timeout time.Duration,
 ) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments provided for file %s", filename)
@@ -76,7 +78,7 @@ func ValidateSegmentsForFile(
 	}
 
 	// Validate segment availability using shared validation logic
-	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, samplePercentage, progressTracker); err != nil {
+	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, samplePercentage, progressTracker, timeout); err != nil {
 		return err
 	}
 

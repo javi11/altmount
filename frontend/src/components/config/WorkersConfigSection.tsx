@@ -150,6 +150,24 @@ export function ImportConfigSection({
 					<p className="label">Cache size in MB for archive analysis.</p>
 				</fieldset>
 
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Lenient Import (Skip Health Check)</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Bypass Usenet article validation during import</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.skip_health_check ?? false}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
+						/>
+					</label>
+					<p className="label text-sm">
+						When enabled, files are imported instantly without checking if all segments are available. 
+						This matches behavior from older versions (Alpha 5). Background health checks will still occur later.
+					</p>
+				</fieldset>
+
 				{/* Import Strategy Configuration */}
 				<div className="space-y-4">
 					<div>

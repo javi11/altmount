@@ -96,10 +96,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		rcloneRCClient = mountService.GetManager()
 	}
 
-	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager)
-
 	// 5. Initialize importer and filesystem
 	repos := setupRepositories(ctx, db)
+
+	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, repos.UserRepo)
 
 	// Create progress broadcaster for WebSocket progress updates
 	progressBroadcaster := progress.NewProgressBroadcaster()
@@ -115,6 +115,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	// Wire ARRs service into importer for instant import triggers
 	importerService.SetArrsService(arrsService)
+	importerService.RegisterConfigChangeHandler(configManager)
 	defer func() {
 		logger.Info("Closing importer service")
 		if err := importerService.Close(); err != nil {
@@ -130,7 +131,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
 
 	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
 	if err != nil {
@@ -163,6 +164,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if healthWorker != nil && librarySyncWorker != nil {
 		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker, ctx)
 		healthController.RegisterConfigChangeHandler(configManager)
+
+		// Trigger initial metadata date sync if health is enabled
+		if cfg.Health.Enabled != nil && *cfg.Health.Enabled {
+			healthController.SyncMetadataDates(ctx)
+		}
 	}
 
 	// Start ARRs queue cleanup worker
@@ -198,6 +204,33 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if err := customServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.ErrorContext(ctx, "Custom server error", "error", err)
 			serverErr <- err
+		}
+	}()
+
+	// Trigger automatic webhook registration after server is up
+	go func() {
+		// Wait for server to be fully ready
+		time.Sleep(5 * time.Second)
+		
+		// Use a fresh background context
+		bgCtx := context.Background()
+		
+		// Find an API key to use for the webhook
+		// If we don't have one, we can't register securely
+		apiKey := ""
+		// Internal helper to get first admin key
+		// We'll use the one we just added to arrsService
+		if key := arrsService.GetFirstAdminAPIKey(bgCtx); key != "" {
+			apiKey = key
+		}
+		
+		if apiKey != "" {
+			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration")
+			if err := arrsService.EnsureWebhookRegistration(bgCtx, "http://altmount:8080", apiKey); err != nil {
+				logger.ErrorContext(bgCtx, "Failed to register ARR webhooks on startup", "error", err)
+			}
+		} else {
+			logger.WarnContext(bgCtx, "No admin API key found, skipping automatic webhook registration")
 		}
 	}()
 

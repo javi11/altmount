@@ -384,11 +384,45 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	// Try to get user from context (auth enabled case)
 	user := auth.GetUserFromContext(c)
 
-	// If no user in context, try to get first admin user (auth disabled case)
+	// If no user in context, try to get first user (auth disabled case)
 	if user == nil && s.userRepo != nil {
 		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
-		if err == nil && len(users) > 0 {
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"success": false,
+				"message": "Failed to retrieve user list",
+				"details": err.Error(),
+			})
+		}
+		if len(users) > 0 {
 			user = users[0]
+		}
+	}
+
+	// If still no user, and authentication is disabled, let's create a default admin user
+	if user == nil && s.userRepo != nil {
+		cfg := s.configManager.GetConfig()
+		loginRequired := true
+		if cfg.Auth.LoginRequired != nil {
+			loginRequired = *cfg.Auth.LoginRequired
+		}
+
+		if !loginRequired {
+			// Auto-bootstrap a default admin user when auth is disabled
+			user = &database.User{
+				UserID:   "admin",
+				Provider: "direct",
+				IsAdmin:  true,
+			}
+			err := s.userRepo.CreateUser(c.Context(), user)
+			if err != nil {
+				return c.Status(500).JSON(fiber.Map{
+					"success": false,
+					"message": "Failed to bootstrap default admin user",
+					"details": err.Error(),
+				})
+			}
+			slog.InfoContext(c.Context(), "Bootstrapped default admin user for API key generation")
 		}
 	}
 
@@ -396,7 +430,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	if user == nil {
 		return c.Status(401).JSON(fiber.Map{
 			"success": false,
-			"message": "No user found",
+			"message": "No user found to regenerate API key for. Please register first.",
 		})
 	}
 

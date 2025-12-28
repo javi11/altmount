@@ -30,11 +30,13 @@ export function HealthConfigSection({
 
 	// Validate form data
 	const validateFormData = (data: HealthConfig): string => {
-		if (data.enabled && !data.library_dir?.trim()) {
-			return "Library Directory is required when Health System is enabled";
-		}
-		if (data.cleanup_orphaned_files && !data.library_dir?.trim()) {
-			return "Library Directory is required when file cleanup is enabled";
+		if (config.import.import_strategy !== "NONE") {
+			if (data.enabled && !data.library_dir?.trim()) {
+				return `Library Directory is required when Health System is enabled with ${config.import.import_strategy} strategy`;
+			}
+			if (data.cleanup_orphaned_metadata && !data.library_dir?.trim()) {
+				return "Library Directory is required when file cleanup is enabled";
+			}
 		}
 		return "";
 	};
@@ -153,14 +155,26 @@ export function HealthConfigSection({
 							<span className="text-sm">{validationError}</span>
 						</div>
 					)}
-					<p className="label text-sm">
-						Path to your organized media library that contains symlinks pointing to altmount files.
-						When a repair is triggered, the system will search for symlinks in this directory and
-						use the library path for ARR rescan instead of the mount path.
-						{formData.enabled && (
-							<strong className="text-error"> Required when Health System is enabled.</strong>
+					<div className="label text-sm whitespace-normal flex-col items-start">
+						<div>
+							Path to your organized media library that contains symlinks pointing to
+							altmount files. When a repair is triggered, the system will search for
+							symlinks in this directory and use the library path for ARR rescan instead
+							of the mount path.
+						</div>
+						{config.import.import_strategy === "NONE" && (
+							<span className="mt-1 text-info">
+								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy,
+								you can leave this empty. The system will use your mount path for repairs.
+							</span>
 						)}
-					</p>
+						{formData.enabled && config.import.import_strategy !== "NONE" && (
+							<strong className="text-error mt-1">
+								Required when Health System is enabled with {config.import.import_strategy}{" "}
+								strategy.
+							</strong>
+						)}
+					</div>
 				</fieldset>
 
 				<fieldset className="fieldset">
@@ -170,12 +184,12 @@ export function HealthConfigSection({
 						<input
 							type="checkbox"
 							className="checkbox"
-							checked={formData.cleanup_orphaned_files ?? false}
+							checked={formData.cleanup_orphaned_metadata ?? false}
 							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("cleanup_orphaned_files", e.target.checked)}
+							onChange={(e) => handleInputChange("cleanup_orphaned_metadata", e.target.checked)}
 						/>
 					</label>
-					{formData.cleanup_orphaned_files && !formData.library_dir?.trim() && (
+					{formData.cleanup_orphaned_metadata && !formData.library_dir?.trim() && (
 						<div className="alert alert-warning mt-2">
 							<AlertTriangle className="h-4 w-4" />
 							<span className="text-sm">
@@ -183,7 +197,7 @@ export function HealthConfigSection({
 							</span>
 						</div>
 					)}
-					{formData.cleanup_orphaned_files && formData.library_dir?.trim() && (
+					{formData.cleanup_orphaned_metadata && formData.library_dir?.trim() && (
 						<div className="alert alert-warning mt-2">
 							<AlertTriangle className="h-4 w-4" />
 							<div className="text-sm">
@@ -193,16 +207,24 @@ export function HealthConfigSection({
 							</div>
 						</div>
 					)}
-					<p className="label text-sm">
-						Automatically delete orphaned library files and metadata during library sync. When
-						disabled, no files will be deleted.
-						{formData.cleanup_orphaned_files && (
-							<strong className="text-warning">
-								{" "}
-								Requires Library Directory to be configured.
-							</strong>
+					<div className="label text-sm whitespace-normal flex-col items-start">
+						<div>
+							Automatically delete orphaned library files and metadata during library sync.
+							When disabled, no files will be deleted.
+						</div>
+						{formData.cleanup_orphaned_metadata &&
+							config.import.import_strategy !== "NONE" && (
+								<strong className="text-warning mt-1">
+									Requires Library Directory to be configured.
+								</strong>
+							)}
+						{config.import.import_strategy === "NONE" && (
+							<span className="mt-1 text-info">
+								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system only
+								performs metadata-only sync. It will not delete library files.
+							</span>
 						)}
-					</p>
+					</div>
 
 					{/* Dry Run Button */}
 					<div className="mt-4">
