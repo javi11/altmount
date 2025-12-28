@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/javi11/nntppool/v2"
+	"github.com/jinzhu/copier"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -324,241 +325,21 @@ type ArrsInstanceConfig struct {
 	SyncIntervalHours *int   `yaml:"sync_interval_hours" mapstructure:"sync_interval_hours" json:"sync_interval_hours,omitempty"`
 }
 
-// DeepCopy returns a deep copy of the configuration
+// DeepCopy returns a deep copy of the configuration using the copier library.
+// This handles all pointer fields, slices, and maps automatically.
 func (c *Config) DeepCopy() *Config {
 	if c == nil {
 		return nil
 	}
 
-	// Start with a shallow copy of value fields
-	copyCfg := *c
-
-	// Deep copy Auth.LoginRequired pointer
-	if c.Auth.LoginRequired != nil {
-		v := *c.Auth.LoginRequired
-		copyCfg.Auth.LoginRequired = &v
-	} else {
-		copyCfg.Auth.LoginRequired = nil
+	copyCfg := &Config{}
+	if err := copier.CopyWithOption(copyCfg, c, copier.Option{DeepCopy: true}); err != nil {
+		// Fallback to shallow copy if deep copy fails (should not happen)
+		shallowCopy := *c
+		return &shallowCopy
 	}
 
-	// Deep copy Health.Enabled pointer
-	if c.Health.Enabled != nil {
-		v := *c.Health.Enabled
-		copyCfg.Health.Enabled = &v
-	} else {
-		copyCfg.Health.Enabled = nil
-	}
-
-	// Deep copy Health.LibraryDir pointer
-	if c.Health.LibraryDir != nil {
-		v := *c.Health.LibraryDir
-		copyCfg.Health.LibraryDir = &v
-	} else {
-		copyCfg.Health.LibraryDir = nil
-	}
-
-	// Deep copy Health.CleanupOrphanedMetadata pointer
-	if c.Health.CleanupOrphanedMetadata != nil {
-		v := *c.Health.CleanupOrphanedMetadata
-		copyCfg.Health.CleanupOrphanedMetadata = &v
-	} else {
-		copyCfg.Health.CleanupOrphanedMetadata = nil
-	}
-
-	// Deep copy Health.ResolveRepairOnImport pointer
-	if c.Health.ResolveRepairOnImport != nil {
-		v := *c.Health.ResolveRepairOnImport
-		copyCfg.Health.ResolveRepairOnImport = &v
-	} else {
-		copyCfg.Health.ResolveRepairOnImport = nil
-	}
-
-	// Deep copy Health.ResolveRepairOnImport pointer
-	if c.Health.ResolveRepairOnImport != nil {
-		v := *c.Health.ResolveRepairOnImport
-		copyCfg.Health.ResolveRepairOnImport = &v
-	} else {
-		copyCfg.Health.ResolveRepairOnImport = nil
-	}
-
-	// Deep copy Metadata.DeleteSourceNzbOnRemoval pointer
-	if c.Metadata.DeleteSourceNzbOnRemoval != nil {
-		v := *c.Metadata.DeleteSourceNzbOnRemoval
-		copyCfg.Metadata.DeleteSourceNzbOnRemoval = &v
-	} else {
-		copyCfg.Metadata.DeleteSourceNzbOnRemoval = nil
-	}
-
-	// Deep copy Import.ImportDir pointer
-	if c.Import.ImportDir != nil {
-		v := *c.Import.ImportDir
-		copyCfg.Import.ImportDir = &v
-	} else {
-		copyCfg.Import.ImportDir = nil
-	}
-
-	// Deep copy Import slices
-	if c.Import.AllowedFileExtensions != nil {
-		copyCfg.Import.AllowedFileExtensions = make([]string, len(c.Import.AllowedFileExtensions))
-		copy(copyCfg.Import.AllowedFileExtensions, c.Import.AllowedFileExtensions)
-	}
-
-	// Deep copy Import.SkipHealthCheck pointer
-	if c.Import.SkipHealthCheck != nil {
-		v := *c.Import.SkipHealthCheck
-		copyCfg.Import.SkipHealthCheck = &v
-	} else {
-		copyCfg.Import.SkipHealthCheck = nil
-	}
-
-	// Deep copy RClone.RCEnabled pointer
-	if c.RClone.RCEnabled != nil {
-		v := *c.RClone.RCEnabled
-		copyCfg.RClone.RCEnabled = &v
-	} else {
-		copyCfg.RClone.RCEnabled = nil
-	}
-
-	// Deep copy RClone.MountEnabled pointer
-	if c.RClone.MountEnabled != nil {
-		v := *c.RClone.MountEnabled
-		copyCfg.RClone.MountEnabled = &v
-	} else {
-		copyCfg.RClone.MountEnabled = nil
-	}
-
-	// Deep copy RClone.MountOptions map
-	if c.RClone.MountOptions != nil {
-		copyCfg.RClone.MountOptions = make(map[string]string, len(c.RClone.MountOptions))
-		for k, v := range c.RClone.MountOptions {
-			copyCfg.RClone.MountOptions[k] = v
-		}
-	} else {
-		copyCfg.RClone.MountOptions = nil
-	}
-
-	// Deep copy Providers slice and their pointer fields
-	if c.Providers != nil {
-					copyCfg.Providers = make([]ProviderConfig, len(c.Providers))
-				for i, p := range c.Providers {
-					pc := p // copy struct value
-					if p.Enabled != nil {
-						ev := *p.Enabled
-						pc.Enabled = &ev
-					} else {
-						pc.Enabled = nil
-					}
-					if p.IsBackupProvider != nil {
-						bv := *p.IsBackupProvider
-						pc.IsBackupProvider = &bv
-					} else {
-						pc.IsBackupProvider = nil
-					}
-					if p.LastSpeedTestTime != nil {
-						tv := *p.LastSpeedTestTime
-						pc.LastSpeedTestTime = &tv
-					} else {
-						pc.LastSpeedTestTime = nil
-					}
-					// LastSpeedTestMbps is a value type, directly copied by `pc := p`
-					copyCfg.Providers[i] = pc
-				}
-			} else {
-				copyCfg.Providers = nil
-			}
-	// Deep copy SABnzbd.Enabled pointer
-	if c.SABnzbd.Enabled != nil {
-		v := *c.SABnzbd.Enabled
-		copyCfg.SABnzbd.Enabled = &v
-	} else {
-		copyCfg.SABnzbd.Enabled = nil
-	}
-
-	// Deep copy SABnzbd Categories slice
-	if c.SABnzbd.Categories != nil {
-		copyCfg.SABnzbd.Categories = make([]SABnzbdCategory, len(c.SABnzbd.Categories))
-		copy(copyCfg.SABnzbd.Categories, c.SABnzbd.Categories)
-	} else {
-		copyCfg.SABnzbd.Categories = nil
-	}
-
-	// Copy SABnzbd fallback settings
-	copyCfg.SABnzbd.FallbackHost = c.SABnzbd.FallbackHost
-	copyCfg.SABnzbd.FallbackAPIKey = c.SABnzbd.FallbackAPIKey
-
-	// Deep copy Arrs.Enabled pointer
-	if c.Arrs.Enabled != nil {
-		v := *c.Arrs.Enabled
-		copyCfg.Arrs.Enabled = &v
-	} else {
-		copyCfg.Arrs.Enabled = nil
-	}
-
-	// Deep copy Arrs.QueueCleanupEnabled pointer
-	if c.Arrs.QueueCleanupEnabled != nil {
-		v := *c.Arrs.QueueCleanupEnabled
-		copyCfg.Arrs.QueueCleanupEnabled = &v
-	} else {
-		copyCfg.Arrs.QueueCleanupEnabled = nil
-	}
-
-	// DeepCopy Fuse.Enabled pointer
-	if c.Fuse.Enabled != nil {
-		v := *c.Fuse.Enabled
-		copyCfg.Fuse.Enabled = &v
-	} else {
-		copyCfg.Fuse.Enabled = nil
-	}
-
-	// Deep copy Scraper Radarr instances
-	if c.Arrs.RadarrInstances != nil {
-		copyCfg.Arrs.RadarrInstances = make([]ArrsInstanceConfig, len(c.Arrs.RadarrInstances))
-		for i, inst := range c.Arrs.RadarrInstances {
-			ic := inst // copy struct value
-			if inst.Enabled != nil {
-				ev := *inst.Enabled
-				ic.Enabled = &ev
-			} else {
-				ic.Enabled = nil
-			}
-			if inst.SyncIntervalHours != nil {
-				iv := *inst.SyncIntervalHours
-				ic.SyncIntervalHours = &iv
-			} else {
-				ic.SyncIntervalHours = nil
-			}
-
-			copyCfg.Arrs.RadarrInstances[i] = ic
-		}
-	} else {
-		copyCfg.Arrs.RadarrInstances = nil
-	}
-
-	// Deep copy Scraper Sonarr instances
-	if c.Arrs.SonarrInstances != nil {
-		copyCfg.Arrs.SonarrInstances = make([]ArrsInstanceConfig, len(c.Arrs.SonarrInstances))
-		for i, inst := range c.Arrs.SonarrInstances {
-			ic := inst // copy struct value
-			if inst.Enabled != nil {
-				ev := *inst.Enabled
-				ic.Enabled = &ev
-			} else {
-				ic.Enabled = nil
-			}
-			if inst.SyncIntervalHours != nil {
-				iv := *inst.SyncIntervalHours
-				ic.SyncIntervalHours = &iv
-			} else {
-				ic.SyncIntervalHours = nil
-			}
-
-			copyCfg.Arrs.SonarrInstances[i] = ic
-		}
-	} else {
-		copyCfg.Arrs.SonarrInstances = nil
-	}
-
-	return &copyCfg
+	return copyCfg
 }
 
 // Validate validates the configuration

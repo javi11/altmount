@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/httpclient"
 )
 
 // Manager handles the rclone RC server and provides mount operations
@@ -78,7 +79,7 @@ func NewManager(cfm *config.Manager) *Manager {
 		logger:      logger,
 		ctx:         ctx,
 		cancel:      cancel,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  httpclient.NewDefault(),
 		serverReady: make(chan struct{}),
 	}
 }

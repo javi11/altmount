@@ -920,6 +920,158 @@ func BadExample(ctx context.Context) {
 - ❌ Routine operations in loops
 - ❌ Successful validation steps
 
+### API Response Format
+
+All REST API endpoints use a unified response format. Use the response builder functions from `internal/api/response.go`.
+
+**Success Response Format:**
+
+```json
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+**Success with Pagination:**
+
+```json
+{
+  "success": true,
+  "data": [ ... ],
+  "meta": {
+    "total": 100,
+    "page": 1,
+    "page_size": 20,
+    "total_pages": 5
+  }
+}
+```
+
+**Error Response Format:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human readable message",
+    "details": "Additional context or technical details"
+  }
+}
+```
+
+**Response Builder Functions:**
+
+```go
+import "github.com/javi11/altmount/internal/api"
+
+// ✅ Good: Use response builders
+func (s *Server) handleGetItem(c *fiber.Ctx) error {
+    item, err := s.repo.GetItem(c.Context(), id)
+    if err != nil {
+        return api.RespondInternalError(c, "Failed to get item", err.Error())
+    }
+    if item == nil {
+        return api.RespondNotFound(c, "Item", "")
+    }
+    return api.RespondSuccess(c, item)
+}
+
+// ❌ Avoid: Inline JSON responses
+func (s *Server) handleGetItem(c *fiber.Ctx) error {
+    item, err := s.repo.GetItem(c.Context(), id)
+    if err != nil {
+        return c.Status(500).JSON(fiber.Map{
+            "success": false,
+            "message": "Failed to get item",
+        })
+    }
+    return c.Status(200).JSON(fiber.Map{
+        "success": true,
+        "data": item,
+    })
+}
+```
+
+**Available Response Builders:**
+
+| Function | HTTP Status | Use Case |
+|----------|-------------|----------|
+| `RespondSuccess(c, data)` | 200 | Successful response with data |
+| `RespondSuccessWithMeta(c, data, meta)` | 200 | Paginated list responses |
+| `RespondCreated(c, data)` | 201 | Resource created successfully |
+| `RespondNoContent(c)` | 204 | Successful deletion, no body |
+| `RespondMessage(c, message)` | 200 | Success with message only |
+| `RespondBadRequest(c, message, details)` | 400 | Invalid request syntax |
+| `RespondValidationError(c, message, details)` | 400 | Validation failures |
+| `RespondUnauthorized(c, message, details)` | 401 | Authentication required |
+| `RespondForbidden(c, message, details)` | 403 | Insufficient permissions |
+| `RespondNotFound(c, resource, details)` | 404 | Resource not found |
+| `RespondConflict(c, message, details)` | 409 | Resource conflict |
+| `RespondInternalError(c, message, details)` | 500 | Server errors |
+| `RespondServiceUnavailable(c, message, details)` | 503 | Service unavailable |
+
+**Error Codes:**
+
+Standard error codes are defined in `internal/api/errors.go`:
+
+- `BAD_REQUEST` - Invalid request format
+- `VALIDATION_ERROR` - Validation failures
+- `UNAUTHORIZED` - Authentication required
+- `FORBIDDEN` - Insufficient permissions
+- `NOT_FOUND` - Resource not found
+- `CONFLICT` - Resource conflict
+- `INTERNAL_SERVER_ERROR` - Server errors
+
+**Example Handler Migration:**
+
+```go
+// Before (inline responses)
+func (s *Server) handleDeleteItem(c *fiber.Ctx) error {
+    id := c.Params("id")
+    if id == "" {
+        return c.Status(400).JSON(fiber.Map{
+            "success": false,
+            "error": fiber.Map{
+                "code":    "BAD_REQUEST",
+                "message": "Item ID is required",
+                "details": "",
+            },
+        })
+    }
+
+    if err := s.repo.Delete(c.Context(), id); err != nil {
+        return c.Status(500).JSON(fiber.Map{
+            "success": false,
+            "error": fiber.Map{
+                "code":    "INTERNAL_SERVER_ERROR",
+                "message": "Failed to delete item",
+                "details": err.Error(),
+            },
+        })
+    }
+
+    return c.SendStatus(204)
+}
+
+// After (response builders)
+func (s *Server) handleDeleteItem(c *fiber.Ctx) error {
+    id := c.Params("id")
+    if id == "" {
+        return RespondBadRequest(c, "Item ID is required", "")
+    }
+
+    if err := s.repo.Delete(c.Context(), id); err != nil {
+        return RespondInternalError(c, "Failed to delete item", err.Error())
+    }
+
+    return RespondNoContent(c)
+}
+```
+
+**Note**: SABnzbd API handlers (`sabnzbd_handlers.go`) use a different response format for API compatibility with SABnzbd clients and should NOT use these builders.
+
 ---
 
 This document should be updated as the project evolves and new patterns emerge.

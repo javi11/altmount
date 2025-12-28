@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/archive"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
@@ -17,14 +18,6 @@ import (
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/rardecode/v2"
 )
-
-// NewNonRetryableError creates a non-retryable error (defined here to avoid import cycles)
-func NewNonRetryableError(message string, cause error) error {
-	if cause != nil {
-		return fmt.Errorf("%s: %w", message, cause)
-	}
-	return fmt.Errorf("%s", message)
-}
 
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
@@ -81,7 +74,7 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 // Returns an array of files to be added to the metadata with all the info and segments for each file
 func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles []parser.ParsedFile, password string, progressTracker *progress.Tracker) ([]Content, error) {
 	if rh.poolManager == nil {
-		return nil, NewNonRetryableError("no pool manager available", nil)
+		return nil, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
 	// Normalize RAR part filenames (e.g., part010 -> part10) for consistent processing
@@ -163,11 +156,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 			"main_file", mainRarFile)
 
 		// Check if error indicates incomplete RAR archive with missing volume segments
-		return nil, NewNonRetryableError("failed to create archive iterator", err)
+		return nil, errors.NewNonRetryableError("failed to create archive iterator", err)
 	}
 
 	if len(aggregatedFiles) == 0 {
-		return nil, NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
+		return nil, errors.NewNonRetryableError("no valid files found in RAR archive. Compressed or encrypted RARs are not supported", nil)
 	}
 
 	// Validate that no files are compressed
@@ -189,7 +182,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Note: AES credentials are extracted per-file, not per-archive
 	Contents, err := rh.convertAggregatedFilesToRarContent(ctx, aggregatedFiles, normalizedFiles)
 	if err != nil {
-		return nil, NewNonRetryableError("failed to convert iterator results to RarContent", err)
+		return nil, errors.NewNonRetryableError("failed to convert iterator results to RarContent", err)
 	}
 
 	return Contents, nil
@@ -204,7 +197,7 @@ func (rh *rarProcessor) checkForCompressedFiles(aggregatedFiles []rardecode.Arch
 			if file.CompressionMethod != "" {
 				compressionInfo = fmt.Sprintf(" (uses %s compression)", file.CompressionMethod)
 			}
-			return NewNonRetryableError(
+			return errors.NewNonRetryableError(
 				fmt.Sprintf("compressed files are not supported: %s%s", file.Name, compressionInfo),
 				nil,
 			)
@@ -217,7 +210,7 @@ func (rh *rarProcessor) checkForCompressedFiles(aggregatedFiles []rardecode.Arch
 // This method prioritizes .rar files over .part001.rar over .r00 files
 func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 	if len(rarFileNames) == 0 {
-		return "", NewNonRetryableError("no RAR files provided", nil)
+		return "", errors.NewNonRetryableError("no RAR files provided", nil)
 	}
 
 	// If only one file, return it
@@ -255,7 +248,7 @@ func (rh *rarProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
 	}
 
 	if len(candidates) == 0 {
-		return "", NewNonRetryableError("no valid first RAR part found in archive", nil)
+		return "", errors.NewNonRetryableError("no valid first RAR part found in archive", nil)
 	}
 
 	// Sort by priority (lower number = higher priority), then by filename for consistency
@@ -428,7 +421,7 @@ func (rh *rarProcessor) convertAggregatedFilesToRarContent(ctx context.Context, 
 			originalCovered := covered
 			sliced, covered, err = patchMissingSegment(sliced, part.PackedSize, covered)
 			if err != nil {
-				return nil, NewNonRetryableError(
+				return nil, errors.NewNonRetryableError(
 					fmt.Sprintf("incomplete NZB data for %s (part %s): %v",
 						af.Name, filepath.Base(part.Path), err), nil)
 			}
@@ -480,13 +473,13 @@ func patchMissingSegment(segments []*metapb.SegmentData, expectedSize, coveredSi
 
 	// Check if the shortfall is small enough to be a single missing segment
 	if shortfall > maxSingleSegmentSize {
-		return nil, 0, NewNonRetryableError(
+		return nil, 0, errors.NewNonRetryableError(
 			fmt.Sprintf("missing %d bytes exceeds single segment threshold (%d bytes), cannot auto-patch", shortfall, maxSingleSegmentSize), nil)
 	}
 
 	// Check if we have segments to duplicate
 	if len(segments) == 0 {
-		return nil, 0, NewNonRetryableError("no segments available to duplicate for patching", nil)
+		return nil, 0, errors.NewNonRetryableError("no segments available to duplicate for patching", nil)
 	}
 
 	// Duplicate the last segment to fill the gap
@@ -513,7 +506,7 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 		return nil, 0, nil
 	}
 	if dataOffset < 0 {
-		return nil, 0, NewNonRetryableError("negative dataOffset", nil)
+		return nil, 0, errors.NewNonRetryableError("negative dataOffset", nil)
 	}
 
 	targetStart := dataOffset

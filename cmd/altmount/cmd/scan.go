@@ -7,9 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/spf13/cobra"
 )
 
@@ -48,9 +48,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	slog.Info("Triggering library scan", "url", url, "dry_run", dryRun)
 
 	// Create client with timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
+	client := httpclient.NewDefault()
 
 	// Create request
 	req, err := http.NewRequest("POST", url, nil)
