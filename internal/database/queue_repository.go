@@ -284,6 +284,16 @@ func (r *QueueRepository) UpdateQueueItemPriority(ctx context.Context, id int64,
 	return nil
 }
 
+// UpdateQueueItemNzbPath updates the NZB path of a queue item
+func (r *QueueRepository) UpdateQueueItemNzbPath(ctx context.Context, id int64, nzbPath string) error {
+	query := `UPDATE import_queue SET nzb_path = ?, updated_at = datetime('now') WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, nzbPath, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item nzb path: %w", err)
+	}
+	return nil
+}
+
 // GetQueueStats returns current queue statistics
 func (r *QueueRepository) GetQueueStats(ctx context.Context) (*QueueStats, error) {
 	// Count items by status

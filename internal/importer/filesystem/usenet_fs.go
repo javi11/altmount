@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -150,6 +151,10 @@ func (uf *UsenetFile) Stat() (fs.FileInfo, error) {
 }
 
 func (uf *UsenetFile) Read(p []byte) (n int, err error) {
+	// Yield CPU to prevent starvation of other goroutines (e.g. WebDAV server)
+	// during heavy processing loops by external libraries (like rardecode)
+	runtime.Gosched()
+
 	if uf.closed {
 		return 0, fs.ErrClosed
 	}
@@ -232,6 +237,9 @@ func (uf *UsenetFile) Seek(offset int64, whence int) (int64, error) {
 // ReadAt reads len(p) bytes into p starting at offset off in the file
 // It returns the number of bytes read and any error encountered
 func (uf *UsenetFile) ReadAt(p []byte, off int64) (n int, err error) {
+	// Yield CPU to prevent starvation
+	runtime.Gosched()
+
 	if uf.closed {
 		return 0, fs.ErrClosed
 	}
