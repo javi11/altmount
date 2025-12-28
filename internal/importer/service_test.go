@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,7 +55,7 @@ func TestIsDatabaseContentionError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isDatabaseContentionError(tt.err)
+			result := queue.IsDatabaseContentionError(tt.err)
 			assert.Equal(t, tt.expected, result,
 				"isDatabaseContentionError should return %v for error: %v", tt.expected, tt.err)
 		})
@@ -107,7 +108,7 @@ func TestRetryBackoff_ErrorMatching(t *testing.T) {
 	for _, errMsg := range databaseErrors {
 		t.Run("should retry: "+errMsg, func(t *testing.T) {
 			err := errors.New(errMsg)
-			shouldRetry := isDatabaseContentionError(err)
+			shouldRetry := queue.IsDatabaseContentionError(err)
 			assert.True(t, shouldRetry,
 				"Error '%s' should trigger retry", errMsg)
 		})
@@ -116,7 +117,7 @@ func TestRetryBackoff_ErrorMatching(t *testing.T) {
 	for _, errMsg := range nonDatabaseErrors {
 		t.Run("should not retry: "+errMsg, func(t *testing.T) {
 			err := errors.New(errMsg)
-			shouldRetry := isDatabaseContentionError(err)
+			shouldRetry := queue.IsDatabaseContentionError(err)
 			assert.False(t, shouldRetry,
 				"Error '%s' should NOT trigger retry", errMsg)
 		})
@@ -190,7 +191,7 @@ func TestRetryBackoff_SelectiveRetry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := errors.New(tt.errorMessage)
-			result := isDatabaseContentionError(err)
+			result := queue.IsDatabaseContentionError(err)
 
 			assert.Equal(t, tt.shouldRetry, result, tt.description)
 
