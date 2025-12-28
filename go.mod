@@ -17,7 +17,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
-	github.com/javi11/nntppool/v2 v2.3.1
+	github.com/javi11/nntppool/v2 v2.3.0
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
 	github.com/javi11/rardecode/v2 v2.1.2-0.20251031153435-d6d75db6d6ca
@@ -177,7 +177,7 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/mgechev/revive v1.11.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
-	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c // indirect
+	github.com/mnightingale/rapidyenc v0.0.0-20250628164132-aaf36ba945ef // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/moricho/tparallel v0.3.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect

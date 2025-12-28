@@ -457,9 +457,7 @@ func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 	query := `
 		UPDATE import_queue
 		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
-		WHERE status = 'processing'
-		  AND (started_at IS NOT NULL AND datetime(started_at, '+10 minutes') < datetime('now'))
-	`
+		WHERE status = 'processing'`
 
 	result, err := r.db.ExecContext(ctx, query)
 	if err != nil {
