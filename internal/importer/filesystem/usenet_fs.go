@@ -155,18 +155,40 @@ func (uf *UsenetFile) Read(p []byte) (n int, err error) {
 	// during heavy processing loops by external libraries (like rardecode)
 	runtime.Gosched()
 
+	// Check context before proceeding - allows cancellation during archive analysis
+	select {
+	case <-uf.ctx.Done():
+		return 0, uf.ctx.Err()
+	default:
+	}
+
 	if uf.closed {
 		return 0, fs.ErrClosed
 	}
 
 	// Create reader if not exists
 	if uf.reader == nil {
-		reader, err := uf.createUsenetReader(uf.ctx, uf.position, uf.size-1)
+		// Create timeout context for reader creation to prevent indefinite blocking
+		timeout := uf.readTimeout
+		if timeout <= 0 {
+			timeout = 5 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(uf.ctx, timeout)
+		defer cancel()
+
+		reader, err := uf.createUsenetReader(ctx, uf.position, uf.size-1)
 		if err != nil {
 			return 0, fmt.Errorf("failed to create usenet reader: %w", err)
 		}
 
 		uf.reader = reader
+	}
+
+	// Check context again before blocking read
+	select {
+	case <-uf.ctx.Done():
+		return 0, uf.ctx.Err()
+	default:
 	}
 
 	n, err = uf.reader.Read(p)

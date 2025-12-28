@@ -203,7 +203,7 @@ func (s *Service) Pause() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.paused = true
-	s.log.InfoContext(context.Background(), "Import service paused")
+	s.log.InfoContext(s.ctx, "Import service paused")
 }
 
 // Resume resumes the queue processing
@@ -211,7 +211,7 @@ func (s *Service) Resume() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.paused = false
-	s.log.InfoContext(context.Background(), "Import service resumed")
+	s.log.InfoContext(s.ctx, "Import service resumed")
 }
 
 // IsPaused returns whether the service is paused
@@ -250,10 +250,6 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.running = false
 	s.mu.Unlock()
 
-	// Release lock BEFORE waiting to avoid deadlock
-	// Workers call IsPaused() which needs this lock
-	s.mu.Unlock()
-
 	// Wait for all goroutines to finish with timeout
 	done := make(chan struct{})
 	go func() {
@@ -271,11 +267,7 @@ func (s *Service) Stop(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	// Re-acquire lock to update state
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Recreate context for potential restart
+	// Re-acquire lock to recreate context for potential restart
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -311,9 +303,9 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 	defer s.mu.Unlock()
 	s.rcloneClient = client
 	if client != nil {
-		s.log.InfoContext(context.Background(), "RClone client updated for VFS notifications")
+		s.log.InfoContext(s.ctx, "RClone client updated for VFS notifications")
 	} else {
-		s.log.InfoContext(context.Background(), "RClone client disabled")
+		s.log.InfoContext(s.ctx, "RClone client disabled")
 	}
 }
 
@@ -373,7 +365,7 @@ func (s *Service) StartManualScan(scanPath string) error {
 	// Start scanning in goroutine
 	go s.performManualScan(scanCtx, scanPath)
 
-	s.log.InfoContext(context.Background(), "Manual scan started", "path", scanPath)
+	s.log.InfoContext(s.ctx, "Manual scan started", "path", scanPath)
 	return nil
 }
 
@@ -403,7 +395,7 @@ func (s *Service) CancelScan() error {
 		s.scanCancel()
 	}
 
-	s.log.InfoContext(context.Background(), "Manual scan cancellation requested", "path", s.scanInfo.Path)
+	s.log.InfoContext(s.ctx, "Manual scan cancellation requested", "path", s.scanInfo.Path)
 	return nil
 }
 
@@ -497,7 +489,7 @@ func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFil
 						s.importInfo.Total++
 						s.importMu.Unlock()
 
-						item, err := s.createNzbFileAndPrepareItem(res, rootFolder, nzbTempDir)
+						item, err := s.createNzbFileAndPrepareItem(importCtx, res, rootFolder, nzbTempDir)
 						if err != nil {
 							s.log.ErrorContext(importCtx, "Failed to prepare item", "file", res.Name, "error", err)
 							s.importMu.Lock()
@@ -580,7 +572,14 @@ func (s *Service) processQueueBatch(ctx context.Context, batchChan <-chan *datab
 	}
 }
 
-func (s *Service) createNzbFileAndPrepareItem(res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
+func (s *Service) createNzbFileAndPrepareItem(ctx context.Context, res *nzbdav.ParsedNzb, rootFolder, nzbTempDir string) (*database.ImportQueueItem, error) {
+	// Check context before file operations
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Create Temp NZB File
 	// Use ID to ensure uniqueness and avoid collisions with releases having the same name in the temp directory
 	// but don't include it in the filename to avoid it appearing in the final folder/file names
@@ -728,7 +727,7 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 		}
 
 		// Check if already in queue (simplified check during scanning)
-		if s.isFileAlreadyInQueue(path) {
+		if s.isFileAlreadyInQueue(ctx, path) {
 			return nil
 		}
 
@@ -739,7 +738,7 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 		}
 
 		// Add to queue
-		if _, err := s.AddToQueue(path, &scanPath, nil, nil); err != nil {
+		if _, err := s.AddToQueue(ctx, path, &scanPath, nil, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
 		}
 
@@ -763,12 +762,12 @@ func (s *Service) performManualScan(ctx context.Context, scanPath string) {
 }
 
 // isFileAlreadyInQueue checks if file is already in queue (simplified scanning)
-func (s *Service) isFileAlreadyInQueue(filePath string) bool {
+func (s *Service) isFileAlreadyInQueue(ctx context.Context, filePath string) bool {
 	// Only check queue database during scanning for performance
 	// The processor will check main database for duplicates when processing
-	inQueue, err := s.database.Repository.IsFileInQueue(context.Background(), filePath)
+	inQueue, err := s.database.Repository.IsFileInQueue(ctx, filePath)
 	if err != nil {
-		s.log.WarnContext(context.Background(), "Failed to check if file in queue", "file", filePath, "error", err)
+		s.log.WarnContext(ctx, "Failed to check if file in queue", "file", filePath, "error", err)
 		return false // Assume not in queue on error
 	}
 	return inQueue
@@ -816,11 +815,18 @@ func (s *Service) isFileAlreadyProcessed(filePath string, scanRoot string) bool 
 }
 
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
-func (s *Service) AddToQueue(filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error) {
+	// Check context before proceeding
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Calculate file size before adding to queue
 	var fileSize *int64
 	if size, err := s.CalculateFileSizeOnly(filePath); err != nil {
-		s.log.WarnContext(context.Background(), "Failed to calculate file size", "file", filePath, "error", err)
+		s.log.WarnContext(ctx, "Failed to calculate file size", "file", filePath, "error", err)
 		// Continue with NULL file size - don't fail the queue addition
 		fileSize = nil
 	} else {
@@ -845,15 +851,15 @@ func (s *Service) AddToQueue(filePath string, relativePath *string, category *st
 		CreatedAt:    time.Now(),
 	}
 
-	if err := s.database.Repository.AddToQueue(context.Background(), item); err != nil {
-		s.log.ErrorContext(context.Background(), "Failed to add file to queue", "file", filePath, "error", err)
+	if err := s.database.Repository.AddToQueue(ctx, item); err != nil {
+		s.log.ErrorContext(ctx, "Failed to add file to queue", "file", filePath, "error", err)
 		return nil, err
 	}
 
 	if fileSize != nil {
-		s.log.InfoContext(context.Background(), "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
+		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
-		s.log.InfoContext(context.Background(), "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
+		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
 	}
 
 	return item, nil
@@ -1447,7 +1453,7 @@ func (s *Service) UpdateWorkerCount(count int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.log.InfoContext(context.Background(), "Queue worker count update requested - restart required to take effect",
+	s.log.InfoContext(s.ctx, "Queue worker count update requested - restart required to take effect",
 		"current_count", s.config.Workers,
 		"requested_count", count,
 		"running", s.running)
@@ -1474,7 +1480,7 @@ func (s *Service) CancelProcessing(itemID int64) error {
 		return fmt.Errorf("item %d is not currently processing", itemID)
 	}
 
-	s.log.InfoContext(context.Background(), "Cancelling processing for queue item", "item_id", itemID)
+	s.log.InfoContext(s.ctx, "Cancelling processing for queue item", "item_id", itemID)
 	cancel()
 	return nil
 }
@@ -1486,9 +1492,9 @@ func (s *Service) notifyRcloneVFS(ctx context.Context, resultingPath string, asy
 	}
 
 	refreshFunc := func(path string) {
-		// Use background context with timeout for VFS notification
+		// Derive timeout context from parent context for proper cancellation propagation
 		// Increased timeout to 60 seconds as vfs/refresh can be slow
-		refreshCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		refreshCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
 		cfg := s.configGetter()

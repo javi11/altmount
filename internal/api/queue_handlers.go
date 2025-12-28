@@ -769,7 +769,7 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 
 	// For manually uploaded files, pass CompleteDir as the base path (not the temp upload directory)
 	// The category will be appended to this by processNzbItem in the service
-	item, err := s.importerService.AddToQueue(tempFile, basePath, categoryPtr, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority)
 	if err != nil {
 		// Clean up temp file on error
 		os.Remove(tempFile)
@@ -1103,7 +1103,7 @@ func (s *Server) handleAddTestQueueItem(c *fiber.Ctx) error {
 		}
 	}
 
-	item, err := s.importerService.AddToQueue(tempPath, basePath, &category, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempPath, basePath, &category, &priority)
 	if err != nil {
 		os.Remove(tempPath)
 		return c.Status(500).JSON(fiber.Map{

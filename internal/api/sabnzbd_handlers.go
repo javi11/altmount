@@ -326,7 +326,7 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.FormValue("priority"))
-	item, err := s.importerService.AddToQueue(tempFile, &completeDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -424,7 +424,7 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
 	priority := s.parseSABnzbdPriority(c.Query("priority"))
-	item, err := s.importerService.AddToQueue(tempFile, &completeDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
