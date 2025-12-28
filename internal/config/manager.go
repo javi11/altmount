@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/nntppool/v2"
 	"github.com/jinzhu/copier"
 	"github.com/spf13/viper"
@@ -196,76 +197,7 @@ func GenerateProviderID(host string, port int, username string) string {
 	return fmt.Sprintf("%x", hash)[:8] // First 8 characters for readability
 }
 
-// checkDirectoryWritable checks if a directory exists and is writable
-// If the directory doesn't exist, it attempts to create it
-func checkDirectoryWritable(path string) error {
-	if path == "" {
-		return fmt.Errorf("path cannot be empty")
-	}
-
-	// Convert to absolute path for clearer error messages
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		absPath = path // fallback to original if abs fails
-	}
-
-	// Check if path exists
-	info, err := os.Stat(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Directory doesn't exist, try to create it
-			if err := os.MkdirAll(absPath, 0755); err != nil {
-				return fmt.Errorf("directory %s does not exist and cannot be created: %w", absPath, err)
-			}
-		} else {
-			return fmt.Errorf("cannot access directory %s: %w", absPath, err)
-		}
-	} else {
-		// Path exists, check if it's a directory
-		if !info.IsDir() {
-			return fmt.Errorf("path %s exists but is not a directory", absPath)
-		}
-	}
-
-	// Test write permissions by creating a temporary file
-	testFile := filepath.Join(absPath, ".altmount-write-test")
-	file, err := os.Create(testFile)
-	if err != nil {
-		return fmt.Errorf("directory %s is not writable: %w", absPath, err)
-	}
-
-	// Write some test data
-	_, writeErr := file.Write([]byte("test"))
-	file.Close()
-
-	// Clean up test file
-	os.Remove(testFile)
-
-	if writeErr != nil {
-		return fmt.Errorf("directory %s is not writable: %w", absPath, writeErr)
-	}
-
-	return nil
-}
-
-// checkFileDirectoryWritable checks if the directory containing a file path is writable
-func checkFileDirectoryWritable(filePath string, fileType string) error {
-	if filePath == "" {
-		return nil // Empty path is valid for some config options (like log file)
-	}
-
-	// Get the directory part of the file path
-	dir := filepath.Dir(filePath)
-	if dir == "" || dir == "." {
-		dir = "./" // current directory
-	}
-
-	if err := checkDirectoryWritable(dir); err != nil {
-		return fmt.Errorf("%s file directory check failed: %w", fileType, err)
-	}
-
-	return nil
-}
+// Path validation functions have been moved to internal/utils/path.go
 
 // ProviderConfig represents a single NNTP provider configuration
 type ProviderConfig struct {
@@ -594,17 +526,17 @@ func (c *Config) Validate() error {
 // This performs actual filesystem checks and may create directories if needed
 func (c *Config) ValidateDirectories() error {
 	// Check metadata directory
-	if err := checkDirectoryWritable(c.Metadata.RootPath); err != nil {
+	if err := pathutil.CheckDirectoryWritable(c.Metadata.RootPath); err != nil {
 		return fmt.Errorf("metadata directory validation failed: %w", err)
 	}
 
 	// Check database directory
-	if err := checkFileDirectoryWritable(c.Database.Path, "database"); err != nil {
+	if err := pathutil.CheckFileDirectoryWritable(c.Database.Path, "database"); err != nil {
 		return err
 	}
 
 	// Check log file directory (only if log file is configured)
-	if err := checkFileDirectoryWritable(c.Log.File, "log"); err != nil {
+	if err := pathutil.CheckFileDirectoryWritable(c.Log.File, "log"); err != nil {
 		return err
 	}
 
