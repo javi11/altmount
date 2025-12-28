@@ -157,6 +157,13 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// Create Afero adapter for the Usenet filesystem
 	aferoFS := filesystem.NewAferoAdapter(ufs)
 
+	// Check context before expensive archive open operation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Open 7zip archive using OpenReaderWithPassword if password provided
 	var reader *sevenzip.ReadCloser
 	if password != "" {
@@ -186,6 +193,13 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	sz.log.DebugContext(ctx, "Successfully analyzed 7zip archive",
 		"main_file", mainSevenZipFile,
 		"files_found", len(fileInfos))
+
+	// Check context before conversion phase
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 
 	// Convert sevenzip FileInfo results to Content
 	// Note: AES credentials are extracted per-file, not per-archive
