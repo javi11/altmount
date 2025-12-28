@@ -779,28 +779,28 @@ func (s *Service) isFileAlreadyProcessed(filePath string, scanRoot string) bool 
 	// Assuming scanRoot maps to root of virtual FS for simplicity in manual scan
 	// or use CalculateVirtualDirectory logic if needed
 	virtualPath := filesystem.CalculateVirtualDirectory(filePath, scanRoot)
-	
+
 	// Check if we have metadata for this path
 	// For single files: virtualPath/filename (minus .nzb)
 	// For multi files: virtualPath/filename (minus .nzb) as directory
-	
+
 	// Normalize filename (remove .nzb extension)
 	fileName := filepath.Base(filePath)
 	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
-	
+
 	// Construct potential virtual paths
 	// 1. As a file (single file import flattened or nested)
 	// We need to check if a file exists with the release name
-	// But we don't know the final extension... 
+	// But we don't know the final extension...
 	// However, metadata service stores files with their final names.
-	
+
 	// Better approach: Check if a directory exists with the release name
 	// Most imports create a folder with the release name
 	releaseDir := filepath.Join(virtualPath, baseName)
 	if s.metadataService.DirectoryExists(releaseDir) {
 		return true
 	}
-	
+
 	// Also check if any file exists that starts with the release name in that directory
 	// This covers flattened single files
 	if files, err := s.metadataService.ListDirectory(virtualPath); err == nil {
@@ -918,7 +918,7 @@ func (s *Service) claimItemWithRetry(ctx context.Context, workerID int) (*databa
 			item = claimedItem
 			return nil
 		},
-		retry.Attempts(3), // Reduced from 5 - immediate transactions should succeed quickly
+		retry.Attempts(3),                // Reduced from 5 - immediate transactions should succeed quickly
 		retry.Delay(50*time.Millisecond), // Increased from 10ms
 		retry.MaxDelay(5*time.Second),    // Increased from 500ms to allow better spreading
 		retry.DelayType(retry.BackOffDelay),
@@ -1093,7 +1093,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	// Generate new filename: <id>_<sanitized_filename>
 	filename := filepath.Base(item.NzbPath)
 	// sanitizeFilename is defined in service.go
-	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
+	newFilename := sanitizeFilename(filename)
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
@@ -1278,7 +1278,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	if s.healthRepo != nil {
 		// Calculate the mount relative path
 		// resultingPath is the virtual path (e.g. "movies/Movie (Year)/Movie.mkv")
-		
+
 		// Read metadata to get SourceNzbPath needed for health check
 		fileMeta, err := s.metadataService.ReadFileMetadata(resultingPath)
 		if err != nil {
