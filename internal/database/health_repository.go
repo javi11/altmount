@@ -114,7 +114,7 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
 		  AND retry_count < max_retries
-		  AND status NOT IN ('repair_triggered', 'corrupted', 'checking', 'healthy')
+		  AND status NOT IN ('repair_triggered', 'corrupted', 'checking')
 		ORDER BY priority DESC, scheduled_check_at ASC
 		LIMIT ?
 	`
