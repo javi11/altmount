@@ -694,7 +694,6 @@ func (s *Server) handleGetHealthWorkerStatus(c *fiber.Ctx) error {
 		TotalFilesCorrupted:    stats.TotalFilesCorrupted,
 		CurrentRunStartTime:    stats.CurrentRunStartTime,
 		CurrentRunFilesChecked: stats.CurrentRunFilesChecked,
-		PendingManualChecks:    stats.PendingManualChecks,
 		LastError:              stats.LastError,
 		ErrorCount:             stats.ErrorCount,
 	}

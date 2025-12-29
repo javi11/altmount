@@ -54,7 +54,7 @@ type LibrarySyncStatus struct {
 	LastSyncResult *SyncResult   `json:"last_sync_result,omitempty"`
 }
 
-// LibraryFiles holds both symlinks and STRM files found in the library directory
+// UsedFiles holds both symlinks and STRM files found in directories
 type UsedFiles struct {
 	Symlinks  map[string]string // Map of mount target path -> library symlink path
 	StrmFiles map[string]string // Map of virtual path (without .strm) -> library .strm file path
@@ -560,18 +560,18 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 		p.Go(func() {
 			// Check if needs to be added
 			if it, exists := dbPathSet[path]; !exists || it.LibraryPath == nil {
-				// Read metadata to get release date
-				fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
+				// Look up library path from our map
+				libraryPath := lsw.getLibraryPath(path, filesInUse)
+
+				record, err := lsw.processMetadataForSync(ctx, path, libraryPath)
 				if err != nil {
 					slog.ErrorContext(ctx, "Failed to read metadata",
 						"mount_relative_path", path,
 						"error", err)
 
 					// Register as corrupted so HealthWorker can pick it up and trigger repair
-					// Look up library path from our map
-					libPath := lsw.getLibraryPath(path, filesInUse)
-					if libPath != nil {
-						regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, libPath, err.Error())
+					if libraryPath != nil {
+						regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, libraryPath, err.Error())
 						if regErr != nil {
 							slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
 						}
@@ -579,46 +579,11 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 					return
 				}
 
-				if fileMeta == nil {
-					return
+				if record != nil {
+					filesToAddMu.Lock()
+					filesToAdd = append(filesToAdd, *record)
+					filesToAddMu.Unlock()
 				}
-
-				// Use CreatedAt if ReleaseDate is missing
-				releaseDate := fileMeta.ReleaseDate
-				if releaseDate == 0 {
-					releaseDate = fileMeta.CreatedAt
-					// Update metadata file with the CreatedAt as release date
-					fileMeta.ReleaseDate = releaseDate
-					if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
-						slog.ErrorContext(ctx, "Failed to update metadata with release date",
-							"path", path,
-							"error", err)
-					} else {
-						slog.InfoContext(ctx, "Set release date from CreatedAt",
-							"path", path,
-							"release_date", time.Unix(releaseDate, 0))
-					}
-				}
-
-				// Convert Unix timestamp to time.Time
-				releaseDateAsTime := time.Unix(releaseDate, 0)
-
-				// Calculate initial check time
-				scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
-
-				// Look up library path from our map
-				libraryPath := lsw.getLibraryPath(path, filesInUse)
-
-				// Protect shared slice with mutex
-				filesToAddMu.Lock()
-				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
-					FilePath:         path,
-					LibraryPath:      libraryPath,
-					ReleaseDate:      &releaseDateAsTime,
-					ScheduledCheckAt: &scheduledCheckAt,
-					SourceNzbPath:    &fileMeta.SourceNzbPath,
-				})
-				filesToAddMu.Unlock()
 			}
 
 			if lsw.progress != nil {
@@ -776,6 +741,97 @@ func (lsw *LibrarySyncWorker) metaPathToMountRelativePath(metaPath string) strin
 	return mountRelativePath
 }
 
+// processMetadataForSync reads metadata and creates an AutomaticHealthCheckRecord.
+// Returns nil record if metadata is invalid or file should be skipped.
+// Returns an error only if metadata read failed (caller should handle registration).
+func (lsw *LibrarySyncWorker) processMetadataForSync(
+	ctx context.Context,
+	path string,
+	libraryPath *string,
+) (*database.AutomaticHealthCheckRecord, error) {
+	// Read metadata to get release date
+	fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
+	if err != nil {
+		return nil, err
+	}
+	if fileMeta == nil {
+		return nil, nil
+	}
+
+	// Use CreatedAt if ReleaseDate is missing
+	releaseDate := fileMeta.ReleaseDate
+	if releaseDate == 0 {
+		releaseDate = fileMeta.CreatedAt
+		// Update metadata file with the CreatedAt as release date
+		fileMeta.ReleaseDate = releaseDate
+		if writeErr := lsw.metadataService.WriteFileMetadata(path, fileMeta); writeErr != nil {
+			slog.ErrorContext(ctx, "Failed to update metadata with release date",
+				"path", path,
+				"error", writeErr)
+		} else {
+			slog.InfoContext(ctx, "Set release date from CreatedAt",
+				"path", path,
+				"release_date", time.Unix(releaseDate, 0))
+		}
+	}
+
+	// Convert Unix timestamp to time.Time
+	releaseDateAsTime := time.Unix(releaseDate, 0)
+
+	// Calculate initial check time
+	scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
+
+	return &database.AutomaticHealthCheckRecord{
+		FilePath:         path,
+		LibraryPath:      libraryPath,
+		ReleaseDate:      &releaseDateAsTime,
+		ScheduledCheckAt: &scheduledCheckAt,
+		SourceNzbPath:    &fileMeta.SourceNzbPath,
+	}, nil
+}
+
+// updateSymlinkForMountChange updates a symlink when mount path changes.
+// Returns the new target path, whether the symlink was updated, and any error.
+func updateSymlinkForMountChange(
+	ctx context.Context,
+	symlinkPath string,
+	currentTarget string,
+	oldMountPath string,
+	newMountPath string,
+) (string, bool, error) {
+	// Extract relative path within the mount
+	relativePath := strings.TrimPrefix(currentTarget, oldMountPath)
+	relativePath = strings.TrimPrefix(relativePath, string(filepath.Separator))
+
+	// Create new target path
+	newTarget := filepath.Join(newMountPath, relativePath)
+
+	// Remove old symlink
+	if err := os.Remove(symlinkPath); err != nil {
+		slog.WarnContext(ctx, "Failed to remove old symlink during mount path update",
+			"path", symlinkPath,
+			"error", err)
+		return currentTarget, false, err
+	}
+
+	// Create new symlink
+	if err := os.Symlink(newTarget, symlinkPath); err != nil {
+		slog.ErrorContext(ctx, "Failed to create updated symlink",
+			"path", symlinkPath,
+			"old_target", currentTarget,
+			"new_target", newTarget,
+			"error", err)
+		return currentTarget, false, err
+	}
+
+	slog.InfoContext(ctx, "Updated symlink to new mount path",
+		"path", symlinkPath,
+		"old_target", currentTarget,
+		"new_target", newTarget)
+
+	return newTarget, true, nil
+}
+
 // getAllLibraryFiles collects both symlinks and .strm files from library directory in a single pass
 // If oldMountPath and newMountPath are provided, it also updates symlinks pointing to the old path
 func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPath, newMountPath string) (*UsedFiles, int, error) {
@@ -832,39 +888,14 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 
 			// Update symlink if it points to the old mount path
 			if shouldUpdateSymlinks && strings.HasPrefix(cleanTarget, oldMountPathClean) {
-				// Extract the relative path within the mount
-				relativePath := strings.TrimPrefix(cleanTarget, oldMountPathClean)
-				relativePath = strings.TrimPrefix(relativePath, string(filepath.Separator))
-
-				// Create new target path
-				newTarget := filepath.Join(newMountPathClean, relativePath)
-
-				// Remove the old symlink
-				if err := os.Remove(path); err != nil {
-					slog.WarnContext(ctx, "Failed to remove old symlink during mount path update",
-						"path", path,
-						"error", err)
+				newTarget, updated, err := updateSymlinkForMountChange(ctx, path, cleanTarget, oldMountPathClean, newMountPathClean)
+				if err != nil {
 					return nil
 				}
-
-				// Create new symlink pointing to new mount path
-				if err := os.Symlink(newTarget, path); err != nil {
-					slog.ErrorContext(ctx, "Failed to create updated symlink",
-						"path", path,
-						"old_target", cleanTarget,
-						"new_target", newTarget,
-						"error", err)
-					return nil
+				if updated {
+					symlinkUpdates++
+					cleanTarget = newTarget
 				}
-
-				slog.InfoContext(ctx, "Updated symlink to new mount path",
-					"path", path,
-					"old_target", cleanTarget,
-					"new_target", newTarget)
-
-				symlinkUpdates++
-				// Update cleanTarget to the new target for storage
-				cleanTarget = newTarget
 			}
 
 			// Check if this symlink points inside the mount directory
@@ -1010,35 +1041,10 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMount
 
 			// Update symlink if it points to the old mount path
 			if shouldUpdateSymlinks && strings.HasPrefix(cleanTarget, oldMountPathClean) {
-				// Extract the relative path within the mount
-				relativePath := strings.TrimPrefix(cleanTarget, oldMountPathClean)
-				relativePath = strings.TrimPrefix(relativePath, string(filepath.Separator))
-
-				// Create new target path
-				newTarget := filepath.Join(newMountPathClean, relativePath)
-
-				// Remove the old symlink
-				if err := os.Remove(path); err != nil {
-					slog.WarnContext(ctx, "Failed to remove old symlink during mount path update",
-						"path", path,
-						"error", err)
-				} else {
-					// Create new symlink pointing to new mount path
-					if err := os.Symlink(newTarget, path); err != nil {
-						slog.ErrorContext(ctx, "Failed to create updated symlink during mount path update",
-							"path", path,
-							"old_target", cleanTarget,
-							"new_target", newTarget,
-							"error", err)
-					} else {
-						symlinkUpdates++
-						slog.DebugContext(ctx, "Updated symlink for new mount path",
-							"path", path,
-							"old_target", cleanTarget,
-							"new_target", newTarget)
-						// Update the target for further processing
-						cleanTarget = newTarget
-					}
+				newTarget, updated, _ := updateSymlinkForMountChange(ctx, path, cleanTarget, oldMountPathClean, newMountPathClean)
+				if updated {
+					symlinkUpdates++
+					cleanTarget = newTarget
 				}
 			}
 
@@ -1236,62 +1242,27 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 		p.Go(func() {
 			// Check if needs to be added
 			if _, exists := dbPathSet[path]; !exists {
-				// Read metadata to get release date
-				fileMeta, err := lsw.metadataService.ReadFileMetadata(path)
+				// For NONE strategy, library path is always nil
+				// since files are accessed directly via mount
+				record, err := lsw.processMetadataForSync(ctx, path, nil)
 				if err != nil {
 					slog.ErrorContext(ctx, "Failed to read metadata",
 						"mount_relative_path", path,
 						"error", err)
 
 					// Register as corrupted so HealthWorker can pick it up and trigger repair
-					// For NONE strategy, library path is effectively the mount path or nil
 					regErr := lsw.healthRepo.RegisterCorruptedFile(ctx, path, nil, err.Error())
 					if regErr != nil {
 						slog.ErrorContext(ctx, "Failed to register corrupted file", "path", path, "error", regErr)
 					}
 					return
 				}
-				if fileMeta == nil {
-					return
+
+				if record != nil {
+					filesToAddMu.Lock()
+					filesToAdd = append(filesToAdd, *record)
+					filesToAddMu.Unlock()
 				}
-
-				// Use CreatedAt if ReleaseDate is missing
-				releaseDate := fileMeta.ReleaseDate
-				if releaseDate == 0 {
-					releaseDate = fileMeta.CreatedAt
-					// Update metadata file with the CreatedAt as release date
-					fileMeta.ReleaseDate = releaseDate
-					if err := lsw.metadataService.WriteFileMetadata(path, fileMeta); err != nil {
-						slog.ErrorContext(ctx, "Failed to update metadata with release date",
-							"path", path,
-							"error", err)
-					} else {
-						slog.InfoContext(ctx, "Set release date from CreatedAt",
-							"path", path,
-							"release_date", time.Unix(releaseDate, 0))
-					}
-				}
-
-				// Convert Unix timestamp to time.Time
-				releaseDateAsTime := time.Unix(releaseDate, 0)
-
-				// Calculate initial check time
-				scheduledCheckAt := calculateInitialCheck(releaseDateAsTime)
-
-				// For NONE strategy, library path is always nil
-				// since files are accessed directly via mount
-				var libraryPath *string = nil
-
-				// Protect shared slice with mutex
-				filesToAddMu.Lock()
-				filesToAdd = append(filesToAdd, database.AutomaticHealthCheckRecord{
-					FilePath:         path,
-					LibraryPath:      libraryPath,
-					ReleaseDate:      &releaseDateAsTime,
-					ScheduledCheckAt: &scheduledCheckAt,
-					SourceNzbPath:    &fileMeta.SourceNzbPath,
-				})
-				filesToAddMu.Unlock()
 			}
 
 			if lsw.progress != nil {
