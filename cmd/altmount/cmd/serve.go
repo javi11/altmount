@@ -162,8 +162,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Register health system config change handler for dynamic enable/disable
 	if healthWorker != nil && librarySyncWorker != nil {
-		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker, ctx)
-		healthController.RegisterConfigChangeHandler(configManager)
+		healthController := health.NewHealthSystemController(healthWorker, librarySyncWorker)
+		healthController.RegisterConfigChangeHandler(ctx, configManager)
 
 		// Trigger initial metadata date sync if health is enabled
 		if cfg.Health.Enabled != nil && *cfg.Health.Enabled {
