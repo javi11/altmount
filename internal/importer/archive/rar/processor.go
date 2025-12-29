@@ -150,11 +150,6 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	// Create iterator for memory-efficient archive traversal
 	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
 	if err != nil {
-		// Log the strict failure and fallback to a more lenient analysis
-		rh.log.WarnContext(ctx, "Failed to analyze RAR archive strictly, falling back to lenient analysis",
-			"error", err,
-			"main_file", mainRarFile)
-
 		// Check if error indicates incomplete RAR archive with missing volume segments
 		return nil, errors.NewNonRetryableError("failed to create archive iterator", err)
 	}
