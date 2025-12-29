@@ -10,6 +10,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -133,5 +134,5 @@ func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQu
 		return c.AttemptFallback(ctx, item)
 	}
 
-	return nil
+	return errors.ErrFallbackNotConfigured
 }

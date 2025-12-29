@@ -732,6 +732,15 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 				"file", item.NzbPath,
 				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
 		}
+	} else if IsNonRetryable(err) && strings.Contains(err.Error(), "SABnzbd fallback not configured") {
+		s.log.DebugContext(ctx, "SABnzbd fallback skipped (not configured)",
+			"queue_id", item.ID,
+			"file", item.NzbPath)
+	} else {
+		s.log.ErrorContext(ctx, "Fallback handling failed",
+			"queue_id", item.ID,
+			"file", item.NzbPath,
+			"error", err)
 	}
 }
 
