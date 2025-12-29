@@ -39,7 +39,6 @@ type WorkerStats struct {
 	TotalFilesCorrupted    int64        `json:"total_files_corrupted"`
 	CurrentRunStartTime    *time.Time   `json:"current_run_start_time,omitempty"`
 	CurrentRunFilesChecked int          `json:"current_run_files_checked"`
-	PendingManualChecks    int          `json:"pending_manual_checks"`
 	LastError              *string      `json:"last_error,omitempty"`
 	ErrorCount             int64        `json:"error_count"`
 }
@@ -180,10 +179,7 @@ func (hw *HealthWorker) GetStats() WorkerStats {
 	hw.statsMu.RLock()
 	defer hw.statsMu.RUnlock()
 
-	stats := hw.stats
-	stats.PendingManualChecks = 0 // No manual queue anymore
-
-	return stats
+	return hw.stats
 }
 
 // CancelHealthCheck cancels an active health check for the specified file
