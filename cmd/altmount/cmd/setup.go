@@ -340,7 +340,6 @@ func startHealthWorker(
 		poolManager,
 		configManager.GetConfigGetter(),
 		rcloneClient,
-		nil, // No event handler for now
 	)
 
 	healthWorker := health.NewHealthWorker(

@@ -38,22 +38,6 @@ type HealthEvent struct {
 	SourceNzb  *string
 }
 
-// EventHandler handles health events
-type EventHandler func(event HealthEvent)
-
-// HealthConfig holds unified configuration for health checking
-type HealthConfig struct {
-	// Worker settings
-	Enabled           bool          // Whether health worker is enabled
-	CheckInterval     time.Duration // How often to run health checks
-	MaxConcurrentJobs int           // How many files to check in each batch
-
-	// Health check settings
-	MaxRetries            int          // Maximum retries before marking as permanently corrupted
-	MaxSegmentConnections int          // Maximum concurrent connections for segment checking
-	EventHandler          EventHandler // Optional event handler for notifications
-}
-
 // HealthChecker manages file health checking logic
 type HealthChecker struct {
 	healthRepo      *database.HealthRepository
@@ -61,7 +45,6 @@ type HealthChecker struct {
 	poolManager     pool.Manager
 	configGetter    config.ConfigGetter
 	rcloneClient    rclonecli.RcloneRcClient // Optional rclone client for VFS notifications
-	eventHandler    EventHandler             // Optional event handler for notifications
 }
 
 // NewHealthChecker creates a new health checker
@@ -71,7 +54,6 @@ func NewHealthChecker(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	rcloneClient rclonecli.RcloneRcClient,
-	eventHandler EventHandler,
 ) *HealthChecker {
 	return &HealthChecker{
 		healthRepo:      healthRepo,
@@ -79,16 +61,7 @@ func NewHealthChecker(
 		poolManager:     poolManager,
 		configGetter:    configGetter,
 		rcloneClient:    rcloneClient,
-		eventHandler:    eventHandler,
 	}
-}
-
-func (hc *HealthChecker) getMaxConnectionsForHealthChecks() int {
-	return hc.configGetter().GetMaxConnectionsForHealthChecks()
-}
-
-func (hc *HealthChecker) getSegmentSamplePercentage() int {
-	return hc.configGetter().GetSegmentSamplePercentage()
 }
 
 // CheckFile checks the health of a specific file
@@ -136,15 +109,16 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		return event
 	}
 
-	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", hc.getSegmentSamplePercentage())
+	cfg := hc.configGetter()
+	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", cfg.GetSegmentSamplePercentage())
 
 	// Validate segment availability using detailed validation logic
 	result, err := usenet.ValidateSegmentAvailabilityDetailed(
 		ctx,
 		fileMeta.SegmentData,
 		hc.poolManager,
-		hc.getMaxConnectionsForHealthChecks(),
-		hc.getSegmentSamplePercentage(),
+		cfg.GetMaxConnectionsForHealthChecks(),
+		cfg.GetSegmentSamplePercentage(),
 		nil, // No progress callback for health checks
 		30*time.Second,
 	)
