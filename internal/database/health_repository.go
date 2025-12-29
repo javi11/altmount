@@ -24,21 +24,22 @@ func NewHealthRepository(db *sql.DB) *HealthRepository {
 func (r *HealthRepository) UpdateFileHealth(ctx context.Context, filePath string, status HealthStatus, errorMessage *string, sourceNzbPath *string, errorDetails *string, noRetry bool) error {
 	filePath = strings.TrimPrefix(filePath, "/")
 	query := `
-		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at, scheduled_check_at)
-		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 2 ELSE 0 END, 2, 0, datetime('now'), datetime('now'), datetime('now'))
+		INSERT INTO file_health (file_path, status, last_checked, last_error, source_nzb_path, error_details, retry_count, max_retries, repair_retry_count, created_at, updated_at, scheduled_check_at, priority)
+		VALUES (?, ?, datetime('now'), ?, ?, ?, CASE WHEN ? THEN 1 ELSE 0 END, 2, 0, datetime('now'), datetime('now'), datetime('now'), CASE WHEN ? THEN 2 ELSE 0 END)
 		ON CONFLICT(file_path) DO UPDATE SET
 		status = excluded.status,
 		last_checked = datetime('now'),
 		last_error = excluded.last_error,
 		source_nzb_path = COALESCE(excluded.source_nzb_path, source_nzb_path),
 		error_details = excluded.error_details,
-		retry_count = CASE WHEN ? THEN max_retries ELSE retry_count END,
+		retry_count = CASE WHEN ? THEN max_retries - 1 ELSE retry_count END,
 		max_retries = excluded.max_retries,
 		updated_at = datetime('now'),
-		scheduled_check_at = datetime('now')
+		scheduled_check_at = datetime('now'),
+		priority = CASE WHEN ? THEN 2 ELSE priority END
 	`
 
-	_, err := r.db.ExecContext(ctx, query, filePath, status, errorMessage, sourceNzbPath, errorDetails, noRetry, noRetry)
+	_, err := r.db.ExecContext(ctx, query, filePath, status, errorMessage, sourceNzbPath, errorDetails, noRetry, noRetry, noRetry, noRetry)
 	if err != nil {
 		return fmt.Errorf("failed to update file health: %w", err)
 	}
@@ -495,16 +496,19 @@ func (r *HealthRepository) RegisterCorruptedFile(ctx context.Context, filePath s
 		INSERT INTO file_health (
 			file_path, library_path, status, last_error, error_details,
 			retry_count, max_retries, repair_retry_count, max_repair_retries,
-			created_at, updated_at, scheduled_check_at
+			created_at, updated_at, scheduled_check_at, last_checked, priority
 		)
-		VALUES (?, ?, 'corrupted', ?, ?, 0, 2, 0, 3, datetime('now'), datetime('now'), NULL)
+		VALUES (?, ?, 'pending', ?, ?, 1, 2, 0, 3, datetime('now'), datetime('now'), datetime('now'), datetime('now'), 2)
 		ON CONFLICT(file_path) DO UPDATE SET
 			library_path = COALESCE(excluded.library_path, library_path),
-			status = 'corrupted',
+			status = 'pending',
 			last_error = excluded.last_error,
 			error_details = excluded.error_details,
-			scheduled_check_at = NULL,
-			updated_at = datetime('now')
+			retry_count = CASE WHEN max_retries > 0 THEN max_retries - 1 ELSE 0 END,
+			scheduled_check_at = datetime('now'),
+			last_checked = datetime('now'),
+			updated_at = datetime('now'),
+			priority = 2
 	`
 
 	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, errorMessage, errorMessage)
