@@ -975,7 +975,8 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		UPDATE file_health 
 		SET repair_retry_count = repair_retry_count + 1, last_error = ?, 
 		    error_details = ?, status = 'repair_triggered', 
-		    updated_at = datetime('now'), last_checked = datetime('now')
+		    updated_at = datetime('now'), last_checked = datetime('now'),
+			scheduled_check_at = datetime('now', '+1 hour')
 		WHERE file_path = ?
 	`)
 	if err != nil {
