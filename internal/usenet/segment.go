@@ -110,7 +110,57 @@ type segment struct {
 	once          sync.Once
 	limitedReader io.Reader // Cached limited reader to prevent multiple LimitReader wraps
 	mx            sync.Mutex
-	closed        bool // Tracks if segment has been closed
+	closed        bool  // Tracks if segment has been closed
+	downloadErr   error // Stores download error for explicit retrieval
+}
+
+// SetDownloadError stores the download error for later retrieval.
+// Uses first-write-wins semantics to preserve the original error.
+func (s *segment) SetDownloadError(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	if s.downloadErr == nil {
+		s.downloadErr = err
+	}
+}
+
+// GetDownloadError returns any download error that occurred.
+func (s *segment) GetDownloadError() error {
+	if s == nil {
+		return nil
+	}
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	return s.downloadErr
+}
+
+// errorAwareReader wraps a reader and checks segment error state.
+// This ensures that download errors are always propagated to the reader,
+// even if the error occurred during pipe operations.
+type errorAwareReader struct {
+	s      *segment
+	reader io.Reader
+}
+
+func (r *errorAwareReader) Read(p []byte) (n int, err error) {
+	// Check for stored download error before reading
+	if downloadErr := r.s.GetDownloadError(); downloadErr != nil {
+		return 0, downloadErr
+	}
+
+	n, err = r.reader.Read(p)
+
+	// On any read error (except EOF), check if there's a more specific download error
+	if err != nil && err != io.EOF {
+		if downloadErr := r.s.GetDownloadError(); downloadErr != nil {
+			return n, downloadErr
+		}
+	}
+
+	return n, err
 }
 
 func (s *segment) GetReader() io.Reader {
@@ -118,14 +168,25 @@ func (s *segment) GetReader() io.Reader {
 		// Skip to Start position
 		if s.Start > 0 {
 			// Seek to the start of the segment
-			_, _ = io.CopyN(io.Discard, s.reader, s.Start)
+			_, err := io.CopyN(io.Discard, s.reader, s.Start)
+			if err != nil && err != io.EOF {
+				// Store the error for later retrieval
+				s.mx.Lock()
+				if s.downloadErr == nil {
+					s.downloadErr = err
+				}
+				s.mx.Unlock()
+			}
 		}
 
 		// Create LimitReader once - this ensures the limit is enforced correctly
 		// across multiple Read() calls in usenet_reader.go
 		// Without this, each GetReader() call would create a NEW LimitReader with
 		// the full limit, allowing reading beyond the intended End offset
-		s.limitedReader = io.LimitReader(s.reader, s.End-s.Start+1)
+		limited := io.LimitReader(s.reader, s.End-s.Start+1)
+
+		// Wrap in errorAwareReader to ensure download errors are always propagated
+		s.limitedReader = &errorAwareReader{s: s, reader: limited}
 	})
 
 	return s.limitedReader
@@ -219,6 +280,11 @@ func (sw *safeWriter) CloseWithError(err error) error {
 		return nil
 	}
 	sw.s.closed = true
+
+	// Store the download error for explicit retrieval by the reader
+	if err != nil && sw.s.downloadErr == nil {
+		sw.s.downloadErr = err
+	}
 
 	var e1, e2 error
 	if sw.s.reader != nil {
