@@ -284,6 +284,11 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 				continue
 			}
 
+			category := instance.Category
+			if category == "" {
+				category = "movies"
+			}
+
 			dc := &radarr.DownloadClientInput{
 				Name:           "AltMount Test",
 				Implementation: "SABnzbd",
@@ -296,7 +301,7 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 					{Name: "port", Value: altmountPort},
 					{Name: "urlBase", Value: urlBase},
 					{Name: "apiKey", Value: apiKey},
-					{Name: "movieCategory", Value: "movies"},
+					{Name: "movieCategory", Value: category},
 					{Name: "useSsl", Value: false},
 				},
 			}
@@ -307,6 +312,11 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 			if err != nil {
 				results[instance.Name] = fmt.Sprintf("Failed to create client: %v", err)
 				continue
+			}
+
+			category := instance.Category
+			if category == "" {
+				category = "tv"
 			}
 
 			dc := &sonarr.DownloadClientInput{
@@ -321,7 +331,7 @@ func (m *Manager) TestDownloadClientRegistration(ctx context.Context, altmountHo
 					{Name: "port", Value: altmountPort},
 					{Name: "urlBase", Value: urlBase},
 					{Name: "apiKey", Value: apiKey},
-					{Name: "tvCategory", Value: "tv"},
+					{Name: "tvCategory", Value: category},
 					{Name: "useSsl", Value: false},
 				},
 			}

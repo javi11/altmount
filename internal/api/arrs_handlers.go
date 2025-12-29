@@ -19,6 +19,7 @@ type ArrsInstanceRequest struct {
 	Type              string `json:"type"`
 	URL               string `json:"url"`
 	APIKey            string `json:"api_key"`
+	Category          string `json:"category"`
 	Enabled           bool   `json:"enabled"`
 	SyncIntervalHours int    `json:"sync_interval_hours"`
 }
@@ -230,10 +231,11 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 // ArrsInstanceResponse represents an arrs instance in API responses
 type ArrsInstanceResponse struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	URL     string `json:"url"`
-	Enabled bool   `json:"enabled"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	URL      string `json:"url"`
+	Category string `json:"category"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // ArrsStatsResponse represents arrs statistics
@@ -306,10 +308,11 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 	response := make([]*ArrsInstanceResponse, len(instances))
 	for i, instance := range instances {
 		response[i] = &ArrsInstanceResponse{
-			Name:    instance.Name,
-			Type:    instance.Type,
-			URL:     instance.URL,
-			Enabled: instance.Enabled,
+			Name:     instance.Name,
+			Type:     instance.Type,
+			URL:      instance.URL,
+			Category: instance.Category,
+			Enabled:  instance.Enabled,
 		}
 	}
 
@@ -350,10 +353,11 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 	}
 
 	response := &ArrsInstanceResponse{
-		Name:    instance.Name,
-		Type:    instance.Type,
-		URL:     instance.URL,
-		Enabled: instance.Enabled,
+		Name:     instance.Name,
+		Type:     instance.Type,
+		URL:      instance.URL,
+		Category: instance.Category,
+		Enabled:  instance.Enabled,
 	}
 
 	return c.Status(200).JSON(fiber.Map{
