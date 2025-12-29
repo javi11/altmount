@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/health"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
@@ -141,7 +142,7 @@ func setupNNTPPool(ctx context.Context, cfg *config.Config, poolManager pool.Man
 // setupRCloneClient creates an RClone client if enabled
 func setupRCloneClient(ctx context.Context, cfg *config.Config, configManager *config.Manager) rclonecli.RcloneRcClient {
 	if cfg.RClone.RCEnabled != nil && *cfg.RClone.RCEnabled {
-		httpClient := &http.Client{}
+		httpClient := httpclient.NewDefault()
 		rcloneClient := rclonecli.NewRcloneRcClient(configManager, httpClient)
 
 		if cfg.RClone.RCUrl != "" {
