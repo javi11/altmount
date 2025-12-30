@@ -75,4 +75,10 @@ var (
 		message: "import contains no video files",
 		cause:   nil,
 	}
+
+	// ErrFallbackNotConfigured indicates that SABnzbd fallback is not enabled or configured.
+	ErrFallbackNotConfigured = &NonRetryableError{
+		message: "SABnzbd fallback not configured",
+		cause:   nil,
+	}
 )

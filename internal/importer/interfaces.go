@@ -117,7 +117,7 @@ type PostProcessor interface {
 	// HandleSuccess performs all post-processing for successful imports
 	HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) error
 	// HandleFailure performs all cleanup for failed imports
-	HandleFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error)
+	HandleFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) error
 }
 
 // ImportService is the main interface combining all importer capabilities
