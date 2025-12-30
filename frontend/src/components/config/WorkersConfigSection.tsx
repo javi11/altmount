@@ -163,8 +163,9 @@ export function ImportConfigSection({
 						/>
 					</label>
 					<p className="label text-sm">
-						When enabled, files are imported instantly without checking if all segments are available. 
-						This matches behavior from older versions (Alpha 5). Background health checks will still occur later.
+						When enabled, files are imported instantly without checking if all segments are
+						available. This matches behavior from older versions (Alpha 5). Background health checks
+						will still occur later.
 					</p>
 				</fieldset>
 

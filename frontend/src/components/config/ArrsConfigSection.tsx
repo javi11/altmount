@@ -30,14 +30,141 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 };
 
 export function ArrsConfigSection({
-// ... (omitted code) ...
+	config,
+	onUpdate,
+	isReadOnly = false,
+	isUpdating = false,
+}: ArrsConfigSectionProps) {
+	const [formData, setFormData] = useState<ArrsConfig>(config.arrs);
+	const [hasChanges, setHasChanges] = useState(false);
+	const [showAddInstance, setShowAddInstance] = useState(false);
+	const [newInstance, setNewInstance] = useState<NewInstanceForm>(DEFAULT_NEW_INSTANCE);
+	const [validationErrors, setValidationErrors] = useState<string[]>([]);
+	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
+	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
+	const [webhookError, setWebhookError] = useState<string | null>(null);
+	const [saveError, setSaveError] = useState<string | null>(null);
+
+	const registerWebhooks = useRegisterArrsWebhooks();
+
+	// Sync form data when config changes from external sources (reload)
+	useEffect(() => {
+		setFormData(config.arrs);
+		setHasChanges(false);
+		setValidationErrors([]);
+		setSaveError(null);
+	}, [config.arrs]);
+
+	const handleRegisterWebhooks = async () => {
+		setWebhookSuccess(null);
+		setWebhookError(null);
+		try {
+			await registerWebhooks.mutateAsync();
+			setWebhookSuccess("Webhook registration triggered successfully.");
+			// Hide success message after 5 seconds
+			setTimeout(() => setWebhookSuccess(null), 5000);
+		} catch (error) {
+			setWebhookError(error instanceof Error ? error.message : "Failed to register webhooks.");
+		}
+	};
+
+	const validateForm = (data: ArrsConfig): string[] => {
+		const errors: string[] = [];
+
+		if (data.enabled) {
+			// Validate mount_path is configured
+			if (!config.mount_path) {
+				errors.push(
+					"Mount Path must be configured in General/System settings before enabling Arrs service",
+				);
+			}
+
+			// Validate instances
+			const allInstanceNames = [
+				...data.radarr_instances.map((i) => ({ name: i.name, type: "Radarr" })),
+				...data.sonarr_instances.map((i) => ({ name: i.name, type: "Sonarr" })),
+			];
+
+			// Check for duplicate names
+			const nameCount: Record<string, number> = {};
+			allInstanceNames.forEach(({ name }) => {
+				nameCount[name] = (nameCount[name] || 0) + 1;
+			});
+
+			Object.entries(nameCount).forEach(([name, count]) => {
+				if (count > 1) {
+					errors.push(`Instance name "${name}" is used multiple times`);
+				}
+			});
+
+			// Validate individual instances
+			[...data.radarr_instances, ...data.sonarr_instances].forEach((instance, index) => {
+				const instanceType = data.radarr_instances.includes(instance) ? "Radarr" : "Sonarr";
+
+				if (!instance.name.trim()) {
+					errors.push(`${instanceType} instance #${index + 1}: Name is required`);
+				}
+
+				if (!instance.url.trim()) {
+					errors.push(`${instanceType} instance "${instance.name}": URL is required`);
+				} else {
+					try {
+						new URL(instance.url);
+					} catch {
+						errors.push(`${instanceType} instance "${instance.name}": Invalid URL format`);
+					}
+				}
+
+				if (!instance.api_key.trim()) {
+					errors.push(`${instanceType} instance "${instance.name}": API key is required`);
+				}
+			});
+		}
+
+		return errors;
+	};
+
+	const handleFormChange = (field: keyof ArrsConfig, value: ArrsConfig[keyof ArrsConfig]) => {
+		const newFormData = { ...formData, [field]: value };
+		setFormData(newFormData);
+		setHasChanges(true);
+		setValidationErrors(validateForm(newFormData));
+	};
+
+	const handleInstanceChange = (
+		type: ArrsType,
+		index: number,
+		field: keyof ArrsInstanceConfig,
+		value: ArrsInstanceConfig[keyof ArrsInstanceConfig],
+	) => {
+		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
+		const instances = [...formData[instancesKey]];
+		instances[index] = { ...instances[index], [field]: value };
+
+		const newFormData = { ...formData, [instancesKey]: instances };
+		setFormData(newFormData);
+		setHasChanges(true);
+		setValidationErrors(validateForm(newFormData));
+	};
+
+	const removeInstance = (type: ArrsType, index: number) => {
+		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
+		const instances = [...formData[instancesKey]];
+		instances.splice(index, 1);
+
+		const newFormData = { ...formData, [instancesKey]: instances };
+		setFormData(newFormData);
+		setHasChanges(true);
+		setValidationErrors(validateForm(newFormData));
+	};
+
 	const addInstance = () => {
 		if (!newInstance.name.trim() || !newInstance.url.trim() || !newInstance.api_key.trim()) {
 			return;
 		}
 
 		const instancesKey = newInstance.type === "radarr" ? "radarr_instances" : "sonarr_instances";
-		
+
 		// Use provided category or default based on type
 		let category = newInstance.category.trim();
 		if (!category) {
@@ -57,7 +184,9 @@ export function ArrsConfigSection({
 		];
 
 		const newFormData = { ...formData, [instancesKey]: instances };
-// ... (omitted code) ...
+		setFormData(newFormData);
+		setHasChanges(true);
+		setValidationErrors(validateForm(newFormData));
 		// Reset form and hide
 		setNewInstance(DEFAULT_NEW_INSTANCE);
 		setShowAddInstance(false);
@@ -171,7 +300,9 @@ export function ArrsConfigSection({
 								</button>
 							</div>
 						</div>
-						{webhookSuccess && <div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>}
+						{webhookSuccess && (
+							<div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>
+						)}
 						{webhookError && <div className="alert alert-error mt-4 py-2">{webhookError}</div>}
 					</div>
 				</div>
@@ -350,7 +481,9 @@ export function ArrsConfigSection({
 									type="text"
 									className="input"
 									value={newInstance.category}
-									onChange={(e) => setNewInstance((prev) => ({ ...prev, category: e.target.value }))}
+									onChange={(e) =>
+										setNewInstance((prev) => ({ ...prev, category: e.target.value }))
+									}
 									placeholder={newInstance.type === "radarr" ? "movies" : "tv"}
 								/>
 							</fieldset>
