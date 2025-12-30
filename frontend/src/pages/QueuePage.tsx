@@ -499,10 +499,10 @@ export function QueuePage() {
 					)}
 
 					<div className="dropdown dropdown-end">
-						<div tabIndex={0} role="button" className="btn btn-neutral">
+						<button type="button" tabIndex={0} className="btn btn-neutral">
 							<PlayCircle className="h-4 w-4" />
 							Add Test NZB
-						</div>
+						</button>
 						<ul className="menu dropdown-content z-[1] w-36 rounded-box bg-base-100 p-2 shadow">
 							<li>
 								<button

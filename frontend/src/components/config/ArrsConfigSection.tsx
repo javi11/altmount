@@ -256,7 +256,9 @@ export function ArrsConfigSection({
 								</button>
 							</div>
 						</div>
-						{webhookSuccess && <div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>}
+						{webhookSuccess && (
+							<div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>
+						)}
 						{webhookError && <div className="alert alert-error mt-4 py-2">{webhookError}</div>}
 					</div>
 				</div>
@@ -435,7 +437,9 @@ export function ArrsConfigSection({
 									type="text"
 									className="input"
 									value={newInstance.category}
-									onChange={(e) => setNewInstance((prev) => ({ ...prev, category: e.target.value }))}
+									onChange={(e) =>
+										setNewInstance((prev) => ({ ...prev, category: e.target.value }))
+									}
 									placeholder={newInstance.type === "radarr" ? "movies" : "tv"}
 								/>
 							</fieldset>

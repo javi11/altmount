@@ -252,7 +252,8 @@ export function SABnzbdConfigSection({
 							disabled={isReadOnly}
 						/>
 						<p className="label">
-							The URL ARR instances will use to talk back to AltMount SABnzbd API. Default: <code>http://altmount:8080/sabnzbd</code>
+							The URL ARR instances will use to talk back to AltMount SABnzbd API. Default:{" "}
+							<code>http://altmount:8080/sabnzbd</code>
 						</p>
 					</fieldset>
 
@@ -554,7 +555,9 @@ export function SABnzbdConfigSection({
 							) : (
 								<Download className="h-4 w-4" />
 							)}
-							{registerDownloadClient.isPending ? "Registering..." : "Auto-Setup ARR Download Clients"}
+							{registerDownloadClient.isPending
+								? "Registering..."
+								: "Auto-Setup ARR Download Clients"}
 						</button>
 						<button
 							type="button"
@@ -573,14 +576,14 @@ export function SABnzbdConfigSection({
 					{regSuccess && <div className="alert alert-success py-2">{regSuccess}</div>}
 					{regError && <div className="alert alert-error py-2">{regError}</div>}
 					{testResults && (
-						<div className="alert bg-base-200 border-base-300 py-2">
-							<div className="flex flex-col w-full">
-								<div className="font-bold mb-1">Connection Test Results:</div>
+						<div className="alert border-base-300 bg-base-200 py-2">
+							<div className="flex w-full flex-col">
+								<div className="mb-1 font-bold">Connection Test Results:</div>
 								<div className="space-y-1">
 									{Object.entries(testResults).map(([instance, result]) => (
 										<div key={instance} className="flex justify-between text-sm">
 											<span>{instance}:</span>
-											<span className={result === "OK" ? "text-success" : "text-error font-mono"}>
+											<span className={result === "OK" ? "text-success" : "font-mono text-error"}>
 												{result}
 											</span>
 										</div>
