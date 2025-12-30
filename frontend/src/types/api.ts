@@ -300,6 +300,8 @@ export interface LibrarySyncResult {
 	files_added: number;
 	files_deleted: number;
 	metadata_deleted: number;
+	library_files_deleted: number;
+	library_dirs_deleted: number;
 	duration: number;
 	completed_at: string;
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -498,11 +499,6 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
-
 	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
@@ -517,6 +513,15 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
+	// Calculate virtual directory BEFORE moving the NZB file
+	// This ensures the calculation is based on the original file path
+	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, basePath)
+
+	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
+	}
+
 	// Determine if allowed extensions override is needed
 	var allowedExtensionsOverride *[]string
 	if item.Category != nil && strings.ToLower(*item.Category) == "test" {
@@ -524,7 +529,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
@@ -685,6 +690,18 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
+	// Clean up the NZB file after successful processing
+	if err := os.Remove(item.NzbPath); err != nil {
+		s.log.WarnContext(ctx, "Failed to clean up NZB file after successful processing",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath,
+			"error", err)
+		// Don't fail the entire process for cleanup failure
+	} else {
+		s.log.DebugContext(ctx, "Cleaned up NZB file after successful processing",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath)
+	}
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }

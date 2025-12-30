@@ -1,27 +1,6 @@
 import { AlertTriangle, CheckCircle, Loader2, Play, RefreshCw, X } from "lucide-react";
 import { formatFutureTime, formatRelativeTime } from "../../../lib/utils";
-
-interface LibrarySyncProgress {
-	processed_files: number;
-	total_files: number;
-	start_time?: string;
-}
-
-interface LibrarySyncResult {
-	files_added: number;
-	files_deleted: number;
-	metadata_deleted: number;
-	library_files_deleted: number;
-	library_dirs_deleted: number;
-	duration: number;
-	completed_at: string;
-}
-
-interface LibrarySyncStatus {
-	is_running: boolean;
-	progress?: LibrarySyncProgress;
-	last_sync_result?: LibrarySyncResult;
-}
+import type { LibrarySyncProgress, LibrarySyncResult, LibrarySyncStatus } from "../../../types/api";
 
 interface LibraryScanStatusProps {
 	status: LibrarySyncStatus | undefined;

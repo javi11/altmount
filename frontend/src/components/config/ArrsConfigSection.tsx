@@ -30,7 +30,91 @@ const DEFAULT_NEW_INSTANCE: NewInstanceForm = {
 };
 
 export function ArrsConfigSection({
-// ... (omitted code) ...
+	config,
+	onUpdate,
+	isReadOnly = false,
+	isUpdating = false,
+}: ArrsConfigSectionProps) {
+	const [formData, setFormData] = useState<ArrsConfig>(config.arrs);
+	const [hasChanges, setHasChanges] = useState(false);
+	const [validationErrors, setValidationErrors] = useState<string[]>([]);
+	const [saveError, setSaveError] = useState<string | null>(null);
+	const [showAddInstance, setShowAddInstance] = useState(false);
+	const [newInstance, setNewInstance] = useState<NewInstanceForm>(DEFAULT_NEW_INSTANCE);
+	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
+	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
+	const [webhookError, setWebhookError] = useState<string | null>(null);
+
+	const registerWebhooks = useRegisterArrsWebhooks();
+
+	// Update form data when config changes
+	useEffect(() => {
+		setFormData(config.arrs);
+		setHasChanges(false);
+		setValidationErrors([]);
+		setSaveError(null);
+	}, [config.arrs]);
+
+	// Validate form data
+	useEffect(() => {
+		const errors: string[] = [];
+
+		// Validate instances
+		const validateInstances = (instances: ArrsInstanceConfig[], type: string) => {
+			instances.forEach((instance, index) => {
+				if (!instance.name?.trim()) {
+					errors.push(`${type} instance ${index + 1}: Name is required`);
+				}
+				if (!instance.url?.trim()) {
+					errors.push(`${type} instance ${index + 1}: URL is required`);
+				}
+				if (!instance.api_key?.trim()) {
+					errors.push(`${type} instance ${index + 1}: API key is required`);
+				}
+			});
+		};
+
+		if (formData.enabled) {
+			validateInstances(formData.radarr_instances, "Radarr");
+			validateInstances(formData.sonarr_instances, "Sonarr");
+		}
+
+		setValidationErrors(errors);
+	}, [formData]);
+
+	const handleFormChange = (field: keyof ArrsConfig, value: any) => {
+		setFormData((prev) => ({ ...prev, [field]: value }));
+		setHasChanges(true);
+	};
+
+	const handleInstanceChange = (type: ArrsType, index: number, field: keyof ArrsInstanceConfig, value: any) => {
+		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
+		const instances = [...formData[instancesKey]];
+		instances[index] = { ...instances[index], [field]: value };
+		setFormData((prev) => ({ ...prev, [instancesKey]: instances }));
+		setHasChanges(true);
+	};
+
+	const removeInstance = (type: ArrsType, index: number) => {
+		const instancesKey = type === "radarr" ? "radarr_instances" : "sonarr_instances";
+		const instances = [...formData[instancesKey]];
+		instances.splice(index, 1);
+		setFormData((prev) => ({ ...prev, [instancesKey]: instances }));
+		setHasChanges(true);
+	};
+
+	const handleRegisterWebhooks = async () => {
+		setWebhookSuccess(null);
+		setWebhookError(null);
+
+		try {
+			await registerWebhooks.mutateAsync();
+			setWebhookSuccess("Webhooks registered successfully!");
+		} catch (error) {
+			console.error("Failed to register webhooks:", error);
+			setWebhookError(error instanceof Error ? error.message : "Failed to register webhooks");
+		}
+	};
 	const addInstance = () => {
 		if (!newInstance.name.trim() || !newInstance.url.trim() || !newInstance.api_key.trim()) {
 			return;
@@ -57,7 +141,8 @@ export function ArrsConfigSection({
 		];
 
 		const newFormData = { ...formData, [instancesKey]: instances };
-// ... (omitted code) ...
+		setFormData(newFormData);
+		setHasChanges(true);
 		// Reset form and hide
 		setNewInstance(DEFAULT_NEW_INSTANCE);
 		setShowAddInstance(false);

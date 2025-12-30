@@ -466,9 +466,11 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		return nil
 	}
 
-	// Generate target_path by removing .nzb extension
+	// Generate target_path: use StoragePath if available (for completed items), otherwise remove .nzb extension from NzbPath
 	targetPath := item.NzbPath
-	if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
+	if item.StoragePath != nil && *item.StoragePath != "" {
+		targetPath = *item.StoragePath
+	} else if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
 		targetPath = targetPath[:len(targetPath)-4]
 	}
 
