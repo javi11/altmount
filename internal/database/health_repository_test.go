@@ -12,7 +12,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) *HealthRepository {
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
+	db, err := sql.Open("sqlite3", "file::memory:")
 	require.NoError(t, err)
 	
 	_, err = db.Exec(`
@@ -33,7 +33,7 @@ func setupTestDB(t *testing.T) *HealthRepository {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			release_date DATETIME,
 			scheduled_check_at DATETIME,
-			priority BOOLEAN DEFAULT 0
+			priority INTEGER DEFAULT 0
 		);
 	`)
 	require.NoError(t, err)
@@ -94,4 +94,41 @@ func TestGetFilesForRepairNotification_RespectsSchedule(t *testing.T) {
 	assert.False(t, foundFuture, "Future scheduled repair should not be picked up")
 	assert.True(t, foundPast, "Past scheduled repair should be picked up")
 	assert.True(t, foundNull, "Null scheduled repair should be picked up")
+}
+
+func TestRegisterCorruptedFile_PlaybackFailureBehavior(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+	filePath := "tv/Show/Season 01/Episode 01.mkv"
+	errorMsg := "no NZB data available for file"
+
+	// 1. Simulate RegisterCorruptedFile call (e.g. from streaming failure)
+	err := repo.RegisterCorruptedFile(ctx, filePath, nil, errorMsg)
+	require.NoError(t, err)
+
+	// 2. Check the file state
+	fileHealth, err := repo.GetFileHealth(ctx, filePath)
+	require.NoError(t, err)
+	require.NotNil(t, fileHealth)
+
+	// Assert FIX behavior:
+	// Status = 'pending'
+	// Priority = HealthPriorityNext (2)
+	// RetryCount = MaxRetries - 1 (so it triggers repair on next check)
+	assert.Equal(t, HealthStatusPending, fileHealth.Status, "Status should be pending to trigger check/repair")
+	assert.Equal(t, HealthPriorityNext, fileHealth.Priority, "Priority should be high/next")
+	assert.Equal(t, fileHealth.MaxRetries-1, fileHealth.RetryCount, "RetryCount should equal MaxRetries-1 to trigger immediate repair on next check")
+	
+	// 3. Verify GetUnhealthyFiles picks it up
+	unhealthyFiles, err := repo.GetUnhealthyFiles(ctx, 10)
+	require.NoError(t, err)
+	
+	found := false
+	for _, f := range unhealthyFiles {
+		if f.FilePath == filePath {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "File should be picked up by GetUnhealthyFiles")
 }
