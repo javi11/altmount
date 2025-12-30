@@ -299,6 +299,7 @@ export interface LibrarySyncProgress {
 export interface LibrarySyncResult {
 	files_added: number;
 	files_deleted: number;
+	metadata_deleted: number;
 	duration: number;
 	completed_at: string;
 }
