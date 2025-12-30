@@ -960,9 +960,20 @@ func DefaultConfig(configDir ...string) *Config {
 			Enabled:               &sabnzbdEnabled,
 			CompleteDir:           "/complete",
 			DownloadClientBaseURL: "http://altmount:8080/sabnzbd",
-			Categories:            []SABnzbdCategory{},
-			FallbackHost:          "",
-			FallbackAPIKey:        "",
+			Categories: []SABnzbdCategory{
+				{
+					Name:     "movies",
+					Order:    1,
+					Priority: 0,
+				},
+				{
+					Name:     "tv",
+					Order:    1,
+					Priority: 1,
+				},
+			},
+			FallbackHost:   "",
+			FallbackAPIKey: "",
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
