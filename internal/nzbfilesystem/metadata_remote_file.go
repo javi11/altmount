@@ -1072,9 +1072,10 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	ctx, cancel := context.WithTimeout(mvf.ctx, 5*time.Second)
 	defer cancel()
 
-	// Any file with missing segments or corruption is marked as corrupted
+	// Any file with missing segments or corruption is marked as corrupted in metadata
+	// but set to pending in DB to trigger the repair cycle immediately
 	metadataStatus := metapb.FileStatus_FILE_STATUS_CORRUPTED
-	dbStatus := database.HealthStatusCorrupted
+	dbStatus := database.HealthStatusPending
 
 	// Update metadata status (blocking with timeout)
 	if err := mvf.metadataService.UpdateFileStatus(mvf.name, metadataStatus); err != nil {
