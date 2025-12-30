@@ -1,8 +1,6 @@
 package archive
 
-import "strconv"
-
-// parseInt safely converts string to int
+// ParseInt safely converts string to int
 func ParseInt(s string) int {
 	num := 0
 	for _, r := range s {
@@ -13,9 +11,4 @@ func ParseInt(s string) int {
 		}
 	}
 	return num
-}
-
-// FormatInt converts an integer to a string
-func FormatInt(n int) string {
-	return strconv.Itoa(n)
 }
