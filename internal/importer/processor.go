@@ -416,8 +416,24 @@ func (proc *Processor) processMultiFile(
 	return targetBaseDir, nil
 }
 
-// processRarArchive handles RAR archive imports
-func (proc *Processor) processRarArchive(
+// archiveProcessFunc is the signature for archive-specific processing functions
+type archiveProcessFunc func(
+	ctx context.Context,
+	nzbFolder string,
+	archiveFiles []parser.ParsedFile,
+	password string,
+	releaseDate int64,
+	nzbPath string,
+	archiveProgressTracker *progress.Tracker,
+	validationProgressTracker *progress.Tracker,
+	maxConnections int,
+	samplePercentage int,
+	allowedExtensions []string,
+	timeout time.Duration,
+) error
+
+// processArchive handles archive imports (RAR or 7zip) with a unified flow
+func (proc *Processor) processArchive(
 	ctx context.Context,
 	virtualDir string,
 	regularFiles []parser.ParsedFile,
@@ -427,6 +443,7 @@ func (proc *Processor) processRarArchive(
 	maxConnections int,
 	allowedExtensions []string,
 	timeout time.Duration,
+	archiveFunc archiveProcessFunc,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
@@ -457,7 +474,7 @@ func (proc *Processor) processRarArchive(
 		}
 	}
 
-	// Analyze and process RAR archive
+	// Process archive files if any
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
 
@@ -465,10 +482,7 @@ func (proc *Processor) processRarArchive(
 		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
 
 		// Get release date from first archive file
-		var releaseDate int64
-		if len(archiveFiles) > 0 {
-			releaseDate = archiveFiles[0].ReleaseDate.Unix()
-		}
+		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 
 		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
 		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
@@ -479,31 +493,61 @@ func (proc *Processor) processRarArchive(
 			samplePercentage = 0
 		}
 
-		// Process archive with unified aggregator
-		err := rar.ProcessArchive(
+		// Process archive with the provided archive-specific function
+		if err := archiveFunc(
 			ctx,
 			nzbFolder,
 			archiveFiles,
 			parsed.GetPassword(),
 			releaseDate,
 			parsed.Path,
-			proc.rarProcessor,
-			proc.metadataService,
-			proc.poolManager,
 			archiveProgressTracker,
 			validationProgressTracker,
 			maxConnections,
 			samplePercentage,
 			allowedExtensions,
 			timeout,
-		)
-		if err != nil {
+		); err != nil {
 			return "", err
 		}
 		// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
 	}
 
 	return nzbFolder, nil
+}
+
+// processRarArchive handles RAR archive imports
+func (proc *Processor) processRarArchive(
+	ctx context.Context,
+	virtualDir string,
+	regularFiles []parser.ParsedFile,
+	archiveFiles []parser.ParsedFile,
+	parsed *parser.ParsedNzb,
+	queueID int,
+	maxConnections int,
+	allowedExtensions []string,
+	timeout time.Duration,
+) (string, error) {
+	return proc.processArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, timeout,
+		func(ctx context.Context, nzbFolder string, archiveFiles []parser.ParsedFile, password string, releaseDate int64, nzbPath string, archiveProgressTracker, validationProgressTracker *progress.Tracker, maxConnections, samplePercentage int, allowedExtensions []string, timeout time.Duration) error {
+			return rar.ProcessArchive(
+				ctx,
+				nzbFolder,
+				archiveFiles,
+				password,
+				releaseDate,
+				nzbPath,
+				proc.rarProcessor,
+				proc.metadataService,
+				proc.poolManager,
+				archiveProgressTracker,
+				validationProgressTracker,
+				maxConnections,
+				samplePercentage,
+				allowedExtensions,
+				timeout,
+			)
+		})
 }
 
 // processSevenZipArchive handles 7zip archive imports
@@ -518,81 +562,26 @@ func (proc *Processor) processSevenZipArchive(
 	allowedExtensions []string,
 	timeout time.Duration,
 ) (string, error) {
-	// Create NZB folder
-	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, filepath.Base(parsed.Path), proc.metadataService)
-	if err != nil {
-		return "", err
-	}
-
-	// Process regular files first if any
-	if len(regularFiles) > 0 {
-		if err := filesystem.CreateDirectoriesForFiles(nzbFolder, regularFiles, proc.metadataService); err != nil {
-			return "", err
-		}
-
-		        		if err := multifile.ProcessRegularFiles(
-		        			ctx,
-		        			nzbFolder,
-		        			regularFiles,
-		        			nil, // No PAR2 files for archive imports
-		        			parsed.Path,
-		        			proc.metadataService,
-		        			proc.poolManager,
-		        			maxConnections,
-		        			proc.segmentSamplePercentage,
-		        			allowedExtensions,
-		        			proc.validationTimeout,
-		        		); err != nil {		            slog.DebugContext(ctx, "Failed to process regular files", "error", err)
-		        }
-		    }
-		
-		    // Analyze and process 7zip archive
-		    if len(archiveFiles) > 0 {
-		        proc.updateProgress(queueID, 50)
-		
-		        // Create progress tracker for 50-80% range (archive analysis)
-		        archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
-		
-		        // Get release date from first archive file
-		        var releaseDate int64
-		        if len(archiveFiles) > 0 {
-		            releaseDate = archiveFiles[0].ReleaseDate.Unix()
-		        }
-		
-		        		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
-		        		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-		        
-		        		// Determine sample percentage based on skipHealthCheck
-		        		samplePercentage := proc.segmentSamplePercentage
-		        		if proc.skipHealthCheck {
-		        			samplePercentage = 0
-		        		}
-		        
-		        		// Process archive with unified aggregator
-		err := sevenzip.ProcessArchive(
-			ctx,
-			nzbFolder,
-			archiveFiles,
-			parsed.GetPassword(),
-			releaseDate,
-			parsed.Path,
-			proc.sevenZipProcessor,
-			proc.metadataService,
-			proc.poolManager,
-			archiveProgressTracker,
-			validationProgressTracker,
-			maxConnections,
-			samplePercentage,
-			allowedExtensions,
-			timeout,
-		)
-		if err != nil {
-			return "", err
-		}
-		// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
-	}
-
-	return nzbFolder, nil
+	return proc.processArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, timeout,
+		func(ctx context.Context, nzbFolder string, archiveFiles []parser.ParsedFile, password string, releaseDate int64, nzbPath string, archiveProgressTracker, validationProgressTracker *progress.Tracker, maxConnections, samplePercentage int, allowedExtensions []string, timeout time.Duration) error {
+			return sevenzip.ProcessArchive(
+				ctx,
+				nzbFolder,
+				archiveFiles,
+				password,
+				releaseDate,
+				nzbPath,
+				proc.sevenZipProcessor,
+				proc.metadataService,
+				proc.poolManager,
+				archiveProgressTracker,
+				validationProgressTracker,
+				maxConnections,
+				samplePercentage,
+				allowedExtensions,
+				timeout,
+			)
+		})
 }
 
 
