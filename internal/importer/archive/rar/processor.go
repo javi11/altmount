@@ -11,6 +11,7 @@ import (
 
 	"github.com/javi11/altmount/internal/errors"
 	"github.com/javi11/altmount/internal/importer/archive"
+	"github.com/javi11/altmount/internal/importer/archive/bluray"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
@@ -64,6 +65,18 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 		meta.Encryption = metapb.Encryption_AES
 		meta.AesKey = Content.AesKey
 		meta.AesIv = Content.AesIV
+	}
+
+	// Set Blu-ray metadata if this is from a BDMV structure
+	if Content.BlurayStreamName != "" {
+		meta.BlurayMetadata = &metapb.BlurayMetadata{
+			TargetM2TsFile: filepath.Base(Content.InternalPath),
+			BdmvPath:       Content.BlurayBDMVPath,
+			PlaylistName:   Content.BlurayStreamName,
+			M2TsOffset:     0, // Offset is handled by segments
+			M2TsSize:       Content.Size,
+			ClipInfoFile:   filepath.Base(Content.BlurayClipInfo),
+		}
 	}
 
 	return meta
@@ -181,6 +194,110 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	return Contents, nil
+}
+
+// ProcessBlurayContent detects if the RAR contents represent a Blu-ray disc structure
+// and filters to return only significant .m2ts streams with Blu-ray metadata
+func (rh *rarProcessor) ProcessBlurayContent(ctx context.Context, rarFiles []parser.ParsedFile, contents []Content, password string, progressTracker *progress.Tracker) ([]Content, bool, error) {
+	// Extract file paths for BDMV detection
+	filePaths := make([]string, len(contents))
+	for i, content := range contents {
+		filePaths[i] = content.InternalPath
+	}
+
+	// Check if this is a Blu-ray structure
+	if !bluray.IsBlurayStructure(filePaths) {
+		return contents, false, nil
+	}
+
+	rh.log.InfoContext(ctx, "Detected Blu-ray disc structure in RAR archive")
+
+	// Analyze the BDMV structure
+	bdmvStructure := bluray.AnalyzeBDMVStructure(filePaths)
+	if bdmvStructure == nil {
+		return nil, false, errors.NewNonRetryableError("failed to analyze BDMV structure", nil)
+	}
+
+	rh.log.InfoContext(ctx, "Analyzed BDMV structure",
+		"stream_files", len(bdmvStructure.StreamFiles),
+		"clip_files", len(bdmvStructure.ClipFiles),
+		"playlist_files", len(bdmvStructure.PlaylistFiles))
+
+	// Create Usenet filesystem for accessing BDMV files
+	// Normalize RAR filenames as done in AnalyzeRarContentFromNzb
+	normalizedFiles := make([]parser.ParsedFile, len(rarFiles))
+	allFilesNoExt := true
+	for _, file := range rarFiles {
+		if hasExtension(file.Filename) {
+			allFilesNoExt = false
+			break
+		}
+	}
+
+	baseFilename := ""
+	if allFilesNoExt && len(rarFiles) > 0 {
+		slices.SortFunc(rarFiles, func(a, b parser.ParsedFile) int {
+			return strings.Compare(a.Filename, b.Filename)
+		})
+		baseFilename = rarFiles[0].Filename
+	}
+
+	for i, file := range rarFiles {
+		normalizedFiles[i] = file
+		normalizedFiles[i].Filename = normalizeRarPartFilename(file.Filename, file.OriginalIndex, allFilesNoExt, len(rarFiles), baseFilename)
+	}
+
+	ufs := filesystem.NewUsenetFileSystem(ctx, rh.poolManager, normalizedFiles, rh.maxWorkers, rh.maxCacheSizeMB, progressTracker, rh.readTimeout)
+
+	// Parse Blu-ray streams to identify significant ones
+	streams, err := bluray.ParseBlurayStreams(ctx, bdmvStructure, ufs)
+	if err != nil {
+		return nil, false, errors.NewNonRetryableError("failed to parse Blu-ray streams", err)
+	}
+
+	rh.log.InfoContext(ctx, "Parsed Blu-ray streams",
+		"total_streams", len(streams),
+		"main_feature", streams[0].DisplayName)
+
+	// Create new content list with only the significant .m2ts files
+	blurayContents := make([]Content, 0, len(streams))
+
+	for _, stream := range streams {
+		// Find the corresponding content for this stream
+		var streamContent *Content
+		for i := range contents {
+			if contents[i].InternalPath == stream.StreamPath {
+				streamContent = &contents[i]
+				break
+			}
+		}
+
+		if streamContent == nil {
+			rh.log.WarnContext(ctx, "Stream file not found in RAR contents",
+				"stream_path", stream.StreamPath)
+			continue
+		}
+
+		// Create a new content with Blu-ray metadata
+		blurayContent := *streamContent // Copy the content
+		blurayContent.Filename = stream.GetSafeFilename()
+		blurayContent.BlurayStreamName = stream.DisplayName
+		blurayContent.BlurayBDMVPath = bdmvStructure.BDMVPath
+		blurayContent.BlurayClipInfo = stream.ClipInfoPath
+
+		blurayContents = append(blurayContents, blurayContent)
+
+		rh.log.InfoContext(ctx, "Added Blu-ray stream",
+			"stream", stream.DisplayName,
+			"path", stream.StreamPath,
+			"size_mb", stream.Size/(1024*1024))
+	}
+
+	if len(blurayContents) == 0 {
+		return nil, false, errors.NewNonRetryableError("no significant Blu-ray streams found", nil)
+	}
+
+	return blurayContents, true, nil
 }
 
 // checkForCompressedFiles validates that no files in the archive are compressed

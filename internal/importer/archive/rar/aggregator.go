@@ -112,6 +112,17 @@ func ProcessArchive(
 		return err
 	}
 
+	// Check if this is a Blu-ray disc structure and process accordingly
+	rarContents, isBluray, err := rarProcessor.ProcessBlurayContent(ctx, archiveFiles, rarContents, password, archiveProgressTracker)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to process Blu-ray content", "error", err)
+		return err
+	}
+
+	if isBluray {
+		slog.InfoContext(ctx, "Processed Blu-ray disc structure", "streams", len(rarContents))
+	}
+
 	// Validate file extensions before processing
 	if !hasAllowedFiles(rarContents, allowedFileExtensions) {
 		slog.WarnContext(ctx, "RAR archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)

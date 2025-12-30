@@ -18,6 +18,10 @@ type Processor interface {
 	// CreateFileMetadataFromRarContent creates FileMetadata from Content for the metadata
 	// system. This is used to convert Content into the protobuf format used by the metadata system.
 	CreateFileMetadataFromRarContent(content Content, sourceNzbPath string, releaseDate int64, nzbdavId string) *metapb.FileMetadata
+	// ProcessBlurayContent detects if the RAR contents represent a Blu-ray disc structure
+	// and filters to return only significant .m2ts streams. Returns the processed contents,
+	// a boolean indicating if Blu-ray was detected, and any error.
+	ProcessBlurayContent(ctx context.Context, rarFiles []parser.ParsedFile, contents []Content, password string, progressTracker *progress.Tracker) ([]Content, bool, error)
 }
 
 // Content represents a file within a RAR archive for processing
@@ -30,4 +34,8 @@ type Content struct {
 	AesKey       []byte                `json:"aes_key,omitempty"`      // AES encryption key (if encrypted)
 	AesIV        []byte                `json:"aes_iv,omitempty"`       // AES initialization vector (if encrypted)
 	NzbdavID     string                `json:"nzbdav_id,omitempty"`    // Original ID from nzbdav
+	// Blu-ray specific fields (if this file is from a BDMV structure)
+	BlurayStreamName string `json:"bluray_stream_name,omitempty"` // Display name (e.g., "Main Feature")
+	BlurayBDMVPath   string `json:"bluray_bdmv_path,omitempty"`   // Path to BDMV folder (e.g., "BDMV/")
+	BlurayClipInfo   string `json:"bluray_clip_info,omitempty"`   // Associated .clpi file
 }

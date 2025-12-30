@@ -33,6 +33,16 @@ message Par2FileReference {
   repeated SegmentData segment_data = 3;  // Usenet segments containing PAR2 data
 }
 
+// BlurayMetadata contains information for extracting specific streams from Blu-ray disc structures
+message BlurayMetadata {
+  string target_m2ts_file = 1;  // Target .m2ts file to extract (e.g., "00000.m2ts")
+  string bdmv_path = 2;          // Path to BDMV folder within archive (e.g., "BDMV/")
+  string playlist_name = 3;      // Human-readable name from playlist (e.g., "Main Feature")
+  int64 m2ts_offset = 4;         // Offset of .m2ts file within BDMV structure
+  int64 m2ts_size = 5;           // Size of the .m2ts file
+  string clip_info_file = 6;     // Associated .clpi file name for metadata
+}
+
 // FileMetadata represents a single virtual file in the filesystem
 // The filename comes from the actual metadata filename on disk
 message FileMetadata {
@@ -47,7 +57,8 @@ message FileMetadata {
   repeated SegmentData segment_data = 9;  // Segment information (lazy-loaded)
   bytes aes_key = 10;           // AES encryption key (for AES-encrypted archives)
   bytes aes_iv = 11;            // AES initialization vector (for AES-encrypted archives)
-    int64 release_date = 12;      // Unix timestamp of the original Usenet post release date
-    repeated Par2FileReference par2_files = 13;  // Associated PAR2 repair files
+  int64 release_date = 12;      // Unix timestamp of the original Usenet post release date
+  repeated Par2FileReference par2_files = 13;  // Associated PAR2 repair files
+  BlurayMetadata bluray_metadata = 14;  // Blu-ray specific metadata (if file is from BDMV structure)
 }
   
