@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -64,6 +65,7 @@ type UsedFiles struct {
 type LibrarySyncWorker struct {
 	metadataService *metadata.MetadataService
 	healthRepo      *database.HealthRepository
+	repo            *database.Repository
 	configGetter    config.ConfigGetter
 	configManager   *config.Manager
 	cancelFunc      context.CancelFunc
@@ -80,18 +82,34 @@ type LibrarySyncWorker struct {
 func NewLibrarySyncWorker(
 	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
+	repo *database.Repository,
 	configGetter config.ConfigGetter,
 	configManager *config.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 ) *LibrarySyncWorker {
-	return &LibrarySyncWorker{
+	worker := &LibrarySyncWorker{
 		metadataService: metadataService,
 		healthRepo:      healthRepo,
+		repo:            repo,
 		configGetter:    configGetter,
 		configManager:   configManager,
 		rcloneClient:    rcloneClient,
 		manualTrigger:   make(chan struct{}, 1), // Buffered channel for non-blocking sends
 	}
+
+	// Load last sync result from database if available
+	if repo != nil {
+		ctx := context.Background()
+		state, err := repo.GetSystemState(ctx, "library_sync_last_result")
+		if err == nil && state != "" {
+			var result SyncResult
+			if err := json.Unmarshal([]byte(state), &result); err == nil {
+				worker.lastSyncResult = &result
+			}
+		}
+	}
+
+	return worker
 }
 
 // StartLibrarySync starts the library sync worker in a background goroutine
@@ -307,19 +325,31 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 	totalDbRecords int,
 ) {
 	duration := time.Since(startTime)
+	now := time.Now().UTC()
 
 	// Store sync result
-	lsw.progressMu.Lock()
-	lsw.lastSyncResult = &SyncResult{
+	result := &SyncResult{
 		FilesAdded:          dbCounts.added,
 		FilesDeleted:        dbCounts.deleted,
 		MetadataDeleted:     cleanup.metadataDeleted,
 		LibraryFilesDeleted: cleanup.libraryFilesDeleted,
 		LibraryDirsDeleted:  cleanup.libraryDirsDeleted,
 		Duration:            duration,
-		CompletedAt:         time.Now(),
+		CompletedAt:         now,
 	}
+
+	lsw.progressMu.Lock()
+	lsw.lastSyncResult = result
 	lsw.progressMu.Unlock()
+
+	// Persist to database
+	if lsw.repo != nil {
+		// Use background context for persistence to ensure it happens even if parent is cancelled
+		bgCtx := context.Background()
+		if data, err := json.Marshal(result); err == nil {
+			_ = lsw.repo.SetSystemState(bgCtx, "library_sync_last_result", string(data))
+		}
+	}
 
 	// Log completion
 	slog.InfoContext(ctx, "Library sync completed",
