@@ -155,21 +155,20 @@ export function HealthConfigSection({
 							<span className="text-sm">{validationError}</span>
 						</div>
 					)}
-					<div className="label text-sm whitespace-normal flex-col items-start">
+					<div className="label flex-col items-start whitespace-normal text-sm">
 						<div>
-							Path to your organized media library that contains symlinks pointing to
-							altmount files. When a repair is triggered, the system will search for
-							symlinks in this directory and use the library path for ARR rescan instead
-							of the mount path.
+							Path to your organized media library that contains symlinks pointing to altmount
+							files. When a repair is triggered, the system will search for symlinks in this
+							directory and use the library path for ARR rescan instead of the mount path.
 						</div>
 						{config.import.import_strategy === "NONE" && (
 							<span className="mt-1 text-info">
-								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy,
-								you can leave this empty. The system will use your mount path for repairs.
+								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy, you can
+								leave this empty. The system will use your mount path for repairs.
 							</span>
 						)}
 						{formData.enabled && config.import.import_strategy !== "NONE" && (
-							<strong className="text-error mt-1">
+							<strong className="mt-1 text-error">
 								Required when Health System is enabled with {config.import.import_strategy}{" "}
 								strategy.
 							</strong>
@@ -207,21 +206,20 @@ export function HealthConfigSection({
 							</div>
 						</div>
 					)}
-					<div className="label text-sm whitespace-normal flex-col items-start">
+					<div className="label flex-col items-start whitespace-normal text-sm">
 						<div>
-							Automatically delete orphaned library files and metadata during library sync.
-							When disabled, no files will be deleted.
+							Automatically delete orphaned library files and metadata during library sync. When
+							disabled, no files will be deleted.
 						</div>
-						{formData.cleanup_orphaned_metadata &&
-							config.import.import_strategy !== "NONE" && (
-								<strong className="text-warning mt-1">
-									Requires Library Directory to be configured.
-								</strong>
-							)}
+						{formData.cleanup_orphaned_metadata && config.import.import_strategy !== "NONE" && (
+							<strong className="mt-1 text-warning">
+								Requires Library Directory to be configured.
+							</strong>
+						)}
 						{config.import.import_strategy === "NONE" && (
 							<span className="mt-1 text-info">
-								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system only
-								performs metadata-only sync. It will not delete library files.
+								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system only performs
+								metadata-only sync. It will not delete library files.
 							</span>
 						)}
 					</div>
@@ -409,51 +407,50 @@ export function HealthConfigSection({
 								</p>
 							</fieldset>
 						)}
-												{formData.library_sync_interval_minutes !== undefined && (
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend">Library Sync Interval (minutes)</legend>
-														<input
-															type="number"
-															className="input"
-															value={formData.library_sync_interval_minutes}
-															readOnly={isReadOnly}
-															min={0}
-															max={1440}
-															step={30}
-															onChange={(e) =>
-																handleInputChange(
-																	"library_sync_interval_minutes",
-																	Number.parseInt(e.target.value, 10) || 0,
-																)
-															}
-														/>
-														<p className="label text-sm">
-															How often to sync the library directory to discover new files (0-1440 minutes).
-															Set to 0 to disable automatic sync. Default: 360 minutes (6 hours).
-														</p>
-													</fieldset>
-												)}
-												<fieldset className="fieldset">
-													<legend className="fieldset-legend">Smart Repair Resolution</legend>
-													<label className="label cursor-pointer">
-														<span className="label-text">Resolve repairs on import</span>
-														<input
-															type="checkbox"
-															className="checkbox"
-															checked={formData.resolve_repair_on_import ?? false}
-															disabled={isReadOnly}
-															onChange={(e) => handleInputChange("resolve_repair_on_import", e.target.checked)}
-														/>
-													</label>
-													<p className="label text-sm">
-														Automatically resolve pending repairs in the same directory when a new file is
-														successfully imported.
-													</p>
-												</fieldset>
-											</div>
-										</div>
-									</details>
-						
+						{formData.library_sync_interval_minutes !== undefined && (
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Library Sync Interval (minutes)</legend>
+								<input
+									type="number"
+									className="input"
+									value={formData.library_sync_interval_minutes}
+									readOnly={isReadOnly}
+									min={0}
+									max={1440}
+									step={30}
+									onChange={(e) =>
+										handleInputChange(
+											"library_sync_interval_minutes",
+											Number.parseInt(e.target.value, 10) || 0,
+										)
+									}
+								/>
+								<p className="label text-sm">
+									How often to sync the library directory to discover new files (0-1440 minutes).
+									Set to 0 to disable automatic sync. Default: 360 minutes (6 hours).
+								</p>
+							</fieldset>
+						)}
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Smart Repair Resolution</legend>
+							<label className="label cursor-pointer">
+								<span className="label-text">Resolve repairs on import</span>
+								<input
+									type="checkbox"
+									className="checkbox"
+									checked={formData.resolve_repair_on_import ?? false}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("resolve_repair_on_import", e.target.checked)}
+								/>
+							</label>
+							<p className="label text-sm">
+								Automatically resolve pending repairs in the same directory when a new file is
+								successfully imported.
+							</p>
+						</fieldset>
+					</div>
+				</div>
+			</details>
 
 			{/* Save Button */}
 			{onUpdate && !isReadOnly && hasChanges && (

@@ -541,7 +541,7 @@ export class APIClient {
 	}
 
 	async getArrsHealth() {
-		return this.request<Record<string, any>>("/arrs/health");
+		return this.request<Record<string, unknown>>("/arrs/health");
 	}
 
 	async registerArrsWebhooks() {

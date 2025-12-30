@@ -147,7 +147,7 @@ function UploadSection() {
 				<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 					{/* Select Files */}
 					<div className="form-control">
-						<label className="label">
+						<label htmlFor="files-input" className="label">
 							<span className="label-text font-medium">Select Files</span>
 						</label>
 						<input
@@ -159,14 +159,14 @@ function UploadSection() {
 							disabled={isUploading}
 							ref={fileInputRef}
 						/>
-						<label className="label">
+						<label htmlFor="files-input" className="label">
 							<span className="label-text-alt">Select individual .nzb files</span>
 						</label>
 					</div>
 
 					{/* Select Folder */}
 					<div className="form-control">
-						<label className="label">
+						<label htmlFor="folder-input" className="label">
 							<span className="label-text font-medium">Select Folder</span>
 						</label>
 						<input
@@ -179,7 +179,7 @@ function UploadSection() {
 							disabled={isUploading}
 							ref={dirInputRef}
 						/>
-						<label className="label">
+						<label htmlFor="folder-input" className="label">
 							<span className="label-text-alt">Upload all .nzb files in a folder</span>
 						</label>
 					</div>
@@ -335,6 +335,7 @@ function NzbDavImportSection() {
 								</div>
 								{!isCanceling && (
 									<button
+										type="button"
 										className="btn btn-sm btn-warning"
 										onClick={handleCancel}
 										disabled={cancelImport.isPending}

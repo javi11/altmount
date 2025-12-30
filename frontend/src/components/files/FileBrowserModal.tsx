@@ -170,10 +170,10 @@ export function FileBrowserModal({
 
 				{allowDirectorySelection && (
 					<div className="modal-action mt-4 shrink-0">
-						<button className="btn" onClick={onClose}>
+						<button type="button" className="btn" onClick={onClose}>
 							Cancel
 						</button>
-						<button className="btn btn-primary" onClick={handleSelectCurrentDir}>
+						<button type="button" className="btn btn-primary" onClick={handleSelectCurrentDir}>
 							Select This Directory
 						</button>
 					</div>

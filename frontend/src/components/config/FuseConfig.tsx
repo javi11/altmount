@@ -125,7 +125,7 @@ export function FuseConfig() {
 						</h3>
 						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 							<div className="form-control w-full">
-								<label className="label">
+								<label htmlFor="mount-path" className="label">
 									<span className="label-text">Mount Path</span>
 								</label>
 								<input
@@ -149,7 +149,7 @@ export function FuseConfig() {
 										disabled={isRunning}
 									/>
 								</label>
-								<label className="label">
+								<label htmlFor="allow-other" className="label">
 									<span className="label-text-alt opacity-70">
 										Allow other users (like Docker/Plex) to access the mount
 									</span>
@@ -165,7 +165,7 @@ export function FuseConfig() {
 						</h3>
 						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 							<div className="form-control">
-								<label className="label">
+								<label htmlFor="attr-timeout" className="label">
 									<span className="label-text">Attribute Timeout</span>
 								</label>
 								<div className="join">
@@ -183,7 +183,7 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">sec</span>
 								</div>
-								<label className="label">
+								<label htmlFor="entry-timeout" className="label">
 									<span className="label-text-alt opacity-70">
 										How long the kernel caches file attributes
 									</span>
@@ -191,7 +191,7 @@ export function FuseConfig() {
 							</div>
 
 							<div className="form-control">
-								<label className="label">
+								<label htmlFor="kernel-read-ahead" className="label">
 									<span className="label-text">Entry Timeout</span>
 								</label>
 								<div className="join">
@@ -209,7 +209,7 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">sec</span>
 								</div>
-								<label className="label">
+								<label htmlFor="kernel-read-ahead" className="label">
 									<span className="label-text-alt opacity-70">
 										How long the kernel caches directory lookups
 									</span>
@@ -217,7 +217,7 @@ export function FuseConfig() {
 							</div>
 
 							<div className="form-control">
-								<label className="label">
+								<label htmlFor="kernel-read-ahead" className="label">
 									<span className="label-text">Kernel Read-Ahead</span>
 								</label>
 								<div className="join">
@@ -235,7 +235,7 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">MB</span>
 								</div>
-								<label className="label">
+								<label htmlFor="kernel-read-ahead" className="label">
 									<span className="label-text-alt opacity-70">
 										Maximum data the kernel will request ahead (FUSE max_readahead)
 									</span>
@@ -251,7 +251,7 @@ export function FuseConfig() {
 						</h3>
 						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 							<div className="form-control">
-								<label className="label">
+								<label htmlFor="max-download-workers" className="label">
 									<span className="label-text">Max Download Workers</span>
 								</label>
 								<input
@@ -266,7 +266,7 @@ export function FuseConfig() {
 									}
 									disabled={isRunning}
 								/>
-								<label className="label">
+								<label htmlFor="max-download-workers" className="label">
 									<span className="label-text-alt opacity-70">
 										Concurrent download workers for this mount
 									</span>
@@ -274,7 +274,7 @@ export function FuseConfig() {
 							</div>
 
 							<div className="form-control">
-								<label className="label">
+								<label htmlFor="max-cache-size" className="label">
 									<span className="label-text">Max Cache Size</span>
 								</label>
 								<div className="join">
@@ -292,7 +292,7 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">MB</span>
 								</div>
-								<label className="label">
+								<label htmlFor="max-cache-size" className="label">
 									<span className="label-text-alt opacity-70">Read-ahead cache size per file</span>
 								</label>
 							</div>
@@ -331,6 +331,7 @@ export function FuseConfig() {
 
 					{!isRunning && (
 						<button
+							type="button"
 							className="btn btn-ghost mr-2"
 							onClick={handleSave}
 							disabled={updateConfig.isPending}
@@ -341,7 +342,12 @@ export function FuseConfig() {
 					)}
 
 					{isRunning ? (
-						<button className="btn btn-error" onClick={handleStop} disabled={isLoading}>
+						<button
+							type="button"
+							className="btn btn-error"
+							onClick={handleStop}
+							disabled={isLoading}
+						>
 							{isLoading ? (
 								<span className="loading loading-spinner" />
 							) : (
@@ -350,7 +356,12 @@ export function FuseConfig() {
 							Unmount
 						</button>
 					) : (
-						<button className="btn btn-primary" onClick={handleStart} disabled={isLoading || !path}>
+						<button
+							type="button"
+							className="btn btn-primary"
+							onClick={handleStart}
+							disabled={isLoading || !path}
+						>
 							{isLoading ? (
 								<span className="loading loading-spinner" />
 							) : (

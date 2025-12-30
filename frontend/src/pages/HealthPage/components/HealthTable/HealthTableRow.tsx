@@ -46,7 +46,7 @@ export function HealthTableRow({
 		}
 	};
 
-	let statusIcon;
+	let statusIcon: React.ReactNode;
 	let iconColorClass = "text-base-content/50"; // Default color
 
 	switch (item.status) {
@@ -128,11 +128,11 @@ export function HealthTableRow({
 				)}
 			</td>
 			<td>
-				<div
+				<button
+					type="button"
 					className="cursor-pointer transition-transform hover:scale-110"
 					onClick={() => onSetPriority(item.id, getNextPriority(item.priority))}
 					title="Click to cycle priority"
-					role="button"
 					tabIndex={0}
 					onKeyDown={(e) => {
 						if (e.key === "Enter" || e.key === " ") {
@@ -147,7 +147,7 @@ export function HealthTableRow({
 					) : (
 						<div className="badge badge-ghost badge-sm">Normal</div>
 					)}
-				</div>
+				</button>
 			</td>
 			<td>
 				<div className="flex flex-col gap-1">

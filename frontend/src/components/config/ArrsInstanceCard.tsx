@@ -152,7 +152,8 @@ export function ArrsInstanceCard({
 							disabled={isReadOnly}
 						/>
 						<p className="label text-base-content/70 text-xs">
-							SABnzbd category to use for this instance. Defaults to "{type === "radarr" ? "movies" : "tv"}".
+							SABnzbd category to use for this instance. Defaults to "
+							{type === "radarr" ? "movies" : "tv"}".
 						</p>
 					</fieldset>
 
