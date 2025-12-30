@@ -114,12 +114,13 @@ type ImportAPIResponse struct {
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
 type SABnzbdAPIResponse struct {
-	Enabled           bool                     `json:"enabled"`
-	CompleteDir       string                   `json:"complete_dir"`
-	Categories        []config.SABnzbdCategory `json:"categories"`
-	FallbackHost      string                   `json:"fallback_host"`
-	FallbackAPIKey    string                   `json:"fallback_api_key"`     // Obfuscated if set
-	FallbackAPIKeySet bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
+	Enabled               bool                     `json:"enabled"`
+	CompleteDir           string                   `json:"complete_dir"`
+	DownloadClientBaseURL string                   `json:"download_client_base_url"`
+	Categories            []config.SABnzbdCategory `json:"categories"`
+	FallbackHost          string                   `json:"fallback_host"`
+	FallbackAPIKey        string                   `json:"fallback_api_key"`     // Obfuscated if set
+	FallbackAPIKeySet     bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
 }
 
 // Helper functions to create API responses from core config types
@@ -208,12 +209,13 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	}
 
 	sabnzbdResp := SABnzbdAPIResponse{
-		Enabled:           cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled,
-		CompleteDir:       cfg.SABnzbd.CompleteDir,
-		Categories:        cfg.SABnzbd.Categories,
-		FallbackHost:      cfg.SABnzbd.FallbackHost,
-		FallbackAPIKey:    fallbackAPIKey,
-		FallbackAPIKeySet: cfg.SABnzbd.FallbackAPIKey != "",
+		Enabled:               cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled,
+		CompleteDir:           cfg.SABnzbd.CompleteDir,
+		DownloadClientBaseURL: cfg.SABnzbd.DownloadClientBaseURL,
+		Categories:            cfg.SABnzbd.Categories,
+		FallbackHost:          cfg.SABnzbd.FallbackHost,
+		FallbackAPIKey:        fallbackAPIKey,
+		FallbackAPIKeySet:     cfg.SABnzbd.FallbackAPIKey != "",
 	}
 
 	return &ConfigAPIResponse{
