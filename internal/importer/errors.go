@@ -24,4 +24,7 @@ var (
 
 	// ErrNoVideoFiles indicates that an import contains no video files.
 	ErrNoVideoFiles = sharedErrors.ErrNoVideoFiles
+
+	// ErrFallbackNotConfigured indicates that SABnzbd fallback is not enabled or configured.
+	ErrFallbackNotConfigured = sharedErrors.ErrFallbackNotConfigured
 )
