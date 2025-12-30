@@ -10,6 +10,9 @@ interface LibrarySyncProgress {
 interface LibrarySyncResult {
 	files_added: number;
 	files_deleted: number;
+	metadata_deleted: number;
+	library_files_deleted: number;
+	library_dirs_deleted: number;
 	duration: number;
 	completed_at: string;
 }
@@ -178,7 +181,16 @@ export function LibraryScanStatus({
 										<strong>Added:</strong> {status.last_sync_result.files_added}
 									</span>
 									<span>
-										<strong>Deleted:</strong> {status.last_sync_result.files_deleted}
+										<strong>Files Deleted:</strong> {status.last_sync_result.files_deleted}
+									</span>
+									<span>
+										<strong>Meta Deleted:</strong> {status.last_sync_result.metadata_deleted}
+									</span>
+									<span>
+										<strong>Lib Deleted:</strong> {status.last_sync_result.library_files_deleted}
+									</span>
+									<span>
+										<strong>Dirs Deleted:</strong> {status.last_sync_result.library_dirs_deleted}
 									</span>
 									<span>
 										<strong>Duration:</strong> {(status.last_sync_result.duration / 1e9).toFixed(2)}
