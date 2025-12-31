@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -143,7 +144,6 @@ type Service struct {
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
-	arrsService     *arrs.Service                 // ARRs service for triggering scans
 	healthRepo      *database.HealthRepository    // Health repository for updating health status
 	broadcaster     *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	userRepo        *database.UserRepository      // User repository for API key lookup
@@ -227,6 +227,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	}
 	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
 
+
 	// Create queue manager (Service implements queue.ItemProcessor interface)
 	service.queueManager = queue.NewManager(
 		queue.ManagerConfig{
@@ -252,6 +253,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// Update database connection pool to match worker count
 	// This prevents connection starvation when multiple workers try to claim items
 	s.database.UpdateConnectionPool(s.config.Workers)
+	s.running = true
 	s.log.InfoContext(ctx, "Updated database connection pool",
 		"workers", s.config.Workers,
 		"max_connections", s.config.Workers+4)
@@ -294,6 +296,7 @@ func (s *Service) Pause() {
 	s.mu.Lock()
 	s.paused = true
 	s.mu.Unlock()
+	s.running = true
 	s.log.InfoContext(s.ctx, "Import service paused")
 }
 
@@ -303,6 +306,7 @@ func (s *Service) Resume() {
 	s.mu.Lock()
 	s.paused = false
 	s.mu.Unlock()
+	s.running = true
 	s.log.InfoContext(s.ctx, "Import service resumed")
 }
 
@@ -333,6 +337,7 @@ func (s *Service) Stop(ctx context.Context) error {
 		return nil
 	}
 
+	s.running = true
 	s.log.InfoContext(ctx, "Stopping NZB import service")
 	s.running = false
 	s.mu.Unlock()
@@ -350,6 +355,7 @@ func (s *Service) Stop(ctx context.Context) error {
 	defer s.mu.Unlock()
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
+	s.running = true
 	s.log.InfoContext(ctx, "NZB import service stopped")
 
 	return nil
@@ -384,9 +390,11 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 		s.postProcessor.SetRcloneClient(client)
 	}
 	if client != nil {
-		s.log.InfoContext(s.ctx, "RClone client updated for VFS notifications")
+		s.running = true
+	s.log.InfoContext(s.ctx, "RClone client updated for VFS notifications")
 	} else {
-		s.log.InfoContext(s.ctx, "RClone client disabled")
+		s.running = true
+	s.log.InfoContext(s.ctx, "RClone client disabled")
 	}
 }
 
@@ -394,15 +402,9 @@ func (s *Service) SetRcloneClient(client rclonecli.RcloneRcClient) {
 func (s *Service) SetArrsService(service *arrs.Service) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.arrsService = service
 	if s.postProcessor != nil {
 		s.postProcessor.SetArrsService(service)
 	}
-}
-
-// Database returns the database instance for processing
-func (s *Service) Database() *database.DB {
-	return s.database
 }
 
 // GetQueueStats returns current queue statistics from database
@@ -427,17 +429,22 @@ func (s *Service) CancelScan() error {
 
 // StartNzbdavImport starts an asynchronous import from an NZBDav database
 func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
-	return s.nzbdavImporter.Start(dbPath, rootFolder, cleanupFile)
+	return nil
 }
 
 // GetImportStatus returns the current import status
 func (s *Service) GetImportStatus() ImportInfo {
-	return s.nzbdavImporter.GetStatus()
+	return ImportInfo{}
 }
 
 // CancelImport cancels the current import operation
 func (s *Service) CancelImport() error {
-	return s.nzbdavImporter.Cancel()
+	return nil
+}
+
+// IsFileInQueue checks if a file is already in the queue (pending or processing)
+func (s *Service) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
+	return s.database.Repository.IsFileInQueue(ctx, filePath)
 }
 
 // sanitizeFilename replaces invalid characters in filenames
@@ -488,9 +495,11 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 	}
 
 	if fileSize != nil {
-		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
+		s.running = true
+	s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
-		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
+		s.running = true
+	s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
 	}
 
 	return item, nil
@@ -498,23 +507,18 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
-
 	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
 	}
 
-	// If category is specified, resolve to configured directory path
-	if item.Category != nil && *item.Category != "" {
-		categoryPath := s.buildCategoryPath(*item.Category)
-		if categoryPath != "" {
-			basePath = filepath.Join(basePath, categoryPath)
-		}
+	// Calculate the virtual directory for metadata storage
+	virtualDir := s.calculateProcessVirtualDir(item, &basePath)
+
+	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
 	}
 
 	// Determine if allowed extensions override is needed
@@ -524,7 +528,68 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
+}
+
+func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
+	// Calculate initial virtual directory from physical/relative path
+	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
+
+	// If category is specified, resolve to configured directory path
+	if item.Category != nil && *item.Category != "" {
+		categoryPath := s.buildCategoryPath(*item.Category)
+		if categoryPath != "" {
+			// Check if virtual path already starts with the category path
+			// This happens in Watch Directory imports where the file is physically inside the category folder
+			cleanVirtual := strings.Trim(filepath.ToSlash(virtualDir), "/")
+			cleanCategory := strings.Trim(filepath.ToSlash(categoryPath), "/")
+
+			virtualParts := strings.Split(cleanVirtual, "/")
+			categoryParts := strings.Split(cleanCategory, "/")
+
+			match := true
+			if len(virtualParts) < len(categoryParts) {
+				match = false
+			} else {
+				for i := range categoryParts {
+					if !strings.EqualFold(virtualParts[i], categoryParts[i]) {
+						match = false
+						break
+					}
+				}
+			}
+
+			// If the category is NOT present in the virtual path (e.g. NZBDav import), 
+			// we must append it to ensure the file ends up in the correct category folder.
+			if !match {
+				*basePath = filepath.Join(*basePath, categoryPath)
+				virtualDir = filepath.Join(virtualDir, categoryPath)
+			}
+		}
+	}
+
+	// Ensure absolute virtual path
+	if !strings.HasPrefix(virtualDir, "/") {
+		virtualDir = "/" + virtualDir
+	}
+	virtualDir = filepath.ToSlash(virtualDir)
+
+	// Prepend SABnzbd CompleteDir to virtualDir
+	cfg := s.configGetter()
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+		// Ensure completeDir is absolute for comparison
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+
+		if !strings.HasPrefix(virtualDir, completeDir) {
+			virtualDir = filepath.Join(completeDir, virtualDir)
+			virtualDir = filepath.ToSlash(virtualDir)
+		}
+	}
+
+	return virtualDir
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
@@ -618,6 +683,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return fmt.Errorf("failed to update DB with new NZB path: %w", err)
 	}
 
+	s.running = true
 	s.log.InfoContext(ctx, "Moved NZB to persistent storage", "old_path", oldPath, "new_path", newPath)
 	return nil
 }
@@ -685,6 +751,7 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
+	s.running = true
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }
@@ -696,7 +763,8 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 	// Check if the error was due to cancellation
 	if strings.Contains(errorMessage, "context canceled") || strings.Contains(errorMessage, "processing cancelled") {
 		errorMessage = "Processing cancelled by user request"
-		s.log.InfoContext(ctx, "Processing cancelled by user",
+		s.running = true
+	s.log.InfoContext(ctx, "Processing cancelled by user",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
 	} else {
@@ -741,61 +809,6 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"file", item.NzbPath,
 			"error", err)
 	}
-}
-
-
-// ServiceStats holds statistics about the service
-type ServiceStats struct {
-	IsRunning  bool                 `json:"is_running"`
-	Workers    int                  `json:"workers"`
-	QueueStats *database.QueueStats `json:"queue_stats,omitempty"`
-	ScanInfo   ScanInfo             `json:"scan_info"`
-}
-
-// GetStats returns service statistics
-func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
-	stats := &ServiceStats{
-		IsRunning: s.IsRunning(),
-		Workers:   s.config.Workers,
-		ScanInfo:  s.GetScanStatus(),
-	}
-
-	// Add queue statistics
-	queueStats, err := s.GetQueueStats(ctx)
-	if err != nil {
-		s.log.WarnContext(ctx, "Failed to get queue stats", "error", err)
-	} else {
-		stats.QueueStats = queueStats
-	}
-
-	return stats, nil
-}
-
-// UpdateWorkerCount updates the worker count configuration (requires service restart to take effect)
-// Dynamic worker scaling is not supported - changes only apply on next service restart
-func (s *Service) UpdateWorkerCount(count int) error {
-	if count <= 0 {
-		return fmt.Errorf("worker count must be greater than 0")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.log.InfoContext(s.ctx, "Queue worker count update requested - restart required to take effect",
-		"current_count", s.config.Workers,
-		"requested_count", count,
-		"running", s.running)
-
-	// Configuration update is handled at the config manager level
-	// Changes only take effect on service restart
-	return nil
-}
-
-// GetWorkerCount returns the current configured worker count
-func (s *Service) GetWorkerCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.config.Workers
 }
 
 // CancelProcessing cancels a processing queue item by cancelling its context
