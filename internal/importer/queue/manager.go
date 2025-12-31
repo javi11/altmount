@@ -162,13 +162,6 @@ func (m *Manager) IsRunning() bool {
 	return m.running
 }
 
-// GetWorkerCount returns the current worker count
-func (m *Manager) GetWorkerCount() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.config.Workers
-}
-
 // CancelProcessing cancels processing for a specific item
 func (m *Manager) CancelProcessing(itemID int64) error {
 	m.cancelMu.RLock()
