@@ -110,6 +110,8 @@ type ImportAPIResponse struct {
 	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
 	ImportDir                      *string               `json:"import_dir,omitempty"`
 	SkipHealthCheck                bool                  `json:"skip_health_check"`
+	WatchDir                       *string               `json:"watch_dir,omitempty"`
+	WatchIntervalSeconds           *int                  `json:"watch_interval_seconds,omitempty"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -239,6 +241,8 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		ImportStrategy:                 importConfig.ImportStrategy,
 		ImportDir:                      importConfig.ImportDir,
 		SkipHealthCheck:                importConfig.SkipHealthCheck != nil && *importConfig.SkipHealthCheck,
+		WatchDir:                       importConfig.WatchDir,
+		WatchIntervalSeconds:           importConfig.WatchIntervalSeconds,
 	}
 }
 

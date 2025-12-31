@@ -488,22 +488,15 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 
 		actionLine := ""
 
-		if item.Status == database.QueueStatusCompleted {
-
+		switch item.Status {
+		case database.QueueStatusCompleted:
 			downloaded = sizeBytes
-
 			actionLine = "Finished"
-
-		} else if item.Status == database.QueueStatusFailed {
-
+		case database.QueueStatusFailed:
 			actionLine = "Failed"
-
 			if item.ErrorMessage != nil {
-
 				actionLine = fmt.Sprintf("Failed: %s", *item.ErrorMessage)
-
 			}
-
 		}
 
 	

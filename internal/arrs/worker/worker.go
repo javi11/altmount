@@ -149,12 +149,13 @@ func (w *Worker) CleanupQueue(ctx context.Context) error {
 			continue
 		}
 
-		if instance.Type == "radarr" {
+		switch instance.Type {
+		case "radarr":
 			if err := w.cleanupRadarrQueue(ctx, instance, cfg); err != nil {
 				slog.WarnContext(ctx, "Failed to cleanup Radarr queue",
 					"instance", instance.Name, "error", err)
 			}
-		} else if instance.Type == "sonarr" {
+		case "sonarr":
 			if err := w.cleanupSonarrQueue(ctx, instance, cfg); err != nil {
 				slog.WarnContext(ctx, "Failed to cleanup Sonarr queue",
 					"instance", instance.Name, "error", err)

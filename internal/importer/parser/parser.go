@@ -2,6 +2,7 @@ package parser
 
 import (
 	"context"
+	"encoding/base64"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -295,12 +296,31 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 	filename := info.Filename
 	enc := metapb.Encryption_NONE // Default to no encryption
 	var nzbdavID string
+	var aesKey []byte
+	var aesIv []byte
 
-	// Extract nzbdavID from subject if present
+	// Extract extra metadata from subject if present (nzbdav compatibility)
 	if strings.HasPrefix(info.NzbFile.Subject, "NZBDAV_ID:") {
-		parts := strings.SplitN(info.NzbFile.Subject, " ", 2)
-		if len(parts) > 0 {
-			nzbdavID = strings.TrimPrefix(parts[0], "NZBDAV_ID:")
+		parts := strings.Split(info.NzbFile.Subject, " ")
+		for _, part := range parts {
+			if strings.HasPrefix(part, "NZBDAV_ID:") {
+				nzbdavID = strings.TrimPrefix(part, "NZBDAV_ID:")
+			} else if strings.HasPrefix(part, "AES_KEY:") {
+				keyStr := strings.TrimPrefix(part, "AES_KEY:")
+				if key, err := base64.StdEncoding.DecodeString(keyStr); err == nil {
+					aesKey = key
+					enc = metapb.Encryption_AES
+				}
+			} else if strings.HasPrefix(part, "AES_IV:") {
+				ivStr := strings.TrimPrefix(part, "AES_IV:")
+				if iv, err := base64.StdEncoding.DecodeString(ivStr); err == nil {
+					aesIv = iv
+				}
+			} else if strings.HasPrefix(part, "DECODED_SIZE:") {
+				if size, err := strconv.ParseInt(strings.TrimPrefix(part, "DECODED_SIZE:"), 10, 64); err == nil && size > 0 {
+					totalSize = size
+				}
+			}
 		}
 	}
 
@@ -365,6 +385,8 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 		Encryption:    enc,
 		Password:      password,
 		Salt:          salt,
+		AesKey:        aesKey,
+		AesIv:         aesIv,
 		ReleaseDate:   info.ReleaseDate,
 		IsPar2Archive: info.IsPar2Archive,
 		OriginalIndex: info.OriginalIndex,
