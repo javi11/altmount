@@ -400,11 +400,6 @@ func (s *Service) SetArrsService(service *arrs.Service) {
 	}
 }
 
-// Database returns the database instance for processing
-func (s *Service) Database() *database.DB {
-	return s.database
-}
-
 // GetQueueStats returns current queue statistics from database
 func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {
 	return s.database.Repository.GetQueueStats(ctx)
@@ -741,61 +736,6 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"file", item.NzbPath,
 			"error", err)
 	}
-}
-
-
-// ServiceStats holds statistics about the service
-type ServiceStats struct {
-	IsRunning  bool                 `json:"is_running"`
-	Workers    int                  `json:"workers"`
-	QueueStats *database.QueueStats `json:"queue_stats,omitempty"`
-	ScanInfo   ScanInfo             `json:"scan_info"`
-}
-
-// GetStats returns service statistics
-func (s *Service) GetStats(ctx context.Context) (*ServiceStats, error) {
-	stats := &ServiceStats{
-		IsRunning: s.IsRunning(),
-		Workers:   s.config.Workers,
-		ScanInfo:  s.GetScanStatus(),
-	}
-
-	// Add queue statistics
-	queueStats, err := s.GetQueueStats(ctx)
-	if err != nil {
-		s.log.WarnContext(ctx, "Failed to get queue stats", "error", err)
-	} else {
-		stats.QueueStats = queueStats
-	}
-
-	return stats, nil
-}
-
-// UpdateWorkerCount updates the worker count configuration (requires service restart to take effect)
-// Dynamic worker scaling is not supported - changes only apply on next service restart
-func (s *Service) UpdateWorkerCount(count int) error {
-	if count <= 0 {
-		return fmt.Errorf("worker count must be greater than 0")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.log.InfoContext(s.ctx, "Queue worker count update requested - restart required to take effect",
-		"current_count", s.config.Workers,
-		"requested_count", count,
-		"running", s.running)
-
-	// Configuration update is handled at the config manager level
-	// Changes only take effect on service restart
-	return nil
-}
-
-// GetWorkerCount returns the current configured worker count
-func (s *Service) GetWorkerCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.config.Workers
 }
 
 // CancelProcessing cancels a processing queue item by cancelling its context
