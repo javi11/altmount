@@ -20,10 +20,6 @@ type QueueManager interface {
 	IsPaused() bool
 	// IsRunning returns whether the queue manager is active
 	IsRunning() bool
-	// GetWorkerCount returns the current number of workers
-	GetWorkerCount() int
-	// UpdateWorkerCount changes the number of active workers
-	UpdateWorkerCount(count int) error
 	// CancelProcessing cancels processing of a specific item
 	CancelProcessing(itemID int64) error
 	// ProcessItemInBackground starts processing a specific item in the background
@@ -56,8 +52,6 @@ type QueueOperations interface {
 	AddToQueue(ctx context.Context, filePath string, relativePath *string, category *string, priority *database.QueuePriority) (*database.ImportQueueItem, error)
 	// GetQueueStats returns queue statistics
 	GetQueueStats(ctx context.Context) (*database.QueueStats, error)
-	// GetStats returns comprehensive service statistics
-	GetStats(ctx context.Context) (*ServiceStats, error)
 }
 
 // SymlinkCreator handles symlink creation for imported files
@@ -127,8 +121,6 @@ type ImportService interface {
 	NzbDavImporter
 	QueueOperations
 
-	// Database returns the underlying database connection
-	Database() *database.DB
 	// Close releases all resources
 	Close() error
 	// SetRcloneClient sets the rclone client for VFS notifications
