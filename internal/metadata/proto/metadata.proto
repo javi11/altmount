@@ -47,7 +47,8 @@ message FileMetadata {
   repeated SegmentData segment_data = 9;  // Segment information (lazy-loaded)
   bytes aes_key = 10;           // AES encryption key (for AES-encrypted archives)
   bytes aes_iv = 11;            // AES initialization vector (for AES-encrypted archives)
-    int64 release_date = 12;      // Unix timestamp of the original Usenet post release date
-    repeated Par2FileReference par2_files = 13;  // Associated PAR2 repair files
+  int64 release_date = 12;      // Unix timestamp of the original Usenet post release date
+  repeated Par2FileReference par2_files = 13;  // Associated PAR2 repair files
+  string nzbdav_id = 14; // ID to maintain compatibility with nzbdav
 }
   
