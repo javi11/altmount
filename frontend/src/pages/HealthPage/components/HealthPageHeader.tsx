@@ -1,4 +1,4 @@
-import { Pause, Play, RefreshCw, Trash2 } from "lucide-react";
+import { Link, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
 
 interface HealthPageHeaderProps {
 	autoRefreshEnabled: boolean;
@@ -7,11 +7,13 @@ interface HealthPageHeaderProps {
 	userInteracting: boolean;
 	isLoading: boolean;
 	isCleanupPending: boolean;
+	isRegenerateSymlinksPending: boolean;
 	onToggleAutoRefresh: () => void;
 	onRefreshIntervalChange: (interval: number) => void;
 	onRefresh: () => void;
 	onResetAll: () => void;
 	onCleanup: () => void;
+	onRegenerateSymlinks: () => void;
 	onUserInteractionStart: () => void;
 	onUserInteractionEnd: () => void;
 }
@@ -23,11 +25,13 @@ export function HealthPageHeader({
 	userInteracting,
 	isLoading,
 	isCleanupPending,
+	isRegenerateSymlinksPending,
 	onToggleAutoRefresh,
 	onRefreshIntervalChange,
 	onRefresh,
 	onResetAll,
 	onCleanup,
+	onRegenerateSymlinks,
 	onUserInteractionStart,
 	onUserInteractionEnd,
 }: HealthPageHeaderProps) {
@@ -81,6 +85,15 @@ export function HealthPageHeader({
 				<button type="button" className="btn btn-outline" onClick={onResetAll}>
 					<RefreshCw className="h-4 w-4" />
 					Reset All Checks
+				</button>
+				<button
+					type="button"
+					className="btn btn-primary"
+					onClick={onRegenerateSymlinks}
+					disabled={isRegenerateSymlinksPending}
+				>
+					<Link className="h-4 w-4" />
+					Regenerate Symlinks
 				</button>
 				<button
 					type="button"
