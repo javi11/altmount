@@ -155,7 +155,6 @@ type Service struct {
 	paused  bool
 	ctx     context.Context
 	cancel  context.CancelFunc
-	wg      sync.WaitGroup
 
 	// Cancellation tracking for processing items
 	cancelFuncs map[int64]context.CancelFunc

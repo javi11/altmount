@@ -445,8 +445,6 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	libraryDir := ""
 	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
 		libraryDir = *cfg.Health.LibraryDir
-	} else {
-		return fmt.Errorf("Health.LibraryDir is not configured")
 	}
 
 	slog.DebugContext(ctx, "Triggering Sonarr rescan/re-download by path",
