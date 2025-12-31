@@ -164,6 +164,8 @@ type ImportConfig struct {
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
 	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
 	SkipHealthCheck                *bool          `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
+	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -333,6 +335,16 @@ func (c *Config) Validate() error {
 		}
 		if !filepath.IsAbs(*c.Import.ImportDir) {
 			return fmt.Errorf("import_dir must be an absolute path")
+		}
+	}
+
+	// Validate watch directory if configured
+	if c.Import.WatchDir != nil && *c.Import.WatchDir != "" {
+		if !filepath.IsAbs(*c.Import.WatchDir) {
+			return fmt.Errorf("import watch_dir must be an absolute path")
+		}
+		if c.Import.WatchIntervalSeconds != nil && *c.Import.WatchIntervalSeconds <= 0 {
+			return fmt.Errorf("import watch_interval_seconds must be greater than 0")
 		}
 	}
 
@@ -830,7 +842,8 @@ func DefaultConfig(configDir ...string) *Config {
 	scrapperEnabled := false
 	fuseEnabled := false
 	loginRequired := true // Require login by default
-	skipHealthCheck := false
+	skipHealthCheck := true
+	watchIntervalSeconds := 10 // Default watch interval
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -937,6 +950,8 @@ func DefaultConfig(configDir ...string) *Config {
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
 			ImportDir:               nil,                // No default import directory
 			SkipHealthCheck:         &skipHealthCheck,
+			WatchDir:                nil,
+			WatchIntervalSeconds:    &watchIntervalSeconds,
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

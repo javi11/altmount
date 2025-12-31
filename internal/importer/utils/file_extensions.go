@@ -1,14 +1,10 @@
 package utils
 
 import (
-	"bufio"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-
-	"github.com/gabriel-vasile/mimetype"
 )
 
 // This file provides helpers translated from https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/utils/file_extension.py for detecting
@@ -75,37 +71,6 @@ var allExt = func() []string {
 	return out
 }()
 
-// AllExtensions returns the combined list of known extensions (dot-prefixed).
-// If you need to add user-defined extensions, pass them to AllExtensionsWith.
-func AllExtensions() []string { return allExt }
-
-// AllExtensionsWith returns combined list plus user-defined dot- or non-dot-prefixed extensions.
-func AllExtensionsWith(extra []string) []string {
-	if len(extra) == 0 {
-		return allExt
-	}
-	set := map[string]struct{}{}
-	for _, e := range allExt {
-		set[e] = struct{}{}
-	}
-	for _, e := range extra {
-		e = strings.ToLower(e)
-		if e == "" {
-			continue
-		}
-		if !strings.HasPrefix(e, ".") {
-			e = "." + e
-		}
-		set[e] = struct{}{}
-	}
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
-}
-
 // HasPopularExtension reports whether file_path has a popular extension (case-insensitive)
 // or matches known RAR or 7zip patterns (e.g., .rar, .r00, .partXX.rar, .7z, .7z.001).
 func HasPopularExtension(filePath string) bool {
@@ -122,83 +87,4 @@ func HasPopularExtension(filePath string) bool {
 	// Fallback to the package's RAR and 7zip detector on the basename
 	base := filepath.Base(filePath)
 	return rarPattern.MatchString(strings.ToLower(base)) || sevenZipPattern.MatchString(strings.ToLower(base))
-}
-
-// AllPossibleExtensions attempts to detect the file's extension(s).
-// Unlike Python's puremagic (which may return multiple candidates), we
-// typically have one strong match via signature-based detection.
-// The returned extensions are dot-prefixed and lowercase.
-func AllPossibleExtensions(filePath string) []string {
-	// Try MIME-based detection
-	if mt, err := mimetype.DetectFile(filePath); err == nil && mt != nil {
-		if ext := strings.ToLower(mt.Extension()); ext != "" {
-			return []string{ext}
-		}
-	}
-	return nil
-}
-
-// WhatIsMostLikelyExtension returns the most likely extension (dot-prefixed) for file_path.
-// Logic mirrors the Python version:
-// 1) If the start of the file is valid UTF-8 text, check for NZB clues, else return .txt
-// 2) Otherwise, use signature detection and prefer a popular extension if it matches
-// 3) Fallback to the first detected extension or empty string if none.
-func WhatIsMostLikelyExtension(filePath string) string {
-	// 1) Quick text/NZB check on the first ~200 bytes
-	if ext, ok := sniffTextOrNZB(filePath, 200); ok {
-		return ext
-	}
-
-	// 2) signature detection
-	candidates := AllPossibleExtensions(filePath)
-	if len(candidates) == 0 {
-		return ""
-	}
-	// Prefer popular extension
-	all := allExt
-	for _, cand := range candidates {
-		if slices.Contains(all, strings.ToLower(cand)) {
-			return strings.ToLower(cand)
-		}
-	}
-	// 3) fallback to first
-	return strings.ToLower(candidates[0])
-}
-
-// sniffTextOrNZB reads up to n bytes and checks if it's valid UTF-8 text and
-// whether it contains NZB markers. Returns (ext, true) when determined.
-func sniffTextOrNZB(filePath string, n int) (string, bool) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-
-	r := bufio.NewReader(f)
-	buf, _ := r.Peek(n)
-	// If valid UTF-8, treat as text
-	if !isLikelyUTF8(buf) {
-		return "", false
-	}
-	lower := strings.ToLower(string(buf))
-	if strings.Contains(lower, "!doctype nzb public") || strings.Contains(lower, "<nzb xmlns=") {
-		return ".nzb", true
-	}
-	return ".txt", true
-}
-
-// isLikelyUTF8 returns true if b looks like UTF-8 (simple heuristic)
-func isLikelyUTF8(b []byte) bool {
-	// Use Go's decoder by converting to string and back
-	// If it contains NUL bytes or replacement characters after round-trip,
-	// consider it unlikely text.
-	s := string(b)
-	// If the conversion replaced invalid sequences, the resulting bytes differ
-	if !slices.Equal([]byte(s), b) {
-		return false
-	}
-	if strings.IndexByte(s, '\x00') >= 0 {
-		return false
-	}
-	return true
 }
