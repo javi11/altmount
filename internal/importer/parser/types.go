@@ -54,4 +54,6 @@ type ParsedFile struct {
 	ReleaseDate   time.Time         // Release date from the Usenet post
 	OriginalIndex int               // Original position in the parsed NZB file list
 	NzbdavID      string            // Original ID from nzbdav (for backward compatibility)
+	AesKey        []byte            // AES encryption key (for nzbdav compatibility)
+	AesIv         []byte            // AES initialization vector (for nzbdav compatibility)
 }
