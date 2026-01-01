@@ -436,7 +436,11 @@ func (s *Service) CancelScan() error {
 
 // StartNzbdavImport starts an asynchronous import from an NZBDav database
 func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
-	return s.nzbdavImporter.Start(dbPath, rootFolder, cleanupFile)
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	nzbDir := filepath.Join(configDir, ".nzbs")
+
+	return s.nzbdavImporter.Start(dbPath, rootFolder, nzbDir, cleanupFile)
 }
 
 // GetImportStatus returns the current import status
@@ -570,7 +574,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	// Generate new filename: <id>_<sanitized_filename>
 	filename := filepath.Base(item.NzbPath)
 	// sanitizeFilename is defined in service.go
-	newFilename := sanitizeFilename(filename)
+	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
