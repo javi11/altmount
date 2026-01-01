@@ -92,6 +92,8 @@ func ProcessSingleFile(
 		file.Encryption,
 		file.Password,
 		file.Salt,
+		file.AesKey,
+		file.AesIv,
 		file.ReleaseDate.Unix(),
 		par2Refs,
 		file.NzbdavID,
