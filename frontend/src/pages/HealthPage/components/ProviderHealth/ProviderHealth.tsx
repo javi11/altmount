@@ -99,6 +99,7 @@ export function ProviderHealth() {
 									<th>Provider Host</th>
 									<th>State</th>
 									<th>Connections</th>
+									<th>Top Speed</th>
 									<th>Last Activity</th>
 									<th>Failure Reason</th>
 								</tr>
@@ -140,6 +141,22 @@ export function ProviderHealth() {
 													{provider.used_connections}/{provider.max_connections}
 												</span>
 											</div>
+										</td>
+										<td>
+											{provider.last_speed_test_mbps > 0 ? (
+												<div className="flex flex-col">
+													<span className="font-medium text-success">
+														{provider.last_speed_test_mbps.toFixed(2)} Mbps
+													</span>
+													{provider.last_speed_test_time && (
+														<span className="text-xs text-base-content/50">
+															{formatRelativeTime(provider.last_speed_test_time)}
+														</span>
+													)}
+												</div>
+											) : (
+												<span className="text-base-content/50">-</span>
+											)}
 										</td>
 										<td className="text-base-content/70 text-sm">
 											{provider.last_successful_connect
