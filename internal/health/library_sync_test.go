@@ -76,7 +76,6 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 	worker := NewLibrarySyncWorker(
 		metadataService,
 		healthRepo,
-		nil, // No main repository for tests
 		configManager.GetConfig,
 		configManager,
 		&MockRcloneClient{},
