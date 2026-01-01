@@ -288,11 +288,8 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 		return nil, fmt.Errorf("failed to create temp NZB subdirectory: %w", err)
 	}
 
-	nzbName := sanitizeFilename(res.Name)
-	if !strings.HasSuffix(strings.ToLower(nzbName), ".nzb") {
-		nzbName += ".nzb"
-	}
-	nzbPath := filepath.Join(nzbSubDir, nzbName)
+	nzbFileName := fmt.Sprintf("%s.nzb", sanitizeFilename(res.Name))
+	nzbPath := filepath.Join(nzbSubDir, nzbFileName)
 
 	outFile, err := os.Create(nzbPath)
 	if err != nil {
@@ -344,17 +341,5 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 
 // sanitizeFilename replaces invalid characters in filenames
 func sanitizeFilename(name string) string {
-	// Replace forbidden characters: / \ : * ? " < > |
-	r := strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"*", "_",
-		"?", "_",
-		"\"", "_",
-		"<", "_",
-		">", "_",
-		"|", "_",
-	)
-	return r.Replace(name)
+	return strings.ReplaceAll(name, "/", "_")
 }

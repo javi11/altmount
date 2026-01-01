@@ -262,9 +262,9 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 		}
 
 		// Write File Header
-		subject := fmt.Sprintf("\"%s\"", fileName)
+		subject := template.HTMLEscapeString(fileName)
 		if fileId != "" {
-			subject = fmt.Sprintf("NZBDAV_ID:%s \"%s\"", fileId, fileName)
+			subject = fmt.Sprintf("NZBDAV_ID:%s %s", template.HTMLEscapeString(fileId), template.HTMLEscapeString(fileName))
 		}
 
 		fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
@@ -272,7 +272,7 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 				<group>alt.binaries.test</group>
 			</groups>
 			<segments>
-`, 0, template.HTMLEscapeString(subject))
+`, 0, subject)
 
 		if _, err := w.Write([]byte(fileHeader)); err != nil {
 			return err
@@ -318,17 +318,19 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 				bytesPerSegment = totalBytes / int64(len(part.SegmentIds))
 			}
 
-						// Write File Header
-						subject := fmt.Sprintf("\"%s\"", partFileName)
-						if fileId != "" {
-							subject = fmt.Sprintf("NZBDAV_ID:%s \"%s\"", fileId, partFileName)
-						}			
-			            fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
-					<groups>
-						<group>alt.binaries.test</group>
-					</groups>
-					<segments>
-			`, 0, template.HTMLEscapeString(subject))
+			// Write File Header
+			subject := template.HTMLEscapeString(partFileName)
+			if fileId != "" {
+				subject = fmt.Sprintf("NZBDAV_ID:%s %s", template.HTMLEscapeString(fileId), template.HTMLEscapeString(partFileName))
+			}
+
+			fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
+		<groups>
+			<group>alt.binaries.test</group>
+		</groups>
+		<segments>
+`, 0, subject)
+
 			if _, err := w.Write([]byte(fileHeader)); err != nil {
 				return err
 			}
@@ -381,15 +383,15 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 					meta.AesParams.Key, meta.AesParams.Iv, meta.AesParams.DecodedSize)
 			}
 
-			subject := fmt.Sprintf("NZBDAV_ID:%s %s\"%s\"", 
-				fileId, extraMeta, partFileName)
+			subject := fmt.Sprintf("NZBDAV_ID:%s %s%s", 
+				template.HTMLEscapeString(fileId), extraMeta, template.HTMLEscapeString(partFileName))
 
 			fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
 		<groups>
 			<group>alt.binaries.test</group>
 		</groups>
 		<segments>
-`, 0, template.HTMLEscapeString(subject))
+`, 0, subject)
 
 			if _, err := w.Write([]byte(fileHeader)); err != nil {
 				return err

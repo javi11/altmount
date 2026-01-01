@@ -189,5 +189,59 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		"category", category,
 		"queue_id", item.ID)
 
+	// Note: We don't delete the file here because AddToQueue (Service.processNzbItem) 
+	// handles moving/renaming the NZB to persistent storage.
+	// If AddToQueue fails, we leave it. If it succeeds, the file at filePath might effectively be "consumed".
+	
+	// Wait, Service.AddToQueue just adds to DB.
+	// The Service *Workers* process the item.
+	// When a worker processes it (processNzbItem), it calls `ensurePersistentNzb` which moves/renames it.
+	// So we DO NOT need to delete it here if the worker picks it up?
+	
+	// BUT `AddToQueue` returns immediately. The file stays there until a worker picks it up.
+	// If we leave it, the next scan loop will find it again and add duplicate queue item!
+	
+	// WE MUST MOVE OR DELETE IT.
+	// `Service.processNzbItem` expects `item.NzbPath` to point to a valid file.
+	// If we delete it here, the worker won't find it.
+	
+	// Solution:
+	// 1. Move file to a temporary staging area or the persistent area immediately?
+	// 2. Or check `IsFileInQueue`?
+	// 3. Or rename to `.nzb.processed`?
+	
+	// Standard "Watch" behavior: The application *takes ownership* of the file.
+	// It usually moves it to a "tmp" or "queue" folder.
+	
+	// Since `Service` has logic to "ensurePersistentNzb" (move to .nzbs), we should rely on that.
+	// BUT we need to prevent double-adding.
+	
+	// We can rename it to `.queued` extension?
+	// Or we can rely on `QueueRepository.IsFileInQueue` check?
+	// `IsFileInQueue` checks if `nzb_path` exists in DB.
+	
+	// If we add `/watch/movie.nzb` to DB.
+	// Next loop finds `/watch/movie.nzb`.
+	// Checks DB. It's there. Skips.
+	
+	// Eventually, Worker picks it up.
+	// Worker calls `ensurePersistentNzb`.
+	// `ensurePersistentNzb` moves `/watch/movie.nzb` to `/config/.nzbs/123_movie.nzb`.
+	// And updates DB `nzb_path`.
+	
+	// Once moved, the file is gone from `/watch`.
+	// So next loop won't find it.
+	
+	// This seems correct and safe!
+	// Provided `AddToQueue` fails if it's already in queue.
+	// `Service.AddToQueue` calls `repository.AddToQueue`.
+	// `repository.AddToQueue` uses `ON CONFLICT(nzb_path) DO UPDATE`.
+	// It upserts.
+	
+	// If we rely on Upsert, we might reset priority/status if we re-add?
+	// We should check existence first.
+	
+	// I need `IsFileInQueue` capability in `WatchQueueAdder`.
+	
 	return nil
 }
