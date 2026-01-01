@@ -59,6 +59,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			slog.Info("NZBDav Database Tables", "tables", tables)
 		}
 
+		slog.Debug("Starting NZBDav file query")
 		// Query ALL files, ordered by Release Path (Parent Path)
 		// This groups files belonging to the same release together
 		rows, err := db.Query(`
@@ -85,9 +86,11 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			return
 		}
 		defer rows.Close()
+		slog.Debug("NZBDav file query completed, starting iteration")
 
 		var currentReleasePath string
 		var currentWriter *io.PipeWriter
+		count := 0
 
 		// cleanupCurrent ensures the current writer is properly closed
 		cleanupCurrent := func() {
@@ -106,20 +109,20 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			var releaseId, releaseName, releasePath string
 			var fileId, fileName string
 			var fileSize sql.NullInt64
-			var segmentIdsJSON sql.NullString
-			var rarPartsJSON sql.NullString
-			var multipartMetadataJSON sql.NullString
+			var segmentIdsJSON, rarPartsJSON, multipartMetadataJSON sql.RawBytes
 
 			if err := rows.Scan(&releaseId, &releaseName, &releasePath, &fileId, &fileName, &fileSize, &segmentIdsJSON, &rarPartsJSON, &multipartMetadataJSON); err != nil {
 				slog.Error("Failed to scan row", "error", err)
 				continue
 			}
+			count++
 
 			// Check if we switched to a new release
 			if releasePath != currentReleasePath || currentWriter == nil {
 				cleanupCurrent()
 
 				currentReleasePath = releasePath
+				slog.Debug("Processing new release", "path", releasePath, "name", releaseName)
 
 				// Create new pipe for this release
 				pr, pw := io.Pipe()
@@ -164,6 +167,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				currentWriter = nil
 			}
 		}
+		slog.Info("NZBDav import scan completed", "total_files", count)
 	}()
 
 	return out, errChan
@@ -232,10 +236,10 @@ type filePart struct {
 }
 
 // writeFileEntry writes a single file's segments to the NZB writer
-func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize sql.NullInt64, segmentIdsJSON, rarPartsJSON, multipartMetadataJSON sql.NullString) error {
-	if segmentIdsJSON.Valid {
+func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize sql.NullInt64, segmentIdsJSON, rarPartsJSON, multipartMetadataJSON sql.RawBytes) error {
+	if len(segmentIdsJSON) > 0 {
 		var segmentIds []string
-		if err := json.Unmarshal([]byte(segmentIdsJSON.String), &segmentIds); err != nil {
+		if err := json.Unmarshal(segmentIdsJSON, &segmentIds); err != nil {
 			return fmt.Errorf("failed to unmarshal segment IDs: %w", err)
 		}
 
@@ -294,9 +298,9 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 		if _, err := w.Write([]byte("		</segments>\n\t</file>\n")); err != nil {
 			return err
 		}
-	} else if rarPartsJSON.Valid {
+	} else if len(rarPartsJSON) > 0 {
 		var parts []rarPart
-		if err := json.Unmarshal([]byte(rarPartsJSON.String), &parts); err != nil {
+		if err := json.Unmarshal(rarPartsJSON, &parts); err != nil {
 			return fmt.Errorf("failed to unmarshal RAR parts: %w", err)
 		}
 
@@ -347,15 +351,23 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 				}
 			}
 
-			if _, err := w.Write([]byte("		</segments>\n\t</file>\n")); err != nil {
-				return err
-			}
-		}
-	} else if multipartMetadataJSON.Valid {
-		var meta multipartMetadata
-		if err := json.Unmarshal([]byte(multipartMetadataJSON.String), &meta); err != nil {
-			return fmt.Errorf("failed to unmarshal multipart metadata: %w", err)
-		}
+						if _, err := w.Write([]byte("  </segments>\n\t</file>\n")); err != nil {
+
+							return err
+
+						}
+
+					}
+
+				} else if len(multipartMetadataJSON) > 0 {
+
+					var meta multipartMetadata
+
+					if err := json.Unmarshal(multipartMetadataJSON, &meta); err != nil {
+
+						return fmt.Errorf("failed to unmarshal multipart metadata: %w", err)
+
+					}
 
 		for partIdx, part := range meta.FileParts {
 			if len(part.SegmentIds) == 0 {
