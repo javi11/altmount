@@ -842,7 +842,7 @@ func DefaultConfig(configDir ...string) *Config {
 	scrapperEnabled := false
 	fuseEnabled := false
 	loginRequired := true // Require login by default
-	skipHealthCheck := false
+	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
 
 	// Set paths based on whether we're running in Docker or have a specific config directory

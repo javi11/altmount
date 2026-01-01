@@ -141,6 +141,7 @@ import:
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
+  skip_health_check: true # Bypass Usenet article validation during import (default: true)
 
 # Health monitoring configuration
 health:
