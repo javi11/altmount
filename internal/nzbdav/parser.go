@@ -30,7 +30,8 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 		// WaitGroup to track active writers
 		var wg sync.WaitGroup
 		
-		db, err := sql.Open("sqlite3", p.dbPath)
+		// Open in read-only mode to avoid locking issues
+		db, err := sql.Open("sqlite3", p.dbPath+"?mode=ro&_journal_mode=WAL")
 		if err != nil {
 			errChan <- fmt.Errorf("failed to open database: %w", err)
 			close(out)
@@ -46,11 +47,13 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			close(errChan)
 		}()
 		
-		// Enable WAL mode for better concurrency if possible, 
-		// but simple connection reuse is already a big win.
 		// Set limits to prevent file descriptor exhaustion
 		db.SetMaxOpenConns(25)
 		db.SetMaxIdleConns(10)
+
+		// Semaphore to limit concurrent writers (prevent goroutine/query stampede)
+		// This ensures we don't overwhelm the DB connection pool or the consumer
+		sem := make(chan struct{}, 20)
 
 		// Query to find all "Release" folders
 		// A release folder is a parent of any item that has an entry in DavNzbFiles or DavRarFiles
@@ -78,9 +81,13 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			// Create pipe for streaming content
 			pr, pw := io.Pipe()
 
+			// Acquire semaphore
+			sem <- struct{}{}
+
 			wg.Add(1)
 			go func(rid, rname string, writer *io.PipeWriter) {
 				defer wg.Done()
+				defer func() { <-sem }() // Release semaphore
 				p.writeNzb(db, rid, rname, writer)
 			}(id, name, pw)
 
