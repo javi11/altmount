@@ -325,8 +325,9 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+	normalizedCompleteDir := s.normalizeSABnzbdPath(completeDir)
 	priority := s.parseSABnzbdPriority(c.FormValue("priority"))
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, normalizedCompleteDir, &validatedCategory, &priority)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -423,8 +424,9 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 
 	// Add the file to the processing queue using centralized method
 	completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+	normalizedCompleteDir := s.normalizeSABnzbdPath(completeDir)
 	priority := s.parseSABnzbdPriority(c.Query("priority"))
-	item, err := s.importerService.AddToQueue(c.Context(), tempFile, &completeDir, &validatedCategory, &priority)
+	item, err := s.importerService.AddToQueue(c.Context(), tempFile, normalizedCompleteDir, &validatedCategory, &priority)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to add to queue")
 	}
@@ -628,6 +630,17 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	totalFailed, err := s.queueRepo.CountQueueItems(c.Context(), &failedStatus, "", categoryFilter)
 	if err != nil {
 		totalFailed = len(failed)
+	}
+
+	// Also include fallback items in history as "failed" (since they failed in AltMount)
+	// This ensures Arr applications see them as failed/completed and don't get stuck "waiting for download client"
+	fallbackStatus := database.QueueStatusFallback
+	fallbackItems, err := s.queueRepo.ListQueueItems(c.Context(), &fallbackStatus, "", categoryFilter, limit, 0, "updated_at", "desc")
+	if err == nil && len(fallbackItems) > 0 {
+		failed = append(failed, fallbackItems...)
+		// Add to total count
+		fallbackCount, _ := s.queueRepo.CountQueueItems(c.Context(), &fallbackStatus, "", categoryFilter)
+		totalFailed += fallbackCount
 	}
 
 	// Combine and convert to SABnzbd format
@@ -870,6 +883,53 @@ func (s *Server) parseSABnzbdPriority(priority string) database.QueuePriority {
 	default:
 		return database.QueuePriorityNormal
 	}
+}
+
+// normalizeSABnzbdPath normalizes a path from SABnzbd config/request to be relative to AltMount root
+func (s *Server) normalizeSABnzbdPath(path string) *string {
+	if path == "" {
+		return nil
+	}
+
+	// Calculate the expected root path for imports
+	rootPath := s.calculateItemBasePath()
+	if rootPath == "" {
+		// If no root path configured, prevent usage of absolute system paths
+		if filepath.IsAbs(path) {
+			empty := ""
+			return &empty
+		}
+		return &path
+	}
+
+	// Clean paths
+	path = filepath.Clean(path)
+	rootPath = filepath.Clean(rootPath)
+
+	// If paths match, return empty string (root)
+	if path == rootPath {
+		empty := ""
+		return &empty
+	}
+
+	// Try to make relative to root
+	rel, err := filepath.Rel(rootPath, path)
+	if err == nil && !strings.HasPrefix(rel, "..") {
+		if rel == "." {
+			empty := ""
+			return &empty
+		}
+		return &rel
+	}
+
+	// If path is absolute but not inside root, ignore it to prevent
+	// absolute system paths from leaking into the virtual filesystem
+	if filepath.IsAbs(path) {
+		empty := ""
+		return &empty
+	}
+
+	return &path
 }
 
 // buildCategoryPath builds the directory path for a category
