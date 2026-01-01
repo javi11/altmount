@@ -59,9 +59,8 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			slog.Info("NZBDav Database Tables", "tables", tables)
 		}
 
-		slog.Debug("Starting NZBDav file query")
-		// Query ALL files, ordered by Release Path (Parent Path)
-		// This groups files belonging to the same release together
+		// Query ALL files, ordered by ParentId
+		// This groups files belonging to the same release together efficiently
 		rows, err := db.Query(`
 			SELECT 
 				COALESCE(p.Id, 'root') as ReleaseId,
@@ -79,7 +78,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			LEFT JOIN DavRarFiles r ON r.Id = c.Id
 			LEFT JOIN DavMultipartFiles m ON m.Id = c.Id
 			WHERE (n.Id IS NOT NULL OR r.Id IS NOT NULL OR m.Id IS NOT NULL)
-			ORDER BY ReleasePath, c.Name
+			ORDER BY c.ParentId, c.Name
 		`)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to query files: %w", err)
@@ -88,7 +87,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 		defer rows.Close()
 		slog.Debug("NZBDav file query completed, starting iteration")
 
-		var currentReleasePath string
+		var currentParentId string
 		var currentWriter *io.PipeWriter
 		count := 0
 
@@ -116,12 +115,15 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				continue
 			}
 			count++
+			if count%100 == 0 {
+				slog.Info("NZBDav import progress", "files_scanned", count)
+			}
 
 			// Check if we switched to a new release
-			if releasePath != currentReleasePath || currentWriter == nil {
+			if releaseId != currentParentId || currentWriter == nil {
 				cleanupCurrent()
 
-				currentReleasePath = releasePath
+				currentParentId = releaseId
 				slog.Debug("Processing new release", "path", releasePath, "name", releaseName)
 
 				// Create new pipe for this release

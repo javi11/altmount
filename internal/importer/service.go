@@ -140,6 +140,7 @@ type Service struct {
 	postProcessor   *postprocessor.Coordinator    // Post-import processing coordinator
 	queueManager    *queue.Manager                // Queue worker management
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
+	watcher         *scanner.Watcher              // Directory watcher for automated imports
 	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
@@ -228,6 +229,9 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	}
 	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
 
+	// Create directory watcher (Service implements WatchQueueAdder)
+	service.watcher = scanner.NewWatcher(service, configGetter)
+
 	// Create queue manager (Service implements queue.ItemProcessor interface)
 	service.queueManager = queue.NewManager(
 		queue.ManagerConfig{
@@ -266,6 +270,12 @@ func (s *Service) Start(ctx context.Context) error {
 	// Delegate worker management to queue manager
 	if err := s.queueManager.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start queue manager: %w", err)
+	}
+
+	// Start directory watcher if configured
+	if err := s.watcher.Start(ctx); err != nil {
+		s.log.ErrorContext(ctx, "Failed to start directory watcher", "error", err)
+		// Don't fail service start if watcher fails
 	}
 
 	s.running = true
@@ -342,6 +352,9 @@ func (s *Service) Stop(ctx context.Context) error {
 	if err := s.queueManager.Stop(ctx); err != nil {
 		s.log.WarnContext(ctx, "Error stopping queue manager", "error", err)
 	}
+
+	// Stop directory watcher
+	s.watcher.Stop()
 
 	// Cancel service context
 	s.cancel()
@@ -434,6 +447,11 @@ func (s *Service) GetImportStatus() ImportInfo {
 // CancelImport cancels the current import operation
 func (s *Service) CancelImport() error {
 	return s.nzbdavImporter.Cancel()
+}
+
+// IsFileInQueue checks if a file is already in the queue (pending or processing)
+func (s *Service) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
+	return s.database.Repository.IsFileInQueue(ctx, filePath)
 }
 
 // sanitizeFilename replaces invalid characters in filenames
