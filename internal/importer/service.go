@@ -353,6 +353,9 @@ func (s *Service) Stop(ctx context.Context) error {
 		s.log.WarnContext(ctx, "Error stopping queue manager", "error", err)
 	}
 
+	// Stop directory watcher
+	s.watcher.Stop()
+
 	// Cancel service context
 	s.cancel()
 
@@ -433,22 +436,38 @@ func (s *Service) CancelScan() error {
 
 // StartNzbdavImport starts an asynchronous import from an NZBDav database
 func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
-	return nil
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	nzbDir := filepath.Join(configDir, ".nzbs")
+
+	return s.nzbdavImporter.Start(dbPath, rootFolder, nzbDir, cleanupFile)
 }
 
 // GetImportStatus returns the current import status
 func (s *Service) GetImportStatus() ImportInfo {
-	return ImportInfo{}
+	return s.nzbdavImporter.GetStatus()
 }
 
 // CancelImport cancels the current import operation
 func (s *Service) CancelImport() error {
-	return nil
+	return s.nzbdavImporter.Cancel()
 }
 
 // IsFileInQueue checks if a file is already in the queue (pending or processing)
 func (s *Service) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
 	return s.database.Repository.IsFileInQueue(ctx, filePath)
+}
+
+// GetNzbFolder returns the path to the persistent NZB storage directory
+func (s *Service) GetNzbFolder() string {
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	return filepath.Join(configDir, ".nzbs")
+}
+
+// GetFailedNzbFolder returns the path to the directory for failed NZB files
+func (s *Service) GetFailedNzbFolder() string {
+	return filepath.Join(s.GetNzbFolder(), "failed")
 }
 
 // sanitizeFilename replaces invalid characters in filenames
@@ -493,15 +512,21 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		CreatedAt:    time.Now(),
 	}
 
+	// Ensure NZB is in a persistent location immediately to prevent data loss if /tmp is cleaned on restart
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		s.log.ErrorContext(ctx, "Failed to ensure persistent NZB during queue addition", "file", filePath, "error", err)
+		return nil, fmt.Errorf("failed to make NZB persistent: %w", err)
+	}
+
 	if err := s.database.Repository.AddToQueue(ctx, item); err != nil {
-		s.log.ErrorContext(ctx, "Failed to add file to queue", "file", filePath, "error", err)
+		s.log.ErrorContext(ctx, "Failed to add file to queue", "file", item.NzbPath, "error", err)
 		return nil, err
 	}
 
 	if fileSize != nil {
-		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
+		s.log.InfoContext(ctx, "Added NZB file to queue", "file", item.NzbPath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
-		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
+		s.log.InfoContext(ctx, "Added NZB file to queue", "file", item.NzbPath, "queue_id", item.ID, "file_size", "unknown")
 	}
 
 	return item, nil
@@ -509,13 +534,13 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Determine the base path, incorporating category if present
+	// Determine the base path
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
 	}
 
-	// Calculate the virtual directory for metadata storage
+	// Calculate the virtual directory for metadata storage using upstream's enhanced logic
 	virtualDir := s.calculateProcessVirtualDir(item, &basePath)
 
 	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
@@ -619,7 +644,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	// Generate new filename: <id>_<sanitized_filename>
 	filename := filepath.Base(item.NzbPath)
 	// sanitizeFilename is defined in service.go
-	newFilename := sanitizeFilename(filename)
+	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
@@ -752,6 +777,18 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
+	// Clean up the NZB file after successful processing
+	if err := os.Remove(item.NzbPath); err != nil {
+		s.log.WarnContext(ctx, "Failed to clean up NZB file after successful processing",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath,
+			"error", err)
+		// Don't fail the entire process for cleanup failure
+	} else {
+		s.log.DebugContext(ctx, "Cleaned up NZB file after successful processing",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath)
+	}
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }
@@ -944,7 +981,3 @@ func (s *Service) calculateStrmFileSize(r io.Reader) (int64, error) {
 
 	return 0, NewNonRetryableError("no valid NXG link found in STRM file", nil)
 }
-
-
-
-
