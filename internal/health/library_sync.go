@@ -2,7 +2,6 @@ package health
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,10 +38,13 @@ type internalSyncProgress struct {
 
 // SyncResult stores the results of a completed library sync
 type SyncResult struct {
-	FilesAdded   int           `json:"files_added"`
-	FilesDeleted int           `json:"files_deleted"`
-	Duration     time.Duration `json:"duration"`
-	CompletedAt  time.Time     `json:"completed_at"`
+	FilesAdded          int           `json:"files_added"`
+	FilesDeleted        int           `json:"files_deleted"`
+	MetadataDeleted     int           `json:"metadata_deleted"`
+	LibraryFilesDeleted int           `json:"library_files_deleted"`
+	LibraryDirsDeleted  int           `json:"library_dirs_deleted"`
+	Duration            time.Duration `json:"duration"`
+	CompletedAt         time.Time     `json:"completed_at"`
 }
 
 // LibrarySyncStatus represents the current status of the library sync worker
@@ -62,7 +64,6 @@ type UsedFiles struct {
 type LibrarySyncWorker struct {
 	metadataService *metadata.MetadataService
 	healthRepo      *database.HealthRepository
-	repo            *database.Repository
 	configGetter    config.ConfigGetter
 	configManager   *config.Manager
 	cancelFunc      context.CancelFunc
@@ -79,34 +80,18 @@ type LibrarySyncWorker struct {
 func NewLibrarySyncWorker(
 	metadataService *metadata.MetadataService,
 	healthRepo *database.HealthRepository,
-	repo *database.Repository,
 	configGetter config.ConfigGetter,
 	configManager *config.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 ) *LibrarySyncWorker {
-	worker := &LibrarySyncWorker{
+	return &LibrarySyncWorker{
 		metadataService: metadataService,
 		healthRepo:      healthRepo,
-		repo:            repo,
 		configGetter:    configGetter,
 		configManager:   configManager,
 		rcloneClient:    rcloneClient,
 		manualTrigger:   make(chan struct{}, 1), // Buffered channel for non-blocking sends
 	}
-
-	// Load last sync result from database if available
-	if repo != nil {
-		ctx := context.Background()
-		state, err := repo.GetSystemState(ctx, "library_sync_last_result")
-		if err == nil && state != "" {
-			var result SyncResult
-			if err := json.Unmarshal([]byte(state), &result); err == nil {
-				worker.lastSyncResult = &result
-			}
-		}
-	}
-
-	return worker
 }
 
 // StartLibrarySync starts the library sync worker in a background goroutine
@@ -268,6 +253,9 @@ type syncCounts struct {
 
 // cleanupCounts holds the results of cleanup operations
 type cleanupCounts struct {
+	metadataDeleted     int
+	libraryFilesDeleted int
+	libraryDirsDeleted  int
 }
 
 // findFilesToDelete identifies database records that no longer have corresponding metadata files
@@ -319,28 +307,19 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 	totalDbRecords int,
 ) {
 	duration := time.Since(startTime)
-	now := time.Now().UTC()
 
 	// Store sync result
-	result := &SyncResult{
-		FilesAdded:   dbCounts.added,
-		FilesDeleted: dbCounts.deleted,
-		Duration:     duration,
-		CompletedAt:  now,
-	}
-
 	lsw.progressMu.Lock()
-	lsw.lastSyncResult = result
-	lsw.progressMu.Unlock()
-
-	// Persist to database
-	if lsw.repo != nil {
-		// Use background context for persistence to ensure it happens even if parent is cancelled
-		bgCtx := context.Background()
-		if data, err := json.Marshal(result); err == nil {
-			_ = lsw.repo.SetSystemState(bgCtx, "library_sync_last_result", string(data))
-		}
+	lsw.lastSyncResult = &SyncResult{
+		FilesAdded:          dbCounts.added,
+		FilesDeleted:        dbCounts.deleted,
+		MetadataDeleted:     cleanup.metadataDeleted,
+		LibraryFilesDeleted: cleanup.libraryFilesDeleted,
+		LibraryDirsDeleted:  cleanup.libraryDirsDeleted,
+		Duration:            duration,
+		CompletedAt:         time.Now(),
 	}
+	lsw.progressMu.Unlock()
 
 	// Log completion
 	slog.InfoContext(ctx, "Library sync completed",
@@ -348,6 +327,9 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 		"total_db_records", totalDbRecords,
 		"added", dbCounts.added,
 		"deleted", dbCounts.deleted,
+		"metadata_deleted", cleanup.metadataDeleted,
+		"library_files_deleted", cleanup.libraryFilesDeleted,
+		"library_dirs_deleted", cleanup.libraryDirsDeleted,
 		"duration", duration)
 }
 
@@ -614,6 +596,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	p.Wait()
 
 	// Additional cleanup of orphaned metadata files if enabled
+	metadataDeletedCount := 0
 	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
 		// We already have libraryFiles from earlier in the function
 		for relativeMountPath := range metaFileSet {
@@ -633,12 +616,16 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 						continue
 					}
 				}
+				metadataDeletedCount++
 			}
 		}
 
 	}
 
 	// Cleanup orphaned library files (symlinks and STRM files without metadata)
+	libraryFilesDeletedCount := 0
+	libraryDirsDeletedCount := 0
+
 	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
 		for metaPath, file := range filesInUse {
 			select {
@@ -657,12 +644,14 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 						continue
 					}
 				}
+				libraryFilesDeletedCount++
 			}
 		}
 
 		// Remove empty directories after file cleanup (only if not dry run)
 		if !dryRun {
-			_, err = lsw.removeEmptyDirectories(ctx)
+			var err error
+			libraryDirsDeletedCount, err = lsw.removeEmptyDirectories(ctx)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
 					slog.ErrorContext(ctx, "Failed to remove empty directories", "error", err)
@@ -681,15 +670,20 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	if dryRun {
 		wouldCleanup := cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata
 		return &DryRunResult{
-			OrphanedMetadataCount:  0, // Will be updated if needed
-			OrphanedLibraryFiles:   0, // Will be updated if needed
+			OrphanedMetadataCount:  metadataDeletedCount,
+			OrphanedLibraryFiles:   libraryFilesDeletedCount,
 			DatabaseRecordsToClean: dbCounts.deleted,
 			WouldCleanup:           wouldCleanup,
 		}
 	}
 
 	// Record sync results
-	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanupCounts{}, len(metadataFiles), len(dbRecords))
+	cleanup := cleanupCounts{
+		metadataDeleted:     metadataDeletedCount,
+		libraryFilesDeleted: libraryFilesDeletedCount,
+		libraryDirsDeleted:  libraryDirsDeletedCount,
+	}
+	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
 	return nil
 }
 
@@ -1299,6 +1293,11 @@ func (lsw *LibrarySyncWorker) syncMetadataOnly(ctx context.Context, startTime ti
 	}
 
 	// Record sync results (no cleanup operations for metadata-only sync)
-	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanupCounts{}, len(metadataFiles), len(dbRecords))
+	cleanup := cleanupCounts{
+		metadataDeleted:     0,
+		libraryFilesDeleted: 0,
+		libraryDirsDeleted:  0,
+	}
+	lsw.recordSyncResult(ctx, startTime, dbCounts, cleanup, len(metadataFiles), len(dbRecords))
 	return nil
 }

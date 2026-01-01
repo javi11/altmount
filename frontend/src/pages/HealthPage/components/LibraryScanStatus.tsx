@@ -178,7 +178,7 @@ export function LibraryScanStatus({
 										<strong>Added:</strong> {status.last_sync_result.files_added}
 									</span>
 									<span>
-										<strong>Files Deleted:</strong> {status.last_sync_result.files_deleted}
+										<strong>Deleted:</strong> {status.last_sync_result.files_deleted}
 									</span>
 									<span>
 										<strong>Duration:</strong> {(status.last_sync_result.duration / 1e9).toFixed(2)}

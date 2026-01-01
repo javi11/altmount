@@ -26,48 +26,6 @@ func NewManager(configGetter config.ConfigGetter, configManager model.ConfigMana
 	}
 }
 
-// GetRadarrInstances returns all Radarr instances
-func (m *Manager) GetRadarrInstances() []*model.ConfigInstance {
-	cfg := m.configGetter()
-	instances := make([]*model.ConfigInstance, 0)
-
-	if len(cfg.Arrs.RadarrInstances) > 0 {
-		for _, radarrConfig := range cfg.Arrs.RadarrInstances {
-			instance := &model.ConfigInstance{
-				Name:     radarrConfig.Name,
-				Type:     "radarr",
-				URL:      radarrConfig.URL,
-				APIKey:   radarrConfig.APIKey,
-				Category: radarrConfig.Category,
-				Enabled:  radarrConfig.Enabled != nil && *radarrConfig.Enabled,
-			}
-			instances = append(instances, instance)
-		}
-	}
-	return instances
-}
-
-// GetSonarrInstances returns all Sonarr instances
-func (m *Manager) GetSonarrInstances() []*model.ConfigInstance {
-	cfg := m.configGetter()
-	instances := make([]*model.ConfigInstance, 0)
-
-	if len(cfg.Arrs.SonarrInstances) > 0 {
-		for _, sonarrConfig := range cfg.Arrs.SonarrInstances {
-			instance := &model.ConfigInstance{
-				Name:     sonarrConfig.Name,
-				Type:     "sonarr",
-				URL:      sonarrConfig.URL,
-				APIKey:   sonarrConfig.APIKey,
-				Category: sonarrConfig.Category,
-				Enabled:  sonarrConfig.Enabled != nil && *sonarrConfig.Enabled,
-			}
-			instances = append(instances, instance)
-		}
-	}
-	return instances
-}
-
 // GetAllInstances returns all arrs instances from current configuration
 func (m *Manager) GetAllInstances() []*model.ConfigInstance {
 	cfg := m.configGetter()
