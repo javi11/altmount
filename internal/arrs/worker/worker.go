@@ -137,26 +137,26 @@ func (w *Worker) CleanupQueue(ctx context.Context) error {
 
 	// Cleanup Radarr instances
 	for _, instance := range w.instances.GetRadarrInstances() {
-		if !instance.Config.Enabled {
+		if !instance.Enabled {
 			continue
 		}
 
 		if err := w.cleanupRadarrQueue(ctx, instance, cfg); err != nil {
 			slog.ErrorContext(ctx, "Failed to cleanup Radarr queue",
-				"instance", instance.Config.Name,
+				"instance", instance.Name,
 				"error", err)
 		}
 	}
 
 	// Cleanup Sonarr instances
 	for _, instance := range w.instances.GetSonarrInstances() {
-		if !instance.Config.Enabled {
+		if !instance.Enabled {
 			continue
 		}
 
 		if err := w.cleanupSonarrQueue(ctx, instance, cfg); err != nil {
 			slog.ErrorContext(ctx, "Failed to cleanup Sonarr queue",
-				"instance", instance.Config.Name,
+				"instance", instance.Name,
 				"error", err)
 		}
 	}
