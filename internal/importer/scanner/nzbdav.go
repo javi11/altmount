@@ -133,7 +133,7 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootF
 	}
 
 	// Create workers
-	numWorkers := 20 // 20 parallel workers for file creation
+	numWorkers := 4 // Use fewer parallel workers for file creation
 	var workerWg sync.WaitGroup
 	batchChan := make(chan *database.ImportQueueItem, 100)
 
@@ -143,6 +143,19 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootF
 	go func() {
 		defer batchWg.Done()
 		n.processBatch(ctx, batchChan)
+	}()
+
+	// Monitor error channel in background to catch query/DB failures early
+	go func() {
+		for err := range errChan {
+			if err != nil {
+				n.log.ErrorContext(ctx, "Error during NZBDav parsing", "error", err)
+				n.mu.Lock()
+				msg := err.Error()
+				n.info.LastError = &msg
+				n.mu.Unlock()
+			}
+		}
 	}()
 
 	// Start workers
