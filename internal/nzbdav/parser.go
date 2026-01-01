@@ -51,6 +51,19 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 		db.SetMaxOpenConns(25)
 		db.SetMaxIdleConns(10)
 
+		// Log available tables for debugging
+		tableRows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table'")
+		if err == nil {
+			var tables []string
+			for tableRows.Next() {
+				var name string
+				tableRows.Scan(&name)
+				tables = append(tables, name)
+			}
+			tableRows.Close()
+			slog.Info("NZBDav Database Tables", "tables", tables)
+		}
+
 		// Semaphore to limit concurrent writers (prevent goroutine/query stampede)
 		// This ensures we don't overwhelm the DB connection pool or the consumer
 		sem := make(chan struct{}, 20)
