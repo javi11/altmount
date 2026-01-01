@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -139,6 +140,7 @@ type Service struct {
 	postProcessor   *postprocessor.Coordinator    // Post-import processing coordinator
 	queueManager    *queue.Manager                // Queue worker management
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
+	watcher         *scanner.Watcher              // Directory watcher for automated imports
 	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
@@ -227,6 +229,9 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	}
 	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
 
+	// Create directory watcher (Service implements WatchQueueAdder)
+	service.watcher = scanner.NewWatcher(service, configGetter)
+
 	// Create queue manager (Service implements queue.ItemProcessor interface)
 	service.queueManager = queue.NewManager(
 		queue.ManagerConfig{
@@ -265,6 +270,12 @@ func (s *Service) Start(ctx context.Context) error {
 	// Delegate worker management to queue manager
 	if err := s.queueManager.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start queue manager: %w", err)
+	}
+
+	// Start directory watcher if configured
+	if err := s.watcher.Start(ctx); err != nil {
+		s.log.ErrorContext(ctx, "Failed to start directory watcher", "error", err)
+		// Don't fail service start if watcher fails
 	}
 
 	s.running = true
@@ -341,6 +352,9 @@ func (s *Service) Stop(ctx context.Context) error {
 	if err := s.queueManager.Stop(ctx); err != nil {
 		s.log.WarnContext(ctx, "Error stopping queue manager", "error", err)
 	}
+
+	// Stop directory watcher
+	s.watcher.Stop()
 
 	// Cancel service context
 	s.cancel()
@@ -422,7 +436,11 @@ func (s *Service) CancelScan() error {
 
 // StartNzbdavImport starts an asynchronous import from an NZBDav database
 func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
-	return s.nzbdavImporter.Start(dbPath, rootFolder, cleanupFile)
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	nzbDir := filepath.Join(configDir, ".nzbs")
+
+	return s.nzbdavImporter.Start(dbPath, rootFolder, nzbDir, cleanupFile)
 }
 
 // GetImportStatus returns the current import status
@@ -433,6 +451,11 @@ func (s *Service) GetImportStatus() ImportInfo {
 // CancelImport cancels the current import operation
 func (s *Service) CancelImport() error {
 	return s.nzbdavImporter.Cancel()
+}
+
+// IsFileInQueue checks if a file is already in the queue (pending or processing)
+func (s *Service) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
+	return s.database.Repository.IsFileInQueue(ctx, filePath)
 }
 
 // sanitizeFilename replaces invalid characters in filenames
@@ -493,11 +516,6 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
-
 	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
@@ -512,6 +530,15 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		}
 	}
 
+	// Calculate virtual directory BEFORE moving the NZB file
+	// This ensures the calculation is based on the original file path
+	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, basePath)
+
+	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
+	}
+
 	// Determine if allowed extensions override is needed
 	var allowedExtensionsOverride *[]string
 	if item.Category != nil && strings.ToLower(*item.Category) == "test" {
@@ -519,7 +546,7 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory
@@ -547,7 +574,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	// Generate new filename: <id>_<sanitized_filename>
 	filename := filepath.Base(item.NzbPath)
 	// sanitizeFilename is defined in service.go
-	newFilename := sanitizeFilename(filename)
+	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
@@ -680,6 +707,18 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
+	// Clean up the NZB file after successful processing
+	if err := os.Remove(item.NzbPath); err != nil {
+		s.log.WarnContext(ctx, "Failed to clean up NZB file after successful processing",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath,
+			"error", err)
+		// Don't fail the entire process for cleanup failure
+	} else {
+		s.log.DebugContext(ctx, "Cleaned up NZB file after successful processing",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath)
+	}
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }
