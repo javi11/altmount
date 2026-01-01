@@ -114,6 +114,22 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				slog.Error("Failed to scan row", "error", err)
 				continue
 			}
+
+			// Improve release name if it's just "extracted"
+			if strings.EqualFold(releaseName, "extracted") {
+				// Try to get the name from the path
+				pathParts := strings.Split(strings.Trim(releasePath, "/"), "/")
+				if len(pathParts) > 0 {
+					// Use the last part of the path that isn't "extracted"
+					for i := len(pathParts) - 1; i >= 0; i-- {
+						if !strings.EqualFold(pathParts[i], "extracted") {
+							releaseName = pathParts[i]
+							break
+						}
+					}
+				}
+			}
+
 			count++
 			if count%100 == 0 {
 				slog.Info("NZBDav import progress", "files_scanned", count)
