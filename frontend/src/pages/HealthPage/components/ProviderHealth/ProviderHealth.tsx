@@ -101,7 +101,6 @@ export function ProviderHealth() {
 									<th>Connections</th>
 									<th>Top Speed</th>
 									<th>Last Activity</th>
-									<th>Failure Reason</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -162,18 +161,6 @@ export function ProviderHealth() {
 											{provider.last_successful_connect
 												? formatRelativeTime(provider.last_successful_connect)
 												: "Never"}
-										</td>
-										<td>
-											{provider.failure_reason && (
-												<div
-													className="tooltip tooltip-left cursor-help text-error"
-													data-tip={provider.failure_reason}
-												>
-													<span className="block max-w-[200px] truncate">
-														{provider.failure_reason}
-													</span>
-												</div>
-											)}
 										</td>
 									</tr>
 								))}
