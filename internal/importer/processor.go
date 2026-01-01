@@ -153,63 +153,66 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 			}
 		}
 		
-		// ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-		func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string) (string, error) {
-			// Determine max connections to use
-			maxConnections := proc.maxImportConnections
-		
-			// Determine allowed file extensions to use
-			allowedExtensions := proc.allowedFileExtensions
-			if allowedExtensionsOverride != nil {
-				allowedExtensions = *allowedExtensionsOverride
-			}
-		
-			// Update progress: starting
-			proc.updateProgress(queueID, 0)
-			// Step 1: Open and parse the file
-			file, err := os.Open(filePath)
-			if err != nil {
-				return "", NewNonRetryableError("failed to open file", err)
-			}
-			defer file.Close()
-		
-			var parsed *parser.ParsedNzb
-		
-			// Determine file type and parse accordingly
-			if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
-				parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
-				if err != nil {
-					return "", NewNonRetryableError("failed to parse STRM file", err)
-				}
-		
-				// Validate the parsed STRM
-				if err := proc.strmParser.ValidateStrmFile(parsed); err != nil {
-					return "", NewNonRetryableError("STRM validation failed", err)
-				}
-			} else {
-				parsed, err = proc.parser.ParseFile(ctx, file, filePath)
-				if err != nil {
-					return "", NewNonRetryableError("failed to parse NZB file", err)
-				}
-		
-				// Validate the parsed NZB
-				if err := proc.parser.ValidateNzb(parsed); err != nil {
-					return "", NewNonRetryableError("NZB validation failed", err)
-				}
-			}
-		
-			// Update progress: parsing complete
-			proc.updateProgress(queueID, 10)
-		
-			// Check for cancellation after parsing
-			if err := proc.checkCancellation(ctx); err != nil {
-				return "", err
-			}
-		
-			// Step 2: Calculate virtual directory
-			virtualDir := filesystem.CalculateVirtualDirectory(filePath, relativePath)
-		
-			proc.log.InfoContext(ctx, "Processing file",
+// ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string) (string, error) {
+	// Determine max connections to use
+	maxConnections := proc.maxImportConnections
+
+	// Determine allowed file extensions to use
+	allowedExtensions := proc.allowedFileExtensions
+	if allowedExtensionsOverride != nil {
+		allowedExtensions = *allowedExtensionsOverride
+	}
+
+	// Update progress: starting
+	proc.updateProgress(queueID, 0)
+	// Step 1: Open and parse the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", NewNonRetryableError("failed to open file", err)
+	}
+	defer file.Close()
+
+	var parsed *parser.ParsedNzb
+
+	// Determine file type and parse accordingly
+	if strings.HasSuffix(strings.ToLower(filePath), strmFileExtension) {
+		parsed, err = proc.strmParser.ParseStrmFile(file, filePath)
+		if err != nil {
+			return "", NewNonRetryableError("failed to parse STRM file", err)
+		}
+
+		// Validate the parsed STRM
+		if err := proc.strmParser.ValidateStrmFile(parsed); err != nil {
+			return "", NewNonRetryableError("STRM validation failed", err)
+		}
+	} else {
+		parsed, err = proc.parser.ParseFile(ctx, file, filePath)
+		if err != nil {
+			return "", NewNonRetryableError("failed to parse NZB file", err)
+		}
+
+		// Validate the parsed NZB
+		if err := proc.parser.ValidateNzb(parsed); err != nil {
+			return "", NewNonRetryableError("NZB validation failed", err)
+		}
+	}
+
+	// Update progress: parsing complete
+	proc.updateProgress(queueID, 10)
+
+	// Check for cancellation after parsing
+	if err := proc.checkCancellation(ctx); err != nil {
+		return "", err
+	}
+
+	// Step 2: Calculate virtual directory
+	virtualDir := filesystem.CalculateVirtualDirectory(filePath, relativePath)
+	if virtualDirOverride != nil {
+		virtualDir = *virtualDirOverride
+	}
+
+	proc.log.InfoContext(ctx, "Processing file",
 				"file_path", filePath,
 				"virtual_dir", virtualDir,
 				"type", parsed.Type,
@@ -279,7 +282,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 			// Normalize virtualDir only for synthetic duplicate folders; skip if the NZB actually lives inside a
 			// real directory named like the release (e.g. .../Season 01/<file>/<file>.nzb).
 			nzbName := proc.getCleanNzbName(nzbPath, queueID)
-			releaseName := strings.TrimSuffix(nzbName, filepath.Ext(nzbName))
+			releaseName := stripNzbExtension(nzbName)
 			nzbDirBase := filepath.Base(filepath.Dir(nzbPath))
 			fileDir := filepath.Dir(regularFiles[0].Filename)
 			if fileDir == "." || fileDir == "" {
@@ -610,7 +613,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 // normalizeReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
 // It avoids generating duplicate extensions like ".mp4.mp4" when the NZB name already contains the suffix.
 func normalizeReleaseFilename(nzbFilename, originalFilename string) string {
-	releaseName := strings.TrimSuffix(nzbFilename, filepath.Ext(nzbFilename))
+	releaseName := stripNzbExtension(nzbFilename)
 	fileExt := filepath.Ext(originalFilename)
 
 	if fileExt == "" {
@@ -643,4 +646,14 @@ func normalizeSingleFileVirtualDir(virtualDir, releaseName, filename string) str
 	}
 
 	return strings.ReplaceAll(cleanDir, string(filepath.Separator), "/")
+}
+
+func stripNzbExtension(name string) string {
+	if strings.HasSuffix(strings.ToLower(name), ".nzb") {
+		return name[:len(name)-4]
+	}
+	if strings.HasSuffix(strings.ToLower(name), ".strm") {
+		return name[:len(name)-5]
+	}
+	return name
 }

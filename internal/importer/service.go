@@ -460,7 +460,19 @@ func (s *Service) IsFileInQueue(ctx context.Context, filePath string) (bool, err
 
 // sanitizeFilename replaces invalid characters in filenames
 func sanitizeFilename(name string) string {
-	return strings.ReplaceAll(name, "/", "_")
+	// Replace forbidden characters: / \ : * ? " < > |
+	r := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	return r.Replace(name)
 }
 
 // AddToQueue adds a new NZB file to the import queue with optional category and priority
