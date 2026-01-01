@@ -37,6 +37,10 @@ func TestParser_Parse(t *testing.T) {
 			Id TEXT PRIMARY KEY,
 			RarParts TEXT
 		);
+		CREATE TABLE DavMultipartFiles (
+			Id TEXT PRIMARY KEY,
+			Metadata TEXT
+		);
 	`)
 	require.NoError(t, err)
 
