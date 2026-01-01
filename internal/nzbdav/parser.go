@@ -70,12 +70,14 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				c.Name as FileName,
 				c.FileSize,
 				n.SegmentIds,
-				r.RarParts
+				r.RarParts,
+				m.Metadata as MultipartMetadata
 			FROM DavItems c
 			LEFT JOIN DavItems p ON c.ParentId = p.Id
 			LEFT JOIN DavNzbFiles n ON n.Id = c.Id
 			LEFT JOIN DavRarFiles r ON r.Id = c.Id
-			WHERE (n.Id IS NOT NULL OR r.Id IS NOT NULL)
+			LEFT JOIN DavMultipartFiles m ON m.Id = c.Id
+			WHERE (n.Id IS NOT NULL OR r.Id IS NOT NULL OR m.Id IS NOT NULL)
 			ORDER BY ReleasePath, c.Name
 		`)
 		if err != nil {
@@ -91,7 +93,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 		cleanupCurrent := func() {
 			if currentWriter != nil {
 				// Write NZB Footer
-				if _, err := currentWriter.Write([]byte(`</nzb>`)); err != nil {
+				if _, err := currentWriter.Write([]byte("</nzb>")); err != nil {
 					slog.Error("Failed to write NZB footer", "error", err)
 				}
 				currentWriter.Close()
@@ -106,8 +108,9 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			var fileSize sql.NullInt64
 			var segmentIdsJSON sql.NullString
 			var rarPartsJSON sql.NullString
+			var multipartMetadataJSON sql.NullString
 
-			if err := rows.Scan(&releaseId, &releaseName, &releasePath, &fileId, &fileName, &fileSize, &segmentIdsJSON, &rarPartsJSON); err != nil {
+			if err := rows.Scan(&releaseId, &releaseName, &releasePath, &fileId, &fileName, &fileSize, &segmentIdsJSON, &rarPartsJSON, &multipartMetadataJSON); err != nil {
 				slog.Error("Failed to scan row", "error", err)
 				continue
 			}
@@ -123,14 +126,9 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				currentWriter = pw
 
 				// Send ParsedNzb to output channel
-				// This runs in a separate goroutine so we can start writing immediately
-				// preventing deadlock if the consumer is waiting for data we haven't written yet
 				category := p.deriveCategory(releasePath)
 				relPath := p.deriveRelPath(releasePath, category)
 				
-				// We need to send the reader to the consumer
-				// The consumer reads from pr. We write to pw (currentWriter).
-				// Sending to 'out' might block if consumer is busy.
 				select {
 				case out <- &ParsedNzb{
 					ID:       releaseId,
@@ -160,7 +158,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 			}
 
 			// Write File Entry
-			if err := p.writeFileEntry(currentWriter, fileId, fileName, fileSize, segmentIdsJSON, rarPartsJSON); err != nil {
+			if err := p.writeFileEntry(currentWriter, fileId, fileName, fileSize, segmentIdsJSON, rarPartsJSON, multipartMetadataJSON); err != nil {
 				slog.Error("Failed to write file entry", "file", fileName, "error", err)
 				currentWriter.CloseWithError(err)
 				currentWriter = nil
@@ -188,8 +186,6 @@ func (p *Parser) deriveRelPath(path, category string) string {
 	path = strings.Trim(path, "/")
 
 	// 2. Identify and remove category prefix
-	// We want to find the category folder in the path and return everything after it
-	// e.g. /content/tv/Show/Season 1 -> Show/Season 1
 	parts := strings.Split(path, "/")
 	
 	// Remove the last part (Release Name) as that is handled by the release name itself
@@ -212,20 +208,31 @@ func (p *Parser) deriveRelPath(path, category string) string {
 		return strings.Join(parts[categoryIndex+1:], "/")
 	}
 
-	// If category not found or it's the last folder, return empty
-	// This prevents returning "content/tv" which results in "tv/content/tv"
 	return ""
 }
 
 type rarPart struct {
 	SegmentIds []string `json:"SegmentIds"`
-	PartSize   int64    `json:"PartSize"`
-	Offset     int64    `json:"Offset"`
 	ByteCount  int64    `json:"ByteCount"`
 }
 
+type multipartMetadata struct {
+	AesParams *aesParams `json:"AesParams"`
+	FileParts []filePart `json:"FileParts"`
+}
+
+type aesParams struct {
+	DecodedSize int64  `json:"DecodedSize"`
+	Iv          string `json:"Iv"`
+	Key         string `json:"Key"`
+}
+
+type filePart struct {
+	SegmentIds []string `json:"SegmentIds"`
+}
+
 // writeFileEntry writes a single file's segments to the NZB writer
-func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize sql.NullInt64, segmentIdsJSON, rarPartsJSON sql.NullString) error {
+func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize sql.NullInt64, segmentIdsJSON, rarPartsJSON, multipartMetadataJSON sql.NullString) error {
 	if segmentIdsJSON.Valid {
 		var segmentIds []string
 		if err := json.Unmarshal([]byte(segmentIdsJSON.String), &segmentIds); err != nil {
@@ -284,10 +291,7 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 			}
 		}
 
-		// Write File Footer
-		if _, err := w.Write([]byte(`		</segments>
-	</file>
-`)); err != nil {
+		if _, err := w.Write([]byte("		</segments>\n\t</file>\n")); err != nil {
 			return err
 		}
 	} else if rarPartsJSON.Valid {
@@ -301,10 +305,7 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 				continue
 			}
 
-			// If it's a RAR archive, we should name the files accordingly so the importer detects it
-			// If fileName is "movie.mkv", we name parts "movie.mkv.part01.rar", etc.
 			partFileName := fmt.Sprintf("%s.part%02d.rar", fileName, partIdx+1)
-
 			totalBytes := part.ByteCount
 			bytesPerSegment := int64(0)
 			if totalBytes > 0 {
@@ -331,12 +332,11 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 			// Write Segments
 			for i, msgId := range part.SegmentIds {
 				segBytes := bytesPerSegment
-				// Adjust last segment size
 				if i == len(part.SegmentIds)-1 && totalBytes > 0 {
 					segBytes = totalBytes - (bytesPerSegment * int64(i))
 				}
 				if segBytes <= 0 {
-					segBytes = 1 // Fallback
+					segBytes = 1
 				}
 
 				segmentLine := fmt.Sprintf(`			<segment bytes="%d" number="%d">%s</segment>
@@ -347,10 +347,52 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 				}
 			}
 
-			// Write File Footer
-			if _, err := w.Write([]byte(`		</segments>
-	</file>
-`)); err != nil {
+			if _, err := w.Write([]byte("		</segments>\n\t</file>\n")); err != nil {
+				return err
+			}
+		}
+	} else if multipartMetadataJSON.Valid {
+		var meta multipartMetadata
+		if err := json.Unmarshal([]byte(multipartMetadataJSON.String), &meta); err != nil {
+			return fmt.Errorf("failed to unmarshal multipart metadata: %w", err)
+		}
+
+		for partIdx, part := range meta.FileParts {
+			if len(part.SegmentIds) == 0 {
+				continue
+			}
+
+			partFileName := fmt.Sprintf("%s.part%02d", fileName, partIdx+1)
+			extraMeta := ""
+			if meta.AesParams != nil {
+				extraMeta = fmt.Sprintf("AES_KEY:%s AES_IV:%s DECODED_SIZE:%d ", 
+					meta.AesParams.Key, meta.AesParams.Iv, meta.AesParams.DecodedSize)
+			}
+
+			subject := fmt.Sprintf("NZBDAV_ID:%s %s%s", 
+				template.HTMLEscapeString(fileId), extraMeta, template.HTMLEscapeString(partFileName))
+
+			fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">
+		<groups>
+			<group>alt.binaries.test</group>
+		</groups>
+		<segments>
+`, 0, subject)
+
+			if _, err := w.Write([]byte(fileHeader)); err != nil {
+				return err
+			}
+
+			for i, msgId := range part.SegmentIds {
+				segmentLine := fmt.Sprintf(`			<segment bytes="%d" number="%d">%s</segment>
+`, 750000, i+1, template.HTMLEscapeString(msgId))
+
+				if _, err := w.Write([]byte(segmentLine)); err != nil {
+					return err
+				}
+			}
+
+			if _, err := w.Write([]byte("		</segments>\n\t</file>\n")); err != nil {
 				return err
 			}
 		}
