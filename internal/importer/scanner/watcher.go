@@ -169,17 +169,25 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 	}
 
 	var category *string
+	var relativePath *string
+
 	if relPath != "." && relPath != "" {
-		// Clean relative path to be used as category
-		cat := filepath.ToSlash(relPath)
-		category = &cat
+		// Use the first directory component as the category
+		parts := strings.Split(filepath.ToSlash(relPath), "/")
+		if len(parts) > 0 {
+			cat := parts[0]
+			category = &cat
+			
+			// Set RelativePath to the category root inside the watch dir
+			// This ensures ProcessNzbFile calculates subfolders (like "4k") correctly relative to this root
+			relRoot := filepath.Join(watchRoot, cat)
+			relativePath = &relRoot
+		}
 	}
 
 	// Add to queue
-	// We pass nil for relativePath so it uses the MountPath/ImportDir as root
-	// We want the category to determine the subfolder
 	priority := database.QueuePriorityNormal
-	item, err := w.queueAdder.AddToQueue(ctx, filePath, nil, category, &priority)
+	item, err := w.queueAdder.AddToQueue(ctx, filePath, relativePath, category, &priority)
 	if err != nil {
 		return fmt.Errorf("failed to add to queue: %w", err)
 	}
