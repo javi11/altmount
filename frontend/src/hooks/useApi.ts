@@ -449,6 +449,29 @@ export const useUploadToQueue = () => {
 	});
 };
 
+export const useUploadNZBLnks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({
+			links,
+			category,
+			priority,
+			relativePath,
+		}: {
+			links: string[];
+			category?: string;
+			priority?: number;
+			relativePath?: string;
+		}) => apiClient.uploadNZBLnks(links, category, priority, relativePath),
+		onSuccess: () => {
+			// Invalidate queue data to show newly added items
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
 export const useAddTestQueueItem = () => {
 	const queryClient = useQueryClient();
 
