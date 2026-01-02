@@ -18,6 +18,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -139,6 +140,7 @@ type Service struct {
 	postProcessor   *postprocessor.Coordinator    // Post-import processing coordinator
 	queueManager    *queue.Manager                // Queue worker management
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
+	watcher         *scanner.Watcher              // Directory watcher for automated imports
 	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
@@ -227,6 +229,9 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	}
 	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
 
+	// Create directory watcher (Service implements WatchQueueAdder)
+	service.watcher = scanner.NewWatcher(service, configGetter)
+
 	// Create queue manager (Service implements queue.ItemProcessor interface)
 	service.queueManager = queue.NewManager(
 		queue.ManagerConfig{
@@ -265,6 +270,12 @@ func (s *Service) Start(ctx context.Context) error {
 	// Delegate worker management to queue manager
 	if err := s.queueManager.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start queue manager: %w", err)
+	}
+
+	// Start directory watcher if configured
+	if err := s.watcher.Start(ctx); err != nil {
+		s.log.ErrorContext(ctx, "Failed to start directory watcher", "error", err)
+		// Don't fail service start if watcher fails
 	}
 
 	s.running = true
@@ -422,17 +433,22 @@ func (s *Service) CancelScan() error {
 
 // StartNzbdavImport starts an asynchronous import from an NZBDav database
 func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
-	return s.nzbdavImporter.Start(dbPath, rootFolder, cleanupFile)
+	return nil
 }
 
 // GetImportStatus returns the current import status
 func (s *Service) GetImportStatus() ImportInfo {
-	return s.nzbdavImporter.GetStatus()
+	return ImportInfo{}
 }
 
 // CancelImport cancels the current import operation
 func (s *Service) CancelImport() error {
-	return s.nzbdavImporter.Cancel()
+	return nil
+}
+
+// IsFileInQueue checks if a file is already in the queue (pending or processing)
+func (s *Service) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
+	return s.database.Repository.IsFileInQueue(ctx, filePath)
 }
 
 // sanitizeFilename replaces invalid characters in filenames
@@ -493,23 +509,18 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
-
 	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
 	}
 
-	// If category is specified, resolve to configured directory path
-	if item.Category != nil && *item.Category != "" {
-		categoryPath := s.buildCategoryPath(*item.Category)
-		if categoryPath != "" {
-			basePath = filepath.Join(basePath, categoryPath)
-		}
+	// Calculate the virtual directory for metadata storage
+	virtualDir := s.calculateProcessVirtualDir(item, &basePath)
+
+	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
 	}
 
 	// Determine if allowed extensions override is needed
@@ -519,7 +530,68 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride)
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
+}
+
+func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
+	// Calculate initial virtual directory from physical/relative path
+	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
+
+	// If category is specified, resolve to configured directory path
+	if item.Category != nil && *item.Category != "" {
+		categoryPath := s.buildCategoryPath(*item.Category)
+		if categoryPath != "" {
+			// Check if virtual path already starts with the category path
+			// This happens in Watch Directory imports where the file is physically inside the category folder
+			cleanVirtual := strings.Trim(filepath.ToSlash(virtualDir), "/")
+			cleanCategory := strings.Trim(filepath.ToSlash(categoryPath), "/")
+
+			virtualParts := strings.Split(cleanVirtual, "/")
+			categoryParts := strings.Split(cleanCategory, "/")
+
+			match := true
+			if len(virtualParts) < len(categoryParts) {
+				match = false
+			} else {
+				for i := range categoryParts {
+					if !strings.EqualFold(virtualParts[i], categoryParts[i]) {
+						match = false
+						break
+					}
+				}
+			}
+
+			// If the category is NOT present in the virtual path (e.g. NZBDav import), 
+			// we must append it to ensure the file ends up in the correct category folder.
+			if !match {
+				*basePath = filepath.Join(*basePath, categoryPath)
+				virtualDir = filepath.Join(virtualDir, categoryPath)
+			}
+		}
+	}
+
+	// Ensure absolute virtual path
+	if !strings.HasPrefix(virtualDir, "/") {
+		virtualDir = "/" + virtualDir
+	}
+	virtualDir = filepath.ToSlash(virtualDir)
+
+	// Prepend SABnzbd CompleteDir to virtualDir
+	cfg := s.configGetter()
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+		// Ensure completeDir is absolute for comparison
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+
+		if !strings.HasPrefix(virtualDir, completeDir) {
+			virtualDir = filepath.Join(completeDir, virtualDir)
+			virtualDir = filepath.ToSlash(virtualDir)
+		}
+	}
+
+	return virtualDir
 }
 
 // ensurePersistentNzb moves the NZB file to a persistent location in the metadata directory

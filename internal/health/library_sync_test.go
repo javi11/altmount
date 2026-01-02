@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,18 +87,11 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 		fileName := filepath.Join("movies", "movie_"+fmt.Sprintf("%d", i)+".mkv")
 		
 		// Create a dummy metadata object
-		meta := metadataService.CreateFileMetadata(
-			1000, 
-			"source.nzb", 
-			0, // Status
-			nil, 
-			0, // Encryption
-			"", "", 
-			time.Now().Unix(), 
-			nil,
-			"",
-		)
-		err := metadataService.WriteFileMetadata(fileName, meta)
+						meta := metadataService.CreateFileMetadata(
+							100, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil,
+							metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+						)
+						err := metadataService.WriteFileMetadata(fileName, meta)
 		require.NoError(t, err)
 	}
 

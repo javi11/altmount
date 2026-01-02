@@ -154,7 +154,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		}
 		
 		// ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-		func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string) (string, error) {
+		func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string) (string, error) {
 			// Determine max connections to use
 			maxConnections := proc.maxImportConnections
 		
@@ -207,7 +207,12 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 			}
 		
 			// Step 2: Calculate virtual directory
-			virtualDir := filesystem.CalculateVirtualDirectory(filePath, relativePath)
+			virtualDir := ""
+			if virtualDirOverride != nil {
+				virtualDir = *virtualDirOverride
+			} else {
+				virtualDir = filesystem.CalculateVirtualDirectory(filePath, relativePath)
+			}
 		
 			proc.log.InfoContext(ctx, "Processing file",
 				"file_path", filePath,
