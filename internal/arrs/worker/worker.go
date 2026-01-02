@@ -133,14 +133,7 @@ func (w *Worker) safeCleanup() {
 func (w *Worker) CleanupQueue(ctx context.Context) error {
 	cfg := w.configGetter()
 
-	slog.InfoContext(ctx, "Starting ARR queue cleanup")
-
-	// Process all instances via our manager which has them normalized
-	// But we need the config instance to pass to cleanup functions...
-	// Actually `instances.GetConfigInstances()` returns `model.ConfigInstance`.
-	// The original code iterated over `cfg.Arrs.RadarrInstances` directly.
-	// Using `w.instances.GetConfigInstances()` is better as it handles enabled logic (partially)
-	// but `cleanupRadarrQueue` expects `model.ConfigInstance` now.
+	slog.DebugContext(ctx, "Starting ARR queue cleanup")
 
 	instances := w.instances.GetAllInstances()
 
@@ -149,12 +142,13 @@ func (w *Worker) CleanupQueue(ctx context.Context) error {
 			continue
 		}
 
-		if instance.Type == "radarr" {
+		switch instance.Type {
+		case "radarr":
 			if err := w.cleanupRadarrQueue(ctx, instance, cfg); err != nil {
 				slog.WarnContext(ctx, "Failed to cleanup Radarr queue",
 					"instance", instance.Name, "error", err)
 			}
-		} else if instance.Type == "sonarr" {
+		case "sonarr":
 			if err := w.cleanupSonarrQueue(ctx, instance, cfg); err != nil {
 				slog.WarnContext(ctx, "Failed to cleanup Sonarr queue",
 					"instance", instance.Name, "error", err)
@@ -162,7 +156,7 @@ func (w *Worker) CleanupQueue(ctx context.Context) error {
 		}
 	}
 
-	slog.InfoContext(ctx, "ARR queue cleanup completed")
+	slog.DebugContext(ctx, "ARR queue cleanup completed")
 	return nil
 }
 
