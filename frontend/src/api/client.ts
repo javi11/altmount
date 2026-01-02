@@ -366,6 +366,20 @@ export class APIClient {
 		});
 	}
 
+	async regenerateSymlinks() {
+		return this.request<{
+			message: string;
+			files_processed: number;
+			symlinks_created: number;
+			errors: string[];
+			error_count: number;
+			warning?: string;
+			completed_at: string;
+		}>("/health/regenerate-symlinks", {
+			method: "POST",
+		});
+	}
+
 	async cleanupHealth(params?: HealthCleanupRequest) {
 		return this.request<HealthCleanupResponse>("/health/cleanup", {
 			method: "DELETE",
