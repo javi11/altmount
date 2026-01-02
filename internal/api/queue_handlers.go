@@ -2,16 +2,20 @@ package api
 
 import (
 	"fmt"
+	"html"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/nzblnk"
 )
 
 // transformQueueError transforms specific errors to user-friendly messages
@@ -448,6 +452,179 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	return RespondCreated(c, response)
 }
 
+// handleUploadNZBLnk handles POST /api/queue/upload-nzblnk
+func (s *Server) handleUploadNZBLnk(c *fiber.Ctx) error {
+	// Parse request body
+	var req struct {
+		Links        []string `json:"links"`
+		Category     string   `json:"category"`
+		Priority     int      `json:"priority"`
+		RelativePath string   `json:"relative_path"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+
+	// Validate links
+	if len(req.Links) == 0 {
+		return RespondValidationError(c, "No links provided", "At least one NZBLNK is required")
+	}
+
+	if len(req.Links) > 20 {
+		return RespondValidationError(c, "Too many links", "Maximum 20 links per request")
+	}
+
+	// Check if importer service is available
+	if s.importerService == nil {
+		return RespondServiceUnavailable(c, "Importer service not available", "The import service is not configured or running")
+	}
+
+	// Create resolver
+	resolver := nzblnk.NewResolver()
+
+	// Process each link
+	type linkResult struct {
+		Link         string `json:"link"`
+		Success      bool   `json:"success"`
+		QueueID      *int64 `json:"queue_id,omitempty"`
+		Title        string `json:"title,omitempty"`
+		ErrorMessage string `json:"error_message,omitempty"`
+	}
+
+	results := make([]linkResult, 0, len(req.Links))
+	successCount := 0
+
+	for _, link := range req.Links {
+		result := linkResult{Link: link}
+
+		// Parse the link first to get title for error messages
+		params, err := nzblnk.ParseNZBLink(link)
+		if err != nil {
+			result.ErrorMessage = err.Error()
+			results = append(results, result)
+			continue
+		}
+		result.Title = params.Title
+
+		// Resolve the link
+		resolved, err := resolver.Resolve(c.Context(), link)
+		if err != nil {
+			result.ErrorMessage = err.Error()
+			results = append(results, result)
+			continue
+		}
+
+		// Create temp file for the NZB
+		tempDir := os.TempDir()
+		uploadDir := filepath.Join(tempDir, "altmount-uploads")
+		if err := os.MkdirAll(uploadDir, 0755); err != nil {
+			result.ErrorMessage = "Failed to create upload directory"
+			results = append(results, result)
+			continue
+		}
+
+		// Sanitize filename from title
+		safeTitle := sanitizeFilename(resolved.Title)
+		tempFile := filepath.Join(uploadDir, safeTitle+".nzb")
+
+		// Embed password in NZB if provided
+		nzbContent := resolved.NZBContent
+		if resolved.Password != "" {
+			nzbContent = embedPasswordInNZB(nzbContent, resolved.Password)
+			slog.DebugContext(c.Context(), "Embedded password in NZB",
+				"title", resolved.Title)
+		}
+
+		// Write NZB content to file
+		if err := os.WriteFile(tempFile, nzbContent, 0644); err != nil {
+			result.ErrorMessage = "Failed to save NZB file"
+			results = append(results, result)
+			continue
+		}
+
+		// Add to queue
+		var categoryPtr *string
+		if req.Category != "" {
+			categoryPtr = &req.Category
+		}
+
+		var basePath *string
+		if s.configManager != nil {
+			completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir
+			if completeDir != "" {
+				p := completeDir
+				if req.RelativePath != "" {
+					p = filepath.Join(p, req.RelativePath)
+				}
+				basePath = &p
+			}
+		}
+
+		priority := database.QueuePriority(req.Priority)
+		item, err := s.importerService.AddToQueue(c.Context(), tempFile, basePath, categoryPtr, &priority)
+		if err != nil {
+			os.Remove(tempFile)
+			result.ErrorMessage = "Failed to add to queue: " + err.Error()
+			results = append(results, result)
+			continue
+		}
+
+		result.Success = true
+		result.QueueID = &item.ID
+		successCount++
+		results = append(results, result)
+	}
+
+	return RespondCreated(c, fiber.Map{
+		"results":       results,
+		"success_count": successCount,
+		"failed_count":  len(req.Links) - successCount,
+	})
+}
+
+// sanitizeFilename removes or replaces characters that are invalid in filenames
+func sanitizeFilename(name string) string {
+	// Replace invalid characters with underscore
+	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	result := name
+	for _, char := range invalid {
+		result = strings.ReplaceAll(result, char, "_")
+	}
+	// Trim spaces and dots from ends
+	result = strings.TrimSpace(result)
+	result = strings.Trim(result, ".")
+	// Limit length
+	if len(result) > 200 {
+		result = result[:200]
+	}
+	if result == "" {
+		result = "download"
+	}
+	return result
+}
+
+// embedPasswordInNZB injects a password into the NZB XML metadata
+func embedPasswordInNZB(nzbContent []byte, password string) []byte {
+	if password == "" {
+		return nzbContent
+	}
+
+	content := string(nzbContent)
+	passwordMeta := fmt.Sprintf(`<meta type="password">%s</meta>`, html.EscapeString(password))
+
+	// If <head> exists, insert password meta inside it
+	if strings.Contains(content, "<head>") {
+		content = strings.Replace(content, "<head>", "<head>\n    "+passwordMeta, 1)
+	} else {
+		// If no <head>, add one after <nzb...> tag
+		re := regexp.MustCompile(`(<nzb[^>]*>)`)
+		content = re.ReplaceAllString(content, "$1\n  <head>\n    "+passwordMeta+"\n  </head>")
+	}
+
+	return []byte(content)
+}
+
 // handleRestartQueueBulk handles POST /api/queue/bulk/restart
 func (s *Server) handleRestartQueueBulk(c *fiber.Ctx) error {
 	// Parse request body
@@ -525,7 +702,7 @@ func (s *Server) handleCancelQueueBulk(c *fiber.Ctx) error {
 	}
 
 	// Cancel each item and track results
-	results := make(map[string]interface{})
+	results := make(map[string]any)
 	cancelledCount := 0
 	notProcessingCount := 0
 	notFoundCount := 0

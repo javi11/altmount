@@ -58,6 +58,21 @@ export interface QueueStats {
 	last_updated: string;
 }
 
+// NZBLNK upload types
+export interface NZBLnkResult {
+	link: string;
+	success: boolean;
+	queue_id?: number;
+	title?: string;
+	error_message?: string;
+}
+
+export interface UploadNZBLnkResponse {
+	results: NZBLnkResult[];
+	success_count: number;
+	failed_count: number;
+}
+
 // Manual Scan types
 export const ScanStatus = {
 	IDLE: "idle",

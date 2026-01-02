@@ -12,7 +12,6 @@ tool (
 require (
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
 	github.com/avast/retry-go/v4 v4.6.1
-	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-pkgz/auth/v2 v2.0.0
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
@@ -22,6 +21,7 @@ require (
 	github.com/javi11/nzbparser v0.5.4
 	github.com/javi11/rardecode/v2 v2.1.2-0.20251031153435-d6d75db6d6ca
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
+	github.com/jinzhu/copier v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pressly/goose/v3 v3.24.3
@@ -148,7 +148,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jgautheron/goconst v1.8.2 // indirect
 	github.com/jingyugao/rowserrcheck v1.1.1 // indirect
-	github.com/jinzhu/copier v0.4.0 // indirect
 	github.com/jjti/go-spancheck v0.6.5 // indirect
 	github.com/jstemmer/go-junit-report/v2 v2.1.0 // indirect
 	github.com/julz/importas v0.2.0 // indirect

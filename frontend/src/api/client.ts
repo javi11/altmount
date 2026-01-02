@@ -20,6 +20,7 @@ import type {
 	SABnzbdAddResponse,
 	ScanStatusResponse,
 	SystemBrowseResponse,
+	UploadNZBLnkResponse,
 	User,
 	UserAdminUpdateRequest,
 } from "../types/api";
@@ -762,6 +763,23 @@ export class APIClient {
 			body: formData,
 			// Don't set Content-Type header - let browser set it with boundary for multipart/form-data
 			headers: {},
+		});
+	}
+
+	async uploadNZBLnks(
+		links: string[],
+		category?: string,
+		priority?: number,
+		relativePath?: string,
+	): Promise<UploadNZBLnkResponse> {
+		return this.request<UploadNZBLnkResponse>("/queue/upload-nzblnk", {
+			method: "POST",
+			body: JSON.stringify({
+				links,
+				category: category || undefined,
+				priority: priority ?? undefined,
+				relative_path: relativePath || undefined,
+			}),
 		});
 	}
 
