@@ -30,6 +30,13 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
+// NzbDavProcessor defines the interface for NZBDav import operations
+type NzbDavProcessor interface {
+	Start(dbPath string, rootFolder string, nzbDir string, cleanupFile bool) error
+	GetStatus() scanner.ImportInfo
+	Cancel() error
+}
+
 // ServiceConfig holds configuration for the NZB import service
 type ServiceConfig struct {
 	Workers int // Number of parallel queue workers (default: 2)
@@ -89,15 +96,6 @@ func (a *queueAdapterForScanner) IsFileProcessed(filePath string, scanRoot strin
 	return isFileAlreadyProcessed(a.metadataService, filePath, scanRoot)
 }
 
-// batchQueueAdapterForImporter adapts database repository for scanner.BatchQueueAdder interface
-type batchQueueAdapterForImporter struct {
-	repo *database.QueueRepository
-}
-
-func (a *batchQueueAdapterForImporter) AddBatchToQueue(ctx context.Context, items []*database.ImportQueueItem) error {
-	return a.repo.AddBatchToQueue(ctx, items)
-}
-
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
 func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath string, scanRoot string) bool {
 	// Calculate virtual path
@@ -140,7 +138,7 @@ type Service struct {
 	postProcessor   *postprocessor.Coordinator    // Post-import processing coordinator
 	queueManager    *queue.Manager                // Queue worker management
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
-	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
+	nzbdavImporter  NzbDavProcessor               // NZBDav database imports
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
@@ -162,7 +160,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository, nzbdavImporter NzbDavProcessor) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -206,6 +204,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
 		broadcaster:     broadcaster,
 		userRepo:        userRepo,
+		nzbdavImporter:  nzbdavImporter,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -220,13 +219,6 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		calcFileSize:    service.CalculateFileSizeOnly,
 	}
 	service.dirScanner = scanner.NewDirectoryScanner(scannerAdapter)
-
-	// Create adapter for NZBDav imports
-	importerAdapter := &batchQueueAdapterForImporter{
-		repo: database.Repository,
-	}
-	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
-
 
 	// Create queue manager (Service implements queue.ItemProcessor interface)
 	service.queueManager = queue.NewManager(
