@@ -1292,8 +1292,8 @@ func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context,
 	}
 
 	query := `
-		DELETE FROM file_health 
-		WHERE file_path LIKE ? 
+		DELETE FROM file_health
+		WHERE file_path LIKE ?
 		AND status IN ('repair_triggered', 'corrupted')
 	`
 
@@ -1306,4 +1306,71 @@ func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context,
 	}
 
 	return result.RowsAffected()
+}
+
+// GetFilesWithoutLibraryPath returns all health records where library_path is NULL
+func (r *HealthRepository) GetFilesWithoutLibraryPath(ctx context.Context) ([]*FileHealth, error) {
+	query := `
+		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
+		       repair_retry_count, max_repair_retries, source_nzb_path,
+		       error_details, created_at, updated_at, release_date, priority
+		FROM file_health
+		WHERE library_path IS NULL
+		ORDER BY file_path ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files without library path: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*FileHealth
+	for rows.Next() {
+		var health FileHealth
+		err := rows.Scan(
+			&health.ID, &health.FilePath, &health.LibraryPath, &health.Status, &health.LastChecked,
+			&health.LastError, &health.RetryCount, &health.MaxRetries,
+			&health.RepairRetryCount, &health.MaxRepairRetries,
+			&health.SourceNzbPath, &health.ErrorDetails,
+			&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan file health: %w", err)
+		}
+		files = append(files, &health)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate files without library path: %w", err)
+	}
+
+	return files, nil
+}
+
+// UpdateLibraryPath updates the library_path for a specific file
+func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath string, libraryPath string) error {
+	filePath = strings.TrimPrefix(filePath, "/")
+	query := `
+		UPDATE file_health
+		SET library_path = ?,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	result, err := r.db.ExecContext(ctx, query, libraryPath, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to update library path: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no health record found to update: %s", filePath)
+	}
+
+	return nil
 }

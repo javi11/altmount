@@ -11,6 +11,7 @@ import {
 	useDirectHealthCheck,
 	useHealth,
 	useHealthStats,
+	useRegenerateSymlinks,
 	useRepairBulkHealthItems,
 	useRepairHealthItem,
 	useResetAllHealthChecks,
@@ -77,6 +78,7 @@ export function HealthPage() {
 	const repairBulkItems = useRepairBulkHealthItems();
 	const cleanupHealth = useCleanupHealth();
 	const resetAllHealth = useResetAllHealthChecks();
+	const regenerateSymlinks = useRegenerateSymlinks();
 	const directHealthCheck = useDirectHealthCheck();
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
@@ -169,6 +171,36 @@ export function HealthPage() {
 				showToast({
 					title: "Reset Failed",
 					message: "Failed to reset all health checks",
+					type: "error",
+				});
+			}
+		}
+	};
+
+	const handleRegenerateSymlinks = async () => {
+		const confirmed = await confirmAction(
+			"Regenerate Symlinks",
+			"This will regenerate symlinks for all files without library path. This operation is only available when import strategy is set to SYMLINK. Are you sure you want to continue?",
+			{
+				type: "info",
+				confirmText: "Regenerate",
+				confirmButtonClass: "btn-primary",
+			},
+		);
+
+		if (confirmed) {
+			try {
+				const result = await regenerateSymlinks.mutateAsync();
+				showToast({
+					title: "Symlinks Regenerated",
+					message: result.message,
+					type: result.error_count > 0 ? "warning" : "success",
+				});
+			} catch (error) {
+				console.error("Failed to regenerate symlinks:", error);
+				showToast({
+					title: "Regeneration Failed",
+					message: error instanceof Error ? error.message : "Failed to regenerate symlinks",
 					type: "error",
 				});
 			}
@@ -554,11 +586,13 @@ export function HealthPage() {
 				userInteracting={userInteracting}
 				isLoading={isLoading}
 				isCleanupPending={cleanupHealth.isPending}
+				isRegenerateSymlinksPending={regenerateSymlinks.isPending}
 				onToggleAutoRefresh={toggleAutoRefresh}
 				onRefreshIntervalChange={handleRefreshIntervalChange}
 				onRefresh={() => refetch()}
 				onResetAll={handleResetAll}
 				onCleanup={handleCleanup}
+				onRegenerateSymlinks={handleRegenerateSymlinks}
 				onUserInteractionStart={handleUserInteractionStart}
 				onUserInteractionEnd={handleUserInteractionEnd}
 			/>

@@ -193,6 +193,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Get("/health/stats", s.handleGetHealthStats)
 	api.Delete("/health/cleanup", s.handleCleanupHealth)
 	api.Post("/health/reset-all", s.handleResetAllHealthChecks)
+	api.Post("/health/regenerate-symlinks", s.handleRegenerateSymlinks)
 	api.Post("/health/check", s.handleAddHealthCheck)
 	api.Get("/health/worker/status", s.handleGetHealthWorkerStatus)
 	api.Post("/health/:id/repair", s.handleRepairHealth)

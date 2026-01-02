@@ -978,3 +978,96 @@ func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
 
 	return RespondSuccess(c, response)
 }
+
+// handleRegenerateSymlinks handles POST /api/health/regenerate-symlinks
+func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
+	ctx := c.Context()
+	cfg := s.configManager.GetConfig()
+
+	// Validate that symlink strategy is enabled
+	if cfg.Import.ImportStrategy != config.ImportStrategySYMLINK {
+		return RespondBadRequest(c, "Symlink regeneration is only available when import strategy is set to SYMLINK", "")
+	}
+
+	if cfg.Import.ImportDir == nil || *cfg.Import.ImportDir == "" {
+		return RespondBadRequest(c, "Import directory is not configured", "")
+	}
+
+	// Get all files without library path
+	files, err := s.healthRepo.GetFilesWithoutLibraryPath(ctx)
+	if err != nil {
+		return RespondInternalError(c, "Failed to retrieve files without library path", err.Error())
+	}
+
+	if len(files) == 0 {
+		return RespondSuccess(c, fiber.Map{
+			"message":           "No files without library path found",
+			"files_processed":   0,
+			"symlinks_created":  0,
+			"errors":            []string{},
+			"completed_at":      time.Now().Format(time.RFC3339),
+		})
+	}
+
+	successCount := 0
+	errorCount := 0
+	errors := make([]string, 0)
+
+	for _, file := range files {
+		// Build the actual file path in the mount
+		actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(file.FilePath, "/"))
+
+		// Build the symlink path in the import directory
+		symlinkPath := filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(file.FilePath, "/"))
+
+		// Create directory if needed
+		baseDir := filepath.Dir(symlinkPath)
+		if err := os.MkdirAll(baseDir, 0755); err != nil {
+			errorCount++
+			errors = append(errors, fmt.Sprintf("%s: failed to create directory: %v", file.FilePath, err))
+			continue
+		}
+
+		// Remove existing symlink if present
+		if _, err := os.Lstat(symlinkPath); err == nil {
+			if err := os.Remove(symlinkPath); err != nil {
+				errorCount++
+				errors = append(errors, fmt.Sprintf("%s: failed to remove existing symlink: %v", file.FilePath, err))
+				continue
+			}
+		}
+
+		// Create the symlink
+		if err := os.Symlink(actualPath, symlinkPath); err != nil {
+			errorCount++
+			errors = append(errors, fmt.Sprintf("%s: failed to create symlink: %v", file.FilePath, err))
+			continue
+		}
+
+		// Update the library path in the database
+		if err := s.healthRepo.UpdateLibraryPath(ctx, file.FilePath, symlinkPath); err != nil {
+			slog.ErrorContext(ctx, "Failed to update library path in database",
+				"file_path", file.FilePath,
+				"symlink_path", symlinkPath,
+				"error", err)
+			// Don't count as error since symlink was created successfully
+		}
+
+		successCount++
+	}
+
+	response := fiber.Map{
+		"message":           fmt.Sprintf("Regenerated symlinks for %d files", successCount),
+		"files_processed":   len(files),
+		"symlinks_created":  successCount,
+		"errors":            errors,
+		"error_count":       errorCount,
+		"completed_at":      time.Now().Format(time.RFC3339),
+	}
+
+	if errorCount > 0 {
+		response["warning"] = fmt.Sprintf("%d file(s) failed to regenerate symlinks", errorCount)
+	}
+
+	return RespondSuccess(c, response)
+}

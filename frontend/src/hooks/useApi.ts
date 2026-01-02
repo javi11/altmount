@@ -200,6 +200,18 @@ export const useResetAllHealthChecks = () => {
 	});
 };
 
+export const useRegenerateSymlinks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.regenerateSymlinks(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+			queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
+		},
+	});
+};
+
 export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 
