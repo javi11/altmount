@@ -295,8 +295,12 @@ func (s *Server) handleSABnzbdAddFile(c *fiber.Ctx) error {
 	}
 
 	// Build category path and create temporary file with category subdirectory
-	tempDir := os.TempDir()
-	uploadDir := filepath.Join(tempDir, "altmount-uploads")
+	// Build category path and create temporary file with category subdirectory (prefer persistent storage)
+	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	if s.importerService != nil {
+		uploadDir = s.importerService.GetNzbFolder()
+	}
+
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to create upload directory")
 	}
@@ -372,8 +376,12 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 	}
 
 	// Create temporary file with category path
-	tempDir := os.TempDir()
-	uploadDir := filepath.Join(tempDir, "altmount-uploads")
+	// Build category path and create temporary file with category subdirectory (prefer persistent storage)
+	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	if s.importerService != nil {
+		uploadDir = s.importerService.GetNzbFolder()
+	}
+
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to create upload directory")
 	}

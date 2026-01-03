@@ -641,10 +641,10 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Generate new filename
+	// Generate new filename: <id>_<sanitized_filename>
 	filename := filepath.Base(item.NzbPath)
 	// sanitizeFilename is defined in service.go
-	newFilename := sanitizeFilename(filename)
+	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
@@ -844,6 +844,20 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
+	}
+
+	// Always clean up the NZB file after failure/fallback to prevent cluttering persistent storage
+	if err := os.Remove(item.NzbPath); err != nil {
+		if !os.IsNotExist(err) {
+			s.log.WarnContext(ctx, "Failed to clean up NZB file after failure",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"error", err)
+		}
+	} else {
+		s.log.DebugContext(ctx, "Cleaned up NZB file after failure",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath)
 	}
 }
 
