@@ -141,6 +141,11 @@ import:
   segment_sample_percentage: 1 # Percentage of segments to sample for validation (1-100)
   import_strategy: 'NONE' # Import strategy: NONE (direct import), SYMLINK (create symlinks), STRM (create .strm files)
   import_dir: '' # Import directory (required when import_strategy is SYMLINK or STRM, must be absolute path)
+  skip_health_check: true # Bypass Usenet article validation during import (default: true)
+  # NZB cleanup behavior
+  nzb_cleanup_behavior:
+    on_success: 'delete' # Options: delete, keep (default: delete)
+    on_failure: 'delete' # Options: delete, keep (default: delete)
 
 # Health monitoring configuration
 health:
