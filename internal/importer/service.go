@@ -846,18 +846,29 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"error", err)
 	}
 
-	// Always clean up the NZB file after failure/fallback to prevent cluttering persistent storage
-	if err := os.Remove(item.NzbPath); err != nil {
+	// Move the NZB file to failed folder after failure/fallback for debugging
+	failedFolder := s.GetFailedNzbFolder()
+	if err := os.MkdirAll(failedFolder, 0755); err != nil {
+		s.log.WarnContext(ctx, "Failed to create failed NZB directory", "error", err)
+	}
+
+	destPath := filepath.Join(failedFolder, filepath.Base(item.NzbPath))
+	if err := os.Rename(item.NzbPath, destPath); err != nil {
 		if !os.IsNotExist(err) {
-			s.log.WarnContext(ctx, "Failed to clean up NZB file after failure",
+			s.log.WarnContext(ctx, "Failed to move NZB file to failed folder",
 				"queue_id", item.ID,
 				"nzb_path", item.NzbPath,
+				"dest_path", destPath,
 				"error", err)
+
+			// Try to remove it if move failed to avoid cluttering persistent storage
+			_ = os.Remove(item.NzbPath)
 		}
 	} else {
-		s.log.DebugContext(ctx, "Cleaned up NZB file after failure",
+		s.log.InfoContext(ctx, "Moved failed NZB file to failed folder",
 			"queue_id", item.ID,
-			"nzb_path", item.NzbPath)
+			"nzb_path", item.NzbPath,
+			"dest_path", destPath)
 	}
 }
 
