@@ -168,6 +168,11 @@ export interface FuseConfig {
 // Import strategy type
 export type ImportStrategy = "NONE" | "SYMLINK" | "STRM";
 
+export interface NzbCleanupBehaviorConfig {
+	on_success: string;
+	on_failure: string;
+}
+
 // Import configuration
 export interface ImportConfig {
 	max_processor_workers: number;
@@ -182,6 +187,7 @@ export interface ImportConfig {
 	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
+	nzb_cleanup_behavior: NzbCleanupBehaviorConfig;
 }
 
 // Log configuration
@@ -356,6 +362,7 @@ export interface ImportUpdateRequest {
 	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
+	nzb_cleanup_behavior?: NzbCleanupBehaviorConfig;
 }
 
 // Log update request
@@ -442,6 +449,7 @@ export interface ImportFormData {
 	import_dir: string;
 	watch_dir?: string;
 	watch_interval_seconds?: number;
+	nzb_cleanup_behavior?: NzbCleanupBehaviorConfig;
 }
 
 export interface MetadataFormData {

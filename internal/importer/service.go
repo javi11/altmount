@@ -751,15 +751,27 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
-	// Clean up the NZB file after successful processing
-	if err := os.Remove(item.NzbPath); err != nil {
-		s.log.WarnContext(ctx, "Failed to clean up NZB file after successful processing",
-			"queue_id", item.ID,
-			"nzb_path", item.NzbPath,
-			"error", err)
-		// Don't fail the entire process for cleanup failure
+	// Check cleanup behavior for success
+	cleanupBehavior := s.configGetter().Import.NzbCleanupBehavior.OnSuccess
+	if cleanupBehavior == "" {
+		cleanupBehavior = "delete" // Default
+	}
+
+	if cleanupBehavior == "delete" {
+		// Clean up the NZB file after successful processing
+		if err := os.Remove(item.NzbPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to clean up NZB file after successful processing",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"error", err)
+			// Don't fail the entire process for cleanup failure
+		} else {
+			s.log.DebugContext(ctx, "Cleaned up NZB file after successful processing",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath)
+		}
 	} else {
-		s.log.DebugContext(ctx, "Cleaned up NZB file after successful processing",
+		s.log.DebugContext(ctx, "Keeping NZB file after successful processing (configured to keep)",
 			"queue_id", item.ID,
 			"nzb_path", item.NzbPath)
 	}
@@ -818,6 +830,26 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
+	}
+
+	// Check cleanup behavior for failure
+	cleanupBehavior := s.configGetter().Import.NzbCleanupBehavior.OnFailure
+	if cleanupBehavior == "" {
+		cleanupBehavior = "delete" // Default
+	}
+
+	if cleanupBehavior == "delete" {
+		if err := os.Remove(item.NzbPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to delete failed NZB file",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"error", err)
+		} else {
+			s.log.InfoContext(ctx, "Deleted failed NZB file (configured to delete)",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath)
+		}
+		return
 	}
 
 	// Move the NZB file to failed folder after failure/fallback for debugging
