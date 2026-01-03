@@ -458,6 +458,13 @@ func (s *Service) IsFileInQueue(ctx context.Context, filePath string) (bool, err
 	return s.database.Repository.IsFileInQueue(ctx, filePath)
 }
 
+// GetNzbFolder returns the path to the persistent NZB storage directory
+func (s *Service) GetNzbFolder() string {
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	return filepath.Join(configDir, ".nzbs")
+}
+
 // sanitizeFilename replaces invalid characters in filenames
 func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
@@ -500,15 +507,21 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 		CreatedAt:    time.Now(),
 	}
 
+	// Ensure NZB is in a persistent location immediately to prevent data loss if /tmp is cleaned on restart
+	if err := s.ensurePersistentNzb(ctx, item); err != nil {
+		s.log.ErrorContext(ctx, "Failed to ensure persistent NZB during queue addition", "file", filePath, "error", err)
+		return nil, fmt.Errorf("failed to make NZB persistent: %w", err)
+	}
+
 	if err := s.database.Repository.AddToQueue(ctx, item); err != nil {
-		s.log.ErrorContext(ctx, "Failed to add file to queue", "file", filePath, "error", err)
+		s.log.ErrorContext(ctx, "Failed to add file to queue", "file", item.NzbPath, "error", err)
 		return nil, err
 	}
 
 	if fileSize != nil {
-		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", *fileSize)
+		s.log.InfoContext(ctx, "Added NZB file to queue", "file", item.NzbPath, "queue_id", item.ID, "file_size", *fileSize)
 	} else {
-		s.log.InfoContext(ctx, "Added NZB file to queue", "file", filePath, "queue_id", item.ID, "file_size", "unknown")
+		s.log.InfoContext(ctx, "Added NZB file to queue", "file", item.NzbPath, "queue_id", item.ID, "file_size", "unknown")
 	}
 
 	return item, nil
@@ -563,11 +576,6 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 				virtualDir = filepath.ToSlash(virtualDir)
 			}
 		}
-	}
-
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
 	}
 
 	// Determine if allowed extensions override is needed
@@ -805,6 +813,20 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
+	}
+
+	// Always clean up the NZB file after failure/fallback to prevent cluttering persistent storage
+	if err := os.Remove(item.NzbPath); err != nil {
+		if !os.IsNotExist(err) {
+			s.log.WarnContext(ctx, "Failed to clean up NZB file after failure",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"error", err)
+		}
+	} else {
+		s.log.DebugContext(ctx, "Cleaned up NZB file after failure",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath)
 	}
 }
 
