@@ -101,15 +101,24 @@ type ProviderAPIResponse struct {
 
 // ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers            int                   `json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
-	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
-	MaxImportConnections           int                   `json:"max_import_connections"`
-	ImportCacheSizeMB              int                   `json:"import_cache_size_mb"`
-	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
-	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
-	ImportDir                      *string               `json:"import_dir,omitempty"`
-	SkipHealthCheck                bool                  `json:"skip_health_check"`
+	MaxProcessorWorkers            int                           `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int                           `json:"queue_processing_interval_seconds"` // Interval in seconds
+	AllowedFileExtensions          []string                      `json:"allowed_file_extensions"`
+	MaxImportConnections           int                           `json:"max_import_connections"`
+	ImportCacheSizeMB              int                           `json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int                           `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
+	ImportStrategy                 config.ImportStrategy         `json:"import_strategy"`
+	ImportDir                      *string                       `json:"import_dir,omitempty"`
+	SkipHealthCheck                bool                          `json:"skip_health_check"`
+	WatchDir                       *string                       `json:"watch_dir,omitempty"`
+	WatchIntervalSeconds           *int                          `json:"watch_interval_seconds,omitempty"`
+	NzbCleanupBehavior             NzbCleanupBehaviorAPIResponse `json:"nzb_cleanup_behavior"`
+}
+
+// NzbCleanupBehaviorAPIResponse handles NZB cleanup behavior config for API responses
+type NzbCleanupBehaviorAPIResponse struct {
+	OnSuccess string `json:"on_success"`
+	OnFailure string `json:"on_failure"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -239,6 +248,12 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		ImportStrategy:                 importConfig.ImportStrategy,
 		ImportDir:                      importConfig.ImportDir,
 		SkipHealthCheck:                importConfig.SkipHealthCheck != nil && *importConfig.SkipHealthCheck,
+		WatchDir:                       importConfig.WatchDir,
+		WatchIntervalSeconds:           importConfig.WatchIntervalSeconds,
+		NzbCleanupBehavior: NzbCleanupBehaviorAPIResponse{
+			OnSuccess: importConfig.NzbCleanupBehavior.OnSuccess,
+			OnFailure: importConfig.NzbCleanupBehavior.OnFailure,
+		},
 	}
 }
 

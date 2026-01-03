@@ -100,7 +100,7 @@ export function ProviderHealth() {
 									<th>State</th>
 									<th>Connections</th>
 									<th>Last Activity</th>
-									<th>Failure Reason</th>
+									<th>Speed</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -147,15 +147,19 @@ export function ProviderHealth() {
 												: "Never"}
 										</td>
 										<td>
-											{provider.failure_reason && (
-												<div
-													className="tooltip tooltip-left cursor-help text-error"
-													data-tip={provider.failure_reason}
-												>
-													<span className="block max-w-[200px] truncate">
-														{provider.failure_reason}
+											{provider.last_speed_test_mbps > 0 ? (
+												<div className="flex flex-col">
+													<span className="font-mono text-sm text-success">
+														{provider.last_speed_test_mbps.toFixed(2)} MB/s
 													</span>
+													{provider.last_speed_test_time && (
+														<span className="text-base-content/50 text-xs">
+															{formatRelativeTime(provider.last_speed_test_time)}
+														</span>
+													)}
 												</div>
+											) : (
+												<span className="text-base-content/30 text-xs italic">N/A</span>
 											)}
 										</td>
 									</tr>
