@@ -22,13 +22,6 @@ import (
 	"github.com/javi11/altmount/internal/database"
 )
 
-var defaultCategory = config.SABnzbdCategory{
-	Name:     "default",
-	Order:    0,
-	Priority: -100,
-	Dir:      "",
-}
-
 // getDefaultCategory returns the Default category from config or a fallback
 func (s *Server) getDefaultCategory() config.SABnzbdCategory {
 	if s.configManager != nil {
