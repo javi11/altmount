@@ -261,10 +261,9 @@ func (m *Manager) categoryUsedByOtherInstance(arrType, category string) bool {
 	var instances []config.ArrsInstanceConfig
 	cfg := m.configManager.GetConfig()
 
-	switch arrType {
-	case "radarr":
+	if arrType == "radarr" {
 		instances = cfg.Arrs.RadarrInstances
-	case "sonarr":
+	} else if arrType == "sonarr" {
 		instances = cfg.Arrs.SonarrInstances
 	}
 

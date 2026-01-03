@@ -472,104 +472,110 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		category = *item.Category
 	}
 
-	// Get file size if available
+		// Get file size if available
 
-	var sizeBytes int64
+		var sizeBytes int64
 
-	if item.FileSize != nil {
+		if item.FileSize != nil {
 
-		sizeBytes = *item.FileSize
+			sizeBytes = *item.FileSize
 
-	}
+		}
 
-	downloaded := int64(0)
+	
 
-	actionLine := ""
+		downloaded := int64(0)
 
-	switch item.Status {
-	case database.QueueStatusCompleted:
+		actionLine := ""
 
-		downloaded = sizeBytes
+		if item.Status == database.QueueStatusCompleted {
 
-		actionLine = "Finished"
+			downloaded = sizeBytes
 
-	case database.QueueStatusFailed:
+			actionLine = "Finished"
 
-		actionLine = "Failed"
+		} else if item.Status == database.QueueStatusFailed {
 
-		if item.ErrorMessage != nil {
+			actionLine = "Failed"
 
-			actionLine = fmt.Sprintf("Failed: %s", *item.ErrorMessage)
+			if item.ErrorMessage != nil {
+
+				actionLine = fmt.Sprintf("Failed: %s", *item.ErrorMessage)
+
+			}
+
+		}
+
+	
+
+		return SABnzbdHistorySlot{
+
+			Index:        index,
+
+			NzoID:        fmt.Sprintf("%d", item.ID),
+
+			Name:         jobName,
+
+			Category:     category,
+
+			PP:           "3",
+
+			Script:       "",
+
+			Report:       "",
+
+			URL:          "",
+
+			Status:       status,
+
+			NzbName:      nzbFilename,
+
+			Download:     jobName,
+
+			Storage:      finalPath,
+
+			Path:         finalPath,
+
+			Postproc:     "",
+
+			Downloaded:   downloaded,
+
+			Completetime: completetime,
+
+			NzbAvg:       "",
+
+			Script_log:   "",
+
+			DuplicateKey: jobName,
+
+			Script_line:  "",
+
+			Fail_message: failMessage,
+
+			Url_info:     "",
+
+			Bytes:        sizeBytes,
+
+			Meta:         []string{},
+
+			Series:       "",
+
+			Md5sum:       "",
+
+			Password:     "",
+
+			ActionLine:   actionLine,
+
+			Size:         formatHumanSize(sizeBytes),
+
+			Loaded:       true,
+
+			Retry:        item.RetryCount,
+
+			StateLog:     []string{},
 
 		}
 
 	}
 
-	return SABnzbdHistorySlot{
-
-		Index: index,
-
-		NzoID: fmt.Sprintf("%d", item.ID),
-
-		Name: jobName,
-
-		Category: category,
-
-		PP: "3",
-
-		Script: "",
-
-		Report: "",
-
-		URL: "",
-
-		Status: status,
-
-		NzbName: nzbFilename,
-
-		Download: jobName,
-
-		Storage: finalPath,
-
-		Path: finalPath,
-
-		Postproc: "",
-
-		Downloaded: downloaded,
-
-		Completetime: completetime,
-
-		NzbAvg: "",
-
-		Script_log: "",
-
-		DuplicateKey: jobName,
-
-		Script_line: "",
-
-		Fail_message: failMessage,
-
-		Url_info: "",
-
-		Bytes: sizeBytes,
-
-		Meta: []string{},
-
-		Series: "",
-
-		Md5sum: "",
-
-		Password: "",
-
-		ActionLine: actionLine,
-
-		Size: formatHumanSize(sizeBytes),
-
-		Loaded: true,
-
-		Retry: item.RetryCount,
-
-		StateLog: []string{},
-	}
-
-}
+	

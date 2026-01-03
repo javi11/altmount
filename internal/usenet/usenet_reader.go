@@ -461,16 +461,23 @@ func (b *UsenetReader) downloadManager(
 					taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
 					err = b.downloadSegmentWithRetry(taskCtx, s)
 
-					// safeWriter implements both Close() and CloseWithError()
-					sw := w.(*safeWriter)
 					if err != nil {
-						if cErr := sw.CloseWithError(err); cErr != nil {
-							b.log.ErrorContext(taskCtx, "Error closing segment buffer:", "error", cErr)
+						// Check if writer supports CloseWithError (PipeWriter does)
+						if cew, ok := w.(interface{ CloseWithError(error) error }); ok {
+							cErr := cew.CloseWithError(err)
+							if cErr != nil {
+								b.log.ErrorContext(taskCtx, "Error closing segment buffer:", "error", cErr)
+							}
+						} else if cw, ok := w.(io.Closer); ok {
+							_ = cw.Close()
 						}
 					} else {
-						if cErr := sw.Close(); cErr != nil {
-							b.log.ErrorContext(taskCtx, "Error closing segment buffer on success:", "error", cErr)
-							err = fmt.Errorf("failed to close segment writer: %w", cErr)
+						// Close writer on success to signal EOF to readers
+						if cw, ok := w.(io.Closer); ok {
+							if cErr := cw.Close(); cErr != nil {
+								b.log.ErrorContext(taskCtx, "Error closing segment buffer on success:", "error", cErr)
+								err = fmt.Errorf("failed to close segment writer: %w", cErr)
+							}
 						}
 					}
 

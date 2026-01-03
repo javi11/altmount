@@ -84,10 +84,9 @@ func ValidateSegmentsForFile(
 
 	// For encrypted files, convert decrypted size to encrypted size for comparison
 	expectedSize := fileSize
-	switch encryption {
-	case metapb.Encryption_RCLONE:
+	if encryption == metapb.Encryption_RCLONE {
 		expectedSize = rclone.EncryptedSize(fileSize)
-	case metapb.Encryption_AES:
+	} else if encryption == metapb.Encryption_AES {
 		// AES-CBC pads to 16-byte block boundary
 		const aesBlockSize = 16
 		if fileSize%aesBlockSize != 0 {
