@@ -20,6 +20,7 @@ import type {
 	SABnzbdAddResponse,
 	ScanStatusResponse,
 	SystemBrowseResponse,
+	UploadNZBLnkResponse,
 	User,
 	UserAdminUpdateRequest,
 } from "../types/api";
@@ -361,6 +362,20 @@ export class APIClient {
 			restarted_count: number;
 			restarted_at: string;
 		}>("/health/reset-all", {
+			method: "POST",
+		});
+	}
+
+	async regenerateSymlinks() {
+		return this.request<{
+			message: string;
+			files_processed: number;
+			symlinks_created: number;
+			errors: string[];
+			error_count: number;
+			warning?: string;
+			completed_at: string;
+		}>("/health/regenerate-symlinks", {
 			method: "POST",
 		});
 	}
@@ -762,6 +777,23 @@ export class APIClient {
 			body: formData,
 			// Don't set Content-Type header - let browser set it with boundary for multipart/form-data
 			headers: {},
+		});
+	}
+
+	async uploadNZBLnks(
+		links: string[],
+		category?: string,
+		priority?: number,
+		relativePath?: string,
+	): Promise<UploadNZBLnkResponse> {
+		return this.request<UploadNZBLnkResponse>("/queue/upload-nzblnk", {
+			method: "POST",
+			body: JSON.stringify({
+				links,
+				category: category || undefined,
+				priority: priority ?? undefined,
+				relative_path: relativePath || undefined,
+			}),
 		});
 	}
 

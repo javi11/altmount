@@ -200,6 +200,18 @@ export const useResetAllHealthChecks = () => {
 	});
 };
 
+export const useRegenerateSymlinks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.regenerateSymlinks(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+			queryClient.invalidateQueries({ queryKey: ["health", "stats"] });
+		},
+	});
+};
+
 export const useDeleteHealthItem = () => {
 	const queryClient = useQueryClient();
 
@@ -443,6 +455,29 @@ export const useUploadToQueue = () => {
 		}) => apiClient.uploadToQueue(file, category, priority, relativePath),
 		onSuccess: () => {
 			// Invalidate queue data to show newly uploaded files
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
+export const useUploadNZBLnks = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({
+			links,
+			category,
+			priority,
+			relativePath,
+		}: {
+			links: string[];
+			category?: string;
+			priority?: number;
+			relativePath?: string;
+		}) => apiClient.uploadNZBLnks(links, category, priority, relativePath),
+		onSuccess: () => {
+			// Invalidate queue data to show newly added items
 			queryClient.invalidateQueries({ queryKey: ["queue"] });
 			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
 		},
