@@ -181,6 +181,8 @@ export interface ImportConfig {
 	import_strategy: ImportStrategy;
 	import_dir?: string | null;
 	skip_health_check?: boolean;
+	watch_dir?: string | null;
+	watch_interval_seconds?: number | null;
 }
 
 // Log configuration
@@ -353,6 +355,8 @@ export interface ImportUpdateRequest {
 	import_strategy?: ImportStrategy;
 	import_dir?: string | null;
 	skip_health_check?: boolean;
+	watch_dir?: string | null;
+	watch_interval_seconds?: number | null;
 }
 
 // Log update request
@@ -437,6 +441,8 @@ export interface ImportFormData {
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	import_strategy: ImportStrategy;
 	import_dir: string;
+	watch_dir?: string;
+	watch_interval_seconds?: number;
 }
 
 export interface MetadataFormData {

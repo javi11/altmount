@@ -178,9 +178,10 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 			cat := parts[0]
 			category = &cat
 			
-			// Set RelativePath to the watch dir root
-			// This ensures ProcessNzbFile calculates virtual path correctly (including the category folder)
-			relativePath = &watchRoot
+			// Set RelativePath to the category root inside the watch dir
+			// This ensures ProcessNzbFile calculates subfolders (like "4k") correctly relative to this root
+			relRoot := filepath.Join(watchRoot, cat)
+			relativePath = &relRoot
 		}
 	}
 
