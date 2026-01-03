@@ -53,6 +53,9 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 			authenticated = true
 			// Still try auto-registration if ARR credentials provided
 			if maUsername != "" && maPassword != "" {
+				if s.arrsService == nil {
+					return s.writeSABnzbdErrorFiber(c, "Radarr/Sonarr Management is disabled")
+				}
 				s.tryAutoRegisterARR(c)
 			}
 		}
@@ -70,6 +73,11 @@ func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 		if apiKey != "" {
 			return s.writeSABnzbdErrorFiber(c, "Invalid API key")
 		}
+
+		if maUsername != "" && s.arrsService == nil {
+			return s.writeSABnzbdErrorFiber(c, "Radarr/Sonarr Management is disabled")
+		}
+
 		return s.writeSABnzbdErrorFiber(c, "Authentication required: provide either apikey or ma_username+ma_password")
 	}
 
