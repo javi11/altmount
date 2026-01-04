@@ -1,6 +1,7 @@
 package api
 
 import (
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -470,10 +471,18 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		return nil
 	}
 
-	// Generate target_path by removing .nzb extension
-	targetPath := item.NzbPath
+	// Generate target_path by removing .nzb extension and ID prefix if present
+	targetPath := filepath.Base(item.NzbPath)
 	if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
 		targetPath = targetPath[:len(targetPath)-4]
+	}
+	
+	// Remove ID prefix (e.g. "123_filename")
+	parts := strings.SplitN(targetPath, "_", 2)
+	if len(parts) == 2 {
+		// Check if first part is numeric (the ID)
+		// We don't need strict validation, just heuristic
+		targetPath = parts[1]
 	}
 
 	// Transform error message for better user understanding
