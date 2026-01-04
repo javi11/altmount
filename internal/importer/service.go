@@ -359,14 +359,11 @@ func (s *Service) Stop(ctx context.Context) error {
 	// Stop directory watcher
 	s.watcher.Stop()
 
-<<<<<<< HEAD
 	// Cancel any running NZBDav import
 	if err := s.nzbdavImporter.Cancel(); err != nil {
 		s.log.WarnContext(ctx, "Error cancelling NZBDav import", "error", err)
 	}
 
-=======
->>>>>>> upstream/main
 	// Cancel service context
 	s.cancel()
 
@@ -546,7 +543,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Determine the base path
+	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
@@ -648,16 +645,9 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-<<<<<<< HEAD
-	// Generate new filename
-	filename := filepath.Base(item.NzbPath)
-	// sanitizeFilename is defined in service.go
-	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
-=======
 	// Generate new filename with sanitized name
 	filename := filepath.Base(item.NzbPath)
 	newFilename := sanitizeFilename(filename)
->>>>>>> upstream/main
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
@@ -1033,12 +1023,12 @@ func (s *Service) calculateStrmFileSize(r io.Reader) (int64, error) {
 
 			fileSizeStr := u.Query().Get("file_size")
 			if fileSizeStr == "" {
-				return 0, NewNonRetryableError("missing file_size parameter in NXG link", nil)
+				return 0, NewNonRetryableError("missing file_size parameter in NZG link", nil)
 			}
 
 			fileSize, err := strconv.ParseInt(fileSizeStr, 10, 64)
 			if err != nil {
-				return 0, NewNonRetryableError("invalid file_size parameter in NXG link", err)
+				return 0, NewNonRetryableError("invalid file_size parameter in NZG link", err)
 			}
 
 			return fileSize, nil
@@ -1050,8 +1040,4 @@ func (s *Service) calculateStrmFileSize(r io.Reader) (int64, error) {
 	}
 
 	return 0, NewNonRetryableError("no valid NXG link found in STRM file", nil)
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> upstream/main

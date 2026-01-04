@@ -187,10 +187,7 @@ export interface ImportConfig {
 	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
-<<<<<<< HEAD
 	nzb_cleanup_behavior: NzbCleanupBehaviorConfig;
-=======
->>>>>>> upstream/main
 }
 
 // Log configuration
@@ -365,10 +362,7 @@ export interface ImportUpdateRequest {
 	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
-<<<<<<< HEAD
 	nzb_cleanup_behavior?: NzbCleanupBehaviorConfig;
-=======
->>>>>>> upstream/main
 }
 
 // Log update request
@@ -455,10 +449,7 @@ export interface ImportFormData {
 	import_dir: string;
 	watch_dir?: string;
 	watch_interval_seconds?: number;
-<<<<<<< HEAD
 	nzb_cleanup_behavior?: NzbCleanupBehaviorConfig;
-=======
->>>>>>> upstream/main
 }
 
 export interface MetadataFormData {
