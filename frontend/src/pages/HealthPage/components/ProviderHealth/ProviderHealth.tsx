@@ -99,8 +99,8 @@ export function ProviderHealth() {
 									<th>Provider Host</th>
 									<th>State</th>
 									<th>Connections</th>
+									<th>Top Speed</th>
 									<th>Last Activity</th>
-									<th>Speed</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -141,26 +141,26 @@ export function ProviderHealth() {
 												</span>
 											</div>
 										</td>
-										<td className="text-base-content/70 text-sm">
-											{provider.last_successful_connect
-												? formatRelativeTime(provider.last_successful_connect)
-												: "Never"}
-										</td>
 										<td>
 											{provider.last_speed_test_mbps > 0 ? (
 												<div className="flex flex-col">
-													<span className="font-mono text-sm text-success">
-														{provider.last_speed_test_mbps.toFixed(2)} MB/s
+													<span className="font-medium text-success">
+														{provider.last_speed_test_mbps.toFixed(2)} Mbps
 													</span>
 													{provider.last_speed_test_time && (
-														<span className="text-base-content/50 text-xs">
+														<span className="text-xs text-base-content/50">
 															{formatRelativeTime(provider.last_speed_test_time)}
 														</span>
 													)}
 												</div>
 											) : (
-												<span className="text-base-content/30 text-xs italic">N/A</span>
+												<span className="text-base-content/50">-</span>
 											)}
+										</td>
+										<td className="text-base-content/70 text-sm">
+											{provider.last_successful_connect
+												? formatRelativeTime(provider.last_successful_connect)
+												: "Never"}
 										</td>
 									</tr>
 								))}

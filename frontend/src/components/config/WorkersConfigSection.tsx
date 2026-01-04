@@ -269,8 +269,11 @@ export function ImportConfigSection({
 					)}
 				</div>
 
+<<<<<<< HEAD
 				<div className="divider" />
 
+=======
+>>>>>>> upstream/main
 				<div className="space-y-4">
 					<div>
 						<h4 className="font-medium">Watch Directory</h4>
@@ -314,6 +317,7 @@ export function ImportConfigSection({
 					)}
 				</div>
 
+<<<<<<< HEAD
 				<div className="divider" />
 
 				{/* NZB Cleanup Behavior Configuration */}
@@ -362,6 +366,8 @@ export function ImportConfigSection({
 
 				<div className="divider" />
 
+=======
+>>>>>>> upstream/main
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Segment Sample Percentage</legend>
 					<input

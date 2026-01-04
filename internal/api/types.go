@@ -669,6 +669,14 @@ type ScanStatusResponse struct {
 	LastError   *string    `json:"last_error,omitempty"`
 }
 
+// WatcherStatusResponse represents the current status of the directory watcher
+type WatcherStatusResponse struct {
+	Enabled         bool   `json:"enabled"`
+	Path            string `json:"path,omitempty"`
+	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	Running         bool   `json:"running"`
+}
+
 // ManualImportRequest represents a request to manually import a file by path
 type ManualImportRequest struct {
 	FilePath     string  `json:"file_path"`
