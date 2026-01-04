@@ -132,9 +132,6 @@ func (w *Worker) safeCleanup() {
 // and removes them from the queue after deleting the empty folder
 func (w *Worker) CleanupQueue(ctx context.Context) error {
 	cfg := w.configGetter()
-
-	slog.DebugContext(ctx, "Starting ARR queue cleanup")
-
 	instances := w.instances.GetAllInstances()
 
 	for _, instance := range instances {
@@ -156,7 +153,6 @@ func (w *Worker) CleanupQueue(ctx context.Context) error {
 		}
 	}
 
-	slog.DebugContext(ctx, "ARR queue cleanup completed")
 	return nil
 }
 
