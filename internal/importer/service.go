@@ -637,10 +637,9 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Generate new filename: <id>_<sanitized_filename>
+	// Generate new filename with sanitized name
 	filename := filepath.Base(item.NzbPath)
-	// sanitizeFilename is defined in service.go
-	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
+	newFilename := sanitizeFilename(filename)
 	newPath := filepath.Join(nzbDir, newFilename)
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
