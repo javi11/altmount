@@ -84,20 +84,12 @@ ENV PGID=${PGID}
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy web binary from builder
-COPY --from=backend-builder /app/altmount /app/altmount
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
-
-# Install required packages for runtime (mime-support already in custom-base)
+# Install required packages and rclone in a single cached layer
+# This layer will only rebuild if the Dockerfile itself changes
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         wget \
-        ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install rclone and FUSE support for internal mount functionality
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+        ca-certificates \
         fuse3 \
         curl \
         unzip && \
@@ -117,11 +109,15 @@ RUN apt-get update && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
-# Make binary executable
-RUN chmod +x /app/altmount
-
 # Copy s6-overlay service configuration
 COPY docker/root/ /
+
+# Copy web binary and frontend from builders (at the end to maximize cache usage)
+COPY --from=backend-builder /app/altmount /app/altmount
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+# Make binary executable
+RUN chmod +x /app/altmount
 
 # Set environment variables
 ENV PORT=8080

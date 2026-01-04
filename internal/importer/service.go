@@ -30,6 +30,13 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
+// NzbDavProcessor defines the interface for NZBDav import operations
+type NzbDavProcessor interface {
+	Start(dbPath string, rootFolder string, nzbDir string, cleanupFile bool) error
+	GetStatus() scanner.ImportInfo
+	Cancel() error
+}
+
 // ServiceConfig holds configuration for the NZB import service
 type ServiceConfig struct {
 	Workers int // Number of parallel queue workers (default: 2)
@@ -41,6 +48,7 @@ type (
 	ScanInfo        = scanner.ScanInfo
 	ImportJobStatus = scanner.ImportJobStatus
 	ImportInfo      = scanner.ImportInfo
+	WatcherStatus   = scanner.WatcherStatus
 )
 
 // Re-export scanner status constants for backward compatibility
@@ -141,7 +149,7 @@ type Service struct {
 	queueManager    *queue.Manager                // Queue worker management
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
 	watcher         *scanner.Watcher              // Directory watcher for automated imports
-	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
+	nzbdavImporter  NzbDavProcessor               // NZBDav database imports
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
@@ -164,7 +172,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository, nzbdavImporter NzbDavProcessor) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -208,6 +216,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
 		broadcaster:     broadcaster,
 		userRepo:        userRepo,
+		nzbdavImporter:  nzbdavImporter,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -222,12 +231,6 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		calcFileSize:    service.CalculateFileSizeOnly,
 	}
 	service.dirScanner = scanner.NewDirectoryScanner(scannerAdapter)
-
-	// Create adapter for NZBDav imports
-	importerAdapter := &batchQueueAdapterForImporter{
-		repo: database.Repository,
-	}
-	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
 
 	// Create directory watcher (Service implements WatchQueueAdder)
 	service.watcher = scanner.NewWatcher(service, configGetter)
@@ -356,6 +359,11 @@ func (s *Service) Stop(ctx context.Context) error {
 	// Stop directory watcher
 	s.watcher.Stop()
 
+	// Cancel any running NZBDav import
+	if err := s.nzbdavImporter.Cancel(); err != nil {
+		s.log.WarnContext(ctx, "Error cancelling NZBDav import", "error", err)
+	}
+
 	// Cancel service context
 	s.cancel()
 
@@ -429,6 +437,11 @@ func (s *Service) GetScanStatus() ScanInfo {
 	return s.dirScanner.GetStatus()
 }
 
+// GetWatcherStatus returns the current directory watcher status
+func (s *Service) GetWatcherStatus() WatcherStatus {
+	return s.watcher.GetStatus()
+}
+
 // CancelScan cancels the current scan operation
 func (s *Service) CancelScan() error {
 	return s.dirScanner.Cancel()
@@ -486,11 +499,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 	// Calculate file size before adding to queue
 	var fileSize *int64
-	if size, err := s.CalculateFileSizeOnly(filePath); err != nil {
-		s.log.WarnContext(ctx, "Failed to calculate file size", "file", filePath, "error", err)
-		// Continue with NULL file size - don't fail the queue addition
-		fileSize = nil
-	} else {
+	if size, err := s.CalculateFileSizeOnly(filePath); err == nil {
 		fileSize = &size
 	}
 
@@ -534,19 +543,14 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Determine the base path
+	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
 	}
 
-	// Calculate the virtual directory for metadata storage using upstream's enhanced logic
+	// Calculate the virtual directory for metadata storage
 	virtualDir := s.calculateProcessVirtualDir(item, &basePath)
-
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
 
 	// Determine if allowed extensions override is needed
 	var allowedExtensionsOverride *[]string
@@ -641,7 +645,7 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 		return nil
 	}
 
-	// Generate new filename: <id>_<sanitized_filename>
+	// Generate new filename
 	filename := filepath.Base(item.NzbPath)
 	// sanitizeFilename is defined in service.go
 	newFilename := fmt.Sprintf("%d_%s", item.ID, sanitizeFilename(filename))
