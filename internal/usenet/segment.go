@@ -265,7 +265,18 @@ func (sw *safeWriter) Write(p []byte) (n int, err error) {
 }
 
 func (sw *safeWriter) Close() error {
-	return sw.s.Close()
+	if sw.s == nil {
+		return nil
+	}
+	sw.s.mx.Lock()
+	defer sw.s.mx.Unlock()
+
+	// Only close the writer pipe to signal EOF to readers
+	// The reader pipe stays open until segment.Close() is called
+	if sw.s.writer != nil {
+		return sw.s.writer.Close()
+	}
+	return nil
 }
 
 func (sw *safeWriter) CloseWithError(err error) error {

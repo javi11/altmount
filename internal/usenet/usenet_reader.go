@@ -115,7 +115,7 @@ func (b *UsenetReader) Start() {
 func (b *UsenetReader) Close() error {
 	b.closeOnce.Do(func() {
 		b.cancel()
-		
+
 		// Drain and close init channel safely
 		select {
 		case <-b.init:
