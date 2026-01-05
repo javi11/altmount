@@ -108,7 +108,7 @@ func (s *Server) validateAPIKey(c *fiber.Ctx, apiKey string) bool {
 	cfg := s.configManager.GetConfig()
 
 	// Check config key_override first (must be exactly 33 chars)
-	if cfg.API.KeyOverride != "" && len(cfg.API.KeyOverride) == 33 {
+	if cfg.API.KeyOverride != "" && len(cfg.API.KeyOverride) == 32 {
 		if apiKey == cfg.API.KeyOverride {
 			return true
 		}

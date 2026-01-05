@@ -10,7 +10,7 @@ webdav:
 # REST API configuration
 api:
   prefix: '/api' # API endpoint prefix
-  key_override: '' # 33-char API key override (takes precedence over database key, leave empty to use database)
+  key_override: '' # 32-char API key override (takes precedence over database key, leave empty to use database)
 
 # Authentication configuration
 auth:

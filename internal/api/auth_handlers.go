@@ -318,10 +318,10 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to regenerate API key", err.Error())
 	}
 
-	// If key_override is configured (has a value with 33 chars), update it with the new key
+	// If key_override is configured (has a value with 32 chars), update it with the new key
 	if s.configManager != nil {
 		cfg := s.configManager.GetConfig()
-		if cfg.API.KeyOverride != "" && len(cfg.API.KeyOverride) == 33 {
+		if cfg.API.KeyOverride != "" && len(cfg.API.KeyOverride) == 32 {
 			// Update the key_override in config to match the new key
 			newConfig := cfg.DeepCopy()
 			newConfig.API.KeyOverride = apiKey
