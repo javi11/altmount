@@ -1071,12 +1071,12 @@ func (s *Service) calculateStrmFileSize(r io.Reader) (int64, error) {
 
 			fileSizeStr := u.Query().Get("file_size")
 			if fileSizeStr == "" {
-				return 0, NewNonRetryableError("missing file_size parameter in NZG link", nil)
+				return 0, NewNonRetryableError("missing file_size parameter in NXG link", nil)
 			}
 
 			fileSize, err := strconv.ParseInt(fileSizeStr, 10, 64)
 			if err != nil {
-				return 0, NewNonRetryableError("invalid file_size parameter in NZG link", err)
+				return 0, NewNonRetryableError("invalid file_size parameter in NXG link", err)
 			}
 
 			return fileSize, nil
