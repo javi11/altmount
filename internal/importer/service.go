@@ -479,8 +479,17 @@ func (s *Service) GetNzbFolder() string {
 }
 
 // GetFailedNzbFolder returns the path to the directory for failed NZB files
-func (s *Service) GetFailedNzbFolder() string {
-	return filepath.Join(s.GetNzbFolder(), "failed")
+func (s *Service) GetFailedNzbFolder(category ...string) string {
+	basePath := filepath.Join(s.GetNzbFolder(), "failed")
+	if len(category) > 0 && category[0] != "" {
+		// Simple sanitization to prevent directory traversal
+		cleanCat := strings.ReplaceAll(category[0], "..", "")
+		cleanCat = strings.Trim(cleanCat, "./\\")
+		if cleanCat != "" {
+			return filepath.Join(basePath, cleanCat)
+		}
+	}
+	return basePath
 }
 
 // sanitizeFilename replaces invalid characters in filenames
@@ -652,7 +661,17 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	configDir := filepath.Dir(cfg.Database.Path)
 	nzbDir := filepath.Join(configDir, ".nzbs")
 
-	// Create .nzbs directory if not exists
+	// If category is present, append it to the path to keep NZBs organized
+	if item.Category != nil && *item.Category != "" {
+		// Simple sanitization to prevent directory traversal
+		cleanCat := strings.ReplaceAll(*item.Category, "..", "")
+		cleanCat = strings.Trim(cleanCat, "./\\")
+		if cleanCat != "" {
+			nzbDir = filepath.Join(nzbDir, cleanCat)
+		}
+	}
+
+	// Create .nzbs directory (and category subdirectory) if not exists
 	if err := os.MkdirAll(nzbDir, 0755); err != nil {
 		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
 	}
@@ -903,7 +922,11 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 	}
 
 	// Move the NZB file to failed folder after failure/fallback for debugging
-	failedFolder := s.GetFailedNzbFolder()
+	category := ""
+	if item.Category != nil {
+		category = *item.Category
+	}
+	failedFolder := s.GetFailedNzbFolder(category)
 	if err := os.MkdirAll(failedFolder, 0755); err != nil {
 		s.log.WarnContext(ctx, "Failed to create failed NZB directory", "error", err)
 	}
