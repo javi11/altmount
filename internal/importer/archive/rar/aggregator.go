@@ -197,11 +197,11 @@ func ProcessArchive(
 			)
 		}
 
-		// For AES-encrypted files, segments contain encrypted data which is padded
-		// to 16-byte boundary. Calculate expected segment size accordingly.
-		validationSize := rarContent.Size
+		// RAR segments contain packed/compressed data, so use PackedSize for validation.
+		// For AES-encrypted files (rclone encryption on top of RAR), add AES padding.
+		validationSize := rarContent.PackedSize
 		if len(rarContent.AesKey) > 0 {
-			validationSize = aes.EncryptedSize(rarContent.Size)
+			validationSize = aes.EncryptedSize(rarContent.PackedSize)
 		}
 
 		// Validate segments with real-time progress updates
