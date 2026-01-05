@@ -34,6 +34,22 @@ func CalculateVirtualDirectory(nzbPath, relativePath string) string {
 		return "/"
 	}
 
+	// Ignore .nzbs folder if present (persistent storage)
+	if strings.Contains(relDir, ".nzbs") {
+		parts := strings.Split(relDir, string(filepath.Separator))
+		filtered := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p != ".nzbs" {
+				filtered = append(filtered, p)
+			}
+		}
+		relDir = filepath.Join(filtered...)
+	}
+
+	if relDir == "." || relDir == "" {
+		return "/"
+	}
+
 	virtualPath := "/" + strings.ReplaceAll(relDir, string(filepath.Separator), "/")
 	return filepath.Clean(virtualPath)
 }
