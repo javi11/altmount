@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"sync"
+
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio/v3"
 )
 
 type Segment struct {
@@ -105,8 +108,9 @@ type segment struct {
 	End           int64
 	SegmentSize   int64
 	groups        []string
-	reader        *io.PipeReader
-	writer        *io.PipeWriter
+	reader        *nio.PipeReader
+	writer        *nio.PipeWriter
+	buf           buffer.Buffer // Bounded buffer for backpressure
 	once          sync.Once
 	limitedReader io.Reader // Cached limited reader to prevent multiple LimitReader wraps
 	mx            sync.Mutex
