@@ -97,14 +97,7 @@ func (a *queueAdapterForScanner) IsFileProcessed(filePath string, scanRoot strin
 	return isFileAlreadyProcessed(a.metadataService, filePath, scanRoot)
 }
 
-// batchQueueAdapterForImporter adapts database repository for scanner.BatchQueueAdder interface
-type batchQueueAdapterForImporter struct {
-	repo *database.QueueRepository
-}
 
-func (a *batchQueueAdapterForImporter) AddBatchToQueue(ctx context.Context, items []*database.ImportQueueItem) error {
-	return a.repo.AddBatchToQueue(ctx, items)
-}
 
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
 func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath string, scanRoot string) bool {
