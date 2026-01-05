@@ -462,8 +462,17 @@ func (s *Service) GetNzbFolder() string {
 }
 
 // GetFailedNzbFolder returns the path to the directory for failed NZB files
-func (s *Service) GetFailedNzbFolder() string {
-	return filepath.Join(s.GetNzbFolder(), "failed")
+func (s *Service) GetFailedNzbFolder(category ...string) string {
+	basePath := filepath.Join(s.GetNzbFolder(), "failed")
+	if len(category) > 0 && category[0] != "" {
+		// Simple sanitization to prevent directory traversal
+		cleanCat := strings.ReplaceAll(category[0], "..", "")
+		cleanCat = strings.Trim(cleanCat, "./\\")
+		if cleanCat != "" {
+			return filepath.Join(basePath, cleanCat)
+		}
+	}
+	return basePath
 }
 
 // sanitizeFilename replaces invalid characters in filenames
@@ -623,7 +632,17 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	configDir := filepath.Dir(cfg.Database.Path)
 	nzbDir := filepath.Join(configDir, ".nzbs")
 
-	// Create .nzbs directory if not exists
+	// If category is present, append it to the path to keep NZBs organized
+	if item.Category != nil && *item.Category != "" {
+		// Simple sanitization to prevent directory traversal
+		cleanCat := strings.ReplaceAll(*item.Category, "..", "")
+		cleanCat = strings.Trim(cleanCat, "./\\")
+		if cleanCat != "" {
+			nzbDir = filepath.Join(nzbDir, cleanCat)
+		}
+	}
+
+	// Create .nzbs directory (and category subdirectory) if not exists
 	if err := os.MkdirAll(nzbDir, 0755); err != nil {
 		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
 	}
@@ -836,6 +855,58 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"file", item.NzbPath,
 			"error", err)
 	}
+<<<<<<< HEAD
+=======
+
+	// Check cleanup behavior for failure
+	cleanupBehavior := s.configGetter().Import.NzbCleanupBehavior.OnFailure
+	if cleanupBehavior == "" {
+		cleanupBehavior = "delete" // Default
+	}
+
+	if cleanupBehavior == "delete" {
+		if err := os.Remove(item.NzbPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to delete failed NZB file",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"error", err)
+		} else {
+			s.log.InfoContext(ctx, "Deleted failed NZB file (configured to delete)",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath)
+		}
+		return
+	}
+
+	// Move the NZB file to failed folder after failure/fallback for debugging
+	category := ""
+	if item.Category != nil {
+		category = *item.Category
+	}
+	failedFolder := s.GetFailedNzbFolder(category)
+	if err := os.MkdirAll(failedFolder, 0755); err != nil {
+		s.log.WarnContext(ctx, "Failed to create failed NZB directory", "error", err)
+	}
+
+	destPath := filepath.Join(failedFolder, filepath.Base(item.NzbPath))
+	if err := os.Rename(item.NzbPath, destPath); err != nil {
+		if !os.IsNotExist(err) {
+			s.log.WarnContext(ctx, "Failed to move NZB file to failed folder",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"dest_path", destPath,
+				"error", err)
+
+			// Try to remove it if move failed to avoid cluttering persistent storage
+			_ = os.Remove(item.NzbPath)
+		}
+	} else {
+		s.log.InfoContext(ctx, "Moved failed NZB file to failed folder",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath,
+			"dest_path", destPath)
+	}
+>>>>>>> fa797ad (feat(importer): organize persistent and failed NZBs by category)
 }
 
 // CancelProcessing cancels a processing queue item by cancelling its context
