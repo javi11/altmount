@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/javi11/altmount/internal/encryption/aes"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
@@ -197,20 +196,22 @@ func ProcessArchive(
 			)
 		}
 
-		// For AES-encrypted files, segments contain encrypted data which is padded
-		// to 16-byte boundary. Calculate expected segment size accordingly.
-		validationSize := rarContent.Size
+		// Determine encryption type for validation
+		// ValidateSegmentsForFile expects the decrypted size and will calculate
+		// the encrypted size internally based on the encryption type
+		encryptionType := metapb.Encryption_NONE
 		if len(rarContent.AesKey) > 0 {
-			validationSize = aes.EncryptedSize(rarContent.Size)
+			encryptionType = metapb.Encryption_AES
 		}
 
 		// Validate segments with real-time progress updates
+		// Pass the decrypted size and let the validation function handle encryption size calculation
 		if err := validation.ValidateSegmentsForFile(
 			ctx,
 			baseFilename,
-			validationSize,
+			rarContent.Size,
 			rarContent.Segments,
-			metapb.Encryption_NONE,
+			encryptionType,
 			poolManager,
 			maxValidationGoroutines,
 			segmentSamplePercentage,
