@@ -24,7 +24,8 @@ type Processor interface {
 type Content struct {
 	InternalPath string                `json:"internal_path"`
 	Filename     string                `json:"filename"`
-	Size         int64                 `json:"size"`
+	Size         int64                 `json:"size"`                   // Uncompressed size (for file metadata)
+	PackedSize   int64                 `json:"packed_size"`            // Compressed size in RAR (for segment validation)
 	Segments     []*metapb.SegmentData `json:"segments"`               // Segment data for this file
 	IsDirectory  bool                  `json:"is_directory,omitempty"` // Indicates if this is a directory
 	AesKey       []byte                `json:"aes_key,omitempty"`      // AES encryption key (if encrypted)

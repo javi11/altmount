@@ -55,11 +55,13 @@ func TestSlicePartSegmentsBeyondEnd(t *testing.T) {
 func TestConvertAggregatedFilesToRarContentSinglePart(t *testing.T) {
 	rp := &rarProcessor{}
 	rarFiles := []parser.ParsedFile{{Filename: "vol1.rar", Segments: []*metapb.SegmentData{seg("s1", 100)}}}
-	ag := []rardecode.ArchiveFileInfo{{Name: "file.bin", TotalPackedSize: 60, Parts: []rardecode.FilePartInfo{{Path: "vol1.rar", DataOffset: 10, PackedSize: 60}}}}
+	ag := []rardecode.ArchiveFileInfo{{Name: "file.bin", TotalUnpackedSize: 100, TotalPackedSize: 60, Parts: []rardecode.FilePartInfo{{Path: "vol1.rar", DataOffset: 10, PackedSize: 60}}}}
 
 	out, err := rp.convertAggregatedFilesToRarContent(context.Background(), ag, rarFiles)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
+	require.Equal(t, int64(100), out[0].Size, "Size should be TotalUnpackedSize")
+	require.Equal(t, int64(60), out[0].PackedSize, "PackedSize should be TotalPackedSize")
 	require.Len(t, out[0].Segments, 1)
 	s := out[0].Segments[0]
 	require.Equal(t, int64(10), s.StartOffset)
@@ -73,8 +75,9 @@ func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 		{Filename: "part2.rar", Segments: []*metapb.SegmentData{seg("p2s1", 30), seg("p2s2", 30)}}, // 60 bytes
 	}
 	ag := []rardecode.ArchiveFileInfo{{
-		Name:            "movie.mkv",
-		TotalPackedSize: 120,
+		Name:              "movie.mkv",
+		TotalUnpackedSize: 500, // Uncompressed size (larger than packed)
+		TotalPackedSize:   120, // Compressed size in RAR parts
 		Parts: []rardecode.FilePartInfo{
 			{Path: "part1.rar", DataOffset: 20, PackedSize: 80}, // last 30 of first seg + all second seg (50) => 30+50=80
 			{Path: "part2.rar", DataOffset: 0, PackedSize: 40},  // all first seg (30) + 10 of second seg
@@ -85,6 +88,8 @@ func TestConvertAggregatedFilesToRarContentMultiPart(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	got := out[0]
+	require.Equal(t, int64(500), got.Size, "Size should be TotalUnpackedSize")
+	require.Equal(t, int64(120), got.PackedSize, "PackedSize should be TotalPackedSize")
 	// Expect 4 segments: tail of p1s1, full p1s2, full p2s1, head of p2s2
 	require.Len(t, got.Segments, 4)
 	// tail of p1s1
