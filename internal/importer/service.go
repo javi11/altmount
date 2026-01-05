@@ -567,10 +567,10 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 		// included it because the file is physically there.
 		// We want to hide this implementation detail.
 		if strings.Contains(virtualDir, filepath.Base(nzbFolder)) {
-			if basePath == "" {
+			if *basePath == "" {
 				virtualDir = "/"
 			} else {
-				virtualDir = basePath
+				virtualDir = *basePath
 				if !strings.HasPrefix(virtualDir, "/") {
 					virtualDir = "/" + virtualDir
 				}
