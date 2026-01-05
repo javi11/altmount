@@ -945,6 +945,7 @@ func (s *Server) buildCategoryPath(category string) string {
 
 // validateSABnzbdCategory validates and returns the category, or error if invalid
 func (s *Server) validateSABnzbdCategory(category string) (string, error) {
+	defaultCategory := s.getDefaultCategory()
 	if category == "" {
 		return defaultCategory.Name, nil
 	}
