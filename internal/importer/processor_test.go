@@ -215,6 +215,12 @@ func TestCalculateVirtualDirectory(t *testing.T) {
 			relativePath: "/downloads/sonarr",
 			expected:     "/",
 		},
+		{
+			name:         "file in persistent .nzbs directory",
+			nzbPath:      "/config/.nzbs/MovieFolder/Movie.nzb",
+			relativePath: "/config",
+			expected:     "/MovieFolder",
+		},
 	}
 
 	for _, tt := range tests {
