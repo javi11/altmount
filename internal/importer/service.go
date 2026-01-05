@@ -545,6 +545,27 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 	// For NZBDav: returns "/root" (e.g. "/nzb")
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, basePath)
 
+	// Fix for issue where files moved to persistent .nzbs directory end up with exposed .nzbs path in virtual directory
+	// This happens when RelativePath is "/" (e.g. from NZBDav or root watch) and NzbPath is inside .nzbs
+	nzbFolder := s.GetNzbFolder()
+	// Check if NzbPath is inside the persistent NZB folder
+	if strings.HasPrefix(item.NzbPath, nzbFolder) {
+		// If virtualDir contains the .nzbs folder name, it means CalculateVirtualDirectory 
+		// included it because the file is physically there.
+		// We want to hide this implementation detail.
+		if strings.Contains(virtualDir, filepath.Base(nzbFolder)) {
+			if basePath == "" {
+				virtualDir = "/"
+			} else {
+				virtualDir = basePath
+				if !strings.HasPrefix(virtualDir, "/") {
+					virtualDir = "/" + virtualDir
+				}
+				virtualDir = filepath.ToSlash(virtualDir)
+			}
+		}
+	}
+
 	// If category is specified, resolve to configured directory path
 	if item.Category != nil && *item.Category != "" {
 		categoryPath := s.buildCategoryPath(*item.Category)
