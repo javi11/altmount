@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/health"
 	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer"
+	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/pool"
@@ -82,7 +83,8 @@ func initializeImporter(
 		Workers: maxProcessorWorkers,
 	}
 
-	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, healthRepo, broadcaster, userRepo)
+	nzbdavImporter := scanner.NewNzbDavImporter(db.Repository)
+	importerService, err := importer.NewService(serviceConfig, metadataService, db, poolManager, rcloneClient, configGetter, healthRepo, broadcaster, userRepo, nzbdavImporter)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to create importer service", "err", err)
 		return nil, err

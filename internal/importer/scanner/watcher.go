@@ -36,6 +36,37 @@ func NewWatcher(queueAdder WatchQueueAdder, configGetter config.ConfigGetter) *W
 	}
 }
 
+// WatcherStatus represents the current status of the directory watcher
+type WatcherStatus struct {
+	Enabled         bool   `json:"enabled"`
+	Path            string `json:"path,omitempty"`
+	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	Running         bool   `json:"running"`
+}
+
+// GetStatus returns the current status of the watcher
+func (w *Watcher) GetStatus() WatcherStatus {
+	cfg := w.configGetter()
+	enabled := cfg.Import.WatchDir != nil && *cfg.Import.WatchDir != ""
+
+	path := ""
+	if cfg.Import.WatchDir != nil {
+		path = *cfg.Import.WatchDir
+	}
+
+	interval := 10
+	if cfg.Import.WatchIntervalSeconds != nil {
+		interval = *cfg.Import.WatchIntervalSeconds
+	}
+
+	return WatcherStatus{
+		Enabled:         enabled,
+		Path:            path,
+		IntervalSeconds: interval,
+		Running:         w.cancel != nil,
+	}
+}
+
 // Start starts the watcher loop
 func (w *Watcher) Start(ctx context.Context) error {
 	cfg := w.configGetter()
