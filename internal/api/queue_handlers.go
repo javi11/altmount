@@ -398,14 +398,17 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 		priority = database.QueuePriorityNormal
 	}
 
-	// Create temporary directory for upload
-	tempDir := os.TempDir()
-	uploadDir := filepath.Join(tempDir, "altmount-uploads")
+	// Determine upload directory (prefer persistent storage)
+	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	if s.importerService != nil {
+		uploadDir = s.importerService.GetNzbFolder()
+	}
+
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}
 
-	// Save the uploaded file to temporary location
+	// Save the uploaded file directly to persistent location
 	tempFile := filepath.Join(uploadDir, file.Filename)
 	if err := c.SaveFile(file, tempFile); err != nil {
 		return RespondInternalError(c, "Failed to save file", err.Error())
