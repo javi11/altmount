@@ -663,6 +663,14 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	newFilename := sanitizeFilename(filename)
 	newPath := filepath.Join(nzbDir, newFilename)
 
+	// Replace strategy: remove existing file if it exists
+	if _, err := os.Stat(newPath); err == nil {
+		s.log.DebugContext(ctx, "Replacing existing persistent NZB", "path", newPath)
+		if err := os.Remove(newPath); err != nil {
+			return fmt.Errorf("failed to remove existing NZB for replace: %w", err)
+		}
+	}
+
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
 
 	// Move or Copy
