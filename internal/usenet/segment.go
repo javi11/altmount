@@ -220,6 +220,11 @@ func (s *segment) Close() error {
 		e2 = s.writer.Close()
 	}
 
+	// Reset the buffer to release its internal storage and prevent memory leaks
+	if s.buf != nil {
+		s.buf.Reset()
+	}
+
 	return errors.Join(e1, e2)
 }
 
@@ -245,6 +250,11 @@ func (s *segment) CloseWithError(err error) error {
 
 	if s.writer != nil {
 		e2 = s.writer.CloseWithError(err)
+	}
+
+	// Reset the buffer to release its internal storage and prevent memory leaks
+	if s.buf != nil {
+		s.buf.Reset()
 	}
 
 	return errors.Join(e1, e2)
