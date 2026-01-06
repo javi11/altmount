@@ -177,11 +177,11 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		if len(parts) > 0 {
 			cat := parts[0]
 			category = &cat
-			
-			// Set RelativePath to the category root inside the watch dir
-			// This ensures ProcessNzbFile calculates subfolders (like "4k") correctly relative to this root
-			relRoot := filepath.Join(watchRoot, cat)
-			relativePath = &relRoot
+
+			// Use the relPath as the relative path
+			// This ensures subfolders inside the category are preserved and
+			// CalculateVirtualDirectory handles it correctly after the NZB move.
+			relativePath = &relPath
 		}
 	}
 
