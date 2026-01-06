@@ -184,7 +184,6 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 			relativePath = &relPath
 		}
 	}
-	}
 
 	// Add to queue
 	priority := database.QueuePriorityNormal
@@ -196,7 +195,7 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 	w.log.InfoContext(ctx, "Added watched NZB to queue",
 		"file", filePath,
 		"category", category,
-		"queue_id", item.ID)
+		"nzb_path", item.NzbPath)
 
 	// Note: We don't delete the file here because AddToQueue (Service.processNzbItem) 
 	// handles moving/renaming the NZB to persistent storage.
