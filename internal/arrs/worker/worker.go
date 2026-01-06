@@ -205,7 +205,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 				break
 			}
 			// Automatic import failure cleanup (configurable)
-			if (cfg.Arrs.CleanupAutomaticImportFailure == nil || *cfg.Arrs.CleanupAutomaticImportFailure) &&
+			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
 				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
 				break
@@ -318,7 +318,7 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 				break
 			}
 			// Automatic import failure cleanup (configurable)
-			if (cfg.Arrs.CleanupAutomaticImportFailure == nil || *cfg.Arrs.CleanupAutomaticImportFailure) &&
+			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
 				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
 				break

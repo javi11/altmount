@@ -845,7 +845,8 @@ func DefaultConfig(configDir ...string) *Config {
 	fuseEnabled := false
 	loginRequired := true // Require login by default
 	skipHealthCheck := true
-	watchIntervalSeconds := 10 // Default watch interval
+	watchIntervalSeconds := 10        // Default watch interval
+	cleanupAutomaticImportFailure := false // Default to false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -994,11 +995,12 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
-			Enabled:         &scrapperEnabled, // Disabled by default
-			MaxWorkers:      5,                // Default to 5 concurrent workers
-			WebhookBaseURL:  "http://altmount:8080",
-			RadarrInstances: []ArrsInstanceConfig{},
-			SonarrInstances: []ArrsInstanceConfig{},
+			Enabled:                       &scrapperEnabled, // Disabled by default
+			MaxWorkers:                    5,                // Default to 5 concurrent workers
+			WebhookBaseURL:                "http://altmount:8080",
+			RadarrInstances:               []ArrsInstanceConfig{},
+			SonarrInstances:               []ArrsInstanceConfig{},
+			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
 		},
 		Fuse: FuseConfig{
 			Enabled:             &fuseEnabled,

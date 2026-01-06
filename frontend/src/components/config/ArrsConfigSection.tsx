@@ -349,7 +349,7 @@ export function ArrsConfigSection({
 										<input
 											type="checkbox"
 											className="checkbox checkbox-primary"
-											checked={formData.cleanup_automatic_import_failure ?? true}
+											checked={formData.cleanup_automatic_import_failure ?? false}
 											onChange={(e) =>
 												handleFormChange("cleanup_automatic_import_failure", e.target.checked)
 											}
