@@ -184,7 +184,6 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 			relativePath = &relPath
 		}
 	}
-	}
 
 	// Add to queue
 	priority := database.QueuePriorityNormal
