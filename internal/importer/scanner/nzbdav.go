@@ -41,7 +41,7 @@ func NewNzbDavImporter(batchAdder BatchQueueAdder) *NzbDavImporter {
 }
 
 // Start starts an asynchronous import from an NZBDav database
-func (n *NzbDavImporter) Start(dbPath string, rootFolder string, cleanupFile bool) error {
+func (n *NzbDavImporter) Start(dbPath string, rootFolder string, nzbDir string, cleanupFile bool) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -61,7 +61,7 @@ func (n *NzbDavImporter) Start(dbPath string, rootFolder string, cleanupFile boo
 		Failed: 0,
 	}
 
-	go n.performImport(importCtx, dbPath, rootFolder, cleanupFile)
+	go n.performImport(importCtx, dbPath, rootFolder, nzbDir, cleanupFile)
 
 	return nil
 }
@@ -95,7 +95,7 @@ func (n *NzbDavImporter) Cancel() error {
 }
 
 // performImport performs the actual import work
-func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootFolder string, cleanupFile bool) {
+func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootFolder string, nzbDir string, cleanupFile bool) {
 	// Parse Database
 	parser := nzbdav.NewParser(dbPath)
 	nzbChan, errChan := parser.Parse()
@@ -121,15 +121,29 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootF
 		}()
 	}()
 
-	// Create temp dir for NZBs
-	nzbTempDir, err := os.MkdirTemp(os.TempDir(), "altmount-nzbdav-imports-")
-	if err != nil {
-		n.log.ErrorContext(ctx, "Failed to create temp directory for NZBs", "error", err)
-		n.mu.Lock()
-		msg := err.Error()
-		n.info.LastError = &msg
-		n.mu.Unlock()
-		return
+	// Use provided persistent nzb directory or fallback to temp
+	nzbTempDir := nzbDir
+	if nzbTempDir == "" {
+		var err error
+		nzbTempDir, err = os.MkdirTemp(os.TempDir(), "altmount-nzbdav-imports-")
+		if err != nil {
+			n.log.ErrorContext(ctx, "Failed to create temp directory for NZBs", "error", err)
+			n.mu.Lock()
+			msg := err.Error()
+			n.info.LastError = &msg
+			n.mu.Unlock()
+			return
+		}
+	} else {
+		// Ensure directory exists
+		if err := os.MkdirAll(nzbTempDir, 0755); err != nil {
+			n.log.ErrorContext(ctx, "Failed to create NZB directory", "dir", nzbTempDir, "error", err)
+			n.mu.Lock()
+			msg := err.Error()
+			n.info.LastError = &msg
+			n.mu.Unlock()
+			return
+		}
 	}
 
 	// Create workers

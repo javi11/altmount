@@ -108,6 +108,8 @@ import:
     segment_sample_percentage: 1
     import_strategy: NONE
     import_dir: null
+    watch_dir: /config/watch
+    watch_interval_seconds: 15
 log:
     file: /config/altmount.log
     level: info

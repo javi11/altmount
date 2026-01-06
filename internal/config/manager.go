@@ -155,18 +155,25 @@ const (
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
-	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
-	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	SkipHealthCheck                *bool          `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
-	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	MaxProcessorWorkers            int                      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int                      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	AllowedFileExtensions          []string                 `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	MaxImportConnections           int                      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	ImportCacheSizeMB              int                      `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int                      `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds             int                      `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	ImportStrategy                 ImportStrategy           `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                      *string                  `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	SkipHealthCheck                *bool                    `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
+	WatchDir                       *string                  `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds           *int                     `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	NzbCleanupBehavior             NzbCleanupBehaviorConfig `yaml:"nzb_cleanup_behavior" mapstructure:"nzb_cleanup_behavior" json:"nzb_cleanup_behavior"`
+}
+
+// NzbCleanupBehaviorConfig represents the cleanup behavior for NZB files
+type NzbCleanupBehaviorConfig struct {
+	OnSuccess string `yaml:"on_success" mapstructure:"on_success" json:"on_success"` // "delete", "keep"
+	OnFailure string `yaml:"on_failure" mapstructure:"on_failure" json:"on_failure"` // "delete", "keep"
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -383,6 +390,18 @@ func (c *Config) Validate() error {
 		if c.Import.WatchIntervalSeconds != nil && *c.Import.WatchIntervalSeconds <= 0 {
 			return fmt.Errorf("import watch_interval_seconds must be greater than 0")
 		}
+	}
+
+	// Validate nzb cleanup behavior
+	if c.Import.NzbCleanupBehavior.OnSuccess != "" &&
+		c.Import.NzbCleanupBehavior.OnSuccess != "delete" &&
+		c.Import.NzbCleanupBehavior.OnSuccess != "keep" {
+		return fmt.Errorf("import nzb_cleanup_behavior.on_success must be one of: delete, keep")
+	}
+	if c.Import.NzbCleanupBehavior.OnFailure != "" &&
+		c.Import.NzbCleanupBehavior.OnFailure != "delete" &&
+		c.Import.NzbCleanupBehavior.OnFailure != "keep" {
+		return fmt.Errorf("import nzb_cleanup_behavior.on_failure must be one of: delete, keep")
 	}
 
 	// Validate log level (both old and new config)
@@ -1000,6 +1019,10 @@ func DefaultConfig(configDir ...string) *Config {
 			SkipHealthCheck:         &skipHealthCheck,
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
+			NzbCleanupBehavior: NzbCleanupBehaviorConfig{
+				OnSuccess: "delete",
+				OnFailure: "delete",
+			},
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path

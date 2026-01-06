@@ -30,6 +30,13 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
+// NzbDavProcessor defines the interface for NZBDav import operations
+type NzbDavProcessor interface {
+	Start(dbPath string, rootFolder string, nzbDir string, cleanupFile bool) error
+	GetStatus() scanner.ImportInfo
+	Cancel() error
+}
+
 // ServiceConfig holds configuration for the NZB import service
 type ServiceConfig struct {
 	Workers int // Number of parallel queue workers (default: 2)
@@ -41,6 +48,7 @@ type (
 	ScanInfo        = scanner.ScanInfo
 	ImportJobStatus = scanner.ImportJobStatus
 	ImportInfo      = scanner.ImportInfo
+	WatcherStatus   = scanner.WatcherStatus
 )
 
 // Re-export scanner status constants for backward compatibility
@@ -89,14 +97,7 @@ func (a *queueAdapterForScanner) IsFileProcessed(filePath string, scanRoot strin
 	return isFileAlreadyProcessed(a.metadataService, filePath, scanRoot)
 }
 
-// batchQueueAdapterForImporter adapts database repository for scanner.BatchQueueAdder interface
-type batchQueueAdapterForImporter struct {
-	repo *database.QueueRepository
-}
 
-func (a *batchQueueAdapterForImporter) AddBatchToQueue(ctx context.Context, items []*database.ImportQueueItem) error {
-	return a.repo.AddBatchToQueue(ctx, items)
-}
 
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
 func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath string, scanRoot string) bool {
@@ -141,7 +142,7 @@ type Service struct {
 	queueManager    *queue.Manager                // Queue worker management
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
 	watcher         *scanner.Watcher              // Directory watcher for automated imports
-	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
+	nzbdavImporter  NzbDavProcessor               // NZBDav database imports
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
@@ -164,7 +165,7 @@ type Service struct {
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
-func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository) (*Service, error) {
+func NewService(config ServiceConfig, metadataService *metadata.MetadataService, database *database.DB, poolManager pool.Manager, rcloneClient rclonecli.RcloneRcClient, configGetter config.ConfigGetter, healthRepo *database.HealthRepository, broadcaster *progress.ProgressBroadcaster, userRepo *database.UserRepository, nzbdavImporter NzbDavProcessor) (*Service, error) {
 	// Set defaults
 	if config.Workers == 0 {
 		config.Workers = 2
@@ -208,6 +209,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		sabnzbdClient:   sabnzbd.NewSABnzbdClient(),
 		broadcaster:     broadcaster,
 		userRepo:        userRepo,
+		nzbdavImporter:  nzbdavImporter,
 		log:             slog.Default().With("component", "importer-service"),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -222,12 +224,6 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		calcFileSize:    service.CalculateFileSizeOnly,
 	}
 	service.dirScanner = scanner.NewDirectoryScanner(scannerAdapter)
-
-	// Create adapter for NZBDav imports
-	importerAdapter := &batchQueueAdapterForImporter{
-		repo: database.Repository,
-	}
-	service.nzbdavImporter = scanner.NewNzbDavImporter(importerAdapter)
 
 	// Create directory watcher (Service implements WatchQueueAdder)
 	service.watcher = scanner.NewWatcher(service, configGetter)
@@ -356,6 +352,11 @@ func (s *Service) Stop(ctx context.Context) error {
 	// Stop directory watcher
 	s.watcher.Stop()
 
+	// Cancel any running NZBDav import
+	if err := s.nzbdavImporter.Cancel(); err != nil {
+		s.log.WarnContext(ctx, "Error cancelling NZBDav import", "error", err)
+	}
+
 	// Cancel service context
 	s.cancel()
 
@@ -429,6 +430,11 @@ func (s *Service) GetScanStatus() ScanInfo {
 	return s.dirScanner.GetStatus()
 }
 
+// GetWatcherStatus returns the current directory watcher status
+func (s *Service) GetWatcherStatus() WatcherStatus {
+	return s.watcher.GetStatus()
+}
+
 // CancelScan cancels the current scan operation
 func (s *Service) CancelScan() error {
 	return s.dirScanner.Cancel()
@@ -436,17 +442,21 @@ func (s *Service) CancelScan() error {
 
 // StartNzbdavImport starts an asynchronous import from an NZBDav database
 func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
-	return nil
+	cfg := s.configGetter()
+	configDir := filepath.Dir(cfg.Database.Path)
+	nzbDir := filepath.Join(configDir, ".nzbs")
+
+	return s.nzbdavImporter.Start(dbPath, rootFolder, nzbDir, cleanupFile)
 }
 
 // GetImportStatus returns the current import status
 func (s *Service) GetImportStatus() ImportInfo {
-	return ImportInfo{}
+	return s.nzbdavImporter.GetStatus()
 }
 
 // CancelImport cancels the current import operation
 func (s *Service) CancelImport() error {
-	return nil
+	return s.nzbdavImporter.Cancel()
 }
 
 // IsFileInQueue checks if a file is already in the queue (pending or processing)
@@ -462,8 +472,17 @@ func (s *Service) GetNzbFolder() string {
 }
 
 // GetFailedNzbFolder returns the path to the directory for failed NZB files
-func (s *Service) GetFailedNzbFolder() string {
-	return filepath.Join(s.GetNzbFolder(), "failed")
+func (s *Service) GetFailedNzbFolder(category ...string) string {
+	basePath := filepath.Join(s.GetNzbFolder(), "failed")
+	if len(category) > 0 && category[0] != "" {
+		// Simple sanitization to prevent directory traversal
+		cleanCat := strings.ReplaceAll(category[0], "..", "")
+		cleanCat = strings.Trim(cleanCat, "./\\")
+		if cleanCat != "" {
+			return filepath.Join(basePath, cleanCat)
+		}
+	}
+	return basePath
 }
 
 // sanitizeFilename replaces invalid characters in filenames
@@ -482,11 +501,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 	// Calculate file size before adding to queue
 	var fileSize *int64
-	if size, err := s.CalculateFileSizeOnly(filePath); err != nil {
-		s.log.WarnContext(ctx, "Failed to calculate file size", "file", filePath, "error", err)
-		// Continue with NULL file size - don't fail the queue addition
-		fileSize = nil
-	} else {
+	if size, err := s.CalculateFileSizeOnly(filePath); err == nil {
 		fileSize = &size
 	}
 
@@ -530,7 +545,7 @@ func (s *Service) AddToQueue(ctx context.Context, filePath string, relativePath 
 
 // processNzbItem processes the NZB file for a queue item
 func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueueItem) (string, error) {
-	// Determine the base path
+	// Determine the base path, incorporating category if present
 	basePath := ""
 	if item.RelativePath != nil {
 		basePath = *item.RelativePath
@@ -538,11 +553,6 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 
 	// Calculate the virtual directory for metadata storage
 	virtualDir := s.calculateProcessVirtualDir(item, &basePath)
-
-	// Ensure NZB is in a persistent location to prevent data loss if /tmp is cleaned
-	if err := s.ensurePersistentNzb(ctx, item); err != nil {
-		return "", fmt.Errorf("failed to ensure persistent NZB: %w", err)
-	}
 
 	// Determine if allowed extensions override is needed
 	var allowedExtensionsOverride *[]string
@@ -623,7 +633,17 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	configDir := filepath.Dir(cfg.Database.Path)
 	nzbDir := filepath.Join(configDir, ".nzbs")
 
-	// Create .nzbs directory if not exists
+	// If category is present, append it to the path to keep NZBs organized
+	if item.Category != nil && *item.Category != "" {
+		// Simple sanitization to prevent directory traversal
+		cleanCat := strings.ReplaceAll(*item.Category, "..", "")
+		cleanCat = strings.Trim(cleanCat, "./\\")
+		if cleanCat != "" {
+			nzbDir = filepath.Join(nzbDir, cleanCat)
+		}
+	}
+
+	// Create .nzbs directory (and category subdirectory) if not exists
 	if err := os.MkdirAll(nzbDir, 0755); err != nil {
 		return fmt.Errorf("failed to create persistent NZB directory: %w", err)
 	}
@@ -791,6 +811,30 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		s.broadcaster.ClearProgress(int(item.ID))
 	}
 
+	// Check cleanup behavior for success
+	cleanupBehavior := s.configGetter().Import.NzbCleanupBehavior.OnSuccess
+	if cleanupBehavior == "" {
+		cleanupBehavior = "delete" // Default
+	}
+
+	if cleanupBehavior == "delete" {
+		// Clean up the NZB file after successful processing
+		if err := os.Remove(item.NzbPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to clean up NZB file after successful processing",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"error", err)
+			// Don't fail the entire process for cleanup failure
+		} else {
+			s.log.DebugContext(ctx, "Cleaned up NZB file after successful processing",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath)
+		}
+	} else {
+		s.log.DebugContext(ctx, "Keeping NZB file after successful processing (configured to keep)",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath)
+	}
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
 	return nil
 }
@@ -837,7 +881,7 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 				"file", item.NzbPath,
 				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
 		}
-	} else if IsNonRetryable(err) && strings.Contains(err.Error(), "SABnzbd fallback not configured") {
+	} else if IsNonRetryable(processingErr) && strings.Contains(processingErr.Error(), "SABnzbd fallback not configured") {
 		s.log.DebugContext(ctx, "SABnzbd fallback skipped (not configured)",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
@@ -845,7 +889,56 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		s.log.ErrorContext(ctx, "Fallback handling failed",
 			"queue_id", item.ID,
 			"file", item.NzbPath,
-			"error", err)
+			"error", processingErr)
+	}
+
+	// Check cleanup behavior for failure
+	cleanupBehavior := s.configGetter().Import.NzbCleanupBehavior.OnFailure
+	if cleanupBehavior == "" {
+		cleanupBehavior = "delete" // Default
+	}
+
+	if cleanupBehavior == "delete" {
+		if err := os.Remove(item.NzbPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to delete failed NZB file",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"error", err)
+		} else {
+			s.log.InfoContext(ctx, "Deleted failed NZB file (configured to delete)",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath)
+		}
+		return
+	}
+
+	// Move the NZB file to failed folder after failure/fallback for debugging
+	category := ""
+	if item.Category != nil {
+		category = *item.Category
+	}
+	failedFolder := s.GetFailedNzbFolder(category)
+	if err := os.MkdirAll(failedFolder, 0755); err != nil {
+		s.log.WarnContext(ctx, "Failed to create failed NZB directory", "error", err)
+	}
+
+	destPath := filepath.Join(failedFolder, filepath.Base(item.NzbPath))
+	if err := os.Rename(item.NzbPath, destPath); err != nil {
+		if !os.IsNotExist(err) {
+			s.log.WarnContext(ctx, "Failed to move NZB file to failed folder",
+				"queue_id", item.ID,
+				"nzb_path", item.NzbPath,
+				"dest_path", destPath,
+				"error", err)
+
+			// Try to remove it if move failed to avoid cluttering persistent storage
+			_ = os.Remove(item.NzbPath)
+		}
+	} else {
+		s.log.InfoContext(ctx, "Moved failed NZB file to failed folder",
+			"queue_id", item.ID,
+			"nzb_path", item.NzbPath,
+			"dest_path", destPath)
 	}
 }
 
