@@ -2,7 +2,6 @@ package usenet
 
 import (
 	"context"
-	"io"
 )
 
 type SegmentLoader interface {
@@ -11,8 +10,12 @@ type SegmentLoader interface {
 	GetSegment(index int) (segment Segment, groups []string, ok bool)
 }
 
+// DefaultSegmentBufferSize is the default buffer size per segment (2MB)
+const DefaultSegmentBufferSize = 1 * 1024 * 1024
+
 // GetSegmentsInRange returns a segmentRange representing the requested byte range [start,end]
 // across the underlying ordered segments provided by the SegmentLoader.
+// bufferSize specifies the bounded buffer size per segment (use DefaultSegmentBufferSize or 0 for default).
 // Behaviour / rules:
 //   - start and end are inclusive; caller guarantees 0 <= start <= end < filesize (filesize not passed here)
 //   - Each loader Segment indicates:
@@ -25,7 +28,11 @@ type SegmentLoader interface {
 //   - First and last returned segments are trimmed so the concatenation of (End-Start+1) bytes across
 //     returned segments equals the requested range length (unless the range lies fully outside available
 //     data, in which case zero segments are returned).
-func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader) *segmentRange {
+func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader, bufferSize int64) *segmentRange {
+	// Use default buffer size if not specified
+	if bufferSize <= 0 {
+		bufferSize = DefaultSegmentBufferSize
+	}
 	// Defensive handling of invalid input ranges
 	if start < 0 || end < start {
 		return &segmentRange{start: start, end: end, segments: nil, ctx: ctx}
@@ -85,15 +92,17 @@ func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader)
 			continue
 		}
 
-		r, w := io.Pipe()
+		// Create segment with lazy buffer initialization
+		// Buffer will be allocated by downloadManager when segment is about to be downloaded
+		// This prevents allocating buffers for all segments upfront, reducing memory usage
 		seg := &segment{
 			Id:          src.Id,
 			Start:       readStart,
 			End:         readEnd,
 			SegmentSize: src.Size,
 			groups:      groups,
-			reader:      r,
-			writer:      w,
+			bufferSize:  bufferSize, // Store for lazy initialization
+			// reader, writer, buf are nil - will be created lazily
 		}
 		segments = append(segments, seg)
 

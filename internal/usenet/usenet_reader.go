@@ -144,7 +144,7 @@ func (b *UsenetReader) Close() error {
 				_ = b.rg.Clear()
 				b.rg = nil
 			}
-		case <-time.After(30 * time.Second):
+		case <-time.After(5 * time.Second):
 			// Timeout waiting for downloads to complete
 			// This prevents hanging but logs the issue
 			b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
@@ -368,8 +368,12 @@ func (b *UsenetReader) downloadManager(
 		}
 
 		// Calculate max segments to download ahead based on cache size
-		avgSegmentSize := b.rg.segments[0].SegmentSize
-		maxSegmentsAhead := int(b.maxCacheSize / avgSegmentSize)
+		// Use actual buffer size (not physical segment size) for accurate memory calculation
+		bufferSize := b.rg.segments[0].bufferSize
+		if bufferSize <= 0 {
+			bufferSize = DefaultSegmentBufferSize
+		}
+		maxSegmentsAhead := int(b.maxCacheSize / bufferSize)
 		if maxSegmentsAhead < 1 {
 			maxSegmentsAhead = 1 // Always allow at least 1 segment
 		}
@@ -452,6 +456,9 @@ func (b *UsenetReader) downloadManager(
 						b.downloadCond.Signal()
 						b.mu.Unlock()
 					}()
+
+					// Initialize buffer lazily - only allocate when about to download
+					s.initBuffer()
 
 					w := s.Writer()
 					if w == nil {

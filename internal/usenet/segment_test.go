@@ -6,18 +6,32 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio/v3"
 )
+
+// testBufferSize is the buffer size used in tests
+const testBufferSize = 1024 * 1024 // 1MB for tests
+
+// newTestPipe creates a new nio pipe with buffer for tests
+func newTestPipe() (*nio.PipeReader, *nio.PipeWriter, buffer.Buffer) {
+	buf := buffer.New(testBufferSize)
+	r, w := nio.Pipe(buf)
+	return r, w, buf
+}
 
 // TestSegmentWriter_WriteAfterClose verifies that writes after close return io.ErrClosedPipe
 func TestSegmentWriter_WriteAfterClose(t *testing.T) {
 	t.Parallel()
 
 	// Create a segment with a pipe
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
 		writer: writer,
+		buf:    buf,
 	}
 
 	// Get writer reference
@@ -45,11 +59,12 @@ func TestSegmentWriter_ConcurrentWriteAndClose(t *testing.T) {
 
 	// Run this test multiple times to increase chance of catching race
 	for i := 0; i < 10; i++ {
-		reader, writer := io.Pipe()
+		reader, writer, buf := newTestPipe()
 		seg := &segment{
 			Id:     "test-segment",
 			reader: reader,
 			writer: writer,
+			buf:    buf,
 		}
 
 		w := seg.Writer()
@@ -92,11 +107,12 @@ func TestSegmentWriter_ConcurrentWriteAndClose(t *testing.T) {
 func TestSegmentClose_Idempotent(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
 		writer: writer,
+		buf:    buf,
 	}
 
 	// Close multiple times
@@ -118,11 +134,12 @@ func TestSegmentClose_Idempotent(t *testing.T) {
 func TestSafeWriter_ReturnsErrorWhenClosed(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
 		writer: writer,
+		buf:    buf,
 	}
 
 	// Close first
@@ -151,11 +168,12 @@ func TestSafeWriter_ReturnsErrorWhenClosed(t *testing.T) {
 func TestSegmentWriter_ConcurrentWrites(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
 		writer: writer,
+		buf:    buf,
 	}
 
 	w := seg.Writer()
@@ -234,11 +252,12 @@ func TestSegmentWriter_RaceDetection(t *testing.T) {
 	// This test is specifically designed to catch data races
 	// Run with: go test -race -run TestSegmentWriter_RaceDetection
 	for iteration := 0; iteration < 20; iteration++ {
-		reader, writer := io.Pipe()
+		reader, writer, buf := newTestPipe()
 		seg := &segment{
 			Id:     "test-segment",
 			reader: reader,
 			writer: writer,
+			buf:    buf,
 		}
 
 		w := seg.Writer()
@@ -276,13 +295,14 @@ func TestSegmentWriter_RaceDetection(t *testing.T) {
 func TestSegment_CloseWithError_StoresError(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:     "test-segment",
 		Start:  0,
 		End:    100,
 		reader: reader,
 		writer: writer,
+		buf:    buf,
 	}
 
 	testErr := errors.New("article not found in providers")
@@ -313,7 +333,7 @@ func TestSegment_CloseWithError_StoresError(t *testing.T) {
 func TestSegment_GetReader_PropagatesStoredError(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:          "test-segment",
 		Start:       0,
@@ -321,6 +341,7 @@ func TestSegment_GetReader_PropagatesStoredError(t *testing.T) {
 		SegmentSize: 100,
 		reader:      reader,
 		writer:      writer,
+		buf:         buf,
 	}
 
 	testErr := errors.New("article not found in providers")
@@ -340,8 +361,8 @@ func TestSegment_GetReader_PropagatesStoredError(t *testing.T) {
 	}
 
 	// Read should return the stored error
-	buf := make([]byte, 10)
-	_, err := r.Read(buf)
+	readBuf := make([]byte, 10)
+	_, err := r.Read(readBuf)
 	if err == nil {
 		t.Fatal("Expected error on read, got nil")
 	}
@@ -354,11 +375,12 @@ func TestSegment_GetReader_PropagatesStoredError(t *testing.T) {
 func TestSegment_SetDownloadError_FirstWriteWins(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:     "test-segment",
 		reader: reader,
 		writer: writer,
+		buf:    buf,
 	}
 	defer seg.Close()
 
@@ -401,7 +423,7 @@ func TestSegment_SetDownloadError_NilSegment(t *testing.T) {
 func TestSegment_ErrorAwareReader_PropagatesErrorBeforeRead(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
+	reader, writer, buf := newTestPipe()
 	seg := &segment{
 		Id:          "test-segment",
 		Start:       0,
@@ -409,6 +431,7 @@ func TestSegment_ErrorAwareReader_PropagatesErrorBeforeRead(t *testing.T) {
 		SegmentSize: 100,
 		reader:      reader,
 		writer:      writer,
+		buf:         buf,
 	}
 
 	// Set error before calling GetReader
@@ -417,8 +440,8 @@ func TestSegment_ErrorAwareReader_PropagatesErrorBeforeRead(t *testing.T) {
 
 	// GetReader and attempt to read
 	r := seg.GetReader()
-	buf := make([]byte, 10)
-	_, err := r.Read(buf)
+	readBuf := make([]byte, 10)
+	_, err := r.Read(readBuf)
 
 	if !errors.Is(err, testErr) {
 		t.Errorf("Expected error %v, got %v", testErr, err)
@@ -430,7 +453,7 @@ func TestSegment_ErrorPropagation_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
 	for iteration := 0; iteration < 10; iteration++ {
-		reader, writer := io.Pipe()
+		reader, writer, buf := newTestPipe()
 		seg := &segment{
 			Id:          "test-segment",
 			Start:       0,
@@ -438,6 +461,7 @@ func TestSegment_ErrorPropagation_ConcurrentAccess(t *testing.T) {
 			SegmentSize: 100,
 			reader:      reader,
 			writer:      writer,
+			buf:         buf,
 		}
 
 		testErr := errors.New("concurrent error")

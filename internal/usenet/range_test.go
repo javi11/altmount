@@ -35,7 +35,7 @@ func TestGetSegmentsInRange_BasicFullCoverage(t *testing.T) {
 		{Id: "s2", Start: 0, End: 9, Size: 10},  // contributes bytes 10..19
 	}, groups: [][]string{{}, {}}}
 
-	rg := GetSegmentsInRange(context.Background(),0, 19, loader)
+	rg := GetSegmentsInRange(context.Background(), 0, 19, loader, 0)
 	if len(rg.segments) != 2 {
 		t.Fatalf("expected 2 segments, got %d", len(rg.segments))
 	}
@@ -59,7 +59,7 @@ func TestGetSegmentsInRange_PartialFirstAndLast(t *testing.T) {
 	}, groups: [][]string{{}, {}, {}}}
 
 	// request middle bytes 5..24 (length 20)
-	rg := GetSegmentsInRange(context.Background(),5, 24, loader)
+	rg := GetSegmentsInRange(context.Background(), 5, 24, loader, 0)
 	if len(rg.segments) != 3 {
 		t.Fatalf("expected 3 segments, got %d", len(rg.segments))
 	}
@@ -88,7 +88,7 @@ func TestGetSegmentsInRange_InternalStartOffset(t *testing.T) {
 	}, groups: [][]string{{}, {}}}
 
 	// Request spans partially across both segments
-	rg := GetSegmentsInRange(context.Background(),3, 12, loader) // length 10
+	rg := GetSegmentsInRange(context.Background(), 3, 12, loader, 0) // length 10
 	if len(rg.segments) != 2 {
 		t.Fatalf("expected 2 segments got %d", len(rg.segments))
 	}
@@ -117,7 +117,7 @@ func TestGetSegmentsInRange_InternalStartOffset(t *testing.T) {
 func TestGetSegmentsInRange_RangeOutside(t *testing.T) {
 	loader := &mockLoader{segments: []Segment{{Id: "s1", Start: 0, End: 4, Size: 5}}, groups: [][]string{{}}}
 	// Request beyond available data (file length = 5)
-	rg := GetSegmentsInRange(context.Background(),10, 20, loader)
+	rg := GetSegmentsInRange(context.Background(), 10, 20, loader, 0)
 	if len(rg.segments) != 0 {
 		t.Fatalf("expected 0 segments, got %d", len(rg.segments))
 	}
@@ -128,7 +128,7 @@ func TestGetSegmentsInRange_EmptySegmentsOrZeroUsable(t *testing.T) {
 		{Id: "s1", Start: 5, End: 4, Size: 5}, // usable 0 (End < Start)
 		{Id: "s2", Start: 0, End: 3, Size: 4}, // usable 4 -> file 0..3
 	}, groups: [][]string{{}, {}}}
-	rg := GetSegmentsInRange(context.Background(),1, 2, loader)
+	rg := GetSegmentsInRange(context.Background(), 1, 2, loader, 0)
 	if len(rg.segments) != 1 {
 		t.Fatalf("expected 1 usable segment, got %d", len(rg.segments))
 	}
@@ -140,7 +140,7 @@ func TestGetSegmentsInRange_EmptySegmentsOrZeroUsable(t *testing.T) {
 
 func TestGetSegmentsInRange_SingleSegmentTrimmed(t *testing.T) {
 	loader := &mockLoader{segments: []Segment{{Id: "s1", Start: 0, End: 99, Size: 100}}, groups: [][]string{{}}}
-	rg := GetSegmentsInRange(context.Background(),10, 49, loader)
+	rg := GetSegmentsInRange(context.Background(), 10, 49, loader, 0)
 	if len(rg.segments) != 1 {
 		t.Fatalf("expected 1 segment got %d", len(rg.segments))
 	}
@@ -155,7 +155,7 @@ func TestGetSegmentsInRange_SingleSegmentTrimmed(t *testing.T) {
 func TestGetSegmentsInRange_SingleSegmentInternalOffset(t *testing.T) {
 	// Physical size 50, internal usable starts at 5 => usable length 45 -> logical file 0..44
 	loader := &mockLoader{segments: []Segment{{Id: "s1", Start: 5, End: 49, Size: 50}}, groups: [][]string{{}}}
-	rg := GetSegmentsInRange(context.Background(),0, 9, loader) // first 10 logical bytes
+	rg := GetSegmentsInRange(context.Background(), 0, 9, loader, 0) // first 10 logical bytes
 	if len(rg.segments) != 1 {
 		t.Fatalf("expected 1 segment got %d", len(rg.segments))
 	}
@@ -174,7 +174,7 @@ func TestGetSegmentsInRange_SingleByteMiddleSegment(t *testing.T) {
 		{Id: "s2", Start: 0, End: 9, Size: 10},  // logical 10..19
 		{Id: "s3", Start: 0, End: 9, Size: 10},  // logical 20..29
 	}, groups: [][]string{{}, {}, {}}}
-	rg := GetSegmentsInRange(context.Background(),10, 10, loader)
+	rg := GetSegmentsInRange(context.Background(), 10, 10, loader, 0)
 	if len(rg.segments) != 1 {
 		t.Fatalf("expected 1 segment got %d", len(rg.segments))
 	}
