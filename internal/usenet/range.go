@@ -2,9 +2,6 @@ package usenet
 
 import (
 	"context"
-
-	"github.com/djherbis/buffer"
-	"github.com/djherbis/nio/v3"
 )
 
 type SegmentLoader interface {
@@ -95,19 +92,17 @@ func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader,
 			continue
 		}
 
-		// Create bounded buffer for backpressure - allows downloads to proceed ahead
-		// while preventing unbounded memory growth
-		buf := buffer.New(bufferSize)
-		r, w := nio.Pipe(buf)
+		// Create segment with lazy buffer initialization
+		// Buffer will be allocated by downloadManager when segment is about to be downloaded
+		// This prevents allocating buffers for all segments upfront, reducing memory usage
 		seg := &segment{
 			Id:          src.Id,
 			Start:       readStart,
 			End:         readEnd,
 			SegmentSize: src.Size,
 			groups:      groups,
-			reader:      r,
-			writer:      w,
-			buf:         buf,
+			bufferSize:  bufferSize, // Store for lazy initialization
+			// reader, writer, buf are nil - will be created lazily
 		}
 		segments = append(segments, seg)
 
