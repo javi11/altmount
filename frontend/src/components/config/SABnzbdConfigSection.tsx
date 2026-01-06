@@ -456,7 +456,8 @@ export function SABnzbdConfigSection({
 												)}
 											</div>
 										</div>
-									))}
+										);
+									})}
 							</div>
 						)}
 
