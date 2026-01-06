@@ -337,26 +337,47 @@ export function ArrsConfigSection({
 							</div>
 
 							{(formData.queue_cleanup_enabled ?? true) && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Cleanup Interval (seconds)</legend>
-									<input
-										type="number"
-										className="input w-full max-w-xs"
-										value={formData.queue_cleanup_interval_seconds ?? 10}
-										onChange={(e) =>
-											handleFormChange(
-												"queue_cleanup_interval_seconds",
-												Number.parseInt(e.target.value, 10) || 10,
-											)
-										}
-										min={1}
-										max={3600}
-										disabled={isReadOnly}
-									/>
-									<p className="label text-base-content/70">
-										How often to check for empty import pending folders (default: 10 seconds)
-									</p>
-								</fieldset>
+								<>
+									<div className="flex items-center justify-between">
+										<div>
+											<span className="font-medium">Cleanup Automatic Import Failures</span>
+											<p className="text-base-content/70 text-sm">
+												Automatically remove and blocklist items that fail with "Automatic import is not
+												possible"
+											</p>
+										</div>
+										<input
+											type="checkbox"
+											className="checkbox checkbox-primary"
+											checked={formData.cleanup_automatic_import_failure ?? true}
+											onChange={(e) =>
+												handleFormChange("cleanup_automatic_import_failure", e.target.checked)
+											}
+											disabled={isReadOnly}
+										/>
+									</div>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Cleanup Interval (seconds)</legend>
+										<input
+											type="number"
+											className="input w-full max-w-xs"
+											value={formData.queue_cleanup_interval_seconds ?? 10}
+											onChange={(e) =>
+												handleFormChange(
+													"queue_cleanup_interval_seconds",
+													Number.parseInt(e.target.value, 10) || 10,
+												)
+											}
+											min={1}
+											max={3600}
+											disabled={isReadOnly}
+										/>
+										<p className="label text-base-content/70">
+											How often to check for empty import pending folders (default: 10 seconds)
+										</p>
+									</fieldset>
+								</>
 							)}
 						</div>
 					</div>

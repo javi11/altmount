@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -203,12 +204,37 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 				shouldCleanup = true
 				break
 			}
+			// Automatic import failure cleanup (configurable)
+			if (cfg.Arrs.CleanupAutomaticImportFailure == nil || *cfg.Arrs.CleanupAutomaticImportFailure) &&
+				strings.Contains(allMessages, "Automatic import is not possible") {
+				shouldCleanup = true
+				break
+			}
 		}
 
 		if shouldCleanup {
 			slog.InfoContext(ctx, "Found failed import pending item",
 				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
 			idsToRemove = append(idsToRemove, q.ID)
+		} else {
+			// Diagnostic logging for stuck items that are not being cleaned up
+			exists := false
+			if _, err := os.Stat(q.OutputPath); err == nil {
+				exists = true
+			}
+
+			statusMsgs := make([]string, 0)
+			for _, msg := range q.StatusMessages {
+				statusMsgs = append(statusMsgs, strings.Join(msg.Messages, " "))
+			}
+
+			slog.WarnContext(ctx, "Detected stuck import item (not eligible for auto-cleanup)",
+				"instance", instance.Name,
+				"title", q.Title,
+				"path", q.OutputPath,
+				"path_exists_locally", exists,
+				"status_messages", strings.Join(statusMsgs, "; "),
+			)
 		}
 	}
 
@@ -291,12 +317,37 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 				shouldCleanup = true
 				break
 			}
+			// Automatic import failure cleanup (configurable)
+			if (cfg.Arrs.CleanupAutomaticImportFailure == nil || *cfg.Arrs.CleanupAutomaticImportFailure) &&
+				strings.Contains(allMessages, "Automatic import is not possible") {
+				shouldCleanup = true
+				break
+			}
 		}
 
 		if shouldCleanup {
 			slog.InfoContext(ctx, "Found failed import pending item",
 				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
 			idsToRemove = append(idsToRemove, q.ID)
+		} else {
+			// Diagnostic logging for stuck items that are not being cleaned up
+			exists := false
+			if _, err := os.Stat(q.OutputPath); err == nil {
+				exists = true
+			}
+
+			statusMsgs := make([]string, 0)
+			for _, msg := range q.StatusMessages {
+				statusMsgs = append(statusMsgs, strings.Join(msg.Messages, " "))
+			}
+
+			slog.WarnContext(ctx, "Detected stuck import item (not eligible for auto-cleanup)",
+				"instance", instance.Name,
+				"title", q.Title,
+				"path", q.OutputPath,
+				"path_exists_locally", exists,
+				"status_messages", strings.Join(statusMsgs, "; "),
+			)
 		}
 	}
 
