@@ -940,55 +940,6 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"nzb_path", item.NzbPath,
 			"dest_path", destPath)
 	}
-
-	// Check cleanup behavior for failure
-	cleanupBehavior := s.configGetter().Import.NzbCleanupBehavior.OnFailure
-	if cleanupBehavior == "" {
-		cleanupBehavior = "delete" // Default
-	}
-
-	if cleanupBehavior == "delete" {
-		if err := os.Remove(item.NzbPath); err != nil {
-			s.log.WarnContext(ctx, "Failed to delete failed NZB file",
-				"queue_id", item.ID,
-				"nzb_path", item.NzbPath,
-				"error", err)
-		} else {
-			s.log.InfoContext(ctx, "Deleted failed NZB file (configured to delete)",
-				"queue_id", item.ID,
-				"nzb_path", item.NzbPath)
-		}
-		return
-	}
-
-	// Move the NZB file to failed folder after failure/fallback for debugging
-	category := ""
-	if item.Category != nil {
-		category = *item.Category
-	}
-	failedFolder := s.GetFailedNzbFolder(category)
-	if err := os.MkdirAll(failedFolder, 0755); err != nil {
-		s.log.WarnContext(ctx, "Failed to create failed NZB directory", "error", err)
-	}
-
-	destPath := filepath.Join(failedFolder, filepath.Base(item.NzbPath))
-	if err := os.Rename(item.NzbPath, destPath); err != nil {
-		if !os.IsNotExist(err) {
-			s.log.WarnContext(ctx, "Failed to move NZB file to failed folder",
-				"queue_id", item.ID,
-				"nzb_path", item.NzbPath,
-				"dest_path", destPath,
-				"error", err)
-
-			// Try to remove it if move failed to avoid cluttering persistent storage
-			_ = os.Remove(item.NzbPath)
-		}
-	} else {
-		s.log.InfoContext(ctx, "Moved failed NZB file to failed folder",
-			"queue_id", item.ID,
-			"nzb_path", item.NzbPath,
-			"dest_path", destPath)
-	}
 }
 
 // CancelProcessing cancels a processing queue item by cancelling its context
