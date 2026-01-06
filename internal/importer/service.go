@@ -855,8 +855,6 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"file", item.NzbPath,
 			"error", err)
 	}
-<<<<<<< HEAD
-=======
 
 	// Check cleanup behavior for failure
 	cleanupBehavior := s.configGetter().Import.NzbCleanupBehavior.OnFailure
@@ -906,7 +904,6 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"nzb_path", item.NzbPath,
 			"dest_path", destPath)
 	}
->>>>>>> fa797ad (feat(importer): organize persistent and failed NZBs by category)
 }
 
 // CancelProcessing cancels a processing queue item by cancelling its context
