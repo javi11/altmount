@@ -1,7 +1,6 @@
 package api
 
 import (
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -102,17 +101,24 @@ type ProviderAPIResponse struct {
 
 // ImportAPIResponse handles Import config for API responses
 type ImportAPIResponse struct {
-	MaxProcessorWorkers            int                   `json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
-	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
-	MaxImportConnections           int                   `json:"max_import_connections"`
-	ImportCacheSizeMB              int                   `json:"import_cache_size_mb"`
-	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
-	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
-	ImportDir                      *string               `json:"import_dir,omitempty"`
-	SkipHealthCheck                bool                  `json:"skip_health_check"`
-	WatchDir                       *string               `json:"watch_dir,omitempty"`
-	WatchIntervalSeconds           *int                  `json:"watch_interval_seconds,omitempty"`
+	MaxProcessorWorkers            int                           `json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int                           `json:"queue_processing_interval_seconds"` // Interval in seconds
+	AllowedFileExtensions          []string                      `json:"allowed_file_extensions"`
+	MaxImportConnections           int                           `json:"max_import_connections"`
+	ImportCacheSizeMB              int                           `json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int                           `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
+	ImportStrategy                 config.ImportStrategy         `json:"import_strategy"`
+	ImportDir                      *string                       `json:"import_dir,omitempty"`
+	SkipHealthCheck                bool                          `json:"skip_health_check"`
+	WatchDir                       *string                       `json:"watch_dir,omitempty"`
+	WatchIntervalSeconds           *int                          `json:"watch_interval_seconds,omitempty"`
+	NzbCleanupBehavior             NzbCleanupBehaviorAPIResponse `json:"nzb_cleanup_behavior"`
+}
+
+// NzbCleanupBehaviorAPIResponse handles NZB cleanup behavior config for API responses
+type NzbCleanupBehaviorAPIResponse struct {
+	OnSuccess string `json:"on_success"`
+	OnFailure string `json:"on_failure"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -244,6 +250,10 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		SkipHealthCheck:                importConfig.SkipHealthCheck != nil && *importConfig.SkipHealthCheck,
 		WatchDir:                       importConfig.WatchDir,
 		WatchIntervalSeconds:           importConfig.WatchIntervalSeconds,
+		NzbCleanupBehavior: NzbCleanupBehaviorAPIResponse{
+			OnSuccess: importConfig.NzbCleanupBehavior.OnSuccess,
+			OnFailure: importConfig.NzbCleanupBehavior.OnFailure,
+		},
 	}
 }
 
@@ -471,18 +481,10 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 		return nil
 	}
 
-	// Generate target_path by removing .nzb extension and ID prefix if present
-	targetPath := filepath.Base(item.NzbPath)
+	// Generate target_path by removing .nzb extension
+	targetPath := item.NzbPath
 	if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
 		targetPath = targetPath[:len(targetPath)-4]
-	}
-	
-	// Remove ID prefix (e.g. "123_filename")
-	parts := strings.SplitN(targetPath, "_", 2)
-	if len(parts) == 2 {
-		// Check if first part is numeric (the ID)
-		// We don't need strict validation, just heuristic
-		targetPath = parts[1]
 	}
 
 	// Transform error message for better user understanding
@@ -665,6 +667,14 @@ type ScanStatusResponse struct {
 	FilesAdded  int        `json:"files_added"`
 	CurrentFile string     `json:"current_file,omitempty"`
 	LastError   *string    `json:"last_error,omitempty"`
+}
+
+// WatcherStatusResponse represents the current status of the directory watcher
+type WatcherStatusResponse struct {
+	Enabled         bool   `json:"enabled"`
+	Path            string `json:"path,omitempty"`
+	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	Running         bool   `json:"running"`
 }
 
 // ManualImportRequest represents a request to manually import a file by path

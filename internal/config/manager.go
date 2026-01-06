@@ -60,7 +60,8 @@ type FuseConfig struct {
 
 // APIConfig represents REST API configuration
 type APIConfig struct {
-	Prefix string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
+	Prefix      string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
+	KeyOverride string `yaml:"key_override" mapstructure:"key_override" json:"key_override,omitempty"`
 }
 
 // AuthConfig represents authentication configuration
@@ -154,18 +155,25 @@ const (
 
 // ImportConfig represents import processing configuration
 type ImportConfig struct {
-	MaxProcessorWorkers            int            `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
-	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
-	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
-	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
-	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
-	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
-	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
-	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
-	ImportDir                      *string        `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
-	SkipHealthCheck                *bool          `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
-	WatchDir                       *string        `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
-	WatchIntervalSeconds           *int           `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	MaxProcessorWorkers            int                      `yaml:"max_processor_workers" mapstructure:"max_processor_workers" json:"max_processor_workers"`
+	QueueProcessingIntervalSeconds int                      `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
+	AllowedFileExtensions          []string                 `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
+	MaxImportConnections           int                      `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
+	ImportCacheSizeMB              int                      `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
+	SegmentSamplePercentage        int                      `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	ReadTimeoutSeconds             int                      `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
+	ImportStrategy                 ImportStrategy           `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
+	ImportDir                      *string                  `yaml:"import_dir" mapstructure:"import_dir" json:"import_dir,omitempty"`
+	SkipHealthCheck                *bool                    `yaml:"skip_health_check" mapstructure:"skip_health_check" json:"skip_health_check,omitempty"`
+	WatchDir                       *string                  `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir,omitempty"`
+	WatchIntervalSeconds           *int                     `yaml:"watch_interval_seconds" mapstructure:"watch_interval_seconds" json:"watch_interval_seconds,omitempty"`
+	NzbCleanupBehavior             NzbCleanupBehaviorConfig `yaml:"nzb_cleanup_behavior" mapstructure:"nzb_cleanup_behavior" json:"nzb_cleanup_behavior"`
+}
+
+// NzbCleanupBehaviorConfig represents the cleanup behavior for NZB files
+type NzbCleanupBehaviorConfig struct {
+	OnSuccess string `yaml:"on_success" mapstructure:"on_success" json:"on_success"` // "delete", "keep"
+	OnFailure string `yaml:"on_failure" mapstructure:"on_failure" json:"on_failure"` // "delete", "keep"
 }
 
 // LogConfig represents logging configuration with rotation support
@@ -236,6 +244,42 @@ type SABnzbdCategory struct {
 	Priority int    `yaml:"priority" mapstructure:"priority" json:"priority"`
 	Dir      string `yaml:"dir" mapstructure:"dir" json:"dir"`
 	Type     string `yaml:"type" mapstructure:"type" json:"type"` // "sonarr" or "radarr"
+}
+
+// DefaultCategoryName is the name of the mandatory default category
+const DefaultCategoryName = "Default"
+
+// DefaultCategoryDir is the default directory for the Default category
+const DefaultCategoryDir = "complete"
+
+// EnsureDefaultCategory ensures that the Default category always exists in the configuration.
+// The Default category's name cannot be changed, but order, priority, and dir can be customized via YAML.
+// If not configured, uses sensible defaults (order=0, priority=0, dir="complete").
+func (c *Config) EnsureDefaultCategory() {
+	// Check if Default category already exists
+	for i, cat := range c.SABnzbd.Categories {
+		if strings.EqualFold(cat.Name, DefaultCategoryName) {
+			// Ensure the name is exactly "Default" (case-sensitive)
+			c.SABnzbd.Categories[i].Name = DefaultCategoryName
+			// Keep customized values from YAML, only set defaults if not configured
+			// Dir defaults to "complete" if empty
+			if c.SABnzbd.Categories[i].Dir == "" {
+				c.SABnzbd.Categories[i].Dir = DefaultCategoryDir
+			}
+			return
+		}
+	}
+
+	// Default category doesn't exist, add it at the beginning with default values
+	defaultCat := SABnzbdCategory{
+		Name:     DefaultCategoryName,
+		Order:    0,
+		Priority: 0,                // Normal priority
+		Dir:      DefaultCategoryDir, // Default dir for files
+	}
+
+	// Prepend Default category to the list
+	c.SABnzbd.Categories = append([]SABnzbdCategory{defaultCat}, c.SABnzbd.Categories...)
 }
 
 // ArrsConfig represents arrs configuration
@@ -346,6 +390,18 @@ func (c *Config) Validate() error {
 		if c.Import.WatchIntervalSeconds != nil && *c.Import.WatchIntervalSeconds <= 0 {
 			return fmt.Errorf("import watch_interval_seconds must be greater than 0")
 		}
+	}
+
+	// Validate nzb cleanup behavior
+	if c.Import.NzbCleanupBehavior.OnSuccess != "" &&
+		c.Import.NzbCleanupBehavior.OnSuccess != "delete" &&
+		c.Import.NzbCleanupBehavior.OnSuccess != "keep" {
+		return fmt.Errorf("import nzb_cleanup_behavior.on_success must be one of: delete, keep")
+	}
+	if c.Import.NzbCleanupBehavior.OnFailure != "" &&
+		c.Import.NzbCleanupBehavior.OnFailure != "delete" &&
+		c.Import.NzbCleanupBehavior.OnFailure != "keep" {
+		return fmt.Errorf("import nzb_cleanup_behavior.on_failure must be one of: delete, keep")
 	}
 
 	// Validate log level (both old and new config)
@@ -459,12 +515,23 @@ func (c *Config) Validate() error {
 
 	// Validate SABnzbd configuration
 	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
+		// CompleteDir is a virtual path relative to the mount point, not an absolute filesystem path
+		// It defaults to "/" (root of mount) if not specified
+		// Normalize: remove leading/trailing slashes for consistency, then ensure it starts with /
 		if c.SABnzbd.CompleteDir == "" {
-			return fmt.Errorf("sabnzbd complete_dir cannot be empty when SABnzbd is enabled")
+			c.SABnzbd.CompleteDir = "/"
+		} else {
+			// Normalize the path: ensure it starts with / and remove trailing /
+			cleanDir := strings.Trim(c.SABnzbd.CompleteDir, "/")
+			if cleanDir == "" {
+				c.SABnzbd.CompleteDir = "/"
+			} else {
+				c.SABnzbd.CompleteDir = "/" + cleanDir
+			}
 		}
-		if !filepath.IsAbs(c.SABnzbd.CompleteDir) {
-			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
-		}
+
+		// Ensure Default category always exists
+		c.EnsureDefaultCategory()
 
 		// Validate categories if provided
 		categoryNames := make(map[string]bool)
@@ -952,6 +1019,10 @@ func DefaultConfig(configDir ...string) *Config {
 			SkipHealthCheck:         &skipHealthCheck,
 			WatchDir:                nil,
 			WatchIntervalSeconds:    &watchIntervalSeconds,
+			NzbCleanupBehavior: NzbCleanupBehaviorConfig{
+				OnSuccess: "delete",
+				OnFailure: "delete",
+			},
 		},
 		Log: LogConfig{
 			File:       logPath, // Default log file path
