@@ -172,9 +172,9 @@ type ImportConfig struct {
 type LogConfig struct {
 	File       string `yaml:"file" mapstructure:"file" json:"file,omitempty"`                      // Log file path (empty = console only)
 	Level      string `yaml:"level" mapstructure:"level" json:"level,omitempty"`                   // Log level (debug, info, warn, error)
-	MaxSize    int    `yaml:"max_size" mapstructure:"max_size" json:"max_size,omitempty"`          // Max size in MB before rotation
-	MaxAge     int    `yaml:"max_age" mapstructure:"max_age" json:"max_age,omitempty"`             // Max age in days to keep files
-	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups" json:"max_backups,omitempty"` // Max number of old files to keep
+	MaxSize    int    `yaml:"max_size" mapstructure:"max_size" json:"max_size"`          // Max size in MB before rotation
+	MaxAge     int    `yaml:"max_age" mapstructure:"max_age" json:"max_age"`             // Max age in days to keep files
+	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups" json:"max_backups"` // Max number of old files to keep
 	Compress   bool   `yaml:"compress" mapstructure:"compress" json:"compress,omitempty"`          // Compress old log files
 }
 
@@ -241,12 +241,12 @@ type SABnzbdCategory struct {
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
 	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers"`
 	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
-	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
