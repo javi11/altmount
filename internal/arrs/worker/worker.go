@@ -171,7 +171,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 	var idsToRemove []int64
 	for _, q := range queue.Records {
 		// Check for completed items with warning status that are pending import
-		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
 			continue
 		}
 
@@ -385,7 +385,7 @@ func (w *Worker) isPathManaged(path string, cfg *config.Config) bool {
 	// Check import_dir
 	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
 		importDir := filepath.Clean(*cfg.Import.ImportDir)
-		if strings.HasPrefix(cleanPath, importDir) {
+		if cleanPath == importDir || strings.HasPrefix(cleanPath, importDir+string(os.PathSeparator)) {
 			return true
 		}
 	}
@@ -393,7 +393,7 @@ func (w *Worker) isPathManaged(path string, cfg *config.Config) bool {
 	// Check mount_path
 	if cfg.MountPath != "" {
 		mountPath := filepath.Clean(cfg.MountPath)
-		if strings.HasPrefix(cleanPath, mountPath) {
+		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
 			return true
 		}
 	}

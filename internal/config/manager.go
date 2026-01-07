@@ -894,6 +894,8 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true // Require login by default
 	skipHealthCheck := true
 	watchIntervalSeconds := 10        // Default watch interval
+	queueCleanupEnabled := true       // Enable queue cleanup by default
+	queueCleanupIntervalSeconds := 10 // 10 seconds default interval
 	cleanupAutomaticImportFailure := false // Default to false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
@@ -1048,6 +1050,8 @@ func DefaultConfig(configDir ...string) *Config {
 			WebhookBaseURL:                "http://altmount:8080",
 			RadarrInstances:               []ArrsInstanceConfig{},
 			SonarrInstances:               []ArrsInstanceConfig{},
+			QueueCleanupEnabled:         &queueCleanupEnabled,
+			QueueCleanupIntervalSeconds: queueCleanupIntervalSeconds,
 			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
 		},
 		Fuse: FuseConfig{
