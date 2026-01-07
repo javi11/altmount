@@ -558,22 +558,31 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	// Calculate initial virtual directory from physical/relative path
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
 
-	// Fix for issue where files moved to persistent .nzbs directory end up with exposed .nzbs path in virtual directory
-	// This happens when NzbPath is inside .nzbs
+	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
+	// This happens when NzbPath is inside .nzbs and CalculateVirtualDirectory sees the physical parent folder.
 	nzbFolder := s.GetNzbFolder()
 	if strings.HasPrefix(item.NzbPath, nzbFolder) {
-		// If virtualDir contains the .nzbs folder name, it means CalculateVirtualDirectory
-		// included it because the file is physically there.
-		if strings.Contains(virtualDir, filepath.Base(nzbFolder)) {
-			if *basePath == "" {
-				virtualDir = "/"
-			} else {
+		// Calculate path relative to the persistent NZB folder
+		if relPath, err := filepath.Rel(nzbFolder, item.NzbPath); err == nil {
+			// If file is directly in root of .nzbs (e.g. "file.nzb"), relDir is "."
+			// If file is in subdir (e.g. "failed/file.nzb"), relDir is "failed"
+			relDir := filepath.Dir(relPath)
+			
+			if relDir == "." {
 				virtualDir = *basePath
-				if !strings.HasPrefix(virtualDir, "/") {
-					virtualDir = "/" + virtualDir
+			} else {
+				// Combine basePath with the subdirectory structure found inside .nzbs
+				if *basePath == "" || *basePath == "/" {
+					virtualDir = relDir
+				} else {
+					virtualDir = filepath.Join(*basePath, relDir)
 				}
-				virtualDir = filepath.ToSlash(virtualDir)
 			}
+			// Ensure proper formatting
+			if !strings.HasPrefix(virtualDir, "/") {
+				virtualDir = "/" + virtualDir
+			}
+			virtualDir = filepath.ToSlash(virtualDir)
 		}
 	}
 
