@@ -13,6 +13,15 @@ on:
         required: false
         default: 'manual'
         type: string
+      architecture:
+        description: 'Architecture to build'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - amd64
+          - arm64
 
 env:
   REGISTRY: ghcr.io
@@ -66,6 +75,7 @@ jobs:
           retention-days: 1
 
   build-image-amd64:
+    if: github.event.inputs.architecture == 'both' || github.event.inputs.architecture == 'amd64'
     runs-on: ubuntu-latest
     needs: build-frontend
     permissions:
@@ -142,6 +152,7 @@ jobs:
           echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
 
   build-image-arm64:
+    if: github.event.inputs.architecture == 'both' || github.event.inputs.architecture == 'arm64'
     runs-on: ubuntu-latest
     needs: build-frontend
     permissions:
@@ -220,6 +231,7 @@ jobs:
   create-manifest:
     runs-on: ubuntu-latest
     needs: [build-image-amd64, build-image-arm64]
+    if: always() && (needs.build-image-amd64.result == 'success' || needs.build-image-arm64.result == 'success')
     permissions:
       contents: read
       packages: write
@@ -244,6 +256,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Set up Docker Buildx for imagetools
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       # Create sanitized branch name for tag
       - name: Create sanitized tag
         id: tag
@@ -258,20 +274,23 @@ jobs:
           echo "arm64_tag=$ARM64_TAG" >> $GITHUB_OUTPUT
           echo "Creating multi-arch manifest with tag: $TAG"
 
-      # Create and push multi-platform manifest
+      # Create and push multi-platform manifest or single-arch tag
       - name: Create multi-platform manifest
         run: |
           AMD64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.amd64_tag }}"
           ARM64_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.arm64_tag }}"
           MANIFEST_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ steps.tag.outputs.tag }}"
 
-          echo "AMD64 Image: $AMD64_IMAGE"
-          echo "ARM64 Image: $ARM64_IMAGE"
-          echo "Manifest Tag: $MANIFEST_TAG"
-
-          # Create and push multi-arch manifest
-          docker manifest create $MANIFEST_TAG $AMD64_IMAGE $ARM64_IMAGE
-          docker manifest push $MANIFEST_TAG
+          if [[ "${{ inputs.architecture }}" == "both" ]]; then
+            echo "Creating multi-arch manifest: $MANIFEST_TAG"
+            docker buildx imagetools create -t $MANIFEST_TAG $AMD64_IMAGE $ARM64_IMAGE
+          elif [[ "${{ inputs.architecture }}" == "amd64" ]]; then
+            echo "Creating single-arch tag for amd64: $MANIFEST_TAG"
+            docker buildx imagetools create -t $MANIFEST_TAG $AMD64_IMAGE
+          elif [[ "${{ inputs.architecture }}" == "arm64" ]]; then
+            echo "Creating single-arch tag for arm64: $MANIFEST_TAG"
+            docker buildx imagetools create -t $MANIFEST_TAG $ARM64_IMAGE
+          fi
 
       # Output manifest details
       - name: Manifest created successfully
