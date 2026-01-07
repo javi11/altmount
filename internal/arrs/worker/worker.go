@@ -216,7 +216,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		removeFromClient := true
 		opts := &starr.QueueDeleteOpts{
 			RemoveFromClient: &removeFromClient,
-			BlockList:        true,
+			BlockList:        false,
 			SkipRedownload:   false,
 		}
 		for _, id := range idsToRemove {
@@ -289,7 +289,7 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		removeFromClient := true
 		opts := &starr.QueueDeleteOpts{
 			RemoveFromClient: &removeFromClient,
-			BlockList:        true,
+			BlockList:        false,
 			SkipRedownload:   false,
 		}
 		for _, id := range idsToRemove {
