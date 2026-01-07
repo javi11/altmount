@@ -172,9 +172,9 @@ type ImportConfig struct {
 type LogConfig struct {
 	File       string `yaml:"file" mapstructure:"file" json:"file,omitempty"`                      // Log file path (empty = console only)
 	Level      string `yaml:"level" mapstructure:"level" json:"level,omitempty"`                   // Log level (debug, info, warn, error)
-	MaxSize    int    `yaml:"max_size" mapstructure:"max_size" json:"max_size,omitempty"`          // Max size in MB before rotation
-	MaxAge     int    `yaml:"max_age" mapstructure:"max_age" json:"max_age,omitempty"`             // Max age in days to keep files
-	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups" json:"max_backups,omitempty"` // Max number of old files to keep
+	MaxSize    int    `yaml:"max_size" mapstructure:"max_size" json:"max_size"`          // Max size in MB before rotation
+	MaxAge     int    `yaml:"max_age" mapstructure:"max_age" json:"max_age"`             // Max age in days to keep files
+	MaxBackups int    `yaml:"max_backups" mapstructure:"max_backups" json:"max_backups"` // Max number of old files to keep
 	Compress   bool   `yaml:"compress" mapstructure:"compress" json:"compress,omitempty"`          // Compress old log files
 }
 
@@ -183,12 +183,12 @@ type HealthConfig struct {
 	Enabled                       *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	LibraryDir                    *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
 	CleanupOrphanedMetadata       *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	MaxConcurrentJobs             int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
-	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
-	LibrarySyncConcurrency        int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
+	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds"`
+	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks"`
+	MaxConcurrentJobs             int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs"`
+	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
+	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes"`
+	LibrarySyncConcurrency        int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency"`
 	ResolveRepairOnImport         *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
 }
 
@@ -241,7 +241,7 @@ type SABnzbdCategory struct {
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
 	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers"`
 	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
