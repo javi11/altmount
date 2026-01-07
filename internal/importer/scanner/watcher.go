@@ -177,12 +177,18 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		if len(parts) > 0 {
 			cat := parts[0]
 			category = &cat
-
-			// Use the relPath as the relative path
-			// This ensures subfolders inside the category are preserved and
-			// CalculateVirtualDirectory handles it correctly after the NZB move.
-			relativePath = &relPath
 		}
+	}
+
+	// Use the watchRoot as the relative path (base path)
+	// This ensures CalculateVirtualDirectory handles it correctly after the NZB move.
+	// We use the absolute path to avoid issues with CWD changes or relative path calculations
+	absWatchRoot, err := filepath.Abs(watchRoot)
+	if err == nil {
+		relativePath = &absWatchRoot
+	} else {
+		// Fallback to provided watchRoot if Abs fails
+		relativePath = &watchRoot
 	}
 
 	// Add to queue
