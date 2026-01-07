@@ -635,6 +635,7 @@ export interface ArrsConfig {
 	sonarr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
+	cleanup_automatic_import_failure?: boolean;
 }
 
 // Sync status and progress types

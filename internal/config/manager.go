@@ -247,6 +247,8 @@ type ArrsConfig struct {
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	// CleanupAutomaticImportFailure enables automatic cleanup of "Automatic import is not possible" errors
+	CleanupAutomaticImportFailure *bool `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -843,7 +845,8 @@ func DefaultConfig(configDir ...string) *Config {
 	fuseEnabled := false
 	loginRequired := true // Require login by default
 	skipHealthCheck := true
-	watchIntervalSeconds := 10 // Default watch interval
+	watchIntervalSeconds := 10        // Default watch interval
+	cleanupAutomaticImportFailure := false // Default to false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -992,11 +995,12 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
-			Enabled:         &scrapperEnabled, // Disabled by default
-			MaxWorkers:      5,                // Default to 5 concurrent workers
-			WebhookBaseURL:  "http://altmount:8080",
-			RadarrInstances: []ArrsInstanceConfig{},
-			SonarrInstances: []ArrsInstanceConfig{},
+			Enabled:                       &scrapperEnabled, // Disabled by default
+			MaxWorkers:                    5,                // Default to 5 concurrent workers
+			WebhookBaseURL:                "http://altmount:8080",
+			RadarrInstances:               []ArrsInstanceConfig{},
+			SonarrInstances:               []ArrsInstanceConfig{},
+			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
 		},
 		Fuse: FuseConfig{
 			Enabled:             &fuseEnabled,
