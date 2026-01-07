@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"sync"
+
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio/v3"
 )
 
 type Segment struct {
@@ -105,13 +108,45 @@ type segment struct {
 	End           int64
 	SegmentSize   int64
 	groups        []string
-	reader        *io.PipeReader
-	writer        *io.PipeWriter
+	reader        *nio.PipeReader
+	writer        *nio.PipeWriter
+	buf           buffer.Buffer // Bounded buffer for backpressure
+	bufferSize    int64         // Size for lazy buffer initialization
 	once          sync.Once
-	limitedReader io.Reader // Cached limited reader to prevent multiple LimitReader wraps
+	bufferOnce    sync.Once     // For lazy buffer initialization
+	limitedReader io.Reader     // Cached limited reader to prevent multiple LimitReader wraps
 	mx            sync.Mutex
 	closed        bool  // Tracks if segment has been closed
 	downloadErr   error // Stores download error for explicit retrieval
+}
+
+// initBuffer lazily initializes the bounded buffer for this segment.
+// This is called by the download manager before downloading to avoid
+// allocating buffers for all segments upfront.
+func (s *segment) initBuffer() {
+	s.bufferOnce.Do(func() {
+		s.mx.Lock()
+		defer s.mx.Unlock()
+
+		// Don't initialize if already closed
+		if s.closed {
+			return
+		}
+
+		// Create bounded buffer for backpressure
+		buf := buffer.New(s.bufferSize)
+		r, w := nio.Pipe(buf)
+		s.buf = buf
+		s.reader = r
+		s.writer = w
+	})
+}
+
+// isBufferInitialized returns true if the buffer has been initialized
+func (s *segment) isBufferInitialized() bool {
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	return s.buf != nil
 }
 
 // SetDownloadError stores the download error for later retrieval.
@@ -164,6 +199,10 @@ func (r *errorAwareReader) Read(p []byte) (n int, err error) {
 }
 
 func (s *segment) GetReader() io.Reader {
+	// Ensure buffer is initialized before reading
+	// This is safe because initBuffer uses sync.Once and is idempotent
+	s.initBuffer()
+
 	s.once.Do(func() {
 		// Skip to Start position
 		if s.Start > 0 {
@@ -210,11 +249,23 @@ func (s *segment) Close() error {
 
 	if s.reader != nil {
 		e1 = s.reader.Close()
+		s.reader = nil
 	}
 
 	if s.writer != nil {
 		e2 = s.writer.Close()
+		s.writer = nil
 	}
+
+	// Reset the buffer to release its internal storage and prevent memory leaks
+	if s.buf != nil {
+		s.buf.Reset()
+		s.buf = nil
+	}
+
+	// Clear remaining references for aggressive GC
+	s.limitedReader = nil
+	s.groups = nil
 
 	return errors.Join(e1, e2)
 }
@@ -237,11 +288,23 @@ func (s *segment) CloseWithError(err error) error {
 
 	if s.reader != nil {
 		e1 = s.reader.CloseWithError(err)
+		s.reader = nil
 	}
 
 	if s.writer != nil {
 		e2 = s.writer.CloseWithError(err)
+		s.writer = nil
 	}
+
+	// Reset the buffer to release its internal storage and prevent memory leaks
+	if s.buf != nil {
+		s.buf.Reset()
+		s.buf = nil
+	}
+
+	// Clear remaining references for aggressive GC
+	s.limitedReader = nil
+	s.groups = nil
 
 	return errors.Join(e1, e2)
 }
@@ -300,10 +363,22 @@ func (sw *safeWriter) CloseWithError(err error) error {
 	var e1, e2 error
 	if sw.s.reader != nil {
 		e1 = sw.s.reader.CloseWithError(err)
+		sw.s.reader = nil
 	}
 	if sw.s.writer != nil {
 		e2 = sw.s.writer.CloseWithError(err)
+		sw.s.writer = nil
 	}
+
+	// Reset the buffer to release its internal storage and prevent memory leaks
+	if sw.s.buf != nil {
+		sw.s.buf.Reset()
+		sw.s.buf = nil
+	}
+
+	// Clear remaining references for aggressive GC
+	sw.s.limitedReader = nil
+	sw.s.groups = nil
 
 	return errors.Join(e1, e2)
 }
