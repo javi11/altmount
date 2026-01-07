@@ -104,7 +104,24 @@ func ParseTimeParamFiber(c *fiber.Ctx, param string) (*time.Time, error) {
 }
 
 // validateAPIKey validates the API key using AltMount's authentication system
+// First checks if there's a key_override in config (must be exactly 32 characters)
+// Then falls back to checking the database
 func (s *Server) validateAPIKey(c *fiber.Ctx, apiKey string) bool {
+	if apiKey == "" {
+		return false
+	}
+
+	// Check config key_override first (must be exactly 32 characters to be valid)
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg.API.KeyOverride != "" && len(cfg.API.KeyOverride) == 32 {
+			if apiKey == cfg.API.KeyOverride {
+				return true
+			}
+		}
+	}
+
+	// Fall back to database validation
 	if s.userRepo == nil {
 		return false
 	}
