@@ -317,6 +317,10 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 				shouldCleanup = true
 				break
 			}
+			if strings.Contains(allMessages, "was not found in the grabbed release") {
+				shouldCleanup = true
+				break
+			}
 			// Automatic import failure cleanup (configurable)
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
 				strings.Contains(allMessages, "Automatic import is not possible") {
