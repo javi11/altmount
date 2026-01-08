@@ -627,6 +627,11 @@ export interface ArrsInstance {
 	updated_at: string;
 }
 
+export interface IgnoredMessage {
+	message: string;
+	enabled: boolean;
+}
+
 export interface ArrsConfig {
 	enabled: boolean;
 	max_workers: number;
@@ -635,6 +640,7 @@ export interface ArrsConfig {
 	sonarr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
+	queue_cleanup_allowlist?: IgnoredMessage[];
 }
 
 // Sync status and progress types

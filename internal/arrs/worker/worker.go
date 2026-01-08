@@ -183,24 +183,23 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		shouldCleanup := false
 		for _, msg := range q.StatusMessages {
 			allMessages := strings.Join(msg.Messages, " ")
-			if strings.Contains(allMessages, "No files found are eligible") {
+			
+			// Automatic import failure cleanup (configurable)
+			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
+				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
 				break
 			}
-			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
-				shouldCleanup = true
-				break
+
+			// Check configured allowlist
+			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
+				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
+					shouldCleanup = true
+					break
+				}
 			}
-			if strings.Contains(allMessages, "is not a valid video file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(allMessages, "Sample file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "No video files were found in the selected folder") {
-				shouldCleanup = true
+			
+			if shouldCleanup {
 				break
 			}
 		}
@@ -255,44 +254,29 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 			continue
 		}
 
-		// Check status messages for known issues
-		shouldCleanup := false
-		for _, msg := range q.StatusMessages {
-			allMessages := strings.Join(msg.Messages, " ")
-			if strings.Contains(allMessages, "No files found are eligible") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "No video files were found in the selected folder") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "Could not find file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "Unexpected error processing file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "Download doesn't contain intermediate path") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(allMessages, "is not a valid video file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(allMessages, "Sample file") {
-				shouldCleanup = true
-				break
-			}
-		}
-
+		        // Check status messages for known issues
+				shouldCleanup := false
+				for _, msg := range q.StatusMessages {
+					allMessages := strings.Join(msg.Messages, " ")
+					
+					// Automatic import failure cleanup (configurable)
+					if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
+						strings.Contains(allMessages, "Automatic import is not possible") {
+						shouldCleanup = true
+						break
+					}
+		
+								// Check configured allowlist
+								for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
+									if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
+										shouldCleanup = true
+										break
+									}
+								}					
+					if shouldCleanup {
+						break
+					}
+				}
 		if shouldCleanup {
 			slog.InfoContext(ctx, "Found failed import pending item",
 				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)

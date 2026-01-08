@@ -238,6 +238,12 @@ type SABnzbdCategory struct {
 	Type     string `yaml:"type" mapstructure:"type" json:"type"` // "sonarr" or "radarr"
 }
 
+// IgnoredMessage represents an error message to ignore during queue cleanup
+type IgnoredMessage struct {
+	Message string `yaml:"message" mapstructure:"message" json:"message"`
+	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+}
+
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
 	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
@@ -245,8 +251,9 @@ type ArrsConfig struct {
 	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
-	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
-	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	QueueCleanupEnabled         *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
+	QueueCleanupIntervalSeconds int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	QueueCleanupAllowlist       []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -997,6 +1004,16 @@ func DefaultConfig(configDir ...string) *Config {
 			WebhookBaseURL:  "http://altmount:8080",
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+			QueueCleanupAllowlist: []IgnoredMessage{
+				{Message: "No files found are eligible", Enabled: true},
+				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
+				{Message: "is not a valid video file", Enabled: true},
+				{Message: "Sample file", Enabled: true},
+				{Message: "No video files were found in the selected folder", Enabled: true},
+				{Message: "Could not find file", Enabled: true},
+				{Message: "Unexpected error processing file", Enabled: true},
+				{Message: "Download doesn't contain intermediate path", Enabled: true},
+			},
 		},
 		Fuse: FuseConfig{
 			Enabled:             &fuseEnabled,
