@@ -2,6 +2,7 @@ import { AlertCircle, CheckCircle2, Download, FileIcon, Link, Upload, X } from "
 import { useCallback, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
 import { useUploadNZBLnks, useUploadToQueue } from "../../hooks/useApi";
+import { useConfig } from "../../hooks/useConfig";
 import { ErrorAlert } from "../ui/ErrorAlert";
 
 interface UploadedFile {
@@ -32,6 +33,10 @@ export function DragDropUpload() {
 	const uploadMutation = useUploadToQueue();
 	const uploadLinksMutation = useUploadNZBLnks();
 	const { showToast } = useToast();
+	const { data: config } = useConfig();
+
+	// Get available categories from config
+	const categories = config?.sabnzbd?.categories ?? [];
 
 	const validateFile = useCallback((file: File): string | null => {
 		// Check file extension
@@ -407,13 +412,18 @@ export function DragDropUpload() {
 				{/* Category Input (shared) */}
 				<fieldset className="fieldset mb-4">
 					<legend className="fieldset-legend">Category (optional)</legend>
-					<input
-						type="text"
-						className="input"
-						placeholder="e.g., movies, tv, software"
+					<select
+						className="select"
 						value={category}
 						onChange={(e) => setCategory(e.target.value)}
-					/>
+					>
+						<option value="">None</option>
+						{categories.map((cat) => (
+							<option key={cat.name} value={cat.name}>
+								{cat.name}
+							</option>
+						))}
+					</select>
 					<p className="label">Category will be applied to all uploaded items</p>
 				</fieldset>
 
