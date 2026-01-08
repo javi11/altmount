@@ -565,19 +565,17 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 		// Calculate path relative to the persistent NZB folder
 		if relPath, err := filepath.Rel(nzbFolder, item.NzbPath); err == nil {
 			// If file is directly in root of .nzbs (e.g. "file.nzb"), relDir is "."
-			// If file is in subdir (e.g. "failed/file.nzb"), relDir is "failed"
 			relDir := filepath.Dir(relPath)
 			
 			if relDir == "." {
+				// Use the original basePath if the file is in the root of .nzbs
 				virtualDir = *basePath
 			} else {
-				// Combine basePath with the subdirectory structure found inside .nzbs
-				if *basePath == "" || *basePath == "/" {
-					virtualDir = relDir
-				} else {
-					virtualDir = filepath.Join(*basePath, relDir)
-				}
+				// Recalculate virtualDir relative to the nzbFolder to discard physical parent paths like /config
+				// We use the subdirectory structure found inside .nzbs if it exists
+				virtualDir = filepath.Join(*basePath, relDir)
 			}
+			
 			// Ensure proper formatting
 			if !strings.HasPrefix(virtualDir, "/") {
 				virtualDir = "/" + virtualDir

@@ -253,12 +253,14 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 	var relativePath *string
 
 	// Try to detect category from configured category directories
+	// The path must START with the category's Dir to match
 	detectedCategory, _ := w.getCategoryFromPath(relPath)
 
 	if detectedCategory != nil {
 		category = detectedCategory
 		// Use the relPath as the relative path
-		// This ensures subfolders inside the category are preserved
+		// This ensures subfolders inside the category are preserved and
+		// CalculateVirtualDirectory handles it correctly after the NZB move.
 		relativePath = &relPath
 	} else if relPath != "." && relPath != "" {
 		// No configured category matched - use the first directory component as the category
@@ -266,16 +268,18 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		if len(parts) > 0 {
 			cat := parts[0]
 			category = &cat
-			// Relative path should be relative to the category folder
-			subPath := strings.Join(parts[1:], "/")
-			relativePath = &subPath
 		}
 	}
 
-	// If relativePath is still nil or empty, use empty string (root)
-	if relativePath == nil || *relativePath == "." {
-		empty := ""
-		relativePath = &empty
+	// Use the watchRoot as the relative path (base path)
+	// This ensures CalculateVirtualDirectory handles it correctly after the NZB move.
+	// We use the absolute path to avoid issues with CWD changes or relative path calculations
+	absWatchRoot, err := filepath.Abs(watchRoot)
+	if err == nil {
+		relativePath = &absWatchRoot
+	} else {
+		// Fallback to provided watchRoot if Abs fails
+		relativePath = &watchRoot
 	}
 
 	// Add to queue
