@@ -411,7 +411,7 @@ export function ArrsConfigSection({
 															onChange={() => handleToggleIgnoreMessage(index)}
 															disabled={isReadOnly}
 														/>
-														<span className={`text-sm font-mono truncate ${!msg.enabled ? "opacity-50 line-through" : ""}`}>
+														<span className={`text-sm font-mono break-all ${!msg.enabled ? "opacity-50 line-through" : ""}`}>
 															{msg.message}
 														</span>
 													</div>
