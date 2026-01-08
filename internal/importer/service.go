@@ -558,6 +558,32 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	// Calculate initial virtual directory from physical/relative path
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
 
+	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
+	// This happens when NzbPath is inside .nzbs and CalculateVirtualDirectory sees the physical parent folder.
+	nzbFolder := s.GetNzbFolder()
+	if strings.HasPrefix(item.NzbPath, nzbFolder) {
+		// Calculate path relative to the persistent NZB folder
+		if relPath, err := filepath.Rel(nzbFolder, item.NzbPath); err == nil {
+			// If file is directly in root of .nzbs (e.g. "file.nzb"), relDir is "."
+			relDir := filepath.Dir(relPath)
+			
+			if relDir == "." {
+				// Use the original basePath if the file is in the root of .nzbs
+				virtualDir = *basePath
+			} else {
+				// Recalculate virtualDir relative to the nzbFolder to discard physical parent paths like /config
+				// We use the subdirectory structure found inside .nzbs if it exists
+				virtualDir = filepath.Join(*basePath, relDir)
+			}
+			
+			// Ensure proper formatting
+			if !strings.HasPrefix(virtualDir, "/") {
+				virtualDir = "/" + virtualDir
+			}
+			virtualDir = filepath.ToSlash(virtualDir)
+		}
+	}
+
 	// If category is specified, resolve to configured directory path
 	if item.Category != nil && *item.Category != "" {
 		categoryPath := s.buildCategoryPath(*item.Category)
