@@ -263,15 +263,12 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		// CalculateVirtualDirectory handles it correctly after the NZB move.
 		relativePath = &relPath
 	} else if relPath != "." && relPath != "" {
-		// No configured category matched - use the first directory component as the category
-		parts := strings.Split(filepath.ToSlash(relPath), "/")
-		if len(parts) > 0 {
-			cat := parts[0]
-			category = &cat
-
-			// Use the relPath as the relative path
-			relativePath = &relPath
-		}
+		// No configured category matched - don't set a category
+		// Just use the watch root as the relative path
+		relativePath = &watchRoot
+		w.log.DebugContext(ctx, "No category matched for path",
+			"file", filePath,
+			"relPath", relPath)
 	}
 
 	// Add to queue
@@ -282,11 +279,9 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 	}
 
 	// Log with category value (not pointer)
-	var categoryValue string
+	categoryValue := ""
 	if category != nil {
 		categoryValue = *category
-	} else {
-		categoryValue = "<none>"
 	}
 	w.log.InfoContext(ctx, "Added watched NZB to queue",
 		"file", filePath,
