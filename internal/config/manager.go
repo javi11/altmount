@@ -251,9 +251,10 @@ type ArrsConfig struct {
 	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
-	QueueCleanupEnabled         *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
-	QueueCleanupIntervalSeconds int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
-	QueueCleanupAllowlist       []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
+	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
+	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
+	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -851,6 +852,7 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true // Require login by default
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
+	cleanupAutomaticImportFailure := false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -1004,6 +1006,7 @@ func DefaultConfig(configDir ...string) *Config {
 			WebhookBaseURL:  "http://altmount:8080",
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
 			QueueCleanupAllowlist: []IgnoredMessage{
 				{Message: "No files found are eligible", Enabled: true},
 				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
