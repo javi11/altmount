@@ -183,7 +183,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		)
 
 		// Check for completed items with warning status that are pending import
-		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
 			continue
 		}
 
@@ -280,7 +280,7 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		)
 
 		// Check for completed items with warning status that are pending import
-		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
 			continue
 		}
 
