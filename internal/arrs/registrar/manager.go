@@ -187,8 +187,8 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					Implementation:           "SABnzbd",
 					ConfigContract:           "SABnzbdSettings",
 					Enable:                   true,
-					RemoveCompletedDownloads: true,
-					RemoveFailedDownloads:    true,
+					RemoveCompletedDownloads: false,
+					RemoveFailedDownloads:    false,
 					Priority:                 1,
 					Protocol:                 "Usenet",
 					Fields: []*starr.FieldInput{
@@ -239,8 +239,8 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 					Implementation:           "SABnzbd",
 					ConfigContract:           "SABnzbdSettings",
 					Enable:                   true,
-					RemoveCompletedDownloads: true,
-					RemoveFailedDownloads:    true,
+					RemoveCompletedDownloads: false,
+					RemoveFailedDownloads:    false,
 					Priority:                 1,
 					Protocol:                 "Usenet",
 					Fields: []*starr.FieldInput{
