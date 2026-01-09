@@ -325,6 +325,7 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 			slog.DebugContext(ctx, "Queue cleanup: item did not match any ignore rules",
 				"instance", instance.Name,
 				"title", q.Title,
+				"path", q.OutputPath,
 				"messages", strings.Join(debugMessages, "; "),
 			)
 		}
