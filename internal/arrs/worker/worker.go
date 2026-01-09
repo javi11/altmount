@@ -347,5 +347,13 @@ func (w *Worker) isPathManaged(path string, cfg *config.Config) bool {
 		}
 	}
 
+	// Check sabnzbd complete_dir
+	if cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled && cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.Clean(cfg.SABnzbd.CompleteDir)
+		if strings.HasPrefix(cleanPath, completeDir) {
+			return true
+		}
+	}
+
 	return false
 }
