@@ -468,23 +468,28 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 	default:
 	}
 
-	// Delegate to HealthChecker
-	event := hw.healthChecker.CheckFile(checkCtx, filePath)
-
-	// Check if cancelled during check
-	select {
-	case <-checkCtx.Done():
-		return checkCtx.Err()
-	default:
-	}
-
-	// Get current file state
+	// Get current file state first to determine check options
 	fh, err := hw.healthRepo.GetFileHealth(ctx, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to get file health state: %w", err)
 	}
 	if fh == nil {
 		return fmt.Errorf("file health record not found: %s", filePath)
+	}
+
+	opts := CheckOptions{}
+	if fh.Priority >= database.HealthPriorityNext {
+		opts.ForceFullCheck = true
+	}
+
+	// Delegate to HealthChecker
+	event := hw.healthChecker.CheckFile(checkCtx, filePath, opts)
+
+	// Check if cancelled during check
+	select {
+	case <-checkCtx.Done():
+		return checkCtx.Err()
+	default:
 	}
 
 	// Prepare result for update
@@ -585,17 +590,21 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
 
 			// Set checking status
-			err := hw.healthRepo.SetFileChecking(ctx, fh.FilePath)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
-				return
-			}
-
-			// Perform check
-			event := hw.healthChecker.CheckFile(ctx, fh.FilePath)
-
-			// Prepare result for batch update
-			update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
+								err := hw.healthRepo.SetFileChecking(ctx, fh.FilePath)
+								if err != nil {
+									slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
+									return
+								}
+			
+								// Perform check
+								opts := CheckOptions{}
+								if fh.Priority >= database.HealthPriorityNext {
+									opts.ForceFullCheck = true
+								}
+								event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
+			
+								// Prepare result for batch update
+								update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 
 			resultsMu.Lock()
 			results = append(results, update)
@@ -632,7 +641,11 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			slog.InfoContext(ctx, "Checking repair status for file", "file_path", fh.FilePath)
 
 			// Perform check
-			event := hw.healthChecker.CheckFile(ctx, fh.FilePath)
+			opts := CheckOptions{}
+			if fh.Priority >= database.HealthPriorityNext {
+				opts.ForceFullCheck = true
+			}
+			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
 
 			// Prepare result for batch update
 			update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
