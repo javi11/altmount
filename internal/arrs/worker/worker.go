@@ -162,7 +162,9 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		return fmt.Errorf("failed to get Radarr client: %w", err)
 	}
 
-	queue, err := client.GetQueueContext(ctx, 0, 100)
+	slog.DebugContext(ctx, "Starting Radarr queue cleanup cycle", "instance", instance.Name)
+
+	queue, err := client.GetQueueContext(ctx, 0, 500)
 	if err != nil {
 		return fmt.Errorf("failed to get Radarr queue: %w", err)
 	}
@@ -246,7 +248,9 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		return fmt.Errorf("failed to get Sonarr client: %w", err)
 	}
 
-	queue, err := client.GetQueueContext(ctx, 0, 100)
+	slog.DebugContext(ctx, "Starting Sonarr queue cleanup cycle", "instance", instance.Name)
+
+	queue, err := client.GetQueueContext(ctx, 0, 500)
 	if err != nil {
 		return fmt.Errorf("failed to get Sonarr queue: %w", err)
 	}
