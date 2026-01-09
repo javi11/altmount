@@ -173,6 +173,15 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
+		slog.DebugContext(ctx, "Queue cleanup: checking item", 
+			"instance", instance.Name, 
+			"title", q.Title, 
+			"protocol", q.Protocol,
+			"status", q.Status, 
+			"tracked_status", q.TrackedDownloadStatus, 
+			"tracked_state", q.TrackedDownloadState,
+		)
+
 		// Check for completed items with warning status that are pending import
 		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
 			continue
@@ -261,6 +270,15 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
+		slog.DebugContext(ctx, "Queue cleanup: checking item", 
+			"instance", instance.Name, 
+			"title", q.Title, 
+			"protocol", q.Protocol,
+			"status", q.Status, 
+			"tracked_status", q.TrackedDownloadStatus, 
+			"tracked_state", q.TrackedDownloadState,
+		)
+
 		// Check for completed items with warning status that are pending import
 		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
 			continue
