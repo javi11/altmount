@@ -176,14 +176,17 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 
 		// Check if path is within managed directories (import_dir or mount_path)
 		if !w.isPathManaged(q.OutputPath, cfg) {
+			slog.DebugContext(ctx, "Queue cleanup: skipping unmanaged path", "instance", instance.Name, "title", q.Title, "path", q.OutputPath)
 			continue
 		}
 
 		// Check status messages for known issues
 		shouldCleanup := false
+		var debugMessages []string
 		for _, msg := range q.StatusMessages {
 			allMessages := strings.Join(msg.Messages, " ")
-			
+			debugMessages = append(debugMessages, allMessages)
+
 			// Automatic import failure cleanup (configurable)
 			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
 				strings.Contains(allMessages, "Automatic import is not possible") {
@@ -198,7 +201,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 					break
 				}
 			}
-			
+
 			if shouldCleanup {
 				break
 			}
@@ -208,6 +211,12 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 			slog.InfoContext(ctx, "Found failed import pending item",
 				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
 			idsToRemove = append(idsToRemove, q.ID)
+		} else {
+			slog.DebugContext(ctx, "Queue cleanup: item did not match any ignore rules", 
+				"instance", instance.Name, 
+				"title", q.Title, 
+				"messages", strings.Join(debugMessages, "; "),
+			)
 		}
 	}
 
@@ -251,36 +260,47 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 
 		// Check if path is within managed directories (import_dir or mount_path)
 		if !w.isPathManaged(q.OutputPath, cfg) {
+			slog.DebugContext(ctx, "Queue cleanup: skipping unmanaged path", "instance", instance.Name, "title", q.Title, "path", q.OutputPath)
 			continue
 		}
 
-		        // Check status messages for known issues
-				shouldCleanup := false
-				for _, msg := range q.StatusMessages {
-					allMessages := strings.Join(msg.Messages, " ")
-					
-					// Automatic import failure cleanup (configurable)
-					if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-						strings.Contains(allMessages, "Automatic import is not possible") {
-						shouldCleanup = true
-						break
-					}
-		
-								// Check configured allowlist
-								for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-									if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-										shouldCleanup = true
-										break
-									}
-								}					
-					if shouldCleanup {
-						break
-					}
+		// Check status messages for known issues
+		shouldCleanup := false
+		var debugMessages []string
+		for _, msg := range q.StatusMessages {
+			allMessages := strings.Join(msg.Messages, " ")
+			debugMessages = append(debugMessages, allMessages)
+
+			// Automatic import failure cleanup (configurable)
+			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
+				strings.Contains(allMessages, "Automatic import is not possible") {
+				shouldCleanup = true
+				break
+			}
+
+			// Check configured allowlist
+			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
+				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
+					shouldCleanup = true
+					break
 				}
+			}
+
+			if shouldCleanup {
+				break
+			}
+		}
+
 		if shouldCleanup {
 			slog.InfoContext(ctx, "Found failed import pending item",
 				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
 			idsToRemove = append(idsToRemove, q.ID)
+		} else {
+			slog.DebugContext(ctx, "Queue cleanup: item did not match any ignore rules",
+				"instance", instance.Name,
+				"title", q.Title,
+				"messages", strings.Join(debugMessages, "; "),
+			)
 		}
 	}
 
