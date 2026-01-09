@@ -169,6 +169,8 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		return fmt.Errorf("failed to get Radarr queue: %w", err)
 	}
 
+	slog.DebugContext(ctx, "Fetched Radarr queue records", "instance", instance.Name, "count", len(queue.Records))
+
 	var idsToRemove []int64
 	for _, q := range queue.Records {
 		// Check for completed items with warning status that are pending import
@@ -254,6 +256,8 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 	if err != nil {
 		return fmt.Errorf("failed to get Sonarr queue: %w", err)
 	}
+
+	slog.DebugContext(ctx, "Fetched Sonarr queue records", "instance", instance.Name, "count", len(queue.Records))
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
