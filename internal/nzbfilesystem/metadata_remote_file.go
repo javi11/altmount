@@ -980,7 +980,18 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
 
 	if !rg.HasSegments() {
-		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download", "start", start, "end", end)
+		// Calculate available bytes for debugging
+		var availableBytes int64
+		for _, seg := range mvf.fileMeta.SegmentData {
+			availableBytes += seg.SegmentSize
+		}
+
+		slog.ErrorContext(ctx, "[createUsenetReader] No segments to download",
+			"start", start,
+			"end", end,
+			"available_bytes", availableBytes,
+			"expected_file_size", mvf.fileMeta.FileSize,
+		)
 
 		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
 			UnderlyingErr: ErrNoNzbData,
