@@ -315,7 +315,9 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 	}
 
 	// Delete old location
-	if err := mrf.metadataService.DeleteFileMetadata(normalizedOld); err != nil {
+	cfg := mrf.configGetter()
+	deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
+	if err := mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedOld, deleteSourceNzb); err != nil {
 		return false, fmt.Errorf("failed to delete old metadata: %w", err)
 	}
 

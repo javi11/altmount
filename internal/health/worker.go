@@ -742,7 +742,12 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 			// We need the relative path for metadata deletion
 			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
 			relativePath = strings.TrimPrefix(relativePath, "/")
-			if delMetaErr := hw.metadataService.DeleteFileMetadata(relativePath); delMetaErr != nil {
+			
+			deleteSourceNzb := false
+			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+				deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
+			}
+			if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
 				slog.ErrorContext(ctx, "Failed to delete orphaned metadata file", "error", delMetaErr)
 			}
 
