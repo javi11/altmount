@@ -274,6 +274,81 @@ func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, s
 	return nil
 }
 
+// UpdateQueueItemFallbackNzoId updates the fallback NZO ID of a queue item
+func (r *QueueRepository) UpdateQueueItemFallbackNzoId(ctx context.Context, id int64, fallbackNzoId *string) error {
+	query := `UPDATE import_queue SET fallback_nzo_id = ?, updated_at = datetime('now') WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, fallbackNzoId, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item fallback NZO ID: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateQueueItemErrorMessage updates only the error message of a queue item without changing status
+func (r *QueueRepository) UpdateQueueItemErrorMessage(ctx context.Context, id int64, errorMessage *string) error {
+	query := `UPDATE import_queue SET error_message = ?, updated_at = datetime('now') WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, errorMessage, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item error message: %w", err)
+	}
+	return nil
+}
+
+// ListFallbackItemsToMonitor returns fallback items that have NZO ID but no error message yet
+// These are items sent to external SABnzbd that haven't been checked for failure
+func (r *QueueRepository) ListFallbackItemsToMonitor(ctx context.Context, limit int) ([]ImportQueueItem, error) {
+	query := `
+		SELECT id, nzb_path, relative_path, storage_path, category, priority, status, 
+		       created_at, updated_at, started_at, completed_at, retry_count, max_retries, 
+		       error_message, batch_id, metadata, fallback_nzo_id, file_size
+		FROM import_queue 
+		WHERE status = 'fallback' 
+		  AND fallback_nzo_id IS NOT NULL 
+		  AND fallback_nzo_id != ''
+		  AND (error_message IS NULL OR error_message = '')
+		ORDER BY created_at ASC
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query fallback items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID,
+			&item.NzbPath,
+			&item.RelativePath,
+			&item.StoragePath,
+			&item.Category,
+			&item.Priority,
+			&item.Status,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+			&item.StartedAt,
+			&item.CompletedAt,
+			&item.RetryCount,
+			&item.MaxRetries,
+			&item.ErrorMessage,
+			&item.BatchID,
+			&item.Metadata,
+			&item.FallbackNzoId,
+			&item.FileSize,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan fallback item: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
 // UpdateQueueItemPriority updates the priority of a queue item
 func (r *QueueRepository) UpdateQueueItemPriority(ctx context.Context, id int64, priority QueuePriority) error {
 	query := `UPDATE import_queue SET priority = ?, updated_at = datetime('now') WHERE id = ?`

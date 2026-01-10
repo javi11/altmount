@@ -29,6 +29,25 @@ var defaultCategory = config.SABnzbdCategory{
 	Dir:      "",
 }
 
+// getDefaultCategory returns the Default category from config or a fallback
+func (s *Server) getDefaultCategory() config.SABnzbdCategory {
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		for _, cat := range cfg.SABnzbd.Categories {
+			if cat.Name == config.DefaultCategoryName {
+				return cat
+			}
+		}
+	}
+	// Fallback if not found in config
+	return config.SABnzbdCategory{
+		Name:     config.DefaultCategoryName,
+		Order:    0,
+		Priority: 0,
+		Dir:      config.DefaultCategoryDir,
+	}
+}
+
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	// Check if SABnzbd API is enabled
@@ -501,7 +520,8 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	var totalMbLeft float64
 
 	for i, item := range items {
-		if item.Status == database.QueueStatusFallback {
+		// Skip fallback items with errors (they go to history as failed)
+		if item.Status == database.QueueStatusFallback && item.ErrorMessage != nil && *item.ErrorMessage != "" {
 			continue
 		}
 
@@ -638,8 +658,22 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		totalFailed = len(failed)
 	}
 
+	// Get fallback items with errors (these should be reported as failed to ARRs)
+	fallbackStatus := database.QueueStatusFallback
+	fallbackItems, err := s.queueRepo.ListQueueItems(c.Context(), &fallbackStatus, "", categoryFilter, limit, start, "updated_at", "desc")
+	if err != nil {
+		fallbackItems = nil // Non-fatal, continue without fallback items
+	}
+	// Filter only fallback items with errors
+	var fallbackWithErrors []*database.ImportQueueItem
+	for _, item := range fallbackItems {
+		if item.ErrorMessage != nil && *item.ErrorMessage != "" {
+			fallbackWithErrors = append(fallbackWithErrors, item)
+		}
+	}
+
 	// Combine and convert to SABnzbd format
-	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
+	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed)+len(fallbackWithErrors))
 	index := 0
 	var totalBytes int64
 
@@ -663,6 +697,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		totalBytes += slot.Bytes
 		index++
 	}
+	// Include fallback items with errors (reported as Failed to ARRs)
+	for _, item := range fallbackWithErrors {
+		itemBasePath := s.calculateItemBasePath()
+		slot := ToSABnzbdHistorySlot(item, start+index, itemBasePath)
+		slots = append(slots, slot)
+		totalBytes += slot.Bytes
+		index++
+	}
 
 	// Create the proper history response structure using the new struct
 	response := SABnzbdCompleteHistoryResponse{
@@ -673,7 +715,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
 			DaySize:   "0 B",
-			Noofslots: totalCompleted + totalFailed,
+			Noofslots: totalCompleted + totalFailed + len(fallbackWithErrors),
 		},
 	}
 
@@ -882,29 +924,39 @@ func (s *Server) parseSABnzbdPriority(priority string) database.QueuePriority {
 
 // buildCategoryPath builds the directory path for a category
 func (s *Server) buildCategoryPath(category string) string {
-	// Return empty for default category (no subdirectory)
-	if category == "default" || category == "" {
-		return ""
+	// Empty category uses Default category's Dir
+	if category == "" {
+		category = config.DefaultCategoryName
 	}
 
 	if s.configManager == nil {
-		// No config manager, use category name as directory
+		// No config manager, use category name as directory (Default uses its default dir)
+		if category == config.DefaultCategoryName {
+			return config.DefaultCategoryDir
+		}
 		return category
 	}
 
-	config := s.configManager.GetConfig()
+	cfg := s.configManager.GetConfig()
 
 	// If no categories are configured, use category name as directory
-	if len(config.SABnzbd.Categories) == 0 {
+	if len(cfg.SABnzbd.Categories) == 0 {
+		if category == config.DefaultCategoryName {
+			return config.DefaultCategoryDir
+		}
 		return category
 	}
 
 	// Look for the category in configuration
-	for _, configCategory := range config.SABnzbd.Categories {
+	for _, configCategory := range cfg.SABnzbd.Categories {
 		if configCategory.Name == category {
 			// Use configured Dir if available, otherwise use category name
 			if configCategory.Dir != "" {
 				return configCategory.Dir
+			}
+			// For Default category with empty Dir, return default dir
+			if category == config.DefaultCategoryName {
+				return config.DefaultCategoryDir
 			}
 			return category
 		}
@@ -916,6 +968,7 @@ func (s *Server) buildCategoryPath(category string) string {
 
 // validateSABnzbdCategory validates and returns the category, or error if invalid
 func (s *Server) validateSABnzbdCategory(category string) (string, error) {
+	defaultCategory := s.getDefaultCategory()
 	if category == "" {
 		return defaultCategory.Name, nil
 	}

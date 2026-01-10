@@ -6,6 +6,7 @@ package postprocessor
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
@@ -23,6 +24,7 @@ type Coordinator struct {
 	healthRepo      *database.HealthRepository
 	arrsService     *arrs.Service
 	userRepo        *database.UserRepository
+	database        *database.QueueRepository
 	log             *slog.Logger
 }
 
@@ -34,6 +36,7 @@ type Config struct {
 	HealthRepo      *database.HealthRepository
 	ArrsService     *arrs.Service
 	UserRepo        *database.UserRepository
+	Database        *database.QueueRepository
 }
 
 // NewCoordinator creates a new post-processor coordinator
@@ -45,6 +48,7 @@ func NewCoordinator(cfg Config) *Coordinator {
 		healthRepo:      cfg.HealthRepo,
 		arrsService:     cfg.ArrsService,
 		userRepo:        cfg.UserRepo,
+		database:        cfg.Database,
 		log:             slog.Default().With("component", "postprocessor"),
 	}
 }
@@ -126,13 +130,35 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 }
 
 // HandleFailure performs cleanup and fallback for failed imports
-func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) error {
+func (c *Coordinator) HandleFailure(ctx context.Context, item *database.ImportQueueItem, processingErr error) (string, error) {
 	cfg := c.configGetter()
 
 	// Attempt SABnzbd fallback if configured
 	if cfg.SABnzbd.FallbackHost != "" && cfg.SABnzbd.FallbackAPIKey != "" {
-		return c.AttemptFallback(ctx, item)
+		nzoID, err := c.AttemptFallback(ctx, item)
+		return nzoID, err
 	}
 
-	return errors.ErrFallbackNotConfigured
+	return "", errors.ErrFallbackNotConfigured
+}
+
+// StartMonitoring starts periodic monitoring of fallback items
+func (c *Coordinator) StartMonitoring(ctx context.Context) {
+	go c.monitorFallbacks(ctx)
+}
+
+func (c *Coordinator) monitorFallbacks(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds for quick feedback
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := c.MonitorFallbacks(ctx); err != nil {
+				c.log.WarnContext(ctx, "Fallback monitoring failed", "error", err)
+			}
+		}
+	}
 }

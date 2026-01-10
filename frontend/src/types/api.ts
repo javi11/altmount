@@ -19,6 +19,7 @@ export const QueueStatus = {
 	PROCESSING: "processing",
 	COMPLETED: "completed",
 	FAILED: "failed",
+	FALLBACK: "fallback",
 } as const;
 
 export type QueueStatus = (typeof QueueStatus)[keyof typeof QueueStatus];
