@@ -669,8 +669,21 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// Wait for all files to complete processing
 	wg.Wait()
 
+	// Build list of protected directories (categories and complete dir)
+	cfg := hw.configGetter()
+	protected := []string{"complete"} // Always protect 'complete'
+	if cfg.SABnzbd.CompleteDir != "" {
+		protected = append(protected, filepath.Base(cfg.SABnzbd.CompleteDir))
+	}
+	for _, cat := range cfg.SABnzbd.Categories {
+		protected = append(protected, cat.Name)
+		if cat.Dir != "" {
+			protected = append(protected, cat.Dir)
+		}
+	}
+
 	// Clean up empty directories in metadata (e.g. from moved/imported files)
-	if err := hw.metadataService.CleanupEmptyDirectories(""); err != nil {
+	if err := hw.metadataService.CleanupEmptyDirectories("", protected); err != nil {
 		slog.WarnContext(ctx, "Failed to cleanup empty directories in metadata", "error", err)
 	}
 
