@@ -162,7 +162,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		return fmt.Errorf("failed to get Radarr client: %w", err)
 	}
 
-	queue, err := client.GetQueueContext(ctx, 0, 100)
+	queue, err := client.GetQueueContext(ctx, 0, 500)
 	if err != nil {
 		return fmt.Errorf("failed to get Radarr queue: %w", err)
 	}
@@ -170,11 +170,11 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 	var idsToRemove []int64
 	for _, q := range queue.Records {
 		// Check for completed items with warning status that are pending import
-		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
 			continue
 		}
 
-		// Check if path is within managed directories (import_dir or mount_path)
+		// Check if path is within managed directories (import_dir, mount_path, or complete_dir)
 		if !w.isPathManaged(q.OutputPath, cfg) {
 			continue
 		}
@@ -183,24 +183,23 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		shouldCleanup := false
 		for _, msg := range q.StatusMessages {
 			allMessages := strings.Join(msg.Messages, " ")
-			if strings.Contains(allMessages, "No files found are eligible") {
+
+			// Automatic import failure cleanup (configurable)
+			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
+				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
 				break
 			}
-			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
-				shouldCleanup = true
-				break
+
+			// Check configured allowlist
+			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
+				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
+					shouldCleanup = true
+					break
+				}
 			}
-			if strings.Contains(allMessages, "is not a valid video file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(allMessages, "Sample file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "No video files were found in the selected folder") {
-				shouldCleanup = true
+
+			if shouldCleanup {
 				break
 			}
 		}
@@ -217,7 +216,7 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 		removeFromClient := true
 		opts := &starr.QueueDeleteOpts{
 			RemoveFromClient: &removeFromClient,
-			BlockList:        true,
+			BlockList:        false,
 			SkipRedownload:   false,
 		}
 		for _, id := range idsToRemove {
@@ -238,7 +237,7 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		return fmt.Errorf("failed to get Sonarr client: %w", err)
 	}
 
-	queue, err := client.GetQueueContext(ctx, 0, 100)
+	queue, err := client.GetQueueContext(ctx, 0, 500)
 	if err != nil {
 		return fmt.Errorf("failed to get Sonarr queue: %w", err)
 	}
@@ -246,11 +245,11 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 	var idsToRemove []int64
 	for _, q := range queue.Records {
 		// Check for completed items with warning status that are pending import
-		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || q.TrackedDownloadState != "importPending" {
+		if q.Protocol != "usenet" || q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
 			continue
 		}
 
-		// Check if path is within managed directories (import_dir or mount_path)
+		// Check if path is within managed directories (import_dir, mount_path, or complete_dir)
 		if !w.isPathManaged(q.OutputPath, cfg) {
 			continue
 		}
@@ -259,36 +258,23 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		shouldCleanup := false
 		for _, msg := range q.StatusMessages {
 			allMessages := strings.Join(msg.Messages, " ")
-			if strings.Contains(allMessages, "No files found are eligible") {
+
+			// Automatic import failure cleanup (configurable)
+			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
+				strings.Contains(allMessages, "Automatic import is not possible") {
 				shouldCleanup = true
 				break
 			}
-			if strings.Contains(msg.Title, "One or more episodes expected in this release were not imported or missing") {
-				shouldCleanup = true
-				break
+
+			// Check configured allowlist
+			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
+				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
+					shouldCleanup = true
+					break
+				}
 			}
-			if strings.Contains(msg.Title, "No video files were found in the selected folder") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "Could not find file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "Unexpected error processing file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(msg.Title, "Download doesn't contain intermediate path") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(allMessages, "is not a valid video file") {
-				shouldCleanup = true
-				break
-			}
-			if strings.Contains(allMessages, "Sample file") {
-				shouldCleanup = true
+
+			if shouldCleanup {
 				break
 			}
 		}
@@ -305,7 +291,7 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		removeFromClient := true
 		opts := &starr.QueueDeleteOpts{
 			RemoveFromClient: &removeFromClient,
-			BlockList:        true,
+			BlockList:        false,
 			SkipRedownload:   false,
 		}
 		for _, id := range idsToRemove {
@@ -339,6 +325,14 @@ func (w *Worker) isPathManaged(path string, cfg *config.Config) bool {
 	if cfg.MountPath != "" {
 		mountPath := filepath.Clean(cfg.MountPath)
 		if strings.HasPrefix(cleanPath, mountPath) {
+			return true
+		}
+	}
+
+	// Check sabnzbd complete_dir
+	if cfg.SABnzbd.Enabled != nil && *cfg.SABnzbd.Enabled && cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.Clean(cfg.SABnzbd.CompleteDir)
+		if strings.HasPrefix(cleanPath, completeDir) {
 			return true
 		}
 	}
