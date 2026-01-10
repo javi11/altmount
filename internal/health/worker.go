@@ -669,6 +669,11 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 	// Wait for all files to complete processing
 	wg.Wait()
 
+	// Clean up empty directories in metadata (e.g. from moved/imported files)
+	if err := hw.metadataService.CleanupEmptyDirectories(""); err != nil {
+		slog.WarnContext(ctx, "Failed to cleanup empty directories in metadata", "error", err)
+	}
+
 	// Perform bulk database update
 	if len(results) > 0 {
 		if err := hw.healthRepo.UpdateHealthStatusBulk(ctx, results); err != nil {
