@@ -194,7 +194,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		RcloneClient:    rcloneClient,
 		HealthRepo:      healthRepo,
 		UserRepo:        userRepo,
-		Database:        database,
+		Database:        database.Repository,
 	})
 
 	service := &Service{
