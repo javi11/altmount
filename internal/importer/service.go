@@ -194,6 +194,7 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 		RcloneClient:    rcloneClient,
 		HealthRepo:      healthRepo,
 		UserRepo:        userRepo,
+		Database:        database,
 	})
 
 	service := &Service{
@@ -277,6 +278,9 @@ func (s *Service) Start(ctx context.Context) error {
 		s.log.ErrorContext(ctx, "Failed to start directory watcher", "error", err)
 		// Don't fail service start if watcher fails
 	}
+
+	// Start fallback monitoring
+	s.postProcessor.StartMonitoring(ctx)
 
 	s.running = true
 	s.log.InfoContext(ctx, fmt.Sprintf("NZB import service started successfully with %d workers", s.config.Workers))
@@ -827,15 +831,20 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 	}
 
 	// Delegate fallback handling to post-processor
-	if err := s.postProcessor.HandleFailure(ctx, item, processingErr); err == nil {
-		// Fallback succeeded - mark item as fallback instead of failed
+	nzoID, err := s.postProcessor.HandleFailure(ctx, item, processingErr)
+	if err == nil {
+		// Fallback succeeded - mark item as fallback instead of failed and store NZO ID
+		if err := s.database.Repository.UpdateQueueItemFallbackNzoId(ctx, item.ID, &nzoID); err != nil {
+			s.log.ErrorContext(ctx, "Failed to update fallback NZO ID", "queue_id", item.ID, "error", err)
+		}
 		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFallback, nil); err != nil {
 			s.log.ErrorContext(ctx, "Failed to mark item as fallback", "queue_id", item.ID, "error", err)
 		} else {
 			s.log.DebugContext(ctx, "Item marked as fallback after successful SABnzbd transfer",
 				"queue_id", item.ID,
 				"file", item.NzbPath,
-				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+				"fallback_host", s.configGetter().SABnzbd.FallbackHost,
+				"sabnzbd_nzo_id", nzoID)
 		}
 	} else if IsNonRetryable(err) && strings.Contains(err.Error(), "SABnzbd fallback not configured") {
 		s.log.DebugContext(ctx, "SABnzbd fallback skipped (not configured)",

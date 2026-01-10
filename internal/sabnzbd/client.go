@@ -28,7 +28,48 @@ func NewSABnzbdClient() *SABnzbdClient {
 	}
 }
 
-// SABnzbdAPIResponse represents a response from SABnzbd API
+// SABnzbdHistoryResponse represents a response from SABnzbd history API
+type SABnzbdHistoryResponse struct {
+	Status  bool                        `json:"status"`
+	Error   *string                     `json:"error,omitempty"`
+	History SABnzbdHistorySlotsWrapper `json:"history,omitempty"`
+}
+
+// SABnzbdHistorySlotsWrapper wraps the history slots
+type SABnzbdHistorySlotsWrapper struct {
+	Slots []SABnzbdHistorySlot `json:"slots"`
+}
+
+// SABnzbdHistorySlot represents a history item
+type SABnzbdHistorySlot struct {
+	NzoID       string  `json:"nzo_id"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	ActionLine  string  `json:"action_line"`
+	FailMessage *string `json:"fail_message,omitempty"`
+}
+
+// SABnzbdQueueResponse represents a response from SABnzbd queue API
+type SABnzbdQueueResponse struct {
+	Status bool                     `json:"status"`
+	Error  *string                  `json:"error,omitempty"`
+	Queue  SABnzbdQueueSlotsWrapper `json:"queue,omitempty"`
+}
+
+// SABnzbdQueueSlotsWrapper wraps the queue slots
+type SABnzbdQueueSlotsWrapper struct {
+	Slots []SABnzbdQueueSlot `json:"slots"`
+}
+
+// SABnzbdQueueSlot represents a queue item in SABnzbd
+type SABnzbdQueueSlot struct {
+	NzoID      string `json:"nzo_id"`
+	Name       string `json:"filename"`
+	Status     string `json:"status"`
+	Percentage string `json:"percentage"`
+}
+
+// SABnzbdAPIResponse represents a response from SABnzbd API (used by addfile)
 type SABnzbdAPIResponse struct {
 	Status bool     `json:"status"`
 	Error  *string  `json:"error,omitempty"`
@@ -168,7 +209,88 @@ func (c *SABnzbdClient) SendNZBFile(ctx context.Context, host, apiKey, nzbPath s
 	return apiResp.NzoIds[0], nil
 }
 
-// buildAddFileURL constructs the SABnzbd API URL for adding files
+// GetHistory retrieves the download history from SABnzbd
+// Returns history slots or an error
+func (c *SABnzbdClient) GetHistory(ctx context.Context, host, apiKey string) ([]SABnzbdHistorySlot, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Validate inputs
+	if host == "" {
+		return nil, fmt.Errorf("SABnzbd host cannot be empty")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("SABnzbd API key cannot be empty")
+	}
+
+	// Build the request URL
+	requestURL, err := c.buildHistoryURL(host, apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build request URL: %w", err)
+	}
+
+	// Create the HTTP request
+	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Send the request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request to SABnzbd: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// Check HTTP status
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("SABnzbd returned HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse the JSON response
+	var apiResp SABnzbdHistoryResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse SABnzbd response: %w", err)
+	}
+
+	// Check if the request was successful
+	if !apiResp.Status {
+		errorMsg := "unknown error"
+		if apiResp.Error != nil {
+			errorMsg = *apiResp.Error
+		}
+		return nil, fmt.Errorf("SABnzbd API error: %s", errorMsg)
+	}
+
+	return apiResp.History.Slots, nil
+}
+
+// buildHistoryURL constructs the SABnzbd API URL for getting history
+func (c *SABnzbdClient) buildHistoryURL(host, apiKey string) (string, error) {
+	// Parse the host URL to ensure it's valid
+	baseURL, err := url.Parse(host)
+	if err != nil {
+		return "", fmt.Errorf("invalid SABnzbd host URL: %w", err)
+	}
+
+	// Build the query parameters
+	params := url.Values{}
+	params.Add("mode", "history")
+	params.Add("apikey", apiKey)
+	params.Add("output", "json")
+	params.Add("limit", "100") // Get recent history
+
+	// Construct the full URL
+	fullURL := fmt.Sprintf("%s/api?%s", baseURL.String(), params.Encode())
+	return fullURL, nil
+}
+
 func (c *SABnzbdClient) buildAddFileURL(host, apiKey string) (string, error) {
 	// Parse the host URL to ensure it's valid
 	baseURL, err := url.Parse(host)
@@ -185,4 +307,52 @@ func (c *SABnzbdClient) buildAddFileURL(host, apiKey string) (string, error) {
 	// Construct the full URL
 	fullURL := fmt.Sprintf("%s/api?%s", baseURL.String(), params.Encode())
 	return fullURL, nil
+}
+
+// GetQueue retrieves the download queue from SABnzbd
+func (c *SABnzbdClient) GetQueue(ctx context.Context, host, apiKey string) ([]SABnzbdQueueSlot, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	if host == "" || apiKey == "" {
+		return nil, fmt.Errorf("SABnzbd host and API key required")
+	}
+
+	baseURL, err := url.Parse(host)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SABnzbd host URL: %w", err)
+	}
+
+	params := url.Values{}
+	params.Add("mode", "queue")
+	params.Add("apikey", apiKey)
+	params.Add("output", "json")
+	requestURL := fmt.Sprintf("%s/api?%s", baseURL.String(), params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("SABnzbd returned HTTP %d", resp.StatusCode)
+	}
+
+	var apiResp SABnzbdQueueResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, err
+	}
+
+	return apiResp.Queue.Slots, nil
 }

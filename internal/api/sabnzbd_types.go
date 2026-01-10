@@ -269,6 +269,7 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 	switch item.Status {
 	case database.QueueStatusPending:
 		status = "Queued"
+	case database.QueueStatusFallback: // Fallback items without error are being processed by external SABnzbd
 	case database.QueueStatusProcessing:
 		status = "Downloading"
 	case database.QueueStatusCompleted:
@@ -406,6 +407,13 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		status = "Completed"
 	case database.QueueStatusFailed:
 		status = "Failed"
+	case database.QueueStatusFallback:
+		// Fallback items with error_message are reported as Failed to ARRs
+		if item.ErrorMessage != nil && *item.ErrorMessage != "" {
+			status = "Failed"
+		} else {
+			status = "Completed" // Still processing in external SABnzbd
+		}
 	default:
 		status = "Unknown"
 	}
@@ -473,102 +481,57 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 	}
 
 	// Get file size if available
-
 	var sizeBytes int64
-
 	if item.FileSize != nil {
-
 		sizeBytes = *item.FileSize
-
 	}
 
 	downloaded := int64(0)
-
 	actionLine := ""
 
 	switch item.Status {
 	case database.QueueStatusCompleted:
-
 		downloaded = sizeBytes
-
 		actionLine = "Finished"
-
 	case database.QueueStatusFailed:
-
 		actionLine = "Failed"
-
 		if item.ErrorMessage != nil {
-
 			actionLine = fmt.Sprintf("Failed: %s", *item.ErrorMessage)
-
 		}
-
 	}
 
 	return SABnzbdHistorySlot{
-
 		Index: index,
-
 		NzoID: fmt.Sprintf("%d", item.ID),
-
 		Name: jobName,
-
 		Category: category,
-
 		PP: "3",
-
 		Script: "",
-
 		Report: "",
-
 		URL: "",
-
 		Status: status,
-
 		NzbName: nzbFilename,
-
 		Download: jobName,
-
 		Storage: finalPath,
-
 		Path: finalPath,
-
 		Postproc: "",
-
 		Downloaded: downloaded,
-
 		Completetime: completetime,
-
 		NzbAvg: "",
-
 		Script_log: "",
-
 		DuplicateKey: jobName,
-
 		Script_line: "",
-
 		Fail_message: failMessage,
-
 		Url_info: "",
-
 		Bytes: sizeBytes,
-
 		Meta: []string{},
-
 		Series: "",
-
 		Md5sum: "",
-
 		Password: "",
-
 		ActionLine: actionLine,
-
 		Size: formatHumanSize(sizeBytes),
-
 		Loaded: true,
-
 		Retry: item.RetryCount,
-
 		StateLog: []string{},
 	}
 

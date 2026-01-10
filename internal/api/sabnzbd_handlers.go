@@ -520,7 +520,8 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	var totalMbLeft float64
 
 	for i, item := range items {
-		if item.Status == database.QueueStatusFallback {
+		// Skip fallback items with errors (they go to history as failed)
+		if item.Status == database.QueueStatusFallback && item.ErrorMessage != nil && *item.ErrorMessage != "" {
 			continue
 		}
 
@@ -657,8 +658,22 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		totalFailed = len(failed)
 	}
 
+	// Get fallback items with errors (these should be reported as failed to ARRs)
+	fallbackStatus := database.QueueStatusFallback
+	fallbackItems, err := s.queueRepo.ListQueueItems(c.Context(), &fallbackStatus, "", categoryFilter, limit, start, "updated_at", "desc")
+	if err != nil {
+		fallbackItems = nil // Non-fatal, continue without fallback items
+	}
+	// Filter only fallback items with errors
+	var fallbackWithErrors []*database.ImportQueueItem
+	for _, item := range fallbackItems {
+		if item.ErrorMessage != nil && *item.ErrorMessage != "" {
+			fallbackWithErrors = append(fallbackWithErrors, item)
+		}
+	}
+
 	// Combine and convert to SABnzbd format
-	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed))
+	slots := make([]SABnzbdHistorySlot, 0, len(completed)+len(failed)+len(fallbackWithErrors))
 	index := 0
 	var totalBytes int64
 
@@ -682,6 +697,14 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		totalBytes += slot.Bytes
 		index++
 	}
+	// Include fallback items with errors (reported as Failed to ARRs)
+	for _, item := range fallbackWithErrors {
+		itemBasePath := s.calculateItemBasePath()
+		slot := ToSABnzbdHistorySlot(item, start+index, itemBasePath)
+		slots = append(slots, slot)
+		totalBytes += slot.Bytes
+		index++
+	}
 
 	// Create the proper history response structure using the new struct
 	response := SABnzbdCompleteHistoryResponse{
@@ -692,7 +715,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 			WeekSize:  "0 B",
 			Version:   "4.5.0",
 			DaySize:   "0 B",
-			Noofslots: totalCompleted + totalFailed,
+			Noofslots: totalCompleted + totalFailed + len(fallbackWithErrors),
 		},
 	}
 

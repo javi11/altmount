@@ -98,10 +98,12 @@ export function getStatusColor(status: string): string {
 		case "repair_triggered":
 			return "info";
 		case "pending":
+		case "fallback":
 			return "warning";
 		case "failed":
 		case "corrupted":
 		case "unhealthy":
+		case "fallback_failed":
 			return "error";
 		case "degraded":
 			return "warning";

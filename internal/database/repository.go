@@ -298,11 +298,22 @@ func (r *Repository) UpdateQueueItemStatus(ctx context.Context, id int64, status
 	return nil
 }
 
+// UpdateQueueItemFallbackNzoId updates the fallback NZO ID of a queue item
+func (r *Repository) UpdateQueueItemFallbackNzoId(ctx context.Context, id int64, fallbackNzoId *string) error {
+	query := `UPDATE import_queue SET fallback_nzo_id = ?, updated_at = datetime('now') WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, fallbackNzoId, id)
+	if err != nil {
+		return fmt.Errorf("failed to update queue item fallback NZO ID: %w", err)
+	}
+
+	return nil
+}
+
 // GetQueueItem retrieves a specific queue item by ID
 func (r *Repository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, fallback_nzo_id
 		FROM import_queue WHERE id = ?
 	`
 
@@ -310,7 +321,7 @@ func (r *Repository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueIt
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.FallbackNzoId,
 	)
 
 	if err != nil {
@@ -579,7 +590,7 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 	var args []interface{}
 
 	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
+	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, fallback_nzo_id
 	               FROM import_queue`
 
 	var conditions []string
@@ -642,7 +653,7 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 		err := rows.Scan(
 			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.FallbackNzoId,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan queue item: %w", err)
@@ -653,16 +664,17 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 	return items, rows.Err()
 }
 
-// ListActiveQueueItems retrieves pending and processing queue items
+// ListActiveQueueItems retrieves pending, processing, and fallback queue items (active items)
 func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, category string, limit, offset int, sortBy, sortOrder string) ([]*ImportQueueItem, error) {
 	var query string
 	var args []interface{}
 
 	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
+	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path, fallback_nzo_id
 	               FROM import_queue`
 
-	conditions := []string{"status IN ('pending', 'processing')"}
+	// Include fallback items without errors (still being processed by external SABnzbd)
+	conditions := []string{"(status IN ('pending', 'processing') OR (status = 'fallback' AND (error_message IS NULL OR error_message = '')))"}
 	var conditionArgs []interface{}
 
 	if search != "" {
@@ -713,7 +725,7 @@ func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, ca
 		err := rows.Scan(
 			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
-			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath, &item.FallbackNzoId,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan queue item: %w", err)
@@ -767,12 +779,13 @@ func (r *Repository) CountQueueItems(ctx context.Context, status *QueueStatus, s
 	return count, nil
 }
 
-// CountActiveQueueItems counts the total number of pending and processing queue items
+// CountActiveQueueItems counts the total number of pending, processing, and active fallback queue items
 func (r *Repository) CountActiveQueueItems(ctx context.Context, search string, category string) (int, error) {
 	var query string
 	var args []interface{}
 
-	baseQuery := `SELECT COUNT(*) FROM import_queue WHERE status IN ('pending', 'processing')`
+	// Include fallback items without errors (still being processed by external SABnzbd)
+	baseQuery := `SELECT COUNT(*) FROM import_queue WHERE (status IN ('pending', 'processing') OR (status = 'fallback' AND (error_message IS NULL OR error_message = '')))`
 
 	var conditions []string
 	var conditionArgs []interface{}

@@ -27,23 +27,24 @@ const (
 
 // ImportQueueItem represents a queued NZB file waiting for import
 type ImportQueueItem struct {
-	ID           int64         `db:"id"`
-	NzbPath      string        `db:"nzb_path"`
-	RelativePath *string       `db:"relative_path"`
-	StoragePath  *string       `db:"storage_path"`
-	Category     *string       `db:"category"` // SABnzbd-compatible category
-	Priority     QueuePriority `db:"priority"`
-	Status       QueueStatus   `db:"status"`
-	CreatedAt    time.Time     `db:"created_at"`
-	UpdatedAt    time.Time     `db:"updated_at"`
-	StartedAt    *time.Time    `db:"started_at"`
-	CompletedAt  *time.Time    `db:"completed_at"`
-	RetryCount   int           `db:"retry_count"`
-	MaxRetries   int           `db:"max_retries"`
-	ErrorMessage *string       `db:"error_message"`
-	BatchID      *string       `db:"batch_id"`
-	Metadata     *string       `db:"metadata"`  // JSON metadata
-	FileSize     *int64        `db:"file_size"` // Total size in bytes calculated from segments
+	ID             int64         `db:"id"`
+	NzbPath        string        `db:"nzb_path"`
+	RelativePath   *string       `db:"relative_path"`
+	StoragePath    *string       `db:"storage_path"`
+	Category       *string       `db:"category"`         // SABnzbd-compatible category
+	Priority       QueuePriority `db:"priority"`
+	Status         QueueStatus   `db:"status"`
+	CreatedAt      time.Time     `db:"created_at"`
+	UpdatedAt      time.Time     `db:"updated_at"`
+	StartedAt      *time.Time    `db:"started_at"`
+	CompletedAt    *time.Time    `db:"completed_at"`
+	RetryCount     int           `db:"retry_count"`
+	MaxRetries     int           `db:"max_retries"`
+	ErrorMessage   *string       `db:"error_message"`
+	BatchID        *string       `db:"batch_id"`
+	Metadata       *string       `db:"metadata"`         // JSON metadata
+	FallbackNzoId  *string       `db:"fallback_nzo_id"`  // NZO ID from external SABnzbd fallback
+	FileSize       *int64        `db:"file_size"`        // Total size in bytes calculated from segments
 }
 
 // BulkOperationResult represents the result of a bulk queue operation
@@ -88,7 +89,7 @@ const (
 type FileHealth struct {
 	ID               int64          `db:"id"`
 	FilePath         string         `db:"file_path"`
-	LibraryPath      *string        `db:"library_path"`      // Path to file in library directory (symlink or .strm file)
+	LibraryPath      *string        `db:"library_path"`       // Path to file in library directory (symlink or .strm file)
 	Status           HealthStatus   `db:"status"`
 	LastChecked      time.Time      `db:"last_checked"`
 	LastError        *string        `db:"last_error"`
@@ -97,7 +98,7 @@ type FileHealth struct {
 	RepairRetryCount int            `db:"repair_retry_count"` // Repair retry count
 	MaxRepairRetries int            `db:"max_repair_retries"` // Max repair retries
 	SourceNzbPath    *string        `db:"source_nzb_path"`
-	ErrorDetails     *string        `db:"error_details"` // JSON error details
+	ErrorDetails     *string        `db:"error_details"`      // JSON error details
 	CreatedAt        time.Time      `db:"created_at"`
 	UpdatedAt        time.Time      `db:"updated_at"`
 	// Health check scheduling fields
