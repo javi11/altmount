@@ -364,7 +364,7 @@ func (ms *MetadataService) CreateDirectoryAll(name string) error {
 
 // CleanupEmptyDirectories recursively removes empty directories under the given virtual path.
 // Uses a bottom-up approach to ensure parent directories are also removed if they become empty.
-func (ms *MetadataService) CleanupEmptyDirectories(virtualPath string) error {
+func (ms *MetadataService) CleanupEmptyDirectories(virtualPath string, protected []string) error {
 	fullPath := filepath.Join(ms.rootPath, virtualPath)
 
 	// Check if path exists
@@ -372,10 +372,10 @@ func (ms *MetadataService) CleanupEmptyDirectories(virtualPath string) error {
 		return nil
 	}
 
-	return ms.cleanupEmptyDirsRecursive(fullPath)
+	return ms.cleanupEmptyDirsRecursive(fullPath, protected)
 }
 
-func (ms *MetadataService) cleanupEmptyDirsRecursive(path string) error {
+func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []string) error {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return err
@@ -385,7 +385,7 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string) error {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			subPath := filepath.Join(path, entry.Name())
-			if err := ms.cleanupEmptyDirsRecursive(subPath); err != nil {
+			if err := ms.cleanupEmptyDirsRecursive(subPath, protected); err != nil {
 				slog.Debug("Failed to cleanup sub-directory", "path", subPath, "error", err)
 				isEmpty = false // Keep parent if sub-cleanup failed
 				continue
@@ -403,6 +403,14 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string) error {
 
 	// Don't delete the root of the cleanup
 	if isEmpty && path != ms.rootPath && !ms.isCompleteDir(path) {
+		// Check protected list
+		base := filepath.Base(path)
+		for _, p := range protected {
+			if strings.EqualFold(base, p) {
+				return nil
+			}
+		}
+
 		slog.Debug("Removing empty metadata directory", "path", path)
 		return os.Remove(path)
 	}
