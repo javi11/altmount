@@ -452,8 +452,8 @@ func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*Que
 
 // ResetStaleItems resets processing items back to pending on service startup
 func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
-	// Only reset items that have been stuck in processing for more than 10 minutes
-	// This prevents resetting items that are actively being processed during quick restarts
+	// Reset all items that are in 'processing' status
+	// Since the service is just starting up, any item marked as processing is from a previous interrupted run
 	query := `
 		UPDATE import_queue
 		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
@@ -473,7 +473,6 @@ func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 		// Log the reset operation for operational visibility with structured logging
 		slog.InfoContext(ctx, "Reset stale queue items",
 			"count", rowsAffected,
-			"threshold_minutes", 10,
 			"component", "queue-repository")
 	}
 
