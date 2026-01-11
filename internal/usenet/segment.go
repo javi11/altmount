@@ -39,6 +39,12 @@ func (r *segmentRange) GetCurrentIndex() int {
 	return r.current
 }
 
+func (r *segmentRange) Len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.segments)
+}
+
 func (r *segmentRange) Get() (*segment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -48,6 +54,17 @@ func (r *segmentRange) Get() (*segment, error) {
 	}
 
 	return r.segments[r.current], nil
+}
+
+func (r *segmentRange) GetSegment(index int) (*segment, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if index < 0 || index >= len(r.segments) {
+		return nil, ErrSegmentLimit
+	}
+
+	return r.segments[index], nil
 }
 
 func (r *segmentRange) Next() (*segment, error) {
@@ -88,9 +105,13 @@ func (r *segmentRange) CloseSegments() {
 }
 
 func (r *segmentRange) Clear() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, s := range r.segments {
-		if err := s.Close(); err != nil {
-			return err
+		if s != nil {
+			if err := s.Close(); err != nil {
+				return err
+			}
 		}
 	}
 

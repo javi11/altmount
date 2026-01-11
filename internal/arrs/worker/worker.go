@@ -27,6 +27,11 @@ type Worker struct {
 	workerWg      sync.WaitGroup
 	workerMu      sync.Mutex
 	workerRunning bool
+
+	// firstSeen tracks when a failed import item was first seen
+	// key: instanceName|queueID
+	firstSeen   map[string]time.Time
+	firstSeenMu sync.RWMutex
 }
 
 func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, clients *clients.Manager) *Worker {
@@ -34,6 +39,7 @@ func NewWorker(configGetter config.ConfigGetter, instances *instances.Manager, c
 		configGetter: configGetter,
 		instances:    instances,
 		clients:      clients,
+		firstSeen:    make(map[string]time.Time),
 	}
 }
 
@@ -169,48 +175,42 @@ func (w *Worker) cleanupRadarrQueue(ctx context.Context, instance *model.ConfigI
 
 	var idsToRemove []int64
 	for _, q := range queue.Records {
-		// Check for completed items with warning status that are pending import
-		if q.Status != "completed" || q.TrackedDownloadStatus != "warning" || (q.TrackedDownloadState != "importPending" && q.TrackedDownloadState != "importBlocked") {
-			continue
-		}
-
-		// Check if path is within managed directories (import_dir, mount_path, or complete_dir)
-		if !w.isPathManaged(q.OutputPath, cfg) {
-			continue
-		}
-
-		// Check status messages for known issues
-		shouldCleanup := false
-		for _, msg := range q.StatusMessages {
-			allMessages := strings.Join(msg.Messages, " ")
-
-			// Automatic import failure cleanup (configurable)
-			if cfg.Arrs.CleanupAutomaticImportFailure != nil && *cfg.Arrs.CleanupAutomaticImportFailure &&
-				strings.Contains(allMessages, "Automatic import is not possible") {
-				shouldCleanup = true
-				break
-			}
-
-			// Check configured allowlist
-			for _, allowedMsg := range cfg.Arrs.QueueCleanupAllowlist {
-				if allowedMsg.Enabled && (strings.Contains(allMessages, allowedMsg.Message) || strings.Contains(msg.Title, allowedMsg.Message)) {
-					shouldCleanup = true
-					break
+		        if shouldCleanup {
+					key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
+					w.firstSeenMu.Lock()
+					seenTime, exists := w.firstSeen[key]
+					if !exists {
+						w.firstSeen[key] = time.Now()
+						w.firstSeenMu.Unlock()
+						slog.DebugContext(ctx, "First saw failed import pending item, starting grace period",
+							"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+						continue
+					}
+					w.firstSeenMu.Unlock()
+		
+					gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
+					if time.Since(seenTime) < gracePeriod {
+						slog.DebugContext(ctx, "Item still in grace period",
+							"path", q.OutputPath, "title", q.Title, "instance", instance.Name,
+							"remaining", gracePeriod-time.Since(seenTime))
+						continue
+					}
+		
+					slog.InfoContext(ctx, "Found failed import pending item after grace period",
+						"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+					idsToRemove = append(idsToRemove, q.ID)
+					
+					w.firstSeenMu.Lock()
+					delete(w.firstSeen, key)
+					w.firstSeenMu.Unlock()
+				} else {
+					// If it's no longer matching failure criteria, remove from tracking
+					key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
+					w.firstSeenMu.Lock()
+					delete(w.firstSeen, key)
+					w.firstSeenMu.Unlock()
 				}
 			}
-
-			if shouldCleanup {
-				break
-			}
-		}
-
-		if shouldCleanup {
-			slog.InfoContext(ctx, "Found failed import pending item",
-				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
-			idsToRemove = append(idsToRemove, q.ID)
-		}
-	}
-
 	// Remove from ARR queue with removeFromClient and blocklist flags
 	if len(idsToRemove) > 0 {
 		removeFromClient := true
@@ -280,9 +280,39 @@ func (w *Worker) cleanupSonarrQueue(ctx context.Context, instance *model.ConfigI
 		}
 
 		if shouldCleanup {
-			slog.InfoContext(ctx, "Found failed import pending item",
+			key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
+			w.firstSeenMu.Lock()
+			seenTime, exists := w.firstSeen[key]
+			if !exists {
+				w.firstSeen[key] = time.Now()
+				w.firstSeenMu.Unlock()
+				slog.DebugContext(ctx, "First saw failed import pending item, starting grace period",
+					"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
+				continue
+			}
+			w.firstSeenMu.Unlock()
+
+			gracePeriod := time.Duration(cfg.Arrs.QueueCleanupGracePeriodMinutes) * time.Minute
+			if time.Since(seenTime) < gracePeriod {
+				slog.DebugContext(ctx, "Item still in grace period",
+					"path", q.OutputPath, "title", q.Title, "instance", instance.Name,
+					"remaining", gracePeriod-time.Since(seenTime))
+				continue
+			}
+
+			slog.InfoContext(ctx, "Found failed import pending item after grace period",
 				"path", q.OutputPath, "title", q.Title, "instance", instance.Name)
 			idsToRemove = append(idsToRemove, q.ID)
+
+			w.firstSeenMu.Lock()
+			delete(w.firstSeen, key)
+			w.firstSeenMu.Unlock()
+		} else {
+			// If it's no longer matching failure criteria, remove from tracking
+			key := fmt.Sprintf("%s|%d", instance.Name, q.ID)
+			w.firstSeenMu.Lock()
+			delete(w.firstSeen, key)
+			w.firstSeenMu.Unlock()
 		}
 	}
 
