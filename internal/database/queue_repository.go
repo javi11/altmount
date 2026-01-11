@@ -156,7 +156,7 @@ func (r *QueueRepository) AddStoragePath(ctx context.Context, itemID int64, stor
 
 // IsFileInQueue checks if a file is already in the queue (pending or processing)
 func (r *QueueRepository) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
-	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing') LIMIT 1`
+	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing', 'paused') LIMIT 1`
 
 	var exists int
 	err := r.db.QueryRowContext(ctx, query, filePath).Scan(&exists)
