@@ -140,19 +140,23 @@ func (b *UsenetReader) Close() error {
 		select {
 		case <-done:
 			// Cleanup completed successfully
+			b.mu.Lock()
 			if b.rg != nil {
 				_ = b.rg.Clear()
 				b.rg = nil
 			}
+			b.mu.Unlock()
 		case <-time.After(30 * time.Second):
 			// Timeout waiting for downloads to complete
 			// This prevents hanging but logs the issue
 			b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
 			// Still attempt to clear resources
+			b.mu.Lock()
 			if b.rg != nil {
 				_ = b.rg.Clear()
 				b.rg = nil
 			}
+			b.mu.Unlock()
 		}
 	})
 
@@ -174,6 +178,10 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		default:
 		}
 	})
+
+	if b.rg == nil {
+		return 0, io.ErrClosedPipe
+	}
 
 	s, err := b.rg.Get()
 	if err != nil {
@@ -262,6 +270,10 @@ func (b *UsenetReader) isArticleNotFoundError(err error) bool {
 func (b *UsenetReader) GetBufferedOffset() int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if b.rg == nil {
+		return 0
+	}
 
 	if b.nextToDownload == 0 || len(b.rg.segments) == 0 {
 		return 0
