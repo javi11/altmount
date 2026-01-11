@@ -1263,10 +1263,16 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 		)
 		VALUES %s
 		ON CONFLICT(file_path) DO UPDATE SET
-			library_path = excluded.library_path,
-			release_date = excluded.release_date,
-			scheduled_check_at = excluded.scheduled_check_at,
-			status = excluded.status,
+			library_path = COALESCE(excluded.library_path, library_path),
+			release_date = COALESCE(excluded.release_date, release_date),
+			scheduled_check_at = CASE 
+				WHEN status IN ('healthy', 'pending') AND last_error IS NULL THEN excluded.scheduled_check_at 
+				ELSE scheduled_check_at 
+			END,
+			status = CASE 
+				WHEN status = 'healthy' OR last_error IS NULL THEN excluded.status 
+				ELSE status 
+			END,
 			updated_at = datetime('now')
 	`, strings.Join(valueStrings, ","))
 
