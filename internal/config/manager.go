@@ -77,6 +77,8 @@ type DatabaseConfig struct {
 type MetadataConfig struct {
 	RootPath                 string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
 	DeleteSourceNzbOnRemoval *bool  `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
+	DeleteFailedNzb          *bool  `yaml:"delete_failed_nzb" mapstructure:"delete_failed_nzb" json:"delete_failed_nzb,omitempty"`
+	DeleteCompletedNzb       *bool  `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 }
 
 // StreamingConfig represents streaming and chunking configuration
@@ -238,6 +240,12 @@ type SABnzbdCategory struct {
 	Type     string `yaml:"type" mapstructure:"type" json:"type"` // "sonarr" or "radarr"
 }
 
+// IgnoredMessage represents an error message to ignore during queue cleanup
+type IgnoredMessage struct {
+	Message string `yaml:"message" mapstructure:"message" json:"message"`
+	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+}
+
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
 	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
@@ -245,8 +253,10 @@ type ArrsConfig struct {
 	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
-	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
-	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
+	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
+	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -844,6 +854,7 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true // Require login by default
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
+	cleanupAutomaticImportFailure := false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -997,6 +1008,17 @@ func DefaultConfig(configDir ...string) *Config {
 			WebhookBaseURL:  "http://altmount:8080",
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
+			QueueCleanupAllowlist: []IgnoredMessage{
+				{Message: "No files found are eligible", Enabled: true},
+				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
+				{Message: "is not a valid video file", Enabled: true},
+				{Message: "Sample file", Enabled: true},
+				{Message: "No video files were found in the selected folder", Enabled: true},
+				{Message: "Could not find file", Enabled: true},
+				{Message: "Unexpected error processing file", Enabled: true},
+				{Message: "Download doesn't contain intermediate path", Enabled: true},
+			},
 		},
 		Fuse: FuseConfig{
 			Enabled:             &fuseEnabled,

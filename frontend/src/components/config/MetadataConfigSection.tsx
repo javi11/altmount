@@ -81,6 +81,40 @@ export function MetadataConfigSection({
 						When enabled, the original NZB file will be permanently deleted when its metadata is
 						removed
 					</p>
+
+					<label className="label cursor-pointer mt-4">
+						<span className="label-text">Delete failed NZB files</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.delete_failed_nzb ?? true}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleCheckboxChange("delete_failed_nzb", e.target.checked)
+							}
+						/>
+					</label>
+					<p className="label">
+						When enabled, failed NZB files will be permanently deleted. When disabled, they will
+						be moved to a 'failed' directory.
+					</p>
+
+					<label className="label cursor-pointer mt-4">
+						<span className="label-text">Delete completed NZB files</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.delete_completed_nzb ?? false}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleCheckboxChange("delete_completed_nzb", e.target.checked)
+							}
+						/>
+					</label>
+					<p className="label">
+						When enabled, the original NZB file will be permanently deleted after successful import.
+						Warning: This removes the ability to re-generate metadata without re-uploading the NZB.
+					</p>
 				</fieldset>
 
 				<fieldset className="fieldset">

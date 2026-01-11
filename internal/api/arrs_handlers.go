@@ -92,14 +92,15 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 	slog.InfoContext(c.Context(), "Received ARR webhook", "event_type", req.EventType)
 
-	// Determine file path to scan based on event type
+	// Determine file path to scan/delete based on event type
 	var pathsToScan []string
+	var pathsToDelete []string
 
 	switch req.EventType {
 	case "Test":
 		slog.InfoContext(c.Context(), "Received ARR test webhook")
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Test successful"})
-	case "Download": // OnImport (renamed from Download in v3/v4 but webhooks might use either)
+	case "Download": // OnImport
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
 		} else if req.FilePath != "" {
@@ -125,11 +126,11 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		} else if req.FilePath != "" {
 			pathsToScan = append(pathsToScan, req.FilePath)
 		}
-		
-		// If we have deleted files information (sometimes sent in payload), scan those too to remove them
+
+		// If we have deleted files information, mark for deletion
 		for _, deleted := range req.DeletedFiles {
 			if deleted.Path != "" {
-				pathsToScan = append(pathsToScan, deleted.Path)
+				pathsToDelete = append(pathsToDelete, deleted.Path)
 			}
 		}
 	case "MovieDelete", "SeriesDelete":
@@ -140,16 +141,11 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		}
 	case "EpisodeFileDelete":
 		if req.EpisodeFile.Path != "" {
-			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+			pathsToDelete = append(pathsToDelete, req.EpisodeFile.Path)
 		}
 	default:
 		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
-	}
-
-	if len(pathsToScan) == 0 {
-		slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
-		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
 	}
 
 	// Trigger scan for each path
@@ -165,8 +161,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		libraryDir = *cfg.Health.LibraryDir
 	}
 
-	for _, path := range pathsToScan {
-		// Normalize path to relative
+	// Helper for path normalization
+	normalize := func(path string) string {
 		normalizedPath := path
 		if mountPath != "" && strings.HasPrefix(normalizedPath, mountPath) {
 			normalizedPath = strings.TrimPrefix(normalizedPath, mountPath)
@@ -190,6 +186,48 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				}
 			}
 		}
+		return normalizedPath
+	}
+
+	// Process Deletions
+	for _, path := range pathsToDelete {
+		normalizedPath := normalize(path)
+		slog.InfoContext(c.Context(), "Processing webhook file deletion",
+			"original_path", path,
+			"normalized_path", normalizedPath)
+
+		// Delete health record
+		if s.healthRepo != nil {
+			if err := s.healthRepo.DeleteHealthRecord(c.Context(), normalizedPath); err != nil {
+				slog.ErrorContext(c.Context(), "Failed to delete health record from webhook", "path", normalizedPath, "error", err)
+			}
+		}
+
+		// Delete metadata
+		if s.metadataService != nil {
+			// Check if we should delete source NZB
+			deleteSource := false
+			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+				deleteSource = *cfg.Metadata.DeleteSourceNzbOnRemoval
+			}
+			if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), normalizedPath, deleteSource); err != nil {
+				// Log as debug because it might already be gone
+				slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", normalizedPath, "error", err)
+			}
+		}
+	}
+
+	if len(pathsToScan) == 0 {
+		if len(pathsToDelete) > 0 {
+			return c.Status(200).JSON(fiber.Map{"success": true, "message": "Deletions processed"})
+		}
+		slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
+	}
+
+	for _, path := range pathsToScan {
+		// Normalize path to relative
+		normalizedPath := normalize(path)
 
 		slog.InfoContext(c.Context(), "Processing webhook file update", 
 			"original_path", path, 

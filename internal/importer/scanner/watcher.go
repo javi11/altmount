@@ -129,6 +129,87 @@ func (w *Watcher) scanDirectory(ctx context.Context, watchDir string) {
 	}
 }
 
+// getCategoryFromPath detects the category from the file's relative path by matching against
+// configured category directories. The path must START with the category's Dir to match.
+// For example, if a category has Dir="filmes/download/mov", then:
+// - "filmes/download/mov/torrent/movie.nzb" -> matches
+// - "other/filmes/download/mov/movie.nzb" -> does NOT match (doesn't start with the dir)
+// Returns the category name and the matched category dir path, or nil if no category matches.
+func (w *Watcher) getCategoryFromPath(relPath string) (*string, string) {
+	cfg := w.configGetter()
+	if cfg == nil || len(cfg.SABnzbd.Categories) == 0 {
+		return nil, ""
+	}
+
+	// Normalize the relative path (use forward slashes, trim leading/trailing slashes)
+	normalizedRelPath := strings.Trim(filepath.ToSlash(relPath), "/")
+	if normalizedRelPath == "" || normalizedRelPath == "." {
+		return nil, ""
+	}
+
+	// Build complete directory prefix from SABnzbd CompleteDir
+	completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
+
+	var bestMatch *config.SABnzbdCategory
+	var bestMatchLen int
+	var bestMatchDir string
+
+	for i := range cfg.SABnzbd.Categories {
+		cat := &cfg.SABnzbd.Categories[i]
+
+		// Get the category directory path (use Dir if set, otherwise use Name)
+		catDir := cat.Dir
+		if catDir == "" {
+			catDir = cat.Name
+		}
+		catDir = strings.Trim(filepath.ToSlash(catDir), "/")
+		if catDir == "" {
+			continue
+		}
+
+		// Check if the relative path starts with the category directory
+		// We need to check for exact prefix match at directory boundaries
+		if strings.HasPrefix(normalizedRelPath, catDir) {
+			// Verify it's a proper prefix (either exact match or followed by "/")
+			remainder := normalizedRelPath[len(catDir):]
+			if remainder == "" || strings.HasPrefix(remainder, "/") {
+				// Prefer longer matches (more specific categories)
+				if len(catDir) > bestMatchLen {
+					bestMatch = cat
+					bestMatchLen = len(catDir)
+					bestMatchDir = catDir
+				}
+			}
+		}
+
+		// Also check with CompleteDir prefix if configured
+		if completeDir != "" {
+			catDirWithComplete := completeDir + "/" + catDir
+			if strings.HasPrefix(normalizedRelPath, catDirWithComplete) {
+				remainder := normalizedRelPath[len(catDirWithComplete):]
+				if remainder == "" || strings.HasPrefix(remainder, "/") {
+					if len(catDirWithComplete) > bestMatchLen {
+						bestMatch = cat
+						bestMatchLen = len(catDirWithComplete)
+						bestMatchDir = catDirWithComplete
+					}
+				}
+			}
+		}
+	}
+
+	if bestMatch != nil {
+		catName := bestMatch.Name
+		w.log.Debug("Detected category from path",
+			"relPath", relPath,
+			"category", catName,
+			"matchedDir", bestMatchDir)
+		return &catName, bestMatchDir
+	}
+
+	return nil, ""
+}
+
 func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) error {
 	w.log.DebugContext(ctx, "Found new NZB file", "file", filePath)
 
@@ -162,7 +243,7 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		return nil
 	}
 
-	// Determine category from subdirectory
+	// Calculate relative path from watch root to file's directory
 	relPath, err := filepath.Rel(watchRoot, filepath.Dir(filePath))
 	if err != nil {
 		return fmt.Errorf("failed to calculate relative path: %w", err)
@@ -171,17 +252,38 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 	var category *string
 	var relativePath *string
 
-	if relPath != "." && relPath != "" {
-		// Use the first directory component as the category
-		parts := strings.Split(filepath.ToSlash(relPath), "/")
-		if len(parts) > 0 {
-			cat := parts[0]
-			category = &cat
+	// Try to detect category from configured category directories
+	// The path must START with the category's Dir to match
+	detectedCategory, _ := w.getCategoryFromPath(relPath)
 
-			// Use the relPath as the relative path
-			// This ensures subfolders inside the category are preserved and
-			// CalculateVirtualDirectory handles it correctly after the NZB move.
-			relativePath = &relPath
+	if detectedCategory != nil {
+		category = detectedCategory
+		// Use the relPath as the relative path
+		// This ensures subfolders inside the category are preserved and
+		// CalculateVirtualDirectory handles it correctly after the NZB move.
+		relativePath = &relPath
+	} else if relPath != "." && relPath != "" {
+		// No configured category matched - don't set a category
+		// Just use the watch root as the relative path
+		// We use the absolute path to avoid issues with CWD changes or relative path calculations
+		absWatchRoot, err := filepath.Abs(watchRoot)
+		if err == nil {
+			relativePath = &absWatchRoot
+		} else {
+			relativePath = &watchRoot
+		}
+		
+		w.log.DebugContext(ctx, "No category matched for path",
+			"file", filePath,
+			"relPath", relPath)
+	} else {
+		// relPath is "." (root of watch dir)
+		// Use absolute watchRoot as base path
+		absWatchRoot, err := filepath.Abs(watchRoot)
+		if err == nil {
+			relativePath = &absWatchRoot
+		} else {
+			relativePath = &watchRoot
 		}
 	}
 
@@ -192,64 +294,15 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		return fmt.Errorf("failed to add to queue: %w", err)
 	}
 
+	// Log with category value (not pointer)
+	categoryValue := ""
+	if category != nil {
+		categoryValue = *category
+	}
 	w.log.InfoContext(ctx, "Added watched NZB to queue",
 		"file", filePath,
-		"category", category,
+		"category", categoryValue,
 		"queue_id", item.ID)
 
-	// Note: We don't delete the file here because AddToQueue (Service.processNzbItem) 
-	// handles moving/renaming the NZB to persistent storage.
-	// If AddToQueue fails, we leave it. If it succeeds, the file at filePath might effectively be "consumed".
-	
-	// Wait, Service.AddToQueue just adds to DB.
-	// The Service *Workers* process the item.
-	// When a worker processes it (processNzbItem), it calls `ensurePersistentNzb` which moves/renames it.
-	// So we DO NOT need to delete it here if the worker picks it up?
-	
-	// BUT `AddToQueue` returns immediately. The file stays there until a worker picks it up.
-	// If we leave it, the next scan loop will find it again and add duplicate queue item!
-	
-	// WE MUST MOVE OR DELETE IT.
-	// `Service.processNzbItem` expects `item.NzbPath` to point to a valid file.
-	// If we delete it here, the worker won't find it.
-	
-	// Solution:
-	// 1. Move file to a temporary staging area or the persistent area immediately?
-	// 2. Or check `IsFileInQueue`?
-	// 3. Or rename to `.nzb.processed`?
-	
-	// Standard "Watch" behavior: The application *takes ownership* of the file.
-	// It usually moves it to a "tmp" or "queue" folder.
-	
-	// Since `Service` has logic to "ensurePersistentNzb" (move to .nzbs), we should rely on that.
-	// BUT we need to prevent double-adding.
-	
-	// We can rename it to `.queued` extension?
-	// Or we can rely on `QueueRepository.IsFileInQueue` check?
-	// `IsFileInQueue` checks if `nzb_path` exists in DB.
-	
-	// If we add `/watch/movie.nzb` to DB.
-	// Next loop finds `/watch/movie.nzb`.
-	// Checks DB. It's there. Skips.
-	
-	// Eventually, Worker picks it up.
-	// Worker calls `ensurePersistentNzb`.
-	// `ensurePersistentNzb` moves `/watch/movie.nzb` to `/config/.nzbs/123_movie.nzb`.
-	// And updates DB `nzb_path`.
-	
-	// Once moved, the file is gone from `/watch`.
-	// So next loop won't find it.
-	
-	// This seems correct and safe!
-	// Provided `AddToQueue` fails if it's already in queue.
-	// `Service.AddToQueue` calls `repository.AddToQueue`.
-	// `repository.AddToQueue` uses `ON CONFLICT(nzb_path) DO UPDATE`.
-	// It upserts.
-	
-	// If we rely on Upsert, we might reset priority/status if we re-add?
-	// We should check existence first.
-	
-	// I need `IsFileInQueue` capability in `WatchQueueAdder`.
-	
 	return nil
 }
