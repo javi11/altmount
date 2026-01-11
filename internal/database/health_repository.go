@@ -1264,8 +1264,20 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 		VALUES %s
 		ON CONFLICT(file_path) DO UPDATE SET
 			library_path = COALESCE(excluded.library_path, library_path),
-			release_date = COALESCE(release_date, excluded.release_date),
-			source_nzb_path = COALESCE(source_nzb_path, excluded.source_nzb_path),
+			status = CASE 
+				WHEN source_nzb_path != excluded.source_nzb_path OR release_date != excluded.release_date THEN excluded.status 
+				ELSE status 
+			END,
+			scheduled_check_at = CASE 
+				WHEN source_nzb_path != excluded.source_nzb_path OR release_date != excluded.release_date THEN excluded.scheduled_check_at 
+				ELSE scheduled_check_at 
+			END,
+			retry_count = CASE 
+				WHEN source_nzb_path != excluded.source_nzb_path OR release_date != excluded.release_date THEN 0 
+				ELSE retry_count 
+			END,
+			source_nzb_path = excluded.source_nzb_path,
+			release_date = excluded.release_date,
 			updated_at = datetime('now')
 	`, strings.Join(valueStrings, ","))
 
