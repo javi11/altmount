@@ -93,9 +93,15 @@ func (nfs *NzbFilesystem) Remove(ctx context.Context, name string) error {
 	return nil
 }
 
-// RemoveAll removes a file and any children (not supported)
+// RemoveAll removes a file and any children
 func (nfs *NzbFilesystem) RemoveAll(ctx context.Context, name string) error {
-	return nfs.Remove(ctx, name)
+	err := nfs.Remove(ctx, name)
+	if err != nil && os.IsNotExist(err) {
+		// If the file/directory is already gone, consider it a success
+		// This prevents Sonarr/Radarr from crashing when trying to delete folders we've already cleaned up
+		return nil
+	}
+	return err
 }
 
 // Rename renames a file (not supported)
