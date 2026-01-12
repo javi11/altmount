@@ -23,6 +23,9 @@ const (
 
 var (
 	_ io.ReadCloser = &UsenetReader{}
+
+	// ErrReaderClosed is returned when Read() is called on a closed UsenetReader
+	ErrReaderClosed = errors.New("usenet reader closed")
 )
 
 type DataCorruptionError struct {
@@ -88,6 +91,13 @@ func NewUsenetReader(
 		downloadingSegments: make(map[int]bool),
 	}
 	ur.downloadCond = sync.NewCond(&ur.mu)
+
+	// Context cancellation cleanup: ensure segments are freed even if Close() is never called.
+	// This handles cases like client disconnect, timeout, or error paths that skip Close().
+	go func() {
+		<-ctx.Done()
+		ur.Close()
+	}()
 
 	// Will start go routine pool with max download workers that will fill the cache
 
@@ -175,6 +185,11 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		}
 	})
 
+	// Check if reader has been closed (can happen via context cancellation cleanup)
+	if b.rg == nil {
+		return 0, ErrReaderClosed
+	}
+
 	s, err := b.rg.Get()
 	if err != nil {
 		// Check if this is an article not found error
@@ -213,6 +228,14 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				// Check if reader has been closed before calling Next()
+				if b.rg == nil {
+					if n > 0 {
+						return n, nil
+					}
+					return 0, ErrReaderClosed
+				}
+
 				// Segment is fully read, remove it from the cache
 				s, err = b.rg.Next()
 
