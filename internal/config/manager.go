@@ -192,6 +192,7 @@ type HealthConfig struct {
 	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 	LibrarySyncConcurrency        int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
 	ResolveRepairOnImport         *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
+	DataVerification              *bool   `yaml:"data_verification" mapstructure:"data_verification" json:"data_verification,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -856,6 +857,7 @@ func DefaultConfig(configDir ...string) *Config {
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
 	cleanupAutomaticImportFailure := false
+	dataVerification := false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -982,6 +984,7 @@ func DefaultConfig(configDir ...string) *Config {
 			SegmentSamplePercentage:       5,   // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:    360, // Default: sync every 6 hours
 			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
+			DataVerification:              &dataVerification, // Disabled by default
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:               &sabnzbdEnabled,

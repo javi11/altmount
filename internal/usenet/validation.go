@@ -33,6 +33,7 @@ func ValidateSegmentAvailability(
 	poolManager pool.Manager,
 	maxConnections int,
 	samplePercentage int,
+	verifyData bool,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
 ) error {
@@ -57,6 +58,37 @@ func ValidateSegmentAvailability(
 	// Atomic counter for progress tracking (thread-safe for concurrent validation)
 	var validatedCount int32
 
+	// Determine which segments need FULL download verification if verifyData is enabled
+	segmentsToDownload := make(map[string]bool)
+	if verifyData {
+		// First segment
+		if len(segments) > 0 {
+			segmentsToDownload[segments[0].Id] = true
+		}
+		// Last segment
+		if len(segments) > 1 {
+			segmentsToDownload[segments[len(segments)-1].Id] = true
+		}
+		// Random sample of ~18 others from the SELECTED segments
+		candidates := make([]string, 0, len(segmentsToValidate))
+		for _, s := range segmentsToValidate {
+			if !segmentsToDownload[s.Id] {
+				candidates = append(candidates, s.Id)
+			}
+		}
+
+		if len(candidates) > 0 {
+			perm := rand.Perm(len(candidates))
+			count := 18
+			if count > len(candidates) {
+				count = len(candidates)
+			}
+			for i := 0; i < count; i++ {
+				segmentsToDownload[candidates[perm[i]]] = true
+			}
+		}
+	}
+
 	// Validate segments concurrently with connection limit
 	pl := concpool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxConnections)
 	for _, segment := range segmentsToValidate {
@@ -65,7 +97,15 @@ func ValidateSegmentAvailability(
 			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			var err error
+			if verifyData && segmentsToDownload[seg.Id] {
+				// Download check (Body)
+				_, err = usenetPool.Body(checkCtx, seg.Id, io.Discard, []string{})
+			} else {
+				// Stat check
+				_, err = usenetPool.Stat(checkCtx, seg.Id, []string{})
+			}
+
 			if err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}
@@ -102,6 +142,7 @@ func ValidateSegmentAvailabilityDetailed(
 	poolManager pool.Manager,
 	maxConnections int,
 	samplePercentage int,
+	verifyData bool,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
 ) (ValidationResult, error) {
@@ -135,6 +176,37 @@ func ValidateSegmentAvailabilityDetailed(
 	// We use a channel to collect missing IDs to avoid locking
 	missingChan := make(chan string, len(segmentsToValidate))
 
+	// Determine which segments need FULL download verification if verifyData is enabled
+	segmentsToDownload := make(map[string]bool)
+	if verifyData {
+		// First segment
+		if len(segments) > 0 {
+			segmentsToDownload[segments[0].Id] = true
+		}
+		// Last segment
+		if len(segments) > 1 {
+			segmentsToDownload[segments[len(segments)-1].Id] = true
+		}
+		// Random sample of ~18 others from the SELECTED segments
+		candidates := make([]string, 0, len(segmentsToValidate))
+		for _, s := range segmentsToValidate {
+			if !segmentsToDownload[s.Id] {
+				candidates = append(candidates, s.Id)
+			}
+		}
+
+		if len(candidates) > 0 {
+			perm := rand.Perm(len(candidates))
+			count := 18
+			if count > len(candidates) {
+				count = len(candidates)
+			}
+			for i := 0; i < count; i++ {
+				segmentsToDownload[candidates[perm[i]]] = true
+			}
+		}
+	}
+
 	// Validate segments concurrently with connection limit
 	// We don't use WithFirstError because we want to check all selected segments
 	pl := concpool.New().WithErrors().WithMaxGoroutines(maxConnections)
@@ -144,7 +216,15 @@ func ValidateSegmentAvailabilityDetailed(
 			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			var err error
+			if verifyData && segmentsToDownload[seg.Id] {
+				// Download check (Body)
+				_, err = usenetPool.Body(checkCtx, seg.Id, io.Discard, []string{})
+			} else {
+				// Stat check
+				_, err = usenetPool.Stat(checkCtx, seg.Id, []string{})
+			}
+
 			if err != nil {
 				atomic.AddInt32(&missingCount, 1)
 				missingChan <- seg.Id

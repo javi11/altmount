@@ -39,6 +39,14 @@ func (c *Config) GetSegmentSamplePercentage() int {
 	return c.Health.SegmentSamplePercentage
 }
 
+// GetDataVerification returns whether data verification is enabled with a default fallback.
+func (c *Config) GetDataVerification() bool {
+	if c.Health.DataVerification == nil {
+		return false // Default: false
+	}
+	return *c.Health.DataVerification
+}
+
 // GetLibrarySyncInterval returns the library sync interval with a default fallback.
 func (c *Config) GetLibrarySyncInterval() time.Duration {
 	if c.Health.LibrarySyncIntervalMinutes <= 0 {

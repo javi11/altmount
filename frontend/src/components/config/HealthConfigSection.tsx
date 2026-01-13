@@ -384,6 +384,23 @@ export function HealthConfigSection({
 								validation of all segments (slower).
 							</p>
 						</fieldset>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Hybrid Data Verification</legend>
+							<label className="label cursor-pointer">
+								<span className="label-text">Enable data verification</span>
+								<input
+									type="checkbox"
+									className="checkbox"
+									checked={formData.data_verification ?? false}
+									disabled={isReadOnly}
+									onChange={(e) => handleInputChange("data_verification", e.target.checked)}
+								/>
+							</label>
+							<p className="label text-sm">
+								When enabled, verify a subset of segments by downloading them to ensure data integrity.
+								This helps detect "ghost" files that exist on the provider but are corrupted.
+							</p>
+						</fieldset>
 						{formData.segment_sample_percentage !== undefined && !formData.check_all_segments && (
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">Segment Sample Percentage</legend>

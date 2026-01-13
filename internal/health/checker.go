@@ -132,6 +132,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		hc.poolManager,
 		cfg.GetMaxConnectionsForHealthChecks(),
 		samplePercentage,
+		cfg.GetDataVerification(),
 		nil, // No progress callback for health checks
 		30*time.Second,
 	)
