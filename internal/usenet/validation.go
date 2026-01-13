@@ -3,6 +3,7 @@ package usenet
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"sync/atomic"
 	"time"
