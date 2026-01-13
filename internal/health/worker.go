@@ -592,10 +592,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 									return
 								}
 			
-								// Perform check
-								opts := CheckOptions{}
-								event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
-			
+								                                // Perform check
+								                                opts := CheckOptions{}
+								                                if fh.Priority == database.HealthPriorityHigh || fh.Priority == database.HealthPriorityNext {
+								                                        opts.ForceFullCheck = true
+								                                }
+								                                event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)			
 								// Prepare result for batch update
 								update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 
@@ -633,10 +635,12 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		wg.Go(func() {
 			slog.InfoContext(ctx, "Checking repair status for file", "file_path", fh.FilePath)
 
-			// Perform check
-			opts := CheckOptions{}
-			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
-
+			                                // Perform check
+			                                opts := CheckOptions{}
+			                                if fh.Priority == database.HealthPriorityHigh || fh.Priority == database.HealthPriorityNext {
+			                                        opts.ForceFullCheck = true
+			                                }
+			                                event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
 			// Prepare result for batch update
 			update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 
