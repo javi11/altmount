@@ -17,6 +17,8 @@ import (
 )
 
 const MountProvider = "altmount"
+const DefaultCategoryName = "Default"
+const DefaultCategoryDir = "complete"
 
 // Config represents the complete application configuration
 type Config struct {
@@ -249,11 +251,11 @@ type IgnoredMessage struct {
 
 // ArrsConfig represents arrs configuration
 type ArrsConfig struct {
-	Enabled                     *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	MaxWorkers                  int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
-	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
-	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
-	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
+	Enabled                        *bool                `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	MaxWorkers                     int                  `yaml:"max_workers" mapstructure:"max_workers" json:"max_workers,omitempty"`
+	WebhookBaseURL                 string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
+	RadarrInstances                []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
+	SonarrInstances                []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
 	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
@@ -486,9 +488,6 @@ func (c *Config) Validate() error {
 			}
 		}
 
-		// Ensure Default category always exists
-		c.EnsureDefaultCategory()
-
 		// Validate categories if provided
 		categoryNames := make(map[string]bool)
 		for i, category := range c.SABnzbd.Categories {
@@ -665,13 +664,13 @@ type ConfigGetter func() *Config
 
 // Manager manages configuration state and persistence
 type Manager struct {
-	current              *Config
-	configFile           string
-	mutex                sync.RWMutex
-	callbacks            []ChangeCallback
-	needsLibrarySync     bool
-	previousMountPath    string
-	librarySyncMutex     sync.RWMutex
+	current           *Config
+	configFile        string
+	mutex             sync.RWMutex
+	callbacks         []ChangeCallback
+	needsLibrarySync  bool
+	previousMountPath string
+	librarySyncMutex  sync.RWMutex
 }
 
 // NewManager creates a new configuration manager
@@ -855,10 +854,10 @@ func isRunningInDocker() bool {
 // DefaultConfig returns a config with default values
 // If configDir is provided, it will be used for database and log file paths
 func DefaultConfig(configDir ...string) *Config {
-	healthEnabled := false               // Health system disabled by default
-	cleanupOrphanedMetadata := false     // Cleanup orphaned metadata disabled by default
-	resolveRepairOnImport := false       // Disable smart replacement detection by default
-	deleteSourceNzbOnRemoval := false    // Delete source NZB on removal disabled by default
+	healthEnabled := false            // Health system disabled by default
+	cleanupOrphanedMetadata := false  // Cleanup orphaned metadata disabled by default
+	resolveRepairOnImport := false    // Disable smart replacement detection by default
+	deleteSourceNzbOnRemoval := false // Delete source NZB on removal disabled by default
 	vfsEnabled := false
 	mountEnabled := false // Disabled by default
 	sabnzbdEnabled := false
@@ -990,9 +989,9 @@ func DefaultConfig(configDir ...string) *Config {
 			CleanupOrphanedMetadata:       &cleanupOrphanedMetadata, // Disabled by default
 			CheckIntervalSeconds:          5,
 			MaxConnectionsForHealthChecks: 5,
-			MaxConcurrentJobs:             1,   // Default: 1 concurrent job
-			SegmentSamplePercentage:       5,   // Default: 5% segment sampling
-			LibrarySyncIntervalMinutes:    360, // Default: sync every 6 hours
+			MaxConcurrentJobs:             1,                      // Default: 1 concurrent job
+			SegmentSamplePercentage:       5,                      // Default: 5% segment sampling
+			LibrarySyncIntervalMinutes:    360,                    // Default: sync every 6 hours
 			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
 		},
 		SABnzbd: SABnzbdConfig{
@@ -1016,12 +1015,12 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{
-			Enabled:         &scrapperEnabled, // Disabled by default
-			MaxWorkers:      5,                // Default to 5 concurrent workers
-			WebhookBaseURL:  "http://altmount:8080",
-			RadarrInstances: []ArrsInstanceConfig{},
-			SonarrInstances: []ArrsInstanceConfig{},
-			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
+			Enabled:                        &scrapperEnabled, // Disabled by default
+			MaxWorkers:                     5,                // Default to 5 concurrent workers
+			WebhookBaseURL:                 "http://altmount:8080",
+			RadarrInstances:                []ArrsInstanceConfig{},
+			SonarrInstances:                []ArrsInstanceConfig{},
+			CleanupAutomaticImportFailure:  &cleanupAutomaticImportFailure,
 			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
 			QueueCleanupAllowlist: []IgnoredMessage{
 				{Message: "No files found are eligible", Enabled: true},
