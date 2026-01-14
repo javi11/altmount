@@ -634,7 +634,7 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 		if relPath, err := filepath.Rel(nzbFolder, item.NzbPath); err == nil {
 			// If file is directly in root of .nzbs (e.g. "file.nzb"), relDir is "."
 			relDir := filepath.Dir(relPath)
-			
+
 			if relDir == "." {
 				// Use the original basePath if the file is in the root of .nzbs
 				virtualDir = *basePath
@@ -643,7 +643,7 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 				// We use the subdirectory structure found inside .nzbs if it exists
 				virtualDir = filepath.Join(*basePath, relDir)
 			}
-			
+
 			// Ensure proper formatting
 			if !strings.HasPrefix(virtualDir, "/") {
 				virtualDir = "/" + virtualDir
@@ -681,7 +681,7 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 				}
 			}
 
-			// If the category is NOT present in the virtual path (e.g. NZBDav import), 
+			// If the category is NOT present in the virtual path (e.g. NZBDav import),
 			// we must append it to ensure the file ends up in the correct category folder.
 			if !match {
 				*basePath = filepath.Join(*basePath, categoryPath)
@@ -1005,7 +1005,6 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 func (s *Service) CancelProcessing(itemID int64) error {
 	return s.queueManager.CancelProcessing(itemID)
 }
-
 
 // ProcessItemInBackground processes a specific queue item in the background
 func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
