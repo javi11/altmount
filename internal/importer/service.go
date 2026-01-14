@@ -719,20 +719,31 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 
 // buildCategoryPath resolves a category name to its configured directory path.
 // Returns the category's Dir if configured, otherwise falls back to the category name.
+// buildCategoryPath builds the directory path for a category.
+// For Default category, returns its configured Dir (defaults to "complete").
 func (s *Service) buildCategoryPath(category string) string {
-	if category == "" || category == "default" {
-		return ""
+	// Empty category uses Default category
+	if category == "" {
+		category = config.DefaultCategoryName
 	}
 
 	cfg := s.configGetter()
 	if cfg == nil || len(cfg.SABnzbd.Categories) == 0 {
+		// No config, use default dir for Default category
+		if strings.EqualFold(category, config.DefaultCategoryName) {
+			return config.DefaultCategoryDir
+		}
 		return category
 	}
 
 	for _, cat := range cfg.SABnzbd.Categories {
-		if cat.Name == category {
+		if strings.EqualFold(cat.Name, category) {
 			if cat.Dir != "" {
 				return cat.Dir
+			}
+			// For Default category with empty Dir, return default dir
+			if strings.EqualFold(category, config.DefaultCategoryName) {
+				return config.DefaultCategoryDir
 			}
 			return category
 		}

@@ -29,6 +29,25 @@ var defaultCategory = config.SABnzbdCategory{
 	Dir:      "",
 }
 
+// getDefaultCategory returns the Default category from config or a fallback
+func (s *Server) getDefaultCategory() config.SABnzbdCategory {
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		for _, cat := range cfg.SABnzbd.Categories {
+			if cat.Name == config.DefaultCategoryName {
+				return cat
+			}
+		}
+	}
+	// Fallback if not found in config
+	return config.SABnzbdCategory{
+		Name:     config.DefaultCategoryName,
+		Order:    0,
+		Priority: 0,
+		Dir:      config.DefaultCategoryDir,
+	}
+}
+
 // handleSABnzbd is the main handler for SABnzbd API endpoints
 func (s *Server) handleSABnzbd(c *fiber.Ctx) error {
 	// Check if SABnzbd API is enabled
@@ -882,29 +901,39 @@ func (s *Server) parseSABnzbdPriority(priority string) database.QueuePriority {
 
 // buildCategoryPath builds the directory path for a category
 func (s *Server) buildCategoryPath(category string) string {
-	// Return empty for default category (no subdirectory)
-	if category == "default" || category == "" {
-		return ""
+	// Empty category uses Default category's Dir
+	if category == "" {
+		category = config.DefaultCategoryName
 	}
 
 	if s.configManager == nil {
-		// No config manager, use category name as directory
+		// No config manager, use category name as directory (Default uses its default dir)
+		if category == config.DefaultCategoryName {
+			return config.DefaultCategoryDir
+		}
 		return category
 	}
 
-	config := s.configManager.GetConfig()
+	cfg := s.configManager.GetConfig()
 
 	// If no categories are configured, use category name as directory
-	if len(config.SABnzbd.Categories) == 0 {
+	if len(cfg.SABnzbd.Categories) == 0 {
+		if category == config.DefaultCategoryName {
+			return config.DefaultCategoryDir
+		}
 		return category
 	}
 
 	// Look for the category in configuration
-	for _, configCategory := range config.SABnzbd.Categories {
+	for _, configCategory := range cfg.SABnzbd.Categories {
 		if configCategory.Name == category {
 			// Use configured Dir if available, otherwise use category name
 			if configCategory.Dir != "" {
 				return configCategory.Dir
+			}
+			// For Default category with empty Dir, return default dir
+			if category == config.DefaultCategoryName {
+				return config.DefaultCategoryDir
 			}
 			return category
 		}
@@ -916,6 +945,7 @@ func (s *Server) buildCategoryPath(category string) string {
 
 // validateSABnzbdCategory validates and returns the category, or error if invalid
 func (s *Server) validateSABnzbdCategory(category string) (string, error) {
+	defaultCategory := s.getDefaultCategory()
 	if category == "" {
 		return defaultCategory.Name, nil
 	}
