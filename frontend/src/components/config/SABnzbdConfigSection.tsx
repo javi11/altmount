@@ -24,6 +24,9 @@ const DEFAULT_NEW_CATEGORY: NewCategoryForm = {
 	dir: "",
 };
 
+const DEFAULT_CATEGORY_NAME = "Default";
+const isDefaultCategory = (categoryName: string) => categoryName === DEFAULT_CATEGORY_NAME;
+
 export function SABnzbdConfigSection({
 	config,
 	onUpdate,
@@ -82,11 +85,11 @@ export function SABnzbdConfigSection({
 		const errors: string[] = [];
 
 		if (data.enabled) {
-			// Validate complete_dir is required and absolute
+			// Validate complete_dir is required and starts with /
 			if (!data.complete_dir?.trim()) {
 				errors.push("Complete directory is required when SABnzbd API is enabled");
 			} else if (!data.complete_dir.startsWith("/")) {
-				errors.push("Complete directory must be an absolute path (starting with /)");
+				errors.push("Complete directory must start with /");
 			}
 
 			// Validate category names are unique
@@ -134,18 +137,39 @@ export function SABnzbdConfigSection({
 	};
 
 	const handleCategoryUpdate = (index: number, updates: Partial<SABnzbdCategory>) => {
+		const category = formData.categories[index];
+		// For Default category, only prevent renaming (allow order, priority, dir changes)
+		if (isDefaultCategory(category.name) && updates.name !== undefined) {
+			// Prevent renaming Default category
+			delete updates.name;
+			if (Object.keys(updates).length === 0) {
+				return;
+			}
+		}
+
 		const categories = [...formData.categories];
 		categories[index] = { ...categories[index], ...updates };
 		updateFormData({ categories });
 	};
 
 	const handleRemoveCategory = (index: number) => {
+		const category = formData.categories[index];
+		// Prevent removing Default category
+		if (isDefaultCategory(category.name)) {
+			return;
+		}
 		const categories = formData.categories.filter((_, i) => i !== index);
 		updateFormData({ categories });
 	};
 
 	const handleAddCategory = () => {
 		if (!newCategory.name.trim()) {
+			return;
+		}
+
+		// Prevent creating a category with the reserved name
+		if (newCategory.name.trim() === DEFAULT_CATEGORY_NAME) {
+			setValidationErrors([`"${DEFAULT_CATEGORY_NAME}" is a reserved category name`]);
 			return;
 		}
 
@@ -231,12 +255,11 @@ export function SABnzbdConfigSection({
 							className="input"
 							value={formData.complete_dir}
 							readOnly={isReadOnly}
-							placeholder="/mnt/altmount/complete"
+							placeholder="/"
 							onChange={(e) => handleCompleteDirChange(e.target.value)}
 						/>
 						<p className="label">
-							Absolute path to the directory where the full imports will be stored, relative to the
-							mounted folder.
+							Base virtual directory (relative to mount point, defaults to root).
 						</p>
 					</fieldset>
 
@@ -346,9 +369,16 @@ export function SABnzbdConfigSection({
 							<div className="space-y-3">
 								{formData.categories
 									.sort((a, b) => a.order - b.order)
-									.map((category, index) => (
-										<div key={index} className="card bg-base-200 shadow-sm">
+									.map((category, index) => {
+										const isDefault = isDefaultCategory(category.name);
+										return (
+										<div key={index} className={`card shadow-sm ${isDefault ? 'bg-base-300 border border-primary/30' : 'bg-base-200'}`}>
 											<div className="card-body p-4">
+												{isDefault && (
+													<div className="badge badge-primary badge-sm mb-2">
+														System Default (name cannot be changed)
+													</div>
+												)}
 												<div className="grid grid-cols-1 gap-4 md:grid-cols-4">
 													<fieldset className="fieldset">
 														<legend className="fieldset-legend">Name</legend>
@@ -356,11 +386,15 @@ export function SABnzbdConfigSection({
 															type="text"
 															className="input input-sm"
 															value={category.name}
-															readOnly={isReadOnly}
+															readOnly={isReadOnly || isDefault}
+															disabled={isDefault}
 															onChange={(e) =>
 																handleCategoryUpdate(index, { name: e.target.value })
 															}
 														/>
+														{isDefault && (
+															<p className="label text-xs text-base-content/60">Name is immutable</p>
+														)}
 													</fieldset>
 													<fieldset className="fieldset">
 														<legend className="fieldset-legend">Order</legend>
@@ -400,12 +434,15 @@ export function SABnzbdConfigSection({
 															className="input input-sm"
 															value={category.dir}
 															readOnly={isReadOnly}
-															placeholder="Optional subdirectory"
+															placeholder={isDefault ? "complete" : "Optional subdirectory"}
 															onChange={(e) => handleCategoryUpdate(index, { dir: e.target.value })}
 														/>
+														{isDefault && (
+															<p className="label text-xs text-base-content/60">Default: complete</p>
+														)}
 													</fieldset>
 												</div>
-												{!isReadOnly && (
+												{!isReadOnly && !isDefault && (
 													<div className="mt-2 flex justify-end">
 														<button
 															type="button"
@@ -419,7 +456,7 @@ export function SABnzbdConfigSection({
 												)}
 											</div>
 										</div>
-									))}
+									)})}
 							</div>
 						)}
 

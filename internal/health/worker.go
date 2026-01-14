@@ -468,23 +468,24 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 	default:
 	}
 
-	// Delegate to HealthChecker
-	event := hw.healthChecker.CheckFile(checkCtx, filePath)
-
-	// Check if cancelled during check
-	select {
-	case <-checkCtx.Done():
-		return checkCtx.Err()
-	default:
-	}
-
-	// Get current file state
+	// Get current file state first to determine check options
 	fh, err := hw.healthRepo.GetFileHealth(ctx, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to get file health state: %w", err)
 	}
 	if fh == nil {
 		return fmt.Errorf("file health record not found: %s", filePath)
+	}
+
+	opts := CheckOptions{}
+	// Delegate to HealthChecker
+	event := hw.healthChecker.CheckFile(checkCtx, filePath, opts)
+
+	// Check if cancelled during check
+	select {
+	case <-checkCtx.Done():
+		return checkCtx.Err()
+	default:
 	}
 
 	// Prepare result for update
@@ -585,17 +586,18 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
 
 			// Set checking status
-			err := hw.healthRepo.SetFileChecking(ctx, fh.FilePath)
-			if err != nil {
-				slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
-				return
-			}
-
-			// Perform check
-			event := hw.healthChecker.CheckFile(ctx, fh.FilePath)
-
-			// Prepare result for batch update
-			update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
+								err := hw.healthRepo.SetFileChecking(ctx, fh.FilePath)
+								if err != nil {
+									slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
+									return
+								}
+			
+								// Perform check
+								opts := CheckOptions{}
+								event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
+			
+								// Prepare result for batch update
+								update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 
 			resultsMu.Lock()
 			results = append(results, update)
@@ -632,7 +634,8 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			slog.InfoContext(ctx, "Checking repair status for file", "file_path", fh.FilePath)
 
 			// Perform check
-			event := hw.healthChecker.CheckFile(ctx, fh.FilePath)
+			opts := CheckOptions{}
+			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
 
 			// Prepare result for batch update
 			update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
@@ -665,6 +668,24 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 
 	// Wait for all files to complete processing
 	wg.Wait()
+
+	// Build list of protected directories (categories and complete dir)
+	cfg := hw.configGetter()
+	protected := []string{"complete"} // Always protect 'complete'
+	if cfg.SABnzbd.CompleteDir != "" {
+		protected = append(protected, filepath.Base(cfg.SABnzbd.CompleteDir))
+	}
+	for _, cat := range cfg.SABnzbd.Categories {
+		protected = append(protected, cat.Name)
+		if cat.Dir != "" {
+			protected = append(protected, cat.Dir)
+		}
+	}
+
+	// Clean up empty directories in metadata (e.g. from moved/imported files)
+	if err := hw.metadataService.CleanupEmptyDirectories("", protected); err != nil {
+		slog.WarnContext(ctx, "Failed to cleanup empty directories in metadata", "error", err)
+	}
 
 	// Perform bulk database update
 	if len(results) > 0 {
@@ -742,7 +763,12 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 			// We need the relative path for metadata deletion
 			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
 			relativePath = strings.TrimPrefix(relativePath, "/")
-			if delMetaErr := hw.metadataService.DeleteFileMetadata(relativePath); delMetaErr != nil {
+			
+			deleteSourceNzb := false
+			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+				deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
+			}
+			if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
 				slog.ErrorContext(ctx, "Failed to delete orphaned metadata file", "error", delMetaErr)
 			}
 

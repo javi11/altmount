@@ -60,7 +60,8 @@ type FuseConfig struct {
 
 // APIConfig represents REST API configuration
 type APIConfig struct {
-	Prefix string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
+	Prefix      string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
+	KeyOverride string `yaml:"key_override" mapstructure:"key_override" json:"key_override,omitempty"`
 }
 
 // AuthConfig represents authentication configuration
@@ -470,12 +471,23 @@ func (c *Config) Validate() error {
 
 	// Validate SABnzbd configuration
 	if c.SABnzbd.Enabled != nil && *c.SABnzbd.Enabled {
+		// CompleteDir is a virtual path relative to the mount point, not an absolute filesystem path
+		// It defaults to "/" (root of mount) if not specified
+		// Normalize: remove leading/trailing slashes for consistency, then ensure it starts with /
 		if c.SABnzbd.CompleteDir == "" {
-			return fmt.Errorf("sabnzbd complete_dir cannot be empty when SABnzbd is enabled")
+			c.SABnzbd.CompleteDir = "/"
+		} else {
+			// Normalize the path: ensure it starts with / and remove trailing /
+			cleanDir := strings.Trim(c.SABnzbd.CompleteDir, "/")
+			if cleanDir == "" {
+				c.SABnzbd.CompleteDir = "/"
+			} else {
+				c.SABnzbd.CompleteDir = "/" + cleanDir
+			}
 		}
-		if !filepath.IsAbs(c.SABnzbd.CompleteDir) {
-			return fmt.Errorf("sabnzbd complete_dir must be an absolute path")
-		}
+
+		// Ensure Default category always exists
+		c.EnsureDefaultCategory()
 
 		// Validate categories if provided
 		categoryNames := make(map[string]bool)
