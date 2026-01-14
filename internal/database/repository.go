@@ -662,7 +662,7 @@ func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, ca
 	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
 	               FROM import_queue`
 
-	conditions := []string{"status IN ('pending', 'processing')"}
+	conditions := []string{"(status = 'pending' OR status = 'processing' OR status = 'paused')"}
 	var conditionArgs []interface{}
 
 	if search != "" {
@@ -772,7 +772,7 @@ func (r *Repository) CountActiveQueueItems(ctx context.Context, search string, c
 	var query string
 	var args []interface{}
 
-	baseQuery := `SELECT COUNT(*) FROM import_queue WHERE status IN ('pending', 'processing')`
+	baseQuery := `SELECT COUNT(*) FROM import_queue WHERE (status = 'pending' OR status = 'processing' OR status = 'paused')`
 
 	var conditions []string
 	var conditionArgs []interface{}
@@ -867,7 +867,7 @@ func (r *Repository) ClearPendingQueueItems(ctx context.Context) (int, error) {
 
 // IsFileInQueue checks if a file is already in the queue (pending or processing)
 func (r *Repository) IsFileInQueue(ctx context.Context, filePath string) (bool, error) {
-	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND status IN ('pending', 'processing') LIMIT 1`
+	query := `SELECT 1 FROM import_queue WHERE nzb_path = ? AND (status = 'pending' OR status = 'processing' OR status = 'paused') LIMIT 1`
 
 	var exists int
 	err := r.db.QueryRowContext(ctx, query, filePath).Scan(&exists)
