@@ -38,6 +38,11 @@ type HealthEvent struct {
 	SourceNzb  *string
 }
 
+// CheckOptions defines options for health checking
+type CheckOptions struct {
+	ForceFullCheck bool
+}
+
 // HealthChecker manages file health checking logic
 type HealthChecker struct {
 	healthRepo      *database.HealthRepository
@@ -65,7 +70,7 @@ func NewHealthChecker(
 }
 
 // CheckFile checks the health of a specific file
-func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string) HealthEvent {
+func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ...CheckOptions) HealthEvent {
 	// Get file metadata
 	fileMeta, err := hc.metadataService.ReadFileMetadata(filePath)
 	if err != nil {
@@ -91,11 +96,11 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string) HealthE
 	}
 
 	// Perform the health check
-	return hc.checkSingleFile(ctx, filePath, fileMeta)
+	return hc.checkSingleFile(ctx, filePath, fileMeta, opts...)
 }
 
 // checkSingleFile performs a health check on a single file
-func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, fileMeta *metapb.FileMetadata) HealthEvent {
+func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, fileMeta *metapb.FileMetadata, opts ...CheckOptions) HealthEvent {
 	event := HealthEvent{
 		FilePath:  filePath,
 		Timestamp: time.Now(),
@@ -110,7 +115,15 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 	}
 
 	cfg := hc.configGetter()
-	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", cfg.GetSegmentSamplePercentage())
+	samplePercentage := cfg.GetSegmentSamplePercentage()
+
+	// Override sample percentage if forced full check is requested
+	if len(opts) > 0 && opts[0].ForceFullCheck {
+		samplePercentage = 100
+		slog.InfoContext(ctx, "Forcing full health check (100% sampling)", "file_path", filePath)
+	}
+
+	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", samplePercentage)
 
 	// Validate segment availability using detailed validation logic
 	result, err := usenet.ValidateSegmentAvailabilityDetailed(
@@ -118,7 +131,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		fileMeta.SegmentData,
 		hc.poolManager,
 		cfg.GetMaxConnectionsForHealthChecks(),
-		cfg.GetSegmentSamplePercentage(),
+		samplePercentage,
 		nil, // No progress callback for health checks
 		30*time.Second,
 	)
