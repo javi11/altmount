@@ -466,6 +466,74 @@ func (s *Service) GetFailedNzbFolder() string {
 	return filepath.Join(s.GetNzbFolder(), "failed")
 }
 
+// MoveToFailedFolder moves a failed NZB file to the failed directory
+func (s *Service) MoveToFailedFolder(ctx context.Context, item *database.ImportQueueItem) error {
+	failedDir := s.GetFailedNzbFolder()
+
+	// Add category subfolder if present to keep failed items organized
+	if item.Category != nil && *item.Category != "" {
+		failedDir = filepath.Join(failedDir, *item.Category)
+	}
+
+	if err := os.MkdirAll(failedDir, 0755); err != nil {
+		return fmt.Errorf("failed to create failed directory: %w", err)
+	}
+
+	fileName := filepath.Base(item.NzbPath)
+	newPath := filepath.Join(failedDir, fileName)
+
+	// Check if source exists
+	if _, err := os.Stat(item.NzbPath); os.IsNotExist(err) {
+		// If source doesn't exist, maybe it was already moved?
+		return nil
+	}
+
+	// Avoid moving if already in failed folder (e.g. retry of failed item)
+	if filepath.Dir(item.NzbPath) == failedDir {
+		return nil
+	}
+
+	// Move file
+	if err := os.Rename(item.NzbPath, newPath); err != nil {
+		// Fallback to Copy+Delete
+		s.log.DebugContext(ctx, "Rename failed, trying copy to failed dir", "error", err)
+
+		srcFile, err := os.Open(item.NzbPath)
+		if err != nil {
+			return fmt.Errorf("failed to open source NZB: %w", err)
+		}
+		defer srcFile.Close()
+
+		dstFile, err := os.Create(newPath)
+		if err != nil {
+			return fmt.Errorf("failed to create destination NZB: %w", err)
+		}
+		defer dstFile.Close()
+
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
+			return fmt.Errorf("failed to copy NZB content: %w", err)
+		}
+
+		// Close files explicitly to allow deletion
+		srcFile.Close()
+		dstFile.Close()
+
+		if err := os.Remove(item.NzbPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to remove source NZB after copy", "path", item.NzbPath, "error", err)
+		}
+	}
+
+	// Update DB
+	if err := s.database.Repository.UpdateQueueItemNzbPath(ctx, item.ID, newPath); err != nil {
+		return fmt.Errorf("failed to update DB with new NZB path: %w", err)
+	}
+
+	// Update struct
+	item.NzbPath = newPath
+	s.log.InfoContext(ctx, "Moved failed NZB to failed directory", "new_path", newPath)
+	return nil
+}
+
 // sanitizeFilename replaces invalid characters in filenames
 func sanitizeFilename(name string) string {
 	return strings.ReplaceAll(name, "/", "_")
@@ -558,25 +626,56 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	// Calculate initial virtual directory from physical/relative path
 	virtualDir := filesystem.CalculateVirtualDirectory(item.NzbPath, *basePath)
 
+	// Fix for issue where files moved to persistent .nzbs directory end up with exposed paths (like /config) in virtual directory
+	// This happens when NzbPath is inside .nzbs and CalculateVirtualDirectory sees the physical parent folder.
+	nzbFolder := s.GetNzbFolder()
+	if strings.HasPrefix(item.NzbPath, nzbFolder) {
+		// Calculate path relative to the persistent NZB folder
+		if relPath, err := filepath.Rel(nzbFolder, item.NzbPath); err == nil {
+			// If file is directly in root of .nzbs (e.g. "file.nzb"), relDir is "."
+			relDir := filepath.Dir(relPath)
+			
+			if relDir == "." {
+				// Use the original basePath if the file is in the root of .nzbs
+				virtualDir = *basePath
+			} else {
+				// Recalculate virtualDir relative to the nzbFolder to discard physical parent paths like /config
+				// We use the subdirectory structure found inside .nzbs if it exists
+				virtualDir = filepath.Join(*basePath, relDir)
+			}
+			
+			// Ensure proper formatting
+			if !strings.HasPrefix(virtualDir, "/") {
+				virtualDir = "/" + virtualDir
+			}
+			virtualDir = filepath.ToSlash(virtualDir)
+		}
+	}
+
 	// If category is specified, resolve to configured directory path
 	if item.Category != nil && *item.Category != "" {
 		categoryPath := s.buildCategoryPath(*item.Category)
 		if categoryPath != "" {
-			// Check if virtual path already starts with the category path
-			// This happens in Watch Directory imports where the file is physically inside the category folder
+			// Check if virtual path already contains the category path
 			cleanVirtual := strings.Trim(filepath.ToSlash(virtualDir), "/")
 			cleanCategory := strings.Trim(filepath.ToSlash(categoryPath), "/")
 
 			virtualParts := strings.Split(cleanVirtual, "/")
 			categoryParts := strings.Split(cleanCategory, "/")
 
-			match := true
-			if len(virtualParts) < len(categoryParts) {
-				match = false
-			} else {
-				for i := range categoryParts {
-					if !strings.EqualFold(virtualParts[i], categoryParts[i]) {
-						match = false
+			match := false
+			if len(virtualParts) >= len(categoryParts) {
+				// Check if categoryParts exists as a sub-sequence in virtualParts
+				for i := 0; i <= len(virtualParts)-len(categoryParts); i++ {
+					subMatch := true
+					for j := range categoryParts {
+						if !strings.EqualFold(virtualParts[i+j], categoryParts[j]) {
+							subMatch = false
+							break
+						}
+					}
+					if subMatch {
+						match = true
 						break
 					}
 				}
@@ -622,6 +721,11 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	// This puts it next to metadata (e.g. /config/.nzbs)
 	configDir := filepath.Dir(cfg.Database.Path)
 	nzbDir := filepath.Join(configDir, ".nzbs")
+
+	// Add category subfolder if present to keep NZBs organized
+	if item.Category != nil && *item.Category != "" {
+		nzbDir = filepath.Join(nzbDir, *item.Category)
+	}
 
 	// Create .nzbs directory if not exists
 	if err := os.MkdirAll(nzbDir, 0755); err != nil {
@@ -792,6 +896,16 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
+
+	// Handle cleanup of completed NZB if configured
+	cfg := s.configGetter()
+	if cfg.Metadata.DeleteCompletedNzb != nil && *cfg.Metadata.DeleteCompletedNzb {
+		s.log.InfoContext(ctx, "Deleting completed NZB (per config)", "file", item.NzbPath)
+		if err := os.Remove(item.NzbPath); err != nil {
+			s.log.WarnContext(ctx, "Failed to delete completed NZB", "file", item.NzbPath, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -841,11 +955,49 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 		s.log.DebugContext(ctx, "SABnzbd fallback skipped (not configured)",
 			"queue_id", item.ID,
 			"file", item.NzbPath)
+
+		// Handle failed NZB based on config
+		cfg := s.configGetter()
+		deleteFailed := true // Default to delete
+		if cfg.Metadata.DeleteFailedNzb != nil {
+			deleteFailed = *cfg.Metadata.DeleteFailedNzb
+		}
+
+		if deleteFailed {
+			s.log.InfoContext(ctx, "Deleting failed NZB (per config)", "file", item.NzbPath)
+			if rmErr := os.Remove(item.NzbPath); rmErr != nil {
+				s.log.WarnContext(ctx, "Failed to delete failed NZB", "file", item.NzbPath, "error", rmErr)
+			}
+		} else {
+			// Move to failed folder
+			if moveErr := s.MoveToFailedFolder(ctx, item); moveErr != nil {
+				s.log.ErrorContext(ctx, "Failed to move NZB to failed folder", "error", moveErr)
+			}
+		}
 	} else {
 		s.log.ErrorContext(ctx, "Fallback handling failed",
 			"queue_id", item.ID,
 			"file", item.NzbPath,
 			"error", err)
+
+		// Handle failed NZB based on config
+		cfg := s.configGetter()
+		deleteFailed := true // Default to delete
+		if cfg.Metadata.DeleteFailedNzb != nil {
+			deleteFailed = *cfg.Metadata.DeleteFailedNzb
+		}
+
+		if deleteFailed {
+			s.log.InfoContext(ctx, "Deleting failed NZB (per config)", "file", item.NzbPath)
+			if rmErr := os.Remove(item.NzbPath); rmErr != nil {
+				s.log.WarnContext(ctx, "Failed to delete failed NZB", "file", item.NzbPath, "error", rmErr)
+			}
+		} else {
+			// Move to failed folder
+			if moveErr := s.MoveToFailedFolder(ctx, item); moveErr != nil {
+				s.log.ErrorContext(ctx, "Failed to move NZB to failed folder", "error", moveErr)
+			}
+		}
 	}
 }
 

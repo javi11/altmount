@@ -186,6 +186,15 @@ arrs:
   max_workers: 5 # Number of concurrent workers (default: 5)
   radarr_instances: [] # Radarr instances (configured via UI)
   sonarr_instances: [] # Sonarr instances (configured via UI)
+  # Queue Cleanup Configuration
+  queue_cleanup_enabled: true # Enable automatic queue cleanup for failed imports (default: true)
+  queue_cleanup_interval_seconds: 10 # Interval in seconds to check for failed imports (default: 10)
+  cleanup_automatic_import_failure: false # Enable cleanup of "Automatic import is not possible" errors (default: false)
+  queue_cleanup_allowlist: [] # List of additional error messages to treat as safe for cleanup
+  # Example:
+  # queue_cleanup_allowlist:
+  #   - "Not a Custom Format upgrade"
+  #   - "Ignored Message 2"
   # Example instance configuration (use the web UI instead):
   # radarr_instances:
   #   - name: "radarr-main"
