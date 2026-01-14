@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -514,13 +513,23 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	lsw.progress.TotalFiles = len(metadataFiles)
 	lsw.progressMu.Unlock()
 
-	// Build a reverse map: mount path -> library path for quick lookup
+	// Build a reverse map: mount relative path -> library path for quick lookup
 	filesInUse := make(map[string]string)
 
-	maps.Copy(filesInUse, libraryFiles.Symlinks)
-	maps.Copy(filesInUse, libraryFiles.StrmFiles)
-	maps.Copy(filesInUse, importDirFiles.Symlinks)
-	maps.Copy(filesInUse, importDirFiles.StrmFiles)
+	// Helper to normalize keys to mount relative paths
+	normalizeKeys := func(m map[string]string) {
+		for target, libPath := range m {
+			// Extract relative path within the mount
+			rel := strings.TrimPrefix(filepath.ToSlash(target), filepath.ToSlash(cfg.MountPath))
+			rel = strings.TrimPrefix(rel, "/")
+			filesInUse[rel] = libPath
+		}
+	}
+
+	normalizeKeys(libraryFiles.Symlinks)
+	normalizeKeys(libraryFiles.StrmFiles)
+	normalizeKeys(importDirFiles.Symlinks)
+	normalizeKeys(importDirFiles.StrmFiles)
 
 	// Get all health check paths from database
 	dbRecords, err := lsw.healthRepo.GetAllHealthCheckRecords(ctx)
@@ -610,7 +619,11 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 			if libraryPath == nil {
 				if !dryRun {
-					err := lsw.metadataService.DeleteFileMetadata(relativeMountPath)
+					deleteSourceNzb := false
+					if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+						deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
+					}
+					err := lsw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativeMountPath, deleteSourceNzb)
 					if err != nil {
 						slog.ErrorContext(ctx, "Failed to delete metadata file", "error", err)
 						continue
@@ -634,15 +647,17 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			default:
 			}
 
-			libraryPath := lsw.getLibraryPath(metaPath, filesInUse)
-
-			if libraryPath == nil {
+			// If the library file points to a metadata path that doesn't exist anymore, it's an orphan
+			if _, exists := metaFileSet[metaPath]; !exists {
 				if !dryRun {
 					err := os.Remove(file)
 					if err != nil {
-						slog.ErrorContext(ctx, "Failed to delete library file", "error", err)
+						if !os.IsNotExist(err) {
+							slog.ErrorContext(ctx, "Failed to delete library file", "path", file, "error", err)
+						}
 						continue
 					}
+					slog.InfoContext(ctx, "Deleted orphaned library file", "path", file, "target", metaPath)
 				}
 				libraryFilesDeletedCount++
 			}
@@ -1094,54 +1109,77 @@ func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[str
 	return nil
 }
 
-// removeEmptyDirectories removes empty directories from the library directory
+// removeEmptyDirectories removes empty directories from the library, import, and metadata directories
 func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, error) {
 	cfg := lsw.configGetter()
-	if cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "" {
-		return 0, fmt.Errorf("library directory is not configured")
+	
+	// Paths to scan for empty directories
+	var scanPaths []string
+	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+		scanPaths = append(scanPaths, *cfg.Health.LibraryDir)
+	}
+	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		scanPaths = append(scanPaths, *cfg.Import.ImportDir)
+	}
+	if cfg.Metadata.RootPath != "" {
+		scanPaths = append(scanPaths, cfg.Metadata.RootPath)
 	}
 
-	libraryDir := *cfg.Health.LibraryDir
-	slog.InfoContext(ctx, "Starting empty directory cleanup", "library_dir", libraryDir)
+	if len(scanPaths) == 0 {
+		return 0, nil
+	}
+
+	slog.InfoContext(ctx, "Starting empty directory cleanup", "paths", scanPaths)
 
 	// Helper function to get directory depth
 	getDepth := func(path string) int {
 		return strings.Count(path, string(filepath.Separator))
 	}
 
-	// Collect all directories
+	// Collect all subdirectories from all scan paths
 	var dirs []string
-	err := filepath.WalkDir(libraryDir, func(path string, d os.DirEntry, err error) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	for _, root := range scanPaths {
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			if err != nil {
+				return nil // Continue on errors
+			}
+
+			// Add to list if it's a subdirectory (not the root itself)
+			if d.IsDir() && path != root {
+				dirs = append(dirs, path)
+			}
+
+			return nil
+		})
 
 		if err != nil {
-			return nil // Continue on errors
+			slog.ErrorContext(ctx, "Error during directory scan", "root", root, "error", err)
 		}
-
-		if d.IsDir() && path != libraryDir {
-			dirs = append(dirs, path)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		slog.ErrorContext(ctx, "Error during directory scan", "error", err)
-		return 0, err
 	}
 
-	// Sort by depth (deepest first)
+	if len(dirs) == 0 {
+		return 0, nil
+	}
+
+	// Sort by depth (deepest first) to ensure we can remove nested empty folders
 	sort.Slice(dirs, func(i, j int) bool {
-		return getDepth(dirs[i]) > getDepth(dirs[j])
+		// If depths are equal, sort alphabetically for stability
+		di, dj := getDepth(dirs[i]), getDepth(dirs[j])
+		if di == dj {
+			return dirs[i] > dirs[j]
+		}
+		return di > dj
 	})
 
 	// Iteratively remove empty directories
 	deletedCount := 0
-	maxIterations := 10 // Prevent infinite loops
+	maxIterations := 5 // Reduced iterations, sorting by depth usually handles it in 1-2
 	for range maxIterations {
 		removedThisIteration := 0
 
@@ -1152,18 +1190,17 @@ func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, 
 			default:
 			}
 
-			// Try to remove the directory
+			// Try to remove the directory (will fail if not empty)
 			if err := os.Remove(dir); err != nil {
-				// Directory not empty or permission error - skip silently
 				continue
 			}
 
-			slog.InfoContext(ctx, "Removed empty directory", "path", dir)
+			slog.DebugContext(ctx, "Removed empty directory", "path", dir)
 			removedThisIteration++
 			deletedCount++
 		}
 
-		// If no directories were removed, we're done
+		// If no directories were removed in this pass, no more empty ones exist
 		if removedThisIteration == 0 {
 			break
 		}
