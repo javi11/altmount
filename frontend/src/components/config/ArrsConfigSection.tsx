@@ -224,6 +224,7 @@ export function ArrsConfigSection({
 				index={index}
 				isReadOnly={isReadOnly}
 				isApiKeyVisible={isApiKeyVisible}
+				categories={config.sabnzbd?.categories}
 				onToggleApiKey={() => toggleApiKeyVisibility(instanceId)}
 				onRemove={() => removeInstance(type, index)}
 				onInstanceChange={(field, value) => handleInstanceChange(type, index, field, value)}
@@ -477,15 +478,20 @@ export function ArrsConfigSection({
 
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">Download Category (Optional)</legend>
-								<input
-									type="text"
-									className="input"
+								<select
+									className="select"
 									value={newInstance.category}
 									onChange={(e) =>
 										setNewInstance((prev) => ({ ...prev, category: e.target.value }))
 									}
-									placeholder={newInstance.type === "radarr" ? "movies" : "tv"}
-								/>
+								>
+									<option value="">None</option>
+									{config.sabnzbd?.categories?.map((cat) => (
+										<option key={cat.name} value={cat.name}>
+											{cat.name}
+										</option>
+									))}
+								</select>
 							</fieldset>
 
 							<label className="label cursor-pointer">

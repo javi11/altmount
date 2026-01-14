@@ -1,6 +1,6 @@
 import { Eye, EyeOff, Trash2 } from "lucide-react";
 import { useCallback, useState } from "react";
-import type { ArrsInstanceConfig, ArrsType } from "../../types/config";
+import type { ArrsInstanceConfig, ArrsType, SABnzbdCategory } from "../../types/config";
 
 interface ArrsInstanceCardProps {
 	instance: ArrsInstanceConfig;
@@ -8,6 +8,7 @@ interface ArrsInstanceCardProps {
 	index: number;
 	isReadOnly: boolean;
 	isApiKeyVisible: boolean;
+	categories?: SABnzbdCategory[];
 	onToggleApiKey: () => void;
 	onRemove: () => void;
 	onInstanceChange: (
@@ -22,6 +23,7 @@ export function ArrsInstanceCard({
 	index,
 	isReadOnly,
 	isApiKeyVisible,
+	categories = [],
 	onToggleApiKey,
 	onRemove,
 	onInstanceChange,
@@ -143,14 +145,19 @@ export function ArrsInstanceCard({
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Download Category (Optional)</legend>
-						<input
-							type="text"
-							className="input"
+						<select
+							className="select"
 							value={instance.category || ""}
 							onChange={(e) => handleInstanceChange("category", e.target.value)}
-							placeholder={type === "radarr" ? "movies" : "tv"}
 							disabled={isReadOnly}
-						/>
+						>
+							<option value="">None</option>
+							{categories.map((cat) => (
+								<option key={cat.name} value={cat.name}>
+									{cat.name}
+								</option>
+							))}
+						</select>
 						<p className="label text-base-content/70 text-xs">
 							SABnzbd category to use for this instance. Defaults to "
 							{type === "radarr" ? "movies" : "tv"}".

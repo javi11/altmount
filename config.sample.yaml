@@ -10,6 +10,7 @@ webdav:
 # REST API configuration
 api:
   prefix: '/api' # API endpoint prefix
+  key_override: '' # 33-char API key override (takes precedence over database key, leave empty to use database)
 
 # Authentication configuration
 auth:
@@ -161,8 +162,12 @@ mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. 
 # SABnzbd-compatible API configuration
 sabnzbd:
   enabled: false # Enable SABnzbd-compatible API
-  complete_dir: '/complete' # The complete directory where the files will be "downloaded"
-  categories: # Download categories (optional)
+  complete_dir: '/' # Base virtual directory (relative to mount point, defaults to root)
+  categories: # Download categories
+    - name: 'Default' # System default category (name cannot be changed)
+      order: 0
+      priority: 0
+      dir: 'complete' # Default directory for uncategorized downloads
     - name: 'movies'
       order: 1
       priority: 0
