@@ -478,13 +478,11 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 		return s.handleSABnzbdQueuePause(c, false)
 	}
 
-	// Get queue items
-	if s.importerService == nil {
-		return s.writeSABnzbdErrorFiber(c, "Importer service not available")
-	}
-
 	// Get category filter from query parameter
 	categoryFilter := c.Query("category", "")
+	if categoryFilter == "" {
+		categoryFilter = c.Query("cat", "")
+	}
 
 	// Get pagination parameters
 	start := 0

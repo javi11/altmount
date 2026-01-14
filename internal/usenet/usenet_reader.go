@@ -140,19 +140,23 @@ func (b *UsenetReader) Close() error {
 		select {
 		case <-done:
 			// Cleanup completed successfully
+			b.mu.Lock()
 			if b.rg != nil {
 				_ = b.rg.Clear()
 				b.rg = nil
 			}
+			b.mu.Unlock()
 		case <-time.After(30 * time.Second):
 			// Timeout waiting for downloads to complete
 			// This prevents hanging but logs the issue
 			b.log.WarnContext(context.Background(), "Timeout waiting for downloads to complete during close, potential goroutine leak")
 			// Still attempt to clear resources
+			b.mu.Lock()
 			if b.rg != nil {
 				_ = b.rg.Clear()
 				b.rg = nil
 			}
+			b.mu.Unlock()
 		}
 	})
 
@@ -175,7 +179,15 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		}
 	})
 
-	s, err := b.rg.Get()
+	b.mu.Lock()
+	rg := b.rg
+	b.mu.Unlock()
+
+	if rg == nil {
+		return 0, io.ErrClosedPipe
+	}
+
+	s, err := rg.Get()
 	if err != nil {
 		// Check if this is an article not found error
 		b.mu.Lock()
@@ -214,7 +226,15 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// Segment is fully read, remove it from the cache
-				s, err = b.rg.Next()
+				b.mu.Lock()
+				rg := b.rg
+				b.mu.Unlock()
+
+				if rg == nil {
+					return n, io.ErrClosedPipe
+				}
+
+				s, err = rg.Next()
 
 				// Signal that we've moved to the next segment (triggers more downloads)
 				b.mu.Lock()
@@ -263,16 +283,19 @@ func (b *UsenetReader) GetBufferedOffset() int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.nextToDownload == 0 || len(b.rg.segments) == 0 {
+	if b.rg == nil {
+		return 0
+	}
+
+	if b.nextToDownload == 0 {
 		return 0
 	}
 
 	idx := b.nextToDownload - 1
-	if idx >= len(b.rg.segments) {
-		idx = len(b.rg.segments) - 1
+	s, err := b.rg.GetSegment(idx)
+	if err != nil || s == nil {
+		return 0
 	}
-
-	s := b.rg.segments[idx]
 	return s.Start + int64(s.SegmentSize)
 }
 
@@ -363,18 +386,22 @@ func (b *UsenetReader) downloadManager(
 			downloadWorkers = defaultDownloadWorkers
 		}
 
-		if len(b.rg.segments) == 0 {
+		if b.rg.Len() == 0 {
 			return
 		}
 
 		// Calculate max segments to download ahead based on cache size
-		avgSegmentSize := b.rg.segments[0].SegmentSize
+		s0, err := b.rg.GetSegment(0)
+		if err != nil || s0 == nil {
+			return
+		}
+		avgSegmentSize := s0.SegmentSize
 		maxSegmentsAhead := int(b.maxCacheSize / avgSegmentSize)
 		if maxSegmentsAhead < 1 {
 			maxSegmentsAhead = 1 // Always allow at least 1 segment
 		}
-		if maxSegmentsAhead > len(b.rg.segments) {
-			maxSegmentsAhead = len(b.rg.segments)
+		if maxSegmentsAhead > b.rg.Len() {
+			maxSegmentsAhead = b.rg.Len()
 		}
 
 		// Limit concurrent downloads to prevent cache overflow
@@ -398,8 +425,8 @@ func (b *UsenetReader) downloadManager(
 
 			// Calculate how many segments we should have downloaded
 			targetDownload := currentIndex + maxSegmentsAhead
-			if targetDownload > len(b.rg.segments) {
-				targetDownload = len(b.rg.segments)
+			if targetDownload > b.rg.Len() {
+				targetDownload = b.rg.Len()
 			}
 
 			// Download segments that are not yet downloaded or downloading
@@ -432,12 +459,20 @@ func (b *UsenetReader) downloadManager(
 
 				segmentIdx := idx // Capture for closure
 				b.mu.Lock()
-				if b.rg == nil || segmentIdx >= len(b.rg.segments) {
-					b.mu.Unlock()
+				rg := b.rg
+				b.mu.Unlock()
+
+				if rg == nil || segmentIdx >= rg.Len() {
 					continue
 				}
-				s := b.rg.segments[segmentIdx]
-				b.mu.Unlock()
+				s, err := rg.GetSegment(segmentIdx)
+				if err != nil || s == nil {
+					continue
+				}
+
+				if s == nil {
+					continue
+				}
 
 				pool.Go(func(c context.Context) (err error) {
 					defer func() {
@@ -487,7 +522,7 @@ func (b *UsenetReader) downloadManager(
 
 			// Check if all segments are downloaded
 			b.mu.Lock()
-			allDownloaded := b.nextToDownload >= len(b.rg.segments)
+			allDownloaded := b.nextToDownload >= b.rg.Len()
 
 			if len(segmentsToQueue) == 0 && !allDownloaded {
 				// Check for cancellation before waiting

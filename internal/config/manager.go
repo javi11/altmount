@@ -257,6 +257,7 @@ type ArrsConfig struct {
 	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
 	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
 	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
+	QueueCleanupGracePeriodMinutes int                  `yaml:"queue_cleanup_grace_period_minutes" mapstructure:"queue_cleanup_grace_period_minutes" json:"queue_cleanup_grace_period_minutes,omitempty"`
 	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
 }
 
@@ -1021,6 +1022,7 @@ func DefaultConfig(configDir ...string) *Config {
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
 			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
+			QueueCleanupGracePeriodMinutes: 10, // Default to 10 minutes
 			QueueCleanupAllowlist: []IgnoredMessage{
 				{Message: "No files found are eligible", Enabled: true},
 				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
