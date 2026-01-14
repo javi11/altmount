@@ -165,7 +165,7 @@ export function QueuePage() {
 			{
 				type: "warning",
 				confirmText: "Clear All",
-				confirmButtonClass: "btn-warning",
+				confirmButtonClass: "btn-success",
 			},
 		);
 		if (confirmed) {
@@ -195,7 +195,7 @@ export function QueuePage() {
 			{
 				type: "info",
 				confirmText: "Clear All",
-				confirmButtonClass: "btn-info",
+				confirmButtonClass: "btn-warning",
 			},
 		);
 		if (confirmed) {
@@ -467,7 +467,7 @@ export function QueuePage() {
 					{stats && stats.total_completed > 0 && (
 						<button
 							type="button"
-							className="btn btn-warning"
+							className="btn btn-success"
 							onClick={handleClearCompleted}
 							disabled={clearCompleted.isPending}
 						>
@@ -478,7 +478,7 @@ export function QueuePage() {
 					{stats && stats.total_queued > 0 && (
 						<button
 							type="button"
-							className="btn btn-info"
+							className="btn btn-warning"
 							onClick={handleClearPending}
 							disabled={clearPending.isPending}
 						>

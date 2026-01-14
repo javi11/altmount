@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResetStaleItems_OnlyResetsOldItems(t *testing.T) {
+func TestResetStaleItems_ResetsAllProcessingItems(t *testing.T) {
 	// Setup
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err, "Failed to open in-memory database")
@@ -22,17 +22,14 @@ func TestResetStaleItems_OnlyResetsOldItems(t *testing.T) {
 	// Insert items with different ages
 	now := time.Now()
 
-	// Item 1: Stuck for 15 minutes (should be reset)
+	// Item 1: Stuck for 15 minutes
 	insertQueueItemWithTime(t, db, 1, "old.nzb", "processing", now.Add(-15*time.Minute))
 
-	// Item 2: Stuck for 5 minutes (should NOT be reset)
+	// Item 2: Stuck for 5 minutes
 	insertQueueItemWithTime(t, db, 2, "recent.nzb", "processing", now.Add(-5*time.Minute))
 
 	// Item 3: Already pending (should remain unchanged)
 	insertQueueItemWithTime(t, db, 3, "pending.nzb", "pending", now)
-
-	// Item 4: Stuck for exactly 10 minutes (boundary case - should NOT be reset)
-	insertQueueItemWithTime(t, db, 4, "boundary.nzb", "processing", now.Add(-10*time.Minute))
 
 	repo := NewQueueRepository(db)
 
@@ -40,11 +37,13 @@ func TestResetStaleItems_OnlyResetsOldItems(t *testing.T) {
 	err = repo.ResetStaleItems(context.Background())
 	require.NoError(t, err, "ResetStaleItems should not error")
 
-	// Verify: Only item 1 was reset
+	// Verify: Both processing items were reset
 	status1 := getQueueItemStatus(t, db, 1)
+	status2 := getQueueItemStatus(t, db, 2)
 	status3 := getQueueItemStatus(t, db, 3)
 
 	assert.Equal(t, "pending", status1, "Item 1 (15min old) should be reset to pending")
+	assert.Equal(t, "pending", status2, "Item 2 (5min old) should be reset to pending")
 	assert.Equal(t, "pending", status3, "Item 3 (already pending) should remain pending")
 
 	// Verify: started_at was cleared for reset item
@@ -72,31 +71,6 @@ func TestResetStaleItems_NoItemsToReset(t *testing.T) {
 	assert.Equal(t, 0, count, "Queue should still be empty")
 }
 
-func TestResetStaleItems_OnlyRecentProcessingItems(t *testing.T) {
-	// Setup: Only recent processing items (none should be reset)
-	db, err := sql.Open("sqlite3", ":memory:")
-	require.NoError(t, err)
-	defer db.Close()
-
-	setupQueueSchema(t, db)
-
-	now := time.Now()
-	// Insert 5 items all started within last 5 minutes (each with unique path)
-	for i := int64(1); i <= 5; i++ {
-		insertQueueItemWithTime(t, db, i, "recent"+string(rune('0'+i))+".nzb", "processing", now.Add(-time.Duration(i)*time.Minute))
-	}
-
-	repo := NewQueueRepository(db)
-
-	// Test: Reset stale items
-	err = repo.ResetStaleItems(context.Background())
-	require.NoError(t, err)
-
-	// Verify: All items still processing (none were reset)
-
-	pendingCount := countQueueItemsByStatus(t, db, "pending")
-	assert.Equal(t, 5, pendingCount, "All items should be reset to pending")
-}
 
 func TestResetStaleItems_MixedStatuses(t *testing.T) {
 	// Setup: Items with various statuses

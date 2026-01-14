@@ -1,4 +1,4 @@
-import { AlertTriangle, Plus, Save, Webhook } from "lucide-react";
+import { AlertTriangle, Plus, Save, Trash2, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRegisterArrsWebhooks } from "../../hooks/useApi";
 import type { ArrsConfig, ArrsInstanceConfig, ArrsType, ConfigResponse } from "../../types/config";
@@ -44,6 +44,7 @@ export function ArrsConfigSection({
 	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
 	const [webhookError, setWebhookError] = useState<string | null>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
+	const [newIgnoreMessage, setNewIgnoreMessage] = useState("");
 
 	const registerWebhooks = useRegisterArrsWebhooks();
 
@@ -192,6 +193,34 @@ export function ArrsConfigSection({
 		setShowAddInstance(false);
 	};
 
+	const handleAddIgnoreMessage = () => {
+		if (!newIgnoreMessage.trim()) return;
+
+		const currentList = formData.queue_cleanup_allowlist || [];
+		if (currentList.some((m) => m.message === newIgnoreMessage.trim())) {
+			setNewIgnoreMessage("");
+			return;
+		}
+
+		const newList = [...currentList, { message: newIgnoreMessage.trim(), enabled: true }];
+		handleFormChange("queue_cleanup_allowlist", newList);
+		setNewIgnoreMessage("");
+	};
+
+	const handleRemoveIgnoreMessage = (index: number) => {
+		const currentList = formData.queue_cleanup_allowlist || [];
+		const newList = [...currentList];
+		newList.splice(index, 1);
+		handleFormChange("queue_cleanup_allowlist", newList);
+	};
+
+	const handleToggleIgnoreMessage = (index: number) => {
+		const currentList = formData.queue_cleanup_allowlist || [];
+		const newList = [...currentList];
+		newList[index] = { ...newList[index], enabled: !newList[index].enabled };
+		handleFormChange("queue_cleanup_allowlist", newList);
+	};
+
 	const handleSave = async () => {
 		if (!onUpdate || validationErrors.length > 0) return;
 		setSaveError(null);
@@ -338,26 +367,101 @@ export function ArrsConfigSection({
 							</div>
 
 							{(formData.queue_cleanup_enabled ?? true) && (
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Cleanup Interval (seconds)</legend>
-									<input
-										type="number"
-										className="input w-full max-w-xs"
-										value={formData.queue_cleanup_interval_seconds ?? 10}
-										onChange={(e) =>
-											handleFormChange(
-												"queue_cleanup_interval_seconds",
-												Number.parseInt(e.target.value, 10) || 10,
-											)
-										}
-										min={1}
-										max={3600}
-										disabled={isReadOnly}
-									/>
-									<p className="label text-base-content/70">
-										How often to check for empty import pending folders (default: 10 seconds)
-									</p>
-								</fieldset>
+								<>
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Cleanup Interval (seconds)</legend>
+										<input
+											type="number"
+											className="input w-full max-w-xs"
+											value={formData.queue_cleanup_interval_seconds ?? 10}
+											onChange={(e) =>
+												handleFormChange(
+													"queue_cleanup_interval_seconds",
+													Number.parseInt(e.target.value, 10) || 10,
+												)
+											}
+											min={1}
+											max={3600}
+											disabled={isReadOnly}
+										/>
+										<p className="label text-base-content/70">
+											How often to check for empty import pending folders (default: 10 seconds)
+										</p>
+									</fieldset>
+
+									<div className="divider" />
+
+									<div>
+										<h4 className="font-medium mb-2">Ignored Error Messages</h4>
+										<p className="text-base-content/70 text-sm mb-4">
+											Additional error messages that are safe to auto-cleanup. You can enable/disable default rules or add custom ones.
+										</p>
+
+										{/* List of ignored messages */}
+										<div className="space-y-2 mb-4">
+											{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
+												<div
+													key={index}
+													className="flex items-center justify-between bg-base-300 p-2 rounded-lg"
+												>
+													<div className="flex items-center flex-1 mr-4">
+														<input
+															type="checkbox"
+															className="checkbox checkbox-sm checkbox-primary mr-3"
+															checked={msg.enabled}
+															onChange={() => handleToggleIgnoreMessage(index)}
+															disabled={isReadOnly}
+														/>
+														<span className={`text-sm font-mono break-all ${!msg.enabled ? "opacity-50 line-through" : ""}`}>
+															{msg.message}
+														</span>
+													</div>
+													<button
+														type="button"
+														className="btn btn-ghost btn-xs btn-circle text-error"
+														onClick={() => handleRemoveIgnoreMessage(index)}
+														disabled={isReadOnly}
+														title="Delete rule"
+													>
+														<Trash2 className="h-4 w-4" />
+													</button>
+												</div>
+											))}
+											{(formData.queue_cleanup_allowlist || []).length === 0 && (
+												<div className="text-center py-4 bg-base-100 rounded-lg text-base-content/50 text-sm italic">
+													No ignored messages configured
+												</div>
+											)}
+										</div>
+
+										{/* Add new message input */}
+										<div className="flex gap-2">
+											<input
+												type="text"
+												className="input input-sm w-full"
+												placeholder="e.g. Not a Custom Format upgrade"
+												value={newIgnoreMessage}
+												onChange={(e) => setNewIgnoreMessage(e.target.value)}
+												onKeyDown={(e) => {
+													if (e.key === "Enter") {
+														e.preventDefault();
+														handleAddIgnoreMessage();
+													}
+												}}
+												disabled={isReadOnly}
+											/>
+											<button
+												type="button"
+												className="btn btn-sm btn-primary"
+												onClick={handleAddIgnoreMessage}
+												disabled={isReadOnly || !newIgnoreMessage.trim()}
+											>
+												<Plus className="h-4 w-4" />
+												Add
+											</button>
+										</div>
+									</div>
+								</>
 							)}
 						</div>
 					</div>

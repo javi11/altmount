@@ -78,6 +78,8 @@ type DatabaseConfig struct {
 type MetadataConfig struct {
 	RootPath                 string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
 	DeleteSourceNzbOnRemoval *bool  `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
+	DeleteFailedNzb          *bool  `yaml:"delete_failed_nzb" mapstructure:"delete_failed_nzb" json:"delete_failed_nzb,omitempty"`
+	DeleteCompletedNzb       *bool  `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
 }
 
 // StreamingConfig represents streaming and chunking configuration
@@ -239,40 +241,10 @@ type SABnzbdCategory struct {
 	Type     string `yaml:"type" mapstructure:"type" json:"type"` // "sonarr" or "radarr"
 }
 
-// DefaultCategoryName is the name of the mandatory default category
-const DefaultCategoryName = "Default"
-
-// DefaultCategoryDir is the default directory for the Default category
-const DefaultCategoryDir = "complete"
-
-// EnsureDefaultCategory ensures that the Default category always exists in the configuration.
-// The Default category's name cannot be changed, but order, priority, and dir can be customized via YAML.
-// If not configured, uses sensible defaults (order=0, priority=0, dir="complete").
-func (c *Config) EnsureDefaultCategory() {
-	// Check if Default category already exists
-	for i, cat := range c.SABnzbd.Categories {
-		if strings.EqualFold(cat.Name, DefaultCategoryName) {
-			// Ensure the name is exactly "Default" (case-sensitive)
-			c.SABnzbd.Categories[i].Name = DefaultCategoryName
-			// Keep customized values from YAML, only set defaults if not configured
-			// Dir defaults to "complete" if empty
-			if c.SABnzbd.Categories[i].Dir == "" {
-				c.SABnzbd.Categories[i].Dir = DefaultCategoryDir
-			}
-			return
-		}
-	}
-
-	// Default category doesn't exist, add it at the beginning with default values
-	defaultCat := SABnzbdCategory{
-		Name:     DefaultCategoryName,
-		Order:    0,
-		Priority: 0,                // Normal priority
-		Dir:      DefaultCategoryDir, // Default dir for files
-	}
-
-	// Prepend Default category to the list
-	c.SABnzbd.Categories = append([]SABnzbdCategory{defaultCat}, c.SABnzbd.Categories...)
+// IgnoredMessage represents an error message to ignore during queue cleanup
+type IgnoredMessage struct {
+	Message string `yaml:"message" mapstructure:"message" json:"message"`
+	Enabled bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
 }
 
 // ArrsConfig represents arrs configuration
@@ -282,8 +254,10 @@ type ArrsConfig struct {
 	WebhookBaseURL              string               `yaml:"webhook_base_url" mapstructure:"webhook_base_url" json:"webhook_base_url,omitempty"`
 	RadarrInstances             []ArrsInstanceConfig `yaml:"radarr_instances" mapstructure:"radarr_instances" json:"radarr_instances"`
 	SonarrInstances             []ArrsInstanceConfig `yaml:"sonarr_instances" mapstructure:"sonarr_instances" json:"sonarr_instances"`
-	QueueCleanupEnabled         *bool `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
-	QueueCleanupIntervalSeconds int   `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	QueueCleanupEnabled            *bool                `yaml:"queue_cleanup_enabled" mapstructure:"queue_cleanup_enabled" json:"queue_cleanup_enabled,omitempty"`
+	QueueCleanupIntervalSeconds    int                  `yaml:"queue_cleanup_interval_seconds" mapstructure:"queue_cleanup_interval_seconds" json:"queue_cleanup_interval_seconds,omitempty"`
+	CleanupAutomaticImportFailure  *bool                `yaml:"cleanup_automatic_import_failure" mapstructure:"cleanup_automatic_import_failure" json:"cleanup_automatic_import_failure,omitempty"`
+	QueueCleanupAllowlist          []IgnoredMessage     `yaml:"queue_cleanup_allowlist" mapstructure:"queue_cleanup_allowlist" json:"queue_cleanup_allowlist,omitempty"`
 }
 
 // ArrsInstanceConfig represents a single arrs instance configuration
@@ -892,6 +866,7 @@ func DefaultConfig(configDir ...string) *Config {
 	loginRequired := true // Require login by default
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
+	cleanupAutomaticImportFailure := false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath string
@@ -1045,6 +1020,17 @@ func DefaultConfig(configDir ...string) *Config {
 			WebhookBaseURL:  "http://altmount:8080",
 			RadarrInstances: []ArrsInstanceConfig{},
 			SonarrInstances: []ArrsInstanceConfig{},
+			CleanupAutomaticImportFailure: &cleanupAutomaticImportFailure,
+			QueueCleanupAllowlist: []IgnoredMessage{
+				{Message: "No files found are eligible", Enabled: true},
+				{Message: "One or more episodes expected in this release were not imported or missing", Enabled: true},
+				{Message: "is not a valid video file", Enabled: true},
+				{Message: "Sample file", Enabled: true},
+				{Message: "No video files were found in the selected folder", Enabled: true},
+				{Message: "Could not find file", Enabled: true},
+				{Message: "Unexpected error processing file", Enabled: true},
+				{Message: "Download doesn't contain intermediate path", Enabled: true},
+			},
 		},
 		Fuse: FuseConfig{
 			Enabled:             &fuseEnabled,
