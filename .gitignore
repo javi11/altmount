@@ -39,4 +39,3 @@ example/
 *debug*
 rclone.conf
 db.sqlite
-import_nzb.py
