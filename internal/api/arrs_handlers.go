@@ -140,9 +140,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			pathsToScan = append(pathsToScan, req.Series.Path)
 		}
 	case "EpisodeFileDelete":
-		if req.EpisodeFile.Path != "" {
-			pathsToDelete = append(pathsToDelete, req.EpisodeFile.Path)
-		}
+		slog.InfoContext(c.Context(), "Ignoring EpisodeFileDelete webhook to prevent accidental library wipes")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
 	default:
 		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
