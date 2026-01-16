@@ -132,3 +132,45 @@ func TestRegisterCorruptedFile_PlaybackFailureBehavior(t *testing.T) {
 	}
 	assert.True(t, found, "File should be picked up by GetUnhealthyFiles")
 }
+
+func TestHealthRepository_DeleteHealthRecordsByPrefix(t *testing.T) {
+	repo := setupTestDB(t)
+	ctx := context.Background()
+
+	// Insert some files
+	files := []string{
+		"movies/Movie1/file1.mkv",
+		"movies/Movie1/file2.mkv",
+		"movies/Movie2/file.mkv",
+		"tv/Show1/S01E01.mkv",
+		"movies/Movie1", // Folder record (exact match)
+	}
+
+	for _, f := range files {
+		err := repo.UpdateFileHealth(ctx, f, HealthStatusHealthy, nil, nil, nil, false)
+		require.NoError(t, err)
+	}
+
+	// Delete by prefix "movies/Movie1"
+	count, err := repo.DeleteHealthRecordsByPrefix(ctx, "movies/Movie1")
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), count) // "movies/Movie1/file1.mkv", "movies/Movie1/file2.mkv", "movies/Movie1"
+
+	// Verify others are still there
+	h, err := repo.GetFileHealth(ctx, "movies/Movie2/file.mkv")
+	require.NoError(t, err)
+	assert.NotNil(t, h)
+
+	h, err = repo.GetFileHealth(ctx, "tv/Show1/S01E01.mkv")
+	require.NoError(t, err)
+	assert.NotNil(t, h)
+
+	// Verify deleted are gone
+	h, err = repo.GetFileHealth(ctx, "movies/Movie1/file1.mkv")
+	require.NoError(t, err)
+	assert.Nil(t, h)
+
+	h, err = repo.GetFileHealth(ctx, "movies/Movie1")
+	require.NoError(t, err)
+	assert.Nil(t, h)
+}
