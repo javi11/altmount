@@ -2,7 +2,6 @@ package usenet
 
 import (
 	"context"
-	"io"
 )
 
 type SegmentLoader interface {
@@ -85,16 +84,8 @@ func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader)
 			continue
 		}
 
-		r, w := io.Pipe()
-		seg := &segment{
-			Id:          src.Id,
-			Start:       readStart,
-			End:         readEnd,
-			SegmentSize: src.Size,
-			groups:      groups,
-			reader:      r,
-			writer:      w,
-		}
+		// Create buffered segment - downloads complete without blocking on readers
+		seg := newSegment(src.Id, readStart, readEnd, src.Size, groups)
 		segments = append(segments, seg)
 
 		logicalFilePos += usableLen
