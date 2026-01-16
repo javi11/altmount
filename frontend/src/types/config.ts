@@ -25,6 +25,7 @@ export interface WebDAVConfig {
 	port: number;
 	user: string;
 	password: string;
+	host?: string;
 }
 
 // API server configuration
@@ -257,6 +258,7 @@ export interface WebDAVUpdateRequest {
 	port?: number;
 	user?: string;
 	password?: string;
+	host?: string;
 	debug?: boolean;
 }
 
@@ -432,6 +434,7 @@ export interface WebDAVFormData {
 	port: number;
 	user: string;
 	password: string;
+	host?: string;
 }
 
 export interface APIFormData {
