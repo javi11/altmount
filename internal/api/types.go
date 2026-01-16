@@ -14,11 +14,20 @@ import (
 // ConfigAPIResponse wraps config.Config with sensitive data handling
 type ConfigAPIResponse struct {
 	*config.Config
+	WebDAV    WebDAVAPIResponse     `json:"webdav"`
 	Import    ImportAPIResponse     `json:"import"`
 	RClone    RCloneAPIResponse     `json:"rclone"`
 	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers []ProviderAPIResponse `json:"providers"`
 	APIKey    string                `json:"api_key,omitempty"` // User's API key for authentication
+}
+
+// WebDAVAPIResponse sanitizes WebDAV config for API responses
+type WebDAVAPIResponse struct {
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"` // Masked if set
+	Host     string `json:"host"`
 }
 
 // RCloneAPIResponse sanitizes RClone config for API responses
@@ -221,8 +230,16 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FallbackAPIKeySet:     cfg.SABnzbd.FallbackAPIKey != "",
 	}
 
+	webdavResp := WebDAVAPIResponse{
+		Port:     cfg.WebDAV.Port,
+		User:     cfg.WebDAV.User,
+		Password: "********", // Mask password
+		Host:     cfg.WebDAV.Host,
+	}
+
 	return &ConfigAPIResponse{
 		Config:    cfg,
+		WebDAV:    webdavResp,
 		Import:    ToImportAPIResponse(cfg.Import),
 		RClone:    rcloneResp,
 		SABnzbd:   sabnzbdResp,
