@@ -193,8 +193,20 @@ type segmentReader struct {
 }
 
 func (r *segmentReader) Read(p []byte) (n int, err error) {
+	r.s.mx.Lock()
+	closed := r.s.closed
+	downloadErr := r.s.downloadErr
+	r.s.mx.Unlock()
+
+	if closed {
+		if downloadErr != nil {
+			return 0, downloadErr
+		}
+		return 0, io.ErrClosedPipe
+	}
+
 	// Always check for download error first - this takes priority over EOF
-	if downloadErr := r.s.GetDownloadError(); downloadErr != nil {
+	if downloadErr != nil {
 		return 0, downloadErr
 	}
 
@@ -279,6 +291,18 @@ func (s *segment) GetReader() io.Reader {
 			remaining: remaining,
 		}
 	})
+
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	if s.cachedReader == nil {
+		// If it's nil, it means it was closed.
+		// Return a reader that returns an error.
+		return &segmentReader{
+			s:         s,
+			reader:    bytes.NewReader(nil),
+			remaining: 0,
+		}
+	}
 
 	return s.cachedReader
 }

@@ -642,3 +642,32 @@ func TestSegment_LazyAllocation_ManySegments(t *testing.T) {
 		seg.Close()
 	}
 }
+
+// TestSegment_GetReader_OnClosedSegment verifies that GetReader returns a valid (non-nil)
+// reader that returns io.ErrClosedPipe even if the segment was closed before reading.
+func TestSegment_GetReader_OnClosedSegment(t *testing.T) {
+	t.Parallel()
+
+	seg := newSegment("test-segment", 0, 100, 101, nil)
+
+	// Close the segment first
+	if err := seg.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	// GetReader should NOT return nil
+	r := seg.GetReader()
+	if r == nil {
+		t.Fatal("GetReader returned nil for closed segment")
+	}
+
+	// Read should return io.ErrClosedPipe
+	buf := make([]byte, 10)
+	n, err := r.Read(buf)
+	if n != 0 {
+		t.Errorf("Expected 0 bytes read, got %d", n)
+	}
+	if !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("Expected io.ErrClosedPipe, got %v", err)
+	}
+}

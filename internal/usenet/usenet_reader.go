@@ -45,6 +45,7 @@ func (e *DataCorruptionError) Unwrap() error {
 type UsenetReader struct {
 	log                *slog.Logger
 	wg                 sync.WaitGroup
+	ctx                context.Context
 	cancel             context.CancelFunc
 	rg                 *segmentRange
 	maxDownloadWorkers int
@@ -81,6 +82,7 @@ func NewUsenetReader(
 
 	ur := &UsenetReader{
 		log:                 log,
+		ctx:                 ctx,
 		cancel:              cancel,
 		rg:                  rg,
 		init:                make(chan any, 1),
@@ -114,7 +116,7 @@ func NewUsenetReader(
 // This is useful for pre-fetching data before the first Read call.
 func (b *UsenetReader) Start() {
 	b.initDownload.Do(func() {
-		// Use select to avoid blocking or panicking if closed
+		// Use select to avoid blocking
 		select {
 		case b.init <- struct{}{}:
 		default:
@@ -126,12 +128,11 @@ func (b *UsenetReader) Close() error {
 	b.closeOnce.Do(func() {
 		b.cancel()
 
-		// Drain and close init channel safely
+		// Drain init channel safely
 		select {
 		case <-b.init:
 		default:
 		}
-		close(b.init)
 
 		// Unblock any pending writes/reads
 		if b.rg != nil {
@@ -182,7 +183,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 	}
 
 	b.initDownload.Do(func() {
-		// Use select to avoid blocking or panicking if closed
+		// Use select to avoid blocking
 		select {
 		case b.init <- struct{}{}:
 		default:
@@ -224,8 +225,14 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 	}
 
 	n := 0
+	reader := s.GetReader()
 	for n < len(p) {
-		nn, err := s.GetReader().Read(p[n:])
+		// Check for context cancellation
+		if err := b.ctx.Err(); err != nil {
+			return n, err
+		}
+
+		nn, err := reader.Read(p[n:])
 		n += nn
 
 		// Track total bytes read
@@ -277,6 +284,9 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 					}
 					return n, io.EOF
 				}
+
+				// Update reader for the new segment
+				reader = s.GetReader()
 			} else {
 				// Check if this is an article not found error
 				if b.isArticleNotFoundError(err) {
