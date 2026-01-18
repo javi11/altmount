@@ -183,6 +183,17 @@ func (m *Manager) workerLoop(workerID int) {
 
 	log := m.log.With("worker_id", workerID)
 
+	// Recovery for panic in worker loop
+	defer func() {
+		if r := recover(); r != nil {
+			log.ErrorContext(m.ctx, "Panic in queue worker", "panic", r)
+			// Restart the worker after a delay to avoid tight loop crashing
+			time.Sleep(5 * time.Second)
+			m.wg.Add(1)
+			go m.workerLoop(workerID)
+		}
+	}()
+
 	// Get processing interval from configuration
 	processingIntervalSeconds := m.configGetter().Import.QueueProcessingIntervalSeconds
 	processingInterval := time.Duration(processingIntervalSeconds) * time.Second
