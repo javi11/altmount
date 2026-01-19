@@ -6,6 +6,7 @@ webdav:
   port: 8080
   user: 'usenet'
   password: 'usenet'
+  host: '' # External host/IP for .strm generation (defaults to localhost if empty)
 
 # REST API configuration
 api:

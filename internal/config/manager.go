@@ -45,6 +45,7 @@ type WebDAVConfig struct {
 	Port     int    `yaml:"port" mapstructure:"port" json:"port"`
 	User     string `yaml:"user" mapstructure:"user" json:"user"`
 	Password string `yaml:"password" mapstructure:"password" json:"password"`
+	Host     string `yaml:"host" mapstructure:"host" json:"host,omitempty"`
 }
 
 // FuseConfig represents FUSE mount configuration
