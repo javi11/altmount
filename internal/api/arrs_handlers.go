@@ -213,9 +213,27 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	// Process File Deletions
 	for _, path := range filesToDelete {
 		normalizedPath := normalize(path)
+
+		// Safety check: Don't delete if we are about to scan this same path (e.g. in-place upgrade/rename)
+		isBeingScanned := false
+		for _, scanPath := range pathsToScan {
+			if normalize(scanPath) == normalizedPath {
+				isBeingScanned = true
+				break
+			}
+		}
+
+		if isBeingScanned {
+			slog.InfoContext(c.Context(), "Skipping webhook file deletion because file is being upgraded/scanned",
+				"path", normalizedPath,
+				"event_type", req.EventType)
+			continue
+		}
+
 		slog.InfoContext(c.Context(), "Processing webhook file deletion",
 			"original_path", path,
-			"normalized_path", normalizedPath)
+			"normalized_path", normalizedPath,
+			"event_type", req.EventType)
 
 		// Delete health record
 		if s.healthRepo != nil {
@@ -225,6 +243,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		}
 
 		// Delete metadata
+		/*
 		if s.metadataService != nil {
 			// Check if we should delete source NZB
 			deleteSource := false
@@ -236,6 +255,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 				slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", normalizedPath, "error", err)
 			}
 		}
+		*/
+		slog.InfoContext(c.Context(), "Skipping metadata deletion (preserved by safety policy)", "path", normalizedPath)
 	}
 
 	// Process Directory Deletions
@@ -255,11 +276,14 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		}
 
 		// Delete metadata directory
+		/*
 		if s.metadataService != nil {
 			if err := s.metadataService.DeleteDirectory(normalizedPath); err != nil {
 				slog.DebugContext(c.Context(), "Failed to delete metadata directory from webhook (might be gone)", "path", normalizedPath, "error", err)
 			}
 		}
+		*/
+		slog.InfoContext(c.Context(), "Skipping metadata directory deletion (preserved by safety policy)", "path", normalizedPath)
 	}
 
 	if len(pathsToScan) == 0 {
