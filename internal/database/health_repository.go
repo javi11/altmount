@@ -460,6 +460,28 @@ func (r *HealthRepository) DeleteHealthRecord(ctx context.Context, filePath stri
 	return nil
 }
 
+// DeleteHealthRecordsByPrefix removes health records that start with the given prefix
+func (r *HealthRepository) DeleteHealthRecordsByPrefix(ctx context.Context, prefix string) (int64, error) {
+	prefix = strings.TrimPrefix(prefix, "/")
+	if prefix == "" {
+		return 0, nil
+	}
+	// Ensure prefix ends with separator to match files inside it
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
+
+	query := `DELETE FROM file_health WHERE file_path LIKE ?`
+	likePattern := prefix + "%"
+
+	result, err := r.db.ExecContext(ctx, query, likePattern)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete health records by prefix %s: %w", prefix, err)
+	}
+
+	return result.RowsAffected()
+}
+
 // CleanupHealthRecords removes health records for files that no longer exist
 func (r *HealthRepository) CleanupHealthRecords(ctx context.Context, existingFiles []string) error {
 	if len(existingFiles) == 0 {
