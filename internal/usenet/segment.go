@@ -108,17 +108,18 @@ func (r *segmentRange) CloseSegments() {
 func (r *segmentRange) Clear() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var errs error
 	for _, s := range r.segments {
 		if s != nil {
 			if err := s.Close(); err != nil {
-				return err
+				errs = errors.Join(errs, err)
 			}
 		}
 	}
 
 	r.segments = nil
 
-	return nil
+	return errs
 }
 
 // segment represents a downloaded usenet segment with buffered storage.
