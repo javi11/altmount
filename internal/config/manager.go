@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/pathutil"
-	"github.com/javi11/nntppool/v2"
 	"github.com/jinzhu/copier"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -628,29 +627,13 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 	return true // All providers are identical
 }
 
-// ToNNTPProviders converts ProviderConfig slice to nntppool.UsenetProviderConfig slice (enabled only)
-func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
-	var providers []nntppool.UsenetProviderConfig
+// GetEnabledProviders returns a slice of enabled providers
+func (c *Config) GetEnabledProviders() []ProviderConfig {
+	var providers []ProviderConfig
 	for _, p := range c.Providers {
 		// Only include enabled providers
-		if *p.Enabled {
-			isBackup := false
-			if p.IsBackupProvider != nil {
-				isBackup = *p.IsBackupProvider
-			}
-			providers = append(providers, nntppool.UsenetProviderConfig{
-				Host:                           p.Host,
-				Port:                           p.Port,
-				Username:                       p.Username,
-				Password:                       p.Password,
-				MaxConnections:                 p.MaxConnections,
-				MaxConnectionIdleTimeInSeconds: 60, // Default idle timeout
-				TLS:                            p.TLS,
-				InsecureSSL:                    p.InsecureTLS,
-				ProxyURL:                       p.ProxyURL,
-				MaxConnectionTTLInSeconds:      60, // Default connection TTL
-				IsBackupProvider:               isBackup,
-			})
+		if p.Enabled != nil && *p.Enabled {
+			providers = append(providers, p)
 		}
 	}
 	return providers

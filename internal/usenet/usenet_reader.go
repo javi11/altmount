@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/avast/retry-go/v4"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v3"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -50,7 +51,7 @@ type UsenetReader struct {
 	initDownload       sync.Once
 	closeOnce          sync.Once
 	totalBytesRead     int64
-	poolGetter         func() (nntppool.UsenetConnectionPool, error) // Dynamic pool getter
+	poolGetter         func() (nntppool.NNTPClient, error) // Dynamic pool getter
 
 	// Dynamic download tracking
 	nextToDownload      int          // Index of next segment to download
@@ -62,7 +63,7 @@ type UsenetReader struct {
 
 func NewUsenetReader(
 	ctx context.Context,
-	poolGetter func() (nntppool.UsenetConnectionPool, error),
+	poolGetter func() (nntppool.NNTPClient, error),
 	rg *segmentRange,
 	maxDownloadWorkers int,
 	maxCacheSizeMB int,
@@ -276,7 +277,8 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 // isArticleNotFoundError checks if the error indicates articles were not found in providers
 func (b *UsenetReader) isArticleNotFoundError(err error) bool {
-	return errors.Is(err, nntppool.ErrArticleNotFoundInProviders)
+	var articleErr *nntppool.ArticleNotFoundError
+	return errors.As(err, &articleErr)
 }
 
 func (b *UsenetReader) GetBufferedOffset() int64 {
@@ -325,8 +327,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 			}
 
 			// Attempt download using the timeout context
-			bytesWritten, err := cp.Body(attemptCtx, segment.Id, segment.Writer(), segment.groups)
+			err = cp.Body(attemptCtx, segment.Id, segment.Writer())
 			if err != nil {
+				if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
+					return nil
+				}
+
 				if errors.Is(err, context.DeadlineExceeded) {
 					b.log.DebugContext(ctx, "Segment download attempt timed out after 30s", "segment_id", segment.Id)
 				}
@@ -334,7 +340,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 				if strings.Contains(err.Error(), "data corruption detected") {
 					return &DataCorruptionError{
 						UnderlyingErr: err,
-						BytesRead:     bytesWritten,
+						BytesRead:     0,
 					}
 				}
 
