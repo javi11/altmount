@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -329,19 +328,9 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 			// Attempt download using the timeout context
 			err = cp.Body(attemptCtx, segment.Id, segment.Writer())
 			if err != nil {
-				if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
+				// the segment is closed, so we can return nil no retry needed
+				if errors.Is(err, io.ErrClosedPipe) {
 					return nil
-				}
-
-				if errors.Is(err, context.DeadlineExceeded) {
-					b.log.DebugContext(ctx, "Segment download attempt timed out after 30s", "segment_id", segment.Id)
-				}
-
-				if strings.Contains(err.Error(), "data corruption detected") {
-					return &DataCorruptionError{
-						UnderlyingErr: err,
-						BytesRead:     0,
-					}
 				}
 
 				return err
@@ -354,11 +343,11 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 		retry.MaxDelay(2*time.Second),
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(func(err error) bool {
-			if b.isArticleNotFoundError(err) {
+			if b.isArticleNotFoundError(err) || ctx.Err() != nil {
 				return false
 			}
 			// Retry on pool-related errors OR timeout errors
-			return b.isPoolUnavailableError(err) || errors.Is(err, context.DeadlineExceeded)
+			return true
 		}),
 		retry.OnRetry(func(n uint, err error) {
 			b.log.DebugContext(ctx, "Pool unavailable or timeout, retrying segment download",
@@ -501,7 +490,6 @@ func (b *UsenetReader) downloadManager(
 
 					taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segmentIdx)
 					err = b.downloadSegmentWithRetry(taskCtx, s)
-
 					if err != nil {
 						// Check if writer supports CloseWithError (PipeWriter does)
 						if cew, ok := w.(interface{ CloseWithError(error) error }); ok {
