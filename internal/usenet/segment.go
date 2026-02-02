@@ -121,6 +121,8 @@ func (r *segmentRange) Clear() error {
 }
 
 type segment struct {
+	ctx           context.Context
+	cancel        context.CancelFunc
 	Id            string
 	Start         int64
 	End           int64
@@ -225,6 +227,8 @@ func (s *segment) Close() error {
 	if s.closed {
 		return nil
 	}
+
+	s.cancel()
 	s.closed = true
 
 	var e1, e2 error

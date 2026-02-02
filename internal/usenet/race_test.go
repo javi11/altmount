@@ -38,7 +38,7 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 		return nil, fmt.Errorf("mock error")
 	}
 
-	ur, err := NewUsenetReader(ctx, poolGetter, rg, 1, 10)
+	ur, err := NewUsenetReader(ctx, poolGetter, rg, 1)
 	if err != nil {
 		t.Fatalf("Failed to create UsenetReader: %v", err)
 	}

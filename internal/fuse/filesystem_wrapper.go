@@ -7,7 +7,6 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
 
@@ -42,19 +41,11 @@ func (c *ContextAdapter) MkdirAll(name string, perm os.FileMode) error {
 }
 
 func (c *ContextAdapter) Open(name string) (afero.File, error) {
-	ctx := context.Background()
-	if c.config.MaxCacheSizeMB > 0 {
-		ctx = context.WithValue(ctx, utils.MaxCacheSizeKey, c.config.MaxCacheSizeMB)
-	}
-	return c.fs.Open(ctx, name)
+	return c.fs.Open(context.Background(), name)
 }
 
 func (c *ContextAdapter) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	ctx := context.Background()
-	if c.config.MaxCacheSizeMB > 0 {
-		ctx = context.WithValue(ctx, utils.MaxCacheSizeKey, c.config.MaxCacheSizeMB)
-	}
-	return c.fs.OpenFile(ctx, name, flag, perm)
+	return c.fs.OpenFile(context.Background(), name, flag, perm)
 }
 
 func (c *ContextAdapter) Remove(name string) error {

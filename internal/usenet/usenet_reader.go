@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	defaultMaxCacheSize    = 32 * 1024 * 1024 // Default to 32MB
 	defaultDownloadWorkers = 15
 )
 
@@ -45,7 +44,6 @@ type UsenetReader struct {
 	cancel             context.CancelFunc
 	rg                 *segmentRange
 	maxDownloadWorkers int
-	maxCacheSize       int64 // Maximum cache size in bytes
 	init               chan any
 	initDownload       sync.Once
 	closeOnce          sync.Once
@@ -65,16 +63,9 @@ func NewUsenetReader(
 	poolGetter func() (nntppool.NNTPClient, error),
 	rg *segmentRange,
 	maxDownloadWorkers int,
-	maxCacheSizeMB int,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
-
-	// Convert MB to bytes
-	maxCacheSize := int64(maxCacheSizeMB) * 1024 * 1024
-	if maxCacheSize <= 0 {
-		maxCacheSize = defaultMaxCacheSize
-	}
 
 	ur := &UsenetReader{
 		log:                 log,
@@ -82,7 +73,6 @@ func NewUsenetReader(
 		rg:                  rg,
 		init:                make(chan any, 1),
 		maxDownloadWorkers:  maxDownloadWorkers,
-		maxCacheSize:        maxCacheSize,
 		poolGetter:          poolGetter,
 		nextToDownload:      0,
 		downloadingSegments: make(map[int]bool),
@@ -315,10 +305,6 @@ func (b *UsenetReader) isPoolUnavailableError(err error) bool {
 func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
 	return retry.Do(
 		func() error {
-			// Create a per-attempt timeout context to prevent hanging on network/DNS issues
-			attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-
 			// Get current pool
 			cp, err := b.poolGetter()
 			if err != nil {
@@ -326,7 +312,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 			}
 
 			// Attempt download using the timeout context
-			err = cp.Body(attemptCtx, segment.Id, segment.Writer())
+			err = cp.Body(ctx, segment.Id, segment.Writer())
 			if err != nil {
 				// the segment is closed, so we can return nil no retry needed
 				if errors.Is(err, io.ErrClosedPipe) {
@@ -338,12 +324,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 
 			return nil
 		},
-		retry.Attempts(10),
+		retry.Attempts(5),
 		retry.Delay(50*time.Millisecond),
 		retry.MaxDelay(2*time.Second),
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(func(err error) bool {
-			if b.isArticleNotFoundError(err) || ctx.Err() != nil {
+			if b.isArticleNotFoundError(err) || segment.ctx.Err() != nil || ctx.Err() != nil || errors.Is(err, context.Canceled) {
 				return false
 			}
 			// Retry on pool-related errors OR timeout errors
@@ -385,23 +371,10 @@ func (b *UsenetReader) downloadManager(
 			return
 		}
 
-		// Calculate max segments to download ahead based on cache size
-		s0, err := b.rg.GetSegment(0)
-		if err != nil || s0 == nil {
-			return
-		}
-		avgSegmentSize := s0.SegmentSize
-		maxSegmentsAhead := int(b.maxCacheSize / avgSegmentSize)
-		if maxSegmentsAhead < 1 {
-			maxSegmentsAhead = 1 // Always allow at least 1 segment
-		}
+		// Use download workers count as the segments-ahead limit
+		maxSegmentsAhead := downloadWorkers
 		if maxSegmentsAhead > b.rg.Len() {
 			maxSegmentsAhead = b.rg.Len()
-		}
-
-		// Limit concurrent downloads to prevent cache overflow
-		if downloadWorkers > maxSegmentsAhead {
-			downloadWorkers = maxSegmentsAhead
 		}
 
 		pool := pool.New().

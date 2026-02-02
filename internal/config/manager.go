@@ -55,7 +55,6 @@ type FuseConfig struct {
 	AttrTimeoutSeconds  int    `yaml:"attr_timeout_seconds" mapstructure:"attr_timeout_seconds" json:"attr_timeout_seconds"`
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxDownloadWorkers  int    `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
-	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
 }
 
@@ -86,7 +85,6 @@ type MetadataConfig struct {
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
 	MaxDownloadWorkers int `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
-	MaxCacheSizeMB     int `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -162,7 +160,6 @@ type ImportConfig struct {
 	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
-	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
@@ -299,10 +296,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("streaming max_download_workers must be greater than 0")
 	}
 
-	if c.Streaming.MaxCacheSizeMB <= 0 {
-		c.Streaming.MaxCacheSizeMB = 32 // Default to 32MB if not set
-	}
-
 	if c.Import.MaxProcessorWorkers <= 0 {
 		return fmt.Errorf("import max_processor_workers must be greater than 0")
 	}
@@ -317,10 +310,6 @@ func (c *Config) Validate() error {
 
 	if c.Import.MaxImportConnections <= 0 {
 		return fmt.Errorf("import max_import_connections must be greater than 0")
-	}
-
-	if c.Import.ImportCacheSizeMB <= 0 {
-		return fmt.Errorf("import import_cache_size_mb must be greater than 0")
 	}
 
 	if c.Import.SegmentSamplePercentage < 1 || c.Import.SegmentSamplePercentage > 100 {
@@ -544,9 +533,6 @@ func (c *Config) Validate() error {
 	// Validate Fuse configuration
 	if c.Fuse.MaxDownloadWorkers <= 0 {
 		c.Fuse.MaxDownloadWorkers = 15 // Default
-	}
-	if c.Fuse.MaxCacheSizeMB <= 0 {
-		c.Fuse.MaxCacheSizeMB = 32 // Default
 	}
 	if c.Fuse.MaxReadAheadMB <= 0 {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
@@ -896,7 +882,6 @@ func DefaultConfig(configDir ...string) *Config {
 		},
 		Streaming: StreamingConfig{
 			MaxDownloadWorkers: 15, // Default: 15 download workers
-			MaxCacheSizeMB:     32, // Default: 32MB cache for ahead downloads
 		},
 		RClone: RCloneConfig{
 			Path:         rclonePath,
@@ -950,7 +935,6 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
-			ImportCacheSizeMB:       64,                 // Default: 64MB cache for archive analysis
 			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
 			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
@@ -1024,7 +1008,6 @@ func DefaultConfig(configDir ...string) *Config {
 			AttrTimeoutSeconds:  1,
 			EntryTimeoutSeconds: 1,
 			MaxDownloadWorkers:  15,
-			MaxCacheSizeMB:      128,
 			MaxReadAheadMB:      128,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled

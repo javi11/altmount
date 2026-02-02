@@ -85,8 +85,12 @@ func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader)
 			continue
 		}
 
+		ctx, cancel := context.WithCancel(ctx)
+
 		r, w := io.Pipe()
 		seg := &segment{
+			ctx:         ctx,
+			cancel:      cancel,
 			Id:          src.Id,
 			Start:       readStart,
 			End:         readEnd,

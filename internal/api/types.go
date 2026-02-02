@@ -106,7 +106,6 @@ type ImportAPIResponse struct {
 	QueueProcessingIntervalSeconds int                   `json:"queue_processing_interval_seconds"` // Interval in seconds
 	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
 	MaxImportConnections           int                   `json:"max_import_connections"`
-	ImportCacheSizeMB              int                   `json:"import_cache_size_mb"`
 	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
 	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
 	ImportDir                      *string               `json:"import_dir,omitempty"`
@@ -237,7 +236,6 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		QueueProcessingIntervalSeconds: importConfig.QueueProcessingIntervalSeconds,
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 		MaxImportConnections:           importConfig.MaxImportConnections,
-		ImportCacheSizeMB:              importConfig.ImportCacheSizeMB,
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
 		ImportStrategy:                 importConfig.ImportStrategy,
 		ImportDir:                      importConfig.ImportDir,
