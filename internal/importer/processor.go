@@ -36,64 +36,57 @@ type Processor struct {
 	poolManager             pool.Manager // Pool manager for dynamic pool access
 	configGetter            config.ConfigGetter
 	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
-	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
-	skipHealthCheck         bool
-	validationTimeout       time.Duration
-	allowedFileExtensions   []string
-	log                     *slog.Logger
-	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
-
-	// Pre-compiled regex patterns for RAR file sorting
-	rarPartPattern    *regexp.Regexp // pattern.part###.rar
-	rarRPattern       *regexp.Regexp // pattern.r### or pattern.r##
-	rarNumericPattern *regexp.Regexp // pattern.### (numeric extensions)
-}
-
-// NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, skipHealthCheck bool) *Processor {
-	return &Processor{
-		parser:                  parser.NewParser(poolManager),
-		strmParser:              parser.NewStrmParser(),
-		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
-		poolManager:             poolManager,
-		configGetter:            configGetter,
-		maxImportConnections:    maxImportConnections,
-		segmentSamplePercentage: segmentSamplePercentage,
-		skipHealthCheck:         skipHealthCheck,
-		validationTimeout:       5 * time.Second, // Default validation timeout for imports
-		allowedFileExtensions:   allowedFileExtensions,
-		log:                     slog.Default().With("component", "nzb-processor"),
-		broadcaster:             broadcaster,
-
+		segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
+		validationTimeout       time.Duration
+		allowedFileExtensions   []string
+		log                     *slog.Logger
+		broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
+	
+		// Pre-compiled regex patterns for RAR file sorting
+		rarPartPattern    *regexp.Regexp // pattern.part###.rar
+		rarRPattern       *regexp.Regexp // pattern.r### or pattern.r##
+		rarNumericPattern *regexp.Regexp // pattern.### (numeric extensions)
+	}
+	
+	// NewProcessor creates a new NZB processor using metadata storage
+	func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, importCacheSizeMB int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter) *Processor {
+		return &Processor{
+			parser:                  parser.NewParser(poolManager),
+			strmParser:              parser.NewStrmParser(),
+			metadataService:         metadataService,
+			rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
+			sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
+			poolManager:             poolManager,
+			configGetter:            configGetter,
+			maxImportConnections:    maxImportConnections,
+			segmentSamplePercentage: segmentSamplePercentage,
+			validationTimeout:       5 * time.Second, // Default validation timeout for imports
+			allowedFileExtensions:   allowedFileExtensions,
+			log:                     slog.Default().With("component", "nzb-processor"),
+			broadcaster:             broadcaster,
+	
 			// Initialize pre-compiled regex patterns for RAR file sorting
-				rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
-				rarRPattern:       regexp.MustCompile(`^(.+)\.r(\d+)$`),         // filename.r00, filename.r01
-				rarNumericPattern: regexp.MustCompile(`^(.+)\.(\d+)$`),          // filename.001, filename.002
-			}
+			rarPartPattern:    regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
+			rarRPattern:       regexp.MustCompile(`^(.+)\.r(\d+)$`),         // filename.r00, filename.r01
+			rarNumericPattern: regexp.MustCompile(`^(.+)\.(\d+)$`),          // filename.001, filename.002
 		}
-		
-		// getCleanNzbName removes the queue ID prefix from the NZB filename if present
-		func (proc *Processor) getCleanNzbName(nzbPath string, queueID int) string {
-			baseName := filepath.Base(nzbPath)
-			prefix := fmt.Sprintf("%d_", queueID)
-			if strings.HasPrefix(baseName, prefix) {
-				return strings.TrimPrefix(baseName, prefix)
-			}
-			return baseName
+	}
+	
+	// getCleanNzbName removes the queue ID prefix from the NZB filename if present
+	func (proc *Processor) getCleanNzbName(nzbPath string, queueID int) string {
+		baseName := filepath.Base(nzbPath)
+		prefix := fmt.Sprintf("%d_", queueID)
+		if strings.HasPrefix(baseName, prefix) {
+			return strings.TrimPrefix(baseName, prefix)
 		}
-		
-		func (proc *Processor) SetSkipHealthCheck(skip bool) {
-			proc.skipHealthCheck = skip
-		}
-		
-		func (proc *Processor) SetSegmentSamplePercentage(percentage int) {
-			proc.segmentSamplePercentage = percentage
-		}
-		
-		func (proc *Processor) isCategoryFolder(path string) bool {
-			cfg := proc.configGetter()
+		return baseName
+	}
+	
+	func (proc *Processor) SetSegmentSamplePercentage(percentage int) {
+		proc.segmentSamplePercentage = percentage
+	}
+	
+	func (proc *Processor) isCategoryFolder(path string) bool {			cfg := proc.configGetter()
 			normalizedPath := strings.Trim(filepath.ToSlash(path), "/")
 			completeDir := strings.Trim(filepath.ToSlash(cfg.SABnzbd.CompleteDir), "/")
 		
@@ -326,33 +319,29 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 				return "", err
 			}
 		
-			// Use the final name for processing
-			regularFiles[0].Filename = finalName
-		
-			// Determine sample percentage based on skipHealthCheck
-			samplePercentage := proc.segmentSamplePercentage
-			if proc.skipHealthCheck {
-				samplePercentage = 0
-			}
-		
-			// Process the single file at the resolved parentPath
-			result, err := singlefile.ProcessSingleFile(
-				ctx,
-				parentPath,
-				regularFiles[0],
-				par2Files,
-				nzbPath,
-				proc.metadataService,
-				proc.poolManager,
-				maxConnections,
-				samplePercentage,
-				allowedExtensions,
-				timeout,
-			)
-			if err != nil {
-				return "", err
-			}
-		
+				// Use the final name for processing
+				regularFiles[0].Filename = finalName
+			
+				// Determine sample percentage based on skipHealthCheck
+				samplePercentage := proc.segmentSamplePercentage
+			
+						// Process the single file at the resolved parentPath
+						result, err := singlefile.ProcessSingleFile(
+							ctx,
+							parentPath,
+							regularFiles[0],
+							par2Files,
+							nzbPath,
+							proc.metadataService,
+							proc.poolManager,
+							maxConnections,
+							samplePercentage,
+							allowedExtensions,
+							timeout,
+						)
+						if err != nil {
+							return "", err
+						}		
 			return result, nil
 		}
 		
@@ -404,32 +393,28 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 					return "", err
 				}
 		
-				targetBaseDir = nzbFolder
-			}
-		
-			// Determine sample percentage based on skipHealthCheck
-			samplePercentage := proc.segmentSamplePercentage
-			if proc.skipHealthCheck {
-				samplePercentage = 0
-			}
-		
-			// Process all regular files
-			if err := multifile.ProcessRegularFiles(
-				ctx,
-				targetBaseDir,
-				regularFiles,
-				par2Files,
-				nzbPath,
-				proc.metadataService,
-				proc.poolManager,
-				maxConnections,
-				samplePercentage,
-				allowedExtensions,
-				timeout,
-			); err != nil {
-				return "", err
-			}
-		
+						targetBaseDir = nzbFolder
+					}
+				
+					// Determine sample percentage based on skipHealthCheck
+					samplePercentage := proc.segmentSamplePercentage
+				
+						// Process all regular files
+						if err := multifile.ProcessRegularFiles(
+							ctx,
+							targetBaseDir,
+							regularFiles,
+							par2Files,
+							nzbPath,
+							proc.metadataService,
+							proc.poolManager,
+							maxConnections,
+							samplePercentage,
+							allowedExtensions,
+							timeout,
+						); err != nil {
+							return "", err
+						}		
 			return targetBaseDir, nil
 		}
 		
@@ -487,37 +472,33 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 					releaseDate = archiveFiles[0].ReleaseDate.Unix()
 				}
 		
-				// Create progress tracker for 80-95% range (validation only, metadata handled separately)
-				validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-		
-				// Determine sample percentage based on skipHealthCheck
-				samplePercentage := proc.segmentSamplePercentage
-				if proc.skipHealthCheck {
-					samplePercentage = 0
-				}
-		
-				// Process archive with unified aggregator
-				err := rar.ProcessArchive(
-					ctx,
-					nzbFolder,
-					archiveFiles,
-					parsed.GetPassword(),
-					releaseDate,
-					parsed.Path,
-					proc.rarProcessor,
-					proc.metadataService,
-					proc.poolManager,
-					archiveProgressTracker,
-					validationProgressTracker,
-					maxConnections,
-					samplePercentage,
-					allowedExtensions,
-					timeout,
-				)
-				if err != nil {
-					return "", err
-				}
-				// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
+						// Create progress tracker for 80-95% range (validation only, metadata handled separately)
+						validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
+				
+						// Determine sample percentage based on skipHealthCheck
+						samplePercentage := proc.segmentSamplePercentage
+				
+								// Process archive with unified aggregator
+								err := rar.ProcessArchive(
+									ctx,
+									nzbFolder,
+									archiveFiles,
+									parsed.GetPassword(),
+									releaseDate,
+									parsed.Path,
+									proc.rarProcessor,
+									proc.metadataService,
+									proc.poolManager,
+									archiveProgressTracker,
+									validationProgressTracker,
+									maxConnections,
+									samplePercentage,
+									allowedExtensions,
+									timeout,
+								)
+								if err != nil {
+									return "", err
+								}				// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
 			}
 		
 			return nzbFolder, nil
@@ -576,37 +557,33 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 					releaseDate = archiveFiles[0].ReleaseDate.Unix()
 				}
 		
-				// Create progress tracker for 80-95% range (validation only, metadata handled separately)
-				validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-		
-				// Determine sample percentage based on skipHealthCheck
-				samplePercentage := proc.segmentSamplePercentage
-				if proc.skipHealthCheck {
-					samplePercentage = 0
-				}
-		
-				// Process archive with unified aggregator
-				err := sevenzip.ProcessArchive(
-					ctx,
-					nzbFolder,
-					archiveFiles,
-					parsed.GetPassword(),
-					releaseDate,
-					parsed.Path,
-					proc.sevenZipProcessor,
-					proc.metadataService,
-					proc.poolManager,
-					archiveProgressTracker,
-					validationProgressTracker,
-					maxConnections,
-					samplePercentage,
-					allowedExtensions,
-					timeout,
-				)
-				if err != nil {
-					return "", err
-				}
-				// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
+						// Create progress tracker for 80-95% range (validation only, metadata handled separately)
+						validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
+				
+						// Determine sample percentage based on skipHealthCheck
+						samplePercentage := proc.segmentSamplePercentage
+				
+								// Process archive with unified aggregator
+								err := sevenzip.ProcessArchive(
+									ctx,
+									nzbFolder,
+									archiveFiles,
+									parsed.GetPassword(),
+									releaseDate,
+									parsed.Path,
+									proc.sevenZipProcessor,
+									proc.metadataService,
+									proc.poolManager,
+									archiveProgressTracker,
+									validationProgressTracker,
+									maxConnections,
+									samplePercentage,
+									allowedExtensions,
+									timeout,
+								)
+								if err != nil {
+									return "", err
+								}				// Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
 			}
 		
 			return nzbFolder, nil
