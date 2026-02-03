@@ -120,4 +120,3 @@ func (m *Manager) GetSeries(ctx context.Context, client *sonarr.Sonarr, instance
 
 	return v.([]*sonarr.Series), nil
 }
-

@@ -57,7 +57,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	// 1. Download Test NZB (1GB)
 	// We use the 1GB file to ensure high-speed connections are properly tested
 	nzbURL := "https://sabnzbd.org/tests/test_download_1GB.nzb"
-	
+
 	req, err := http.NewRequestWithContext(c.Context(), http.MethodGet, nzbURL, nil)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -241,4 +241,3 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		},
 	})
 }
-

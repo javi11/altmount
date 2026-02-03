@@ -343,7 +343,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		// Get speed test info
 		var lastSpeedTestMbps float64
 		var lastSpeedTestTime *time.Time
-		
+
 		// Try to look up by ID first
 		if info, ok := providerConfigMap[providerInfo.ID()]; ok {
 			lastSpeedTestMbps = info.Speed

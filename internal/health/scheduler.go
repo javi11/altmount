@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	minInterval              = 1 * time.Hour   // Absolute minimum interval
-	aggressiveCheckThreshold = 7 * 24 * time.Hour // Files younger than 7 days
+	minInterval              = 1 * time.Hour       // Absolute minimum interval
+	aggressiveCheckThreshold = 7 * 24 * time.Hour  // Files younger than 7 days
 	dailyCheckThreshold      = 30 * 24 * time.Hour // Files between 7 and 30 days
 	aggressiveCheckInterval  = 6 * time.Hour
 	dailyCheckInterval       = 24 * time.Hour

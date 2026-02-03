@@ -303,7 +303,7 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 	}
 
 	streams := s.streamTracker.GetAll()
-	
+
 	// Check for filter parameter
 	filterType := c.Query("type") // e.g., type=file
 

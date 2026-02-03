@@ -85,13 +85,13 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 	numFiles := 50
 	for i := 0; i < numFiles; i++ {
 		fileName := filepath.Join("movies", "movie_"+fmt.Sprintf("%d", i)+".mkv")
-		
+
 		// Create a dummy metadata object
-						meta := metadataService.CreateFileMetadata(
-							100, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil,
-							metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
-						)
-						err := metadataService.WriteFileMetadata(fileName, meta)
+		meta := metadataService.CreateFileMetadata(
+			100, "test.nzb", metapb.FileStatus_FILE_STATUS_HEALTHY, nil,
+			metapb.Encryption_NONE, "", "", nil, nil, 0, nil, "",
+		)
+		err := metadataService.WriteFileMetadata(fileName, meta)
 		require.NoError(t, err)
 	}
 
@@ -99,7 +99,7 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 	ctx := context.Background()
 	// dryRun = false
 	result := worker.SyncLibrary(ctx, false)
-    
+
 	// SyncLibrary returns nil on success (non-dry-run)
 	assert.Nil(t, result)
 

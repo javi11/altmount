@@ -70,7 +70,7 @@ func TestParser_Parse(t *testing.T) {
 	// Note: ORDER BY c.ParentId, c.Name
 	// file1 parent is rel1
 	// file2 parent is ext
-	
+
 	// Item 1
 	select {
 	case res, ok := <-out:
@@ -78,7 +78,7 @@ func TestParser_Parse(t *testing.T) {
 		// file2 (parent 'ext') might come first depending on sorting, but let's see.
 		// Actually, since we order by ParentId, and IDs are likely UUIDs or sequential.
 		// In our insert, 'ext' comes after 'rel1' alphabetically? maybe.
-		
+
 		if res.Name == "Actual.Movie.Name" {
 			assert.Equal(t, "movies", res.Category)
 			content, _ := io.ReadAll(res.Content)

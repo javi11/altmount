@@ -52,6 +52,7 @@ export function WebDAVConfigSection({
 				port: formData.port,
 				user: formData.user,
 				password: formData.password,
+				host: formData.host || "",
 			};
 			await onUpdate("webdav", webdavData);
 
@@ -111,7 +112,22 @@ export function WebDAVConfigSection({
 				</div>
 			</fieldset>
 
-			<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">External Host</legend>
+					<input
+						type="text"
+						className="input"
+						value={formData.host || ""}
+						readOnly={isReadOnly}
+						onChange={(e) => handleInputChange("host", e.target.value)}
+						placeholder="localhost"
+					/>
+					<p className="label">
+						External hostname or IP address used for .strm file generation. Defaults to localhost
+						if empty.
+					</p>
+				</fieldset>
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Port</legend>
 					<input
@@ -123,6 +139,8 @@ export function WebDAVConfigSection({
 					/>
 					<p className="label">WebDAV server port for client connections</p>
 				</fieldset>
+			</div>
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Username</legend>
 					<input

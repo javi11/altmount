@@ -14,11 +14,20 @@ import (
 // ConfigAPIResponse wraps config.Config with sensitive data handling
 type ConfigAPIResponse struct {
 	*config.Config
+	WebDAV    WebDAVAPIResponse     `json:"webdav"`
 	Import    ImportAPIResponse     `json:"import"`
 	RClone    RCloneAPIResponse     `json:"rclone"`
 	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
 	Providers []ProviderAPIResponse `json:"providers"`
 	APIKey    string                `json:"api_key,omitempty"` // User's API key for authentication
+}
+
+// WebDAVAPIResponse sanitizes WebDAV config for API responses
+type WebDAVAPIResponse struct {
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"` // Masked if set
+	Host     string `json:"host"`
 }
 
 // RCloneAPIResponse sanitizes RClone config for API responses
@@ -27,17 +36,16 @@ type RCloneAPIResponse struct {
 	PasswordSet bool `json:"password_set"`
 	SaltSet     bool `json:"salt_set"`
 
-		// RC (Remote Control) Configuration
+	// RC (Remote Control) Configuration
 
-		RCEnabled    bool              `json:"rc_enabled"`
+	RCEnabled bool `json:"rc_enabled"`
 
-		RCUrl        string            `json:"rc_url"`
+	RCUrl string `json:"rc_url"`
 
-		VFSName      string            `json:"vfs_name"`
+	VFSName string `json:"vfs_name"`
 
-		RCPort       int               `json:"rc_port"`
+	RCPort int `json:"rc_port"`
 
-	
 	RCUser    string            `json:"rc_user"`
 	RCPassSet bool              `json:"rc_pass_set"`
 	RCOptions map[string]string `json:"rc_options"`
@@ -221,8 +229,16 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FallbackAPIKeySet:     cfg.SABnzbd.FallbackAPIKey != "",
 	}
 
+	webdavResp := WebDAVAPIResponse{
+		Port:     cfg.WebDAV.Port,
+		User:     cfg.WebDAV.User,
+		Password: "********", // Mask password
+		Host:     cfg.WebDAV.Host,
+	}
+
 	return &ConfigAPIResponse{
 		Config:    cfg,
+		WebDAV:    webdavResp,
 		Import:    ToImportAPIResponse(cfg.Import),
 		RClone:    rcloneResp,
 		SABnzbd:   sabnzbdResp,
@@ -330,21 +346,21 @@ type QueueStatsResponse struct {
 
 // HealthItemResponse represents a health record in API responses
 type HealthItemResponse struct {
-	ID               int64                 `json:"id"`
-	FilePath         string                `json:"file_path"`
-	LibraryPath      *string               `json:"library_path,omitempty"`
-	Status           database.HealthStatus `json:"status"`
-	LastChecked      time.Time             `json:"last_checked"`
-	LastError        *string               `json:"last_error"`
-	RetryCount       int                   `json:"retry_count"`
-	MaxRetries       int                   `json:"max_retries"`
-	SourceNzbPath    *string               `json:"source_nzb_path"`
-	ErrorDetails     *string               `json:"error_details"`
-	RepairRetryCount int                   `json:"repair_retry_count"`
-	MaxRepairRetries int                   `json:"max_repair_retries"`
-	CreatedAt        time.Time             `json:"created_at"`
-	UpdatedAt        time.Time             `json:"updated_at"`
-	ScheduledCheckAt *time.Time            `json:"scheduled_check_at,omitempty"`
+	ID               int64                   `json:"id"`
+	FilePath         string                  `json:"file_path"`
+	LibraryPath      *string                 `json:"library_path,omitempty"`
+	Status           database.HealthStatus   `json:"status"`
+	LastChecked      time.Time               `json:"last_checked"`
+	LastError        *string                 `json:"last_error"`
+	RetryCount       int                     `json:"retry_count"`
+	MaxRetries       int                     `json:"max_retries"`
+	SourceNzbPath    *string                 `json:"source_nzb_path"`
+	ErrorDetails     *string                 `json:"error_details"`
+	RepairRetryCount int                     `json:"repair_retry_count"`
+	MaxRepairRetries int                     `json:"max_repair_retries"`
+	CreatedAt        time.Time               `json:"created_at"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+	ScheduledCheckAt *time.Time              `json:"scheduled_check_at,omitempty"`
 	Priority         database.HealthPriority `json:"priority"`
 }
 
@@ -384,9 +400,9 @@ type HealthCleanupRequest struct {
 
 // HealthCheckRequest represents request to add file for manual health checking
 type HealthCheckRequest struct {
-	FilePath   string  `json:"file_path"`
-	MaxRetries *int    `json:"max_retries,omitempty"`
-	SourceNzb  *string `json:"source_nzb_path,omitempty"`
+	FilePath   string                  `json:"file_path"`
+	MaxRetries *int                    `json:"max_retries,omitempty"`
+	SourceNzb  *string                 `json:"source_nzb_path,omitempty"`
 	Priority   database.HealthPriority `json:"priority,omitempty"`
 }
 
@@ -476,7 +492,7 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 	if strings.HasSuffix(strings.ToLower(targetPath), ".nzb") {
 		targetPath = targetPath[:len(targetPath)-4]
 	}
-	
+
 	// Remove ID prefix (e.g. "123_filename")
 	parts := strings.SplitN(targetPath, "_", 2)
 	if len(parts) == 2 {
@@ -681,17 +697,17 @@ type ManualImportResponse struct {
 
 // ProviderStatusResponse represents NNTP provider connection status in API responses
 type ProviderStatusResponse struct {
-	ID                    string    `json:"id"`
-	Host                  string    `json:"host"`
-	Username              string    `json:"username"`
-	UsedConnections       int       `json:"used_connections"`
-	MaxConnections        int       `json:"max_connections"`
-	State                 string    `json:"state"`
-	ErrorCount            int64     `json:"error_count"`
-	LastConnectionAttempt time.Time `json:"last_connection_attempt"`
-	LastSuccessfulConnect time.Time `json:"last_successful_connect"`
-	FailureReason         string    `json:"failure_reason"`
-	LastSpeedTestMbps     float64   `json:"last_speed_test_mbps"`
+	ID                    string     `json:"id"`
+	Host                  string     `json:"host"`
+	Username              string     `json:"username"`
+	UsedConnections       int        `json:"used_connections"`
+	MaxConnections        int        `json:"max_connections"`
+	State                 string     `json:"state"`
+	ErrorCount            int64      `json:"error_count"`
+	LastConnectionAttempt time.Time  `json:"last_connection_attempt"`
+	LastSuccessfulConnect time.Time  `json:"last_successful_connect"`
+	FailureReason         string     `json:"failure_reason"`
+	LastSpeedTestMbps     float64    `json:"last_speed_test_mbps"`
 	LastSpeedTestTime     *time.Time `json:"last_speed_test_time,omitempty"`
 }
 

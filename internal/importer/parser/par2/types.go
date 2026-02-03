@@ -36,11 +36,11 @@ type PacketHeader struct {
 // FileDescriptor represents a file description from a PAR2 FileDesc packet
 // Reference: https://github.com/akalin/gopar/blob/main/par2/file_description_packet.go
 type FileDescriptor struct {
-	FileID     [16]byte // Unique file identifier (MD5 of [Hash16k, Length, Name])
-	FileMD5    [16]byte // MD5 hash of entire file content
-	Hash16k    [16]byte // MD5 hash of first 16KB of file (for matching)
-	Length     uint64   // File length in bytes
-	Name       string   // Original filename (variable length, null-terminated, 4-byte aligned)
+	FileID  [16]byte // Unique file identifier (MD5 of [Hash16k, Length, Name])
+	FileMD5 [16]byte // MD5 hash of entire file content
+	Hash16k [16]byte // MD5 hash of first 16KB of file (for matching)
+	Length  uint64   // File length in bytes
+	Name    string   // Original filename (variable length, null-terminated, 4-byte aligned)
 }
 
 const (

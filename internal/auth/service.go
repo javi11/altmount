@@ -45,7 +45,7 @@ type Config struct {
 // DefaultConfig returns default authentication configuration
 func DefaultConfig() *Config {
 	return &Config{
-		TokenDuration:     24 * time.Hour, // 24 hours
+		TokenDuration:     24 * time.Hour,       // 24 hours
 		CookieDomain:      "",                   // Empty string allows browser to use current domain
 		CookieSecure:      false,                // true for production
 		CookieSameSite:    http.SameSiteLaxMode, // Use Lax mode for Safari compatibility

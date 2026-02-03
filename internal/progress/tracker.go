@@ -52,9 +52,10 @@ func (pt *Tracker) UpdateAbsolute(percentage int) {
 // where each operation reports progress from 0→N, but we want overall progress.
 //
 // Example: Processing 3 files with 100, 50, 50 segments (200 total):
-//   File 1: OffsetTracker{offset: 0, total: 200} → updates 0/200, 1/200, ..., 100/200
-//   File 2: OffsetTracker{offset: 100, total: 200} → updates 100/200, 101/200, ..., 150/200
-//   File 3: OffsetTracker{offset: 150, total: 200} → updates 150/200, 151/200, ..., 200/200
+//
+//	File 1: OffsetTracker{offset: 0, total: 200} → updates 0/200, 1/200, ..., 100/200
+//	File 2: OffsetTracker{offset: 100, total: 200} → updates 100/200, 101/200, ..., 150/200
+//	File 3: OffsetTracker{offset: 150, total: 200} → updates 150/200, 151/200, ..., 200/200
 type OffsetTracker struct {
 	baseTracker *Tracker
 	offset      int

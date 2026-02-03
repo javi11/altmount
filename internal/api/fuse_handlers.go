@@ -164,10 +164,10 @@ func (s *Server) AutoStartFuse() {
 	cfg := s.configManager.GetConfig()
 	if cfg.Fuse.Enabled != nil && *cfg.Fuse.Enabled && cfg.Fuse.MountPath != "" {
 		slog.Info("Auto-starting FUSE mount", "path", cfg.Fuse.MountPath)
-		
+
 		// Create a fake fiber context for the internal call or just extract logic
 		// For simplicity, let's just trigger it manually since we have all info
-		
+
 		s.fuseManager.mu.Lock()
 		if s.fuseManager.status == "running" {
 			s.fuseManager.mu.Unlock()

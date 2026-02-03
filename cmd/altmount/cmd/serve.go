@@ -211,10 +211,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go func() {
 		// Wait for server to be fully ready
 		time.Sleep(5 * time.Second)
-		
+
 		// Use a fresh background context
 		bgCtx := context.Background()
-		
+
 		// Find an API key to use for the webhook
 		// If we don't have one, we can't register securely
 		apiKey := ""
@@ -223,7 +223,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if key := arrsService.GetFirstAdminAPIKey(bgCtx); key != "" {
 			apiKey = key
 		}
-		
+
 		if apiKey != "" {
 			logger.InfoContext(bgCtx, "Triggering automatic ARR webhook registration")
 			if err := arrsService.EnsureWebhookRegistration(bgCtx, "http://altmount:8080", apiKey); err != nil {
