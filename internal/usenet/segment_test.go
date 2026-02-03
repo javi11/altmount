@@ -470,3 +470,223 @@ func TestSegment_ErrorPropagation_ConcurrentAccess(t *testing.T) {
 		_ = seg.Close()
 	}
 }
+
+// =============================================================================
+// Tests for segmentRange.Clear() early return bug fix
+// =============================================================================
+
+// TestSegmentRangeClear_ContinuesOnError is the critical test for the memory leak fix.
+// It verifies that Clear() continues closing ALL segments even when some return errors.
+// This is a regression test for: https://github.com/javi11/altmount/issues/XXX
+func TestSegmentRangeClear_ContinuesOnError(t *testing.T) {
+	t.Parallel()
+
+	const numSegments = 5
+
+	// Create segments
+	segments := make([]*segment, numSegments)
+	for i := 0; i < numSegments; i++ {
+		r, w := io.Pipe()
+		segments[i] = &segment{
+			Id:     "segment-" + string(rune('0'+i)),
+			reader: r,
+			writer: w,
+		}
+	}
+
+	// Pre-close segment 2 to simulate a condition where Close returns "already closed"
+	_ = segments[2].Close()
+
+	sr := &segmentRange{
+		segments: segments,
+		current:  0,
+	}
+
+	// Call Clear - this should close ALL segments, not stop at segment 2
+	_ = sr.Clear()
+
+	// Verify all segments are closed (closed flag should be true)
+	for i := 0; i < numSegments; i++ {
+		segments[i].mx.Lock()
+		isClosed := segments[i].closed
+		segments[i].mx.Unlock()
+
+		if !isClosed {
+			t.Errorf("Segment %d should be closed after Clear(), but closed=%v", i, isClosed)
+		}
+	}
+
+	// segments slice should be nil
+	if sr.segments != nil {
+		t.Error("Expected segments slice to be nil after Clear()")
+	}
+}
+
+// TestSegmentRangeClear_AllSegmentsClosed verifies that all segments are properly
+// closed when Clear() is called on a fresh segmentRange.
+func TestSegmentRangeClear_AllSegmentsClosed(t *testing.T) {
+	t.Parallel()
+
+	const numSegments = 10
+
+	segments := make([]*segment, numSegments)
+	for i := 0; i < numSegments; i++ {
+		r, w := io.Pipe()
+		segments[i] = &segment{
+			Id:     "segment",
+			reader: r,
+			writer: w,
+		}
+	}
+
+	sr := &segmentRange{
+		segments: segments,
+		current:  0,
+	}
+
+	// Clear should close all segments
+	err := sr.Clear()
+	if err != nil {
+		t.Logf("Clear() returned error (expected with fix): %v", err)
+	}
+
+	// All segments should have closed=true
+	for i, seg := range segments {
+		seg.mx.Lock()
+		isClosed := seg.closed
+		seg.mx.Unlock()
+
+		if !isClosed {
+			t.Errorf("Segment %d should be closed after Clear()", i)
+		}
+	}
+
+	// segments slice should be nil
+	if sr.segments != nil {
+		t.Error("Expected segments slice to be nil after Clear()")
+	}
+}
+
+// TestSegmentRangeClear_NilSegmentsHandled verifies that Clear() handles nil
+// segments in the slice gracefully.
+func TestSegmentRangeClear_NilSegmentsHandled(t *testing.T) {
+	t.Parallel()
+
+	r1, w1 := io.Pipe()
+	r2, w2 := io.Pipe()
+
+	segments := []*segment{
+		{Id: "s1", reader: r1, writer: w1},
+		nil, // nil segment
+		{Id: "s2", reader: r2, writer: w2},
+	}
+
+	sr := &segmentRange{
+		segments: segments,
+	}
+
+	// Clear should not panic and should close non-nil segments
+	err := sr.Clear()
+	if err != nil {
+		t.Logf("Clear() returned error: %v", err)
+	}
+
+	// Non-nil segments should be closed
+	segments[0].mx.Lock()
+	if !segments[0].closed {
+		t.Error("Segment 0 should be closed")
+	}
+	segments[0].mx.Unlock()
+
+	segments[2].mx.Lock()
+	if !segments[2].closed {
+		t.Error("Segment 2 should be closed")
+	}
+	segments[2].mx.Unlock()
+}
+
+// TestSegmentRangeClear_EmptyRange verifies that Clear() handles empty ranges.
+func TestSegmentRangeClear_EmptyRange(t *testing.T) {
+	t.Parallel()
+
+	sr := &segmentRange{
+		segments: []*segment{},
+	}
+
+	// Clear should succeed without error
+	err := sr.Clear()
+	if err != nil {
+		t.Errorf("Clear() on empty range returned error: %v", err)
+	}
+}
+
+// TestSegmentRangeClear_NilRange verifies Clear() handles nil segment slice.
+func TestSegmentRangeClear_NilRange(t *testing.T) {
+	t.Parallel()
+
+	sr := &segmentRange{
+		segments: nil,
+	}
+
+	// Clear should succeed without error
+	err := sr.Clear()
+	if err != nil {
+		t.Errorf("Clear() on nil segments returned error: %v", err)
+	}
+}
+
+// TestSegmentRangeClear_ConcurrentSafety tests that Clear is safe with concurrent access.
+func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
+	t.Parallel()
+
+	const numSegments = 10
+	segments := make([]*segment, numSegments)
+
+	for i := 0; i < numSegments; i++ {
+		r, w := io.Pipe()
+		segments[i] = &segment{
+			Id:     "segment",
+			reader: r,
+			writer: w,
+		}
+	}
+
+	sr := &segmentRange{
+		segments: segments,
+	}
+
+	// Call Clear from multiple goroutines
+	var wg sync.WaitGroup
+
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = sr.Clear()
+		}()
+	}
+
+	wg.Wait()
+
+	// Should not panic and should complete
+}
+
+// BenchmarkClear benchmarks the Clear operation
+func BenchmarkClear(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		segments := make([]*segment, 100)
+		for j := 0; j < 100; j++ {
+			r, w := io.Pipe()
+			segments[j] = &segment{
+				Id:     "segment",
+				reader: r,
+				writer: w,
+			}
+		}
+		sr := &segmentRange{segments: segments}
+		b.StartTimer()
+
+		_ = sr.Clear()
+	}
+}
