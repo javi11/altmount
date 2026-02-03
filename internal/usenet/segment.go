@@ -107,17 +107,23 @@ func (r *segmentRange) CloseSegments() {
 func (r *segmentRange) Clear() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Collect all errors instead of returning early on first error.
+	// This prevents resource leaks when one segment fails to close.
+	// See: Memory leak root cause analysis - Clear() early return bug
+	var errs []error
 	for _, s := range r.segments {
 		if s != nil {
 			if err := s.Close(); err != nil {
-				return err
+				errs = append(errs, err)
+				// Continue closing remaining segments - don't return early!
 			}
 		}
 	}
 
 	r.segments = nil
 
-	return nil
+	return errors.Join(errs...)
 }
 
 type segment struct {
