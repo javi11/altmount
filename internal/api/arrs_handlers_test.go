@@ -93,7 +93,7 @@ func TestHandleArrsWebhook_EpisodeFileDelete(t *testing.T) {
 	}
 
 	assert.Equal(t, true, result["success"])
-	assert.Equal(t, "Deletions processed", result["message"])
+	assert.Equal(t, "Ignored", result["message"])
 }
 func TestHandleArrsWebhook_MovieFileDelete(t *testing.T) {
 	app := fiber.New()
