@@ -149,7 +149,7 @@ func (t *StreamTracker) snapshotLoop() {
 					if currentBytes > progress {
 						progress = currentBytes
 					}
-					
+
 					remainingBytes := s.TotalSize - progress
 					if remainingBytes > 0 {
 						s.ETA = remainingBytes / s.BytesPerSecond
@@ -269,7 +269,7 @@ func (t *StreamTracker) KillStream(id string) bool {
 func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	
+
 	// Return a copy of history, reversed (newest first)
 	res := make([]nzbfilesystem.ActiveStream, len(t.history))
 	for i, s := range t.history {
@@ -298,13 +298,13 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 
 		if existing, ok := grouped[groupKey]; ok {
 			// Aggregate with existing group
-			
+
 			// Sum up bytes sent from all connections
 			currentBytes := atomic.LoadInt64(&s.BytesSent)
 			existing.BytesSent += currentBytes
 			existing.BytesPerSecond += internal.BytesPerSecond
 			// Average speed is complex to aggregate, but sum of averages approximates total throughput
-			existing.SpeedAvg += internal.SpeedAvg 
+			existing.SpeedAvg += internal.SpeedAvg
 
 			// Use the current offset from the most recently active connection
 			// This handles seek-back scenarios better than taking the max
@@ -313,12 +313,12 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 				existing.CurrentOffset = atomic.LoadInt64(&s.CurrentOffset)
 				existing.BufferedOffset = atomic.LoadInt64(&s.BufferedOffset)
 			}
-			
+
 			// For ETA, use the stream with the longest remaining time or re-calculate based on totals?
 			// Re-calculating based on aggregated values is safer
 			if existing.BytesPerSecond > 0 && existing.TotalSize > 0 {
 				remaining := existing.TotalSize - existing.CurrentOffset
-				
+
 				if remaining > 0 {
 					existing.ETA = remaining / existing.BytesPerSecond
 				} else {

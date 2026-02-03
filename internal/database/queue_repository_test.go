@@ -71,7 +71,6 @@ func TestResetStaleItems_NoItemsToReset(t *testing.T) {
 	assert.Equal(t, 0, count, "Queue should still be empty")
 }
 
-
 func TestResetStaleItems_MixedStatuses(t *testing.T) {
 	// Setup: Items with various statuses
 	db, err := sql.Open("sqlite3", ":memory:")

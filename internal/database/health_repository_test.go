@@ -14,7 +14,7 @@ import (
 func setupTestDB(t *testing.T) *HealthRepository {
 	db, err := sql.Open("sqlite3", "file::memory:")
 	require.NoError(t, err)
-	
+
 	_, err = db.Exec(`
 		CREATE TABLE file_health (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,11 +118,11 @@ func TestRegisterCorruptedFile_PlaybackFailureBehavior(t *testing.T) {
 	assert.Equal(t, HealthStatusPending, fileHealth.Status, "Status should be pending to trigger check/repair")
 	assert.Equal(t, HealthPriorityNext, fileHealth.Priority, "Priority should be high/next")
 	assert.Equal(t, fileHealth.MaxRetries-1, fileHealth.RetryCount, "RetryCount should equal MaxRetries-1 to trigger immediate repair on next check")
-	
+
 	// 3. Verify GetUnhealthyFiles picks it up
 	unhealthyFiles, err := repo.GetUnhealthyFiles(ctx, 10)
 	require.NoError(t, err)
-	
+
 	found := false
 	for _, f := range unhealthyFiles {
 		if f.FilePath == filePath {

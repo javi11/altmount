@@ -47,7 +47,7 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 	tmpDir := t.TempDir()
 	metadataDir := filepath.Join(tmpDir, "metadata")
 	importDir := filepath.Join(tmpDir, "import")
-	
+
 	err := os.MkdirAll(metadataDir, 0755)
 	require.NoError(t, err)
 	err = os.MkdirAll(importDir, 0755)
@@ -56,7 +56,7 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 	// Setup Database and User
 	userRepo := setupTestDB(t)
 	ctx := context.Background()
-	
+
 	apiKey := "test-api-key"
 	adminUser := &database.User{
 		UserID:    "admin",
@@ -76,7 +76,7 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 	movieDir := filepath.Join(metadataDir, "movies")
 	err = os.MkdirAll(movieDir, 0755)
 	require.NoError(t, err)
-	
+
 	metaFilePath := filepath.Join(movieDir, "test.mkv.meta")
 	err = os.WriteFile(metaFilePath, []byte("metadata content"), 0644)
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 					Host: tt.host,
 				},
 			}
-			
+
 			configGetter := func() *config.Config {
 				return cfg
 			}
@@ -134,7 +134,7 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 			// Call CreateStrmFiles
 			item := &database.ImportQueueItem{ID: 1}
 			resultingPath := "/movies/test.mkv"
-			
+
 			err := coord.CreateStrmFiles(ctx, item, resultingPath)
 			require.NoError(t, err)
 
@@ -142,7 +142,7 @@ func TestCreateStrmFiles_HostConfiguration(t *testing.T) {
 			strmPath := filepath.Join(importDir, "movies", "test.mkv.strm")
 			content, err := os.ReadFile(strmPath)
 			require.NoError(t, err)
-			
+
 			url := string(content)
 			expectedPrefix := "http://" + tt.expectedHost + ":8080/api/files/stream"
 			assert.True(t, strings.HasPrefix(url, expectedPrefix), "URL %s should start with %s", url, expectedPrefix)

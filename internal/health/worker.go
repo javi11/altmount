@@ -586,18 +586,18 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			slog.InfoContext(ctx, "Checking unhealthy file", "file_path", fh.FilePath)
 
 			// Set checking status
-								err := hw.healthRepo.SetFileChecking(ctx, fh.FilePath)
-								if err != nil {
-									slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
-									return
-								}
-			
-								// Perform check
-								opts := CheckOptions{}
-								event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
-			
-								// Prepare result for batch update
-								update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
+			err := hw.healthRepo.SetFileChecking(ctx, fh.FilePath)
+			if err != nil {
+				slog.ErrorContext(ctx, "Failed to set file checking status", "file_path", fh.FilePath, "error", err)
+				return
+			}
+
+			// Perform check
+			opts := CheckOptions{}
+			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
+
+			// Prepare result for batch update
+			update, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
 
 			resultsMu.Lock()
 			results = append(results, update)
@@ -763,7 +763,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 			// We need the relative path for metadata deletion
 			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
 			relativePath = strings.TrimPrefix(relativePath, "/")
-			
+
 			deleteSourceNzb := false
 			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
 				deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval

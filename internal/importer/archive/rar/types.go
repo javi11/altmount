@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/javi11/altmount/internal/importer/parser"
-	"github.com/javi11/altmount/internal/progress"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/progress"
 )
 
 // Processor interface for analyzing RAR content from NZB data

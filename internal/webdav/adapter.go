@@ -177,11 +177,11 @@ func NewHandler(
 			// Create cancellable context
 			streamCtx, cancel := context.WithCancel(r.Context())
 			defer cancel() // Ensure cleanup for this specific stream context
-			
+
 			// Add to tracker with full metadata
 			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, r.RemoteAddr, r.UserAgent(), 0)
 			defer streamTracker.Remove(stream)
-			
+
 			// Register cancel function in tracker
 			streamTracker.SetCancelFunc(stream, cancel)
 

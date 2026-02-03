@@ -177,7 +177,6 @@ func (n *NZBIndexIndexer) Search(ctx context.Context, query string) (*SearchResu
 	}, nil
 }
 
-
 // DownloadNZB downloads the NZB file from nzbindex.com
 func (n *NZBIndexIndexer) DownloadNZB(ctx context.Context, id string) ([]byte, error) {
 	// Build download URL
