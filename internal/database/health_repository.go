@@ -460,19 +460,23 @@ func (r *HealthRepository) DeleteHealthRecord(ctx context.Context, filePath stri
 	return nil
 }
 
-// DeleteHealthRecordsByPrefix removes all health records that start with the given prefix
+// DeleteHealthRecordsByPrefix removes health records that start with the given prefix
 func (r *HealthRepository) DeleteHealthRecordsByPrefix(ctx context.Context, prefix string) (int64, error) {
 	prefix = strings.TrimPrefix(prefix, "/")
 	if prefix == "" {
 		return 0, nil
 	}
+	// Ensure prefix ends with separator to match files inside it
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
 
-	query := `DELETE FROM file_health WHERE file_path = ? OR file_path LIKE ?`
-	pattern := prefix + "/%"
+	query := `DELETE FROM file_health WHERE file_path LIKE ?`
+	likePattern := prefix + "%"
 
-	result, err := r.db.ExecContext(ctx, query, prefix, pattern)
+	result, err := r.db.ExecContext(ctx, query, likePattern)
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete health records by prefix: %w", err)
+		return 0, fmt.Errorf("failed to delete health records by prefix %s: %w", prefix, err)
 	}
 
 	return result.RowsAffected()
@@ -1019,7 +1023,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	defer stmtCorrupted.Close()
 
 	for _, update := range updates {
-		filePath := strings.TrimPrefix(update.FilePath, "/")
+		filePath := update.FilePath
 		switch update.Status {
 		case HealthStatusHealthy:
 			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath)
