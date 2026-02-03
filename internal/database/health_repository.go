@@ -1001,7 +1001,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	defer stmtCorrupted.Close()
 
 	for _, update := range updates {
-		filePath := strings.TrimPrefix(update.FilePath, "/")
+		filePath := update.FilePath
 		switch update.Status {
 		case HealthStatusHealthy:
 			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath)
