@@ -176,14 +176,13 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
 	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
-	skipHealthCheck := currentConfig.Import.SkipHealthCheck != nil && *currentConfig.Import.SkipHealthCheck
 	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
 	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter, skipHealthCheck)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -328,8 +327,6 @@ func (s *Service) RegisterConfigChangeHandler(configManager *config.Manager) {
 		defer s.mu.Unlock()
 
 		if s.processor != nil {
-			skip := newConfig.Import.SkipHealthCheck != nil && *newConfig.Import.SkipHealthCheck
-			s.processor.SetSkipHealthCheck(skip)
 			s.processor.SetSegmentSamplePercentage(newConfig.Import.SegmentSamplePercentage)
 		}
 	})
