@@ -149,7 +149,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				// Send ParsedNzb to output channel
 				category := p.deriveCategory(releasePath)
 				relPath := p.deriveRelPath(releasePath, category)
-				
+
 				select {
 				case out <- &ParsedNzb{
 					ID:       releaseId,
@@ -209,7 +209,7 @@ func (p *Parser) deriveRelPath(path, category string) string {
 
 	// 2. Identify and remove category prefix
 	parts := strings.Split(path, "/")
-	
+
 	// Remove the last part (Release Name) as that is handled by the release name itself
 	if len(parts) > 0 {
 		parts = parts[:len(parts)-1]
@@ -369,23 +369,23 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 				}
 			}
 
-						if _, err := w.Write([]byte("  </segments>\n\t</file>\n")); err != nil {
+			if _, err := w.Write([]byte("  </segments>\n\t</file>\n")); err != nil {
 
-							return err
+				return err
 
-						}
+			}
 
-					}
+		}
 
-				} else if len(multipartMetadataJSON) > 0 {
+	} else if len(multipartMetadataJSON) > 0 {
 
-					var meta multipartMetadata
+		var meta multipartMetadata
 
-					if err := json.Unmarshal(multipartMetadataJSON, &meta); err != nil {
+		if err := json.Unmarshal(multipartMetadataJSON, &meta); err != nil {
 
-						return fmt.Errorf("failed to unmarshal multipart metadata: %w", err)
+			return fmt.Errorf("failed to unmarshal multipart metadata: %w", err)
 
-					}
+		}
 
 		for partIdx, part := range meta.FileParts {
 			if len(part.SegmentIds) == 0 {
@@ -395,11 +395,11 @@ func (p *Parser) writeFileEntry(w io.Writer, fileId, fileName string, fileSize s
 			partFileName := fmt.Sprintf("%s.part%02d", fileName, partIdx+1)
 			extraMeta := ""
 			if meta.AesParams != nil {
-				extraMeta = fmt.Sprintf("AES_KEY:%s AES_IV:%s DECODED_SIZE:%d ", 
+				extraMeta = fmt.Sprintf("AES_KEY:%s AES_IV:%s DECODED_SIZE:%d ",
 					meta.AesParams.Key, meta.AesParams.Iv, meta.AesParams.DecodedSize)
 			}
 
-			subject := fmt.Sprintf("NZBDAV_ID:%s %s%s", 
+			subject := fmt.Sprintf("NZBDAV_ID:%s %s%s",
 				template.HTMLEscapeString(fileId), extraMeta, template.HTMLEscapeString(partFileName))
 
 			fileHeader := fmt.Sprintf(`	<file poster="AltMount" date="%d" subject="%s">

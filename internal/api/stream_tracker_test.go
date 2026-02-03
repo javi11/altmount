@@ -33,7 +33,7 @@ func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 
 	streams := tracker.GetAll()
 
-	// Should have 3 aggregated streams: 
+	// Should have 3 aggregated streams:
 	// 1. movie.mkv for user1 (aggregated from 3)
 	// 2. other.mkv for user1
 	// 3. movie.mkv for user2

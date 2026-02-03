@@ -104,4 +104,3 @@ func countQueueItemsByStatus(t *testing.T, db *sql.DB, status string) int {
 	}
 	return count
 }
-

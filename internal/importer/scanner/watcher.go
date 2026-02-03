@@ -272,7 +272,7 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		} else {
 			relativePath = &watchRoot
 		}
-		
+
 		w.log.DebugContext(ctx, "No category matched for path",
 			"file", filePath,
 			"relPath", relPath)

@@ -186,7 +186,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 			if s, ok := ctx.Value(utils.StreamSourceKey).(string); ok && s != "" {
 				source = s
 			}
-			
+
 			userName := "FUSE"
 			if u, ok := ctx.Value(utils.StreamUserNameKey).(string); ok && u != "" {
 				userName = u
@@ -1157,7 +1157,7 @@ func (mrf *MetadataRemoteFile) resolveIDPath(idPath string) (string, error) {
 
 	// The idPath is like .ids/4/0/e/9/a/40e9a6c9-e922-4217-ab6c-9d2207528a78
 	// The metadata file is at metadataRoot/.ids/4/0/e/9/a/40e9a6c9-e922-4217-ab6c-9d2207528a78.meta
-	
+
 	// Ensure it has .meta extension for the check
 	fullIdPath := filepath.Join(metadataRoot, idPath+".meta")
 
@@ -1169,10 +1169,10 @@ func (mrf *MetadataRemoteFile) resolveIDPath(idPath string) (string, error) {
 
 	// The target is relative to the directory of the symlink
 	// e.g. ../../../../../movies/Spider-Man.../Spider-Man....meta
-	
+
 	// Calculate the absolute path of the target metadata file
 	absTarget := filepath.Join(filepath.Dir(fullIdPath), target)
-	
+
 	// Calculate the relative path from metadataRoot to get the virtual path
 	relPath, err := filepath.Rel(metadataRoot, absTarget)
 	if err != nil {

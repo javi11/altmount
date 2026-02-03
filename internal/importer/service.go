@@ -638,10 +638,10 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 			} else {
 				// Recalculate virtualDir relative to the nzbFolder to discard physical parent paths like /config
 				// We use the subdirectory structure found inside .nzbs if it exists
-				
+
 				cleanBase := filepath.ToSlash(*basePath)
 				cleanRel := filepath.ToSlash(relDir)
-				
+
 				// Avoid duplication if basePath already starts with relDir (common with Watcher or manual imports)
 				if *basePath != "" && (cleanBase == cleanRel || strings.HasPrefix(cleanBase, cleanRel+"/")) {
 					virtualDir = *basePath

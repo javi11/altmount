@@ -171,7 +171,7 @@ func (s *MountService) StartRCServer(ctx context.Context) error {
 	}
 
 	// Wait for the server to be ready with timeout
-	if err := s.manager.WaitForReady(30*time.Second); err != nil {
+	if err := s.manager.WaitForReady(30 * time.Second); err != nil {
 		slog.WarnContext(ctx, "RClone RC server started but not ready within timeout", "error", err)
 		return fmt.Errorf("RClone RC server not ready: %w", err)
 	}
