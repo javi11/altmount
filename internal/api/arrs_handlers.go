@@ -245,17 +245,17 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 		// Delete metadata
 		/*
-		if s.metadataService != nil {
-			// Check if we should delete source NZB
-			deleteSource := false
-			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
-				deleteSource = *cfg.Metadata.DeleteSourceNzbOnRemoval
+			if s.metadataService != nil {
+				// Check if we should delete source NZB
+				deleteSource := false
+				if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+					deleteSource = *cfg.Metadata.DeleteSourceNzbOnRemoval
+				}
+				if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), normalizedPath, deleteSource); err != nil {
+					// Log as debug because it might already be gone
+					slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", normalizedPath, "error", err)
+				}
 			}
-			if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), normalizedPath, deleteSource); err != nil {
-				// Log as debug because it might already be gone
-				slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", normalizedPath, "error", err)
-			}
-		}
 		*/
 		slog.InfoContext(c.Context(), "Skipping metadata deletion (preserved by safety policy)", "path", normalizedPath)
 	}
@@ -278,37 +278,13 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 		// Delete metadata directory
 		/*
-		if s.metadataService != nil {
-			if err := s.metadataService.DeleteDirectory(normalizedPath); err != nil {
-				slog.DebugContext(c.Context(), "Failed to delete metadata directory from webhook (might be gone)", "path", normalizedPath, "error", err)
+			if s.metadataService != nil {
+				if err := s.metadataService.DeleteDirectory(normalizedPath); err != nil {
+					slog.DebugContext(c.Context(), "Failed to delete metadata directory from webhook (might be gone)", "path", normalizedPath, "error", err)
+				}
 			}
-		}
 		*/
 		slog.InfoContext(c.Context(), "Skipping metadata directory deletion (preserved by safety policy)", "path", normalizedPath)
-	}
-
-	// Process Directory Deletions
-	for _, path := range dirsToDelete {
-		normalizedPath := normalize(path)
-		slog.InfoContext(c.Context(), "Processing webhook directory deletion",
-			"original_path", path,
-			"normalized_path", normalizedPath)
-
-		// Delete health records for all files in this directory
-		if s.healthRepo != nil {
-			if count, err := s.healthRepo.DeleteHealthRecordsByPrefix(c.Context(), normalizedPath); err != nil {
-				slog.ErrorContext(c.Context(), "Failed to delete health records by prefix from webhook", "prefix", normalizedPath, "error", err)
-			} else {
-				slog.InfoContext(c.Context(), "Deleted health records for directory", "prefix", normalizedPath, "count", count)
-			}
-		}
-
-		// Delete metadata directory
-		if s.metadataService != nil {
-			if err := s.metadataService.DeleteDirectory(normalizedPath); err != nil {
-				slog.DebugContext(c.Context(), "Failed to delete metadata directory from webhook (might be gone)", "path", normalizedPath, "error", err)
-			}
-		}
 	}
 
 	if len(pathsToScan) == 0 {
@@ -323,10 +299,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		// Normalize path to relative
 		normalizedPath := normalize(path)
 
-		slog.InfoContext(c.Context(), "Processing webhook file update", 
-			"original_path", path, 
+		slog.InfoContext(c.Context(), "Processing webhook file update",
+			"original_path", path,
 			"normalized_path", normalizedPath)
-		
+
 		if s.healthRepo != nil {
 			var releaseDate *time.Time
 			var sourceNzb *string
@@ -630,7 +606,7 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 			baseURL = cfg.Arrs.WebhookBaseURL
 		}
 	}
-	
+
 	// Launch in background to not block
 	go func() {
 		ctx := context.Background()

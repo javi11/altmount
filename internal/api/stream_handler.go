@@ -218,7 +218,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 		if streamID != "" {
 			// Add stream ID to context for low-level tracking
 			streamCtx = context.WithValue(streamCtx, utils.StreamIDKey, streamID)
-			
+
 			// Register cancel function in tracker
 			h.streamTracker.SetCancelFunc(streamID, cancel)
 

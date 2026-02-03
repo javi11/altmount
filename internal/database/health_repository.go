@@ -466,15 +466,11 @@ func (r *HealthRepository) DeleteHealthRecordsByPrefix(ctx context.Context, pref
 	if prefix == "" {
 		return 0, nil
 	}
-	// Ensure prefix ends with separator to match files inside it
-	if !strings.HasSuffix(prefix, "/") {
-		prefix = prefix + "/"
-	}
 
-	query := `DELETE FROM file_health WHERE file_path LIKE ?`
-	likePattern := prefix + "%"
+	query := `DELETE FROM file_health WHERE file_path = ? OR file_path LIKE ?`
+	likePattern := prefix + "/%"
 
-	result, err := r.db.ExecContext(ctx, query, likePattern)
+	result, err := r.db.ExecContext(ctx, query, prefix, likePattern)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete health records by prefix %s: %w", prefix, err)
 	}
@@ -1125,12 +1121,12 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 	var records []AutomaticHealthCheckRecord
 	for rows.Next() {
 		var (
-			path             string
-			libraryPath      *string
-			releaseDate      *time.Time
+			path               string
+			libraryPath        *string
+			releaseDate        *time.Time
 			scheduledCheckAtNT sql.NullTime
-			sourceNzbPath    *string
-			status           HealthStatus
+			sourceNzbPath      *string
+			status             HealthStatus
 		)
 
 		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath, &status); err != nil {
