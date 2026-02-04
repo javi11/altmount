@@ -151,7 +151,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	defer pool.Quit()
 
 	// Test for up to 15 seconds
-	testCtx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
+	testCtx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
 	defer cancel()
 
 	var totalBytes int64
