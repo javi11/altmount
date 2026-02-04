@@ -22,7 +22,7 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2/pkg/nntpcli"
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
 )
@@ -31,7 +31,7 @@ import (
 // This avoids redundant fetching when both PAR2 extraction and file parsing need the same data
 type FirstSegmentData struct {
 	File                *nzbparser.NzbFile  // Reference to the NZB file (for groups, subject, metadata)
-	Headers             nntppool.YencHeader // yEnc headers (FileName, FileSize, PartSize)
+	Headers             nntpcli.YencHeaders // yEnc headers (FileName, FileSize, PartSize)
 	RawBytes            []byte              // Up to 16KB of raw data for PAR2 detection (may be less if segment is smaller)
 	MissingFirstSegment bool                // True if first segment download failed (article not found, etc.)
 	OriginalIndex       int                 // Original position in the parsed NZB file list
@@ -452,7 +452,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			defer cancel()
 
 			// Get body reader for the first segment
-			r, err := cp.BodyReader(ctx, firstSegment.ID)
+			r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
 			if err != nil {
 				return fetchResult{
 					segmentID: firstSegment.ID,
@@ -467,7 +467,18 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			defer r.Close()
 
 			// Get yEnc headers
-			headers := r.YencHeaders()
+			headers, err := r.GetYencHeaders()
+			if err != nil {
+				return fetchResult{
+					segmentID: firstSegment.ID,
+					data: &FirstSegmentData{
+						File:                fileToFetch,
+						MissingFirstSegment: true,
+						OriginalIndex:       originalIndex,
+					},
+					err: fmt.Errorf("failed to get yenc headers: %w", err),
+				}, nil
+			}
 
 			// Read up to 16KB for PAR2 detection and hash matching
 			// PAR2 Hash16k requires exactly 16KB (or entire file if smaller)
@@ -506,7 +517,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 					// Create a new context for this segment
 					segCtx, segCancel := context.WithTimeout(ctx, time.Second*30)
 
-					segReader, err := cp.BodyReader(segCtx, segment.ID)
+					segReader, err := cp.BodyReader(segCtx, segment.ID, nil)
 					if err != nil {
 						segCancel()
 						p.log.DebugContext(ctx, "Failed to read additional segment for 16KB completion",
@@ -553,17 +564,11 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			// Trim buffer to actual bytes read
 			rawBytes := buffer[:bytesRead]
 
-			// Dereference headers if available, use empty struct if nil
-			var headerValue nntppool.YencHeader
-			if headers != nil {
-				headerValue = *headers
-			}
-
 			return fetchResult{
 				segmentID: firstSegment.ID,
 				data: &FirstSegmentData{
 					File:          fileToFetch,
-					Headers:       headerValue,
+					Headers:       headers,
 					RawBytes:      rawBytes,
 					OriginalIndex: originalIndex,
 				},
@@ -609,32 +614,32 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 }
 
 // fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment
-func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegment, groups []string) (nntppool.YencHeader, error) {
+func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegment, groups []string) (nntpcli.YencHeaders, error) {
 	if p.poolManager == nil {
-		return nntppool.YencHeader{}, errors.NewNonRetryableError("no pool manager available", nil)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
-		return nntppool.YencHeader{}, errors.NewNonRetryableError("no connection pool available", err)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("no connection pool available", err)
 	}
 
-	r, err := cp.BodyReader(ctx, segment.ID)
+	r, err := cp.BodyReader(ctx, segment.ID, nil)
 	if err != nil {
-		return nntppool.YencHeader{}, errors.NewNonRetryableError("failed to get body reader: %w", err)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("failed to get body reader: %w", err)
 	}
 	defer r.Close()
 
-	headers := r.YencHeaders()
-	if headers == nil {
-		return nntppool.YencHeader{}, errors.NewNonRetryableError("failed to get yenc headers", nil)
+	headers, err := r.GetYencHeaders()
+	if err != nil {
+		return nntpcli.YencHeaders{}, fmt.Errorf("failed to get yenc headers: %w", err)
 	}
 
 	if headers.PartSize <= 0 {
-		return nntppool.YencHeader{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
+		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
 	}
 
-	return *headers, nil
+	return headers, nil
 }
 
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
