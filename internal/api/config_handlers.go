@@ -318,6 +318,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	if testReq.TLS {
 		tlsConfig = &tls.Config{
 			InsecureSkipVerify: testReq.InsecureTLS,
+			ServerName:         testReq.Host,
 		}
 	}
 

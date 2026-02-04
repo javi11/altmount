@@ -14,7 +14,7 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 	// Setup
 	ctx := context.Background()
 
-	// Create a dummy segment range
+	// Create a dummy segment range with properly initialized segment
 	r, w := io.Pipe()
 	segments := []*segment{
 		{
@@ -30,7 +30,6 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 		segments: segments,
 		start:    0,
 		end:      100,
-		ctx:      ctx,
 	}
 
 	// Mock pool getter that returns error (so we don't need real pool)

@@ -305,7 +305,7 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 		return nil, fmt.Errorf("[importer.UsenetFile] no segments to download")
 	}
 
-	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
+	rg := usenet.GetSegmentsInRange(start, end, loader)
 	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxWorkers)
 }
 

@@ -125,6 +125,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	if targetProvider.TLS {
 		tlsConfig = &tls.Config{
 			InsecureSkipVerify: targetProvider.InsecureTLS,
+			ServerName:         targetProvider.Host,
 		}
 	}
 
@@ -133,7 +134,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		Address:               address,
 		MaxConnections:        targetProvider.MaxConnections,
 		InitialConnections:    0,
-		InflightPerConnection: 10,
+		InflightPerConnection: targetProvider.MaxConnections * 2,
 		MaxConnIdleTime:       60 * time.Second,
 		MaxConnLifetime:       60 * time.Second,
 		Auth:                  nntppool.Auth{Username: targetProvider.Username, Password: targetProvider.Password},
@@ -148,8 +149,16 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		})
 	}
 
-	client := nntppool.NewClient(100)
-	client.AddProvider(provider, nntppool.ProviderPrimary)
+	client := nntppool.NewClient()
+	err = client.AddProvider(provider, nntppool.ProviderPrimary)
+	if err != nil {
+		slog.Error("Failed to add provider to client", "error", err, "provider_id", providerID)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": err.Error(),
+		})
+	}
+
 	defer client.Close()
 
 	// Test for up to 15 seconds
@@ -172,6 +181,8 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 
 	startTime := time.Now()
 
+	var testErr error
+
 	for i := 0; i < numWorkers; i++ {
 		workerWg.Add(1)
 		go func() {
@@ -185,8 +196,8 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 						return
 					}
 					// Download
-					err := client.Body(testCtx, seg.ID, io.Discard)
-					if err == nil {
+					testErr = client.Body(testCtx, seg.ID, io.Discard)
+					if testErr == nil {
 						atomic.AddInt64(&totalBytes, seg.Size)
 					}
 				}
@@ -195,6 +206,15 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	}
 
 	workerWg.Wait()
+
+	if testErr != nil {
+		slog.Error("Failed to test provider speed", "error", testErr, "provider_id", providerID)
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": testErr.Error(),
+		})
+	}
+
 	duration := time.Since(startTime)
 
 	var speed float64

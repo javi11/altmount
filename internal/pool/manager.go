@@ -88,8 +88,7 @@ func (m *manager) SetProviders(providers []config.ProviderConfig) error {
 		}
 	}
 
-	// Create new client with maxInflight = 100
-	client := nntppool.NewClient(maxConnections)
+	client := nntppool.NewClient()
 
 	// Create and add providers
 	m.logger.InfoContext(m.ctx, "Creating NNTP connection pool", "provider_count", len(providers))
@@ -110,8 +109,8 @@ func (m *manager) SetProviders(providers []config.ProviderConfig) error {
 
 		err = client.AddProvider(provider, tier)
 		if err != nil {
-
 			client.Close()
+
 			return fmt.Errorf("failed to add provider %s: %w", p.Host, err)
 		}
 
@@ -186,7 +185,7 @@ func createProvider(ctx context.Context, cfg config.ProviderConfig) (*nntppool.P
 		Address:               address,
 		MaxConnections:        cfg.MaxConnections,
 		InitialConnections:    0,
-		InflightPerConnection: 10,
+		InflightPerConnection: cfg.MaxConnections * 2,
 		MaxConnIdleTime:       30 * time.Second,
 		MaxConnLifetime:       30 * time.Second,
 		Auth:                  nntppool.Auth{Username: cfg.Username, Password: cfg.Password},
