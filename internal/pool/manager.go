@@ -2,23 +2,21 @@ package pool
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2"
 )
 
 // Manager provides centralized NNTP connection pool management
 type Manager interface {
 	// GetPool returns the current connection pool or error if not available
-	GetPool() (nntppool.NNTPClient, error)
+	GetPool() (nntppool.UsenetConnectionPool, error)
 
 	// SetProviders creates/recreates the pool with new providers
-	SetProviders(providers []config.ProviderConfig) error
+	SetProviders(providers []nntppool.UsenetProviderConfig) error
 
 	// ClearPool shuts down and removes the current pool
 	ClearPool() error
@@ -33,7 +31,7 @@ type Manager interface {
 // manager implements the Manager interface
 type manager struct {
 	mu             sync.RWMutex
-	pool           nntppool.NNTPClient
+	pool           nntppool.UsenetConnectionPool
 	metricsTracker *MetricsTracker
 	ctx            context.Context
 	logger         *slog.Logger
@@ -48,7 +46,7 @@ func NewManager(ctx context.Context) Manager {
 }
 
 // GetPool returns the current connection pool or error if not available
-func (m *manager) GetPool() (nntppool.NNTPClient, error) {
+func (m *manager) GetPool() (nntppool.UsenetConnectionPool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -60,7 +58,7 @@ func (m *manager) GetPool() (nntppool.NNTPClient, error) {
 }
 
 // SetProviders creates/recreates the pool with new providers
-func (m *manager) SetProviders(providers []config.ProviderConfig) error {
+func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -71,7 +69,7 @@ func (m *manager) SetProviders(providers []config.ProviderConfig) error {
 			m.metricsTracker.Stop()
 			m.metricsTracker = nil
 		}
-		m.pool.Close()
+		m.pool.Quit()
 		m.pool = nil
 	}
 
@@ -81,46 +79,24 @@ func (m *manager) SetProviders(providers []config.ProviderConfig) error {
 		return nil
 	}
 
-	maxConnections := 0
-	for _, provider := range providers {
-		if provider.MaxConnections > maxConnections {
-			maxConnections = provider.MaxConnections
-		}
-	}
-
-	client := nntppool.NewClient()
-
-	// Create and add providers
+	// Create new pool with providers
 	m.logger.InfoContext(m.ctx, "Creating NNTP connection pool", "provider_count", len(providers))
-
-	for _, p := range providers {
-		provider, err := createProvider(m.ctx, p)
-		if err != nil {
-			// Clean up already added providers
-			client.Close()
-			return fmt.Errorf("failed to create provider %s: %w", p.Host, err)
-		}
-
-		// Determine provider tier
-		tier := nntppool.ProviderPrimary
-		if p.IsBackupProvider != nil && *p.IsBackupProvider {
-			tier = nntppool.ProviderBackup
-		}
-
-		err = client.AddProvider(provider, tier)
-		if err != nil {
-			client.Close()
-
-			return fmt.Errorf("failed to add provider %s: %w", p.Host, err)
-		}
-
-		m.logger.InfoContext(m.ctx, "Added provider", "host", p.Host, "tier", tier)
+	pool, err := nntppool.NewConnectionPool(nntppool.Config{
+		Providers:      providers,
+		Logger:         m.logger,
+		DelayType:      nntppool.DelayTypeFixed,
+		RetryDelay:     10 * time.Millisecond,
+		MinConnections: 0,
+		DrainTimeout:   5 * time.Second,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create NNTP connection pool: %w", err)
 	}
 
-	m.pool = client
+	m.pool = pool
 
 	// Start metrics tracker
-	m.metricsTracker = NewMetricsTracker(client)
+	m.metricsTracker = NewMetricsTracker(pool)
 	m.metricsTracker.Start(m.ctx)
 
 	m.logger.InfoContext(m.ctx, "NNTP connection pool created successfully")
@@ -138,7 +114,7 @@ func (m *manager) ClearPool() error {
 			m.metricsTracker.Stop()
 			m.metricsTracker = nil
 		}
-		m.pool.Close()
+		m.pool.Quit()
 		m.pool = nil
 	}
 
@@ -167,29 +143,4 @@ func (m *manager) GetMetrics() (MetricsSnapshot, error) {
 	}
 
 	return m.metricsTracker.GetSnapshot(), nil
-}
-
-// createProvider creates a new nntppool.Provider from config
-func createProvider(ctx context.Context, cfg config.ProviderConfig) (*nntppool.Provider, error) {
-	var tlsConfig *tls.Config
-	if cfg.TLS {
-		tlsConfig = &tls.Config{
-			InsecureSkipVerify: cfg.InsecureTLS,
-			ServerName:         cfg.Host,
-		}
-	}
-
-	address := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-
-	return nntppool.NewProvider(ctx, nntppool.ProviderConfig{
-		Address:               address,
-		MaxConnections:        cfg.MaxConnections,
-		InitialConnections:    0,
-		InflightPerConnection: cfg.MaxConnections * 2,
-		MaxConnIdleTime:       30 * time.Second,
-		MaxConnLifetime:       30 * time.Second,
-		Auth:                  nntppool.Auth{Username: cfg.Username, Password: cfg.Password},
-		TLSConfig:             tlsConfig,
-		ProxyURL:              cfg.ProxyURL,
-	})
 }

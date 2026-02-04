@@ -1,6 +1,7 @@
 package usenet
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -23,6 +24,7 @@ type segmentRange struct {
 	end      int64
 	segments []*segment
 	current  int
+	ctx      context.Context
 	mu       sync.RWMutex
 }
 
@@ -229,7 +231,6 @@ func (s *segment) Close() error {
 	if s.closed {
 		return nil
 	}
-
 	s.closed = true
 
 	var e1, e2 error

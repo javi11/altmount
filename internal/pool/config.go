@@ -21,7 +21,7 @@ func RegisterConfigHandlers(ctx context.Context, configManager *config.Manager, 
 				"new_count", len(newConfig.Providers))
 
 			// Update pool with new providers
-			providers := newConfig.GetEnabledProviders()
+			providers := newConfig.ToNNTPProviders()
 			if err := poolManager.SetProviders(providers); err != nil {
 				slog.ErrorContext(ctx, "Failed to update NNTP connection pool", "err", err)
 			} else {

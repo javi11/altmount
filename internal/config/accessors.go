@@ -73,6 +73,14 @@ func (c *Config) GetMaxImportConnections() int {
 	return c.Import.MaxImportConnections
 }
 
+// GetImportCacheSizeMB returns import cache size in MB with a default fallback.
+func (c *Config) GetImportCacheSizeMB() int {
+	if c.Import.ImportCacheSizeMB <= 0 {
+		return 100 // Default: 100 MB
+	}
+	return c.Import.ImportCacheSizeMB
+}
+
 // GetReadTimeoutSeconds returns read timeout in seconds with a default fallback.
 func (c *Config) GetReadTimeoutSeconds() int {
 	if c.Import.ReadTimeoutSeconds <= 0 {
