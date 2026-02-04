@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v2/pkg/nntpcli"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -20,15 +20,15 @@ type MockPoolManager struct {
 	mock.Mock
 }
 
-func (m *MockPoolManager) GetPool() (nntppool.NNTPClient, error) {
+func (m *MockPoolManager) GetPool() (nntppool.UsenetConnectionPool, error) {
 	args := m.Called()
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(nntppool.NNTPClient), args.Error(1)
+	return args.Get(0).(nntppool.UsenetConnectionPool), args.Error(1)
 }
 
-func (m *MockPoolManager) SetProviders(providers []config.ProviderConfig) error {
+func (m *MockPoolManager) SetProviders(providers []nntppool.UsenetProviderConfig) error {
 	return nil
 }
 func (m *MockPoolManager) ClearPool() error {
@@ -46,76 +46,57 @@ type MockConnectionPool struct {
 	mock.Mock
 }
 
-func (m *MockConnectionPool) Stat(ctx context.Context, id string) (*nntppool.Response, error) {
-	args := m.Called(ctx, id)
+func (m *MockConnectionPool) Stat(ctx context.Context, id string, groups []string) (int, error) {
+	args := m.Called(ctx, id, groups)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockConnectionPool) Body(ctx context.Context, id string, w io.Writer, groups []string) (int64, error) {
+	args := m.Called(ctx, id, w, groups)
+	return int64(args.Int(0)), args.Error(1)
+}
+
+func (m *MockConnectionPool) BodyReader(ctx context.Context, id string, groups []string) (nntpcli.ArticleBodyReader, error) {
+	args := m.Called(ctx, id, groups)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*nntppool.Response), args.Error(1)
+	return args.Get(0).(nntpcli.ArticleBodyReader), args.Error(1)
 }
 
-func (m *MockConnectionPool) Body(ctx context.Context, id string, w io.Writer) error {
-	args := m.Called(ctx, id, w)
-	return args.Error(0)
-}
-
-func (m *MockConnectionPool) BodyReader(ctx context.Context, id string) (nntppool.YencReader, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(nntppool.YencReader), args.Error(1)
-}
-
-func (m *MockConnectionPool) BodyAt(ctx context.Context, id string, w io.WriterAt) error {
-	return nil
-}
-
-func (m *MockConnectionPool) Article(ctx context.Context, id string, w io.Writer) error {
-	return nil
-}
-
-func (m *MockConnectionPool) Head(ctx context.Context, id string) (*nntppool.Response, error) {
+func (m *MockConnectionPool) GetConnection(ctx context.Context, skipProviders []string, useBackupProviders bool) (nntppool.PooledConnection, error) {
 	return nil, nil
 }
 
-func (m *MockConnectionPool) Group(ctx context.Context, group string) (*nntppool.Response, error) {
-	return nil, nil
-}
-
-func (m *MockConnectionPool) Post(ctx context.Context, headers map[string]string, body io.Reader) (*nntppool.Response, error) {
-	return nil, nil
-}
-
-func (m *MockConnectionPool) PostYenc(ctx context.Context, headers map[string]string, body io.Reader, opts *nntppool.YencOptions) (*nntppool.Response, error) {
-	return nil, nil
-}
-
-func (m *MockConnectionPool) AddProvider(provider *nntppool.Provider, tier nntppool.ProviderType) error {
+func (m *MockConnectionPool) Post(ctx context.Context, r io.Reader) error {
 	return nil
 }
 
-func (m *MockConnectionPool) RemoveProvider(provider *nntppool.Provider) error {
+func (m *MockConnectionPool) BodyBatch(ctx context.Context, group string, requests []nntppool.BodyBatchRequest) []nntppool.BodyBatchResult {
 	return nil
 }
 
-func (m *MockConnectionPool) Close() {}
+func (m *MockConnectionPool) TestProviderPipelineSupport(ctx context.Context, providerHost string, testMsgID string) (bool, int, error) {
+	return false, 0, nil
+}
 
-func (m *MockConnectionPool) Send(ctx context.Context, payload []byte, bodyWriter io.Writer) <-chan nntppool.Response {
+func (m *MockConnectionPool) GetProvidersInfo() []nntppool.ProviderInfo {
 	return nil
 }
 
-func (m *MockConnectionPool) Metrics() map[string]nntppool.ProviderMetrics {
+func (m *MockConnectionPool) GetProviderStatus(providerID string) (*nntppool.ProviderInfo, bool) {
+	return nil, false
+}
+
+func (m *MockConnectionPool) GetMetrics() *nntppool.PoolMetrics {
 	return nil
 }
 
-func (m *MockConnectionPool) SpeedTest(ctx context.Context, articleIDs []string) (nntppool.SpeedTestStats, error) {
-	return nntppool.SpeedTestStats{}, nil
+func (m *MockConnectionPool) GetMetricsSnapshot() nntppool.PoolMetricsSnapshot {
+	return nntppool.PoolMetricsSnapshot{}
 }
 
-func (m *MockConnectionPool) Date(ctx context.Context) error {
-	return nil
-}
+func (m *MockConnectionPool) Quit() {}
 
 func TestValidateSegmentAvailabilityDetailed_Hybrid(t *testing.T) {
 	// Setup
@@ -129,7 +110,7 @@ func TestValidateSegmentAvailabilityDetailed_Hybrid(t *testing.T) {
 
 	// Test hybrid mode (verifyData = true)
 	// Expect Body call
-	mockPool.On("Body", mock.Anything, "seg1", mock.Anything).Return(ErrLimitReached).Once()
+	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, mock.Anything).Return(0, ErrLimitReached).Once()
 
 	result, err := ValidateSegmentAvailabilityDetailed(
 		context.Background(),
@@ -162,7 +143,7 @@ func TestValidateSegmentAvailabilityDetailed_Hybrid_Failure(t *testing.T) {
 
 	// Test hybrid mode (verifyData = true)
 	// Expect Body call returning generic error (e.g. 430 No Such Article)
-	mockPool.On("Body", mock.Anything, "seg1", mock.Anything).Return(fmt.Errorf("article not found")).Once()
+	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, mock.Anything).Return(0, fmt.Errorf("article not found")).Once()
 
 	result, err := ValidateSegmentAvailabilityDetailed(
 		context.Background(),
