@@ -412,11 +412,7 @@ export function DragDropUpload() {
 				{/* Category Input (shared) */}
 				<fieldset className="fieldset mb-4">
 					<legend className="fieldset-legend">Category (optional)</legend>
-					<select
-						className="select"
-						value={category}
-						onChange={(e) => setCategory(e.target.value)}
-					>
+					<select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
 						<option value="">None</option>
 						{categories.map((cat) => (
 							<option key={cat.name} value={cat.name}>

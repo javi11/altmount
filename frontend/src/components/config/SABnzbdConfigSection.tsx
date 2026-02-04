@@ -372,91 +372,101 @@ export function SABnzbdConfigSection({
 									.map((category, index) => {
 										const isDefault = isDefaultCategory(category.name);
 										return (
-										<div key={index} className={`card shadow-sm ${isDefault ? 'bg-base-300 border border-primary/30' : 'bg-base-200'}`}>
-											<div className="card-body p-4">
-												{isDefault && (
-													<div className="badge badge-primary badge-sm mb-2">
-														System Default (name cannot be changed)
+											<div
+												key={index}
+												className={`card shadow-sm ${isDefault ? "border border-primary/30 bg-base-300" : "bg-base-200"}`}
+											>
+												<div className="card-body p-4">
+													{isDefault && (
+														<div className="badge badge-primary badge-sm mb-2">
+															System Default (name cannot be changed)
+														</div>
+													)}
+													<div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend">Name</legend>
+															<input
+																type="text"
+																className="input input-sm"
+																value={category.name}
+																readOnly={isReadOnly || isDefault}
+																disabled={isDefault}
+																onChange={(e) =>
+																	handleCategoryUpdate(index, { name: e.target.value })
+																}
+															/>
+															{isDefault && (
+																<p className="label text-base-content/60 text-xs">
+																	Name is immutable
+																</p>
+															)}
+														</fieldset>
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend">Order</legend>
+															<input
+																type="number"
+																className="input input-sm"
+																value={category.order}
+																readOnly={isReadOnly}
+																onChange={(e) =>
+																	handleCategoryUpdate(index, {
+																		order: Number.parseInt(e.target.value, 10) || 0,
+																	})
+																}
+															/>
+														</fieldset>
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend">Priority</legend>
+															<select
+																className="select select-sm"
+																value={category.priority}
+																disabled={isReadOnly}
+																onChange={(e) =>
+																	handleCategoryUpdate(index, {
+																		priority: Number.parseInt(e.target.value, 10),
+																	})
+																}
+															>
+																<option value={-1}>Low</option>
+																<option value={0}>Normal</option>
+																<option value={1}>High</option>
+															</select>
+														</fieldset>
+														<fieldset className="fieldset">
+															<legend className="fieldset-legend">Subdirectory</legend>
+															<input
+																type="text"
+																className="input input-sm"
+																value={category.dir}
+																readOnly={isReadOnly}
+																placeholder={isDefault ? "complete" : "Optional subdirectory"}
+																onChange={(e) =>
+																	handleCategoryUpdate(index, { dir: e.target.value })
+																}
+															/>
+															{isDefault && (
+																<p className="label text-base-content/60 text-xs">
+																	Default: complete
+																</p>
+															)}
+														</fieldset>
 													</div>
-												)}
-												<div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend">Name</legend>
-														<input
-															type="text"
-															className="input input-sm"
-															value={category.name}
-															readOnly={isReadOnly || isDefault}
-															disabled={isDefault}
-															onChange={(e) =>
-																handleCategoryUpdate(index, { name: e.target.value })
-															}
-														/>
-														{isDefault && (
-															<p className="label text-xs text-base-content/60">Name is immutable</p>
-														)}
-													</fieldset>
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend">Order</legend>
-														<input
-															type="number"
-															className="input input-sm"
-															value={category.order}
-															readOnly={isReadOnly}
-															onChange={(e) =>
-																handleCategoryUpdate(index, {
-																	order: Number.parseInt(e.target.value, 10) || 0,
-																})
-															}
-														/>
-													</fieldset>
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend">Priority</legend>
-														<select
-															className="select select-sm"
-															value={category.priority}
-															disabled={isReadOnly}
-															onChange={(e) =>
-																handleCategoryUpdate(index, {
-																	priority: Number.parseInt(e.target.value, 10),
-																})
-															}
-														>
-															<option value={-1}>Low</option>
-															<option value={0}>Normal</option>
-															<option value={1}>High</option>
-														</select>
-													</fieldset>
-													<fieldset className="fieldset">
-														<legend className="fieldset-legend">Subdirectory</legend>
-														<input
-															type="text"
-															className="input input-sm"
-															value={category.dir}
-															readOnly={isReadOnly}
-															placeholder={isDefault ? "complete" : "Optional subdirectory"}
-															onChange={(e) => handleCategoryUpdate(index, { dir: e.target.value })}
-														/>
-														{isDefault && (
-															<p className="label text-xs text-base-content/60">Default: complete</p>
-														)}
-													</fieldset>
+													{!isReadOnly && !isDefault && (
+														<div className="mt-2 flex justify-end">
+															<button
+																type="button"
+																className="btn btn-ghost btn-sm btn-error"
+																onClick={() => handleRemoveCategory(index)}
+															>
+																<Trash2 className="h-4 w-4" />
+																Remove
+															</button>
+														</div>
+													)}
 												</div>
-												{!isReadOnly && !isDefault && (
-													<div className="mt-2 flex justify-end">
-														<button
-															type="button"
-															className="btn btn-ghost btn-sm btn-error"
-															onClick={() => handleRemoveCategory(index)}
-														>
-															<Trash2 className="h-4 w-4" />
-															Remove
-														</button>
-													</div>
-												)}
 											</div>
-										</div>
-									)})}
+										);
+									})}
 							</div>
 						)}
 
