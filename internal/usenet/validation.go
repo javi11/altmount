@@ -65,7 +65,7 @@ func ValidateSegmentAvailability(
 			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			_, err := usenetPool.Stat(checkCtx, seg.Id)
 			if err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}
@@ -144,7 +144,7 @@ func ValidateSegmentAvailabilityDetailed(
 			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			_, err := usenetPool.Stat(checkCtx, seg.Id)
 			if err != nil {
 				atomic.AddInt32(&missingCount, 1)
 				missingChan <- seg.Id

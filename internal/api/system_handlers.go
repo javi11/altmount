@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -292,7 +293,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get the pool to fetch provider information
+	// Get the pool to fetch provider metrics
 	pool, err := s.poolManager.GetPool()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -302,77 +303,51 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		})
 	}
 
-	// Get provider information from pool
-	providersInfo := pool.GetProvidersInfo()
+	// Get provider metrics from pool (new v3 API)
+	providerMetrics := pool.Metrics()
 
-	// Get current configuration to access speed test results
-	config := s.configManager.GetConfig()
-	providerConfigMap := make(map[string]struct {
-		Speed float64
-		Time  *time.Time
-	})
-	if config != nil {
-		for _, p := range config.Providers {
-			providerConfigMap[p.ID] = struct {
-				Speed float64
-				Time  *time.Time
-			}{
-				Speed: p.LastSpeedTestMbps,
-				Time:  p.LastSpeedTestTime,
-			}
+	// Get current configuration as the primary source for provider info
+	cfg := s.configManager.GetConfig()
+	enabledProviders := cfg.GetEnabledProviders()
+
+	// Map provider info to response format using config as primary source
+	providers := make([]ProviderStatusResponse, 0, len(enabledProviders))
+	for _, p := range enabledProviders {
+		// Build host address to match metrics key
+		hostAddr := fmt.Sprintf("%s:%d", p.Host, p.Port)
+
+		// Get active connections from pool metrics
+		activeConnections := 0
+		state := "connected"
+		if pm, exists := providerMetrics[hostAddr]; exists {
+			activeConnections = pm.ActiveConnections
+		} else if pm, exists := providerMetrics[p.Host]; exists {
+			// Fallback: try without port
+			activeConnections = pm.ActiveConnections
+		} else {
+			state = "idle"
 		}
-	}
 
-	// Map provider info to response format
-	providers := make([]ProviderStatusResponse, 0, len(providersInfo))
-	for _, providerInfo := range providersInfo {
 		// Get error count for this provider from metrics
 		errorCount := int64(0)
 		if metrics.ProviderErrors != nil {
-			// Try matching by provider ID first
-			if count, exists := metrics.ProviderErrors[providerInfo.ID()]; exists {
+			if count, exists := metrics.ProviderErrors[hostAddr]; exists {
 				errorCount = count
-			} else {
-				// Fallback: Try matching by provider Host if ID doesn't work (might be a mismatch in nntppool keys)
-				if count, exists := metrics.ProviderErrors[providerInfo.Host]; exists {
-					errorCount = count
-				}
-			}
-		}
-
-		// Get speed test info
-		var lastSpeedTestMbps float64
-		var lastSpeedTestTime *time.Time
-
-		// Try to look up by ID first
-		if info, ok := providerConfigMap[providerInfo.ID()]; ok {
-			lastSpeedTestMbps = info.Speed
-			lastSpeedTestTime = info.Time
-		} else if config != nil {
-			// Fallback: try to find matching provider in config by Host and Username
-			// This handles cases where nntppool might use a different ID scheme or ID is empty
-			for _, p := range config.Providers {
-				if p.Host == providerInfo.Host && p.Username == providerInfo.Username {
-					lastSpeedTestMbps = p.LastSpeedTestMbps
-					lastSpeedTestTime = p.LastSpeedTestTime
-					break
-				}
+			} else if count, exists := metrics.ProviderErrors[p.Host]; exists {
+				errorCount = count
 			}
 		}
 
 		providers = append(providers, ProviderStatusResponse{
-			ID:                    providerInfo.ID(),
-			Host:                  providerInfo.Host,
-			Username:              providerInfo.Username,
-			UsedConnections:       providerInfo.UsedConnections,
-			MaxConnections:        providerInfo.MaxConnections,
-			State:                 providerInfo.State.String(),
-			ErrorCount:            errorCount,
-			LastConnectionAttempt: providerInfo.LastConnectionAttempt,
-			LastSuccessfulConnect: providerInfo.LastSuccessfulConnect,
-			FailureReason:         providerInfo.FailureReason,
-			LastSpeedTestMbps:     lastSpeedTestMbps,
-			LastSpeedTestTime:     lastSpeedTestTime,
+			ID:                p.ID,
+			Host:              p.Host,
+			Username:          p.Username,
+			UsedConnections:   activeConnections,
+			MaxConnections:    p.MaxConnections,
+			State:             state,
+			ErrorCount:        errorCount,
+			LastSpeedTestMbps: p.LastSpeedTestMbps,
+			LastSpeedTestTime: p.LastSpeedTestTime,
 		})
 	}
 

@@ -39,7 +39,6 @@ type UsenetFileSystem struct {
 	poolManager     pool.Manager
 	files           map[string]parser.ParsedFile
 	maxWorkers      int
-	maxCacheSizeMB  int
 	progressTracker *progress.Tracker
 	filesCompleted  int32 // atomic counter
 	totalFiles      int
@@ -53,7 +52,7 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, maxCacheSizeMB int, progressTracker *progress.Tracker, readTimeout time.Duration) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxWorkers int, progressTracker *progress.Tracker, readTimeout time.Duration) *UsenetFileSystem {
 	filesMap := make(map[string]parser.ParsedFile)
 	for _, file := range files {
 		filesMap[file.Filename] = file
@@ -64,7 +63,6 @@ func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []
 		poolManager:     poolManager,
 		files:           filesMap,
 		maxWorkers:      maxWorkers,
-		maxCacheSizeMB:  maxCacheSizeMB,
 		progressTracker: progressTracker,
 		filesCompleted:  0,
 		totalFiles:      len(files),
@@ -89,17 +87,16 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	}
 
 	return &UsenetFile{
-		name:           name,
-		file:           &file,
-		poolManager:    ufs.poolManager,
-		ctx:            ctx,
-		maxWorkers:     ufs.maxWorkers,
-		maxCacheSizeMB: ufs.maxCacheSizeMB,
-		size:           file.Size,
-		position:       0,
-		closed:         false,
-		ufs:            ufs,
-		readTimeout:    ufs.readTimeout,
+		name:        name,
+		file:        &file,
+		poolManager: ufs.poolManager,
+		ctx:         ctx,
+		maxWorkers:  ufs.maxWorkers,
+		size:        file.Size,
+		position:    0,
+		closed:      false,
+		ufs:         ufs,
+		readTimeout: ufs.readTimeout,
 	}, nil
 }
 
@@ -127,18 +124,17 @@ func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 // UsenetFile implements fs.File and io.Seeker for reading individual RAR parts from Usenet
 // The Seeker interface allows rardecode.OpenReader to efficiently seek within RAR parts
 type UsenetFile struct {
-	name           string
-	file           *parser.ParsedFile
-	poolManager    pool.Manager
-	ctx            context.Context
-	maxWorkers     int
-	maxCacheSizeMB int
-	size           int64
-	reader         io.ReadCloser
-	position       int64
-	closed         bool
-	ufs            *UsenetFileSystem
-	readTimeout    time.Duration
+	name        string
+	file        *parser.ParsedFile
+	poolManager pool.Manager
+	ctx         context.Context
+	maxWorkers  int
+	size        int64
+	reader      io.ReadCloser
+	position    int64
+	closed      bool
+	ufs         *UsenetFileSystem
+	readTimeout time.Duration
 }
 
 // UsenetFile methods implementing fs.File interface
@@ -309,8 +305,8 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 		return nil, fmt.Errorf("[importer.UsenetFile] no segments to download")
 	}
 
-	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
-	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxWorkers, uf.maxCacheSizeMB)
+	rg := usenet.GetSegmentsInRange(start, end, loader)
+	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxWorkers)
 }
 
 // dbSegmentLoader implements the segment loader interface for database segments
