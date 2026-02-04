@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2"
 )
 
 func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
@@ -30,14 +30,15 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 		segments: segments,
 		start:    0,
 		end:      100,
+		ctx:      ctx,
 	}
 
 	// Mock pool getter that returns error (so we don't need real pool)
-	poolGetter := func() (nntppool.NNTPClient, error) {
+	poolGetter := func() (nntppool.UsenetConnectionPool, error) {
 		return nil, fmt.Errorf("mock error")
 	}
 
-	ur, err := NewUsenetReader(ctx, poolGetter, rg, 1)
+	ur, err := NewUsenetReader(ctx, poolGetter, rg, 1, 10)
 	if err != nil {
 		t.Fatalf("Failed to create UsenetReader: %v", err)
 	}

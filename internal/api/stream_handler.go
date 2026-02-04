@@ -207,7 +207,7 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	if h.streamTracker != nil {
 		// Create a cancellable context for the stream
 		streamCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
+		defer cancel() // Ensure cleanup
 
 		var streamID string
 		// Try to get stream ID from the file itself (created during OpenFile)

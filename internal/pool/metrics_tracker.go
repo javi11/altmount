@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2"
 )
 
 // MetricsSnapshot represents pool metrics at a point in time with calculated values
@@ -25,7 +25,7 @@ type MetricsSnapshot struct {
 
 // MetricsTracker tracks pool metrics over time and calculates rates
 type MetricsTracker struct {
-	pool              nntppool.NNTPClient
+	pool              nntppool.UsenetConnectionPool
 	mu                sync.RWMutex
 	samples           []metricsample
 	sampleInterval    time.Duration
@@ -48,7 +48,7 @@ type metricsample struct {
 }
 
 // NewMetricsTracker creates a new metrics tracker
-func NewMetricsTracker(pool nntppool.NNTPClient) *MetricsTracker {
+func NewMetricsTracker(pool nntppool.UsenetConnectionPool) *MetricsTracker {
 	mt := &MetricsTracker{
 		pool:              pool,
 		samples:           make([]metricsample, 0, 60), // Preallocate for 60 samples
@@ -86,66 +86,33 @@ func (mt *MetricsTracker) Stop() {
 	}
 }
 
-// aggregateMetrics aggregates metrics from all providers
-func (mt *MetricsTracker) aggregateMetrics() (bytesRead, bytesWritten int64, providerErrors map[string]int64) {
-	providerErrors = make(map[string]int64)
-
-	metrics := mt.pool.Metrics()
-	for host, pm := range metrics {
-		bytesRead += int64(pm.TotalBytesRead)
-		bytesWritten += int64(pm.TotalBytesWritten)
-		// Note: The new API doesn't expose per-provider error counts directly
-		// We'll track connection errors as a simple count
-		providerErrors[host] = 0 // Placeholder - errors are not directly exposed in new API
-	}
-
-	return bytesRead, bytesWritten, providerErrors
-}
-
 // GetSnapshot returns the current metrics with calculated speeds
 func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
 
-	// Get current aggregated metrics from pool
-	bytesRead, bytesWritten, providerErrors := mt.aggregateMetrics()
-	now := time.Now()
-
-	currentSnapshot := struct {
-		BytesDownloaded int64
-		BytesUploaded   int64
-		Timestamp       time.Time
-	}{
-		BytesDownloaded: bytesRead,
-		BytesUploaded:   bytesWritten,
-		Timestamp:       now,
-	}
+	// Get current snapshot from pool
+	poolSnapshot := mt.pool.GetMetricsSnapshot()
 
 	// Calculate speeds
-	downloadSpeed, uploadSpeed := mt.calculateSpeeds(currentSnapshot)
+	downloadSpeed, uploadSpeed := mt.calculateSpeeds(poolSnapshot)
 
 	// Update max speed
 	if downloadSpeed > mt.maxDownloadSpeed {
 		mt.maxDownloadSpeed = downloadSpeed
 	}
 
-	// Calculate total errors from provider errors
-	var totalErrors int64
-	for _, errCount := range providerErrors {
-		totalErrors += errCount
-	}
-
 	return MetricsSnapshot{
-		BytesDownloaded:             bytesRead,
-		BytesUploaded:               bytesWritten,
-		ArticlesDownloaded:          0, // Not directly available in new API
-		ArticlesPosted:              0, // Not directly available in new API
-		TotalErrors:                 totalErrors,
-		ProviderErrors:              providerErrors,
+		BytesDownloaded:             poolSnapshot.BytesDownloaded,
+		BytesUploaded:               poolSnapshot.BytesUploaded,
+		ArticlesDownloaded:          poolSnapshot.ArticlesDownloaded,
+		ArticlesPosted:              poolSnapshot.ArticlesPosted,
+		TotalErrors:                 poolSnapshot.TotalErrors,
+		ProviderErrors:              poolSnapshot.ProviderErrors,
 		DownloadSpeedBytesPerSec:    downloadSpeed,
 		MaxDownloadSpeedBytesPerSec: mt.maxDownloadSpeed,
 		UploadSpeedBytesPerSec:      uploadSpeed,
-		Timestamp:                   now,
+		Timestamp:                   poolSnapshot.Timestamp,
 	}
 }
 
@@ -166,20 +133,20 @@ func (mt *MetricsTracker) samplingLoop(ctx context.Context) {
 
 // takeSample captures a metrics snapshot and stores it
 func (mt *MetricsTracker) takeSample() {
-	bytesRead, bytesWritten, providerErrors := mt.aggregateMetrics()
+	snapshot := mt.pool.GetMetricsSnapshot()
 
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
 
 	// Create sample
 	sample := metricsample{
-		bytesDownloaded:    bytesRead,
-		bytesUploaded:      bytesWritten,
-		articlesDownloaded: 0, // Not directly available in new API
-		articlesPosted:     0, // Not directly available in new API
-		totalErrors:        0,
-		providerErrors:     copyProviderErrors(providerErrors),
-		timestamp:          time.Now(),
+		bytesDownloaded:    snapshot.BytesDownloaded,
+		bytesUploaded:      snapshot.BytesUploaded,
+		articlesDownloaded: snapshot.ArticlesDownloaded,
+		articlesPosted:     snapshot.ArticlesPosted,
+		totalErrors:        snapshot.TotalErrors,
+		providerErrors:     copyProviderErrors(snapshot.ProviderErrors),
+		timestamp:          snapshot.Timestamp,
 	}
 
 	// Add sample
@@ -210,11 +177,7 @@ func (mt *MetricsTracker) cleanupOldSamples() {
 
 // calculateSpeeds calculates download and upload speeds based on historical samples
 // Uses calculationWindow (default 10s) for more accurate real-time speed measurements
-func (mt *MetricsTracker) calculateSpeeds(current struct {
-	BytesDownloaded int64
-	BytesUploaded   int64
-	Timestamp       time.Time
-}) (downloadSpeed, uploadSpeed float64) {
+func (mt *MetricsTracker) calculateSpeeds(current nntppool.PoolMetricsSnapshot) (downloadSpeed, uploadSpeed float64) {
 	// Need at least 2 samples to calculate speed
 	if len(mt.samples) < 2 {
 		return 0, 0
@@ -262,9 +225,9 @@ func copyProviderErrors(original map[string]int64) map[string]int64 {
 		return nil
 	}
 
-	cpy := make(map[string]int64, len(original))
+	copy := make(map[string]int64, len(original))
 	for k, v := range original {
-		cpy[k] = v
+		copy[k] = v
 	}
-	return cpy
+	return copy
 }

@@ -126,13 +126,13 @@ func initializeFilesystem(
 
 // setupNNTPPool initializes the NNTP connection pool
 func setupNNTPPool(ctx context.Context, cfg *config.Config, poolManager pool.Manager) error {
-	providers := cfg.GetEnabledProviders()
-	if len(providers) > 0 {
+	if len(cfg.Providers) > 0 {
+		providers := cfg.ToNNTPProviders()
 		if err := poolManager.SetProviders(providers); err != nil {
 			slog.ErrorContext(ctx, "failed to create initial NNTP pool", "err", err)
 			return err
 		}
-		slog.InfoContext(ctx, "NNTP connection pool initialized", "provider_count", len(providers))
+		slog.InfoContext(ctx, "NNTP connection pool initialized", "provider_count", len(cfg.Providers))
 	} else {
 		slog.InfoContext(ctx, "Starting server without NNTP providers - configure via API to enable downloads")
 	}
