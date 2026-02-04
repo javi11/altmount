@@ -559,10 +559,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 				break
 			}
 		}
-	}
-				break
-			}
-		}
+
 		// Try match with relative path
 		if relativePath != "" {
 			strippedRelative := strings.TrimSuffix(relativePath, ".strm")
