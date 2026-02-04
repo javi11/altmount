@@ -285,12 +285,13 @@ export function ImportConfigSection({
 								readOnly={isReadOnly}
 								min={1}
 								onChange={(e) =>
-									handleInputChange("watch_interval_seconds", Number.parseInt(e.target.value, 10) || 10)
+									handleInputChange(
+										"watch_interval_seconds",
+										Number.parseInt(e.target.value, 10) || 10,
+									)
 								}
 							/>
-							<p className="label">
-								How often to check for new files (default: 10 seconds).
-							</p>
+							<p className="label">How often to check for new files (default: 10 seconds).</p>
 						</fieldset>
 					)}
 				</div>
