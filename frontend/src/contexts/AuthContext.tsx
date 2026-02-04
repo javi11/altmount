@@ -19,6 +19,7 @@ type AuthAction =
 	| { type: "AUTH_ERROR"; payload: string }
 	| { type: "AUTH_LOGOUT" }
 	| { type: "AUTH_CLEAR_ERROR" }
+	| { type: "AUTH_SKIP" } // Auth disabled - treat as authenticated anonymous admin
 	| { type: "SET_LOGIN_REQUIRED"; payload: boolean };
 
 // Initial state
@@ -61,6 +62,20 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
 				user: null,
 				isLoading: false,
 				isAuthenticated: false,
+				error: null,
+			};
+		case "AUTH_SKIP":
+			// Auth is disabled - treat user as authenticated anonymous admin
+			return {
+				...state,
+				user: {
+					id: "anonymous",
+					name: "Admin",
+					provider: "none",
+					is_admin: true,
+				} as User,
+				isLoading: false,
+				isAuthenticated: true,
 				error: null,
 			};
 		case "AUTH_CLEAR_ERROR":
@@ -111,10 +126,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 				const authConfig = await apiClient.getAuthConfig();
 				dispatch({ type: "SET_LOGIN_REQUIRED", payload: authConfig.login_required });
 
-				// If login is not required, skip authentication
+				// If login is not required, treat as authenticated anonymous admin
 				if (!authConfig.login_required) {
-					// Set authenticated state without user
-					dispatch({ type: "AUTH_LOGOUT" });
+					dispatch({ type: "AUTH_SKIP" });
 					return;
 				}
 

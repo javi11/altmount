@@ -148,7 +148,7 @@ export function ProviderHealth() {
 														{provider.last_speed_test_mbps.toFixed(2)} Mbps
 													</span>
 													{provider.last_speed_test_time && (
-														<span className="text-xs text-base-content/50">
+														<span className="text-base-content/50 text-xs">
 															{formatRelativeTime(provider.last_speed_test_time)}
 														</span>
 													)}

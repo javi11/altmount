@@ -392,19 +392,20 @@ export function ArrsConfigSection({
 									<div className="divider" />
 
 									<div>
-										<h4 className="font-medium mb-2">Ignored Error Messages</h4>
-										<p className="text-base-content/70 text-sm mb-4">
-											Additional error messages that are safe to auto-cleanup. You can enable/disable default rules or add custom ones.
+										<h4 className="mb-2 font-medium">Ignored Error Messages</h4>
+										<p className="mb-4 text-base-content/70 text-sm">
+											Additional error messages that are safe to auto-cleanup. You can
+											enable/disable default rules or add custom ones.
 										</p>
 
 										{/* List of ignored messages */}
-										<div className="space-y-2 mb-4">
+										<div className="mb-4 space-y-2">
 											{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
 												<div
 													key={index}
-													className="flex items-center justify-between bg-base-300 p-2 rounded-lg"
+													className="flex items-center justify-between rounded-lg bg-base-300 p-2"
 												>
-													<div className="flex items-center flex-1 mr-4">
+													<div className="mr-4 flex flex-1 items-center">
 														<input
 															type="checkbox"
 															className="checkbox checkbox-sm checkbox-primary mr-3"
@@ -412,7 +413,9 @@ export function ArrsConfigSection({
 															onChange={() => handleToggleIgnoreMessage(index)}
 															disabled={isReadOnly}
 														/>
-														<span className={`text-sm font-mono break-all ${!msg.enabled ? "opacity-50 line-through" : ""}`}>
+														<span
+															className={`break-all font-mono text-sm ${!msg.enabled ? "line-through opacity-50" : ""}`}
+														>
 															{msg.message}
 														</span>
 													</div>
@@ -428,7 +431,7 @@ export function ArrsConfigSection({
 												</div>
 											))}
 											{(formData.queue_cleanup_allowlist || []).length === 0 && (
-												<div className="text-center py-4 bg-base-100 rounded-lg text-base-content/50 text-sm italic">
+												<div className="rounded-lg bg-base-100 py-4 text-center text-base-content/50 text-sm italic">
 													No ignored messages configured
 												</div>
 											)}

@@ -124,8 +124,8 @@ export function WebDAVConfigSection({
 						placeholder="localhost"
 					/>
 					<p className="label">
-						External hostname or IP address used for .strm file generation. Defaults to localhost
-						if empty.
+						External hostname or IP address used for .strm file generation. Defaults to localhost if
+						empty.
 					</p>
 				</fieldset>
 				<fieldset className="fieldset">
