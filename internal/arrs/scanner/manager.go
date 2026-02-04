@@ -570,6 +570,39 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 	}
 
 	if len(episodeIDs) == 0 {
+		// Fallback: Try to find episodes by parsing SxxExx from the filename
+		// This handles cases where Sonarr has already unlinked the file
+		fileName := filepath.Base(filePath)
+		slog.InfoContext(ctx, "No linked episodes found, attempting filename parsing fallback", "filename", fileName)
+
+		allSatisfied := true
+		for _, episode := range episodes {
+			// Construct SxxExx pattern (e.g. S01E01)
+			sxxExx := fmt.Sprintf("S%02dE%02d", episode.SeasonNumber, episode.EpisodeNumber)
+			if strings.Contains(strings.ToUpper(fileName), sxxExx) {
+				slog.InfoContext(ctx, "Found Sonarr episode match by filename pattern",
+					"pattern", sxxExx,
+					"episode_id", episode.ID)
+
+				// Check if this episode is already satisfied by a different healthy file
+				if !episode.HasFile || episode.EpisodeFileID == 0 {
+					allSatisfied = false
+				}
+
+				episodeIDs = append(episodeIDs, episode.ID)
+			}
+		}
+
+		// If we found episodes and ALL of them are already satisfied by other files,
+		// then this file is a "zombie" duplicate and can be safely deleted.
+		if len(episodeIDs) > 0 && allSatisfied {
+			slog.InfoContext(ctx, "All episodes in unlinked file are already satisfied by other files in Sonarr. Marking as zombie.", 
+				"file_path", filePath)
+			return fmt.Errorf("file %s is a zombie: %w", filePath, model.ErrEpisodeAlreadySatisfied)
+		}
+	}
+
+	if len(episodeIDs) == 0 {
 		return fmt.Errorf("no episodes found for file: %s: %w", filePath, model.ErrPathMatchFailed)
 	}
 
