@@ -472,10 +472,7 @@ func (s *Server) handleSABnzbdQueue(c *fiber.Ctx) error {
 	}
 
 	// Get category filter from query parameter
-	categoryFilter := c.Query("category", "")
-	if categoryFilter == "" {
-		categoryFilter = c.Query("cat", "")
-	}
+	categoryFilter := s.normalizeCategoryFilter(c)
 
 	// Get pagination parameters
 	start := 0
@@ -606,7 +603,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	}
 
 	// Get category filter from query parameter
-	categoryFilter := c.Query("category", "")
+	categoryFilter := s.normalizeCategoryFilter(c)
 
 	// Get pagination parameters
 	start := 0
@@ -1001,6 +998,21 @@ func (s *Server) ensureCategoryDirectories(category string) error {
 	}
 
 	return nil
+}
+
+// normalizeCategoryFilter extracts and normalizes the category filter from query parameters
+func (s *Server) normalizeCategoryFilter(c *fiber.Ctx) string {
+	category := c.Query("category", "")
+	if category == "" {
+		category = c.Query("cat", "")
+	}
+
+	lower := strings.ToLower(category)
+	if lower == "all" || lower == "*" || lower == "default" {
+		return ""
+	}
+
+	return category
 }
 
 // calculateItemBasePath calculates the base path for an item based on the import strategy configuration
