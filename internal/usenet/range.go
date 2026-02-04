@@ -2,6 +2,7 @@ package usenet
 
 import (
 	"context"
+	"fmt"
 	"io"
 )
 
@@ -122,6 +123,49 @@ func int64AccumulatedLen(segs []*segment) int64 {
 		total += (s.End - s.Start + 1)
 	}
 	return total
+}
+
+// CheckMetadataIntegrity verifies that the segments provided by the loader
+// cover the entire file range [0, fileSize-1] without any gaps.
+// Returns an error if any part of the file is not covered by segment data.
+func CheckMetadataIntegrity(fileSize int64, ml SegmentLoader) error {
+	if fileSize == 0 {
+		return nil
+	}
+
+	var logicalFilePos int64 = 0
+
+	for idx := 0; ; idx++ {
+		src, _, ok := ml.GetSegment(idx)
+		if !ok {
+			break
+		}
+
+		// Gap detection: if the logical file position we're tracking
+		// is less than the file position this segment would cover,
+		// there's a gap in the metadata.
+		// (Note: in altmount segments are expected to be perfectly sequential
+		// because of how they are imported from NZBs)
+
+		usableLen := src.End - src.Start + 1
+		if usableLen <= 0 {
+			continue
+		}
+
+		// We assume segments are provided in order by the loader.
+		// If logicalFilePos < total size but we're out of segments or have a gap, it's corrupt.
+		logicalFilePos += usableLen
+
+		if logicalFilePos >= fileSize {
+			return nil
+		}
+	}
+
+	if logicalFilePos < fileSize {
+		return fmt.Errorf("metadata gap: only %d of %d bytes are covered by segments", logicalFilePos, fileSize)
+	}
+
+	return nil
 }
 
 // Helper functions (avoid importing math for simple min/max & allocating in fmt for int to string)
