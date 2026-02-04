@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"testing"
 	"time"
 
-	"github.com/javi11/altmount/internal/config"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -20,15 +20,15 @@ type MockPoolManager struct {
 	mock.Mock
 }
 
-func (m *MockPoolManager) GetPool() (nntppool.NNTPClient, error) {
+func (m *MockPoolManager) GetPool() (nntppool.UsenetConnectionPool, error) {
 	args := m.Called()
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(nntppool.NNTPClient), args.Error(1)
+	return args.Get(0).(nntppool.UsenetConnectionPool), args.Error(1)
 }
 
-func (m *MockPoolManager) SetProviders(providers []config.ProviderConfig) error {
+func (m *MockPoolManager) SetProviders(providers []nntppool.UsenetProviderConfig) error {
 	return nil
 }
 func (m *MockPoolManager) ClearPool() error {
@@ -44,77 +44,17 @@ func (m *MockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 // MockConnectionPool
 type MockConnectionPool struct {
 	mock.Mock
+	nntppool.UsenetConnectionPool
 }
 
-func (m *MockConnectionPool) Stat(ctx context.Context, id string) (*nntppool.Response, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*nntppool.Response), args.Error(1)
+func (m *MockConnectionPool) Stat(ctx context.Context, id string, groups []string) (int, error) {
+	args := m.Called(ctx, id, groups)
+	return args.Int(0), args.Error(1)
 }
 
-func (m *MockConnectionPool) Body(ctx context.Context, id string, w io.Writer) error {
-	args := m.Called(ctx, id, w)
-	return args.Error(0)
-}
-
-func (m *MockConnectionPool) BodyReader(ctx context.Context, id string) (nntppool.YencReader, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(nntppool.YencReader), args.Error(1)
-}
-
-func (m *MockConnectionPool) BodyAt(ctx context.Context, id string, w io.WriterAt) error {
-	return nil
-}
-
-func (m *MockConnectionPool) Article(ctx context.Context, id string, w io.Writer) error {
-	return nil
-}
-
-func (m *MockConnectionPool) Head(ctx context.Context, id string) (*nntppool.Response, error) {
-	return nil, nil
-}
-
-func (m *MockConnectionPool) Group(ctx context.Context, group string) (*nntppool.Response, error) {
-	return nil, nil
-}
-
-func (m *MockConnectionPool) Post(ctx context.Context, headers map[string]string, body io.Reader) (*nntppool.Response, error) {
-	return nil, nil
-}
-
-func (m *MockConnectionPool) PostYenc(ctx context.Context, headers map[string]string, body io.Reader, opts *nntppool.YencOptions) (*nntppool.Response, error) {
-	return nil, nil
-}
-
-func (m *MockConnectionPool) AddProvider(provider *nntppool.Provider, tier nntppool.ProviderType) error {
-	return nil
-}
-
-func (m *MockConnectionPool) RemoveProvider(provider *nntppool.Provider) error {
-	return nil
-}
-
-func (m *MockConnectionPool) Close() {}
-
-func (m *MockConnectionPool) Send(ctx context.Context, payload []byte, bodyWriter io.Writer) <-chan nntppool.Response {
-	return nil
-}
-
-func (m *MockConnectionPool) Metrics() map[string]nntppool.ProviderMetrics {
-	return nil
-}
-
-func (m *MockConnectionPool) SpeedTest(ctx context.Context, articleIDs []string) (nntppool.SpeedTestStats, error) {
-	return nntppool.SpeedTestStats{}, nil
-}
-
-func (m *MockConnectionPool) Date(ctx context.Context) error {
-	return nil
+func (m *MockConnectionPool) Body(ctx context.Context, id string, w io.Writer, groups []string) (int64, error) {
+	args := m.Called(ctx, id, w, groups)
+	return int64(args.Int(0)), args.Error(1)
 }
 
 func TestValidateSegmentAvailabilityDetailed_Hybrid(t *testing.T) {
@@ -129,7 +69,7 @@ func TestValidateSegmentAvailabilityDetailed_Hybrid(t *testing.T) {
 
 	// Test hybrid mode (verifyData = true)
 	// Expect Body call
-	mockPool.On("Body", mock.Anything, "seg1", mock.Anything).Return(ErrLimitReached).Once()
+	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, []string{}).Return(0, ErrLimitReached).Once()
 
 	result, err := ValidateSegmentAvailabilityDetailed(
 		context.Background(),
@@ -162,7 +102,7 @@ func TestValidateSegmentAvailabilityDetailed_Hybrid_Failure(t *testing.T) {
 
 	// Test hybrid mode (verifyData = true)
 	// Expect Body call returning generic error (e.g. 430 No Such Article)
-	mockPool.On("Body", mock.Anything, "seg1", mock.Anything).Return(fmt.Errorf("article not found")).Once()
+	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, []string{}).Return(0, fmt.Errorf("article not found")).Once()
 
 	result, err := ValidateSegmentAvailabilityDetailed(
 		context.Background(),
@@ -182,4 +122,51 @@ func TestValidateSegmentAvailabilityDetailed_Hybrid_Failure(t *testing.T) {
 
 	mockPool.AssertExpectations(t)
 	mockManager.AssertExpectations(t)
+}
+
+func TestSelectSegmentsForValidation(t *testing.T) {
+	// Seed random for predictability in middle segments
+	rand.Seed(1)
+
+	// Create 100 dummy segments
+	segments := make([]*metapb.SegmentData, 100)
+	for i := 0; i < 100; i++ {
+		segments[i] = &metapb.SegmentData{Id: fmt.Sprintf("seg%d", i)}
+	}
+
+	t.Run("100 percent", func(t *testing.T) {
+		selected := selectSegmentsForValidation(segments, 100)
+		assert.Equal(t, 100, len(selected))
+	})
+
+	t.Run("10 percent", func(t *testing.T) {
+		selected := selectSegmentsForValidation(segments, 10)
+		// 10% of 100 = 10 segments
+		assert.Equal(t, 10, len(selected))
+
+		// Should include first 3
+		assert.Equal(t, "seg0", selected[0].Id)
+		assert.Equal(t, "seg1", selected[1].Id)
+		assert.Equal(t, "seg2", selected[2].Id)
+
+		// Should include last 2
+		found98 := false
+		found99 := false
+		for _, s := range selected {
+			if s.Id == "seg98" {
+				found98 = true
+			}
+			if s.Id == "seg99" {
+				found99 = true
+			}
+		}
+		assert.True(t, found98, "Should include seg98")
+		assert.True(t, found99, "Should include seg99")
+	})
+
+	t.Run("minimum 5", func(t *testing.T) {
+		// 1% of 100 = 1 segment, but minimum is 5
+		selected := selectSegmentsForValidation(segments, 1)
+		assert.Equal(t, 5, len(selected))
+	})
 }
