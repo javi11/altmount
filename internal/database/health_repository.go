@@ -460,6 +460,24 @@ func (r *HealthRepository) DeleteHealthRecord(ctx context.Context, filePath stri
 	return nil
 }
 
+// DeleteHealthRecordsByPrefix removes health records that start with the given prefix
+func (r *HealthRepository) DeleteHealthRecordsByPrefix(ctx context.Context, prefix string) (int64, error) {
+	prefix = strings.TrimPrefix(prefix, "/")
+	if prefix == "" {
+		return 0, nil
+	}
+
+	query := `DELETE FROM file_health WHERE file_path = ? OR file_path LIKE ?`
+	likePattern := prefix + "/%"
+
+	result, err := r.db.ExecContext(ctx, query, prefix, likePattern)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete health records by prefix %s: %w", prefix, err)
+	}
+
+	return result.RowsAffected()
+}
+
 // CleanupHealthRecords removes health records for files that no longer exist
 func (r *HealthRepository) CleanupHealthRecords(ctx context.Context, existingFiles []string) error {
 	if len(existingFiles) == 0 {
@@ -1001,7 +1019,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	defer stmtCorrupted.Close()
 
 	for _, update := range updates {
-		filePath := strings.TrimPrefix(update.FilePath, "/")
+		filePath := update.FilePath
 		switch update.Status {
 		case HealthStatusHealthy:
 			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath)
@@ -1103,12 +1121,12 @@ func (r *HealthRepository) GetAllHealthCheckRecords(ctx context.Context) ([]Auto
 	var records []AutomaticHealthCheckRecord
 	for rows.Next() {
 		var (
-			path             string
-			libraryPath      *string
-			releaseDate      *time.Time
+			path               string
+			libraryPath        *string
+			releaseDate        *time.Time
 			scheduledCheckAtNT sql.NullTime
-			sourceNzbPath    *string
-			status           HealthStatus
+			sourceNzbPath      *string
+			status             HealthStatus
 		)
 
 		if err := rows.Scan(&path, &libraryPath, &releaseDate, &scheduledCheckAtNT, &sourceNzbPath, &status); err != nil {

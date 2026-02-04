@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/url"
 	"os"
@@ -32,21 +33,35 @@ type ArrsWebhookRequest struct {
 	Movie struct {
 		FolderPath string `json:"folderPath"`
 	} `json:"movie,omitempty"`
+	MovieFile struct {
+		Path string `json:"path"`
+	} `json:"movieFile,omitempty"`
 	Series struct {
 		Path string `json:"path"`
 	} `json:"series,omitempty"`
 	EpisodeFile struct {
 		Path string `json:"path"`
 	} `json:"episodeFile,omitempty"`
-	UpgradeTopics []struct {
-		EntryId     int    `json:"entryId"`
-		EpisodeId   int    `json:"episodeId"`
-		LanguageId  int    `json:"languageId"`
-		QualityName string `json:"qualityName"`
-	} `json:"upgradeTopics,omitempty"`
-	DeletedFiles []struct {
-		Path string `json:"path"`
-	} `json:"deletedFiles,omitempty"`
+	DeletedFiles ArrsDeletedFiles `json:"deletedFiles,omitempty"`
+}
+
+type ArrsDeletedFile struct {
+	Path string `json:"path"`
+}
+
+type ArrsDeletedFiles []ArrsDeletedFile
+
+func (df *ArrsDeletedFiles) UnmarshalJSON(data []byte) error {
+	if string(data) == "false" || string(data) == "null" {
+		*df = nil
+		return nil
+	}
+	var a []ArrsDeletedFile
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*df = a
+	return nil
 }
 
 // handleArrsWebhook handles webhooks from Radarr/Sonarr
@@ -94,7 +109,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 	// Determine file path to scan/delete based on event type
 	var pathsToScan []string
-	var pathsToDelete []string
+	var filesToDelete []string
+	var dirsToDelete []string
 
 	switch req.EventType {
 	case "Test":
@@ -103,6 +119,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	case "Download": // OnImport
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.MovieFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.MovieFile.Path)
 		} else if req.FilePath != "" {
 			pathsToScan = append(pathsToScan, req.FilePath)
 		}
@@ -110,6 +128,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		// For rename, we want to scan the new file
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.MovieFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.MovieFile.Path)
 		} else if req.FilePath != "" {
 			pathsToScan = append(pathsToScan, req.FilePath)
 		}
@@ -123,6 +143,8 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		// For upgrade, scan the new file
 		if req.EpisodeFile.Path != "" {
 			pathsToScan = append(pathsToScan, req.EpisodeFile.Path)
+		} else if req.MovieFile.Path != "" {
+			pathsToScan = append(pathsToScan, req.MovieFile.Path)
 		} else if req.FilePath != "" {
 			pathsToScan = append(pathsToScan, req.FilePath)
 		}
@@ -130,19 +152,15 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		// If we have deleted files information, mark for deletion
 		for _, deleted := range req.DeletedFiles {
 			if deleted.Path != "" {
-				pathsToDelete = append(pathsToDelete, deleted.Path)
+				filesToDelete = append(filesToDelete, deleted.Path)
 			}
 		}
 	case "MovieDelete", "SeriesDelete":
-		if req.Movie.FolderPath != "" {
-			pathsToScan = append(pathsToScan, req.Movie.FolderPath)
-		} else if req.Series.Path != "" {
-			pathsToScan = append(pathsToScan, req.Series.Path)
-		}
+		slog.InfoContext(c.Context(), "Ignoring delete webhook to prevent accidental library wipes")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
 	case "EpisodeFileDelete":
-		if req.EpisodeFile.Path != "" {
-			pathsToDelete = append(pathsToDelete, req.EpisodeFile.Path)
-		}
+		slog.InfoContext(c.Context(), "Ignoring EpisodeFileDelete webhook to prevent accidental library wipes")
+		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
 	default:
 		slog.DebugContext(c.Context(), "Ignoring unhandled webhook event", "event_type", req.EventType)
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "Ignored"})
@@ -189,38 +207,89 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		return normalizedPath
 	}
 
-	// Process Deletions
-	for _, path := range pathsToDelete {
-		normalizedPath := normalize(path)
-		slog.InfoContext(c.Context(), "Processing webhook file deletion",
-			"original_path", path,
-			"normalized_path", normalizedPath)
+	// Process File Deletions
+	// SAFETY: Webhook should NEVER delete anything to prevent accidental library wipes (e.g. when mount is down)
+	if false {
+		for _, path := range filesToDelete {
+			normalizedPath := normalize(path)
 
-		// Delete health record
-		if s.healthRepo != nil {
-			if err := s.healthRepo.DeleteHealthRecord(c.Context(), normalizedPath); err != nil {
-				slog.ErrorContext(c.Context(), "Failed to delete health record from webhook", "path", normalizedPath, "error", err)
+			// Safety check: Don't delete if we are about to scan this same path (e.g. in-place upgrade/rename)
+			isBeingScanned := false
+			for _, scanPath := range pathsToScan {
+				if normalize(scanPath) == normalizedPath {
+					isBeingScanned = true
+					break
+				}
 			}
+
+			if isBeingScanned {
+				slog.InfoContext(c.Context(), "Skipping webhook file deletion because file is being upgraded/scanned",
+					"path", normalizedPath,
+					"event_type", req.EventType)
+				continue
+			}
+
+			slog.InfoContext(c.Context(), "Processing webhook file deletion",
+				"original_path", path,
+				"normalized_path", normalizedPath,
+				"event_type", req.EventType)
+
+			// Delete health record
+			if s.healthRepo != nil {
+				if err := s.healthRepo.DeleteHealthRecord(c.Context(), normalizedPath); err != nil {
+					slog.ErrorContext(c.Context(), "Failed to delete health record from webhook", "path", normalizedPath, "error", err)
+				}
+			}
+
+			// Delete metadata
+			/*
+				if s.metadataService != nil {
+					// Check if we should delete source NZB
+					deleteSource := false
+					if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+						deleteSource = *cfg.Metadata.DeleteSourceNzbOnRemoval
+					}
+					if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), normalizedPath, deleteSource); err != nil {
+						// Log as debug because it might already be gone
+						slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", normalizedPath, "error", err)
+					}
+				}
+			*/
+			slog.InfoContext(c.Context(), "Skipping metadata deletion (preserved by safety policy)", "path", normalizedPath)
 		}
+	}
 
-		// Delete metadata
-		if s.metadataService != nil {
-			// Check if we should delete source NZB
-			deleteSource := false
-			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
-				deleteSource = *cfg.Metadata.DeleteSourceNzbOnRemoval
+	// Process Directory Deletions
+	// SAFETY: Webhook should NEVER delete anything to prevent accidental library wipes (e.g. when mount is down)
+	if false {
+		for _, path := range dirsToDelete {
+			normalizedPath := normalize(path)
+			slog.InfoContext(c.Context(), "Processing webhook directory deletion",
+				"original_path", path,
+				"normalized_path", normalizedPath)
+
+			// Delete health records for all files in this directory
+			if s.healthRepo != nil {
+				if count, err := s.healthRepo.DeleteHealthRecordsByPrefix(c.Context(), normalizedPath); err != nil {
+					slog.ErrorContext(c.Context(), "Failed to delete health records by prefix from webhook", "prefix", normalizedPath, "error", err)
+				} else {
+					slog.InfoContext(c.Context(), "Deleted health records for directory", "prefix", normalizedPath, "count", count)
+				}
 			}
-			if err := s.metadataService.DeleteFileMetadataWithSourceNzb(c.Context(), normalizedPath, deleteSource); err != nil {
-				// Log as debug because it might already be gone
-				slog.DebugContext(c.Context(), "Failed to delete metadata from webhook (might be gone)", "path", normalizedPath, "error", err)
-			}
+
+			// Delete metadata directory
+			/*
+				if s.metadataService != nil {
+					if err := s.metadataService.DeleteDirectory(normalizedPath); err != nil {
+						slog.DebugContext(c.Context(), "Failed to delete metadata directory from webhook (might be gone)", "path", normalizedPath, "error", err)
+					}
+				}
+			*/
+			slog.InfoContext(c.Context(), "Skipping metadata directory deletion (preserved by safety policy)", "path", normalizedPath)
 		}
 	}
 
 	if len(pathsToScan) == 0 {
-		if len(pathsToDelete) > 0 {
-			return c.Status(200).JSON(fiber.Map{"success": true, "message": "Deletions processed"})
-		}
 		slog.WarnContext(c.Context(), "No file path found in webhook payload to scan")
 		return c.Status(200).JSON(fiber.Map{"success": true, "message": "No path to scan"})
 	}
@@ -229,10 +298,10 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 		// Normalize path to relative
 		normalizedPath := normalize(path)
 
-		slog.InfoContext(c.Context(), "Processing webhook file update", 
-			"original_path", path, 
+		slog.InfoContext(c.Context(), "Processing webhook file update",
+			"original_path", path,
 			"normalized_path", normalizedPath)
-		
+
 		if s.healthRepo != nil {
 			var releaseDate *time.Time
 			var sourceNzb *string
@@ -536,7 +605,7 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 			baseURL = cfg.Arrs.WebhookBaseURL
 		}
 	}
-	
+
 	// Launch in background to not block
 	go func() {
 		ctx := context.Background()

@@ -157,10 +157,10 @@ func TestRetryBackoff_SelectiveRetry(t *testing.T) {
 	// Verify that only database contention errors trigger retry
 
 	tests := []struct {
-		name          string
-		errorMessage  string
-		shouldRetry   bool
-		description   string
+		name         string
+		errorMessage string
+		shouldRetry  bool
+		description  string
 	}{
 		{
 			name:         "lock error should retry",

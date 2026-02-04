@@ -44,7 +44,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	url := fmt.Sprintf("http://localhost:%d%s/health/library-sync/%s", port, prefix, endpoint)
-	
+
 	slog.Info("Triggering library scan", "url", url, "dry_run", dryRun)
 
 	// Create client with timeout
@@ -56,10 +56,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// If auth is required, we might need to handle it. 
+	// If auth is required, we might need to handle it.
 	// For now, assuming localhost access or no auth for internal CLI usage if configured that way.
 	// However, the API usually requires auth if LoginRequired is true.
-	// The CLI might need an API key or token. 
+	// The CLI might need an API key or token.
 	// Checking if there's a way to bypass or provide credentials.
 	// Since this is a "convenience" CLI command, let's see if we can get an admin token or similar.
 	// If not, we'll warn the user they might need to authenticate if the request fails with 401.

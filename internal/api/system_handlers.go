@@ -339,18 +339,15 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		}
 
 		providers = append(providers, ProviderStatusResponse{
-			ID:                    p.ID,
-			Host:                  p.Host,
-			Username:              p.Username,
-			UsedConnections:       activeConnections,
-			MaxConnections:        p.MaxConnections,
-			State:                 state,
-			ErrorCount:            errorCount,
-			LastConnectionAttempt: time.Time{}, // Not available in new API
-			LastSuccessfulConnect: time.Time{}, // Not available in new API
-			FailureReason:         "",          // Not available in new API
-			LastSpeedTestMbps:     p.LastSpeedTestMbps,
-			LastSpeedTestTime:     p.LastSpeedTestTime,
+			ID:                p.ID,
+			Host:              p.Host,
+			Username:          p.Username,
+			UsedConnections:   activeConnections,
+			MaxConnections:    p.MaxConnections,
+			State:             state,
+			ErrorCount:        errorCount,
+			LastSpeedTestMbps: p.LastSpeedTestMbps,
+			LastSpeedTestTime: p.LastSpeedTestTime,
 		})
 	}
 

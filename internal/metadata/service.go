@@ -390,7 +390,7 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 				isEmpty = false // Keep parent if sub-cleanup failed
 				continue
 			}
-			
+
 			// Re-check after sub-directory cleanup
 			subEntries, _ := os.ReadDir(subPath)
 			if len(subEntries) > 0 {

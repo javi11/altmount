@@ -394,7 +394,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 			// if err != nil { ... return ... }
 			// if err := s.healthRepo.DeleteHealthRecord...
 			// So it only deletes if TriggerFileRescan succeeds.
-			
+
 			failedCount++
 			errors[filePath] = fmt.Sprintf("Failed to trigger repair: %v", err)
 			continue
@@ -407,7 +407,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 				"file_path", item.FilePath)
 			// Don't count as failure since repair was triggered
 		}
-		
+
 		successCount++
 	}
 
@@ -1001,11 +1001,11 @@ func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
 
 	if len(files) == 0 {
 		return RespondSuccess(c, fiber.Map{
-			"message":           "No files without library path found",
-			"files_processed":   0,
-			"symlinks_created":  0,
-			"errors":            []string{},
-			"completed_at":      time.Now().Format(time.RFC3339),
+			"message":          "No files without library path found",
+			"files_processed":  0,
+			"symlinks_created": 0,
+			"errors":           []string{},
+			"completed_at":     time.Now().Format(time.RFC3339),
 		})
 	}
 
@@ -1057,12 +1057,12 @@ func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
 	}
 
 	response := fiber.Map{
-		"message":           fmt.Sprintf("Regenerated symlinks for %d files", successCount),
-		"files_processed":   len(files),
-		"symlinks_created":  successCount,
-		"errors":            errors,
-		"error_count":       errorCount,
-		"completed_at":      time.Now().Format(time.RFC3339),
+		"message":          fmt.Sprintf("Regenerated symlinks for %d files", successCount),
+		"files_processed":  len(files),
+		"symlinks_created": successCount,
+		"errors":           errors,
+		"error_count":      errorCount,
+		"completed_at":     time.Now().Format(time.RFC3339),
 	}
 
 	if errorCount > 0 {

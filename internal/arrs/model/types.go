@@ -27,4 +27,3 @@ type ConfigManager interface {
 	UpdateConfig(config *config.Config) error
 	SaveConfig() error
 }
-

@@ -392,9 +392,9 @@ func (m *Manager) forceUnmountPath(mountPath string) error {
 	if runtime.GOOS == "darwin" {
 		// macOS-specific commands
 		methods = [][]string{
-			{"umount", "-f", mountPath},                       // macOS force unmount
-			{"diskutil", "unmount", "force", mountPath},       // macOS diskutil
-			{"umount", mountPath},                             // Standard unmount
+			{"umount", "-f", mountPath},                 // macOS force unmount
+			{"diskutil", "unmount", "force", mountPath}, // macOS diskutil
+			{"umount", mountPath},                       // Standard unmount
 		}
 	} else {
 		// Linux/Unix commands

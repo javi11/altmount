@@ -176,13 +176,12 @@ func NewHandler(
 			// r.URL.Path contains the full path including prefix
 			// Create cancellable context
 			streamCtx, cancel := context.WithCancel(r.Context())
-			// Note: Do NOT defer cancel() or Remove() - webdav handler returns before
-			// streaming completes. Cleanup happens via: client disconnect (ctx cancels),
-			// File.Close() (which calls StreamTracker.Remove), or explicit KillStream().
+			defer cancel() // Ensure cleanup for this specific stream context
 
 			// Add to tracker with full metadata
 			stream := streamTracker.Add(r.URL.Path, "WebDAV", effectiveUser, r.RemoteAddr, r.UserAgent(), 0)
-			
+			defer streamTracker.Remove(stream)
+
 			// Register cancel function in tracker
 			streamTracker.SetCancelFunc(stream, cancel)
 

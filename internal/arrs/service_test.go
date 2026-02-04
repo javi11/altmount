@@ -11,7 +11,7 @@ func TestFindInstanceForFilePath(t *testing.T) {
 	// This test is limited because it requires actual Radarr/Sonarr clients or complex mocks
 	// But we can at least verify it compiles and handles basic logic if we were to mock the clients.
 	// For now, let's just ensure the service can be initialized.
-	
+
 	cfg := &config.Config{
 		Arrs: config.ArrsConfig{
 			RadarrInstances: []config.ArrsInstanceConfig{

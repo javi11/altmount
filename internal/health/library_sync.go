@@ -1112,7 +1112,7 @@ func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[str
 // removeEmptyDirectories removes empty directories from the library, import, and metadata directories
 func (lsw *LibrarySyncWorker) removeEmptyDirectories(ctx context.Context) (int, error) {
 	cfg := lsw.configGetter()
-	
+
 	// Paths to scan for empty directories
 	var scanPaths []string
 	if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {

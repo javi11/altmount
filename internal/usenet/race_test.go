@@ -14,7 +14,7 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 	// Setup
 	ctx := context.Background()
 
-	// Create a dummy segment range with properly initialized segment
+	// Create a dummy segment range
 	r, w := io.Pipe()
 	segments := []*segment{
 		{

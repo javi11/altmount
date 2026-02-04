@@ -20,4 +20,5 @@ const (
 	StreamUserNameKey = contextKey("streamUserName")
 	ClientIPKey       = contextKey("clientIP")
 	UserAgentKey      = contextKey("userAgent")
+	MaxCacheSizeKey   = contextKey("maxCacheSize")
 )

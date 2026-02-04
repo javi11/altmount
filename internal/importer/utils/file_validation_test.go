@@ -362,10 +362,10 @@ func TestIsAllowedFile_SampleProofPatterns(t *testing.T) {
 
 func TestIsAllowedFile_MixedDotFormats(t *testing.T) {
 	tests := []struct {
-		name        string
-		filename    string
-		allowed     []string
-		expected    bool
+		name     string
+		filename string
+		allowed  []string
+		expected bool
 	}{
 		{
 			name:     "allowed without dot matches file",
