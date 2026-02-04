@@ -1,7 +1,6 @@
 import { Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, StreamingConfig } from "../../types/config";
-import { BytesDisplay } from "../ui/BytesDisplay";
 
 interface StreamingConfigSectionProps {
 	config: ConfigResponse;
@@ -40,47 +39,27 @@ export function StreamingConfigSection({
 	return (
 		<div className="space-y-4">
 			<h3 className="font-semibold text-lg">Streaming & Download Configuration</h3>
-			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Max Cache Size</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_cache_size_mb}
-						readOnly={isReadOnly}
-						min={1}
-						max={1024} // 1GB max
-						step={1} // 1MB steps
-						onChange={(e) =>
-							handleInputChange("max_cache_size_mb", Number.parseInt(e.target.value, 10) || 1)
-						}
-					/>
-					<p className="label">Maximum cache size in MB for ahead download chunks</p>
-					<BytesDisplay bytes={formData.max_cache_size_mb * 1024 * 1024} mode="badge" />
-				</fieldset>
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Download Workers</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_download_workers}
-						readOnly={isReadOnly}
-						min={1}
-						max={50}
-						onChange={(e) =>
-							handleInputChange("max_download_workers", Number.parseInt(e.target.value, 10) || 1)
-						}
-					/>
-					<p className="label">Number of concurrent download threads</p>
-				</fieldset>
-			</div>
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">Download Workers</legend>
+				<input
+					type="number"
+					className="input"
+					value={formData.max_download_workers}
+					readOnly={isReadOnly}
+					min={1}
+					max={50}
+					onChange={(e) =>
+						handleInputChange("max_download_workers", Number.parseInt(e.target.value, 10) || 1)
+					}
+				/>
+				<p className="label">Number of concurrent download threads</p>
+			</fieldset>
 			<div className="alert alert-info">
 				<div>
 					<div className="font-bold">Note</div>
 					<div className="text-sm">
-						Cache size controls memory usage for ahead downloading of segments. Download workers
-						control the number of concurrent downloads from NNTP servers. If you don't understand
-						these settings, it's recommended to keep the default values.
+						Download workers control the number of concurrent downloads from NNTP servers. If you
+						don't understand these settings, it's recommended to keep the default values.
 					</div>
 				</div>
 			</div>
