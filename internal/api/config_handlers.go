@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,7 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2"
 )
 
 // ConfigManager interface defines methods for configuration management
@@ -313,37 +312,20 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 
-	// Build TLS config if TLS is enabled
-	var tlsConfig *tls.Config
-	if testReq.TLS {
-		tlsConfig = &tls.Config{
-			InsecureSkipVerify: testReq.InsecureTLS,
-			ServerName:         testReq.Host,
-		}
-	}
-
-	// Create provider to test connectivity
-	address := fmt.Sprintf("%s:%d", testReq.Host, testReq.Port)
-	provider, err := nntppool.NewProvider(ctx, nntppool.ProviderConfig{
-		Address:               address,
-		MaxConnections:        1,
-		InitialConnections:    1, // Force immediate connection to test
-		InflightPerConnection: 1,
-		MaxConnIdleTime:       30 * time.Second,
-		MaxConnLifetime:       30 * time.Second,
-		Auth:                  nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
-		TLSConfig:             tlsConfig,
-		ProxyURL:              testReq.ProxyURL,
-	})
+	err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
+		Host:     testReq.Host,
+		Port:     testReq.Port,
+		Username: testReq.Username,
+		Password: testReq.Password,
+		TLS:      testReq.TLS,
+		ProxyURL: testReq.ProxyURL,
+	}, slog.Default(), nil)
 	if err != nil {
 		return RespondSuccess(c, TestProviderResponse{
 			Success:      false,
 			ErrorMessage: err.Error(),
 		})
 	}
-
-	// Clean up the test provider
-	provider.Close()
 
 	response := TestProviderResponse{
 		Success:      true,

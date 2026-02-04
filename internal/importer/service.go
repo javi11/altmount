@@ -181,13 +181,14 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	maxImportConnections := currentConfig.Import.MaxImportConnections
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
+	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
 	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
 	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, readTimeout, broadcaster, configGetter)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
