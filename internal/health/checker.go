@@ -116,14 +116,20 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 
 	cfg := hc.configGetter()
 	samplePercentage := cfg.GetSegmentSamplePercentage()
+	verifyData := cfg.GetVerifyData()
 
 	// Override sample percentage if forced full check is requested
 	if len(opts) > 0 && opts[0].ForceFullCheck {
 		samplePercentage = 100
-		slog.InfoContext(ctx, "Forcing full health check (100% sampling)", "file_path", filePath)
+		verifyData = true
+		slog.InfoContext(ctx, "Forcing full health check (100% sampling + data verification)", "file_path", filePath)
 	}
 
-	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", samplePercentage)
+	slog.InfoContext(ctx, "Checking segment availability",
+		"file_path", filePath,
+		"total_segments", len(fileMeta.SegmentData),
+		"sample_percentage", samplePercentage,
+		"verify_data", verifyData)
 
 	// 1. Metadata integrity check - Verify the entire file map is complete
 	loader := &metadataSegmentLoader{segments: fileMeta.SegmentData}
@@ -145,6 +151,7 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 		samplePercentage,
 		nil, // No progress callback for health checks
 		30*time.Second,
+		verifyData,
 	)
 
 	if err != nil {
