@@ -2,11 +2,9 @@ package pool
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/nntppool/v3"
@@ -94,7 +92,7 @@ func (m *manager) SetProviders(providers []config.ProviderConfig) error {
 	m.logger.InfoContext(m.ctx, "Creating NNTP connection pool", "provider_count", len(providers))
 
 	for _, p := range providers {
-		provider, err := createProvider(m.ctx, p)
+		provider, err := NewProvider(m.ctx, p)
 		if err != nil {
 			// Clean up already added providers
 			client.Close()
@@ -167,29 +165,4 @@ func (m *manager) GetMetrics() (MetricsSnapshot, error) {
 	}
 
 	return m.metricsTracker.GetSnapshot(), nil
-}
-
-// createProvider creates a new nntppool.Provider from config
-func createProvider(ctx context.Context, cfg config.ProviderConfig) (*nntppool.Provider, error) {
-	var tlsConfig *tls.Config
-	if cfg.TLS {
-		tlsConfig = &tls.Config{
-			InsecureSkipVerify: cfg.InsecureTLS,
-			ServerName:         cfg.Host,
-		}
-	}
-
-	address := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-
-	return nntppool.NewProvider(ctx, nntppool.ProviderConfig{
-		Address:               address,
-		MaxConnections:        cfg.MaxConnections,
-		InitialConnections:    0,
-		InflightPerConnection: cfg.MaxConnections * 2,
-		MaxConnIdleTime:       30 * time.Second,
-		MaxConnLifetime:       30 * time.Second,
-		Auth:                  nntppool.Auth{Username: cfg.Username, Password: cfg.Password},
-		TLSConfig:             tlsConfig,
-		ProxyURL:              cfg.ProxyURL,
-	})
 }
