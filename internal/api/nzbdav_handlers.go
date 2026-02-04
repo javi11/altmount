@@ -123,12 +123,30 @@ func (s *Server) handleCancelNzbdavImport(c *fiber.Ctx) error {
 	})
 }
 
+// handleResetNzbdavImportStatus handles POST /import/nzbdav/reset
+func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
+	if s.importerService == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Importer service not available",
+		})
+	}
+
+	s.importerService.ResetNzbdavImportStatus()
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Import status reset",
+	})
+}
+
 func toImportStatusResponse(info importer.ImportInfo) map[string]interface{} {
 	return map[string]interface{}{
 		"status":     string(info.Status),
 		"total":      info.Total,
 		"added":      info.Added,
 		"failed":     info.Failed,
+		"skipped":    info.Skipped,
 		"last_error": info.LastError,
 	}
 }

@@ -101,6 +101,7 @@ export const ImportJobStatus = {
 	IDLE: "idle",
 	RUNNING: "running",
 	CANCELING: "canceling",
+	COMPLETED: "completed",
 } as const;
 
 export type ImportJobStatus = (typeof ImportJobStatus)[keyof typeof ImportJobStatus];
@@ -110,6 +111,7 @@ export interface ImportStatusResponse {
 	total: number;
 	added: number;
 	failed: number;
+	skipped?: number;
 	last_error?: string;
 }
 

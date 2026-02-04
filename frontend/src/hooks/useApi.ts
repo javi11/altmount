@@ -410,6 +410,17 @@ export const useNzbdavImportStatus = (refetchInterval?: number) => {
 	});
 };
 
+export const useResetNzbdavImportStatus = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.resetNzbdavImportStatus(),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["import", "nzbdav", "status"] });
+		},
+	});
+};
+
 export const useCancelNzbdavImport = () => {
 	const queryClient = useQueryClient();
 
