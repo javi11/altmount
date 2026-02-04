@@ -3,7 +3,7 @@ package fileinfo
 import (
 	"time"
 
-	"github.com/javi11/nntppool/v3"
+	"github.com/javi11/nntppool/v2/pkg/nntpcli"
 	"github.com/javi11/nzbparser"
 )
 
@@ -26,7 +26,7 @@ type FileInfo struct {
 	IsRar         bool                 // Whether this is a RAR archive (detected by magic or extension)
 	Is7z          bool                 // Whether this is a 7z archive (detected by extension)
 	IsPar2Archive bool                 // Whether this is a PAR2 archive (detected by extension)
-	YencHeaders   *nntppool.YencHeader // yEnc headers from first segment
+	YencHeaders   *nntpcli.YencHeaders // yEnc headers from first segment
 	First16KB     []byte               // First 16KB of the file (for magic byte detection)
 	OriginalIndex int                  // Original position in the parsed NZB file list
 }
@@ -35,7 +35,7 @@ type FileInfo struct {
 // Similar to C# FetchFirstSegmentsStep.NzbFileWithFirstSegment
 type NzbFileWithFirstSegment struct {
 	NzbFile       *nzbparser.NzbFile
-	Headers       *nntppool.YencHeader
+	Headers       *nntpcli.YencHeaders
 	First16KB     []byte
 	ReleaseDate   time.Time
 	OriginalIndex int // Original position in the parsed NZB file list
