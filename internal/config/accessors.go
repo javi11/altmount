@@ -93,3 +93,19 @@ func (c *Config) GetReadTimeoutSeconds() int {
 func (c *Config) GetReadTimeout() time.Duration {
 	return time.Duration(c.GetReadTimeoutSeconds()) * time.Second
 }
+
+// GetMetadataBackupInterval returns the metadata backup interval with a default fallback.
+func (c *Config) GetMetadataBackupInterval() time.Duration {
+	if c.Metadata.Backup.IntervalHours <= 0 {
+		return 24 * time.Hour // Default: 24 hours
+	}
+	return time.Duration(c.Metadata.Backup.IntervalHours) * time.Hour
+}
+
+// GetMetadataBackupKeep returns the number of metadata backups to keep with a default fallback.
+func (c *Config) GetMetadataBackupKeep() int {
+	if c.Metadata.Backup.KeepBackups <= 0 {
+		return 10 // Default: 10 backups
+	}
+	return c.Metadata.Backup.KeepBackups
+}
