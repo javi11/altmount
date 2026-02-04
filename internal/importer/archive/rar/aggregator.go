@@ -95,6 +95,7 @@ func ProcessArchive(
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 	timeout time.Duration,
+	extractedFiles []parser.ExtractedFileInfo,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -186,40 +187,57 @@ func ProcessArchive(
 			}
 		}
 
-		// Create offset tracker for real-time segment-level progress
-		// This maps individual file segment progress (0→N) to cumulative progress across all files
-		var offsetTracker *progress.OffsetTracker
-		if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
-			offsetTracker = progress.NewOffsetTracker(
-				validationProgressTracker,
-				validatedSegmentsCount,  // Segments already validated in previous files
-				totalSegmentsToValidate, // Total segments across all files
-			)
+		// Check if this file matches an already extracted file in the database
+		isPreExtracted := false
+		for _, extracted := range extractedFiles {
+			// Check exact name match or if extracted name is contained in the rar filename
+			// ExtractedFileInfo.Name is usually the base filename
+			if extracted.Name == baseFilename && extracted.Size == rarContent.Size {
+				isPreExtracted = true
+				break
+			}
 		}
 
-		// RAR segments contain packed/compressed data, so use PackedSize for validation.
-		// For AES-encrypted files (rclone encryption on top of RAR), add AES padding.
-		validationSize := rarContent.PackedSize
-		if len(rarContent.AesKey) > 0 {
-			validationSize = aes.EncryptedSize(rarContent.PackedSize)
-		}
+		if isPreExtracted {
+			slog.InfoContext(ctx, "Skipping validation for pre-extracted file (found in database)",
+				"file", baseFilename,
+				"size", rarContent.Size)
+		} else {
+			// Create offset tracker for real-time segment-level progress
+			// This maps individual file segment progress (0→N) to cumulative progress across all files
+			var offsetTracker *progress.OffsetTracker
+			if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
+				offsetTracker = progress.NewOffsetTracker(
+					validationProgressTracker,
+					validatedSegmentsCount,  // Segments already validated in previous files
+					totalSegmentsToValidate, // Total segments across all files
+				)
+			}
 
-		// Validate segments with real-time progress updates
-		if err := validation.ValidateSegmentsForFile(
-			ctx,
-			baseFilename,
-			validationSize,
-			rarContent.Segments,
-			metapb.Encryption_NONE,
-			poolManager,
-			maxValidationGoroutines,
-			segmentSamplePercentage,
-			offsetTracker, // Real-time segment progress with cumulative offset
-			timeout,
-		); err != nil {
-			slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", baseFilename)
+			// RAR segments contain packed/compressed data, so use PackedSize for validation.
+			// For AES-encrypted files (rclone encryption on top of RAR), add AES padding.
+			validationSize := rarContent.PackedSize
+			if len(rarContent.AesKey) > 0 {
+				validationSize = aes.EncryptedSize(rarContent.PackedSize)
+			}
 
-			continue
+			// Validate segments with real-time progress updates
+			if err := validation.ValidateSegmentsForFile(
+				ctx,
+				baseFilename,
+				validationSize,
+				rarContent.Segments,
+				metapb.Encryption_NONE,
+				poolManager,
+				maxValidationGoroutines,
+				segmentSamplePercentage,
+				offsetTracker, // Real-time segment progress with cumulative offset
+				timeout,
+			); err != nil {
+				slog.WarnContext(ctx, "Skipping RAR file due to validation error", "error", err, "file", baseFilename)
+
+				continue
+			}
 		}
 
 		// Calculate and track segments validated for this file (for next file's offset)

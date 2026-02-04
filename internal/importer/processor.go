@@ -148,7 +148,7 @@ func (proc *Processor) checkCancellation(ctx context.Context) error {
 }
 
 // ProcessNzbFile processes an NZB or STRM file maintaining the folder structure relative to relative path
-func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string) (string, error) {
+func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePath string, queueID int, allowedExtensionsOverride *[]string, virtualDirOverride *string, extractedFiles []parser.ExtractedFileInfo) (string, error) {
 	// Determine max connections to use
 	maxConnections := proc.maxImportConnections
 
@@ -192,6 +192,10 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		}
 	}
 
+	// Attach extracted files metadata if available (optimization)
+	if len(extractedFiles) > 0 {
+		parsed.ExtractedFiles = extractedFiles
+	}
 	// Update progress: parsing complete
 	proc.updateProgress(queueID, 10)
 
@@ -237,11 +241,11 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 
 	case parser.NzbTypeRarArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout)
+		result, err = proc.processRarArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles)
 
 	case parser.NzbType7zArchive:
 		proc.updateProgress(queueID, 30)
-		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout)
+		result, err = proc.processSevenZipArchive(ctx, virtualDir, regularFiles, archiveFiles, parsed, queueID, maxConnections, allowedExtensions, proc.validationTimeout, parsed.ExtractedFiles)
 
 	case parser.NzbTypeStrm:
 		proc.updateProgress(queueID, 30)
@@ -430,6 +434,7 @@ func (proc *Processor) processRarArchive(
 	maxConnections int,
 	allowedExtensions []string,
 	timeout time.Duration,
+	extractedFiles []parser.ExtractedFileInfo,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, proc.getCleanNzbName(parsed.Path, queueID), proc.metadataService)
@@ -496,6 +501,7 @@ func (proc *Processor) processRarArchive(
 			samplePercentage,
 			allowedExtensions,
 			timeout,
+			extractedFiles,
 		)
 		if err != nil {
 			return "", err
@@ -516,6 +522,7 @@ func (proc *Processor) processSevenZipArchive(
 	maxConnections int,
 	allowedExtensions []string,
 	timeout time.Duration,
+	extractedFiles []parser.ExtractedFileInfo,
 ) (string, error) {
 	// Create NZB folder
 	nzbFolder, err := filesystem.CreateNzbFolder(virtualDir, proc.getCleanNzbName(parsed.Path, queueID), proc.metadataService)
@@ -582,6 +589,7 @@ func (proc *Processor) processSevenZipArchive(
 			samplePercentage,
 			allowedExtensions,
 			timeout,
+			extractedFiles,
 		)
 		if err != nil {
 			return "", err

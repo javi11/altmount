@@ -98,6 +98,10 @@ func (a *batchQueueAdapterForImporter) AddBatchToQueue(ctx context.Context, item
 	return a.repo.AddBatchToQueue(ctx, items)
 }
 
+func (a *batchQueueAdapterForImporter) FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error) {
+	return a.repo.FilterExistingNzbdavIds(ctx, ids)
+}
+
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
 func isFileAlreadyProcessed(metadataService *metadata.MetadataService, filePath string, scanRoot string) bool {
 	// Calculate virtual path
@@ -615,7 +619,19 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
+	// Parse metadata for extracted files (optimization for already extracted content)
+	var extractedFiles []parser.ExtractedFileInfo
+	if item.Metadata != nil && *item.Metadata != "" {
+		type metaStruct struct {
+			ExtractedFiles []parser.ExtractedFileInfo `json:"extracted_files"`
+		}
+		var meta metaStruct
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil {
+			extractedFiles = meta.ExtractedFiles
+		}
+	}
+
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles)
 }
 
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {
