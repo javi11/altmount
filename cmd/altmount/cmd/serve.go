@@ -17,6 +17,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/health"
+	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
@@ -176,6 +177,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		logger.ErrorContext(ctx, "Failed to start ARR queue cleanup worker", "error", err)
 	}
 
+	// Start metadata backup worker
+	metadataBackupWorker := metadata.NewBackupWorker(configManager.GetConfigGetter())
+	if err := metadataBackupWorker.Start(ctx); err != nil {
+		logger.ErrorContext(ctx, "Failed to start metadata backup worker", "error", err)
+	}
+
 	// ARRs service status logging
 	if cfg.Arrs.Enabled != nil && *cfg.Arrs.Enabled {
 		logger.InfoContext(ctx, "Arrs service ready for health monitoring and repair")
@@ -277,6 +284,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Stop ARRs queue cleanup worker
 	arrsService.StopWorker(ctx)
+
+	// Stop metadata backup worker
+	metadataBackupWorker.Stop(ctx)
 
 	// Stop RClone mount service if running
 	if cfg.RClone.MountEnabled != nil && *cfg.RClone.MountEnabled {

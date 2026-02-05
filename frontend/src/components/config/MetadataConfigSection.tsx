@@ -1,7 +1,7 @@
 import { Download, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useBatchExportNZB } from "../../hooks/useConfig";
-import type { ConfigResponse, MetadataConfig } from "../../types/config";
+import type { ConfigResponse, MetadataBackupConfig, MetadataConfig } from "../../types/config";
 
 interface MetadataConfigSectionProps {
 	config: ConfigResponse;
@@ -38,6 +38,18 @@ export function MetadataConfigSection({
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
 	};
 
+	const handleBackupChange = (field: keyof MetadataBackupConfig, value: string | number | boolean) => {
+		const newData = {
+			...formData,
+			backup: {
+				...formData.backup,
+				[field]: value,
+			},
+		};
+		setFormData(newData);
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
+	};
+
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
 			await onUpdate("metadata", formData);
@@ -61,6 +73,68 @@ export function MetadataConfigSection({
 						required
 					/>
 					<p className="label">Directory path where file metadata will be stored (required)</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Backup Options</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Enable Automatic Backups</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.backup?.enabled ?? false}
+							disabled={isReadOnly}
+							onChange={(e) => handleBackupChange("enabled", e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						When enabled, all .meta files will be periodically mirrored to the backup directory
+					</p>
+
+					<div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+						<div className="form-control">
+							<label className="label">
+								<span className="label-text">Backup Interval (Hours)</span>
+							</label>
+							<input
+								type="number"
+								className="input"
+								value={formData.backup?.interval_hours ?? 24}
+								disabled={isReadOnly || !formData.backup?.enabled}
+								onChange={(e) => handleBackupChange("interval_hours", Number.parseInt(e.target.value))}
+								min="1"
+							/>
+						</div>
+
+						<div className="form-control">
+							<label className="label">
+								<span className="label-text">Keep Backups</span>
+							</label>
+							<input
+								type="number"
+								className="input"
+								value={formData.backup?.keep_backups ?? 10}
+								disabled={isReadOnly || !formData.backup?.enabled}
+								onChange={(e) => handleBackupChange("keep_backups", Number.parseInt(e.target.value))}
+								min="1"
+							/>
+						</div>
+					</div>
+
+					<div className="form-control mt-4">
+						<label className="label">
+							<span className="label-text">Backup Path</span>
+						</label>
+						<input
+							type="text"
+							className="input"
+							value={formData.backup?.path ?? ""}
+							disabled={isReadOnly || !formData.backup?.enabled}
+							onChange={(e) => handleBackupChange("path", e.target.value)}
+							placeholder="/path/to/backups"
+						/>
+						<p className="label">Absolute path where metadata mirrors will be stored</p>
+					</div>
 				</fieldset>
 
 				<fieldset className="fieldset">

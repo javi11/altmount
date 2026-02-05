@@ -79,10 +79,19 @@ type DatabaseConfig struct {
 
 // MetadataConfig represents metadata filesystem configuration
 type MetadataConfig struct {
-	RootPath                 string `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
-	DeleteSourceNzbOnRemoval *bool  `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
-	DeleteFailedNzb          *bool  `yaml:"delete_failed_nzb" mapstructure:"delete_failed_nzb" json:"delete_failed_nzb,omitempty"`
-	DeleteCompletedNzb       *bool  `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
+	RootPath                 string               `yaml:"root_path" mapstructure:"root_path" json:"root_path"`
+	DeleteSourceNzbOnRemoval *bool                `yaml:"delete_source_nzb_on_removal" mapstructure:"delete_source_nzb_on_removal" json:"delete_source_nzb_on_removal,omitempty"`
+	DeleteFailedNzb          *bool                `yaml:"delete_failed_nzb" mapstructure:"delete_failed_nzb" json:"delete_failed_nzb,omitempty"`
+	DeleteCompletedNzb       *bool                `yaml:"delete_completed_nzb" mapstructure:"delete_completed_nzb" json:"delete_completed_nzb,omitempty"`
+	Backup                   MetadataBackupConfig `yaml:"backup" mapstructure:"backup" json:"backup"`
+}
+
+// MetadataBackupConfig represents metadata backup configuration
+type MetadataBackupConfig struct {
+	Enabled       *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	IntervalHours int    `yaml:"interval_hours" mapstructure:"interval_hours" json:"interval_hours"`
+	KeepBackups   int    `yaml:"keep_backups" mapstructure:"keep_backups" json:"keep_backups"`
+	Path          string `yaml:"path" mapstructure:"path" json:"path"`
 }
 
 // StreamingConfig represents streaming and chunking configuration
@@ -409,6 +418,22 @@ func (c *Config) Validate() error {
 	// Validate metadata configuration (now required)
 	if c.Metadata.RootPath == "" {
 		return fmt.Errorf("metadata root_path cannot be empty")
+	}
+
+	// Validate metadata backup configuration
+	if c.Metadata.Backup.Enabled != nil && *c.Metadata.Backup.Enabled {
+		if c.Metadata.Backup.IntervalHours <= 0 {
+			return fmt.Errorf("metadata backup interval_hours must be greater than 0")
+		}
+		if c.Metadata.Backup.KeepBackups <= 0 {
+			return fmt.Errorf("metadata backup keep_backups must be greater than 0")
+		}
+		if c.Metadata.Backup.Path == "" {
+			return fmt.Errorf("metadata backup path cannot be empty")
+		}
+		if !filepath.IsAbs(c.Metadata.Backup.Path) {
+			return fmt.Errorf("metadata backup path must be an absolute path")
+		}
 	}
 
 	// Validate streaming configuration
@@ -869,9 +894,10 @@ func DefaultConfig(configDir ...string) *Config {
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
 	cleanupAutomaticImportFailure := false
+	metadataBackupEnabled := false
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
-	var dbPath, metadataPath, logPath, rclonePath, cachePath string
+	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
 
 	// If a config directory is provided, use it
 	if len(configDir) > 0 && configDir[0] != "" {
@@ -880,18 +906,21 @@ func DefaultConfig(configDir ...string) *Config {
 		logPath = filepath.Join(configDir[0], "altmount.log")
 		rclonePath = configDir[0]
 		cachePath = filepath.Join(configDir[0], "cache")
+		backupPath = filepath.Join(configDir[0], "backups")
 	} else if isRunningInDocker() {
 		dbPath = "/config/altmount.db"
 		metadataPath = "/metadata"
 		logPath = "/config/altmount.log"
 		rclonePath = "/config"
 		cachePath = "/config/cache"
+		backupPath = "/config/backups"
 	} else {
 		dbPath = "./altmount.db"
 		metadataPath = "./metadata"
 		logPath = "./altmount.log"
 		rclonePath = "."
 		cachePath = "./cache"
+		backupPath = "./backups"
 	}
 
 	return &Config{
@@ -912,6 +941,12 @@ func DefaultConfig(configDir ...string) *Config {
 		Metadata: MetadataConfig{
 			RootPath:                 metadataPath,
 			DeleteSourceNzbOnRemoval: &deleteSourceNzbOnRemoval,
+			Backup: MetadataBackupConfig{
+				Enabled:       &metadataBackupEnabled,
+				IntervalHours: 24,
+				KeepBackups:   10,
+				Path:          backupPath,
+			},
 		},
 		Streaming: StreamingConfig{
 			MaxDownloadWorkers: 15, // Default: 15 download workers
