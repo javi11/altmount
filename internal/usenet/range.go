@@ -27,6 +27,17 @@ type SegmentLoader interface {
 //     returned segments equals the requested range length (unless the range lies fully outside available
 //     data, in which case zero segments are returned).
 func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader) *segmentRange {
+	return GetSegmentsInRangeFromIndex(ctx, start, end, ml, 0, 0)
+}
+
+// GetSegmentsInRangeFromIndex is like GetSegmentsInRange but allows skipping directly to a
+// known segment index with its corresponding file position. This enables O(1) skip to the
+// correct segment when a pre-built index provides the starting segment via binary search.
+//
+// Parameters:
+//   - startSegmentIndex: the segment index to start iteration from (use 0 for beginning)
+//   - startFilePos: the cumulative file offset at the start of startSegmentIndex (use 0 for beginning)
+func GetSegmentsInRangeFromIndex(ctx context.Context, start, end int64, ml SegmentLoader, startSegmentIndex int, startFilePos int64) *segmentRange {
 	// Defensive handling of invalid input ranges
 	if start < 0 || end < start {
 		return &segmentRange{start: start, end: end, segments: nil, ctx: ctx}
@@ -36,9 +47,15 @@ func GetSegmentsInRange(ctx context.Context, start, end int64, ml SegmentLoader)
 	segments := make([]*segment, 0, 4)
 
 	// logicalFilePos tracks the starting file offset of the next loader segment's usable data
-	var logicalFilePos int64 = 0
+	// Start from the provided position to skip O(n) iteration
+	logicalFilePos := startFilePos
+	startIdx := startSegmentIndex
+	if startIdx < 0 {
+		startIdx = 0
+		logicalFilePos = 0
+	}
 
-	for idx := 0; ; idx++ {
+	for idx := startIdx; ; idx++ {
 		src, groups, ok := ml.GetSegment(idx)
 		if !ok { // no more segments
 			break
