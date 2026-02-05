@@ -2,6 +2,7 @@ package usenet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync/atomic"
@@ -35,6 +36,7 @@ func ValidateSegmentAvailability(
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
+	verifyData bool,
 ) error {
 	if len(segments) == 0 {
 		return nil
@@ -65,7 +67,19 @@ func ValidateSegmentAvailability(
 			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			var err error
+			if verifyData {
+				// Hybrid mode: attempt to read a few bytes of the segment body
+				lw := &limitedWriter{limit: 1}
+				_, err = usenetPool.Body(checkCtx, seg.Id, lw, []string{})
+
+				if errors.Is(err, ErrLimitReached) {
+					err = nil
+				}
+			} else {
+				// Standard mode: only perform STAT command
+				_, err = usenetPool.Stat(checkCtx, seg.Id, []string{})
+			}
 			if err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
 			}
@@ -104,6 +118,7 @@ func ValidateSegmentAvailabilityDetailed(
 	samplePercentage int,
 	progressTracker progress.ProgressTracker,
 	timeout time.Duration,
+	verifyData bool,
 ) (ValidationResult, error) {
 	result := ValidationResult{
 		MissingIDs: []string{},
@@ -144,7 +159,22 @@ func ValidateSegmentAvailabilityDetailed(
 			checkCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			_, err := usenetPool.Stat(checkCtx, seg.Id, []string{})
+			var err error
+			if verifyData {
+				// Hybrid mode: attempt to read a few bytes of the segment body
+				// to ensure the provider actually has the data.
+				// We use a limited writer to only read 1 byte.
+				lw := &limitedWriter{limit: 1}
+				_, err = usenetPool.Body(checkCtx, seg.Id, lw, []string{})
+
+				// If we reached our 1-byte limit, it means the segment data is accessible.
+				if errors.Is(err, ErrLimitReached) {
+					err = nil
+				}
+			} else {
+				// Standard mode: only perform STAT command
+				_, err = usenetPool.Stat(checkCtx, seg.Id, []string{})
+			}
 			if err != nil {
 				atomic.AddInt32(&missingCount, 1)
 				missingChan <- seg.Id
@@ -178,6 +208,27 @@ func ValidateSegmentAvailabilityDetailed(
 	}
 
 	return result, nil
+}
+
+// limitedWriter is an io.Writer that stops after reaching a certain byte limit
+type limitedWriter struct {
+	limit int64
+	read  int64
+}
+
+func (lw *limitedWriter) Write(p []byte) (n int, err error) {
+	canWrite := lw.limit - lw.read
+	if canWrite <= 0 {
+		return 0, ErrLimitReached
+	}
+
+	if int64(len(p)) > canWrite {
+		lw.read += canWrite
+		return int(canWrite), ErrLimitReached
+	}
+
+	lw.read += int64(len(p))
+	return len(p), nil
 }
 
 // selectSegmentsForValidation determines which segments to validate based on validation mode and sample percentage.

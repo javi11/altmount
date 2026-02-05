@@ -196,6 +196,7 @@ type HealthConfig struct {
 	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
 	LibrarySyncConcurrency        int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
 	ResolveRepairOnImport         *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
+	VerifyData                    *bool   `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username

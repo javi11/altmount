@@ -69,6 +69,7 @@ export interface HealthConfig {
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
 	resolve_repair_on_import?: boolean; // Automatically resolve pending repairs in the same directory when a new file is imported
+	verify_data?: boolean; // Verify 1 byte of data for each segment
 }
 
 // Library sync types
@@ -298,6 +299,7 @@ export interface HealthUpdateRequest {
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
 	resolve_repair_on_import?: boolean;
+	verify_data?: boolean;
 }
 
 // RClone update request
