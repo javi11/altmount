@@ -78,7 +78,7 @@ func ValidateSegmentsForFile(
 	}
 
 	// Validate segment availability using shared validation logic
-	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, samplePercentage, progressTracker, timeout); err != nil {
+	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, samplePercentage, progressTracker, timeout, false); err != nil {
 		return err
 	}
 

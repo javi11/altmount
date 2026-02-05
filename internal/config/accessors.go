@@ -55,6 +55,14 @@ func (c *Config) GetLibrarySyncConcurrency() int {
 	return c.Health.LibrarySyncConcurrency
 }
 
+// GetVerifyData returns whether to verify data during health checks.
+func (c *Config) GetVerifyData() bool {
+	if c.Health.VerifyData == nil {
+		return false // Default: false
+	}
+	return *c.Health.VerifyData
+}
+
 // Import config accessor methods.
 
 // GetMaxImportConnections returns max import connections with a default fallback.
