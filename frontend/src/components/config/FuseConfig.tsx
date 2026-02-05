@@ -1,6 +1,8 @@
-import { Activity, Download, FolderOpen, HardDrive, Play, Save, Square } from "lucide-react";
+import { HardDrive, Play, Save, Square } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { apiClient } from "../../api/client";
+import { useConfirm } from "../../contexts/ModalContext";
+import { useToast } from "../../contexts/ToastContext";
 import { useConfig, useUpdateConfigSection } from "../../hooks/useConfig";
 import type { FuseConfig as FuseConfigType } from "../../types/config";
 
@@ -11,6 +13,7 @@ export function FuseConfig() {
 	const [status, setStatus] = useState<"stopped" | "starting" | "running" | "error">("stopped");
 	const [path, setPath] = useState("");
 	const [formData, setFormData] = useState<Partial<FuseConfigType>>({
+		enabled: false,
 		allow_other: true,
 		debug: false,
 		attr_timeout_seconds: 1,
@@ -22,6 +25,9 @@ export function FuseConfig() {
 
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [isEnabledToggleSaving, setIsEnabledToggleSaving] = useState(false);
+	const { showToast } = useToast();
+	const { confirmAction } = useConfirm();
 
 	// Initialize form data from config
 	useEffect(() => {
@@ -104,74 +110,130 @@ export function FuseConfig() {
 
 	const isRunning = status === "running" || status === "starting";
 
+	const handleEnabledChange = async (enabled: boolean) => {
+		// If disabling and mount is running, ask for confirmation
+		if (!enabled && isRunning) {
+			const confirmed = await confirmAction(
+				"Disable FUSE Mount",
+				"The mount is currently active. Disabling will stop the active mount. Continue?",
+				{ type: "warning", confirmText: "Disable & Unmount", confirmButtonClass: "btn-warning" },
+			);
+			if (!confirmed) return;
+		}
+
+		setIsEnabledToggleSaving(true);
+		setFormData((prev) => ({ ...prev, enabled }));
+
+		try {
+			// If disabling and running, stop the mount first
+			if (!enabled && isRunning) {
+				await apiClient.stopFuseMount();
+				await fetchStatus();
+			}
+
+			// Save the config
+			await updateConfig.mutateAsync({
+				section: "fuse",
+				config: { fuse: { ...formData, enabled } },
+			});
+
+			showToast({
+				type: "success",
+				title: enabled ? "FUSE mount enabled" : "FUSE mount disabled",
+				message: enabled
+					? "Configure mount path and start the mount"
+					: "FUSE mount has been disabled",
+			});
+		} catch (err) {
+			// Revert on error
+			setFormData((prev) => ({ ...prev, enabled: !enabled }));
+			showToast({
+				type: "error",
+				title: `Failed to ${enabled ? "enable" : "disable"} FUSE mount`,
+				message: err instanceof Error ? err.message : "Unknown error",
+			});
+		} finally {
+			setIsEnabledToggleSaving(false);
+		}
+	};
+
 	return (
-		<div className="card bg-base-100 shadow-xl">
-			<div className="card-body">
-				<h2 className="card-title flex items-center gap-2">
-					<FolderOpen className="h-6 w-6" />
-					altmount Native Mount
-				</h2>
-				<p className="text-sm opacity-70">
-					Mount altmount directly to a local directory for high performance access.
+		<div className="space-y-4">
+			<h3 className="font-semibold text-lg">FUSE Mount Configuration</h3>
+			<p className="text-sm opacity-70">
+				Mount altmount directly to a local directory for high performance access.
+			</p>
+
+			{/* Enable FUSE Mount Toggle */}
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">Enable FUSE Mount</legend>
+				<label className="label cursor-pointer">
+					<span className="label-text">
+						Enable native FUSE mount
+						{isEnabledToggleSaving && <span className="loading loading-spinner loading-xs ml-2" />}
+					</span>
+					<input
+						type="checkbox"
+						className="checkbox"
+						checked={formData.enabled ?? false}
+						disabled={isEnabledToggleSaving}
+						onChange={(e) => handleEnabledChange(e.target.checked)}
+					/>
+				</label>
+				<p className="label">
+					Mount altmount directly to a local directory using native FUSE
+					{isEnabledToggleSaving && " (Saving...)"}
 				</p>
+			</fieldset>
 
-				<div className="divider" />
+			{formData.enabled && (
+				<>
+					{/* Mount Settings */}
+					<div className="space-y-4">
+						<h4 className="font-medium text-base">Mount Settings</h4>
 
-				<div className="space-y-6">
-					<section>
-						<h3 className="mb-4 flex items-center gap-2 font-medium text-lg">
-							<HardDrive className="h-5 w-5" />
-							Mount Settings
-						</h3>
 						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-							<div className="form-control w-full">
-								<label htmlFor="mount-path" className="label">
-									<span className="label-text">Mount Path</span>
-								</label>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Mount Path</legend>
 								<input
 									type="text"
 									placeholder="/mnt/altmount"
-									className="input input-bordered w-full"
+									className="input w-full"
 									value={path}
 									onChange={(e) => setPath(e.target.value)}
 									disabled={isRunning}
 								/>
-							</div>
+								<p className="label">Local filesystem path where FUSE mount will be created</p>
+							</fieldset>
 
-							<div className="form-control">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Allow Other Users</legend>
 								<label className="label cursor-pointer">
-									<span className="label-text">Allow Other Users</span>
+									<span className="label-text">Allow other users to access mount</span>
 									<input
 										type="checkbox"
-										className="toggle toggle-primary"
+										className="checkbox"
 										checked={formData.allow_other ?? true}
 										onChange={(e) => setFormData({ ...formData, allow_other: e.target.checked })}
 										disabled={isRunning}
 									/>
 								</label>
-								<label htmlFor="allow-other" className="label">
-									<span className="label-text-alt opacity-70">
-										Allow other users (like Docker/Plex) to access the mount
-									</span>
-								</label>
-							</div>
+								<p className="label">Allow other users (like Docker/Plex) to access the mount</p>
+							</fieldset>
 						</div>
-					</section>
+					</div>
 
-					<section>
-						<h3 className="mb-4 flex items-center gap-2 font-medium text-lg">
-							<Activity className="h-5 w-5" />
-							Kernel Cache Settings
-						</h3>
+					{/* Kernel Cache Settings */}
+					<div className="space-y-4">
+						<h4 className="font-medium text-base">Kernel Cache Settings</h4>
+
 						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-							<div className="form-control">
-								<label htmlFor="attr-timeout" className="label">
-									<span className="label-text">Attribute Timeout</span>
-								</label>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Attribute Timeout</legend>
 								<div className="join">
 									<input
 										type="number"
-										className="input input-bordered join-item w-full"
+										className="input join-item w-full"
 										value={formData.attr_timeout_seconds ?? 1}
 										onChange={(e) =>
 											setFormData({
@@ -183,21 +245,15 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">sec</span>
 								</div>
-								<label htmlFor="entry-timeout" className="label">
-									<span className="label-text-alt opacity-70">
-										How long the kernel caches file attributes
-									</span>
-								</label>
-							</div>
+								<p className="label">How long the kernel caches file attributes</p>
+							</fieldset>
 
-							<div className="form-control">
-								<label htmlFor="kernel-read-ahead" className="label">
-									<span className="label-text">Entry Timeout</span>
-								</label>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Entry Timeout</legend>
 								<div className="join">
 									<input
 										type="number"
-										className="input input-bordered join-item w-full"
+										className="input join-item w-full"
 										value={formData.entry_timeout_seconds ?? 1}
 										onChange={(e) =>
 											setFormData({
@@ -209,21 +265,15 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">sec</span>
 								</div>
-								<label htmlFor="kernel-read-ahead" className="label">
-									<span className="label-text-alt opacity-70">
-										How long the kernel caches directory lookups
-									</span>
-								</label>
-							</div>
+								<p className="label">How long the kernel caches directory lookups</p>
+							</fieldset>
 
-							<div className="form-control">
-								<label htmlFor="kernel-read-ahead" className="label">
-									<span className="label-text">Kernel Read-Ahead</span>
-								</label>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Kernel Read-Ahead</legend>
 								<div className="join">
 									<input
 										type="number"
-										className="input input-bordered join-item w-full"
+										className="input join-item w-full"
 										value={formData.max_read_ahead_mb ?? 128}
 										onChange={(e) =>
 											setFormData({
@@ -235,28 +285,23 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">MB</span>
 								</div>
-								<label htmlFor="kernel-read-ahead" className="label">
-									<span className="label-text-alt opacity-70">
-										Maximum data the kernel will request ahead (FUSE max_readahead)
-									</span>
-								</label>
-							</div>
+								<p className="label">
+									Maximum data the kernel will request ahead (FUSE max_readahead)
+								</p>
+							</fieldset>
 						</div>
-					</section>
+					</div>
 
-					<section>
-						<h3 className="mb-4 flex items-center gap-2 font-medium text-lg">
-							<Download className="h-5 w-5" />
-							Streaming Cache Settings
-						</h3>
+					{/* Streaming Cache Settings */}
+					<div className="space-y-4">
+						<h4 className="font-medium text-base">Streaming Cache Settings</h4>
+
 						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-							<div className="form-control">
-								<label htmlFor="max-download-workers" className="label">
-									<span className="label-text">Max Download Workers</span>
-								</label>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Max Download Workers</legend>
 								<input
 									type="number"
-									className="input input-bordered"
+									className="input"
 									value={formData.max_download_workers ?? 15}
 									onChange={(e) =>
 										setFormData({
@@ -266,21 +311,15 @@ export function FuseConfig() {
 									}
 									disabled={isRunning}
 								/>
-								<label htmlFor="max-download-workers" className="label">
-									<span className="label-text-alt opacity-70">
-										Concurrent download workers for this mount
-									</span>
-								</label>
-							</div>
+								<p className="label">Concurrent download workers for this mount</p>
+							</fieldset>
 
-							<div className="form-control">
-								<label htmlFor="max-cache-size" className="label">
-									<span className="label-text">Max Cache Size</span>
-								</label>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Max Cache Size</legend>
 								<div className="join">
 									<input
 										type="number"
-										className="input input-bordered join-item w-full"
+										className="input join-item w-full"
 										value={formData.max_cache_size_mb ?? 128}
 										onChange={(e) =>
 											setFormData({
@@ -292,86 +331,105 @@ export function FuseConfig() {
 									/>
 									<span className="btn no-animation join-item">MB</span>
 								</div>
-								<label htmlFor="max-cache-size" className="label">
-									<span className="label-text-alt opacity-70">Read-ahead cache size per file</span>
-								</label>
-							</div>
+								<p className="label">Read-ahead cache size per file</p>
+							</fieldset>
 						</div>
-					</section>
+					</div>
 
-					<section>
-						<div className="form-control max-w-xs">
+					{/* Advanced Options */}
+					<div className="space-y-4">
+						<h4 className="font-medium text-base">Advanced Options</h4>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Debug Logging</legend>
 							<label className="label cursor-pointer">
-								<span className="label-text">Debug Logging</span>
+								<span className="label-text">Enable debug logging</span>
 								<input
 									type="checkbox"
-									className="checkbox checkbox-primary"
+									className="checkbox"
 									checked={formData.debug ?? false}
 									onChange={(e) => setFormData({ ...formData, debug: e.target.checked })}
 									disabled={isRunning}
 								/>
 							</label>
+							<p className="label">Enable verbose debug output for troubleshooting</p>
+						</fieldset>
+					</div>
+
+					{error && (
+						<div className="alert alert-error">
+							<span>{error}</span>
 						</div>
-					</section>
-				</div>
+					)}
 
-				{error && (
-					<div className="alert alert-error mt-4">
-						<span>{error}</span>
-					</div>
-				)}
-
-				<div className="card-actions mt-6 items-center justify-end">
+					{/* Mount Status */}
 					<div
-						className="badge badge-lg mr-4 font-bold uppercase"
-						data-theme={status === "running" ? "success" : status === "error" ? "error" : "neutral"}
+						className={`alert ${status === "running" ? "alert-success" : status === "error" ? "alert-error" : "alert-warning"}`}
 					>
-						{status}
+						<HardDrive className="h-6 w-6" />
+						<div>
+							<div className="font-bold">
+								{status === "running"
+									? "Mounted"
+									: status === "starting"
+										? "Starting..."
+										: status === "error"
+											? "Error"
+											: "Not Mounted"}
+							</div>
+							{path && status !== "stopped" && <div className="text-sm">Mount point: {path}</div>}
+						</div>
+						{isRunning ? (
+							<button
+								type="button"
+								className="btn btn-sm btn-outline"
+								onClick={handleStop}
+								disabled={isLoading}
+							>
+								{isLoading ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<Square className="h-4 w-4" />
+								)}
+								{isLoading ? "Stopping..." : "Unmount"}
+							</button>
+						) : (
+							<button
+								type="button"
+								className="btn btn-sm btn-primary"
+								onClick={handleStart}
+								disabled={isLoading || !path}
+							>
+								{isLoading ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<Play className="h-4 w-4" />
+								)}
+								{isLoading ? "Starting..." : "Mount"}
+							</button>
+						)}
 					</div>
 
+					{/* Save Button */}
 					{!isRunning && (
-						<button
-							type="button"
-							className="btn btn-ghost mr-2"
-							onClick={handleSave}
-							disabled={updateConfig.isPending}
-						>
-							<Save className="mr-2 h-4 w-4" />
-							Save Settings
-						</button>
+						<div className="flex justify-end">
+							<button
+								type="button"
+								className="btn btn-primary"
+								onClick={handleSave}
+								disabled={updateConfig.isPending}
+							>
+								{updateConfig.isPending ? (
+									<span className="loading loading-spinner loading-sm" />
+								) : (
+									<Save className="h-4 w-4" />
+								)}
+								{updateConfig.isPending ? "Saving..." : "Save Changes"}
+							</button>
+						</div>
 					)}
-
-					{isRunning ? (
-						<button
-							type="button"
-							className="btn btn-error"
-							onClick={handleStop}
-							disabled={isLoading}
-						>
-							{isLoading ? (
-								<span className="loading loading-spinner" />
-							) : (
-								<Square className="h-4 w-4" />
-							)}
-							Unmount
-						</button>
-					) : (
-						<button
-							type="button"
-							className="btn btn-primary"
-							onClick={handleStart}
-							disabled={isLoading || !path}
-						>
-							{isLoading ? (
-								<span className="loading loading-spinner" />
-							) : (
-								<Play className="h-4 w-4" />
-							)}
-							Mount
-						</button>
-					)}
-				</div>
-			</div>
+				</>
+			)}
 		</div>
 	);
 }

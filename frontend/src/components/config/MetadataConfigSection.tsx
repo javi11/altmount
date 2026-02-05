@@ -38,7 +38,10 @@ export function MetadataConfigSection({
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
 	};
 
-	const handleBackupChange = (field: keyof MetadataBackupConfig, value: string | number | boolean) => {
+	const handleBackupChange = (
+		field: keyof MetadataBackupConfig,
+		value: string | number | boolean,
+	) => {
 		const newData = {
 			...formData,
 			backup: {
@@ -101,7 +104,9 @@ export function MetadataConfigSection({
 								className="input"
 								value={formData.backup?.interval_hours ?? 24}
 								disabled={isReadOnly || !formData.backup?.enabled}
-								onChange={(e) => handleBackupChange("interval_hours", Number.parseInt(e.target.value))}
+								onChange={(e) =>
+									handleBackupChange("interval_hours", Number.parseInt(e.target.value, 10))
+								}
 								min="1"
 							/>
 						</div>
@@ -115,7 +120,9 @@ export function MetadataConfigSection({
 								className="input"
 								value={formData.backup?.keep_backups ?? 10}
 								disabled={isReadOnly || !formData.backup?.enabled}
-								onChange={(e) => handleBackupChange("keep_backups", Number.parseInt(e.target.value))}
+								onChange={(e) =>
+									handleBackupChange("keep_backups", Number.parseInt(e.target.value, 10))
+								}
 								min="1"
 							/>
 						</div>
