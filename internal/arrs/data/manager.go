@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -14,18 +15,20 @@ import (
 const cacheTTL = 10 * time.Minute
 
 type Manager struct {
-	cacheMu      sync.RWMutex
-	movieCache   map[string][]*radarr.Movie  // key: instance name
-	seriesCache  map[string][]*sonarr.Series // key: instance name
-	cacheExpiry  map[string]time.Time        // key: instance name
-	requestGroup singleflight.Group
+	cacheMu           sync.RWMutex
+	movieCache        map[string][]*radarr.Movie       // key: instance name
+	seriesCache       map[string][]*sonarr.Series      // key: instance name
+	episodeFilesCache map[string][]*sonarr.EpisodeFile // key: instance name + series id
+	cacheExpiry       map[string]time.Time             // key: cache key
+	requestGroup      singleflight.Group
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		movieCache:  make(map[string][]*radarr.Movie),
-		seriesCache: make(map[string][]*sonarr.Series),
-		cacheExpiry: make(map[string]time.Time),
+		movieCache:        make(map[string][]*radarr.Movie),
+		seriesCache:       make(map[string][]*sonarr.Series),
+		episodeFilesCache: make(map[string][]*sonarr.EpisodeFile),
+		cacheExpiry:       make(map[string]time.Time),
 	}
 }
 
@@ -119,4 +122,51 @@ func (m *Manager) GetSeries(ctx context.Context, client *sonarr.Sonarr, instance
 	}
 
 	return v.([]*sonarr.Series), nil
+}
+
+// GetEpisodeFiles retrieves all episode files for a series from Sonarr, using a cache if available and valid
+func (m *Manager) GetEpisodeFiles(ctx context.Context, client *sonarr.Sonarr, instanceName string, seriesID int64) ([]*sonarr.EpisodeFile, error) {
+	cacheKey := fmt.Sprintf("sonarr_episode_files_%s_%d", instanceName, seriesID)
+
+	// 1. Check cache (read lock)
+	m.cacheMu.RLock()
+	files, ok := m.episodeFilesCache[cacheKey]
+	expiry, valid := m.cacheExpiry[cacheKey]
+	m.cacheMu.RUnlock()
+
+	if ok && valid && time.Now().Before(expiry) {
+		slog.DebugContext(ctx, "Using cached episode files list", "instance", instanceName, "series_id", seriesID, "count", len(files))
+		return files, nil
+	}
+
+	// 2. Use singleflight to deduplicate requests
+	v, err, _ := m.requestGroup.Do(cacheKey, func() (interface{}, error) {
+		// Double check cache
+		m.cacheMu.RLock()
+		files, ok := m.episodeFilesCache[cacheKey]
+		expiry, valid := m.cacheExpiry[cacheKey]
+		m.cacheMu.RUnlock()
+		if ok && valid && time.Now().Before(expiry) {
+			return files, nil
+		}
+
+		slog.DebugContext(ctx, "Fetching fresh episode files list", "instance", instanceName, "series_id", seriesID)
+		freshFiles, err := client.GetSeriesEpisodeFilesContext(ctx, seriesID)
+		if err != nil {
+			return nil, err
+		}
+
+		m.cacheMu.Lock()
+		m.episodeFilesCache[cacheKey] = freshFiles
+		m.cacheExpiry[cacheKey] = time.Now().Add(cacheTTL)
+		m.cacheMu.Unlock()
+
+		return freshFiles, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return v.([]*sonarr.EpisodeFile), nil
 }
