@@ -753,17 +753,16 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		canEdit: true,
 	},
 	rclone: {
-		title: "Mount & RClone",
+		title: "Rclone Mount",
 		description: "RClone mount and VFS settings",
 		icon: "HardDrive",
 		canEdit: true,
 	},
 	fuse: {
-		title: "altmount Native Mount",
+		title: "Altmount Native Mount",
 		description: "Configure altmount native FUSE mount settings",
 		icon: "HardDrive",
 		canEdit: true,
-		hidden: true,
 	},
 	metadata: {
 		title: "Metadata",

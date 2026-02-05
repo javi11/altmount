@@ -17,6 +17,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
+import { FuseConfig } from "../components/config/FuseConfig";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
@@ -572,6 +573,8 @@ export function ConfigurationPage() {
 									/>
 								)}
 
+								{activeSection === "fuse" && <FuseConfig />}
+
 								{/* Placeholder for other sections */}
 								{![
 									"webdav",
@@ -585,6 +588,7 @@ export function ConfigurationPage() {
 									"sabnzbd",
 									"arrs",
 									"health",
+									"fuse",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

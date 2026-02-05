@@ -188,3 +188,96 @@ func TestGetSegmentsInRange_SingleByteMiddleSegment(t *testing.T) {
 		t.Fatalf("length mismatch got %d want 1", collectedLen(rg))
 	}
 }
+
+func TestGetSegmentsInRangeFromIndex_SkipToMiddle(t *testing.T) {
+	// 10 segments of 10 bytes each (100 bytes total)
+	segments := make([]Segment, 10)
+	groups := make([][]string, 10)
+	for i := range segments {
+		segments[i] = Segment{Id: string(rune('a' + i)), Start: 0, End: 9, Size: 10}
+		groups[i] = []string{}
+	}
+	loader := &mockLoader{segments: segments, groups: groups}
+
+	// Request bytes 55-64 using index hint to start at segment 5 (offset 50)
+	// This tests O(log n) skip - we provide startSegmentIndex=5, startFilePos=50
+	rg := GetSegmentsInRangeFromIndex(context.Background(), 55, 64, loader, 5, 50)
+	if len(rg.segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(rg.segments))
+	}
+	// First segment (index 5) should be trimmed to start at offset 5 (55-50=5)
+	if rg.segments[0].Id != "f" || rg.segments[0].Start != 5 || rg.segments[0].End != 9 {
+		t.Fatalf("unexpected first segment: id=%s start=%d end=%d", rg.segments[0].Id, rg.segments[0].Start, rg.segments[0].End)
+	}
+	// Second segment (index 6) should be trimmed to end at offset 4 (64-60=4)
+	if rg.segments[1].Id != "g" || rg.segments[1].Start != 0 || rg.segments[1].End != 4 {
+		t.Fatalf("unexpected second segment: id=%s start=%d end=%d", rg.segments[1].Id, rg.segments[1].Start, rg.segments[1].End)
+	}
+	if collectedLen(rg) != 10 {
+		t.Fatalf("length mismatch got %d want 10", collectedLen(rg))
+	}
+}
+
+func TestGetSegmentsInRangeFromIndex_EquivalentToBasic(t *testing.T) {
+	// Verify that GetSegmentsInRangeFromIndex with startIndex=0, startPos=0
+	// produces the same result as GetSegmentsInRange
+	loader := &mockLoader{segments: []Segment{
+		{Id: "s1", Start: 0, End: 9, Size: 10}, // file 0..9
+		{Id: "s2", Start: 0, End: 9, Size: 10}, // file 10..19
+		{Id: "s3", Start: 0, End: 9, Size: 10}, // file 20..29
+	}, groups: [][]string{{}, {}, {}}}
+
+	rg1 := GetSegmentsInRange(context.Background(), 5, 24, loader)
+	rg2 := GetSegmentsInRangeFromIndex(context.Background(), 5, 24, loader, 0, 0)
+
+	if len(rg1.segments) != len(rg2.segments) {
+		t.Fatalf("segment count mismatch: %d vs %d", len(rg1.segments), len(rg2.segments))
+	}
+	for i := range rg1.segments {
+		if rg1.segments[i].Id != rg2.segments[i].Id ||
+			rg1.segments[i].Start != rg2.segments[i].Start ||
+			rg1.segments[i].End != rg2.segments[i].End {
+			t.Fatalf("segment %d mismatch", i)
+		}
+	}
+}
+
+func TestGetSegmentsInRangeFromIndex_NegativeIndex(t *testing.T) {
+	// Test that negative start index is handled gracefully (defaults to 0)
+	loader := &mockLoader{segments: []Segment{
+		{Id: "s1", Start: 0, End: 9, Size: 10},
+	}, groups: [][]string{{}}}
+
+	rg := GetSegmentsInRangeFromIndex(context.Background(), 0, 9, loader, -5, 0)
+	if len(rg.segments) != 1 {
+		t.Fatalf("expected 1 segment, got %d", len(rg.segments))
+	}
+	if rg.segments[0].Id != "s1" {
+		t.Fatalf("expected s1, got %s", rg.segments[0].Id)
+	}
+}
+
+func TestGetSegmentsInRangeFromIndex_LargeSkip(t *testing.T) {
+	// Simulate a large file with many segments to verify O(1) skip works
+	const numSegments = 1000
+	const segmentSize = 1000
+	segments := make([]Segment, numSegments)
+	groups := make([][]string, numSegments)
+	for i := range segments {
+		segments[i] = Segment{Id: string(rune(i)), Start: 0, End: segmentSize - 1, Size: segmentSize}
+		groups[i] = []string{}
+	}
+	loader := &mockLoader{segments: segments, groups: groups}
+
+	// Request bytes from segment 900 (offset 900000)
+	// Skip directly to segment 900 instead of iterating through 900 segments
+	startOffset := int64(900 * segmentSize)
+	rg := GetSegmentsInRangeFromIndex(context.Background(), startOffset, startOffset+999, loader, 900, startOffset)
+
+	if len(rg.segments) != 1 {
+		t.Fatalf("expected 1 segment, got %d", len(rg.segments))
+	}
+	if collectedLen(rg) != 1000 {
+		t.Fatalf("length mismatch got %d want 1000", collectedLen(rg))
+	}
+}

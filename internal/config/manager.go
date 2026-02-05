@@ -580,6 +580,11 @@ func (c *Config) Validate() error {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
 	}
 
+	// Validate FUSE mount_path is set when enabled
+	if c.Fuse.Enabled != nil && *c.Fuse.Enabled && c.Fuse.MountPath == "" {
+		return fmt.Errorf("fuse.mount_path is required when fuse is enabled")
+	}
+
 	return nil
 }
 
@@ -811,6 +816,12 @@ func (m *Manager) ReloadConfig() error {
 	config := DefaultConfig()
 	if err := viper.Unmarshal(config); err != nil {
 		return fmt.Errorf("error unmarshaling config: %w", err)
+	}
+
+	// Ensure *bool pointers are not nil after unmarshal (viper may leave them nil if not set in YAML)
+	if config.Fuse.Enabled == nil {
+		defaultEnabled := false
+		config.Fuse.Enabled = &defaultEnabled
 	}
 
 	// Validate configuration
@@ -1158,6 +1169,12 @@ func LoadConfig(configFile string) (*Config, error) {
 	// Unmarshal the config
 	if err := viper.Unmarshal(config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
+	}
+
+	// Ensure *bool pointers are not nil after unmarshal (viper may leave them nil if not set in YAML)
+	if config.Fuse.Enabled == nil {
+		defaultEnabled := false
+		config.Fuse.Enabled = &defaultEnabled
 	}
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,

@@ -182,6 +182,11 @@ var _ fs.NodeSetattrer = (*AltMountFile)(nil)
 // ensure FileHandle implements fs.FileReleaser
 var _ fs.FileReleaser = (*FileHandle)(nil)
 
+// Removed fs.FileReader interface check for FileHandle intentionally.
+// We use Seek+Read exclusively (not ReadAt) because MetadataVirtualFile's
+// UsenetReader is forward-only. ReadAt creates a new reader per call which
+// causes corruption when streaming video files.
+
 // AltMountFile represents a file in the FUSE filesystem
 type AltMountFile struct {
 	fs.Inode
@@ -248,24 +253,31 @@ func (f *AltMountFile) Read(ctx context.Context, fh fs.FileHandle, dest []byte, 
 	return handle.Read(ctx, dest, off)
 }
 
-// FileHandle handles file operations
+// FileHandle handles file operations.
+// Uses Seek+Read exclusively (not ReadAt) because the underlying
+// MetadataVirtualFile's UsenetReader is forward-only. Each ReadAt
+// call would create a new reader, causing data corruption for
+// streaming media files.
 type FileHandle struct {
-	file   afero.File
-	mu     sync.Mutex
-	logger *slog.Logger
-	path   string
+	file     afero.File
+	mu       sync.Mutex
+	logger   *slog.Logger
+	path     string
+	position int64 // Track current file position to skip unnecessary seeks
 }
 
-// Read implements the actual reading logic with Seek+Read atomicity
 func (h *FileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Seek to the requested offset
-	_, err := h.file.Seek(off, io.SeekStart)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
-		return nil, syscall.EIO
+	// Only seek if position changed (skip for sequential reads)
+	if off != h.position {
+		_, err := h.file.Seek(off, io.SeekStart)
+		if err != nil {
+			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
+			return nil, syscall.EIO
+		}
+		h.position = off
 	}
 
 	// Read into the buffer
@@ -275,7 +287,7 @@ func (h *FileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.Rea
 		return nil, syscall.EIO
 	}
 
-	// Return the data read
+	h.position += int64(n) // Update position after read
 	return fuse.ReadResultData(dest[:n]), 0
 }
 

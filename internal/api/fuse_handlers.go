@@ -162,53 +162,71 @@ func (s *Server) handleGetFuseStatus(c *fiber.Ctx) error {
 // AutoStartFuse automatically starts the FUSE mount if enabled in config
 func (s *Server) AutoStartFuse() {
 	cfg := s.configManager.GetConfig()
-	if cfg.Fuse.Enabled != nil && *cfg.Fuse.Enabled && cfg.Fuse.MountPath != "" {
-		slog.Info("Auto-starting FUSE mount", "path", cfg.Fuse.MountPath)
 
-		// Create a fake fiber context for the internal call or just extract logic
-		// For simplicity, let's just trigger it manually since we have all info
+	// Log diagnostic info for troubleshooting
+	slog.Debug("Checking FUSE auto-start conditions",
+		"mount_path", cfg.Fuse.MountPath)
 
-		s.fuseManager.mu.Lock()
-		if s.fuseManager.status == "running" {
+	if cfg.Fuse.Enabled == nil {
+		slog.Info("FUSE auto-start skipped: enabled flag not configured")
+		return
+	}
+
+	if !*cfg.Fuse.Enabled {
+		slog.Debug("FUSE auto-start skipped: disabled in configuration")
+		return
+	}
+
+	if cfg.Fuse.MountPath == "" {
+		slog.Warn("FUSE auto-start skipped: mount_path is empty despite being enabled")
+		return
+	}
+
+	slog.Info("Auto-starting FUSE mount", "path", cfg.Fuse.MountPath)
+
+	// Create a fake fiber context for the internal call or just extract logic
+	// For simplicity, let's just trigger it manually since we have all info
+
+	s.fuseManager.mu.Lock()
+	if s.fuseManager.status == "running" {
+		s.fuseManager.mu.Unlock()
+		return
+	}
+	s.fuseManager.status = "starting"
+	s.fuseManager.path = cfg.Fuse.MountPath
+	s.fuseManager.mu.Unlock()
+
+	if _, err := os.Stat(cfg.Fuse.MountPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(cfg.Fuse.MountPath, 0755); err != nil {
+			slog.Error("Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
+			s.fuseManager.mu.Lock()
+			s.fuseManager.status = "error"
 			s.fuseManager.mu.Unlock()
 			return
 		}
-		s.fuseManager.status = "starting"
-		s.fuseManager.path = cfg.Fuse.MountPath
+	}
+
+	go func() {
+		logger := slog.With("component", "fuse")
+		adapter := fuse.NewContextAdapter(s.nzbFilesystem, cfg.Fuse)
+		server := fuse.NewServer(cfg.Fuse.MountPath, adapter, logger, cfg.Fuse)
+
+		s.fuseManager.mu.Lock()
+		s.fuseManager.server = server
+		s.fuseManager.status = "running"
 		s.fuseManager.mu.Unlock()
 
-		if _, err := os.Stat(cfg.Fuse.MountPath); os.IsNotExist(err) {
-			if err := os.MkdirAll(cfg.Fuse.MountPath, 0755); err != nil {
-				slog.Error("Failed to create auto-mount directory", "path", cfg.Fuse.MountPath, "error", err)
-				s.fuseManager.mu.Lock()
-				s.fuseManager.status = "error"
-				s.fuseManager.mu.Unlock()
-				return
-			}
-		}
-
-		go func() {
-			logger := slog.With("component", "fuse")
-			adapter := fuse.NewContextAdapter(s.nzbFilesystem, cfg.Fuse)
-			server := fuse.NewServer(cfg.Fuse.MountPath, adapter, logger, cfg.Fuse)
-
+		if err := server.Mount(); err != nil {
+			slog.Error("FUSE auto-mount failed", "error", err)
 			s.fuseManager.mu.Lock()
-			s.fuseManager.server = server
-			s.fuseManager.status = "running"
+			s.fuseManager.status = "error"
+			s.fuseManager.server = nil
 			s.fuseManager.mu.Unlock()
-
-			if err := server.Mount(); err != nil {
-				slog.Error("FUSE auto-mount failed", "error", err)
-				s.fuseManager.mu.Lock()
-				s.fuseManager.status = "error"
-				s.fuseManager.server = nil
-				s.fuseManager.mu.Unlock()
-			} else {
-				s.fuseManager.mu.Lock()
-				s.fuseManager.status = "stopped"
-				s.fuseManager.server = nil
-				s.fuseManager.mu.Unlock()
-			}
-		}()
-	}
+		} else {
+			s.fuseManager.mu.Lock()
+			s.fuseManager.status = "stopped"
+			s.fuseManager.server = nil
+			s.fuseManager.mu.Unlock()
+		}
+	}()
 }
