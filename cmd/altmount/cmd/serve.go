@@ -63,7 +63,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	configManager := config.NewManager(cfg, configFile)
-	poolManager := pool.NewManager(ctx)
 
 	// 3. Initialize core services
 	db, err := initializeDatabase(ctx, cfg)
@@ -76,6 +75,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Error("failed to close database", "err", err)
 		}
 	}()
+
+	repos := setupRepositories(ctx, db)
+	poolManager := pool.NewManager(ctx, repos.MainRepo)
 
 	metadataService, metadataReader := initializeMetadata(cfg)
 
@@ -98,7 +100,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 5. Initialize importer and filesystem
-	repos := setupRepositories(ctx, db)
 
 	arrsService := arrs.NewService(configManager.GetConfigGetter(), configManager, repos.UserRepo)
 

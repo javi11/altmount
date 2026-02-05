@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/nntppool/v2"
 )
 
@@ -33,14 +34,16 @@ type manager struct {
 	mu             sync.RWMutex
 	pool           nntppool.UsenetConnectionPool
 	metricsTracker *MetricsTracker
+	repo           *database.Repository
 	ctx            context.Context
 	logger         *slog.Logger
 }
 
 // NewManager creates a new pool manager
-func NewManager(ctx context.Context) Manager {
+func NewManager(ctx context.Context, repo *database.Repository) Manager {
 	return &manager{
 		ctx:    ctx,
+		repo:   repo,
 		logger: slog.Default().With("component", "pool"),
 	}
 }
@@ -96,7 +99,7 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 	m.pool = pool
 
 	// Start metrics tracker
-	m.metricsTracker = NewMetricsTracker(pool)
+	m.metricsTracker = NewMetricsTracker(pool, m.repo)
 	m.metricsTracker.Start(m.ctx)
 
 	m.logger.InfoContext(m.ctx, "NNTP connection pool created successfully")

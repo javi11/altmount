@@ -135,3 +135,10 @@ type MediaFile struct {
 	CreatedAt    time.Time `db:"created_at"`    // When record was created
 	UpdatedAt    time.Time `db:"updated_at"`    // When record was last updated
 }
+
+// SystemStat represents a persistent system statistic
+type SystemStat struct {
+	Key       string    `db:"key"`
+	Value     int64     `db:"value"`
+	UpdatedAt time.Time `db:"updated_at"`
+}
