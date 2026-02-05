@@ -610,8 +610,10 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate FUSE mount_path is set when enabled
-	if c.Fuse.Enabled != nil && *c.Fuse.Enabled && c.Fuse.MountPath == "" {
-		return fmt.Errorf("fuse.mount_path is required when fuse is enabled")
+	if c.Fuse.Enabled != nil && *c.Fuse.Enabled && c.Fuse.MountPath != "" {
+		if !filepath.IsAbs(c.Fuse.MountPath) {
+			return fmt.Errorf("fuse.mount_path must be an absolute path")
+		}
 	}
 
 	return nil
