@@ -50,6 +50,7 @@ type SABnzbdQueueSlot struct {
 	Priority   string `json:"priority"`
 	Filename   string `json:"filename"`
 	Cat        string `json:"cat"`
+	Category   string `json:"category"`
 	Percentage string `json:"percentage"`
 	Status     string `json:"status"`
 	Timeleft   string `json:"timeleft"`
@@ -79,6 +80,7 @@ type SABnzbdHistorySlot struct {
 	NzoID        string   `json:"nzo_id"`
 	Name         string   `json:"name"`
 	Category     string   `json:"category"`
+	Cat          string   `json:"cat"`
 	PP           string   `json:"pp"`
 	Script       string   `json:"script"`
 	Report       string   `json:"report"`
@@ -382,6 +384,7 @@ func ToSABnzbdQueueSlot(item *database.ImportQueueItem, index int, progressBroad
 		Priority:   priority,
 		Filename:   jobName,
 		Cat:        category,
+		Category:   category,
 		Percentage: fmt.Sprintf("%d", progressPercentage),
 		Status:     status,
 		Timeleft:   timeLeft,
@@ -514,6 +517,8 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 		Name: jobName,
 
 		Category: category,
+
+		Cat: category,
 
 		PP: "3",
 
