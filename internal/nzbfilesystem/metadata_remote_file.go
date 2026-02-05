@@ -976,6 +976,12 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 		mvf.closeCurrentReader()
 	}
 
+	// Reset originalRangeEnd when position changes to force fresh range calculation
+	// on next read. This prevents stale range information from being reused after seek.
+	if abs != mvf.position {
+		mvf.originalRangeEnd = 0
+	}
+
 	mvf.position = abs
 	return abs, nil
 }
@@ -1172,13 +1178,12 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	startFilePos := int64(0)
 	if mvf.segmentIndex != nil && start > 0 {
 		startSegIdx = mvf.segmentIndex.findSegmentForOffset(start)
-		if startSegIdx > 0 {
+		if startSegIdx >= 0 {
 			startFilePos = mvf.segmentIndex.getOffsetForSegment(startSegIdx)
-		} else if startSegIdx < 0 {
-			// Offset is beyond all segments
-			startSegIdx = len(mvf.fileMeta.SegmentData)
-			startFilePos = 0
 		}
+		// If startSegIdx < 0 (offset beyond all segments), keep defaults (0, 0)
+		// to let GetSegmentsInRangeFromIndex iterate from beginning -
+		// it will correctly handle finding no segments in range
 	}
 
 	rg := usenet.GetSegmentsInRangeFromIndex(ctx, start, end, loader, startSegIdx, startFilePos)

@@ -361,6 +361,218 @@ func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 	return pool.MetricsSnapshot{}, nil
 }
 
+// TestSeekResetsOriginalRangeEnd tests that Seek properly resets originalRangeEnd
+// This is critical for video playback - without this fix, seeking causes stale range
+// information to be reused, breaking subsequent reads
+func TestSeekResetsOriginalRangeEnd(t *testing.T) {
+	fileSize := int64(100 * 1024 * 1024) // 100MB
+	mvf := &MetadataVirtualFile{
+		fileMeta: &metapb.FileMetadata{
+			FileSize: fileSize,
+		},
+		position:         0,
+		originalRangeEnd: -1, // Simulate unbounded range from initial HTTP request
+		readerInitialized: false,
+	}
+
+	// Seek to a new position - this should reset originalRangeEnd
+	newPos, err := mvf.Seek(1024*1024, io.SeekStart) // Seek to 1MB
+	if err != nil {
+		t.Fatalf("Seek() error = %v", err)
+	}
+	if newPos != 1024*1024 {
+		t.Errorf("Seek() returned position = %d, want %d", newPos, 1024*1024)
+	}
+
+	// originalRangeEnd should be reset to 0 (not -1) to force fresh range calculation
+	if mvf.originalRangeEnd != 0 {
+		t.Errorf("After Seek(), originalRangeEnd = %d, want 0 (reset)", mvf.originalRangeEnd)
+	}
+}
+
+// TestSeekSamePositionDoesNotResetRange tests that seeking to the same position
+// does not reset originalRangeEnd (optimization)
+func TestSeekSamePositionDoesNotResetRange(t *testing.T) {
+	fileSize := int64(100 * 1024 * 1024) // 100MB
+	mvf := &MetadataVirtualFile{
+		fileMeta: &metapb.FileMetadata{
+			FileSize: fileSize,
+		},
+		position:         1024,
+		originalRangeEnd: -1, // Unbounded range
+		readerInitialized: false,
+	}
+
+	// Seek to the SAME position
+	_, err := mvf.Seek(1024, io.SeekStart)
+	if err != nil {
+		t.Fatalf("Seek() error = %v", err)
+	}
+
+	// originalRangeEnd should NOT be reset since position didn't change
+	if mvf.originalRangeEnd != -1 {
+		t.Errorf("After Seek() to same position, originalRangeEnd = %d, want -1 (unchanged)", mvf.originalRangeEnd)
+	}
+}
+
+// TestMultipleConsecutiveSeeks tests that multiple seeks all reset originalRangeEnd correctly
+func TestMultipleConsecutiveSeeks(t *testing.T) {
+	fileSize := int64(100 * 1024 * 1024) // 100MB
+	mvf := &MetadataVirtualFile{
+		fileMeta: &metapb.FileMetadata{
+			FileSize: fileSize,
+		},
+		position:         0,
+		originalRangeEnd: 5000, // Bounded range
+		readerInitialized: false,
+	}
+
+	positions := []int64{1000, 5000, 10000, 50000, 1000} // Back and forth
+
+	for i, targetPos := range positions {
+		mvf.originalRangeEnd = int64(i * 1000) // Set a non-zero value before each seek
+
+		_, err := mvf.Seek(targetPos, io.SeekStart)
+		if err != nil {
+			t.Fatalf("Seek(%d) error = %v", targetPos, err)
+		}
+
+		if mvf.position != targetPos {
+			t.Errorf("After Seek(%d), position = %d", targetPos, mvf.position)
+		}
+
+		// originalRangeEnd should be reset after each seek (except when position unchanged)
+		if mvf.originalRangeEnd != 0 {
+			t.Errorf("After Seek(%d), originalRangeEnd = %d, want 0", targetPos, mvf.originalRangeEnd)
+		}
+	}
+}
+
+// TestSeekWithWhenceModes tests all three seek whence modes reset originalRangeEnd
+func TestSeekWithWhenceModes(t *testing.T) {
+	fileSize := int64(100 * 1024 * 1024) // 100MB
+
+	tests := []struct {
+		name          string
+		initialPos    int64
+		offset        int64
+		whence        int
+		expectedPos   int64
+	}{
+		{
+			name:        "SeekStart to middle",
+			initialPos:  0,
+			offset:      50 * 1024 * 1024,
+			whence:      io.SeekStart,
+			expectedPos: 50 * 1024 * 1024,
+		},
+		{
+			name:        "SeekCurrent forward",
+			initialPos:  1024,
+			offset:      1024,
+			whence:      io.SeekCurrent,
+			expectedPos: 2048,
+		},
+		{
+			name:        "SeekEnd backwards",
+			initialPos:  0,
+			offset:      -1024,
+			whence:      io.SeekEnd,
+			expectedPos: fileSize - 1024,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mvf := &MetadataVirtualFile{
+				fileMeta: &metapb.FileMetadata{
+					FileSize: fileSize,
+				},
+				position:         tt.initialPos,
+				originalRangeEnd: -1, // Unbounded
+				readerInitialized: false,
+			}
+
+			newPos, err := mvf.Seek(tt.offset, tt.whence)
+			if err != nil {
+				t.Fatalf("Seek() error = %v", err)
+			}
+
+			if newPos != tt.expectedPos {
+				t.Errorf("Seek() position = %d, want %d", newPos, tt.expectedPos)
+			}
+
+			// originalRangeEnd should be reset
+			if mvf.originalRangeEnd != 0 {
+				t.Errorf("originalRangeEnd = %d, want 0", mvf.originalRangeEnd)
+			}
+		})
+	}
+}
+
+// TestSeekErrorCases tests that invalid seeks don't modify state
+func TestSeekErrorCases(t *testing.T) {
+	fileSize := int64(100 * 1024 * 1024) // 100MB
+
+	tests := []struct {
+		name          string
+		initialPos    int64
+		offset        int64
+		whence        int
+		expectedErr   error
+	}{
+		{
+			name:        "negative position via SeekStart",
+			initialPos:  0,
+			offset:      -100,
+			whence:      io.SeekStart,
+			expectedErr: ErrSeekNegative,
+		},
+		{
+			name:        "beyond file size",
+			initialPos:  0,
+			offset:      fileSize + 100,
+			whence:      io.SeekStart,
+			expectedErr: ErrSeekTooFar,
+		},
+		{
+			name:        "invalid whence",
+			initialPos:  0,
+			offset:      0,
+			whence:      99, // Invalid whence
+			expectedErr: ErrInvalidWhence,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mvf := &MetadataVirtualFile{
+				fileMeta: &metapb.FileMetadata{
+					FileSize: fileSize,
+				},
+				position:         tt.initialPos,
+				originalRangeEnd: -1,
+				readerInitialized: false,
+			}
+
+			_, err := mvf.Seek(tt.offset, tt.whence)
+			if err != tt.expectedErr {
+				t.Errorf("Seek() error = %v, want %v", err, tt.expectedErr)
+			}
+
+			// Position should not change on error
+			if mvf.position != tt.initialPos {
+				t.Errorf("Position changed on error: got %d, want %d", mvf.position, tt.initialPos)
+			}
+
+			// originalRangeEnd should not be reset on error
+			if mvf.originalRangeEnd != -1 {
+				t.Errorf("originalRangeEnd changed on error: got %d, want -1", mvf.originalRangeEnd)
+			}
+		})
+	}
+}
+
 // TestConcurrentSegmentIndexAccess tests thread safety of segment index
 func TestConcurrentSegmentIndexAccess(t *testing.T) {
 	segments := []*metapb.SegmentData{
