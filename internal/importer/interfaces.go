@@ -74,6 +74,12 @@ type VFSNotifier interface {
 	RefreshMountPathIfNeeded(ctx context.Context, resultingPath string, itemID int64)
 }
 
+// FUSECacheNotifier handles FUSE metadata cache invalidation
+type FUSECacheNotifier interface {
+	// InvalidateFUSECache invalidates cache entries for a path and its parent
+	InvalidateFUSECache(path string)
+}
+
 // HealthScheduler handles health check scheduling for imported files
 type HealthScheduler interface {
 	// ScheduleHealthCheck schedules a health check for an imported file
@@ -103,6 +109,7 @@ type PostProcessor interface {
 	SymlinkCreator
 	StrmGenerator
 	VFSNotifier
+	FUSECacheNotifier
 	HealthScheduler
 	ARRNotifier
 	SABnzbdFallback
