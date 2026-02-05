@@ -7,8 +7,9 @@ import (
 )
 
 var (
-	ErrPathMatchFailed  = fmt.Errorf("path match failed")
-	ErrInstanceNotFound = fmt.Errorf("instance not found")
+	ErrPathMatchFailed           = fmt.Errorf("path match failed")
+	ErrEpisodeAlreadySatisfied   = fmt.Errorf("episode already satisfied by another file")
+	ErrInstanceNotFound          = fmt.Errorf("instance not found")
 )
 
 // ConfigInstance represents an arrs instance from configuration
