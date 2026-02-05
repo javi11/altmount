@@ -49,6 +49,14 @@ export interface MetadataConfig {
 	delete_source_nzb_on_removal?: boolean;
 	delete_failed_nzb?: boolean;
 	delete_completed_nzb?: boolean;
+	backup: MetadataBackupConfig;
+}
+
+export interface MetadataBackupConfig {
+	enabled: boolean;
+	interval_hours: number;
+	keep_backups: number;
+	path: string;
 }
 
 // Streaming configuration
@@ -282,6 +290,7 @@ export interface DatabaseUpdateRequest {
 export interface MetadataUpdateRequest {
 	root_path?: string;
 	delete_source_nzb_on_removal?: boolean;
+	backup?: MetadataBackupConfig;
 }
 
 // Streaming update request
@@ -455,6 +464,7 @@ export interface ImportFormData {
 export interface MetadataFormData {
 	root_path: string;
 	delete_source_nzb_on_removal?: boolean;
+	backup: MetadataBackupConfig;
 }
 
 export interface StreamingFormData {
