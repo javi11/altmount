@@ -616,6 +616,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Prevent RClone and FUSE from using the same mount path
+	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled &&
+		c.Fuse.Enabled != nil && *c.Fuse.Enabled &&
+		c.MountPath != "" && c.Fuse.MountPath != "" &&
+		filepath.Clean(c.MountPath) == filepath.Clean(c.Fuse.MountPath) {
+		return fmt.Errorf("rclone mount and native mount cannot use the same path: %s", c.MountPath)
+	}
+
 	return nil
 }
 
