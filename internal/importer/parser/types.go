@@ -17,15 +17,21 @@ const (
 	NzbTypeStrm       NzbType = "strm_file"
 )
 
+type ExtractedFileInfo struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
 // ParsedNzb contains the parsed NZB data and extracted metadata
 type ParsedNzb struct {
-	Path          string
-	Filename      string
-	TotalSize     int64
-	Type          NzbType
-	Files         []ParsedFile
-	SegmentsCount int
-	password      string // Private field - use GetPassword() to access
+	Path           string
+	Filename       string
+	TotalSize      int64
+	Type           NzbType
+	Files          []ParsedFile
+	SegmentsCount  int
+	password       string // Private field - use GetPassword() to access
+	ExtractedFiles []ExtractedFileInfo
 }
 
 // GetPassword returns the password for this NZB

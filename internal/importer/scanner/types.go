@@ -38,5 +38,6 @@ type ImportInfo struct {
 	Total     int             `json:"total"`
 	Added     int             `json:"added"`
 	Failed    int             `json:"failed"`
+	Skipped   int             `json:"skipped"`
 	LastError *string         `json:"last_error,omitempty"`
 }
