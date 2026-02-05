@@ -266,15 +266,6 @@ type FileHandle struct {
 	position int64 // Track current file position to skip unnecessary seeks
 }
 
-// Read implements the actual reading logic using Seek+Read with mutex.
-// We intentionally avoid ReadAt because MetadataVirtualFile's UsenetReader
-// is forward-only - each ReadAt would create a new reader from scratch,
-// abandoning the previous download and causing data corruption for video streaming.
-//
-// Position tracking optimization: For sequential reads (video streaming), the kernel
-// requests data in ~4KB chunks at consecutive offsets. By tracking the current file
-// position, we skip unnecessary Seek() calls when the requested offset matches the
-// current position. This significantly reduces overhead during continuous playback.
 func (h *FileHandle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

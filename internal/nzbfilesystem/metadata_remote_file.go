@@ -832,7 +832,6 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 // ReadAt implements afero.File.ReadAt with concurrent random access support.
 // Unlike Read(), this method creates an independent reader for each call,
 // allowing concurrent reads at different offsets without mutex serialization.
-// This is critical for FUSE performance with video seeking and file browsers.
 func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
