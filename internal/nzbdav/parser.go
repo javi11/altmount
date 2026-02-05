@@ -90,6 +90,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 		var currentParentId string
 		var currentWriter *io.PipeWriter
 		count := 0
+		var currentExtractedFiles []ExtractedFileInfo
 
 		// cleanupCurrent ensures the current writer is properly closed
 		cleanupCurrent := func() {
@@ -130,6 +131,15 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				}
 			}
 
+			// Check if this file is inside an "extracted" folder
+			isExtractedFile := strings.Contains(releasePath, "/extracted") || releaseName == "extracted"
+			if isExtractedFile && fileSize.Valid && fileSize.Int64 > 0 {
+				currentExtractedFiles = append(currentExtractedFiles, ExtractedFileInfo{
+					Name: fileName,
+					Size: fileSize.Int64,
+				})
+			}
+
 			count++
 			if count%100 == 0 {
 				slog.Info("NZBDav import progress", "files_scanned", count)
@@ -140,6 +150,7 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 				cleanupCurrent()
 
 				currentParentId = releaseId
+				currentExtractedFiles = nil // Reset for new release
 				slog.Debug("Processing new release", "path", releasePath, "name", releaseName)
 
 				// Create new pipe for this release
@@ -152,11 +163,12 @@ func (p *Parser) Parse() (<-chan *ParsedNzb, <-chan error) {
 
 				select {
 				case out <- &ParsedNzb{
-					ID:       releaseId,
-					Name:     releaseName,
-					Category: category,
-					RelPath:  relPath,
-					Content:  pr,
+					ID:             releaseId,
+					Name:           releaseName,
+					Category:       category,
+					RelPath:        relPath,
+					Content:        pr,
+					ExtractedFiles: currentExtractedFiles,
 				}:
 				case <-errChan: // Context cancelled or error
 					return

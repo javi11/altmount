@@ -3,6 +3,7 @@ package importer
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer/filesystem"
+	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -96,6 +98,10 @@ type batchQueueAdapterForImporter struct {
 
 func (a *batchQueueAdapterForImporter) AddBatchToQueue(ctx context.Context, items []*database.ImportQueueItem) error {
 	return a.repo.AddBatchToQueue(ctx, items)
+}
+
+func (a *batchQueueAdapterForImporter) FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error) {
+	return a.repo.FilterExistingNzbdavIds(ctx, ids)
 }
 
 // isFileAlreadyProcessed checks if a file has already been processed by checking metadata
@@ -616,7 +622,19 @@ func (s *Service) processNzbItem(ctx context.Context, item *database.ImportQueue
 		allowedExtensionsOverride = &emptySlice // Allow all extensions for test files
 	}
 
-	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir)
+	// Parse metadata for extracted files (optimization for already extracted content)
+	var extractedFiles []parser.ExtractedFileInfo
+	if item.Metadata != nil && *item.Metadata != "" {
+		type metaStruct struct {
+			ExtractedFiles []parser.ExtractedFileInfo `json:"extracted_files"`
+		}
+		var meta metaStruct
+		if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil {
+			extractedFiles = meta.ExtractedFiles
+		}
+	}
+
+	return s.processor.ProcessNzbFile(ctx, item.NzbPath, basePath, int(item.ID), allowedExtensionsOverride, &virtualDir, extractedFiles)
 }
 
 func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, basePath *string) string {

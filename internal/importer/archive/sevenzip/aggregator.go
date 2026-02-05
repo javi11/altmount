@@ -94,6 +94,7 @@ func ProcessArchive(
 	segmentSamplePercentage int,
 	allowedFileExtensions []string,
 	timeout time.Duration,
+	extractedFiles []parser.ExtractedFileInfo,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -188,39 +189,54 @@ func ProcessArchive(
 			}
 		}
 
-		// Create offset tracker for real-time segment-level progress
-		// This maps individual file segment progress (0→N) to cumulative progress across all files
-		var offsetTracker *progress.OffsetTracker
-		if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
-			offsetTracker = progress.NewOffsetTracker(
-				validationProgressTracker,
-				validatedSegmentsCount,  // Segments already validated in previous files
-				totalSegmentsToValidate, // Total segments across all files
-			)
+		// Check if this file matches an already extracted file in the database
+		isPreExtracted := false
+		for _, extracted := range extractedFiles {
+			if extracted.Name == baseFilename && extracted.Size == sevenZipContent.Size {
+				isPreExtracted = true
+				break
+			}
 		}
 
-		// Determine encryption type for validation
-		encryption := metapb.Encryption_NONE
-		if len(sevenZipContent.AesKey) > 0 {
-			encryption = metapb.Encryption_AES
-		}
+		if isPreExtracted {
+			slog.InfoContext(ctx, "Skipping validation for pre-extracted file (found in database)",
+				"file", baseFilename,
+				"size", sevenZipContent.Size)
+		} else {
+			// Create offset tracker for real-time segment-level progress
+			// This maps individual file segment progress (0→N) to cumulative progress across all files
+			var offsetTracker *progress.OffsetTracker
+			if validationProgressTracker != nil && totalSegmentsToValidate > 0 {
+				offsetTracker = progress.NewOffsetTracker(
+					validationProgressTracker,
+					validatedSegmentsCount,  // Segments already validated in previous files
+					totalSegmentsToValidate, // Total segments across all files
+				)
+			}
 
-		// Validate segments with real-time progress updates
-		if err := validation.ValidateSegmentsForFile(
-			ctx,
-			baseFilename,
-			sevenZipContent.Size,
-			sevenZipContent.Segments,
-			encryption,
-			poolManager,
-			maxValidationGoroutines,
-			segmentSamplePercentage,
-			offsetTracker, // Real-time segment progress with cumulative offset
-			timeout,
-		); err != nil {
-			slog.WarnContext(ctx, "Skipping 7zip file due to validation error", "error", err, "file", baseFilename)
+			// Determine encryption type for validation
+			encryption := metapb.Encryption_NONE
+			if len(sevenZipContent.AesKey) > 0 {
+				encryption = metapb.Encryption_AES
+			}
 
-			continue
+			// Validate segments with real-time progress updates
+			if err := validation.ValidateSegmentsForFile(
+				ctx,
+				baseFilename,
+				sevenZipContent.Size,
+				sevenZipContent.Segments,
+				encryption,
+				poolManager,
+				maxValidationGoroutines,
+				segmentSamplePercentage,
+				offsetTracker, // Real-time segment progress with cumulative offset
+				timeout,
+			); err != nil {
+				slog.WarnContext(ctx, "Skipping 7zip file due to validation error", "error", err, "file", baseFilename)
+
+				continue
+			}
 		}
 
 		// Calculate and track segments validated for this file (for next file's offset)

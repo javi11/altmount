@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 // BatchQueueAdder defines the interface for batch queue operations
 type BatchQueueAdder interface {
 	AddBatchToQueue(ctx context.Context, items []*database.ImportQueueItem) error
+	FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error)
 }
 
 // NzbDavImporter handles importing from NZBDav databases
@@ -222,16 +224,98 @@ func (n *NzbDavImporter) processBatch(ctx context.Context, batchChan <-chan *dat
 
 	insertBatch := func() {
 		if len(batch) > 0 {
-			if err := n.batchAdder.AddBatchToQueue(ctx, batch); err != nil {
-				n.log.ErrorContext(ctx, "Failed to add batch to queue", "count", len(batch), "error", err)
-				n.mu.Lock()
-				n.info.Failed += len(batch)
-				n.mu.Unlock()
+			// 1. Extract IDs from batch to check for duplicates
+			idMap := make(map[string]*database.ImportQueueItem)
+			idsToCheck := make([]string, 0, len(batch))
+
+			type metaStruct struct {
+				NzbdavID string `json:"nzbdav_id"`
+			}
+
+			for _, item := range batch {
+				if item.Metadata != nil {
+					var meta metaStruct
+					if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil && meta.NzbdavID != "" {
+						idMap[meta.NzbdavID] = item
+						idsToCheck = append(idsToCheck, meta.NzbdavID)
+					}
+				}
+			}
+
+			// 2. Check for existing IDs in DB
+			var existingIds []string
+			var err error
+			if len(idsToCheck) > 0 {
+				existingIds, err = n.batchAdder.FilterExistingNzbdavIds(ctx, idsToCheck)
+				if err != nil {
+					n.log.ErrorContext(ctx, "Failed to check for existing IDs", "error", err)
+					// On error, we proceed with all items - the DB unique constraint on nzb_path
+					// will catch duplicates, though less efficiently, or we might add duplicates
+					// if paths differ. Better to fail safe and try to add.
+				}
+			}
+
+			// 3. Filter out duplicates
+			itemsToAdd := make([]*database.ImportQueueItem, 0, len(batch))
+			duplicates := 0
+
+			if len(existingIds) > 0 {
+				existingMap := make(map[string]bool)
+				for _, id := range existingIds {
+					existingMap[id] = true
+				}
+
+				for _, item := range batch {
+					isDuplicate := false
+					if item.Metadata != nil {
+						var meta metaStruct
+						if err := json.Unmarshal([]byte(*item.Metadata), &meta); err == nil && meta.NzbdavID != "" {
+							if existingMap[meta.NzbdavID] {
+								isDuplicate = true
+							}
+						}
+					}
+
+					if isDuplicate {
+						duplicates++
+						// Cleanup temp NZB file for duplicate
+						if err := os.Remove(item.NzbPath); err != nil {
+							n.log.DebugContext(ctx, "Failed to remove duplicate temp NZB", "path", item.NzbPath, "error", err)
+						}
+						// Also try to remove the parent temp dir if empty (it was created just for this file)
+						go func(path string) {
+							dir := filepath.Dir(path)
+							_ = os.Remove(dir)
+						}(item.NzbPath)
+					} else {
+						itemsToAdd = append(itemsToAdd, item)
+					}
+				}
 			} else {
+				itemsToAdd = batch
+			}
+
+			if duplicates > 0 {
+				n.log.InfoContext(ctx, "Skipped duplicate items", "count", duplicates)
 				n.mu.Lock()
-				n.info.Added += len(batch)
+				n.info.Skipped += duplicates
 				n.mu.Unlock()
 			}
+
+			// 4. Add unique items to queue
+			if len(itemsToAdd) > 0 {
+				if err := n.batchAdder.AddBatchToQueue(ctx, itemsToAdd); err != nil {
+					n.log.ErrorContext(ctx, "Failed to add batch to queue", "count", len(itemsToAdd), "error", err)
+					n.mu.Lock()
+					n.info.Failed += len(itemsToAdd)
+					n.mu.Unlock()
+				} else {
+					n.mu.Lock()
+					n.info.Added += len(itemsToAdd)
+					n.mu.Unlock()
+				}
+			}
+
 			batch = nil // Reset batch
 		}
 	}
@@ -306,8 +390,16 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 	relPath := rootFolder
 	priority := database.QueuePriorityNormal
 
-	// Store original ID in metadata
-	metaJSON := fmt.Sprintf(`{"nzbdav_id": "%s"}`, res.ID)
+	// Store original ID and extracted files in metadata
+	metaMap := map[string]interface{}{
+		"nzbdav_id": res.ID,
+	}
+	if len(res.ExtractedFiles) > 0 {
+		metaMap["extracted_files"] = res.ExtractedFiles
+	}
+
+	metaBytes, _ := json.Marshal(metaMap)
+	metaJSON := string(metaBytes)
 
 	// Prepare item struct
 	item := &database.ImportQueueItem{

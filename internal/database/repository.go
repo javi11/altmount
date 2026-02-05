@@ -881,6 +881,62 @@ func (r *Repository) IsFileInQueue(ctx context.Context, filePath string) (bool, 
 	return true, nil
 }
 
+// FilterExistingNzbdavIds checks a list of nzbdav IDs and returns those that already exist in the queue
+// This is used for deduplication during import
+func (r *Repository) FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// We can't pass too many parameters at once, so we batch the query
+	batchSize := 500
+	existingIds := make([]string, 0)
+
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+
+		batchIds := ids[i:end]
+
+		// Build placeholders for the IN clause
+		placeholders := make([]string, len(batchIds))
+		args := make([]interface{}, len(batchIds))
+		for j, id := range batchIds {
+			placeholders[j] = "?"
+			args[j] = id
+		}
+
+		// Query using json_extract to find matching IDs
+		// We use DISTINCT to avoid duplicates in the result
+		query := fmt.Sprintf(`
+			SELECT DISTINCT json_extract(metadata, '$.nzbdav_id') 
+			FROM import_queue 
+			WHERE json_extract(metadata, '$.nzbdav_id') IN (%s)
+		`, strings.Join(placeholders, ","))
+
+		rows, err := r.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check existing nzbdav IDs: %w", err)
+		}
+
+		for rows.Next() {
+			var id sql.NullString
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("failed to scan matching id: %w", err)
+			}
+			if id.Valid {
+				existingIds = append(existingIds, id.String)
+			}
+		}
+		rows.Close()
+	}
+
+	return existingIds, nil
+}
+
 // UpdateQueueItemPriority updates the priority of a queue item
 func (r *Repository) UpdateQueueItemPriority(ctx context.Context, id int64, priority QueuePriority) error {
 	query := `UPDATE import_queue SET priority = ?, updated_at = datetime('now') WHERE id = ?`
