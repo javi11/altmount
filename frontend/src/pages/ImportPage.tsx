@@ -231,7 +231,8 @@ function NzbDavImportSection() {
 
 	// Calculate progress
 	const total = importStatus?.total || 0;
-	const processed = (importStatus?.added || 0) + (importStatus?.failed || 0) + (importStatus?.skipped || 0);
+	const processed =
+		(importStatus?.added || 0) + (importStatus?.failed || 0) + (importStatus?.skipped || 0);
 	const progressPercent = total > 0 ? Math.min((processed / total) * 100, 100) : 0;
 
 	const handleSubmit = async (e: React.FormEvent) => {
@@ -388,7 +389,7 @@ function NzbDavImportSection() {
 
 							{/* Progress Bar */}
 							<div className="space-y-2">
-								<div className="flex justify-between text-xs font-medium text-base-content/70">
+								<div className="flex justify-between font-medium text-base-content/70 text-xs">
 									<span>Progress</span>
 									<span>{Math.round(progressPercent)}%</span>
 								</div>
@@ -403,34 +404,32 @@ function NzbDavImportSection() {
 							{/* Stats Grid */}
 							<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
 								<div className="flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
-									<span className="text-base-content/60 text-xs font-medium uppercase tracking-wider">
+									<span className="font-medium text-base-content/60 text-xs uppercase tracking-wider">
 										Total
 									</span>
 									<span className="font-bold text-2xl">{importStatus?.total || 0}</span>
 								</div>
-								<div className="border-b-2 border-success flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
-									<span className="text-success text-xs font-medium uppercase tracking-wider">
+								<div className="flex flex-col items-center rounded-lg border-success border-b-2 bg-base-100 p-3 shadow-sm">
+									<span className="font-medium text-success text-xs uppercase tracking-wider">
 										Added
 									</span>
 									<span className="font-bold text-2xl text-success">
 										{importStatus?.added || 0}
 									</span>
 								</div>
-								<div className="border-b-2 border-warning flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
-									<span className="text-warning text-xs font-medium uppercase tracking-wider">
+								<div className="flex flex-col items-center rounded-lg border-warning border-b-2 bg-base-100 p-3 shadow-sm">
+									<span className="font-medium text-warning text-xs uppercase tracking-wider">
 										Skipped
 									</span>
 									<span className="font-bold text-2xl text-warning">
 										{importStatus?.skipped || 0}
 									</span>
 								</div>
-								<div className="border-b-2 border-error flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
-									<span className="text-error text-xs font-medium uppercase tracking-wider">
+								<div className="flex flex-col items-center rounded-lg border-error border-b-2 bg-base-100 p-3 shadow-sm">
+									<span className="font-medium text-error text-xs uppercase tracking-wider">
 										Failed
 									</span>
-									<span className="font-bold text-2xl text-error">
-										{importStatus?.failed || 0}
-									</span>
+									<span className="font-bold text-2xl text-error">{importStatus?.failed || 0}</span>
 								</div>
 							</div>
 
