@@ -207,6 +207,9 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
+	// Build segment offset index for O(1) lookup
+	segmentIndex := buildSegmentIndex(fileMeta.SegmentData)
+
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -223,6 +226,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		globalSalt:       mrf.getGlobalSalt(),
 		streamTracker:    mrf.streamTracker,
 		streamID:         streamID,
+		segmentIndex:     segmentIndex,
 	}
 
 	return true, virtualFile, nil
@@ -659,12 +663,88 @@ type MetadataVirtualFile struct {
 	// Reader state and position tracking
 	reader            io.ReadCloser
 	readerInitialized bool
-	position          int64
+	position          int64 // File position (what client sees after Seek)
 	currentRangeStart int64 // Start of current reader's range
 	currentRangeEnd   int64 // End of current reader's range
 	originalRangeEnd  int64 // Original end requested by client (-1 for unbounded)
 
+	// Segment offset index for O(1) offset→segment lookup
+	segmentIndex *segmentOffsetIndex
+
 	mu sync.Mutex
+}
+
+// segmentOffsetIndex provides O(1) lookup for offset→segment mapping using binary search
+type segmentOffsetIndex struct {
+	offsets []int64 // Cumulative start offset of each segment in file coordinates
+	sizes   []int64 // Size of each segment's usable data
+}
+
+// buildSegmentIndex builds an offset index from metadata segments for O(1) lookup
+func buildSegmentIndex(segments []*metapb.SegmentData) *segmentOffsetIndex {
+	if len(segments) == 0 {
+		return nil
+	}
+
+	idx := &segmentOffsetIndex{
+		offsets: make([]int64, len(segments)),
+		sizes:   make([]int64, len(segments)),
+	}
+
+	var pos int64
+	for i, seg := range segments {
+		idx.offsets[i] = pos
+		usableLen := seg.EndOffset - seg.StartOffset + 1
+		idx.sizes[i] = usableLen
+		pos += usableLen
+	}
+
+	return idx
+}
+
+// findSegmentForOffset returns the segment index containing the given file offset
+// Returns -1 if offset is beyond all segments
+func (idx *segmentOffsetIndex) findSegmentForOffset(offset int64) int {
+	if idx == nil || len(idx.offsets) == 0 || offset < 0 {
+		return -1
+	}
+
+	// Binary search for the segment containing this offset
+	// We want the largest i such that offsets[i] <= offset
+	n := len(idx.offsets)
+
+	// Quick check: if offset is before first segment or beyond last
+	if offset < idx.offsets[0] {
+		return 0
+	}
+
+	lastSegEnd := idx.offsets[n-1] + idx.sizes[n-1] - 1
+	if offset > lastSegEnd {
+		return -1
+	}
+
+	// Binary search
+	lo, hi := 0, n
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if idx.offsets[mid] <= offset {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+
+	// lo-1 is the largest index where offsets[i] <= offset
+	return lo - 1
+}
+
+// getOffsetForSegment returns the cumulative file offset at the start of the given segment index
+// Returns 0 if the index is invalid or out of bounds
+func (idx *segmentOffsetIndex) getOffsetForSegment(segmentIndex int) int64 {
+	if idx == nil || segmentIndex < 0 || segmentIndex >= len(idx.offsets) {
+		return 0
+	}
+	return idx.offsets[segmentIndex]
 }
 
 // GetStreamID returns the active stream ID associated with this file handle
@@ -749,9 +829,118 @@ func (mvf *MetadataVirtualFile) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-// ReadAt implements afero.File.ReadAt
+// ReadAt implements afero.File.ReadAt with concurrent random access support.
+// Unlike Read(), this method creates an independent reader for each call,
+// allowing concurrent reads at different offsets without mutex serialization.
 func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
-	return 0, os.ErrPermission // Not supported for streaming readers
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	// Validate offset bounds
+	if off < 0 {
+		return 0, ErrNegativeOffset
+	}
+	if off >= mvf.fileMeta.FileSize {
+		return 0, io.EOF
+	}
+
+	// Calculate end position (don't read beyond file size)
+	end := off + int64(len(p)) - 1
+	if end >= mvf.fileMeta.FileSize {
+		end = mvf.fileMeta.FileSize - 1
+	}
+
+	// Create an independent reader for this specific offset range
+	// This reader is self-contained and doesn't affect the file's main position
+	reader, err := mvf.createReaderAtOffset(off, end)
+	if err != nil {
+		return 0, err
+	}
+	defer reader.Close()
+
+	// Read the requested data
+	n, err = io.ReadFull(reader, p[:end-off+1])
+	if err == io.ErrUnexpectedEOF {
+		// Partial read is acceptable for ReadAt at end of file
+		err = nil
+	}
+
+	return n, err
+}
+
+// createReaderAtOffset creates an independent reader for reading at a specific offset.
+// This reader is self-contained and can be used concurrently with other readers.
+func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadCloser, error) {
+	if mvf.poolManager == nil {
+		return nil, ErrNoUsenetPool
+	}
+
+	if len(mvf.fileMeta.SegmentData) == 0 {
+		return nil, ErrNoNzbData
+	}
+
+	// Create reader based on encryption type
+	if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
+		return mvf.createEncryptedReaderAtOffset(start, end)
+	}
+
+	return mvf.createUsenetReader(mvf.ctx, start, end)
+}
+
+// createEncryptedReaderAtOffset creates an encrypted reader for a specific offset range
+func (mvf *MetadataVirtualFile) createEncryptedReaderAtOffset(start, end int64) (io.ReadCloser, error) {
+	switch mvf.fileMeta.Encryption {
+	case metapb.Encryption_RCLONE:
+		if mvf.rcloneCipher == nil {
+			return nil, ErrNoCipherConfig
+		}
+
+		password := mvf.fileMeta.Password
+		if password == "" {
+			password = mvf.globalPassword
+		}
+		salt := mvf.fileMeta.Salt
+		if salt == "" {
+			salt = mvf.globalSalt
+		}
+
+		return mvf.rcloneCipher.Open(
+			mvf.ctx,
+			&utils.RangeHeader{Start: start, End: end},
+			mvf.fileMeta.FileSize,
+			password,
+			salt,
+			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
+				return mvf.createUsenetReader(ctx, s, e)
+			},
+		)
+
+	case metapb.Encryption_AES:
+		if mvf.aesCipher == nil {
+			return nil, ErrNoCipherConfig
+		}
+		if len(mvf.fileMeta.AesKey) == 0 {
+			return nil, fmt.Errorf("missing AES key in metadata")
+		}
+		if len(mvf.fileMeta.AesIv) == 0 {
+			return nil, fmt.Errorf("missing AES IV in metadata")
+		}
+
+		return mvf.aesCipher.Open(
+			mvf.ctx,
+			&utils.RangeHeader{Start: start, End: end},
+			mvf.fileMeta.FileSize,
+			mvf.fileMeta.AesKey,
+			mvf.fileMeta.AesIv,
+			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
+				return mvf.createUsenetReader(ctx, s, e)
+			},
+		)
+
+	default:
+		return nil, fmt.Errorf("unsupported encryption type: %v", mvf.fileMeta.Encryption)
+	}
 }
 
 // Seek implements afero.File.Seek
@@ -780,13 +969,13 @@ func (mvf *MetadataVirtualFile) Seek(offset int64, whence int) (int64, error) {
 		return 0, ErrSeekTooFar
 	}
 
-	// Check if the new position is outside our current reader's range
-	if mvf.readerInitialized && (abs < mvf.currentRangeStart || abs > mvf.currentRangeEnd) {
-		// Position is outside current range, need to recreate reader
+	// Close reader if position changes - UsenetReader is forward-only and cannot seek.
+	// Creating a new reader at the target position is faster than downloading and
+	// discarding data to catch up.
+	if mvf.readerInitialized && abs != mvf.position {
 		mvf.closeCurrentReader()
 	}
 
-	// Update position - new reader will be created on next read if needed
 	mvf.position = abs
 	return abs, nil
 }
@@ -887,7 +1076,7 @@ func (mvf *MetadataVirtualFile) hasMoreDataToRead() bool {
 	return false
 }
 
-// closeCurrentReader closes the current reader and marks it uninitialized
+// closeCurrentReader closes the current reader and resets reader state
 func (mvf *MetadataVirtualFile) closeCurrentReader() {
 	if mvf.reader != nil {
 		mvf.reader.Close()
@@ -977,7 +1166,22 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	}
 
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
-	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
+
+	// Use segment index for O(log n) lookup of starting segment instead of O(n) linear scan
+	startSegIdx := 0
+	startFilePos := int64(0)
+	if mvf.segmentIndex != nil && start > 0 {
+		startSegIdx = mvf.segmentIndex.findSegmentForOffset(start)
+		if startSegIdx > 0 {
+			startFilePos = mvf.segmentIndex.getOffsetForSegment(startSegIdx)
+		} else if startSegIdx < 0 {
+			// Offset is beyond all segments
+			startSegIdx = len(mvf.fileMeta.SegmentData)
+			startFilePos = 0
+		}
+	}
+
+	rg := usenet.GetSegmentsInRangeFromIndex(ctx, start, end, loader, startSegIdx, startFilePos)
 
 	if !rg.HasSegments() {
 		// Calculate available bytes for debugging
