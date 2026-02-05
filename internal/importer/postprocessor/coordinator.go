@@ -6,11 +6,13 @@ package postprocessor
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/errors"
+	fusecache "github.com/javi11/altmount/internal/fuse/cache"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
@@ -23,6 +25,7 @@ type Coordinator struct {
 	healthRepo      *database.HealthRepository
 	arrsService     *arrs.Service
 	userRepo        *database.UserRepository
+	fuseCache       fusecache.Cache // Optional FUSE metadata cache
 	log             *slog.Logger
 }
 
@@ -59,6 +62,27 @@ func (c *Coordinator) SetArrsService(service *arrs.Service) {
 	c.arrsService = service
 }
 
+// SetFuseCache sets the FUSE metadata cache for invalidation
+func (c *Coordinator) SetFuseCache(cache fusecache.Cache) {
+	c.fuseCache = cache
+}
+
+// InvalidateFUSECache invalidates cache entries for a path and its parent directory.
+// This is called after successful imports to ensure the FUSE mount sees new files.
+func (c *Coordinator) InvalidateFUSECache(path string) {
+	if c.fuseCache == nil {
+		return
+	}
+
+	c.fuseCache.Invalidate(path)
+
+	// Also invalidate parent directory so directory listings are refreshed
+	parent := filepath.Dir(path)
+	if parent != path && parent != "." && parent != "/" {
+		c.fuseCache.Invalidate(parent)
+	}
+}
+
 // ProcessingResult holds the result of post-processing operations
 type ProcessingResult struct {
 	SymlinksCreated bool
@@ -73,11 +97,14 @@ type ProcessingResult struct {
 func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQueueItem, resultingPath string) (*ProcessingResult, error) {
 	result := &ProcessingResult{}
 
-	// 1. Notify VFS (blocking to ensure visibility)
+	// 1. Invalidate FUSE metadata cache (ensures visibility immediately)
+	c.InvalidateFUSECache(resultingPath)
+
+	// 2. Notify VFS (blocking to ensure visibility)
 	c.NotifyVFS(ctx, resultingPath, false)
 	result.VFSNotified = true
 
-	// 2. Create symlinks if configured
+	// 3. Create symlinks if configured
 	if err := c.CreateSymlinks(ctx, item, resultingPath); err != nil {
 		c.log.WarnContext(ctx, "Failed to create symlinks",
 			"queue_id", item.ID,
@@ -88,10 +115,10 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		result.SymlinksCreated = true
 	}
 
-	// 3. Create ID metadata links
+	// 4. Create ID metadata links
 	c.HandleIDMetadataLinks(ctx, item, resultingPath)
 
-	// 4. Create STRM files if configured
+	// 5. Create STRM files if configured
 	if err := c.CreateStrmFiles(ctx, item, resultingPath); err != nil {
 		c.log.WarnContext(ctx, "Failed to create STRM files",
 			"queue_id", item.ID,
@@ -102,7 +129,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		result.StrmCreated = true
 	}
 
-	// 5. Schedule health check
+	// 6. Schedule health check
 	if err := c.ScheduleHealthCheck(ctx, resultingPath); err != nil {
 		c.log.WarnContext(ctx, "Failed to schedule health check",
 			"path", resultingPath,
@@ -112,7 +139,7 @@ func (c *Coordinator) HandleSuccess(ctx context.Context, item *database.ImportQu
 		result.HealthScheduled = true
 	}
 
-	// 6. Notify ARR applications
+	// 7. Notify ARR applications
 	if err := c.NotifyARR(ctx, item, resultingPath); err != nil {
 		c.log.DebugContext(ctx, "ARR notification not sent",
 			"path", resultingPath,

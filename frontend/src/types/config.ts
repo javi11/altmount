@@ -176,6 +176,14 @@ export interface FuseConfig {
 	max_download_workers: number;
 	max_cache_size_mb: number;
 	max_read_ahead_mb: number;
+	// Metadata cache settings
+	metadata_cache_enabled?: boolean;
+	stat_cache_size?: number;
+	dir_cache_size?: number;
+	negative_cache_size?: number;
+	stat_cache_ttl_seconds?: number;
+	dir_cache_ttl_seconds?: number;
+	negative_cache_ttl_seconds?: number;
 }
 
 // Import strategy type

@@ -12,6 +12,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/config"
+	fusecache "github.com/javi11/altmount/internal/fuse/cache"
 	"github.com/spf13/afero"
 )
 
@@ -22,6 +23,7 @@ type Server struct {
 	logger     *slog.Logger
 	server     *fuse.Server
 	config     config.FuseConfig
+	cache      fusecache.Cache // Metadata cache (can be nil if disabled)
 }
 
 // NewServer creates a new FUSE server instance
@@ -53,7 +55,34 @@ func (s *Server) Mount() error {
 	uid := uint32(getIDFromEnv("PUID", 1000))
 	gid := uint32(getIDFromEnv("PGID", 1000))
 
-	root := NewAltMountRoot(s.fileSystem, "", s.logger, uid, gid)
+	// Initialize metadata cache if enabled
+	var metadataCache fusecache.Cache
+	if s.config.MetadataCacheEnabled != nil && *s.config.MetadataCacheEnabled {
+		cfg := fusecache.Config{
+			StatCacheSize:     s.config.StatCacheSize,
+			DirCacheSize:      s.config.DirCacheSize,
+			NegativeCacheSize: s.config.NegativeCacheSize,
+			StatTTL:           time.Duration(s.config.StatCacheTTLSeconds) * time.Second,
+			DirTTL:            time.Duration(s.config.DirCacheTTLSeconds) * time.Second,
+			NegativeTTL:       time.Duration(s.config.NegativeCacheTTLSeconds) * time.Second,
+		}
+		var err error
+		metadataCache, err = fusecache.NewLRUCache(cfg)
+		if err != nil {
+			s.logger.Warn("Failed to create metadata cache, running without cache", "error", err)
+		} else {
+			s.logger.Info("FUSE metadata cache enabled",
+				"stat_cache_size", cfg.StatCacheSize,
+				"dir_cache_size", cfg.DirCacheSize,
+				"negative_cache_size", cfg.NegativeCacheSize,
+				"stat_ttl", cfg.StatTTL,
+				"dir_ttl", cfg.DirTTL,
+				"negative_ttl", cfg.NegativeTTL)
+		}
+	}
+	s.cache = metadataCache
+
+	root := NewAltMountRoot(s.fileSystem, "", s.logger, uid, gid, metadataCache)
 
 	// Configure FUSE options
 	// We want to enable some caching to avoid hitting metadata service too often
@@ -133,4 +162,10 @@ func (s *Server) CleanupMount() {
 	// Simple check: try to unmount. If it fails, it probably wasn't mounted or we lack perms.
 	// We ignore errors here as we just want to ensure it's clean for the new mount.
 	_ = s.ForceUnmount()
+}
+
+// GetCache returns the metadata cache for external access (e.g., import service invalidation).
+// Returns nil if caching is disabled.
+func (s *Server) GetCache() fusecache.Cache {
+	return s.cache
 }

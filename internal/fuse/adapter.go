@@ -11,6 +11,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	fusecache "github.com/javi11/altmount/internal/fuse/cache"
 	"github.com/spf13/afero"
 )
 
@@ -31,10 +32,11 @@ type AltMountRoot struct {
 	isRootDir bool
 	uid       uint32
 	gid       uint32
+	cache     fusecache.Cache // Metadata cache (can be nil if disabled)
 }
 
 // NewAltMountRoot creates a new root node for the FUSE filesystem
-func NewAltMountRoot(fileSystem afero.Fs, path string, logger *slog.Logger, uid, gid uint32) *AltMountRoot {
+func NewAltMountRoot(fileSystem afero.Fs, path string, logger *slog.Logger, uid, gid uint32, cache fusecache.Cache) *AltMountRoot {
 	return &AltMountRoot{
 		fs:        fileSystem,
 		path:      path,
@@ -42,6 +44,7 @@ func NewAltMountRoot(fileSystem afero.Fs, path string, logger *slog.Logger, uid,
 		isRootDir: path == "" || path == "/",
 		uid:       uid,
 		gid:       gid,
+		cache:     cache,
 	}
 }
 
@@ -60,13 +63,31 @@ func (r *AltMountRoot) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.
 		return 0
 	}
 
+	// Check cache first
+	if r.cache != nil {
+		if info, ok := r.cache.GetStat(r.path); ok {
+			fillAttr(info, &out.Attr, r.uid, r.gid)
+			out.Ino = r.Inode.StableAttr().Ino
+			return 0
+		}
+	}
+
 	info, err := r.fs.Stat(r.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Cache negative result
+			if r.cache != nil {
+				r.cache.SetNegative(r.path)
+			}
 			return syscall.ENOENT
 		}
 		r.logger.ErrorContext(ctx, "Getattr failed", "path", r.path, "error", err)
 		return syscall.EIO
+	}
+
+	// Cache the result
+	if r.cache != nil {
+		r.cache.SetStat(r.path, info)
 	}
 
 	fillAttr(info, &out.Attr, r.uid, r.gid)
@@ -83,13 +104,37 @@ func (r *AltMountRoot) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.Se
 func (r *AltMountRoot) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	fullPath := filepath.Join(r.path, name)
 
-	info, err := r.fs.Stat(fullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, syscall.ENOENT
+	// Check negative cache first (known non-existent paths)
+	if r.cache != nil && r.cache.IsNegative(fullPath) {
+		return nil, syscall.ENOENT
+	}
+
+	// Check stat cache
+	var info os.FileInfo
+	var cached bool
+	if r.cache != nil {
+		info, cached = r.cache.GetStat(fullPath)
+	}
+
+	if !cached {
+		var err error
+		info, err = r.fs.Stat(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// Cache negative result
+				if r.cache != nil {
+					r.cache.SetNegative(fullPath)
+				}
+				return nil, syscall.ENOENT
+			}
+			r.logger.ErrorContext(ctx, "Lookup failed", "path", fullPath, "error", err)
+			return nil, syscall.EIO
 		}
-		r.logger.ErrorContext(ctx, "Lookup failed", "path", fullPath, "error", err)
-		return nil, syscall.EIO
+
+		// Cache the result
+		if r.cache != nil {
+			r.cache.SetStat(fullPath, info)
+		}
 	}
 
 	fillAttr(info, &out.Attr, r.uid, r.gid)
@@ -101,6 +146,7 @@ func (r *AltMountRoot) Lookup(ctx context.Context, name string, out *fuse.EntryO
 			logger: r.logger,
 			uid:    r.uid,
 			gid:    r.gid,
+			cache:  r.cache,
 		}
 		return r.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
 	}
@@ -112,6 +158,7 @@ func (r *AltMountRoot) Lookup(ctx context.Context, name string, out *fuse.EntryO
 		size:   info.Size(),
 		uid:    r.uid,
 		gid:    r.gid,
+		cache:  r.cache,
 	}
 	return r.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
 }
@@ -134,11 +181,39 @@ func (r *AltMountRoot) Rename(ctx context.Context, oldName string, newParent fs.
 		return syscall.EIO
 	}
 
+	// Invalidate cache for affected paths
+	if r.cache != nil {
+		r.cache.Invalidate(oldPath)
+		r.cache.Invalidate(newPath)
+		r.cache.Invalidate(r.path)         // Source parent directory
+		r.cache.Invalidate(targetDir.path) // Target parent directory
+	}
+
 	return 0
 }
 
 // Readdir implements fs.NodeReaddirer
 func (r *AltMountRoot) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
+	// Check directory cache first
+	if r.cache != nil {
+		if cachedEntries, ok := r.cache.GetDirEntries(r.path); ok {
+			entries := make([]fuse.DirEntry, 0, len(cachedEntries))
+			for _, ce := range cachedEntries {
+				mode := uint32(ce.Mode)
+				if ce.IsDir {
+					mode |= syscall.S_IFDIR
+				} else {
+					mode |= syscall.S_IFREG
+				}
+				entries = append(entries, fuse.DirEntry{
+					Name: ce.Name,
+					Mode: mode,
+				})
+			}
+			return fs.NewListDirStream(entries), 0
+		}
+	}
+
 	// Open the directory
 	f, err := r.fs.Open(r.path)
 	if err != nil {
@@ -155,6 +230,8 @@ func (r *AltMountRoot) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno
 	}
 
 	entries := make([]fuse.DirEntry, 0, len(infos))
+	cacheEntries := make([]fusecache.DirEntry, 0, len(infos))
+
 	for _, info := range infos {
 		mode := uint32(info.Mode())
 		// Ensure the mode bits are set correctly for FUSE
@@ -168,6 +245,24 @@ func (r *AltMountRoot) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno
 			Name: info.Name(),
 			Mode: mode,
 		})
+
+		// Build cache entry
+		cacheEntries = append(cacheEntries, fusecache.DirEntry{
+			Name:  info.Name(),
+			IsDir: info.IsDir(),
+			Mode:  info.Mode(),
+		})
+
+		// Also cache the stat for each child entry
+		if r.cache != nil {
+			childPath := filepath.Join(r.path, info.Name())
+			r.cache.SetStat(childPath, info)
+		}
+	}
+
+	// Cache directory entries
+	if r.cache != nil {
+		r.cache.SetDirEntries(r.path, cacheEntries)
 	}
 
 	return fs.NewListDirStream(entries), 0
@@ -196,17 +291,36 @@ type AltMountFile struct {
 	size   int64
 	uid    uint32
 	gid    uint32
+	cache  fusecache.Cache // Metadata cache (can be nil if disabled)
 }
 
 // Getattr implements fs.NodeGetattrer
 func (f *AltMountFile) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	// Check cache first
+	if f.cache != nil {
+		if info, ok := f.cache.GetStat(f.path); ok {
+			fillAttr(info, &out.Attr, f.uid, f.gid)
+			out.Ino = f.Inode.StableAttr().Ino
+			return 0
+		}
+	}
+
 	info, err := f.fs.Stat(f.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Cache negative result
+			if f.cache != nil {
+				f.cache.SetNegative(f.path)
+			}
 			return syscall.ENOENT
 		}
 		f.logger.ErrorContext(ctx, "File Getattr failed", "path", f.path, "error", err)
 		return syscall.EIO
+	}
+
+	// Cache the result
+	if f.cache != nil {
+		f.cache.SetStat(f.path, info)
 	}
 
 	fillAttr(info, &out.Attr, f.uid, f.gid)

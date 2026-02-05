@@ -21,6 +21,14 @@ export function FuseConfig() {
 		max_download_workers: 15,
 		max_cache_size_mb: 128,
 		max_read_ahead_mb: 128,
+		// Metadata cache defaults
+		metadata_cache_enabled: false,
+		stat_cache_size: 10000,
+		dir_cache_size: 1000,
+		negative_cache_size: 5000,
+		stat_cache_ttl_seconds: 30,
+		dir_cache_ttl_seconds: 60,
+		negative_cache_ttl_seconds: 10,
 	});
 
 	const [isLoading, setIsLoading] = useState(false);
@@ -334,6 +342,158 @@ export function FuseConfig() {
 								<p className="label">Read-ahead cache size per file</p>
 							</fieldset>
 						</div>
+					</div>
+
+					{/* Metadata Cache Settings */}
+					<div className="space-y-4">
+						<h4 className="font-medium text-base">Metadata Cache Settings</h4>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Enable Metadata Cache</legend>
+							<label className="label cursor-pointer">
+								<span className="label-text">Cache file and directory metadata</span>
+								<input
+									type="checkbox"
+									className="checkbox"
+									checked={formData.metadata_cache_enabled ?? false}
+									onChange={(e) =>
+										setFormData({ ...formData, metadata_cache_enabled: e.target.checked })
+									}
+									disabled={isRunning}
+								/>
+							</label>
+							<p className="label">
+								Reduces filesystem lookups by caching file attributes and directory listings
+							</p>
+						</fieldset>
+
+						{formData.metadata_cache_enabled && (
+							<>
+								<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Stat Cache Size</legend>
+										<div className="join">
+											<input
+												type="number"
+												className="input join-item w-full"
+												value={formData.stat_cache_size ?? 10000}
+												onChange={(e) =>
+													setFormData({
+														...formData,
+														stat_cache_size: Number.parseInt(e.target.value, 10) || 0,
+													})
+												}
+												disabled={isRunning}
+											/>
+											<span className="btn no-animation join-item">entries</span>
+										</div>
+										<p className="label">Max cached file metadata entries</p>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Dir Cache Size</legend>
+										<div className="join">
+											<input
+												type="number"
+												className="input join-item w-full"
+												value={formData.dir_cache_size ?? 1000}
+												onChange={(e) =>
+													setFormData({
+														...formData,
+														dir_cache_size: Number.parseInt(e.target.value, 10) || 0,
+													})
+												}
+												disabled={isRunning}
+											/>
+											<span className="btn no-animation join-item">entries</span>
+										</div>
+										<p className="label">Max cached directory listings</p>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Negative Cache Size</legend>
+										<div className="join">
+											<input
+												type="number"
+												className="input join-item w-full"
+												value={formData.negative_cache_size ?? 5000}
+												onChange={(e) =>
+													setFormData({
+														...formData,
+														negative_cache_size: Number.parseInt(e.target.value, 10) || 0,
+													})
+												}
+												disabled={isRunning}
+											/>
+											<span className="btn no-animation join-item">entries</span>
+										</div>
+										<p className="label">Max cached "not found" results</p>
+									</fieldset>
+								</div>
+
+								<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Stat Cache TTL</legend>
+										<div className="join">
+											<input
+												type="number"
+												className="input join-item w-full"
+												value={formData.stat_cache_ttl_seconds ?? 30}
+												onChange={(e) =>
+													setFormData({
+														...formData,
+														stat_cache_ttl_seconds: Number.parseInt(e.target.value, 10) || 0,
+													})
+												}
+												disabled={isRunning}
+											/>
+											<span className="btn no-animation join-item">sec</span>
+										</div>
+										<p className="label">File metadata cache lifetime</p>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Dir Cache TTL</legend>
+										<div className="join">
+											<input
+												type="number"
+												className="input join-item w-full"
+												value={formData.dir_cache_ttl_seconds ?? 60}
+												onChange={(e) =>
+													setFormData({
+														...formData,
+														dir_cache_ttl_seconds: Number.parseInt(e.target.value, 10) || 0,
+													})
+												}
+												disabled={isRunning}
+											/>
+											<span className="btn no-animation join-item">sec</span>
+										</div>
+										<p className="label">Directory listing cache lifetime</p>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend">Negative Cache TTL</legend>
+										<div className="join">
+											<input
+												type="number"
+												className="input join-item w-full"
+												value={formData.negative_cache_ttl_seconds ?? 10}
+												onChange={(e) =>
+													setFormData({
+														...formData,
+														negative_cache_ttl_seconds: Number.parseInt(e.target.value, 10) || 0,
+													})
+												}
+												disabled={isRunning}
+											/>
+											<span className="btn no-animation join-item">sec</span>
+										</div>
+										<p className="label">"Not found" cache lifetime</p>
+									</fieldset>
+								</div>
+							</>
+						)}
 					</div>
 
 					{/* Advanced Options */}

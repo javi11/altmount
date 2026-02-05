@@ -59,6 +59,15 @@ type FuseConfig struct {
 	MaxDownloadWorkers  int    `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
+
+	// Metadata cache configuration
+	MetadataCacheEnabled    *bool `yaml:"metadata_cache_enabled" mapstructure:"metadata_cache_enabled" json:"metadata_cache_enabled"`
+	StatCacheSize           int   `yaml:"stat_cache_size" mapstructure:"stat_cache_size" json:"stat_cache_size"`
+	DirCacheSize            int   `yaml:"dir_cache_size" mapstructure:"dir_cache_size" json:"dir_cache_size"`
+	NegativeCacheSize       int   `yaml:"negative_cache_size" mapstructure:"negative_cache_size" json:"negative_cache_size"`
+	StatCacheTTLSeconds     int   `yaml:"stat_cache_ttl_seconds" mapstructure:"stat_cache_ttl_seconds" json:"stat_cache_ttl_seconds"`
+	DirCacheTTLSeconds      int   `yaml:"dir_cache_ttl_seconds" mapstructure:"dir_cache_ttl_seconds" json:"dir_cache_ttl_seconds"`
+	NegativeCacheTTLSeconds int   `yaml:"negative_cache_ttl_seconds" mapstructure:"negative_cache_ttl_seconds" json:"negative_cache_ttl_seconds"`
 }
 
 // APIConfig represents REST API configuration
@@ -580,6 +589,26 @@ func (c *Config) Validate() error {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
 	}
 
+	// Validate FUSE metadata cache configuration with defaults
+	if c.Fuse.StatCacheSize <= 0 {
+		c.Fuse.StatCacheSize = 10000 // Default: 10K entries (~1.5 MB)
+	}
+	if c.Fuse.DirCacheSize <= 0 {
+		c.Fuse.DirCacheSize = 1000 // Default: 1K entries (~500 KB)
+	}
+	if c.Fuse.NegativeCacheSize <= 0 {
+		c.Fuse.NegativeCacheSize = 5000 // Default: 5K entries (~200 KB)
+	}
+	if c.Fuse.StatCacheTTLSeconds <= 0 {
+		c.Fuse.StatCacheTTLSeconds = 30 // Default: 30 seconds
+	}
+	if c.Fuse.DirCacheTTLSeconds <= 0 {
+		c.Fuse.DirCacheTTLSeconds = 60 // Default: 60 seconds
+	}
+	if c.Fuse.NegativeCacheTTLSeconds <= 0 {
+		c.Fuse.NegativeCacheTTLSeconds = 10 // Default: 10 seconds
+	}
+
 	// Validate FUSE mount_path is set when enabled
 	if c.Fuse.Enabled != nil && *c.Fuse.Enabled && c.Fuse.MountPath == "" {
 		return fmt.Errorf("fuse.mount_path is required when fuse is enabled")
@@ -1082,15 +1111,22 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Fuse: FuseConfig{
-			Enabled:             &fuseEnabled,
-			MountPath:           "",
-			AllowOther:          true,
-			Debug:               false,
-			AttrTimeoutSeconds:  1,
-			EntryTimeoutSeconds: 1,
-			MaxDownloadWorkers:  15,
-			MaxCacheSizeMB:      128,
-			MaxReadAheadMB:      128,
+			Enabled:                 &fuseEnabled,
+			MountPath:               "",
+			AllowOther:              true,
+			Debug:                   false,
+			AttrTimeoutSeconds:      1,
+			EntryTimeoutSeconds:     1,
+			MaxDownloadWorkers:      15,
+			MaxCacheSizeMB:          128,
+			MaxReadAheadMB:          128,
+			MetadataCacheEnabled:    &fuseEnabled, // Disabled by default (same as fuse)
+			StatCacheSize:           10000,        // 10K entries (~1.5 MB)
+			DirCacheSize:            1000,         // 1K entries (~500 KB)
+			NegativeCacheSize:       5000,         // 5K entries (~200 KB)
+			StatCacheTTLSeconds:     30,           // 30 seconds
+			DirCacheTTLSeconds:      60,           // 60 seconds
+			NegativeCacheTTLSeconds: 10,           // 10 seconds
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}

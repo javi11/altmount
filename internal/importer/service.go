@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	fusecache "github.com/javi11/altmount/internal/fuse/cache"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
@@ -414,6 +415,20 @@ func (s *Service) SetArrsService(service *arrs.Service) {
 	s.arrsService = service
 	if s.postProcessor != nil {
 		s.postProcessor.SetArrsService(service)
+	}
+}
+
+// SetFuseCache sets or updates the FUSE metadata cache for invalidation
+func (s *Service) SetFuseCache(cache fusecache.Cache) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.postProcessor != nil {
+		s.postProcessor.SetFuseCache(cache)
+	}
+	if cache != nil {
+		s.log.InfoContext(s.ctx, "FUSE metadata cache connected to import service")
+	} else {
+		s.log.InfoContext(s.ctx, "FUSE metadata cache disconnected from import service")
 	}
 }
 
