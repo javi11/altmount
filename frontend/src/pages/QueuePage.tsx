@@ -28,6 +28,7 @@ import {
 	useClearPendingQueue,
 	useDeleteBulkQueueItems,
 	useDeleteQueueItem,
+	usePostieRetry,
 	useQueue,
 	useQueueStats,
 	useRestartBulkQueueItems,
@@ -96,6 +97,7 @@ export function QueuePage() {
 	const deleteBulk = useDeleteBulkQueueItems();
 	const restartBulk = useRestartBulkQueueItems();
 	const retryItem = useRetryQueueItem();
+	const postieRetry = usePostieRetry();
 	const cancelItem = useCancelQueueItem();
 	const cancelBulk = useBulkCancelQueueItems();
 	const clearCompleted = useClearCompletedQueue();
@@ -113,6 +115,10 @@ export function QueuePage() {
 
 	const handleRetry = async (id: number) => {
 		await retryItem.mutateAsync(id);
+	};
+
+	const handlePostieRetry = async (id: number) => {
+		await postieRetry.mutateAsync(id);
 	};
 
 	const handleCancel = async (id: number) => {
@@ -832,6 +838,19 @@ export function QueuePage() {
 															>
 																<XCircle className="h-4 w-4" />
 																Cancel
+															</button>
+														</li>
+													)}
+													{item.postie_upload_status === "postie_failed" && (
+														<li>
+															<button
+																type="button"
+																onClick={() => handlePostieRetry(item.id)}
+																disabled={postieRetry.isPending}
+																className="text-warning"
+															>
+																<RefreshCw className="h-4 w-4" />
+																Retry Postie Upload
 															</button>
 														</li>
 													)}

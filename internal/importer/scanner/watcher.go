@@ -19,12 +19,27 @@ type WatchQueueAdder interface {
 	IsFileInQueue(ctx context.Context, filePath string) (bool, error)
 }
 
+// PostieMatcher defines the interface for matching Postie-generated NZBs to original queue items
+type PostieMatcher interface {
+	FindOriginalItem(ctx context.Context, nzbPath string) (*database.ImportQueueItem, error)
+	LinkPostieUpload(ctx context.Context, itemID int64, nzbPath string) error
+	CompletePostieUpload(ctx context.Context, itemID int64) error
+	FailPostieUpload(ctx context.Context, itemID int64, reason string) error
+}
+
+// PostieReimporter defines the interface for re-importing Postie uploads
+type PostieReimporter interface {
+	ReimportForPostie(ctx context.Context, originalItemID int64, newNzbPath string) error
+}
+
 // Watcher handles monitoring a directory for new NZB files
 type Watcher struct {
 	queueAdder   WatchQueueAdder
 	configGetter config.ConfigGetter
 	log          *slog.Logger
 	cancel       context.CancelFunc
+	postieMatcher   PostieMatcher // Optional Postie matcher for re-import handling
+	postieReimporter PostieReimporter // Optional service for re-importing Postie uploads
 }
 
 // NewWatcher creates a new directory watcher
@@ -34,6 +49,17 @@ func NewWatcher(queueAdder WatchQueueAdder, configGetter config.ConfigGetter) *W
 		configGetter: configGetter,
 		log:          slog.Default().With("component", "directory-watcher"),
 	}
+}
+
+// SetPostieMatcher sets the Postie matcher for handling Postie-generated NZBs
+func (w *Watcher) SetPostieMatcher(matcher PostieMatcher) {
+	w.postieMatcher = matcher
+	w.log.Info("Postie matcher configured for directory watcher")
+}
+
+// SetPostieReimporter sets the Postie re-importer service
+func (w *Watcher) SetPostieReimporter(reimporter PostieReimporter) {
+	w.postieReimporter = reimporter
 }
 
 // Start starts the watcher loop
@@ -243,6 +269,22 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		return nil
 	}
 
+	// First, check if this NZB matches a Postie fallback item
+	// This handles the case where Postie has uploaded a new NZB for a failed import
+	if w.postieMatcher != nil {
+		cfg := w.configGetter()
+		if cfg.Postie.Enabled != nil && *cfg.Postie.Enabled {
+			originalItem, err := w.postieMatcher.FindOriginalItem(ctx, filePath)
+			if err != nil {
+				w.log.WarnContext(ctx, "Postie matcher error", "file", filePath, "error", err)
+				// Continue with normal processing
+			} else if originalItem != nil {
+				// This is a Postie-generated NZB - handle it specially
+				return w.processPostieUpload(ctx, watchRoot, filePath, originalItem)
+			}
+		}
+	}
+
 	// Calculate relative path from watch root to file's directory
 	relPath, err := filepath.Rel(watchRoot, filepath.Dir(filePath))
 	if err != nil {
@@ -303,6 +345,66 @@ func (w *Watcher) processNzb(ctx context.Context, watchRoot, filePath string) er
 		"file", filePath,
 		"category", categoryValue,
 		"queue_id", item.ID)
+
+	return nil
+}
+
+// processPostieUpload handles a Postie-generated NZB by linking it to the original queue item
+// and triggering a re-import with the new message IDs
+func (w *Watcher) processPostieUpload(ctx context.Context, watchRoot, nzbPath string, originalItem *database.ImportQueueItem) error {
+	w.log.InfoContext(ctx, "Processing Postie-generated NZB",
+		"nzb_path", nzbPath,
+		"queue_id", originalItem.ID,
+		"original_name", originalItem.OriginalReleaseName)
+
+	// Link the Postie upload to the original queue item
+	if err := w.postieMatcher.LinkPostieUpload(ctx, originalItem.ID, nzbPath); err != nil {
+		w.log.ErrorContext(ctx, "Failed to link Postie upload", "error", err)
+		return err
+	}
+
+	// If we have a Postie re-importer service, use it to handle the re-import
+	if w.postieReimporter != nil {
+		if err := w.postieReimporter.ReimportForPostie(ctx, originalItem.ID, nzbPath); err != nil {
+			w.log.ErrorContext(ctx, "Failed to re-import Postie NZB", "error", err)
+			// Fall through to basic processing
+		} else {
+			// Mark Postie upload as completed after successful re-import
+			if err := w.postieMatcher.CompletePostieUpload(ctx, originalItem.ID); err != nil {
+				w.log.WarnContext(ctx, "Failed to mark Postie upload as completed", "error", err)
+			}
+			return nil
+		}
+	}
+
+	// Fallback: Calculate relative path and add to queue normally
+	relPath, err := filepath.Rel(watchRoot, filepath.Dir(nzbPath))
+	if err != nil {
+		return fmt.Errorf("failed to calculate relative path: %w", err)
+	}
+
+	// Use the absolute watch root as the relative path
+	absWatchRoot, err := filepath.Abs(watchRoot)
+	if err == nil {
+		relPath = absWatchRoot
+	} else {
+		relPath = watchRoot
+	}
+
+	relativePath := &relPath
+
+	// Add the NZB as a new queue item with a reference to the original
+	priority := database.QueuePriorityNormal
+	newItem, err := w.queueAdder.AddToQueue(ctx, nzbPath, relativePath, originalItem.Category, &priority)
+	if err != nil {
+		return fmt.Errorf("failed to add Postie NZB to queue: %w", err)
+	}
+
+	w.log.InfoContext(ctx, "Added Postie NZB to queue for re-import",
+		"nzb_path", nzbPath,
+		"new_queue_id", newItem.ID,
+		"original_queue_id", originalItem.ID,
+		"category", originalItem.Category)
 
 	return nil
 }

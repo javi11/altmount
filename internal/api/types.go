@@ -132,6 +132,7 @@ type SABnzbdAPIResponse struct {
 	FallbackHost          string                   `json:"fallback_host"`
 	FallbackAPIKey        string                   `json:"fallback_api_key"`     // Obfuscated if set
 	FallbackAPIKeySet     bool                     `json:"fallback_api_key_set"` // Indicates if API key is set
+	Postie                *config.PostieConfig     `json:"postie,omitempty"`    // Postie integration config
 }
 
 // Helper functions to create API responses from core config types
@@ -227,6 +228,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		FallbackHost:          cfg.SABnzbd.FallbackHost,
 		FallbackAPIKey:        fallbackAPIKey,
 		FallbackAPIKeySet:     cfg.SABnzbd.FallbackAPIKey != "",
+		Postie:                &cfg.Postie,
 	}
 
 	webdavResp := WebDAVAPIResponse{

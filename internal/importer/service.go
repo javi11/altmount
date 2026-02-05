@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer/filesystem"
+	"github.com/javi11/altmount/internal/importer/postie"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
@@ -142,6 +143,7 @@ type Service struct {
 	dirScanner      *scanner.DirectoryScanner     // Manual directory scanning
 	watcher         *scanner.Watcher              // Directory watcher for automated imports
 	nzbdavImporter  *scanner.NzbDavImporter       // NZBDav database imports
+	postieMatcher   *postie.Matcher               // Postie matcher for re-import handling
 	rcloneClient    rclonecli.RcloneRcClient      // Optional rclone client for VFS notifications
 	configGetter    config.ConfigGetter           // Config getter for dynamic configuration access
 	sabnzbdClient   *sabnzbd.SABnzbdClient        // SABnzbd client for fallback
@@ -230,6 +232,11 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 
 	// Create directory watcher (Service implements WatchQueueAdder)
 	service.watcher = scanner.NewWatcher(service, configGetter)
+
+	// Create Postie matcher and set it on the watcher
+	service.postieMatcher = postie.NewMatcher(database.Repository, configGetter)
+	service.watcher.SetPostieMatcher(service.postieMatcher)
+	service.watcher.SetPostieReimporter(service)
 
 	// Create queue manager (Service implements queue.ItemProcessor interface)
 	service.queueManager = queue.NewManager(
@@ -956,6 +963,25 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 				"queue_id", item.ID,
 				"file", item.NzbPath,
 				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+
+			// If Postie tracking was set in the fallback handler, save it to database
+			if item.PostieUploadStatus != nil && item.OriginalReleaseName != nil {
+				if err := s.database.Repository.UpdatePostieTracking(
+					ctx,
+					item.ID,
+					item.PostieUploadID,
+					item.PostieUploadStatus,
+					item.PostieUploadedAt,
+					item.OriginalReleaseName,
+				); err != nil {
+					s.log.ErrorContext(ctx, "Failed to save Postie tracking", "queue_id", item.ID, "error", err)
+				} else {
+					s.log.InfoContext(ctx, "Postie tracking saved",
+						"queue_id", item.ID,
+						"original_release_name", *item.OriginalReleaseName,
+						"status", *item.PostieUploadStatus)
+				}
+			}
 		}
 	} else if IsNonRetryable(err) && strings.Contains(err.Error(), "SABnzbd fallback not configured") {
 		s.log.DebugContext(ctx, "SABnzbd fallback skipped (not configured)",
@@ -1013,7 +1039,94 @@ func (s *Service) CancelProcessing(itemID int64) error {
 }
 
 // ProcessItemInBackground processes a specific queue item in the background
+// ProcessItemInBackground processes a specific queue item in the background
 func (s *Service) ProcessItemInBackground(ctx context.Context, itemID int64) {
+	go func() {
+		s.log.DebugContext(ctx, "Starting background processing of queue item", "item_id", itemID, "background", true)
+
+		// Get the queue item
+		item, err := s.database.Repository.GetQueueItem(ctx, itemID)
+		if err != nil {
+			s.log.ErrorContext(ctx, "Failed to get queue item for background processing", "item_id", itemID, "error", err)
+			return
+		}
+
+		if item == nil {
+			s.log.WarnContext(ctx, "Queue item not found for background processing", "item_id", itemID)
+			return
+		}
+
+		// Update status to processing
+		if err := s.database.Repository.UpdateQueueItemStatus(ctx, itemID, database.QueueStatusProcessing, nil); err != nil {
+			s.log.ErrorContext(ctx, "Failed to update item status to processing", "item_id", itemID, "error", err)
+			return
+		}
+
+		// Create cancellable context for this item
+		itemCtx, cancel := context.WithCancel(ctx)
+
+		// Register cancel function
+		s.cancelMu.Lock()
+		s.cancelFuncs[item.ID] = cancel
+		s.cancelMu.Unlock()
+
+		// Clean up after processing
+		defer func() {
+			s.cancelMu.Lock()
+			delete(s.cancelFuncs, item.ID)
+			s.cancelMu.Unlock()
+		}()
+
+		// Process the NZB file using cancellable context
+		resultingPath, processingErr := s.processNzbItem(itemCtx, item)
+
+		// Update queue database with results
+		if processingErr != nil {
+			// Handle failure
+			s.handleProcessingFailure(ctx, item, processingErr)
+		} else {
+			// Handle success (storage path, VFS notification, symlinks, status update)
+			s.handleProcessingSuccess(ctx, item, resultingPath)
+		}
+	}()
+}
+
+// ReimportForPostie re-imports a Postie-generated NZB with the original item's context
+// This is called when a Postie upload is detected by the watcher
+// The new NZB contains new message IDs from the uploaded content
+func (s *Service) ReimportForPostie(ctx context.Context, originalItemID int64, newNzbPath string) error {
+	s.log.InfoContext(ctx, "Re-importing for Postie",
+		"original_item_id", originalItemID,
+		"new_nzb_path", newNzbPath)
+
+	// Get the original item to preserve its context
+	originalItem, err := s.database.Repository.GetQueueItem(ctx, originalItemID)
+	if err != nil {
+		return fmt.Errorf("failed to get original item: %w", err)
+	}
+	if originalItem == nil {
+		return fmt.Errorf("original item not found: %d", originalItemID)
+	}
+
+	// Create a new queue item for the Postie NZB with preserved context
+	priority := database.QueuePriorityNormal
+	relativePath := originalItem.RelativePath
+
+	newItem, err := s.AddToQueue(ctx, newNzbPath, relativePath, originalItem.Category, &priority)
+	if err != nil {
+		return fmt.Errorf("failed to add Postie NZB to queue: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "Added Postie NZB to queue for re-import",
+		"new_queue_id", newItem.ID,
+		"original_queue_id", originalItemID,
+		"nzb_path", newNzbPath)
+
+	// Process the new item in background
+	s.ProcessItemInBackground(ctx, newItem.ID)
+
+	return nil
+}
 	go func() {
 		s.log.DebugContext(ctx, "Starting background processing of queue item", "item_id", itemID, "background", true)
 

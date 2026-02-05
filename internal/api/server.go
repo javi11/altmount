@@ -184,6 +184,12 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/queue/:id/cancel", s.handleCancelQueue)
 	api.Get("/queue/:id/download", s.handleDownloadNZB)
 
+	// Postie endpoints
+	api.Get("/queue/postie/pending", s.handleGetPendingPostieItems)
+	api.Get("/queue/postie/failed", s.handleGetFailedPostieItems)
+	api.Post("/queue/:id/postie-retry", s.handlePostieRetry)
+	api.Post("/queue/postie/check-timeouts", s.handlePostieCheckTimeouts)
+
 	// Health endpoints
 	api.Get("/health", s.handleListHealth)
 	api.Post("/health/bulk/delete", s.handleDeleteHealthBulk)

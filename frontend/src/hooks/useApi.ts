@@ -81,6 +81,17 @@ export const useRetryQueueItem = () => {
 	});
 };
 
+export const usePostieRetry = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: number) => apiClient.retryPostieUpload(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+		},
+	});
+};
+
 export const useCancelQueueItem = () => {
 	const queryClient = useQueryClient();
 

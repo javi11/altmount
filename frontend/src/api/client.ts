@@ -207,6 +207,12 @@ export class APIClient {
 		});
 	}
 
+	async retryPostieUpload(id: number) {
+		return this.request<QueueItem>(`/queue/${id}/postie-retry`, {
+			method: "POST",
+		});
+	}
+
 	async cancelQueueItem(id: number) {
 		return this.request<{ message: string; id: number }>(`/queue/${id}/cancel`, {
 			method: "POST",

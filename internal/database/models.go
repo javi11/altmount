@@ -44,6 +44,12 @@ type ImportQueueItem struct {
 	BatchID      *string       `db:"batch_id"`
 	Metadata     *string       `db:"metadata"`  // JSON metadata
 	FileSize     *int64        `db:"file_size"` // Total size in bytes calculated from segments
+
+	// Postie tracking fields for fallback integration
+	PostieUploadID      *string    `db:"postie_upload_id"`        // Unique ID for Postie upload tracking
+	PostieUploadStatus  *string    `db:"postie_upload_status"`    // "pending", "uploading", "completed", "failed"
+	PostieUploadedAt    *time.Time `db:"postie_uploaded_at"`       // When Postie upload completed
+	OriginalReleaseName *string    `db:"original_release_name"`   // Original release name for Postie matching
 }
 
 // BulkOperationResult represents the result of a bulk queue operation

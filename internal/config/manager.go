@@ -33,6 +33,7 @@ type Config struct {
 	Import          ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
 	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
 	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Postie          PostieConfig     `yaml:"postie" mapstructure:"postie" json:"postie"`
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
@@ -233,6 +234,16 @@ type SABnzbdConfig struct {
 	// Fallback configuration for sending failed imports to external SABnzbd
 	FallbackHost   string `yaml:"fallback_host" mapstructure:"fallback_host" json:"fallback_host"`
 	FallbackAPIKey string `yaml:"fallback_api_key" mapstructure:"fallback_api_key" json:"fallback_api_key"` // Masked in API responses
+}
+
+// PostieConfig represents Postie integration configuration for NZB fallback uploads
+type PostieConfig struct {
+	// Enabled enables the Postie integration (default: false)
+	// When enabled, AltMount tracks items sent to SABnzbd fallback for Postie upload
+	// Postie integration requires SABnzbd fallback to be configured
+	Enabled        *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	WatchDir       string `yaml:"watch_dir" mapstructure:"watch_dir" json:"watch_dir"`                          // Directory where Postie writes NZBs (should match Import.WatchDir)
+	TimeoutMinutes int    `yaml:"timeout_minutes" mapstructure:"timeout_minutes" json:"timeout_minutes"`       // How long to wait for Postie upload before marking as failed (default: 120)
 }
 
 // SABnzbdCategory represents a SABnzbd category configuration
@@ -511,6 +522,25 @@ func (c *Config) Validate() error {
 			if c.SABnzbd.FallbackAPIKey == "" {
 				fmt.Printf("Warning: SABnzbd fallback_host is set but fallback_api_key is empty\n")
 			}
+		}
+	}
+
+	// Validate Postie configuration
+	if c.Postie.Enabled != nil && *c.Postie.Enabled {
+		// Postie integration requires SABnzbd fallback to be configured
+		if c.SABnzbd.FallbackHost == "" {
+			return fmt.Errorf("postie integration requires sabnzbd fallback_host to be configured")
+		}
+		if c.SABnzbd.FallbackAPIKey == "" {
+			return fmt.Errorf("postie integration requires sabnzbd fallback_api_key to be configured")
+		}
+		// Validate timeout
+		if c.Postie.TimeoutMinutes <= 0 {
+			return fmt.Errorf("postie timeout_minutes must be greater than 0")
+		}
+		// If watch_dir is not set, log a warning (it's optional since we can use the main import.watch_dir)
+		if c.Postie.WatchDir == "" {
+			fmt.Printf("Info: postie watch_dir not set, will use import.watch_dir\n")
 		}
 	}
 
@@ -864,6 +894,7 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
+	postieEnabled := false // Postie integration disabled by default
 	loginRequired := true // Require login by default
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
@@ -1013,6 +1044,11 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 			FallbackHost:   "",
 			FallbackAPIKey: "",
+		},
+		Postie: PostieConfig{
+			Enabled:        &postieEnabled,
+			WatchDir:       "",
+			TimeoutMinutes: 120, // Default: 2 hours
 		},
 		Providers: []ProviderConfig{},
 		Arrs: ArrsConfig{

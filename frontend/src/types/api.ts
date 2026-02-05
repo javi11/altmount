@@ -41,7 +41,11 @@ export interface QueueItem {
 	batch_id?: string;
 	metadata?: string;
 	file_size?: number;
-	percentage?: number; // Progress percentage (0-100), only present for items being processed
+	percentage?: number; // Progress percentage (0-100), only present for items being processing
+	postie_upload_id?: string;
+	postie_upload_status?: "pending" | "uploading" | "completed" | "postie_failed";
+	postie_uploaded_at?: string;
+	original_release_name?: string;
 }
 
 export interface ProgressUpdate {

@@ -342,6 +342,108 @@ export function SABnzbdConfigSection({
 						)}
 					</div>
 
+					{/* Postie Fallback Configuration */}
+					<div className="space-y-4">
+						<div>
+							<h4 className="font-medium">Postie Integration (Optional - Requires Fallback)</h4>
+							<p className="text-base-content/70 text-sm">
+								Automatically upload SABnzbd fallback downloads to alternative Usenet backbones via Postie,
+								then re-import with new message IDs. Requires SABnzbd fallback to be configured.
+							</p>
+						</div>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Enable Postie Integration</legend>
+							<label className="label cursor-pointer">
+								<span className="label-text">
+									Enable Postie integration for automatic re-upload to alternative backbones
+								</span>
+								<input
+									type="checkbox"
+									className="toggle toggle-primary"
+									checked={formData.postie?.enabled || false}
+									disabled={isReadOnly || !formData.fallback_host}
+									onChange={(e) => updateFormData({
+										postie: {
+											...formData.postie,
+											enabled: e.target.checked,
+											timeout_minutes: formData.postie?.timeout_minutes || 120,
+										},
+									})}
+								/>
+							</label>
+							{!formData.fallback_host && (
+								<p className="label">
+									<span className="badge badge-sm badge-warning">Requires Fallback</span> Configure SABnzbd fallback first
+								</p>
+							)}
+						</fieldset>
+
+						{formData.postie?.enabled && (
+							<>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Postie Watch Directory</legend>
+									<input
+										type="text"
+										className="input"
+										value={formData.postie.watch_dir || ""}
+										readOnly={isReadOnly}
+										placeholder="Leave empty to use main watch directory"
+										onChange={(e) => updateFormData({
+											postie: {
+												...formData.postie,
+												watch_dir: e.target.value || undefined,
+											},
+										})}
+									/>
+									<p className="label">
+										Directory where Postie writes NZBs (default: same as Import watch directory)
+									</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Upload Timeout (minutes)</legend>
+									<input
+										type="number"
+										className="input"
+										value={formData.postie.timeout_minutes || 120}
+										min="1"
+										max="1440"
+										readOnly={isReadOnly}
+										onChange={(e) => updateFormData({
+											postie: {
+												...formData.postie,
+												timeout_minutes: parseInt(e.target.value, 10) || 120,
+											},
+										})}
+									/>
+									<p className="label">
+										How long to wait for Postie upload before marking as failed (default: 120 minutes)
+									</p>
+								</fieldset>
+
+								<div className="alert alert-info">
+									<div>
+										<div className="font-bold">Postie Integration Enabled</div>
+										<div className="text-sm">
+											Failed downloads will be uploaded to alternative backbones via Postie and re-imported automatically.
+											See{" "}
+											<a
+												href="https://docs.altmount.org/configuration/postie-fallback"
+												target="_blank"
+												rel="noopener noreferrer"
+												className="link"
+											>
+												Postie documentation
+											</a>{" "}
+											for setup instructions.
+										</div>
+									</div>
+								</div>
+							</>
+						)}
+					</div>
+
 					{/* Categories Section */}
 					<div className="space-y-4">
 						<div className="flex items-center justify-between">

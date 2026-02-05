@@ -15,6 +15,7 @@ export interface ConfigResponse {
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
 	arrs: ArrsConfig;
+	postie?: PostieConfig; // Postie configuration (may be at root level in some configs)
 	providers: ProviderConfig[];
 	mount_path: string;
 	api_key?: string;
@@ -224,6 +225,7 @@ export interface SABnzbdConfig {
 	fallback_host?: string;
 	fallback_api_key?: string; // Obfuscated when returned from API
 	fallback_api_key_set?: boolean; // For display purposes only
+	postie?: PostieConfig; // Postie fallback integration
 }
 
 // SABnzbd category configuration
@@ -232,6 +234,13 @@ export interface SABnzbdCategory {
 	order: number;
 	priority: number;
 	dir: string;
+}
+
+// Postie configuration for NZB fallback uploads
+export interface PostieConfig {
+	enabled: boolean;
+	watch_dir?: string;
+	timeout_minutes: number;
 }
 
 // Configuration update request types

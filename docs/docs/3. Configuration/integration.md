@@ -70,3 +70,13 @@ AltMount acts as a download client for Sonarr and Radarr, mimicking the SABnzbd 
 4.  Once downloaded and processed, AltMount notifies the ARR instance that the download is complete.
 5.  If using "Symlinks" or "STRM", the files are ready in the configured directory. If using "NONE", they are in the mount.
 
+## SABnzbd Fallback
+
+AltMount supports falling back to an external SABnzbd instance when primary NNTP providers fail. This is configured in the SABnzbd section:
+
+- **Fallback Host**: URL of external SABnzbd instance
+- **Fallback API Key**: API key for the external SABnzbd
+
+When fallback is triggered, AltMount sends the NZB to the external SABnzbd, which downloads the content using its own configured providers.
+
+> **See Also**: [Postie Fallback Integration](./postie-fallback.md) - Optional feature to automatically upload SABnzbd fallback downloads to alternative Usenet backbones via Postie.

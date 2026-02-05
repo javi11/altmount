@@ -105,14 +105,18 @@ func (r *QueueRepository) RestartQueueItemsBulk(ctx context.Context, ids []int64
 // AddToQueue adds a new NZB file to the import queue
 func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem) error {
 	query := `
-		INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		INSERT INTO import_queue (nzb_path, relative_path, category, priority, status, retry_count, max_retries, batch_id, metadata, file_size, postie_upload_id, postie_upload_status, postie_uploaded_at, original_release_name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(nzb_path) DO UPDATE SET
 		priority = CASE WHEN excluded.priority < priority THEN excluded.priority ELSE priority END,
 		category = excluded.category,
 		batch_id = excluded.batch_id,
 		metadata = excluded.metadata,
 		file_size = excluded.file_size,
+		postie_upload_id = excluded.postie_upload_id,
+		postie_upload_status = excluded.postie_upload_status,
+		postie_uploaded_at = excluded.postie_uploaded_at,
+		original_release_name = excluded.original_release_name,
 		status = excluded.status,
 		retry_count = 0,
 		started_at = NULL,
@@ -123,7 +127,8 @@ func (r *QueueRepository) AddToQueue(ctx context.Context, item *ImportQueueItem)
 
 	result, err := r.db.ExecContext(ctx, query,
 		item.NzbPath, item.RelativePath, item.Category, item.Priority, item.Status,
-		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize)
+		item.RetryCount, item.MaxRetries, item.BatchID, item.Metadata, item.FileSize,
+		item.PostieUploadID, item.PostieUploadStatus, item.PostieUploadedAt, item.OriginalReleaseName)
 	if err != nil {
 		return fmt.Errorf("failed to add queue item: %w", err)
 	}
@@ -218,9 +223,10 @@ func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueI
 
 		// Get the complete claimed item data
 		getQuery := `
-			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at, 
-			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size
-			FROM import_queue 
+			SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+			       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size,
+			       postie_upload_id, postie_upload_status, postie_uploaded_at, original_release_name
+			FROM import_queue
 			WHERE id = ?
 		`
 
@@ -229,6 +235,7 @@ func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueI
 			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize,
+			&item.PostieUploadID, &item.PostieUploadStatus, &item.PostieUploadedAt, &item.OriginalReleaseName,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get claimed item: %w", err)
@@ -292,6 +299,99 @@ func (r *QueueRepository) UpdateQueueItemNzbPath(ctx context.Context, id int64, 
 		return fmt.Errorf("failed to update queue item nzb path: %w", err)
 	}
 	return nil
+}
+
+// UpdatePostieTracking updates Postie tracking fields for a queue item
+func (r *QueueRepository) UpdatePostieTracking(ctx context.Context, id int64, uploadID, status *string, uploadedAt *time.Time, releaseName *string) error {
+	query := `
+		UPDATE import_queue
+		SET postie_upload_id = ?, postie_upload_status = ?, postie_uploaded_at = ?, original_release_name = ?, updated_at = datetime('now')
+		WHERE id = ?
+	`
+	_, err := r.db.ExecContext(ctx, query, uploadID, status, uploadedAt, releaseName, id)
+	if err != nil {
+		return fmt.Errorf("failed to update postie tracking: %w", err)
+	}
+	return nil
+}
+
+// GetItemsByPostieStatus retrieves queue items with a specific Postie upload status
+func (r *QueueRepository) GetItemsByPostieStatus(ctx context.Context, status string) ([]*ImportQueueItem, error) {
+	query := `
+		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path,
+		       postie_upload_id, postie_upload_status, postie_uploaded_at, original_release_name
+		FROM import_queue
+		WHERE postie_upload_status = ?
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query items by postie status: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+			&item.PostieUploadID, &item.PostieUploadStatus, &item.PostieUploadedAt, &item.OriginalReleaseName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating items: %w", err)
+	}
+
+	return items, nil
+}
+
+// GetPendingPostieItems retrieves queue items that have been sent to Postie but not yet completed
+// This is used by the matcher to find candidates for incoming Postie-generated NZBs
+func (r *QueueRepository) GetPendingPostieItems(ctx context.Context) ([]*ImportQueueItem, error) {
+	query := `
+		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path,
+		       postie_upload_id, postie_upload_status, postie_uploaded_at, original_release_name
+		FROM import_queue
+		WHERE postie_upload_status = 'pending' AND status = 'fallback'
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending postie items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []*ImportQueueItem
+	for rows.Next() {
+		var item ImportQueueItem
+		err := rows.Scan(
+			&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
+			&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
+			&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+			&item.PostieUploadID, &item.PostieUploadStatus, &item.PostieUploadedAt, &item.OriginalReleaseName,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan queue item: %w", err)
+		}
+		items = append(items, &item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating items: %w", err)
+	}
+
+	return items, nil
 }
 
 // GetQueueStats returns current queue statistics
@@ -399,7 +499,8 @@ func (r *QueueRepository) AddBatchToQueue(ctx context.Context, items []*ImportQu
 func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQueueItem, error) {
 	query := `
 		SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
-		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
+		       started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path,
+		       postie_upload_id, postie_upload_status, postie_uploaded_at, original_release_name
 		FROM import_queue WHERE id = ?
 	`
 
@@ -408,6 +509,7 @@ func (r *QueueRepository) GetQueueItem(ctx context.Context, id int64) (*ImportQu
 		&item.ID, &item.NzbPath, &item.RelativePath, &item.Category, &item.Priority, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt, &item.StartedAt, &item.CompletedAt,
 		&item.RetryCount, &item.MaxRetries, &item.ErrorMessage, &item.BatchID, &item.Metadata, &item.FileSize, &item.StoragePath,
+		&item.PostieUploadID, &item.PostieUploadStatus, &item.PostieUploadedAt, &item.OriginalReleaseName,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
