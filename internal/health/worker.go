@@ -733,6 +733,27 @@ func (hw *HealthWorker) getMaxConcurrentJobs() int {
 // It directly queries ARR APIs to find which instance manages the file and triggers repair
 func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.FileHealth, errorMsg *string, errorDetails *string) error {
 	filePath := item.FilePath
+
+	// Check if file metadata still exists. If not, the file is gone (likely upgraded/deleted by Sonarr already)
+	// and this health record is a zombie.
+	{
+		meta, err := hw.metadataService.ReadFileMetadata(filePath)
+		if err != nil {
+			slog.ErrorContext(ctx, "Failed to read metadata during repair trigger", "file_path", filePath, "error", err)
+			// Continue with repair attempt if read failed (could be transient), but let's be careful
+		} else if meta == nil {
+			// Metadata is missing -> File is gone.
+			slog.WarnContext(ctx, "File metadata missing during repair trigger - file likely deleted/upgraded externally. Cleaning up zombie record.", 
+				"file_path", filePath)
+
+			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
+				slog.ErrorContext(ctx, "Failed to delete zombie health record", "error", delErr)
+				return delErr
+			}
+			return nil
+		}
+	}
+
 	slog.InfoContext(ctx, "Triggering file repair using direct ARR API approach", "file_path", filePath)
 
 	cfg := hw.configGetter()
@@ -750,6 +771,31 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	// Step 4: Trigger rescan through the ARR service
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
 	if err != nil {
+		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
+			slog.WarnContext(ctx, "File is a zombie (already satisfied by another file in ARR), removing from AltMount",
+				"file_path", filePath)
+
+			// Delete health record
+			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
+				slog.ErrorContext(ctx, "Failed to delete zombie health record", "error", delErr)
+			}
+
+			// Delete metadata file
+			// We need the relative path for metadata deletion
+			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
+			relativePath = strings.TrimPrefix(relativePath, "/")
+
+			deleteSourceNzb := false
+			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+				deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
+			}
+			if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
+				slog.ErrorContext(ctx, "Failed to delete zombie metadata file", "error", delMetaErr)
+			}
+
+			return nil
+		}
+
 		if errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File not found in ARR (likely upgraded/deleted), removing orphan from AltMount",
 				"file_path", filePath)

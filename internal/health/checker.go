@@ -125,7 +125,18 @@ func (hc *HealthChecker) checkSingleFile(ctx context.Context, filePath string, f
 
 	slog.InfoContext(ctx, "Checking segment availability", "file_path", filePath, "total_segments", len(fileMeta.SegmentData), "sample_percentage", samplePercentage)
 
-	// Validate segment availability using detailed validation logic
+	// 1. Metadata integrity check - Verify the entire file map is complete
+	loader := &metadataSegmentLoader{segments: fileMeta.SegmentData}
+	if err := usenet.CheckMetadataIntegrity(fileMeta.FileSize, loader); err != nil {
+		event.Type = EventTypeFileCorrupted
+		event.Status = database.HealthStatusCorrupted
+		event.Error = fmt.Errorf("metadata corruption: %w", err)
+		details := fmt.Sprintf(`{"error": "metadata_gap", "message": %q}`, err.Error())
+		event.Details = &details
+		return event
+	}
+
+	// 2. Network availability check - Validate segment availability using detailed validation logic
 	result, err := usenet.ValidateSegmentAvailabilityDetailed(
 		ctx,
 		fileMeta.SegmentData,
@@ -204,4 +215,22 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 // GetHealthStats returns current health statistics
 func (hc *HealthChecker) GetHealthStats(ctx context.Context) (map[database.HealthStatus]int, error) {
 	return hc.healthRepo.GetHealthStats(ctx)
+}
+
+type metadataSegmentLoader struct {
+	segments []*metapb.SegmentData
+}
+
+func (l *metadataSegmentLoader) GetSegment(index int) (usenet.Segment, []string, bool) {
+	if index < 0 || index >= len(l.segments) {
+		return usenet.Segment{}, nil, false
+	}
+
+	s := l.segments[index]
+	return usenet.Segment{
+		Id:    s.Id,
+		Start: s.StartOffset,
+		End:   s.EndOffset,
+		Size:  s.SegmentSize,
+	}, []string{}, true
 }

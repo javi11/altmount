@@ -23,8 +23,9 @@ type ConfigInstance = model.ConfigInstance
 type ConfigManager = model.ConfigManager
 
 var (
-	ErrPathMatchFailed  = model.ErrPathMatchFailed
-	ErrInstanceNotFound = model.ErrInstanceNotFound
+	ErrPathMatchFailed         = model.ErrPathMatchFailed
+	ErrEpisodeAlreadySatisfied = model.ErrEpisodeAlreadySatisfied
+	ErrInstanceNotFound        = model.ErrInstanceNotFound
 )
 
 // Service manages Radarr and Sonarr instances for health monitoring and file repair
