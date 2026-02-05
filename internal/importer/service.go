@@ -439,17 +439,22 @@ func (s *Service) CancelScan() error {
 
 // StartNzbdavImport starts an asynchronous import from an NZBDav database
 func (s *Service) StartNzbdavImport(dbPath string, rootFolder string, cleanupFile bool) error {
-	return nil
+	return s.nzbdavImporter.Start(dbPath, rootFolder, cleanupFile)
 }
 
 // GetImportStatus returns the current import status
 func (s *Service) GetImportStatus() ImportInfo {
-	return ImportInfo{}
+	return s.nzbdavImporter.GetStatus()
+}
+
+// ResetNzbdavImportStatus resets the import status to Idle
+func (s *Service) ResetNzbdavImportStatus() {
+	s.nzbdavImporter.Reset()
 }
 
 // CancelImport cancels the current import operation
 func (s *Service) CancelImport() error {
-	return nil
+	return s.nzbdavImporter.Cancel()
 }
 
 // IsFileInQueue checks if a file is already in the queue (pending or processing)

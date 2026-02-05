@@ -30,6 +30,7 @@ const (
 	ImportStatusIdle      ImportJobStatus = "idle"
 	ImportStatusRunning   ImportJobStatus = "running"
 	ImportStatusCanceling ImportJobStatus = "canceling"
+	ImportStatusCompleted ImportJobStatus = "completed"
 )
 
 // ImportInfo holds information about the current NZBDav import operation

@@ -47,7 +47,7 @@ func (n *NzbDavImporter) Start(dbPath string, rootFolder string, cleanupFile boo
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if n.info.Status != ImportStatusIdle {
+	if n.info.Status == ImportStatusRunning || n.info.Status == ImportStatusCanceling {
 		return fmt.Errorf("import already in progress")
 	}
 
@@ -57,10 +57,11 @@ func (n *NzbDavImporter) Start(dbPath string, rootFolder string, cleanupFile boo
 
 	// Initialize status
 	n.info = ImportInfo{
-		Status: ImportStatusRunning,
-		Total:  0,
-		Added:  0,
-		Failed: 0,
+		Status:  ImportStatusRunning,
+		Total:   0,
+		Added:   0,
+		Failed:  0,
+		Skipped: 0,
 	}
 
 	go n.performImport(importCtx, dbPath, rootFolder, cleanupFile)
@@ -96,6 +97,16 @@ func (n *NzbDavImporter) Cancel() error {
 	return nil
 }
 
+// Reset resets the import status to Idle
+func (n *NzbDavImporter) Reset() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.info.Status == ImportStatusCompleted || n.info.Status == ImportStatusIdle {
+		n.info = ImportInfo{Status: ImportStatusIdle}
+	}
+}
+
 // performImport performs the actual import work
 func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootFolder string, cleanupFile bool) {
 	// Parse Database
@@ -104,7 +115,7 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootF
 
 	defer func() {
 		n.mu.Lock()
-		n.info.Status = ImportStatusIdle
+		n.info.Status = ImportStatusCompleted
 		n.cancelFunc = nil
 		n.mu.Unlock()
 

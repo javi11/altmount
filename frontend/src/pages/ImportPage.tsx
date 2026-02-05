@@ -18,6 +18,7 @@ import {
 	useCancelNzbdavImport,
 	useCancelScan,
 	useNzbdavImportStatus,
+	useResetNzbdavImportStatus,
 	useScanStatus,
 	useStartManualScan,
 	useUploadToQueue,
@@ -220,9 +221,18 @@ function NzbDavImportSection() {
 
 	const { data: importStatus } = useNzbdavImportStatus(2000);
 	const cancelImport = useCancelNzbdavImport();
+	const resetImport = useResetNzbdavImportStatus();
 
 	const isRunning = importStatus?.status === "running";
 	const isCanceling = importStatus?.status === "canceling";
+	// Also check for "completed" status from backend
+	const isCompleted = importStatus?.status === "completed";
+	const hasResults = (importStatus?.total || 0) > 0 || !!importStatus?.last_error;
+
+	// Calculate progress
+	const total = importStatus?.total || 0;
+	const processed = (importStatus?.added || 0) + (importStatus?.failed || 0) + (importStatus?.skipped || 0);
+	const progressPercent = total > 0 ? Math.min((processed / total) * 100, 100) : 0;
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -301,6 +311,14 @@ function NzbDavImportSection() {
 		}
 	};
 
+	const handleReset = async () => {
+		try {
+			await resetImport.mutateAsync();
+		} catch (error) {
+			console.error("Failed to reset import status:", error);
+		}
+	};
+
 	return (
 		<>
 			{error && <ErrorAlert error={error} />}
@@ -315,55 +333,110 @@ function NzbDavImportSection() {
 						Import your existing NZBDav database to populate the library.
 					</p>
 
-					{isRunning || isCanceling ? (
-						<div className="space-y-4 rounded-lg bg-base-200 p-6">
+					{isRunning || isCanceling || isCompleted || hasResults ? (
+						<div className="space-y-6 rounded-lg bg-base-200 p-6">
+							{/* Header Status */}
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-3">
-									{isCanceling ? (
-										<Square className="h-5 w-5 text-warning" />
+									{isRunning ? (
+										<div className="rounded-full bg-primary/20 p-2">
+											<span className="loading loading-spinner loading-sm text-primary" />
+										</div>
+									) : isCanceling ? (
+										<div className="rounded-full bg-warning/20 p-2">
+											<Square className="h-5 w-5 text-warning" />
+										</div>
 									) : (
-										<span className="loading loading-spinner text-primary" />
+										<div className="rounded-full bg-success/20 p-2">
+											<CheckCircle2 className="h-5 w-5 text-success" />
+										</div>
 									)}
 									<div>
-										<h3 className="font-bold">
-											{isCanceling ? "Canceling Import..." : "Importing Database..."}
+										<h3 className="font-bold text-lg">
+											{isRunning
+												? "Importing Database..."
+												: isCanceling
+													? "Canceling Import..."
+													: "Import Complete"}
 										</h3>
 										<p className="text-base-content/70 text-xs">
-											This process runs in the background.
+											{isRunning ? "Processing records in background" : "Process finished"}
 										</p>
 									</div>
 								</div>
-								{!isCanceling && (
+								{!isCanceling && isRunning && (
 									<button
 										type="button"
-										className="btn btn-sm btn-warning"
+										className="btn btn-sm btn-ghost text-error hover:bg-error/10"
 										onClick={handleCancel}
 										disabled={cancelImport.isPending}
 									>
-										Cancel
+										Stop Import
+									</button>
+								)}
+								{!isRunning && !isCanceling && (
+									<button
+										type="button"
+										className="btn btn-sm btn-ghost"
+										onClick={handleReset}
+										disabled={resetImport.isPending}
+									>
+										Done
 									</button>
 								)}
 							</div>
 
-							<div className="stats w-full bg-base-100 shadow">
-								<div className="stat place-items-center">
-									<div className="stat-title">Total Found</div>
-									<div className="stat-value text-base">{importStatus?.total || 0}</div>
+							{/* Progress Bar */}
+							<div className="space-y-2">
+								<div className="flex justify-between text-xs font-medium text-base-content/70">
+									<span>Progress</span>
+									<span>{Math.round(progressPercent)}%</span>
 								</div>
-								<div className="stat place-items-center">
-									<div className="stat-title">Added</div>
-									<div className="stat-value text-base text-success">
-										{importStatus?.added || 0}
-									</div>
-								</div>
-								<div className="stat place-items-center">
-									<div className="stat-title">Failed</div>
-									<div className="stat-value text-base text-error">{importStatus?.failed || 0}</div>
+								<div className="h-2.5 w-full overflow-hidden rounded-full bg-base-300">
+									<div
+										className={`h-full transition-all duration-300 ${isCanceling ? "bg-warning" : "bg-primary"}`}
+										style={{ width: `${progressPercent}%` }}
+									/>
 								</div>
 							</div>
 
+							{/* Stats Grid */}
+							<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+								<div className="flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
+									<span className="text-base-content/60 text-xs font-medium uppercase tracking-wider">
+										Total
+									</span>
+									<span className="font-bold text-2xl">{importStatus?.total || 0}</span>
+								</div>
+								<div className="border-b-2 border-success flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
+									<span className="text-success text-xs font-medium uppercase tracking-wider">
+										Added
+									</span>
+									<span className="font-bold text-2xl text-success">
+										{importStatus?.added || 0}
+									</span>
+								</div>
+								<div className="border-b-2 border-warning flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
+									<span className="text-warning text-xs font-medium uppercase tracking-wider">
+										Skipped
+									</span>
+									<span className="font-bold text-2xl text-warning">
+										{importStatus?.skipped || 0}
+									</span>
+								</div>
+								<div className="border-b-2 border-error flex flex-col items-center rounded-lg bg-base-100 p-3 shadow-sm">
+									<span className="text-error text-xs font-medium uppercase tracking-wider">
+										Failed
+									</span>
+									<span className="font-bold text-2xl text-error">
+										{importStatus?.failed || 0}
+									</span>
+								</div>
+							</div>
+
+							{/* Last Error */}
 							{importStatus?.last_error && (
-								<div className="alert alert-error text-sm">
+								<div className="alert alert-error text-sm shadow-sm">
 									<AlertCircle className="h-4 w-4" />
 									<span>{importStatus.last_error}</span>
 								</div>

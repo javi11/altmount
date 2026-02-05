@@ -721,6 +721,12 @@ export class APIClient {
 		return this.request<ImportStatusResponse>("/import/nzbdav/status");
 	}
 
+	async resetNzbdavImportStatus() {
+		return this.request<{ message: string }>("/import/nzbdav/reset", {
+			method: "POST",
+		});
+	}
+
 	async cancelNzbdavImport() {
 		return this.request<{ message: string }>("/import/nzbdav", {
 			method: "DELETE",
