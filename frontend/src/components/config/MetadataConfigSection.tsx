@@ -38,7 +38,10 @@ export function MetadataConfigSection({
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
 	};
 
-	const handleBackupChange = (field: keyof MetadataBackupConfig, value: string | number | boolean) => {
+	const handleBackupChange = (
+		field: keyof MetadataBackupConfig,
+		value: string | number | boolean,
+	) => {
 		const newData = {
 			...formData,
 			backup: {
@@ -92,39 +95,37 @@ export function MetadataConfigSection({
 					</p>
 
 					<div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-						<div className="form-control">
-							<label className="label">
-								<span className="label-text">Backup Interval (Hours)</span>
-							</label>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Backup Interval (Hours)</legend>
 							<input
 								type="number"
 								className="input"
 								value={formData.backup?.interval_hours ?? 24}
 								disabled={isReadOnly || !formData.backup?.enabled}
-								onChange={(e) => handleBackupChange("interval_hours", Number.parseInt(e.target.value))}
+								onChange={(e) =>
+									handleBackupChange("interval_hours", Number.parseInt(e.target.value, 10))
+								}
 								min="1"
 							/>
-						</div>
+						</fieldset>
 
-						<div className="form-control">
-							<label className="label">
-								<span className="label-text">Keep Backups</span>
-							</label>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Keep Backups</legend>
 							<input
 								type="number"
 								className="input"
 								value={formData.backup?.keep_backups ?? 10}
 								disabled={isReadOnly || !formData.backup?.enabled}
-								onChange={(e) => handleBackupChange("keep_backups", Number.parseInt(e.target.value))}
+								onChange={(e) =>
+									handleBackupChange("keep_backups", Number.parseInt(e.target.value, 10))
+								}
 								min="1"
 							/>
-						</div>
+						</fieldset>
 					</div>
 
-					<div className="form-control mt-4">
-						<label className="label">
-							<span className="label-text">Backup Path</span>
-						</label>
+					<fieldset className="fieldset mt-4">
+						<legend className="fieldset-legend">Backup Path</legend>
 						<input
 							type="text"
 							className="input"
@@ -134,7 +135,7 @@ export function MetadataConfigSection({
 							placeholder="/path/to/backups"
 						/>
 						<p className="label">Absolute path where metadata mirrors will be stored</p>
-					</div>
+					</fieldset>
 				</fieldset>
 
 				<fieldset className="fieldset">
