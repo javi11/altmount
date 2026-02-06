@@ -1403,3 +1403,23 @@ func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath strin
 
 	return nil
 }
+
+// RenameHealthRecord updates the file_path for a health record when a file is moved
+func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newPath string) error {
+	oldPath = strings.TrimPrefix(oldPath, "/")
+	newPath = strings.TrimPrefix(newPath, "/")
+
+	query := `
+		UPDATE file_health
+		SET file_path = ?,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	_, err := r.db.ExecContext(ctx, query, newPath, oldPath)
+	if err != nil {
+		return fmt.Errorf("failed to rename health record: %w", err)
+	}
+
+	return nil
+}

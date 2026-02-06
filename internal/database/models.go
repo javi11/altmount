@@ -90,7 +90,7 @@ type FileHealth struct {
 	FilePath         string       `db:"file_path"`
 	LibraryPath      *string      `db:"library_path"` // Path to file in library directory (symlink or .strm file)
 	Status           HealthStatus `db:"status"`
-	LastChecked      time.Time    `db:"last_checked"`
+	LastChecked      *time.Time   `db:"last_checked"`
 	LastError        *string      `db:"last_error"`
 	RetryCount       int          `db:"retry_count"`        // Health check retry count
 	MaxRetries       int          `db:"max_retries"`        // Max health check retries
