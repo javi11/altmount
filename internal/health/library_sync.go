@@ -689,6 +689,13 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			// If the library file points to a metadata path that doesn't exist anymore, it's an orphan
 			if _, exists := metaFileSet[metaPath]; !exists {
 				if !dryRun {
+					// SAFETY: Never delete physical files in NONE strategy.
+					// In NONE strategy, the library file IS the actual media file in the mount.
+					if cfg.Import.ImportStrategy == config.ImportStrategyNone {
+						slog.DebugContext(ctx, "Skipped library file deletion (NONE strategy safety)", "path", file)
+						continue
+					}
+
 					err := os.Remove(file)
 					if err != nil {
 						if !os.IsNotExist(err) {
