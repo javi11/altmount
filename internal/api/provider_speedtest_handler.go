@@ -6,8 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -145,51 +143,38 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 
 	defer client.Close()
 
-	// Test for up to 15 seconds
+	// Test for up to 5 minutes
 	testCtx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
 	defer cancel()
 
-	var totalBytes int64
-	var workerWg sync.WaitGroup
-
-	numWorkers := targetProvider.MaxConnections
-	if numWorkers <= 0 {
-		numWorkers = 20
+	type pendingSegment struct {
+		respCh <-chan nntppool.Response
+		size   int64
 	}
-
-	segmentChan := make(chan segmentInfo, len(allSegments))
-	for _, s := range allSegments {
-		segmentChan <- s
-	}
-	close(segmentChan)
 
 	startTime := time.Now()
 
-	var testErr error
-
-	for i := 0; i < numWorkers; i++ {
-		workerWg.Add(1)
-		go func() {
-			defer workerWg.Done()
-			for {
-				select {
-				case <-testCtx.Done():
-					return
-				case seg, ok := <-segmentChan:
-					if !ok {
-						return
-					}
-					// Download
-					testErr = client.Body(testCtx, seg.ID, io.Discard)
-					if testErr == nil {
-						atomic.AddInt64(&totalBytes, seg.Size)
-					}
-				}
-			}
-		}()
+	// Phase 1: Fire all async requests
+	// The pool's inflightSem provides natural backpressure
+	pending := make([]pendingSegment, 0, len(allSegments))
+	for _, seg := range allSegments {
+		ch := client.BodyAsync(testCtx, seg.ID, io.Discard)
+		pending = append(pending, pendingSegment{respCh: ch, size: seg.Size})
 	}
 
-	workerWg.Wait()
+	// Phase 2: Drain all responses
+	var totalBytes int64
+	var testErr error
+	for _, p := range pending {
+		resp := <-p.respCh
+		if resp.Err != nil {
+			if testErr == nil {
+				testErr = resp.Err
+			}
+			continue
+		}
+		totalBytes += p.size
+	}
 
 	if testErr != nil {
 		slog.Error("Failed to test provider speed", "error", testErr, "provider_id", providerID)

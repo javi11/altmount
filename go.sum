@@ -357,6 +357,8 @@ github.com/javi11/nntppool/v3 v3.2.2-0.20260206133107-44123c029ffb h1:lFNGuNmjK+
 github.com/javi11/nntppool/v3 v3.2.2-0.20260206133107-44123c029ffb/go.mod h1:STTmCQzuwmuEr/Uv4ghenSZimZk8gWKH45rMzuZ1+us=
 github.com/javi11/nntppool/v3 v3.2.2-0.20260206134041-9c20b45b89a5 h1:Zsw702rSytdEmmaR06zCVcR64fdjUKk29PMcc7ZWBqY=
 github.com/javi11/nntppool/v3 v3.2.2-0.20260206134041-9c20b45b89a5/go.mod h1:STTmCQzuwmuEr/Uv4ghenSZimZk8gWKH45rMzuZ1+us=
+github.com/javi11/nntppool/v3 v3.2.2-0.20260206144816-47e42c56366d h1:lz0yulLRyjCfMLEZK495NzJzbg4NJOZiNEZdj4bk4xk=
+github.com/javi11/nntppool/v3 v3.2.2-0.20260206144816-47e42c56366d/go.mod h1:STTmCQzuwmuEr/Uv4ghenSZimZk8gWKH45rMzuZ1+us=
 github.com/javi11/nntppool/v3 v3.2.2 h1:10u5x04PCirCqBQwbb0OH2iPL59SAYHzNcfBRM283pg=
 github.com/javi11/nntppool/v3 v3.2.2/go.mod h1:STTmCQzuwmuEr/Uv4ghenSZimZk8gWKH45rMzuZ1+us=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=

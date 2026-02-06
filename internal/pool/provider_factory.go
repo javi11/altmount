@@ -62,7 +62,7 @@ func NewProvider(ctx context.Context, cfg config.ProviderConfig, opts ...Provide
 		Address:               address,
 		MaxConnections:        maxConns,
 		InitialConnections:    initialConns,
-		InflightPerConnection: 10,
+		InflightPerConnection: 50,
 		MaxConnIdleTime:       idleTime,
 		MaxConnLifetime:       lifetime,
 		Auth:                  nntppool.Auth{Username: cfg.Username, Password: cfg.Password},
