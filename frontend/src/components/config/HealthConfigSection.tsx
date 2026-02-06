@@ -157,16 +157,11 @@ export function HealthConfigSection({
 					)}
 					<div className="label flex-col items-start whitespace-normal text-sm">
 						<div>
-							Path to your organized media library that contains symlinks pointing to altmount
-							files. When a repair is triggered, the system will search for symlinks in this
-							directory and use the library path for ARR rescan instead of the mount path.
+							Path to your organized media library. For symlink/STRM strategies, this contains
+							the generated link files. For <strong>NONE</strong> strategy, this allows the system
+							to track files moved or renamed by Sonarr/Radarr, ensuring health checks and repairs
+							always use the correct paths.
 						</div>
-						{config.import.import_strategy === "NONE" && (
-							<span className="mt-1 text-info">
-								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy, you can
-								leave this empty. The system will use your mount path for repairs.
-							</span>
-						)}
 						{formData.enabled && config.import.import_strategy !== "NONE" && (
 							<strong className="mt-1 text-error">
 								Required when Health System is enabled with {config.import.import_strategy}{" "}
@@ -218,8 +213,9 @@ export function HealthConfigSection({
 						)}
 						{config.import.import_strategy === "NONE" && (
 							<span className="mt-1 text-info">
-								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system only performs
-								metadata-only sync. It will not delete library files.
+								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system performs a
+								full library sync if a Library Directory is configured, allowing it to track
+								renames. Cleanup will only remove database records for missing files.
 							</span>
 						)}
 					</div>

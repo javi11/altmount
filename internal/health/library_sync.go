@@ -441,9 +441,9 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			"new_mount", newMountPath)
 	}
 
-	// Check import strategy - if NONE, only sync DB with metadata files
-	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
-		slog.InfoContext(ctx, "Import strategy is NONE, performing metadata-only sync")
+	// Check import strategy - if NONE and no library dir, only sync DB with metadata files
+	if cfg.Import.ImportStrategy == config.ImportStrategyNone && (cfg.Health.LibraryDir == nil || *cfg.Health.LibraryDir == "") {
+		slog.InfoContext(ctx, "Import strategy is NONE and no library directory configured, performing metadata-only sync")
 		return lsw.syncMetadataOnly(ctx, startTime, dryRun)
 	}
 
