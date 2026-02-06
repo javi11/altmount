@@ -957,44 +957,53 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 				// Store mapping of mount target path -> library symlink path
 				result.Symlinks[cleanTarget] = path
 			}
-		}
+		} else if !d.IsDir() {
+			// Check if it's a .strm file
+			if strings.HasSuffix(d.Name(), ".strm") {
+				// Read the STRM file content to extract the URL
+				content, err := os.ReadFile(path)
+				if err != nil {
+					slog.WarnContext(ctx, "Failed to read STRM file",
+						"path", path,
+						"error", err)
+					return nil
+				}
 
-		// Check if it's a .strm file
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".strm") {
-			// Read the STRM file content to extract the URL
-			content, err := os.ReadFile(path)
-			if err != nil {
-				slog.WarnContext(ctx, "Failed to read STRM file",
-					"path", path,
-					"error", err)
-				return nil
+				// Parse the URL from the file content (trim whitespace)
+				urlStr := strings.TrimSpace(string(content))
+				parsedURL, err := url.Parse(urlStr)
+				if err != nil {
+					slog.WarnContext(ctx, "Failed to parse URL from STRM file",
+						"path", path,
+						"url", urlStr,
+						"error", err)
+					return nil
+				}
+
+				// Extract the 'path' query parameter
+				virtualPath := parsedURL.Query().Get("path")
+				if virtualPath == "" {
+					slog.WarnContext(ctx, "STRM file URL missing 'path' query parameter",
+						"path", path,
+						"url", urlStr)
+					return nil
+				}
+
+				// Normalize path separators
+				virtualPath = filepath.ToSlash(virtualPath)
+
+				// Store mapping of virtual path -> library .strm file path
+				result.StrmFiles[virtualPath] = path
+			} else if cfg.Import.ImportStrategy == config.ImportStrategyNone {
+				// For NONE strategy, also count regular files if they are in the mount directory
+				cleanPath := filepath.Clean(path)
+				cleanMountDir := filepath.Clean(mountDir)
+
+				if strings.HasPrefix(cleanPath, cleanMountDir) {
+					// In NONE strategy, the library file IS the mount file
+					result.Symlinks[cleanPath] = path
+				}
 			}
-
-			// Parse the URL from the file content (trim whitespace)
-			urlStr := strings.TrimSpace(string(content))
-			parsedURL, err := url.Parse(urlStr)
-			if err != nil {
-				slog.WarnContext(ctx, "Failed to parse URL from STRM file",
-					"path", path,
-					"url", urlStr,
-					"error", err)
-				return nil
-			}
-
-			// Extract the 'path' query parameter
-			virtualPath := parsedURL.Query().Get("path")
-			if virtualPath == "" {
-				slog.WarnContext(ctx, "STRM file URL missing 'path' query parameter",
-					"path", path,
-					"url", urlStr)
-				return nil
-			}
-
-			// Normalize path separators
-			virtualPath = filepath.ToSlash(virtualPath)
-
-			// Store mapping of virtual path -> library .strm file path
-			result.StrmFiles[virtualPath] = path
 		}
 
 		return nil
@@ -1116,8 +1125,10 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMount
 		} else if strings.HasSuffix(d.Name(), ".strm") {
 			// STRM file - add without .strm extension
 			result.StrmFiles[strings.TrimSuffix(virtualPath, ".strm")] = path
+		} else if cfg.Import.ImportStrategy == config.ImportStrategyNone {
+			// For NONE strategy, also count regular files
+			result.Symlinks[virtualPath] = path
 		}
-		// Ignore all other regular files
 
 		return nil
 	})
