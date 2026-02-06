@@ -26,6 +26,7 @@ import (
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
@@ -743,16 +744,8 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	// Prepend SABnzbd CompleteDir to virtualDir
 	cfg := s.configGetter()
 	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		// Ensure completeDir is absolute for comparison
-		if !strings.HasPrefix(completeDir, "/") {
-			completeDir = "/" + completeDir
-		}
-
-		if !strings.HasPrefix(virtualDir, completeDir) {
-			virtualDir = filepath.Join(completeDir, virtualDir)
-			virtualDir = filepath.ToSlash(virtualDir)
-		}
+		virtualDir = pathutil.JoinAbsPath(cfg.SABnzbd.CompleteDir, virtualDir)
+		virtualDir = filepath.ToSlash(virtualDir)
 	}
 
 	return virtualDir

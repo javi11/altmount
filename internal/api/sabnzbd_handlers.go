@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/pathutil"
 )
 
 // getDefaultCategory returns the Default category from config or a fallback
@@ -793,7 +794,7 @@ func (s *Server) handleSABnzbdGetConfig(c *fiber.Ctx) error {
 		// Build misc configuration
 		itemBasePath := s.calculateItemBasePath()
 		sabnzbdConfig.Misc = SABnzbdMiscConfig{
-			CompleteDir:            itemBasePath,
+			CompleteDir:            pathutil.JoinAbsPath(itemBasePath, cfg.SABnzbd.CompleteDir),
 			PreCheck:               0,
 			HistoryRetention:       "",
 			HistoryRetentionOption: "all",

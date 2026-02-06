@@ -17,6 +17,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
+	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/altmount/pkg/rclonecli"
 	"github.com/sourcegraph/conc/pool"
 )
@@ -1095,7 +1096,7 @@ func (lsw *LibrarySyncWorker) getAllImportDirFiles(ctx context.Context, oldMount
 // It checks both the full mount path and the relative path (for STRM files)
 func (lsw *LibrarySyncWorker) getLibraryPath(metaPath string, filesInUse map[string]string) *string {
 	cfg := lsw.configGetter()
-	mountPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(metaPath, "/"))
+	mountPath := pathutil.JoinAbsPath(cfg.MountPath, metaPath)
 
 	if libPath, ok := filesInUse[mountPath]; ok {
 		return &libPath
