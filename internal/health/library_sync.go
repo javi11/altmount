@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -84,7 +85,7 @@ func NewLibrarySyncWorker(
 	configManager *config.Manager,
 	rcloneClient rclonecli.RcloneRcClient,
 ) *LibrarySyncWorker {
-	return &LibrarySyncWorker{
+	worker := &LibrarySyncWorker{
 		metadataService: metadataService,
 		healthRepo:      healthRepo,
 		configGetter:    configGetter,
@@ -92,6 +93,35 @@ func NewLibrarySyncWorker(
 		rcloneClient:    rcloneClient,
 		manualTrigger:   make(chan struct{}, 1), // Buffered channel for non-blocking sends
 	}
+
+	// Load last result from database if available
+	_ = worker.LoadLastResult(context.Background())
+
+	return worker
+}
+
+const lastLibrarySyncResultKey = "last_library_sync_result"
+
+// LoadLastResult loads the last sync result from the database
+func (lsw *LibrarySyncWorker) LoadLastResult(ctx context.Context) error {
+	data, err := lsw.healthRepo.GetSystemState(ctx, lastLibrarySyncResultKey)
+	if err != nil {
+		return err
+	}
+	if data == "" {
+		return nil
+	}
+
+	var result SyncResult
+	if err := json.Unmarshal([]byte(data), &result); err != nil {
+		return err
+	}
+
+	lsw.progressMu.Lock()
+	lsw.lastSyncResult = &result
+	lsw.progressMu.Unlock()
+
+	return nil
 }
 
 // StartLibrarySync starts the library sync worker in a background goroutine
@@ -307,10 +337,7 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 	totalDbRecords int,
 ) {
 	duration := time.Since(startTime)
-
-	// Store sync result
-	lsw.progressMu.Lock()
-	lsw.lastSyncResult = &SyncResult{
+	result := &SyncResult{
 		FilesAdded:          dbCounts.added,
 		FilesDeleted:        dbCounts.deleted,
 		MetadataDeleted:     cleanup.metadataDeleted,
@@ -319,7 +346,18 @@ func (lsw *LibrarySyncWorker) recordSyncResult(
 		Duration:            duration,
 		CompletedAt:         time.Now(),
 	}
+
+	// Store sync result in memory
+	lsw.progressMu.Lock()
+	lsw.lastSyncResult = result
 	lsw.progressMu.Unlock()
+
+	// Persist sync result to database
+	if resultData, err := json.Marshal(result); err == nil {
+		if err := lsw.healthRepo.UpdateSystemState(ctx, lastLibrarySyncResultKey, string(resultData)); err != nil {
+			slog.ErrorContext(ctx, "Failed to persist library sync result", "error", err)
+		}
+	}
 
 	// Log completion
 	slog.InfoContext(ctx, "Library sync completed",
