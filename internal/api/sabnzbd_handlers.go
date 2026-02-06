@@ -746,8 +746,12 @@ func (s *Server) handleSABnzbdStatus(c *fiber.Ctx) error {
 	}
 
 	// Get actual disk space for storage directory
-	tempDir := filepath.Join(os.TempDir(), "altmount-uploads")
-	diskFree, diskTotal := getDiskSpace(tempDir)
+	cfg := s.configManager.GetConfig()
+	targetPath := cfg.MountPath
+	if targetPath == "" {
+		targetPath = filepath.Join(os.TempDir(), "altmount-uploads")
+	}
+	diskFree, diskTotal := getDiskSpace(targetPath)
 
 	response := SABnzbdStatusResponse{
 		Status:          true,
