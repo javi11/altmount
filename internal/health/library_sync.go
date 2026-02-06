@@ -547,6 +547,19 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			"total_updated", totalSymlinksUpdated)
 	}
 
+	// SAFETY: If the library scan returned zero files but we have metadata files,
+	// it's almost certainly a mount failure or network glitch.
+	// Abort cleanup operations to prevent mass data loss.
+	totalFilesFound := len(libraryFiles.Symlinks) + len(libraryFiles.StrmFiles) +
+		len(importDirFiles.Symlinks) + len(importDirFiles.StrmFiles)
+
+	shouldCleanup := cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata
+	if shouldCleanup && totalFilesFound == 0 && len(metadataFiles) > 0 {
+		slog.WarnContext(ctx, "Library scan returned zero files while metadata exists. Possible mount failure? Aborting cleanup for safety.",
+			"metadata_count", len(metadataFiles))
+		shouldCleanup = false
+	}
+
 	// Update total files count
 	lsw.progressMu.Lock()
 	lsw.progress.TotalFiles = len(metadataFiles)
@@ -645,7 +658,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 
 	// Additional cleanup of orphaned metadata files if enabled
 	metadataDeletedCount := 0
-	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
+	if shouldCleanup {
 		// We already have libraryFiles from earlier in the function
 		for relativeMountPath := range metaFileSet {
 			select {
@@ -678,7 +691,7 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	libraryFilesDeletedCount := 0
 	libraryDirsDeletedCount := 0
 
-	if cfg.Health.CleanupOrphanedMetadata != nil && *cfg.Health.CleanupOrphanedMetadata {
+	if shouldCleanup {
 		for metaPath, file := range filesInUse {
 			select {
 			case <-ctx.Done():
