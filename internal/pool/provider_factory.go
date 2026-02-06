@@ -43,10 +43,8 @@ func NewProvider(ctx context.Context, cfg config.ProviderConfig, opts ...Provide
 	}
 
 	initialConns := 0
-	inflightPerConn := maxConns * 2
 	if opt.ForceImmediateConnection {
 		initialConns = 1
-		inflightPerConn = 1
 	}
 
 	idleTime := 30 * time.Second
@@ -64,7 +62,7 @@ func NewProvider(ctx context.Context, cfg config.ProviderConfig, opts ...Provide
 		Address:               address,
 		MaxConnections:        maxConns,
 		InitialConnections:    initialConns,
-		InflightPerConnection: inflightPerConn,
+		InflightPerConnection: 10,
 		MaxConnIdleTime:       idleTime,
 		MaxConnLifetime:       lifetime,
 		Auth:                  nntppool.Auth{Username: cfg.Username, Password: cfg.Password},

@@ -314,15 +314,6 @@ func (b *UsenetReader) GetBufferedOffset() int64 {
 func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *segment) error {
 	return retry.Do(
 		func() error {
-			// Get buffer from pool for intermediate storage
-			buf := getBuffer()
-			defer putBuffer(buf)
-
-			// Pre-allocate buffer if segment size is known
-			if segment.SegmentSize > 0 {
-				buf.Grow(int(segment.SegmentSize))
-			}
-
 			// Get current pool
 			cp, err := b.poolGetter()
 			if err != nil {
@@ -330,18 +321,7 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, segment *se
 			}
 
 			// Phase 1: Download to buffer (releases NNTP connection quickly)
-			err = cp.Body(ctx, segment.Id, buf)
-			if err != nil {
-				// The segment is closed, so we can return nil - no retry needed
-				if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, context.Canceled) {
-					return nil
-				}
-				return err
-			}
-
-			// Phase 2: Write from buffer to pipe (can block without holding NNTP connection)
-			// Use WriteTo for efficient single-write operation instead of chunked io.Copy
-			_, err = buf.WriteTo(segment.Writer())
+			err = cp.Body(ctx, segment.Id, segment.Writer())
 			if err != nil {
 				// The segment is closed, so we can return nil - no retry needed
 				if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, context.Canceled) {
