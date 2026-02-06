@@ -741,8 +741,8 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			}
 		}
 
-		// Remove empty directories after file cleanup (only if not dry run)
-		if !dryRun {
+		// Remove empty directories after file cleanup (only if not dry run and cleanup is safe)
+		if !dryRun && shouldCleanup {
 			var err error
 			libraryDirsDeletedCount, err = lsw.removeEmptyDirectories(ctx)
 			if err != nil {
@@ -754,7 +754,13 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	}
 
 	// Find files to delete (in database but not in filesystem or not in use)
-	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, filesInUse)
+	// SAFETY: If mount protection is triggered (shouldCleanup is false), 
+	// we pass nil for filesInUse to skip the 'in-use' check and prevent mass record deletion.
+	effectiveFilesInUse := filesInUse
+	if !shouldCleanup {
+		effectiveFilesInUse = nil
+	}
+	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, effectiveFilesInUse)
 
 	// Perform batch operations
 	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete, dryRun)
