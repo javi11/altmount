@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // CheckDirectoryWritable checks if a directory exists and is writable.
@@ -57,6 +58,28 @@ func CheckDirectoryWritable(path string) error {
 	}
 
 	return nil
+}
+
+// JoinAbsPath safely joins a base path with another path (which could be absolute or relative).
+// If the second path is absolute and starts with the base path, it returns the second path as is.
+// Otherwise, it joins them normally.
+func JoinAbsPath(basePath, otherPath string) string {
+	if basePath == "" {
+		return otherPath
+	}
+
+	// Ensure consistent slashes for comparison
+	cleanBase := strings.TrimSuffix(filepath.ToSlash(basePath), "/")
+	cleanOther := filepath.ToSlash(otherPath)
+
+	// If otherPath is absolute and starts with basePath, don't join
+	if filepath.IsAbs(cleanOther) && (cleanOther == cleanBase || strings.HasPrefix(cleanOther, cleanBase+"/")) {
+		return filepath.FromSlash(cleanOther)
+	}
+
+	// Join them, ensuring otherPath is treated as relative to base
+	relOther := strings.TrimPrefix(cleanOther, "/")
+	return filepath.Join(basePath, filepath.FromSlash(relOther))
 }
 
 // CheckFileDirectoryWritable checks if the directory containing a file path is writable.

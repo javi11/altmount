@@ -12,6 +12,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/pathutil"
 )
 
 // CreateStrmFiles creates STRM files for an imported file or directory
@@ -28,7 +29,7 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	}
 
 	// Check the metadata directory to determine if this is a file or directory
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
+	metadataPath := pathutil.JoinAbsPath(cfg.Metadata.RootPath, resultingPath)
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
@@ -103,15 +104,12 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 func (c *Coordinator) createSingleStrmFile(ctx context.Context, virtualPath string, port int) error {
 	cfg := c.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath))
+	strmPath := pathutil.JoinAbsPath(*cfg.Import.ImportDir, virtualPath) + ".strm"
+	baseDir := filepath.Dir(strmPath)
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create STRM directory: %w", err)
 	}
-
-	// Keep original filename and add .strm extension
-	filename := filepath.Base(virtualPath) + ".strm"
-	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath), filename)
 
 	// Get first admin user's API key for authentication
 	if c.userRepo == nil {

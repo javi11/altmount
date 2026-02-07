@@ -224,6 +224,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Delete("/import/scan", s.handleCancelScan)
 	// System endpoints
 	api.Get("/system/stats", s.handleGetSystemStats)
+	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Get("/system/health", s.handleGetSystemHealth)
 	api.Get("/system/browse", s.handleSystemBrowse)
 	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)

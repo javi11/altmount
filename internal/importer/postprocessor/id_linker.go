@@ -10,6 +10,7 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pathutil"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -29,7 +30,7 @@ func (c *Coordinator) HandleIDMetadataLinks(ctx context.Context, item *database.
 
 	// 2. Check individual files for IDs
 	cfg := c.configGetter()
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
+	metadataPath := pathutil.JoinAbsPath(cfg.Metadata.RootPath, resultingPath)
 
 	_ = filepath.WalkDir(metadataPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".meta") {

@@ -946,3 +946,75 @@ func (r *Repository) UpdateQueueItemPriority(ctx context.Context, id int64, prio
 	}
 	return nil
 }
+
+// System stats operations
+
+// GetSystemStat retrieves a system statistic by key
+func (r *Repository) GetSystemStat(ctx context.Context, key string) (int64, error) {
+	query := `SELECT value FROM system_stats WHERE key = ?`
+	var value int64
+	err := r.db.QueryRowContext(ctx, query, key).Scan(&value)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to get system stat %s: %w", key, err)
+	}
+	return value, nil
+}
+
+// UpdateSystemStat updates a system statistic by key
+func (r *Repository) UpdateSystemStat(ctx context.Context, key string, value int64) error {
+	query := `
+		INSERT INTO system_stats (key, value, updated_at)
+		VALUES (?, ?, datetime('now'))
+		ON CONFLICT(key) DO UPDATE SET
+		value = excluded.value,
+		updated_at = datetime('now')
+	`
+	_, err := r.db.ExecContext(ctx, query, key, value)
+	if err != nil {
+		return fmt.Errorf("failed to update system stat %s: %w", key, err)
+	}
+	return nil
+}
+
+// ResetSystemStats clears system statistics from the database
+func (r *Repository) ResetSystemStats(ctx context.Context) error {
+	query := `DELETE FROM system_stats WHERE key IN ('bytes_downloaded', 'articles_downloaded', 'max_download_speed')`
+	_, err := r.db.ExecContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to reset system stats: %w", err)
+	}
+	return nil
+}
+
+// UpdateSystemState updates a system state string (JSON) by key
+func (r *Repository) UpdateSystemState(ctx context.Context, key string, value string) error {
+	query := `
+		INSERT INTO system_state (key, value, updated_at)
+		VALUES (?, ?, datetime('now'))
+		ON CONFLICT(key) DO UPDATE SET
+		value = excluded.value,
+		updated_at = datetime('now')
+	`
+	_, err := r.db.ExecContext(ctx, query, key, value)
+	if err != nil {
+		return fmt.Errorf("failed to update system state %s: %w", key, err)
+	}
+	return nil
+}
+
+// GetSystemState retrieves a system state string by key
+func (r *Repository) GetSystemState(ctx context.Context, key string) (string, error) {
+	query := `SELECT value FROM system_state WHERE key = ?`
+	var value string
+	err := r.db.QueryRowContext(ctx, query, key).Scan(&value)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get system state %s: %w", key, err)
+	}
+	return value, nil
+}
