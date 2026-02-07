@@ -77,3 +77,13 @@ func CheckFileDirectoryWritable(filePath string, fileType string) error {
 
 	return nil
 }
+
+// JoinAbsPath joins paths and returns an absolute path.
+func JoinAbsPath(base string, paths ...string) string {
+	path := filepath.Join(base, filepath.Join(paths...))
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return absPath
+}

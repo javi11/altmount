@@ -533,3 +533,52 @@ func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
 
 	return nil
 }
+
+// IncrementRetryCountAndResetStatus increments the retry count and resets status to pending if retries remain
+func (r *QueueRepository) IncrementRetryCountAndResetStatus(ctx context.Context, id int64, errorMessage *string) (bool, error) {
+	var retried bool
+	err := r.withQueueTransaction(ctx, func(txRepo *QueueRepository) error {
+		// Get current retry count and max retries
+		var retryCount, maxRetries int
+		query := `SELECT retry_count, max_retries FROM import_queue WHERE id = ?`
+		err := txRepo.db.QueryRowContext(ctx, query, id).Scan(&retryCount, &maxRetries)
+		if err != nil {
+			return err
+		}
+
+		if retryCount < maxRetries {
+			// Increment retry count and reset to pending
+			updateQuery := `
+				UPDATE import_queue 
+				SET retry_count = retry_count + 1, 
+				    status = 'pending', 
+				    started_at = NULL, 
+				    error_message = ?, 
+				    updated_at = datetime('now') 
+				WHERE id = ?
+			`
+			_, err = txRepo.db.ExecContext(ctx, updateQuery, errorMessage, id)
+			if err != nil {
+				return err
+			}
+			retried = true
+		} else {
+			// Mark as failed
+			updateQuery := `
+				UPDATE import_queue 
+				SET status = 'failed', 
+				    error_message = ?, 
+				    updated_at = datetime('now') 
+				WHERE id = ?
+			`
+			_, err = txRepo.db.ExecContext(ctx, updateQuery, errorMessage, id)
+			if err != nil {
+				return err
+			}
+			retried = false
+		}
+		return nil
+	})
+
+	return retried, err
+}
