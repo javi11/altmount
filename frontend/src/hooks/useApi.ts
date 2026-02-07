@@ -515,6 +515,18 @@ export const useSystemBrowse = (path?: string) => {
 	});
 };
 
+export const useResetSystemStats = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.resetSystemStats(),
+		onSuccess: () => {
+			// Invalidate pool metrics to show reset values
+			queryClient.invalidateQueries({ queryKey: ["system", "pool", "metrics"] });
+		},
+	});
+};
+
 // ARR Webhook Registration hook
 export const useRegisterArrsWebhooks = () => {
 	return useMutation({

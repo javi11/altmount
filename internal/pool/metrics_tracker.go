@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/nntppool/v2"
 )
 
@@ -26,12 +27,16 @@ type MetricsSnapshot struct {
 // MetricsTracker tracks pool metrics over time and calculates rates
 type MetricsTracker struct {
 	pool              nntppool.UsenetConnectionPool
+	repo              *database.Repository
 	mu                sync.RWMutex
+	persistenceMu     sync.Mutex // Mutex for persistent state updates (offsets)
 	samples           []metricsample
 	sampleInterval    time.Duration
 	retentionPeriod   time.Duration
 	calculationWindow time.Duration // Window for speed calculations (shorter than retention for accuracy)
 	maxDownloadSpeed  float64
+	offsetBytes       int64
+	offsetArticles    int64
 	cancel            context.CancelFunc
 	logger            *slog.Logger
 }
@@ -48,9 +53,10 @@ type metricsample struct {
 }
 
 // NewMetricsTracker creates a new metrics tracker
-func NewMetricsTracker(pool nntppool.UsenetConnectionPool) *MetricsTracker {
+func NewMetricsTracker(pool nntppool.UsenetConnectionPool, repo *database.Repository) *MetricsTracker {
 	mt := &MetricsTracker{
 		pool:              pool,
+		repo:              repo,
 		samples:           make([]metricsample, 0, 60), // Preallocate for 60 samples
 		sampleInterval:    5 * time.Second,
 		retentionPeriod:   60 * time.Second,
@@ -58,7 +64,43 @@ func NewMetricsTracker(pool nntppool.UsenetConnectionPool) *MetricsTracker {
 		logger:            slog.Default().With("component", "metrics-tracker"),
 	}
 
+	// Initialize persistent offsets from database
+	mt.loadPersistentStats()
+
 	return mt
+}
+
+func (mt *MetricsTracker) loadPersistentStats() {
+	if mt.repo == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mt.persistenceMu.Lock()
+	defer mt.persistenceMu.Unlock()
+
+	bytes, err := mt.repo.GetSystemStat(ctx, "bytes_downloaded")
+	if err != nil {
+		mt.logger.Error("Failed to load persistent bytes_downloaded", "err", err)
+	} else {
+		mt.offsetBytes = bytes
+	}
+
+	articles, err := mt.repo.GetSystemStat(ctx, "articles_downloaded")
+	if err != nil {
+		mt.logger.Error("Failed to load persistent articles_downloaded", "err", err)
+	} else {
+		mt.offsetArticles = articles
+	}
+
+	maxSpeed, err := mt.repo.GetSystemStat(ctx, "max_download_speed")
+	if err != nil {
+		mt.logger.Error("Failed to load persistent max_download_speed", "err", err)
+	} else {
+		mt.maxDownloadSpeed = float64(maxSpeed)
+	}
 }
 
 // Start begins collecting metrics samples
@@ -72,16 +114,26 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 	// Start sampling goroutine
 	go mt.samplingLoop(childCtx)
 
+	mt.mu.RLock()
+	mt.persistenceMu.Lock()
 	mt.logger.InfoContext(ctx, "Metrics tracker started",
 		"sample_interval", mt.sampleInterval,
 		"retention_period", mt.retentionPeriod,
+		"offset_bytes", mt.offsetBytes,
+		"offset_articles", mt.offsetArticles,
 	)
+	mt.persistenceMu.Unlock()
+	mt.mu.RUnlock()
 }
 
 // Stop stops collecting metrics samples
 func (mt *MetricsTracker) Stop() {
 	if mt.cancel != nil {
 		mt.cancel()
+
+		// Save final metrics before stopping
+		mt.savePersistentStats(context.Background())
+
 		mt.logger.InfoContext(context.Background(), "Metrics tracker stopped")
 	}
 }
@@ -102,10 +154,13 @@ func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
 		mt.maxDownloadSpeed = downloadSpeed
 	}
 
+	mt.persistenceMu.Lock()
+	defer mt.persistenceMu.Unlock()
+
 	return MetricsSnapshot{
-		BytesDownloaded:             poolSnapshot.BytesDownloaded,
+		BytesDownloaded:             mt.offsetBytes + poolSnapshot.BytesDownloaded,
 		BytesUploaded:               poolSnapshot.BytesUploaded,
-		ArticlesDownloaded:          poolSnapshot.ArticlesDownloaded,
+		ArticlesDownloaded:          mt.offsetArticles + poolSnapshot.ArticlesDownloaded,
 		ArticlesPosted:              poolSnapshot.ArticlesPosted,
 		TotalErrors:                 poolSnapshot.TotalErrors,
 		ProviderErrors:              poolSnapshot.ProviderErrors,
@@ -116,10 +171,46 @@ func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
 	}
 }
 
+// UpdatePersistence allows external triggers to save persistent stats
+func (mt *MetricsTracker) UpdatePersistence(ctx context.Context) {
+	mt.savePersistentStats(ctx)
+}
+
+// ResetStats resets the cumulative statistics in memory and triggers a DB reset
+func (mt *MetricsTracker) ResetStats(ctx context.Context) error {
+	if mt.repo != nil {
+		if err := mt.repo.ResetSystemStats(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Reset in-memory state
+	mt.mu.Lock()
+	mt.samples = make([]metricsample, 0, 60)
+	mt.maxDownloadSpeed = 0
+	mt.mu.Unlock()
+
+	mt.persistenceMu.Lock()
+	// To fully reset, we must also reset the offsets and account for current pool session data
+	// We can't easily reset nntppool's internal counters without recreating it, 
+	// so we'll just adjust offsets to make the sum zero.
+	snapshot := mt.pool.GetMetricsSnapshot()
+	mt.offsetBytes = -snapshot.BytesDownloaded
+	mt.offsetArticles = -snapshot.ArticlesDownloaded
+	mt.persistenceMu.Unlock()
+
+	mt.logger.InfoContext(ctx, "Cumulative statistics reset")
+	return nil
+}
+
 // samplingLoop periodically samples metrics
 func (mt *MetricsTracker) samplingLoop(ctx context.Context) {
 	ticker := time.NewTicker(mt.sampleInterval)
 	defer ticker.Stop()
+
+	// Periodic persistence ticker (every 1 minute)
+	persistTicker := time.NewTicker(1 * time.Minute)
+	defer persistTicker.Stop()
 
 	for {
 		select {
@@ -127,9 +218,40 @@ func (mt *MetricsTracker) samplingLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			mt.takeSample()
+		case <-persistTicker.C:
+			mt.savePersistentStats(ctx)
 		}
 	}
 }
+
+// savePersistentStats persists current total stats to database
+func (mt *MetricsTracker) savePersistentStats(ctx context.Context) {
+	if mt.repo == nil {
+		return
+	}
+
+	mt.mu.RLock()
+	poolSnapshot := mt.pool.GetMetricsSnapshot()
+	currentMaxSpeed := mt.maxDownloadSpeed
+	mt.mu.RUnlock()
+
+	mt.persistenceMu.Lock()
+	totalBytes := mt.offsetBytes + poolSnapshot.BytesDownloaded
+	totalArticles := mt.offsetArticles + poolSnapshot.ArticlesDownloaded
+	mt.persistenceMu.Unlock()
+
+	// Update in database
+	if err := mt.repo.UpdateSystemStat(ctx, "bytes_downloaded", totalBytes); err != nil {
+		mt.logger.ErrorContext(ctx, "Failed to persist bytes_downloaded", "err", err)
+	}
+	if err := mt.repo.UpdateSystemStat(ctx, "articles_downloaded", totalArticles); err != nil {
+		mt.logger.ErrorContext(ctx, "Failed to persist articles_downloaded", "err", err)
+	}
+	if err := mt.repo.UpdateSystemStat(ctx, "max_download_speed", int64(currentMaxSpeed)); err != nil {
+		mt.logger.ErrorContext(ctx, "Failed to persist max_download_speed", "err", err)
+	}
+}
+
 
 // takeSample captures a metrics snapshot and stores it
 func (mt *MetricsTracker) takeSample() {
