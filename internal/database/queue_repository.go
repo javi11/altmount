@@ -275,6 +275,26 @@ func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, s
 	return nil
 }
 
+// IncrementRetryCountAndResetStatus increments the retry count and resets the status to pending
+func (r *QueueRepository) IncrementRetryCountAndResetStatus(ctx context.Context, id int64, errorMessage *string) (bool, error) {
+	query := `
+		UPDATE import_queue 
+		SET status = 'pending', retry_count = retry_count + 1, started_at = NULL, error_message = ?, updated_at = datetime('now')
+		WHERE id = ? AND retry_count < max_retries
+	`
+	result, err := r.db.ExecContext(ctx, query, errorMessage, id)
+	if err != nil {
+		return false, fmt.Errorf("failed to increment retry count: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected > 0, nil
+}
+
 // FilterExistingNzbdavIds checks a list of nzbdav IDs and returns those that already exist in the queue
 func (r *QueueRepository) FilterExistingNzbdavIds(ctx context.Context, ids []string) ([]string, error) {
 	if len(ids) == 0 {

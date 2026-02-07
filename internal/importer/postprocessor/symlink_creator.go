@@ -10,6 +10,7 @@ import (
 
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/pathutil"
 )
 
 // CreateSymlinks creates symlinks for an imported item based on the import strategy
@@ -26,10 +27,10 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 	}
 
 	// Get the actual metadata/mount path (where the content actually lives)
-	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
+	actualPath := pathutil.JoinAbsPath(cfg.MountPath, resultingPath)
 
 	// Check the metadata directory to determine if this is a file or directory
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
+	metadataPath := pathutil.JoinAbsPath(cfg.Metadata.RootPath, resultingPath)
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
@@ -108,13 +109,12 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) error {
 	cfg := c.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(resultingPath, "/")))
+	symlinkPath := pathutil.JoinAbsPath(*cfg.Import.ImportDir, resultingPath)
+	baseDir := filepath.Dir(symlinkPath)
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
-
-	symlinkPath := filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(resultingPath, "/"))
 
 	// Remove existing symlink if present
 	if _, err := os.Lstat(symlinkPath); err == nil {
@@ -123,6 +123,7 @@ func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) erro
 		}
 	}
 
+	// Create the symlink using the absolute actual path
 	if err := os.Symlink(actualPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}

@@ -26,6 +26,8 @@ import (
 	"github.com/javi11/altmount/internal/importer/queue"
 	"github.com/javi11/altmount/internal/importer/scanner"
 	"github.com/javi11/altmount/internal/metadata"
+	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/sabnzbd"
@@ -677,14 +679,26 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 				// Recalculate virtualDir relative to the nzbFolder to discard physical parent paths like /config
 				// We use the subdirectory structure found inside .nzbs if it exists
 
-				cleanBase := filepath.ToSlash(*basePath)
+				// Strip 'failed' subdirectory if present (added when items fail and are moved to .nzbs/failed)
+				// We want to avoid including 'failed' in the virtual directory path during retries.
 				cleanRel := filepath.ToSlash(relDir)
+				if strings.HasPrefix(cleanRel, "failed/") {
+					cleanRel = strings.TrimPrefix(cleanRel, "failed/")
+				} else if cleanRel == "failed" {
+					cleanRel = ""
+				}
 
-				// Avoid duplication if basePath already starts with relDir (common with Watcher or manual imports)
-				if *basePath != "" && (cleanBase == cleanRel || strings.HasPrefix(cleanBase, cleanRel+"/")) {
+				if cleanRel == "" {
 					virtualDir = *basePath
 				} else {
-					virtualDir = filepath.Join(*basePath, relDir)
+					cleanBase := filepath.ToSlash(*basePath)
+
+					// Avoid duplication if basePath already starts with relDir (common with Watcher or manual imports)
+					if *basePath != "" && (cleanBase == cleanRel || strings.HasPrefix(cleanBase, cleanRel+"/")) {
+						virtualDir = *basePath
+					} else {
+						virtualDir = filepath.Join(*basePath, cleanRel)
+					}
 				}
 			}
 
@@ -743,16 +757,8 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 	// Prepend SABnzbd CompleteDir to virtualDir
 	cfg := s.configGetter()
 	if cfg.SABnzbd.CompleteDir != "" {
-		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
-		// Ensure completeDir is absolute for comparison
-		if !strings.HasPrefix(completeDir, "/") {
-			completeDir = "/" + completeDir
-		}
-
-		if !strings.HasPrefix(virtualDir, completeDir) {
-			virtualDir = filepath.Join(completeDir, virtualDir)
-			virtualDir = filepath.ToSlash(virtualDir)
-		}
+		virtualDir = pathutil.JoinAbsPath(cfg.SABnzbd.CompleteDir, virtualDir)
+		virtualDir = filepath.ToSlash(virtualDir)
 	}
 
 	return virtualDir
@@ -908,6 +914,20 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
+	// Double-check file health before marking as completed.
+	// If the file is obviously broken (metadata gap), we should fail the import immediately
+	// so Sonarr/Radarr can re-grab it without it getting stuck in 'complete' folder.
+	if meta, err := s.metadataService.ReadFileMetadata(resultingPath); err == nil && meta != nil {
+		if meta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
+			errMsg := "File is corrupted (metadata gap detected during import)"
+			if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errMsg); err != nil {
+				return err
+			}
+			s.log.WarnContext(ctx, "Import failed: file is corrupted", "queue_id", item.ID, "path", resultingPath)
+			return nil
+		}
+	}
+
 	// Refresh mount path if needed before post-processing
 	s.postProcessor.RefreshMountPathIfNeeded(ctx, resultingPath, item.ID)
 
@@ -970,7 +990,30 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"error", processingErr)
 	}
 
-	// Mark as failed in queue database (no automatic retry)
+	// Handle automatic retries for transient errors
+	if !IsNonRetryable(processingErr) {
+		retried, err := s.database.Repository.IncrementRetryCountAndResetStatus(ctx, item.ID, &errorMessage)
+		if err == nil && retried {
+			s.log.InfoContext(ctx, "Item failed with transient error, scheduled for retry",
+				"queue_id", item.ID,
+				"retry_count", item.RetryCount+1,
+				"max_retries", item.MaxRetries)
+
+			// Clear progress tracking
+			if s.broadcaster != nil {
+				s.broadcaster.ClearProgress(int(item.ID))
+			}
+			return
+		}
+
+		if err != nil {
+			s.log.ErrorContext(ctx, "Failed to increment retry count", "queue_id", item.ID, "error", err)
+		} else {
+			s.log.WarnContext(ctx, "Max retries reached for transient error", "queue_id", item.ID)
+		}
+	}
+
+	// Mark as failed in queue database (non-retryable or max retries reached)
 	if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFailed, &errorMessage); err != nil {
 		s.log.ErrorContext(ctx, "Failed to mark item as failed", "queue_id", item.ID, "error", err)
 	} else {

@@ -3,10 +3,10 @@ package postprocessor
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/pathutil"
 )
 
 // NotifyARR notifies ARR applications about imported content
@@ -18,7 +18,7 @@ func (c *Coordinator) NotifyARR(ctx context.Context, item *database.ImportQueueI
 	cfg := c.configGetter()
 
 	// Try to trigger scan on the specific instance that manages this file
-	fullMountPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
+	fullMountPath := pathutil.JoinAbsPath(cfg.MountPath, resultingPath)
 
 	if err := c.arrsService.TriggerScanForFile(ctx, fullMountPath); err != nil {
 		// Fallback: broadcast to all instances of the type

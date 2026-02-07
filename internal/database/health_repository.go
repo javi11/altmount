@@ -1403,3 +1403,53 @@ func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath strin
 
 	return nil
 }
+
+// UpdateSystemState updates a system state string (JSON) by key
+func (r *HealthRepository) UpdateSystemState(ctx context.Context, key string, value string) error {
+	query := `
+		INSERT INTO system_state (key, value, updated_at)
+		VALUES (?, ?, datetime('now'))
+		ON CONFLICT(key) DO UPDATE SET
+		value = excluded.value,
+		updated_at = datetime('now')
+	`
+	_, err := r.db.ExecContext(ctx, query, key, value)
+	if err != nil {
+		return fmt.Errorf("failed to update system state %s: %w", key, err)
+	}
+	return nil
+}
+
+// GetSystemState retrieves a system state string by key
+func (r *HealthRepository) GetSystemState(ctx context.Context, key string) (string, error) {
+	query := `SELECT value FROM system_state WHERE key = ?`
+	var value string
+	err := r.db.QueryRowContext(ctx, query, key).Scan(&value)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get system state %s: %w", key, err)
+	}
+	return value, nil
+}
+
+// RenameHealthRecord updates the file_path for a health record when a file is moved
+func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newPath string) error {
+	oldPath = strings.TrimPrefix(oldPath, "/")
+	newPath = strings.TrimPrefix(newPath, "/")
+
+	query := `
+		UPDATE file_health
+		SET file_path = ?,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	_, err := r.db.ExecContext(ctx, query, newPath, oldPath)
+	if err != nil {
+		return fmt.Errorf("failed to rename health record: %w", err)
+	}
+
+	return nil
+}

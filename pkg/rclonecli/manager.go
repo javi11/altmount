@@ -115,7 +115,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	args := []string{
 		"rcd",
-		"--rc-addr", ":" + m.rcPort,
+		"--rc-addr", "127.0.0.1:" + m.rcPort,
 		"--rc-no-auth", // We'll handle auth at the application level
 		"--config", filepath.Join(m.rcloneDir, "rclone.conf"),
 		"--log-file", logFile,
@@ -344,7 +344,7 @@ func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("http://localhost:%s/%s", m.rcPort, req.Command)
+	url := fmt.Sprintf("http://127.0.0.1:%s/%s", m.rcPort, req.Command)
 	httpReq, err := http.NewRequestWithContext(m.ctx, "POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
