@@ -63,6 +63,14 @@ func (c *Config) GetVerifyData() bool {
 	return *c.Health.VerifyData
 }
 
+// GetCheckAllSegments returns whether to check all segments during health checks.
+func (c *Config) GetCheckAllSegments() bool {
+	if c.Health.CheckAllSegments == nil {
+		return false // Default: false
+	}
+	return *c.Health.CheckAllSegments
+}
+
 // Import config accessor methods.
 
 // GetMaxImportConnections returns max import connections with a default fallback.
@@ -108,4 +116,12 @@ func (c *Config) GetMetadataBackupKeep() int {
 		return 10 // Default: 10 backups
 	}
 	return c.Metadata.Backup.KeepBackups
+}
+
+// GetFuseMountPath returns the FUSE mount path, falling back to the root mount_path if not set.
+func (c *Config) GetFuseMountPath() string {
+	if c.Fuse.MountPath != "" {
+		return c.Fuse.MountPath
+	}
+	return c.MountPath
 }
