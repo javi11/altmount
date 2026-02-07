@@ -47,6 +47,29 @@ func (s *Server) handleGetSystemStats(c *fiber.Ctx) error {
 	})
 }
 
+// handleResetSystemStats handles POST /api/system/stats/reset
+func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
+	if s.poolManager == nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Pool manager not available",
+		})
+	}
+
+	if err := s.poolManager.ResetMetrics(c.Context()); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to reset cumulative statistics",
+			"details": err.Error(),
+		})
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "Cumulative statistics reset successfully",
+	})
+}
+
 // handleGetSystemHealth handles GET /api/system/health
 func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 	// Perform health checks

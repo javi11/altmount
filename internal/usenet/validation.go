@@ -70,11 +70,19 @@ func ValidateSegmentAvailability(
 			var err error
 			if verifyData {
 				// Hybrid mode: attempt to read a few bytes of the segment body
-				lw := &limitedWriter{limit: 1}
+				// to ensure the provider actually has the data.
+				// We use a limited writer to read 16 bytes and check if they are all zeros.
+				lw := &limitedWriter{limit: 16, allZeros: true}
 				_, err = usenetPool.Body(checkCtx, seg.Id, lw, []string{})
 
+				// If we reached our limit, it means the segment data is accessible.
 				if errors.Is(err, ErrLimitReached) {
-					err = nil
+					// Check if the data was just filler zeros (ghost file)
+					if lw.allZeros {
+						err = fmt.Errorf("segment with ID %s contains only zeros", seg.Id)
+					} else {
+						err = nil
+					}
 				}
 			} else {
 				// Standard mode: only perform STAT command
@@ -163,13 +171,18 @@ func ValidateSegmentAvailabilityDetailed(
 			if verifyData {
 				// Hybrid mode: attempt to read a few bytes of the segment body
 				// to ensure the provider actually has the data.
-				// We use a limited writer to only read 1 byte.
-				lw := &limitedWriter{limit: 1}
+				// We use a limited writer to read 16 bytes and check if they are all zeros.
+				lw := &limitedWriter{limit: 16, allZeros: true}
 				_, err = usenetPool.Body(checkCtx, seg.Id, lw, []string{})
 
-				// If we reached our 1-byte limit, it means the segment data is accessible.
+				// If we reached our limit, it means the segment data is accessible.
 				if errors.Is(err, ErrLimitReached) {
-					err = nil
+					// Check if the data was just filler zeros (ghost file)
+					if lw.allZeros {
+						err = fmt.Errorf("segment with ID %s contains only zeros", seg.Id)
+					} else {
+						err = nil
+					}
 				}
 			} else {
 				// Standard mode: only perform STAT command
@@ -212,11 +225,24 @@ func ValidateSegmentAvailabilityDetailed(
 
 // limitedWriter is an io.Writer that stops after reaching a certain byte limit
 type limitedWriter struct {
-	limit int64
-	read  int64
+	limit    int64
+	read     int64
+	allZeros bool
 }
 
 func (lw *limitedWriter) Write(p []byte) (n int, err error) {
+	// Initialize allZeros on first write if we haven't read anything yet
+	if lw.read == 0 && len(p) > 0 {
+		lw.allZeros = true
+	}
+
+	for _, b := range p {
+		if b != 0 {
+			lw.allZeros = false
+			break
+		}
+	}
+
 	canWrite := lw.limit - lw.read
 	if canWrite <= 0 {
 		return 0, ErrLimitReached
@@ -253,10 +279,10 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 	}
 
 	// Optimization: Cap the number of samples for very large files to prevent
-	// excessive network I/O. 50 random samples + 5 fixed samples is plenty
+	// excessive network I/O. 1000 random samples + 5 fixed samples is plenty
 	// for a reliable health check even on 100GB+ files.
-	if targetSamples > 55 {
-		targetSamples = 55
+	if targetSamples > 1005 {
+		targetSamples = 1005
 	}
 
 	// If target samples equals or exceeds total segments, validate all

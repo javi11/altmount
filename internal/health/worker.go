@@ -15,6 +15,7 @@ import (
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/sourcegraph/conc"
 )
 
@@ -369,7 +370,7 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 			releaseDate = &fh.CreatedAt
 		}
 
-		nextCheck := CalculateNextCheck(*releaseDate, time.Now().UTC())
+		nextCheck := CalculateNextCheck(releaseDate.UTC(), time.Now().UTC())
 		update.Type = database.UpdateTypeHealthy
 		update.Status = database.HealthStatusHealthy
 		update.ScheduledCheckAt = nextCheck
@@ -763,9 +764,9 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	if item.LibraryPath != nil && *item.LibraryPath != "" {
 		pathForRescan = *item.LibraryPath
 	} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(filePath, "/"))
+		pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, filePath)
 	} else {
-		pathForRescan = filepath.Join(hw.configGetter().MountPath, strings.TrimPrefix(filePath, "/"))
+		pathForRescan = pathutil.JoinAbsPath(hw.configGetter().MountPath, filePath)
 	}
 
 	// Step 4: Trigger rescan through the ARR service

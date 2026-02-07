@@ -419,7 +419,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 		err       error
 	}
 
-	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(runtime.NumCPU()).WithContext(ctx)
+	concPool := concpool.NewWithResults[fetchResult]().WithMaxGoroutines(runtime.NumCPU()).WithContext(ctx).WithFirstError()
 
 	// Fetch first segment of each file in parallel
 	for idx, file := range files {
@@ -441,7 +441,6 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						MissingFirstSegment: true,
 						OriginalIndex:       originalIndex,
 					},
-					err: fmt.Errorf("file has no segments"),
 				}, nil
 			}
 
@@ -454,15 +453,26 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			// Get body reader for the first segment
 			r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
 			if err != nil {
+				// Check if this is a permanent failure (e.g. Article Not Found)
+				// If it's a transient failure (e.g. connection pool saturation), we should return the error
+				// to trigger a retry of the whole NZB instead of marking it as missing.
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "430") || strings.Contains(errStr, "not found") || strings.Contains(errStr, "no such article") {
+					return fetchResult{
+						segmentID: firstSegment.ID,
+						data: &FirstSegmentData{
+							File:                fileToFetch,
+							MissingFirstSegment: true,
+							OriginalIndex:       originalIndex,
+						},
+						err: fmt.Errorf("failed to get body reader: %w", err),
+					}, nil
+				}
+
+				// Transient error (saturation, timeout, network error, etc.)
 				return fetchResult{
-					segmentID: firstSegment.ID,
-					data: &FirstSegmentData{
-						File:                fileToFetch,
-						MissingFirstSegment: true,
-						OriginalIndex:       originalIndex,
-					},
-					err: fmt.Errorf("failed to get body reader: %w", err),
-				}, nil
+					err: err,
+				}, err
 			}
 			defer r.Close()
 
@@ -583,7 +593,8 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			return nil, errors.NewNonRetryableError("fetching first segments canceled", err)
 		}
 
-		return nil, errors.NewNonRetryableError("failed to fetch first segments", err)
+		// Return the error directly - if it's not a NonRetryableError, it will be retryable by the queue
+		return nil, fmt.Errorf("failed to fetch first segments: %w", err)
 	}
 
 	// Build cache from all fetches (successful and failed)
