@@ -1,6 +1,7 @@
 package nzbfilesystem
 
 import (
+	"context"
 	"io"
 	"sync"
 	"testing"
@@ -359,6 +360,10 @@ func (m *mockPoolManager) HasPool() bool {
 
 func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 	return pool.MetricsSnapshot{}, nil
+}
+
+func (m *mockPoolManager) ResetMetrics(_ context.Context) error {
+	return nil
 }
 
 // TestSeekResetsOriginalRangeEnd tests that Seek properly resets originalRangeEnd

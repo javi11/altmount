@@ -90,7 +90,7 @@ type FileHealth struct {
 	FilePath         string       `db:"file_path"`
 	LibraryPath      *string      `db:"library_path"` // Path to file in library directory (symlink or .strm file)
 	Status           HealthStatus `db:"status"`
-	LastChecked      time.Time    `db:"last_checked"`
+	LastChecked      *time.Time   `db:"last_checked"`
 	LastError        *string      `db:"last_error"`
 	RetryCount       int          `db:"retry_count"`        // Health check retry count
 	MaxRetries       int          `db:"max_retries"`        // Max health check retries
@@ -134,4 +134,11 @@ type MediaFile struct {
 	FileSize     *int64    `db:"file_size"`     // File size in bytes (nullable)
 	CreatedAt    time.Time `db:"created_at"`    // When record was created
 	UpdatedAt    time.Time `db:"updated_at"`    // When record was last updated
+}
+
+// SystemStat represents a persistent system statistic
+type SystemStat struct {
+	Key       string    `db:"key"`
+	Value     int64     `db:"value"`
+	UpdatedAt time.Time `db:"updated_at"`
 }

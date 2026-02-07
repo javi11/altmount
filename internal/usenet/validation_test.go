@@ -40,6 +40,9 @@ func (m *MockPoolManager) HasPool() bool {
 func (m *MockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 	return pool.MetricsSnapshot{}, nil
 }
+func (m *MockPoolManager) ResetMetrics(_ context.Context) error {
+	return nil
+}
 
 // MockConnectionPool
 type MockConnectionPool struct {
@@ -69,7 +72,11 @@ func TestValidateSegmentAvailabilityDetailed_Hybrid(t *testing.T) {
 
 	// Test hybrid mode (verifyData = true)
 	// Expect Body call
-	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, []string{}).Return(0, ErrLimitReached).Once()
+	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, []string{}).Run(func(args mock.Arguments) {
+		w := args.Get(2).(io.Writer)
+		// Write some non-zero data
+		_, _ = w.Write([]byte{0x01, 0x02, 0x03})
+	}).Return(3, ErrLimitReached).Once()
 
 	result, err := ValidateSegmentAvailabilityDetailed(
 		context.Background(),
@@ -124,6 +131,82 @@ func TestValidateSegmentAvailabilityDetailed_Hybrid_Failure(t *testing.T) {
 	mockManager.AssertExpectations(t)
 }
 
+func TestValidateSegmentAvailabilityDetailed_Hybrid_AllZeros(t *testing.T) {
+	// Setup
+	mockPool := new(MockConnectionPool)
+	mockManager := new(MockPoolManager)
+	mockManager.On("GetPool").Return(mockPool, nil)
+
+	segments := []*metapb.SegmentData{
+		{Id: "seg1", SegmentSize: 1000},
+	}
+
+	// Test hybrid mode (verifyData = true)
+	// Mock Body call to write zeros
+	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, []string{}).Run(func(args mock.Arguments) {
+		w := args.Get(2).(io.Writer)
+		// Write 16 zeros
+		_, _ = w.Write(make([]byte, 16))
+	}).Return(16, ErrLimitReached).Once()
+
+	result, err := ValidateSegmentAvailabilityDetailed(
+		context.Background(),
+		segments,
+		mockManager,
+		1,
+		100,
+		nil,
+		time.Second,
+		true, // verifyData
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, result.MissingCount, "Should flag zero-filled segment as missing")
+	assert.Equal(t, 1, result.TotalChecked)
+
+	mockPool.AssertExpectations(t)
+	mockManager.AssertExpectations(t)
+}
+
+func TestValidateSegmentAvailabilityDetailed_Hybrid_PartialZeros(t *testing.T) {
+	// Setup
+	mockPool := new(MockConnectionPool)
+	mockManager := new(MockPoolManager)
+	mockManager.On("GetPool").Return(mockPool, nil)
+
+	segments := []*metapb.SegmentData{
+		{Id: "seg1", SegmentSize: 1000},
+	}
+
+	// Test hybrid mode (verifyData = true)
+	// Mock Body call to write mixed data: 8 zeros then 1 non-zero
+	mockPool.On("Body", mock.Anything, "seg1", mock.Anything, []string{}).Run(func(args mock.Arguments) {
+		w := args.Get(2).(io.Writer)
+		// Write 8 zeros then one 0x01
+		data := make([]byte, 16)
+		data[8] = 0x01
+		_, _ = w.Write(data)
+	}).Return(16, ErrLimitReached).Once()
+
+	result, err := ValidateSegmentAvailabilityDetailed(
+		context.Background(),
+		segments,
+		mockManager,
+		1,
+		100,
+		nil,
+		time.Second,
+		true, // verifyData
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, result.MissingCount, "Should NOT flag segment with partial data as missing")
+	assert.Equal(t, 1, result.TotalChecked)
+
+	mockPool.AssertExpectations(t)
+	mockManager.AssertExpectations(t)
+}
+
 func TestSelectSegmentsForValidation(t *testing.T) {
 	// Seed random for predictability in middle segments
 	rand.Seed(1)
@@ -168,5 +251,16 @@ func TestSelectSegmentsForValidation(t *testing.T) {
 		// 1% of 100 = 1 segment, but minimum is 5
 		selected := selectSegmentsForValidation(segments, 1)
 		assert.Equal(t, 5, len(selected))
+	})
+
+	t.Run("cap 1005", func(t *testing.T) {
+		// Create 20,000 segments (10% = 2000)
+		largeSegments := make([]*metapb.SegmentData, 20000)
+		for i := 0; i < 20000; i++ {
+			largeSegments[i] = &metapb.SegmentData{Id: fmt.Sprintf("seg%d", i)}
+		}
+
+		selected := selectSegmentsForValidation(largeSegments, 10)
+		assert.Equal(t, 1005, len(selected), "Should be capped at 1005")
 	})
 }

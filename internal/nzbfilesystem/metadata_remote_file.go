@@ -329,8 +329,10 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 
 	// Clean up any health records for the new location and optionally for the directory
 	if mrf.healthRepository != nil {
-		// Remove health record for the specific resulting file (the new one)
-		_ = mrf.healthRepository.DeleteHealthRecord(ctx, normalizedNew)
+		// Update the health record path to follow the move
+		if err := mrf.healthRepository.RenameHealthRecord(ctx, normalizedOld, normalizedNew); err != nil {
+			slog.WarnContext(ctx, "Failed to update health record path during MOVE", "old", normalizedOld, "new", normalizedNew, "error", err)
+		}
 
 		// Check if we should resolve other repairs in the same directory
 		cfg := mrf.configGetter()
