@@ -310,9 +310,6 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Valid port is required (1-65535)", "INVALID_PORT")
 	}
 
-	// TODO: TestProviderConnectivity was removed in nntppool v4.
-	// Implement a basic connectivity test by creating a temporary client and doing a STAT or similar.
-	// For now, we create a minimal client and close it to verify connectivity.
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 
@@ -324,28 +321,23 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		}
 	}
 
-	testClient, err := nntppool.NewClient(ctx, []nntppool.Provider{
-		{
-			Host:        host,
-			TLSConfig:   tlsCfg,
-			Auth:        nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
-			Connections: 1,
-		},
+	result := nntppool.TestProvider(ctx, nntppool.Provider{
+		Host:      host,
+		TLSConfig: tlsCfg,
+		Auth:      nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
 	})
-	if err != nil {
+
+	if result.Err != nil {
 		return RespondSuccess(c, TestProviderResponse{
 			Success:      false,
-			ErrorMessage: err.Error(),
+			ErrorMessage: result.Err.Error(),
 		})
 	}
-	defer testClient.Close()
 
-	response := TestProviderResponse{
-		Success:      true,
-		ErrorMessage: "",
-	}
-
-	return RespondSuccess(c, response)
+	return RespondSuccess(c, TestProviderResponse{
+		Success: true,
+		RTTMs:   result.RTT.Milliseconds(),
+	})
 }
 
 // handleCreateProvider creates a new NNTP provider

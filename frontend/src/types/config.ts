@@ -728,6 +728,7 @@ export interface ProviderTestRequest {
 export interface ProviderTestResponse {
 	success: boolean;
 	error_message?: string;
+	rtt_ms?: number;
 }
 
 export interface ProviderCreateRequest {

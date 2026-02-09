@@ -626,12 +626,6 @@ type ProviderTestRequest struct {
 	ProxyURL    string `json:"proxy_url,omitempty"`
 }
 
-// ProviderTestResponse represents the result of testing provider connectivity
-type ProviderTestResponse struct {
-	Success      bool   `json:"success"`
-	ErrorMessage string `json:"error_message,omitempty"`
-}
-
 // ProviderCreateRequest represents a request to create a new provider
 type ProviderCreateRequest struct {
 	Host             string `json:"host"`
@@ -729,6 +723,7 @@ type PoolMetricsResponse struct {
 type TestProviderResponse struct {
 	Success      bool   `json:"success"`
 	ErrorMessage string `json:"error_message,omitempty"`
+	RTTMs        int64  `json:"rtt_ms,omitempty"`
 }
 
 // Library Sync API Types

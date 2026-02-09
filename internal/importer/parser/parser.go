@@ -575,7 +575,9 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	return cache, nil
 }
 
-// fetchYencHeaders fetches the yenc header to get the actual part size for a specific segment
+// fetchYencHeaders fetches the yenc header to get the actual part size for a specific segment.
+// It uses BodyAsync with io.Discard + onMeta to return headers as soon as =ybegin/=ypart
+// lines are parsed, without waiting for the full article body to transfer.
 func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegment, groups []string) (nntppool.YEncMeta, error) {
 	if p.poolManager == nil {
 		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no pool manager available", nil)
@@ -586,18 +588,34 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no connection pool available", err)
 	}
 
-	result, err := cp.Body(ctx, segment.ID)
-	if err != nil {
-		return nntppool.YEncMeta{}, errors.NewNonRetryableError("failed to get body: %w", err)
+	// onMeta fires after =ybegin/=ypart parsing (~first 2 lines),
+	// while the body continues draining to io.Discard in the background.
+	metaCh := make(chan nntppool.YEncMeta, 1)
+	resultCh := cp.BodyAsync(ctx, segment.ID, io.Discard, func(meta nntppool.YEncMeta) {
+		metaCh <- meta
+	})
+
+	// Wait for either: headers via onMeta (fast), full result (error or no yEnc), or context cancel.
+	select {
+	case headers := <-metaCh:
+		if headers.PartSize <= 0 {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
+		}
+		return headers, nil
+	case result := <-resultCh:
+		// BodyAsync completed before onMeta fired — either error or non-yEnc article
+		if result.Err != nil {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("failed to get body", result.Err)
+		}
+		// onMeta didn't fire but body completed — use headers from result
+		headers := result.Body.YEnc
+		if headers.PartSize <= 0 {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
+		}
+		return headers, nil
+	case <-ctx.Done():
+		return nntppool.YEncMeta{}, errors.NewNonRetryableError("context canceled", ctx.Err())
 	}
-
-	headers := result.YEnc
-
-	if headers.PartSize <= 0 {
-		return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
-	}
-
-	return headers, nil
 }
 
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers
