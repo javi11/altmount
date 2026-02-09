@@ -22,7 +22,7 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/slogutil"
-	"github.com/javi11/nntppool/v2/pkg/nntpcli"
+	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 	concpool "github.com/sourcegraph/conc/pool"
 )
@@ -30,11 +30,11 @@ import (
 // FirstSegmentData holds cached data from the first segment of an NZB file
 // This avoids redundant fetching when both PAR2 extraction and file parsing need the same data
 type FirstSegmentData struct {
-	File                *nzbparser.NzbFile  // Reference to the NZB file (for groups, subject, metadata)
-	Headers             nntpcli.YencHeaders // yEnc headers (FileName, FileSize, PartSize)
-	RawBytes            []byte              // Up to 16KB of raw data for PAR2 detection (may be less if segment is smaller)
-	MissingFirstSegment bool                // True if first segment download failed (article not found, etc.)
-	OriginalIndex       int                 // Original position in the parsed NZB file list
+	File                *nzbparser.NzbFile   // Reference to the NZB file (for groups, subject, metadata)
+	Headers             nntppool.YEncMeta    // yEnc headers (FileName, FileSize, PartSize)
+	RawBytes            []byte               // Up to 16KB of raw data for PAR2 detection (may be less if segment is smaller)
+	MissingFirstSegment bool                 // True if first segment download failed (article not found, etc.)
+	OriginalIndex       int                  // Original position in the parsed NZB file list
 }
 
 // Parser handles NZB file parsing
@@ -451,8 +451,8 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			ctx, cancel := context.WithTimeout(ctx, time.Second*30)
 			defer cancel()
 
-			// Get body reader for the first segment
-			r, err := cp.BodyReader(ctx, firstSegment.ID, nil)
+			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
+			result, err := cp.Body(ctx, firstSegment.ID)
 			if err != nil {
 				return fetchResult{
 					segmentID: firstSegment.ID,
@@ -461,45 +461,19 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 						MissingFirstSegment: true,
 						OriginalIndex:       originalIndex,
 					},
-					err: fmt.Errorf("failed to get body reader: %w", err),
-				}, nil
-			}
-			defer r.Close()
-
-			// Get yEnc headers
-			headers, err := r.GetYencHeaders()
-			if err != nil {
-				return fetchResult{
-					segmentID: firstSegment.ID,
-					data: &FirstSegmentData{
-						File:                fileToFetch,
-						MissingFirstSegment: true,
-						OriginalIndex:       originalIndex,
-					},
-					err: fmt.Errorf("failed to get yenc headers: %w", err),
+					err: fmt.Errorf("failed to get body: %w", err),
 				}, nil
 			}
 
-			// Read up to 16KB for PAR2 detection and hash matching
-			// PAR2 Hash16k requires exactly 16KB (or entire file if smaller)
+			headers := result.YEnc
+
+			// Use decoded bytes from result (up to 16KB for PAR2 detection)
 			const maxRead = 16 * 1024
-			buffer := make([]byte, maxRead)
-
-			// Try to read exactly 16KB (or until EOF for smaller files)
-			bytesRead, err := io.ReadFull(r, buffer)
-
-			// io.ErrUnexpectedEOF is acceptable - file/segment is smaller than 16KB
-			// io.EOF means the segment is empty (should not happen but handle gracefully)
-			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-				return fetchResult{
-					segmentID: firstSegment.ID,
-					data: &FirstSegmentData{
-						File:                fileToFetch,
-						MissingFirstSegment: true,
-						OriginalIndex:       originalIndex,
-					},
-					err: fmt.Errorf("failed to read segment data: %w", err),
-				}, nil
+			rawBytes := result.Bytes
+			bytesRead := len(rawBytes)
+			if bytesRead > maxRead {
+				rawBytes = rawBytes[:maxRead]
+				bytesRead = maxRead
 			}
 
 			// Check if we need to read from additional segments to reach 16KB
@@ -510,6 +484,10 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 					"first_segment_bytes", bytesRead,
 					"total_segments", len(fileToFetch.Segments))
 
+				// Pre-allocate buffer if we need to combine multiple segments
+				buffer := make([]byte, maxRead)
+				copy(buffer, rawBytes)
+
 				// Read from subsequent segments until we have 16KB or run out of segments
 				for segIdx := 1; segIdx < len(fileToFetch.Segments) && bytesRead < maxRead; segIdx++ {
 					segment := fileToFetch.Segments[segIdx]
@@ -517,52 +495,36 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 					// Create a new context for this segment
 					segCtx, segCancel := context.WithTimeout(ctx, time.Second*30)
 
-					segReader, err := cp.BodyReader(segCtx, segment.ID, nil)
+					segResult, err := cp.Body(segCtx, segment.ID)
+					segCancel()
 					if err != nil {
-						segCancel()
 						p.log.DebugContext(ctx, "Failed to read additional segment for 16KB completion",
 							"segment_index", segIdx,
 							"error", err)
 						break // Stop trying, use what we have
 					}
 
-					// Use closure to ensure cleanup via defer regardless of how we exit
-					shouldBreak := func() bool {
-						defer segReader.Close()
-						defer segCancel()
+					// Copy remaining bytes needed from this segment
+					remainingBytes := maxRead - bytesRead
+					segBytes := segResult.Bytes
+					if len(segBytes) > remainingBytes {
+						segBytes = segBytes[:remainingBytes]
+					}
+					copy(buffer[bytesRead:], segBytes)
+					bytesRead += len(segBytes)
 
-						// Read remaining bytes needed
-						remainingBytes := maxRead - bytesRead
-						tempBuffer := make([]byte, remainingBytes)
+					p.log.DebugContext(ctx, "Read additional bytes from segment",
+						"segment_index", segIdx,
+						"bytes_read", len(segBytes),
+						"total_bytes", bytesRead)
 
-						n, err := io.ReadFull(segReader, tempBuffer)
-						if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-							p.log.DebugContext(ctx, "Error reading from additional segment",
-								"segment_index", segIdx,
-								"error", err)
-							return true // break outer loop
-						}
-
-						// Append to our buffer
-						copy(buffer[bytesRead:], tempBuffer[:n])
-						bytesRead += n
-
-						p.log.DebugContext(ctx, "Read additional bytes from segment",
-							"segment_index", segIdx,
-							"bytes_read", n,
-							"total_bytes", bytesRead)
-
-						return false
-					}()
-
-					if shouldBreak || bytesRead >= maxRead {
+					if bytesRead >= maxRead {
 						break
 					}
 				}
-			}
 
-			// Trim buffer to actual bytes read
-			rawBytes := buffer[:bytesRead]
+				rawBytes = buffer[:bytesRead]
+			}
 
 			return fetchResult{
 				segmentID: firstSegment.ID,
@@ -613,33 +575,47 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 	return cache, nil
 }
 
-// fetchYencPartSize fetches the yenc header to get the actual part size for a specific segment
-func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegment, groups []string) (nntpcli.YencHeaders, error) {
+// fetchYencHeaders fetches the yenc header to get the actual part size for a specific segment.
+// It uses BodyAsync with io.Discard + onMeta to return headers as soon as =ybegin/=ypart
+// lines are parsed, without waiting for the full article body to transfer.
+func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegment, groups []string) (nntppool.YEncMeta, error) {
 	if p.poolManager == nil {
-		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("no pool manager available", nil)
+		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no pool manager available", nil)
 	}
 
 	cp, err := p.poolManager.GetPool()
 	if err != nil {
-		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("no connection pool available", err)
+		return nntppool.YEncMeta{}, errors.NewNonRetryableError("no connection pool available", err)
 	}
 
-	r, err := cp.BodyReader(ctx, segment.ID, nil)
-	if err != nil {
-		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("failed to get body reader: %w", err)
-	}
-	defer r.Close()
+	// onMeta fires after =ybegin/=ypart parsing (~first 2 lines),
+	// while the body continues draining to io.Discard in the background.
+	metaCh := make(chan nntppool.YEncMeta, 1)
+	resultCh := cp.BodyAsync(ctx, segment.ID, io.Discard, func(meta nntppool.YEncMeta) {
+		metaCh <- meta
+	})
 
-	headers, err := r.GetYencHeaders()
-	if err != nil {
-		return nntpcli.YencHeaders{}, fmt.Errorf("failed to get yenc headers: %w", err)
+	// Wait for either: headers via onMeta (fast), full result (error or no yEnc), or context cancel.
+	select {
+	case headers := <-metaCh:
+		if headers.PartSize <= 0 {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
+		}
+		return headers, nil
+	case result := <-resultCh:
+		// BodyAsync completed before onMeta fired — either error or non-yEnc article
+		if result.Err != nil {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("failed to get body", result.Err)
+		}
+		// onMeta didn't fire but body completed — use headers from result
+		headers := result.Body.YEnc
+		if headers.PartSize <= 0 {
+			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
+		}
+		return headers, nil
+	case <-ctx.Done():
+		return nntppool.YEncMeta{}, errors.NewNonRetryableError("context canceled", ctx.Err())
 	}
-
-	if headers.PartSize <= 0 {
-		return nntpcli.YencHeaders{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
-	}
-
-	return headers, nil
 }
 
 // normalizeSegmentSizesWithYenc normalizes segment sizes using yEnc PartSize headers

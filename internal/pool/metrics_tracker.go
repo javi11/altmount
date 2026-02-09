@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 )
 
 // MetricsSnapshot represents pool metrics at a point in time with calculated values
@@ -25,7 +25,7 @@ type MetricsSnapshot struct {
 
 // MetricsTracker tracks pool metrics over time and calculates rates
 type MetricsTracker struct {
-	pool              nntppool.UsenetConnectionPool
+	pool              *nntppool.Client
 	mu                sync.RWMutex
 	samples           []metricsample
 	sampleInterval    time.Duration
@@ -38,17 +38,14 @@ type MetricsTracker struct {
 
 // metricsample represents a single metrics sample at a point in time
 type metricsample struct {
-	bytesDownloaded    int64
-	bytesUploaded      int64
-	articlesDownloaded int64
-	articlesPosted     int64
-	totalErrors        int64
-	providerErrors     map[string]int64
-	timestamp          time.Time
+	avgSpeed       float64
+	totalErrors    int64
+	providerErrors map[string]int64
+	timestamp      time.Time
 }
 
 // NewMetricsTracker creates a new metrics tracker
-func NewMetricsTracker(pool nntppool.UsenetConnectionPool) *MetricsTracker {
+func NewMetricsTracker(pool *nntppool.Client) *MetricsTracker {
 	mt := &MetricsTracker{
 		pool:              pool,
 		samples:           make([]metricsample, 0, 60), // Preallocate for 60 samples
@@ -91,28 +88,43 @@ func (mt *MetricsTracker) GetSnapshot() MetricsSnapshot {
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
 
-	// Get current snapshot from pool
-	poolSnapshot := mt.pool.GetMetricsSnapshot()
+	// Get current stats from pool
+	stats := mt.pool.Stats()
+	now := time.Now()
 
-	// Calculate speeds
-	downloadSpeed, uploadSpeed := mt.calculateSpeeds(poolSnapshot)
+	// Calculate total errors and provider errors from v4 stats
+	var totalErrors int64
+	providerErrors := make(map[string]int64)
+	for _, ps := range stats.Providers {
+		totalErrors += ps.Errors
+		providerErrors[ps.Name] = ps.Errors
+	}
+
+	// v4 provides AvgSpeed directly (bytes/sec)
+	downloadSpeed := stats.AvgSpeed
 
 	// Update max speed
 	if downloadSpeed > mt.maxDownloadSpeed {
 		mt.maxDownloadSpeed = downloadSpeed
 	}
 
+	// Approximate bytes downloaded from average speed and elapsed time
+	var bytesDownloaded int64
+	if stats.Elapsed > 0 {
+		bytesDownloaded = int64(stats.AvgSpeed * stats.Elapsed.Seconds())
+	}
+
 	return MetricsSnapshot{
-		BytesDownloaded:             poolSnapshot.BytesDownloaded,
-		BytesUploaded:               poolSnapshot.BytesUploaded,
-		ArticlesDownloaded:          poolSnapshot.ArticlesDownloaded,
-		ArticlesPosted:              poolSnapshot.ArticlesPosted,
-		TotalErrors:                 poolSnapshot.TotalErrors,
-		ProviderErrors:              poolSnapshot.ProviderErrors,
+		BytesDownloaded:             bytesDownloaded,
+		BytesUploaded:               0, // v4 doesn't track uploads
+		ArticlesDownloaded:          0, // v4 doesn't track article counts
+		ArticlesPosted:              0, // v4 doesn't track article counts
+		TotalErrors:                 totalErrors,
+		ProviderErrors:              providerErrors,
 		DownloadSpeedBytesPerSec:    downloadSpeed,
 		MaxDownloadSpeedBytesPerSec: mt.maxDownloadSpeed,
-		UploadSpeedBytesPerSec:      uploadSpeed,
-		Timestamp:                   poolSnapshot.Timestamp,
+		UploadSpeedBytesPerSec:      0, // v4 doesn't track uploads
+		Timestamp:                   now,
 	}
 }
 
@@ -133,20 +145,25 @@ func (mt *MetricsTracker) samplingLoop(ctx context.Context) {
 
 // takeSample captures a metrics snapshot and stores it
 func (mt *MetricsTracker) takeSample() {
-	snapshot := mt.pool.GetMetricsSnapshot()
+	stats := mt.pool.Stats()
 
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
 
+	// Calculate total errors and provider errors
+	var totalErrors int64
+	providerErrors := make(map[string]int64)
+	for _, ps := range stats.Providers {
+		totalErrors += ps.Errors
+		providerErrors[ps.Name] = ps.Errors
+	}
+
 	// Create sample
 	sample := metricsample{
-		bytesDownloaded:    snapshot.BytesDownloaded,
-		bytesUploaded:      snapshot.BytesUploaded,
-		articlesDownloaded: snapshot.ArticlesDownloaded,
-		articlesPosted:     snapshot.ArticlesPosted,
-		totalErrors:        snapshot.TotalErrors,
-		providerErrors:     copyProviderErrors(snapshot.ProviderErrors),
-		timestamp:          snapshot.Timestamp,
+		avgSpeed:       stats.AvgSpeed,
+		totalErrors:    totalErrors,
+		providerErrors: copyProviderErrors(providerErrors),
+		timestamp:      time.Now(),
 	}
 
 	// Add sample
@@ -173,50 +190,6 @@ func (mt *MetricsTracker) cleanupOldSamples() {
 	if keepIndex > 0 {
 		mt.samples = mt.samples[keepIndex:]
 	}
-}
-
-// calculateSpeeds calculates download and upload speeds based on historical samples
-// Uses calculationWindow (default 10s) for more accurate real-time speed measurements
-func (mt *MetricsTracker) calculateSpeeds(current nntppool.PoolMetricsSnapshot) (downloadSpeed, uploadSpeed float64) {
-	// Need at least 2 samples to calculate speed
-	if len(mt.samples) < 2 {
-		return 0, 0
-	}
-
-	// Find sample closest to calculationWindow ago (instead of using oldest sample)
-	// This provides more accurate real-time speed by looking at recent history
-	targetTime := current.Timestamp.Add(-mt.calculationWindow)
-	compareIndex := 0
-
-	// Search backwards to find the sample closest to calculationWindow ago
-	for i := len(mt.samples) - 1; i >= 0; i-- {
-		if mt.samples[i].timestamp.Before(targetTime) || mt.samples[i].timestamp.Equal(targetTime) {
-			compareIndex = i
-			break
-		}
-	}
-
-	compareSample := mt.samples[compareIndex]
-
-	// Calculate time delta
-	timeDelta := current.Timestamp.Sub(compareSample.timestamp).Seconds()
-	if timeDelta <= 0 {
-		return 0, 0
-	}
-
-	// Calculate download speed (bytes per second) over the calculation window
-	bytesDelta := current.BytesDownloaded - compareSample.bytesDownloaded
-	if bytesDelta > 0 {
-		downloadSpeed = float64(bytesDelta) / timeDelta
-	}
-
-	// Calculate upload speed (bytes per second) over the calculation window
-	uploadDelta := current.BytesUploaded - compareSample.bytesUploaded
-	if uploadDelta > 0 {
-		uploadSpeed = float64(uploadDelta) / timeDelta
-	}
-
-	return downloadSpeed, uploadSpeed
 }
 
 // copyProviderErrors creates a copy of the provider errors map

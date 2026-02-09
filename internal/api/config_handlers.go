@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 )
 
 // ConfigManager interface defines methods for configuration management
@@ -312,27 +313,32 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 
-	err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
-		Host:     testReq.Host,
-		Port:     testReq.Port,
-		Username: testReq.Username,
-		Password: testReq.Password,
-		TLS:      testReq.TLS,
-		ProxyURL: testReq.ProxyURL,
-	}, slog.Default(), nil)
-	if err != nil {
+	host := fmt.Sprintf("%s:%d", testReq.Host, testReq.Port)
+	var tlsCfg *tls.Config
+	if testReq.TLS {
+		tlsCfg = &tls.Config{
+			InsecureSkipVerify: testReq.InsecureTLS,
+			ServerName:         testReq.Host,
+		}
+	}
+
+	result := nntppool.TestProvider(ctx, nntppool.Provider{
+		Host:      host,
+		TLSConfig: tlsCfg,
+		Auth:      nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
+	})
+
+	if result.Err != nil {
 		return RespondSuccess(c, TestProviderResponse{
 			Success:      false,
-			ErrorMessage: err.Error(),
+			ErrorMessage: result.Err.Error(),
 		})
 	}
 
-	response := TestProviderResponse{
-		Success:      true,
-		ErrorMessage: "",
-	}
-
-	return RespondSuccess(c, response)
+	return RespondSuccess(c, TestProviderResponse{
+		Success: true,
+		RTTMs:   result.RTT.Milliseconds(),
+	})
 }
 
 // handleCreateProvider creates a new NNTP provider

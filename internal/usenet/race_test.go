@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 )
 
 func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
@@ -34,7 +34,7 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 	}
 
 	// Mock pool getter that returns error (so we don't need real pool)
-	poolGetter := func() (nntppool.UsenetConnectionPool, error) {
+	poolGetter := func() (*nntppool.Client, error) {
 		return nil, fmt.Errorf("mock error")
 	}
 

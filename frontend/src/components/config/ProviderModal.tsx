@@ -30,6 +30,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 	const [connectionTestResult, setConnectionTestResult] = useState<{
 		success: boolean;
 		message?: string;
+		rttMs?: number;
 	} | null>(null);
 	const [canSave, setCanSave] = useState(false);
 
@@ -99,6 +100,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 			setConnectionTestResult({
 				success: result.success,
 				message: result.error_message,
+				rttMs: result.rtt_ms,
 			});
 
 			setCanSave(result.success);
@@ -350,7 +352,9 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								)}
 								<div>
 									<div className="font-medium">
-										{connectionTestResult.success ? "Connection successful!" : "Connection failed"}
+										{connectionTestResult.success
+											? `Connection successful!${connectionTestResult.rttMs ? ` (${connectionTestResult.rttMs}ms)` : ""}`
+											: "Connection failed"}
 									</div>
 									{connectionTestResult.message && (
 										<div className="text-sm">{connectionTestResult.message}</div>

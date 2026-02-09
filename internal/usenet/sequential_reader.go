@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )
 
@@ -16,7 +16,7 @@ type SequentialReader struct {
 	ctx            context.Context
 	segments       []nzbparser.NzbSegment
 	groups         []string
-	pool           nntppool.UsenetConnectionPool
+	pool           *nntppool.Client
 	currentIndex   int
 	currentReader  io.ReadCloser
 	currentSegment nzbparser.NzbSegment
@@ -29,7 +29,7 @@ func NewSequentialReader(
 	ctx context.Context,
 	segments []nzbparser.NzbSegment,
 	groups []string,
-	pool nntppool.UsenetConnectionPool,
+	pool *nntppool.Client,
 ) (*SequentialReader, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("no segments provided")
@@ -113,13 +113,15 @@ func (sr *SequentialReader) openNextSegment() error {
 	segment := sr.segments[sr.currentIndex]
 	sr.currentSegment = segment
 
-	// Open reader for this segment
-	reader, err := sr.pool.BodyReader(sr.ctx, segment.ID, sr.groups)
-	if err != nil {
-		return fmt.Errorf("failed to open segment %s: %w", segment.ID, err)
-	}
-
-	sr.currentReader = reader
+	r, w := io.Pipe()
+	go func() {
+		defer w.Close()
+		_, err := sr.pool.BodyStream(sr.ctx, segment.ID, w)
+		if err != nil {
+			_ = r.CloseWithError(err)
+		}
+	}()
+	sr.currentReader = r
 	return nil
 }
 

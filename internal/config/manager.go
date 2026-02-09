@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/sha256"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/pathutil"
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -638,6 +639,159 @@ func (c *Config) ValidateDirectories() error {
 	return nil
 }
 
+// ProviderChangeType describes the kind of provider change detected by ProvidersDiff.
+type ProviderChangeType int
+
+const (
+	ProviderAdded   ProviderChangeType = iota
+	ProviderRemoved
+	ProviderModified
+)
+
+// ProviderChange describes a single provider change between two configurations.
+type ProviderChange struct {
+	Type        ProviderChangeType
+	ProviderID  string
+	OldProvider *ProviderConfig // nil for Added
+	NewProvider *ProviderConfig // nil for Removed
+}
+
+// NNTPPoolName returns the name nntppool v4 uses to identify this provider.
+// Format: "host:port" or "host:port+username" when username is set.
+func (p *ProviderConfig) NNTPPoolName() string {
+	name := fmt.Sprintf("%s:%d", p.Host, p.Port)
+	if p.Username != "" {
+		name += "+" + p.Username
+	}
+	return name
+}
+
+// ToNNTPProvider converts a single ProviderConfig to an nntppool.Provider.
+// Does not check the Enabled flag — caller is responsible for that.
+func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
+	isBackup := false
+	if p.IsBackupProvider != nil {
+		isBackup = *p.IsBackupProvider
+	}
+
+	host := fmt.Sprintf("%s:%d", p.Host, p.Port)
+
+	var tlsCfg *tls.Config
+	if p.TLS {
+		tlsCfg = &tls.Config{
+			InsecureSkipVerify: p.InsecureTLS,
+			ServerName:         p.Host,
+		}
+	}
+
+	return nntppool.Provider{
+		Host:        host,
+		TLSConfig:   tlsCfg,
+		Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
+		Connections: p.MaxConnections,
+		Backup:      isBackup,
+		Inflight:    3,
+		IdleTimeout: 60 * time.Second,
+	}
+}
+
+// ProvidersDiff computes the set of provider changes between this config and another.
+// Returns nil if providers are identical (same set and same field values).
+func (c *Config) ProvidersDiff(other *Config) []ProviderChange {
+	oldMap := make(map[string]ProviderConfig, len(c.Providers))
+	for _, p := range c.Providers {
+		oldMap[p.ID] = p
+	}
+
+	newMap := make(map[string]ProviderConfig, len(other.Providers))
+	for _, p := range other.Providers {
+		newMap[p.ID] = p
+	}
+
+	var changes []ProviderChange
+
+	// Detect removed and modified providers
+	for id, oldP := range oldMap {
+		newP, exists := newMap[id]
+		if !exists {
+			oldCopy := oldP
+			changes = append(changes, ProviderChange{
+				Type:        ProviderRemoved,
+				ProviderID:  id,
+				OldProvider: &oldCopy,
+			})
+			continue
+		}
+		if !providersFieldsEqual(oldP, newP) {
+			oldCopy := oldP
+			newCopy := newP
+			changes = append(changes, ProviderChange{
+				Type:        ProviderModified,
+				ProviderID:  id,
+				OldProvider: &oldCopy,
+				NewProvider: &newCopy,
+			})
+		}
+	}
+
+	// Detect added providers
+	for id, newP := range newMap {
+		if _, exists := oldMap[id]; !exists {
+			newCopy := newP
+			changes = append(changes, ProviderChange{
+				Type:       ProviderAdded,
+				ProviderID: id,
+				NewProvider: &newCopy,
+			})
+		}
+	}
+
+	if len(changes) == 0 {
+		return nil
+	}
+	return changes
+}
+
+// providersFieldsEqual returns true if two ProviderConfig values are identical
+// in all fields that affect pool behaviour.
+func providersFieldsEqual(a, b ProviderConfig) bool {
+	return a.Host == b.Host &&
+		a.Port == b.Port &&
+		a.Username == b.Username &&
+		a.Password == b.Password &&
+		a.MaxConnections == b.MaxConnections &&
+		a.TLS == b.TLS &&
+		a.InsecureTLS == b.InsecureTLS &&
+		a.ProxyURL == b.ProxyURL &&
+		boolPtrEqual(a.Enabled, b.Enabled) &&
+		boolPtrEqual(a.IsBackupProvider, b.IsBackupProvider)
+}
+
+// boolPtrEqual safely compares two *bool values.
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// ProvidersOrderChanged returns true if the provider order differs between
+// this config and another, even if the set of providers is unchanged.
+func (c *Config) ProvidersOrderChanged(other *Config) bool {
+	if len(c.Providers) != len(other.Providers) {
+		return false // different lengths are handled by ProvidersDiff
+	}
+	for i := range c.Providers {
+		if c.Providers[i].ID != other.Providers[i].ID {
+			return true
+		}
+	}
+	return false
+}
+
 // ProvidersEqual compares the providers in this config with another config for equality
 func (c *Config) ProvidersEqual(other *Config) bool {
 	if len(c.Providers) != len(other.Providers) {
@@ -689,29 +843,12 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 	return true // All providers are identical
 }
 
-// ToNNTPProviders converts ProviderConfig slice to nntppool.UsenetProviderConfig slice (enabled only)
-func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
-	var providers []nntppool.UsenetProviderConfig
+// ToNNTPProviders converts ProviderConfig slice to nntppool.Provider slice (enabled only)
+func (c *Config) ToNNTPProviders() []nntppool.Provider {
+	var providers []nntppool.Provider
 	for _, p := range c.Providers {
-		// Only include enabled providers
 		if *p.Enabled {
-			isBackup := false
-			if p.IsBackupProvider != nil {
-				isBackup = *p.IsBackupProvider
-			}
-			providers = append(providers, nntppool.UsenetProviderConfig{
-				Host:                           p.Host,
-				Port:                           p.Port,
-				Username:                       p.Username,
-				Password:                       p.Password,
-				MaxConnections:                 p.MaxConnections,
-				MaxConnectionIdleTimeInSeconds: 60, // Default idle timeout
-				TLS:                            p.TLS,
-				InsecureSSL:                    p.InsecureTLS,
-				ProxyURL:                       p.ProxyURL,
-				MaxConnectionTTLInSeconds:      60, // Default connection TTL
-				IsBackupProvider:               isBackup,
-			})
+			providers = append(providers, p.ToNNTPProvider())
 		}
 	}
 	return providers

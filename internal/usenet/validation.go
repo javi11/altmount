@@ -14,6 +14,8 @@ import (
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
+var randPerm = rand.Perm
+
 // ValidateSegmentAvailability validates that segments are available on Usenet servers.
 // It uses a strategic sampling approach for efficiency when fullValidation is false:
 // - Validates first 3 segments (DMCA/takedown detection)
@@ -71,14 +73,14 @@ func ValidateSegmentAvailability(
 			if verifyData {
 				// Hybrid mode: attempt to read a few bytes of the segment body
 				lw := &limitedWriter{limit: 1}
-				_, err = usenetPool.Body(checkCtx, seg.Id, lw, []string{})
+				_, err = usenetPool.BodyStream(checkCtx, seg.Id, lw)
 
 				if errors.Is(err, ErrLimitReached) {
 					err = nil
 				}
 			} else {
 				// Standard mode: only perform STAT command
-				_, err = usenetPool.Stat(checkCtx, seg.Id, []string{})
+				_, err = usenetPool.Stat(checkCtx, seg.Id)
 			}
 			if err != nil {
 				return fmt.Errorf("segment with ID %s unreachable: %w", seg.Id, err)
@@ -165,7 +167,7 @@ func ValidateSegmentAvailabilityDetailed(
 				// to ensure the provider actually has the data.
 				// We use a limited writer to only read 1 byte.
 				lw := &limitedWriter{limit: 1}
-				_, err = usenetPool.Body(checkCtx, seg.Id, lw, []string{})
+				_, err = usenetPool.BodyStream(checkCtx, seg.Id, lw)
 
 				// If we reached our 1-byte limit, it means the segment data is accessible.
 				if errors.Is(err, ErrLimitReached) {
@@ -173,7 +175,7 @@ func ValidateSegmentAvailabilityDetailed(
 				}
 			} else {
 				// Standard mode: only perform STAT command
-				_, err = usenetPool.Stat(checkCtx, seg.Id, []string{})
+				_, err = usenetPool.Stat(checkCtx, seg.Id)
 			}
 			if err != nil {
 				atomic.AddInt32(&missingCount, 1)
@@ -302,7 +304,7 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 
 		if randomSamples > 0 {
 			// Random sampling without replacement from middle section
-			perm := rand.Perm(middleRange)
+			perm := randPerm(middleRange)
 			for i := 0; i < randomSamples; i++ {
 				toValidate = append(toValidate, segments[middleStart+perm[i]])
 			}
