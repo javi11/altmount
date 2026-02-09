@@ -25,6 +25,14 @@ type Manager interface {
 
 	// GetMetrics returns the current pool metrics with calculated speeds
 	GetMetrics() (MetricsSnapshot, error)
+
+	// AddProvider adds a single provider to the running pool.
+	// If no pool exists, a new one is created with this provider.
+	AddProvider(provider nntppool.Provider) error
+
+	// RemoveProvider removes a provider by its nntppool name (host:port or host:port+username).
+	// If the last provider is removed, the pool is closed.
+	RemoveProvider(name string) error
 }
 
 // manager implements the Manager interface
@@ -135,4 +143,56 @@ func (m *manager) GetMetrics() (MetricsSnapshot, error) {
 	}
 
 	return m.metricsTracker.GetSnapshot(), nil
+}
+
+// AddProvider adds a single provider to the running pool.
+// If no pool exists yet, a new one is created with this single provider.
+func (m *manager) AddProvider(provider nntppool.Provider) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.pool == nil {
+		// No pool yet — create one with this single provider
+		m.logger.InfoContext(m.ctx, "Creating NNTP connection pool for first provider", "provider", provider.Host)
+		pool, err := nntppool.NewClient(m.ctx, []nntppool.Provider{provider})
+		if err != nil {
+			return fmt.Errorf("failed to create NNTP connection pool: %w", err)
+		}
+		m.pool = pool
+		m.metricsTracker = NewMetricsTracker(pool)
+		m.metricsTracker.Start(m.ctx)
+		return nil
+	}
+
+	m.logger.InfoContext(m.ctx, "Adding provider to NNTP connection pool", "provider", provider.Host)
+	return m.pool.AddProvider(provider)
+}
+
+// RemoveProvider removes a provider by name from the running pool.
+// If the last provider is removed, the pool and metrics tracker are shut down.
+func (m *manager) RemoveProvider(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.pool == nil {
+		return fmt.Errorf("NNTP connection pool not available - cannot remove provider")
+	}
+
+	m.logger.InfoContext(m.ctx, "Removing provider from NNTP connection pool", "provider", name)
+	if err := m.pool.RemoveProvider(name); err != nil {
+		return err
+	}
+
+	// If no providers remain, tear down the pool entirely
+	if m.pool.NumProviders() == 0 {
+		m.logger.InfoContext(m.ctx, "Last provider removed - shutting down NNTP connection pool")
+		if m.metricsTracker != nil {
+			m.metricsTracker.Stop()
+			m.metricsTracker = nil
+		}
+		m.pool.Close()
+		m.pool = nil
+	}
+
+	return nil
 }
