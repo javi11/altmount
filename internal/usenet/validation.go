@@ -14,6 +14,8 @@ import (
 	concpool "github.com/sourcegraph/conc/pool"
 )
 
+var randPerm = rand.Perm
+
 // ValidateSegmentAvailability validates that segments are available on Usenet servers.
 // It uses a strategic sampling approach for efficiency when fullValidation is false:
 // - Validates first 3 segments (DMCA/takedown detection)
@@ -302,7 +304,7 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 
 		if randomSamples > 0 {
 			// Random sampling without replacement from middle section
-			perm := rand.Perm(middleRange)
+			perm := randPerm(middleRange)
 			for i := 0; i < randomSamples; i++ {
 				toValidate = append(toValidate, segments[middleStart+perm[i]])
 			}

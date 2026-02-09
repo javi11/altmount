@@ -15,8 +15,13 @@ import (
 // a real NNTP server should be used to test validation behavior.
 
 func TestSelectSegmentsForValidation(t *testing.T) {
-	// Seed random for predictability in middle segments
-	rand.Seed(1)
+	// Use a deterministic RNG for predictability in middle segments.
+	rng := rand.New(rand.NewSource(1))
+	previousRandPerm := randPerm
+	randPerm = rng.Perm
+	t.Cleanup(func() {
+		randPerm = previousRandPerm
+	})
 
 	// Create 100 dummy segments
 	segments := make([]*metapb.SegmentData, 100)

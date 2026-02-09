@@ -119,8 +119,7 @@ func TestBuildSegmentIndex(t *testing.T) {
 			} else {
 				if idx == nil {
 					t.Errorf("buildSegmentIndex() = nil, want non-nil")
-				}
-				if len(idx.offsets) != len(tt.segments) {
+				} else if len(idx.offsets) != len(tt.segments) {
 					t.Errorf("buildSegmentIndex() offsets len = %d, want %d", len(idx.offsets), len(tt.segments))
 				}
 			}
@@ -132,9 +131,9 @@ func TestBuildSegmentIndex(t *testing.T) {
 func TestSegmentOffsetIndexFindSegment(t *testing.T) {
 	// Create an index with 3 segments: [0-999], [1000-1999], [2000-2499]
 	segments := []*metapb.SegmentData{
-		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000},  // usable: 1000 bytes
-		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000},  // usable: 1000 bytes
-		{StartOffset: 0, EndOffset: 499, SegmentSize: 500},   // usable: 500 bytes
+		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000}, // usable: 1000 bytes
+		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000}, // usable: 1000 bytes
+		{StartOffset: 0, EndOffset: 499, SegmentSize: 500},  // usable: 500 bytes
 	}
 	idx := buildSegmentIndex(segments)
 
@@ -186,9 +185,9 @@ func TestSegmentOffsetIndexNil(t *testing.T) {
 func TestGetOffsetForSegment(t *testing.T) {
 	// Create an index with 3 segments: [0-999], [1000-1999], [2000-2499]
 	segments := []*metapb.SegmentData{
-		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000},  // usable: 1000 bytes, offset: 0
-		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000},  // usable: 1000 bytes, offset: 1000
-		{StartOffset: 0, EndOffset: 499, SegmentSize: 500},   // usable: 500 bytes, offset: 2000
+		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000}, // usable: 1000 bytes, offset: 0
+		{StartOffset: 0, EndOffset: 999, SegmentSize: 1000}, // usable: 1000 bytes, offset: 1000
+		{StartOffset: 0, EndOffset: 499, SegmentSize: 500},  // usable: 500 bytes, offset: 2000
 	}
 	idx := buildSegmentIndex(segments)
 
@@ -219,11 +218,11 @@ func TestGetOffsetForSegment(t *testing.T) {
 func TestSegmentIndexIntegration(t *testing.T) {
 	// Create a realistic segment index with varying segment sizes
 	segments := []*metapb.SegmentData{
-		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000},  // 750KB
-		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000},  // 750KB
-		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000},  // 750KB
-		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000},  // 750KB
-		{StartOffset: 0, EndOffset: 249999, SegmentSize: 250000},  // 250KB (final partial)
+		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000}, // 750KB
+		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000}, // 750KB
+		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000}, // 750KB
+		{StartOffset: 0, EndOffset: 749999, SegmentSize: 750000}, // 750KB
+		{StartOffset: 0, EndOffset: 249999, SegmentSize: 250000}, // 250KB (final partial)
 	}
 	idx := buildSegmentIndex(segments)
 
@@ -378,8 +377,8 @@ func TestSeekResetsOriginalRangeEnd(t *testing.T) {
 		fileMeta: &metapb.FileMetadata{
 			FileSize: fileSize,
 		},
-		position:         0,
-		originalRangeEnd: -1, // Simulate unbounded range from initial HTTP request
+		position:          0,
+		originalRangeEnd:  -1, // Simulate unbounded range from initial HTTP request
 		readerInitialized: false,
 	}
 
@@ -406,8 +405,8 @@ func TestSeekSamePositionDoesNotResetRange(t *testing.T) {
 		fileMeta: &metapb.FileMetadata{
 			FileSize: fileSize,
 		},
-		position:         1024,
-		originalRangeEnd: -1, // Unbounded range
+		position:          1024,
+		originalRangeEnd:  -1, // Unbounded range
 		readerInitialized: false,
 	}
 
@@ -430,8 +429,8 @@ func TestMultipleConsecutiveSeeks(t *testing.T) {
 		fileMeta: &metapb.FileMetadata{
 			FileSize: fileSize,
 		},
-		position:         0,
-		originalRangeEnd: 5000, // Bounded range
+		position:          0,
+		originalRangeEnd:  5000, // Bounded range
 		readerInitialized: false,
 	}
 
@@ -461,11 +460,11 @@ func TestSeekWithWhenceModes(t *testing.T) {
 	fileSize := int64(100 * 1024 * 1024) // 100MB
 
 	tests := []struct {
-		name          string
-		initialPos    int64
-		offset        int64
-		whence        int
-		expectedPos   int64
+		name        string
+		initialPos  int64
+		offset      int64
+		whence      int
+		expectedPos int64
 	}{
 		{
 			name:        "SeekStart to middle",
@@ -496,8 +495,8 @@ func TestSeekWithWhenceModes(t *testing.T) {
 				fileMeta: &metapb.FileMetadata{
 					FileSize: fileSize,
 				},
-				position:         tt.initialPos,
-				originalRangeEnd: -1, // Unbounded
+				position:          tt.initialPos,
+				originalRangeEnd:  -1, // Unbounded
 				readerInitialized: false,
 			}
 
@@ -523,11 +522,11 @@ func TestSeekErrorCases(t *testing.T) {
 	fileSize := int64(100 * 1024 * 1024) // 100MB
 
 	tests := []struct {
-		name          string
-		initialPos    int64
-		offset        int64
-		whence        int
-		expectedErr   error
+		name        string
+		initialPos  int64
+		offset      int64
+		whence      int
+		expectedErr error
 	}{
 		{
 			name:        "negative position via SeekStart",
@@ -558,8 +557,8 @@ func TestSeekErrorCases(t *testing.T) {
 				fileMeta: &metapb.FileMetadata{
 					FileSize: fileSize,
 				},
-				position:         tt.initialPos,
-				originalRangeEnd: -1,
+				position:          tt.initialPos,
+				originalRangeEnd:  -1,
 				readerInitialized: false,
 			}
 
