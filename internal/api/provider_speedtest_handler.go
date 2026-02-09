@@ -4,17 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/nntppool/v4"
-	"github.com/javi11/nzbparser"
 )
 
 type ProviderSpeedTestResponse struct {
@@ -26,17 +21,11 @@ type ProviderSpeedTestResponse struct {
 func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	providerID := c.Params("id")
 	if providerID == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider ID is required",
-		})
+		return RespondBadRequest(c, "Provider ID is required", "")
 	}
 
 	if s.configManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Configuration management not available",
-		})
+		return RespondInternalError(c, "Configuration management not available", "")
 	}
 
 	cfg := s.configManager.GetConfig()
@@ -49,76 +38,9 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	}
 
 	if targetProvider == nil {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"message": "Provider not found",
-		})
+		return RespondNotFound(c, "Provider", "")
 	}
 
-	// 1. Download Test NZB (1GB)
-	// We use the 1GB file to ensure high-speed connections are properly tested
-	nzbURL := "https://sabnzbd.org/tests/test_download_1GB.nzb"
-
-	req, err := http.NewRequestWithContext(c.Context(), http.MethodGet, nzbURL, nil)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to create request for test NZB",
-			"details": err.Error(),
-		})
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return c.Status(502).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to download test NZB",
-			"details": err.Error(),
-		})
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return c.Status(502).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to download test NZB",
-			"details": fmt.Sprintf("Status: %s", resp.Status),
-		})
-	}
-
-	// 2. Parse NZB
-	nzbFile, err := nzbparser.Parse(resp.Body)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to parse test NZB",
-			"details": err.Error(),
-		})
-	}
-
-	type segmentInfo struct {
-		ID   string
-		Size int64
-	}
-
-	var allSegments []segmentInfo
-	for _, file := range nzbFile.Files {
-		for _, seg := range file.Segments {
-			allSegments = append(allSegments, segmentInfo{
-				ID:   seg.ID,
-				Size: int64(seg.Bytes),
-			})
-		}
-	}
-
-	if len(allSegments) == 0 {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "No segments found in test NZB",
-		})
-	}
-
-	// 3. Run Speed Test
 	host := fmt.Sprintf("%s:%d", targetProvider.Host, targetProvider.Port)
 	var tlsCfg *tls.Config
 	if targetProvider.TLS {
@@ -138,74 +60,33 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 		},
 	})
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to create connection pool",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to create connection pool", err.Error())
 	}
 	defer pool.Close()
 
-	// Test for up to 15 seconds
+	// Resolve provider name matching nntppool's resolveProviderName logic
+	providerName := host
+	if targetProvider.Username != "" {
+		providerName = host + "+" + targetProvider.Username
+	}
+
 	testCtx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
 	defer cancel()
 
-	var totalBytes int64
-	var workerWg sync.WaitGroup
-
-	numWorkers := targetProvider.MaxConnections
-	if numWorkers <= 0 {
-		numWorkers = 20
+	result, err := pool.SpeedTest(testCtx, nntppool.SpeedTestOptions{
+		ProviderName: providerName,
+	})
+	if err != nil {
+		return RespondInternalError(c, "Speed test failed", err.Error())
 	}
 
-	segmentChan := make(chan segmentInfo, len(allSegments))
-	for _, s := range allSegments {
-		segmentChan <- s
-	}
-	close(segmentChan)
-
-	startTime := time.Now()
-
-	for i := 0; i < numWorkers; i++ {
-		workerWg.Add(1)
-		go func() {
-			defer workerWg.Done()
-			for {
-				select {
-				case <-testCtx.Done():
-					return
-				case seg, ok := <-segmentChan:
-					if !ok {
-						return
-					}
-					// Download
-					_, err := pool.BodyStream(testCtx, seg.ID, io.Discard)
-					if err == nil {
-						atomic.AddInt64(&totalBytes, seg.Size)
-					}
-				}
-			}
-		}()
-	}
-
-	workerWg.Wait()
-	duration := time.Since(startTime)
-
-	var speed float64
-	if duration.Seconds() == 0 {
-		speed = 0
-	} else {
-		mb := float64(totalBytes) / 1024 / 1024
-		speed = mb / duration.Seconds()
-	}
+	speed := result.WireSpeedBps / 1024 / 1024 // bytes/sec → MB/s
 
 	// Update provider config with speed test result
 	now := time.Now()
-	// Create a copy of the config to modify
 	currentConfig := s.configManager.GetConfig()
-	newConfig := currentConfig.DeepCopy() // DeepCopy ensures we don't modify the live config directly
+	newConfig := currentConfig.DeepCopy()
 
-	// Find the provider in the new config and update its fields
 	for i, p := range newConfig.Providers {
 		if p.ID == providerID {
 			newConfig.Providers[i].LastSpeedTestMbps = speed
@@ -216,24 +97,15 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 
 	if err := s.configManager.UpdateConfig(newConfig); err != nil {
 		slog.Error("Failed to update provider speed test result in config", "provider_id", providerID, "err", err)
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to save speed test result",
-			"details": err.Error(),
-		})
+		return RespondInternalError(c, "Failed to save speed test result", err.Error())
 	}
 
-	// Persist changes to disk
 	if err := s.configManager.SaveConfig(); err != nil {
 		slog.Error("Failed to persist config after speed test", "err", err)
-		// We don't fail the request since the test was successful and in-memory config is updated
 	}
 
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
-		"data": ProviderSpeedTestResponse{
-			SpeedMBps: speed,
-			Duration:  duration.Seconds(),
-		},
+	return RespondSuccess(c, ProviderSpeedTestResponse{
+		SpeedMBps: speed,
+		Duration:  result.Elapsed.Seconds(),
 	})
 }
