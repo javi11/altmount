@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 	"github.com/javi11/nzbparser"
 )
 
@@ -96,18 +97,16 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	}
 
 	type segmentInfo struct {
-		ID     string
-		Groups []string
-		Size   int64
+		ID   string
+		Size int64
 	}
 
 	var allSegments []segmentInfo
 	for _, file := range nzbFile.Files {
 		for _, seg := range file.Segments {
 			allSegments = append(allSegments, segmentInfo{
-				ID:     seg.ID,
-				Groups: file.Groups,
-				Size:   int64(seg.Bytes),
+				ID:   seg.ID,
+				Size: int64(seg.Bytes),
 			})
 		}
 	}
@@ -120,27 +119,24 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 	}
 
 	// 3. Run Speed Test
-	poolCfg := nntppool.Config{
-		Providers: []nntppool.UsenetProviderConfig{
-			{
-				Host:                           targetProvider.Host,
-				Port:                           targetProvider.Port,
-				Username:                       targetProvider.Username,
-				Password:                       targetProvider.Password,
-				TLS:                            targetProvider.TLS,
-				MaxConnections:                 targetProvider.MaxConnections,
-				InsecureSSL:                    targetProvider.InsecureTLS,
-				MaxConnectionIdleTimeInSeconds: 60,
-				MaxConnectionTTLInSeconds:      60,
-			},
-		},
-		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		DelayType:      nntppool.DelayTypeFixed,
-		RetryDelay:     10 * time.Millisecond,
-		MinConnections: 0,
+	host := fmt.Sprintf("%s:%d", targetProvider.Host, targetProvider.Port)
+	var tlsCfg *tls.Config
+	if targetProvider.TLS {
+		tlsCfg = &tls.Config{
+			InsecureSkipVerify: targetProvider.InsecureTLS,
+			ServerName:         targetProvider.Host,
+		}
 	}
 
-	pool, err := nntppool.NewConnectionPool(poolCfg)
+	pool, err := nntppool.NewClient(c.Context(), []nntppool.Provider{
+		{
+			Host:        host,
+			TLSConfig:   tlsCfg,
+			Auth:        nntppool.Auth{Username: targetProvider.Username, Password: targetProvider.Password},
+			Connections: targetProvider.MaxConnections,
+			IdleTimeout: 60 * time.Second,
+		},
+	})
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"success": false,
@@ -148,7 +144,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
-	defer pool.Quit()
+	defer pool.Close()
 
 	// Test for up to 15 seconds
 	testCtx, cancel := context.WithTimeout(c.Context(), 5*time.Minute)
@@ -183,7 +179,7 @@ func (s *Server) handleTestProviderSpeed(c *fiber.Ctx) error {
 						return
 					}
 					// Download
-					_, err := pool.Body(testCtx, seg.ID, io.Discard, seg.Groups)
+					_, err := pool.BodyStream(testCtx, seg.ID, io.Discard)
 					if err == nil {
 						atomic.AddInt64(&totalBytes, seg.Size)
 					}

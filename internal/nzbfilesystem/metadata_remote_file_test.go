@@ -7,7 +7,7 @@ import (
 
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 )
 
 // createTestVirtualFile creates a MetadataVirtualFile with default configuration for testing
@@ -341,11 +341,11 @@ var _ pool.Manager = (*mockPoolManager)(nil)
 // mockPoolManager implements pool.Manager for testing
 type mockPoolManager struct{}
 
-func (m *mockPoolManager) GetPool() (nntppool.UsenetConnectionPool, error) {
+func (m *mockPoolManager) GetPool() (*nntppool.Client, error) {
 	return nil, nil
 }
 
-func (m *mockPoolManager) SetProviders(_ []nntppool.UsenetProviderConfig) error {
+func (m *mockPoolManager) SetProviders(_ []nntppool.Provider) error {
 	return nil
 }
 

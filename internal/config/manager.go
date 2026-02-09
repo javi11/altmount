@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/sha256"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 	"time"
 
 	"github.com/javi11/altmount/internal/pathutil"
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 	"github.com/jinzhu/copier"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -689,9 +690,9 @@ func (c *Config) ProvidersEqual(other *Config) bool {
 	return true // All providers are identical
 }
 
-// ToNNTPProviders converts ProviderConfig slice to nntppool.UsenetProviderConfig slice (enabled only)
-func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
-	var providers []nntppool.UsenetProviderConfig
+// ToNNTPProviders converts ProviderConfig slice to nntppool.Provider slice (enabled only)
+func (c *Config) ToNNTPProviders() []nntppool.Provider {
+	var providers []nntppool.Provider
 	for _, p := range c.Providers {
 		// Only include enabled providers
 		if *p.Enabled {
@@ -699,18 +700,25 @@ func (c *Config) ToNNTPProviders() []nntppool.UsenetProviderConfig {
 			if p.IsBackupProvider != nil {
 				isBackup = *p.IsBackupProvider
 			}
-			providers = append(providers, nntppool.UsenetProviderConfig{
-				Host:                           p.Host,
-				Port:                           p.Port,
-				Username:                       p.Username,
-				Password:                       p.Password,
-				MaxConnections:                 p.MaxConnections,
-				MaxConnectionIdleTimeInSeconds: 60, // Default idle timeout
-				TLS:                            p.TLS,
-				InsecureSSL:                    p.InsecureTLS,
-				ProxyURL:                       p.ProxyURL,
-				MaxConnectionTTLInSeconds:      60, // Default connection TTL
-				IsBackupProvider:               isBackup,
+
+			host := fmt.Sprintf("%s:%d", p.Host, p.Port)
+
+			var tlsCfg *tls.Config
+			if p.TLS {
+				tlsCfg = &tls.Config{
+					InsecureSkipVerify: p.InsecureTLS,
+					ServerName:         p.Host,
+				}
+			}
+
+			providers = append(providers, nntppool.Provider{
+				Host:        host,
+				TLSConfig:   tlsCfg,
+				Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
+				Connections: p.MaxConnections,
+				Backup:      isBackup,
+				Inflight:    3,
+				IdleTimeout: 60 * time.Second,
 			})
 		}
 	}

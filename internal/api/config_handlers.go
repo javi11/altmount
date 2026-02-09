@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 )
 
 // ConfigManager interface defines methods for configuration management
@@ -309,23 +310,35 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		return RespondValidationError(c, "Valid port is required (1-65535)", "INVALID_PORT")
 	}
 
+	// TODO: TestProviderConnectivity was removed in nntppool v4.
+	// Implement a basic connectivity test by creating a temporary client and doing a STAT or similar.
+	// For now, we create a minimal client and close it to verify connectivity.
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 
-	err := nntppool.TestProviderConnectivity(ctx, nntppool.UsenetProviderConfig{
-		Host:     testReq.Host,
-		Port:     testReq.Port,
-		Username: testReq.Username,
-		Password: testReq.Password,
-		TLS:      testReq.TLS,
-		ProxyURL: testReq.ProxyURL,
-	}, slog.Default(), nil)
+	host := fmt.Sprintf("%s:%d", testReq.Host, testReq.Port)
+	var tlsCfg *tls.Config
+	if testReq.TLS {
+		tlsCfg = &tls.Config{
+			InsecureSkipVerify: testReq.InsecureTLS,
+		}
+	}
+
+	testClient, err := nntppool.NewClient(ctx, []nntppool.Provider{
+		{
+			Host:        host,
+			TLSConfig:   tlsCfg,
+			Auth:        nntppool.Auth{Username: testReq.Username, Password: testReq.Password},
+			Connections: 1,
+		},
+	})
 	if err != nil {
 		return RespondSuccess(c, TestProviderResponse{
 			Success:      false,
 			ErrorMessage: err.Error(),
 		})
 	}
+	defer testClient.Close()
 
 	response := TestProviderResponse{
 		Success:      true,

@@ -5,18 +5,17 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
-	"github.com/javi11/nntppool/v2"
+	"github.com/javi11/nntppool/v4"
 )
 
 // Manager provides centralized NNTP connection pool management
 type Manager interface {
 	// GetPool returns the current connection pool or error if not available
-	GetPool() (nntppool.UsenetConnectionPool, error)
+	GetPool() (*nntppool.Client, error)
 
 	// SetProviders creates/recreates the pool with new providers
-	SetProviders(providers []nntppool.UsenetProviderConfig) error
+	SetProviders(providers []nntppool.Provider) error
 
 	// ClearPool shuts down and removes the current pool
 	ClearPool() error
@@ -31,7 +30,7 @@ type Manager interface {
 // manager implements the Manager interface
 type manager struct {
 	mu             sync.RWMutex
-	pool           nntppool.UsenetConnectionPool
+	pool           *nntppool.Client
 	metricsTracker *MetricsTracker
 	ctx            context.Context
 	logger         *slog.Logger
@@ -46,7 +45,7 @@ func NewManager(ctx context.Context) Manager {
 }
 
 // GetPool returns the current connection pool or error if not available
-func (m *manager) GetPool() (nntppool.UsenetConnectionPool, error) {
+func (m *manager) GetPool() (*nntppool.Client, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -58,7 +57,7 @@ func (m *manager) GetPool() (nntppool.UsenetConnectionPool, error) {
 }
 
 // SetProviders creates/recreates the pool with new providers
-func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error {
+func (m *manager) SetProviders(providers []nntppool.Provider) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -69,7 +68,7 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 			m.metricsTracker.Stop()
 			m.metricsTracker = nil
 		}
-		m.pool.Quit()
+		m.pool.Close()
 		m.pool = nil
 	}
 
@@ -81,14 +80,7 @@ func (m *manager) SetProviders(providers []nntppool.UsenetProviderConfig) error 
 
 	// Create new pool with providers
 	m.logger.InfoContext(m.ctx, "Creating NNTP connection pool", "provider_count", len(providers))
-	pool, err := nntppool.NewConnectionPool(nntppool.Config{
-		Providers:      providers,
-		Logger:         m.logger,
-		DelayType:      nntppool.DelayTypeFixed,
-		RetryDelay:     10 * time.Millisecond,
-		MinConnections: 0,
-		DrainTimeout:   5 * time.Second,
-	})
+	pool, err := nntppool.NewClient(m.ctx, providers)
 	if err != nil {
 		return fmt.Errorf("failed to create NNTP connection pool: %w", err)
 	}
@@ -114,7 +106,7 @@ func (m *manager) ClearPool() error {
 			m.metricsTracker.Stop()
 			m.metricsTracker = nil
 		}
-		m.pool.Quit()
+		m.pool.Close()
 		m.pool = nil
 	}
 

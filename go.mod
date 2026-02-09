@@ -16,7 +16,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
-	github.com/javi11/nntppool/v2 v2.3.0
+	github.com/javi11/nntppool/v4 v4.0.0-20260209102903-34901059cbd2
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
 	github.com/javi11/rardecode/v2 v2.1.2-0.20251031153435-d6d75db6d6ca
@@ -138,14 +138,11 @@ require (
 	github.com/gostaticanalysis/comment v1.5.0 // indirect
 	github.com/gostaticanalysis/forcetypeassert v0.2.0 // indirect
 	github.com/gostaticanalysis/nilerr v0.1.1 // indirect
-	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0 // indirect
-	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/hexops/gotextdiff v1.0.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jgautheron/goconst v1.8.2 // indirect
 	github.com/jingyugao/rowserrcheck v1.1.1 // indirect
 	github.com/jjti/go-spancheck v0.6.5 // indirect
@@ -177,7 +174,7 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/mgechev/revive v1.11.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
-	github.com/mnightingale/rapidyenc v0.0.0-20250628164132-aaf36ba945ef // indirect
+	github.com/mnightingale/rapidyenc v0.0.0-20251128204712-7aafef1eaf1c // indirect
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/moricho/tparallel v0.3.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
