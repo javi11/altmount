@@ -703,6 +703,10 @@ type ProviderStatusResponse struct {
 	FailureReason         string     `json:"failure_reason"`
 	LastSpeedTestMbps     float64    `json:"last_speed_test_mbps"`
 	LastSpeedTestTime     *time.Time `json:"last_speed_test_time,omitempty"`
+	CurrentSpeedBytesPerSec float64    `json:"current_speed_bytes_per_sec"`
+	MissingCount            int64      `json:"missing_count"`
+	MissingRatePerMinute    float64    `json:"missing_rate_per_minute"`
+	MissingWarning          bool       `json:"missing_warning"`
 }
 
 // PoolMetricsResponse represents NNTP pool metrics in API responses

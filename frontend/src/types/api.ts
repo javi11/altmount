@@ -338,8 +338,12 @@ export interface ProviderStatus {
 	last_connection_attempt: string;
 	last_successful_connect: string;
 	failure_reason: string;
+	current_speed_bytes_per_sec: number;
 	last_speed_test_mbps: number;
 	last_speed_test_time?: string;
+	missing_count: number;
+	missing_rate_per_minute: number;
+	missing_warning: boolean;
 }
 
 export interface ActiveStream {

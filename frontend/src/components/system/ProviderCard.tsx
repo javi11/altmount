@@ -91,6 +91,33 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 					/>
 				</div>
 
+				{/* Missing Articles */}
+				{provider.missing_count > 0 && (
+					<div className="mt-2 space-y-1">
+						<div className="flex items-center justify-between text-sm">
+							<span className="text-base-content/70">Missing Articles</span>
+							<div className="text-right">
+								<span
+									className={`font-medium ${provider.missing_warning ? "text-error" : "text-warning"}`}
+								>
+									{provider.missing_count.toLocaleString()}
+								</span>
+								{provider.missing_rate_per_minute > 0 && (
+									<span className="ml-1 text-base-content/60 text-xs">
+										~{Math.round(provider.missing_rate_per_minute)}/min
+									</span>
+								)}
+							</div>
+						</div>
+						{provider.missing_warning && (
+							<div className="alert alert-warning py-2">
+								<AlertTriangle className="h-4 w-4" />
+								<span className="text-sm">Consider using a backup provider</span>
+							</div>
+						)}
+					</div>
+				)}
+
 				{/* Speed Test Info */}
 				{provider.last_speed_test_mbps > 0 && (
 					<div className="mt-2 flex items-center justify-between text-xs">
