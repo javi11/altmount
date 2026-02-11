@@ -26,6 +26,18 @@ type Manager interface {
 	// GetMetrics returns the current pool metrics with calculated speeds
 	GetMetrics() (MetricsSnapshot, error)
 
+	// ResetMetrics resets all cumulative metrics
+	ResetMetrics(ctx context.Context) error
+
+	// IncArticlesDownloaded increments the count of articles successfully downloaded
+	IncArticlesDownloaded()
+
+	// UpdateDownloadProgress updates the bytes downloaded for a specific stream
+	UpdateDownloadProgress(id string, bytesDownloaded int64)
+
+	// IncArticlesPosted increments the count of articles successfully posted
+	IncArticlesPosted()
+
 	// AddProvider adds a single provider to the running pool.
 	// If no pool exists, a new one is created with this provider.
 	AddProvider(provider nntppool.Provider) error
@@ -35,19 +47,28 @@ type Manager interface {
 	RemoveProvider(name string) error
 }
 
+// StatsRepository defines the interface for persisting pool statistics
+type StatsRepository interface {
+	UpdateSystemStat(ctx context.Context, key string, value int64) error
+	BatchUpdateSystemStats(ctx context.Context, stats map[string]int64) error
+	GetSystemStats(ctx context.Context) (map[string]int64, error)
+}
+
 // manager implements the Manager interface
 type manager struct {
 	mu             sync.RWMutex
 	pool           *nntppool.Client
 	metricsTracker *MetricsTracker
+	repo           StatsRepository
 	ctx            context.Context
 	logger         *slog.Logger
 }
 
 // NewManager creates a new pool manager
-func NewManager(ctx context.Context) Manager {
+func NewManager(ctx context.Context, repo StatsRepository) Manager {
 	return &manager{
 		ctx:    ctx,
+		repo:   repo,
 		logger: slog.Default().With("component", "pool"),
 	}
 }
@@ -96,7 +117,7 @@ func (m *manager) SetProviders(providers []nntppool.Provider) error {
 	m.pool = pool
 
 	// Start metrics tracker
-	m.metricsTracker = NewMetricsTracker(pool)
+	m.metricsTracker = NewMetricsTracker(pool, m.repo)
 	m.metricsTracker.Start(m.ctx)
 
 	m.logger.InfoContext(m.ctx, "NNTP connection pool created successfully")
@@ -145,6 +166,65 @@ func (m *manager) GetMetrics() (MetricsSnapshot, error) {
 	return m.metricsTracker.GetSnapshot(), nil
 }
 
+// ResetMetrics resets all cumulative metrics
+func (m *manager) ResetMetrics(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.metricsTracker != nil {
+		return m.metricsTracker.Reset(ctx)
+	}
+
+	// If tracker not available, still try to reset DB directly
+	if m.repo != nil {
+		currentStats, err := m.repo.GetSystemStats(ctx)
+		if err == nil {
+			resetMap := make(map[string]int64)
+			for k := range currentStats {
+				resetMap[k] = 0
+			}
+			resetMap["bytes_downloaded"] = 0
+			resetMap["articles_downloaded"] = 0
+			resetMap["bytes_uploaded"] = 0
+			resetMap["articles_posted"] = 0
+			resetMap["max_download_speed"] = 0
+			_ = m.repo.BatchUpdateSystemStats(ctx, resetMap)
+		}
+	}
+
+	return nil
+}
+
+// IncArticlesDownloaded increments the count of articles successfully downloaded
+func (m *manager) IncArticlesDownloaded() {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.metricsTracker != nil {
+		m.metricsTracker.IncArticlesDownloaded()
+	}
+}
+
+// UpdateDownloadProgress updates the bytes downloaded for a specific stream
+func (m *manager) UpdateDownloadProgress(id string, bytesDownloaded int64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.metricsTracker != nil {
+		m.metricsTracker.UpdateDownloadProgress(id, bytesDownloaded)
+	}
+}
+
+// IncArticlesPosted increments the count of articles successfully posted
+func (m *manager) IncArticlesPosted() {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.metricsTracker != nil {
+		m.metricsTracker.IncArticlesPosted()
+	}
+}
+
 // AddProvider adds a single provider to the running pool.
 // If no pool exists yet, a new one is created with this single provider.
 func (m *manager) AddProvider(provider nntppool.Provider) error {
@@ -159,7 +239,7 @@ func (m *manager) AddProvider(provider nntppool.Provider) error {
 			return fmt.Errorf("failed to create NNTP connection pool: %w", err)
 		}
 		m.pool = pool
-		m.metricsTracker = NewMetricsTracker(pool)
+		m.metricsTracker = NewMetricsTracker(pool, m.repo)
 		m.metricsTracker.Start(m.ctx)
 		return nil
 	}

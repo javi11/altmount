@@ -20,6 +20,7 @@ type SequentialReader struct {
 	currentIndex   int
 	currentReader  io.ReadCloser
 	currentSegment nzbparser.NzbSegment
+	metricsTracker MetricsTracker
 }
 
 // NewSequentialReader creates a new sequential reader for the given NZB segments
@@ -30,6 +31,7 @@ func NewSequentialReader(
 	segments []nzbparser.NzbSegment,
 	groups []string,
 	pool *nntppool.Client,
+	metricsTracker MetricsTracker,
 ) (*SequentialReader, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("no segments provided")
@@ -40,11 +42,12 @@ func NewSequentialReader(
 	}
 
 	sr := &SequentialReader{
-		ctx:          ctx,
-		segments:     segments,
-		groups:       groups,
-		pool:         pool,
-		currentIndex: -1, // Start before first segment
+		ctx:            ctx,
+		segments:       segments,
+		groups:         groups,
+		pool:           pool,
+		currentIndex:   -1, // Start before first segment
+		metricsTracker: metricsTracker,
 	}
 
 	// Open the first segment
@@ -119,6 +122,9 @@ func (sr *SequentialReader) openNextSegment() error {
 		_, err := sr.pool.BodyStream(sr.ctx, segment.ID, w)
 		if err != nil {
 			_ = r.CloseWithError(err)
+		} else if sr.metricsTracker != nil {
+			sr.metricsTracker.IncArticlesDownloaded()
+			sr.metricsTracker.UpdateDownloadProgress("", int64(segment.Bytes))
 		}
 	}()
 	sr.currentReader = r

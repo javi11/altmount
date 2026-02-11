@@ -24,6 +24,12 @@ var (
 	_ io.ReadCloser = &UsenetReader{}
 )
 
+type MetricsTracker interface {
+	IncArticlesDownloaded()
+	IncArticlesPosted()
+	UpdateDownloadProgress(id string, bytesDownloaded int64)
+}
+
 type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
@@ -39,6 +45,7 @@ func (e *DataCorruptionError) Unwrap() error {
 }
 
 type UsenetReader struct {
+<<<<<<< HEAD
 	log            *slog.Logger
 	wg             sync.WaitGroup
 	cancel         context.CancelFunc
@@ -49,6 +56,21 @@ type UsenetReader struct {
 	closeOnce      sync.Once
 	totalBytesRead int64
 	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
+=======
+	log                *slog.Logger
+	wg                 sync.WaitGroup
+	cancel             context.CancelFunc
+	rg                 *segmentRange
+	maxDownloadWorkers int
+	maxCacheSize       int64 // Maximum cache size in bytes
+	init               chan any
+	initDownload       sync.Once
+	closeOnce          sync.Once
+	totalBytesRead     int64
+	poolGetter         func() (*nntppool.Client, error) // Dynamic pool getter
+	metricsTracker     MetricsTracker
+	streamID           string
+>>>>>>> 664266d (feat(metrics): implement windowed real-time speed tracking)
 
 	// Prefetch-based download tracking
 	nextToDownload int // Index of next segment to schedule
@@ -60,7 +82,14 @@ func NewUsenetReader(
 	ctx context.Context,
 	poolGetter func() (*nntppool.Client, error),
 	rg *segmentRange,
+<<<<<<< HEAD
 	maxPrefetch int,
+=======
+	maxDownloadWorkers int,
+	maxCacheSizeMB int,
+	metricsTracker MetricsTracker,
+	streamID string,
+>>>>>>> 664266d (feat(metrics): implement windowed real-time speed tracking)
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
@@ -70,12 +99,26 @@ func NewUsenetReader(
 	}
 
 	ur := &UsenetReader{
+<<<<<<< HEAD
 		log:         log,
 		cancel:      cancel,
 		rg:          rg,
 		init:        make(chan any, 1),
 		maxPrefetch: maxPrefetch,
 		poolGetter:  poolGetter,
+=======
+		log:                 log,
+		cancel:              cancel,
+		rg:                  rg,
+		init:                make(chan any, 1),
+		maxDownloadWorkers:  maxDownloadWorkers,
+		maxCacheSize:        maxCacheSize,
+		poolGetter:          poolGetter,
+		metricsTracker:      metricsTracker,
+		streamID:            streamID,
+		nextToDownload:      0,
+		downloadingSegments: make(map[int]bool),
+>>>>>>> 664266d (feat(metrics): implement windowed real-time speed tracking)
 	}
 
 	ur.wg.Add(1)
@@ -312,7 +355,20 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return err
 			}
 
+<<<<<<< HEAD
 			resultBytes = buf.Bytes()
+=======
+			segment.writer.Write(result.Bytes)
+
+			if b.metricsTracker != nil {
+				b.metricsTracker.IncArticlesDownloaded()
+
+				if b.streamID != "" {
+					b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(result.Bytes)))
+				}
+			}
+
+>>>>>>> 664266d (feat(metrics): implement windowed real-time speed tracking)
 			return nil
 		},
 		retry.Attempts(10),

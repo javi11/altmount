@@ -18,8 +18,10 @@ type ActiveStream struct {
 	UserAgent        string    `json:"user_agent,omitempty"`
 	TotalSize        int64     `json:"total_size"`
 	BytesSent        int64     `json:"bytes_sent"`
+	BytesDownloaded  int64     `json:"bytes_downloaded"`
 	CurrentOffset    int64     `json:"current_offset"`
 	BytesPerSecond   int64     `json:"bytes_per_second"`
+	DownloadSpeed    int64     `json:"download_speed"`
 	SpeedAvg         int64     `json:"speed_avg"`
 	ETA              int64     `json:"eta"` // Seconds remaining
 	TotalConnections int       `json:"total_connections"`
@@ -31,8 +33,11 @@ type ActiveStream struct {
 type StreamTracker interface {
 	Add(filePath, source, userName, clientIP, userAgent string, totalSize int64) string
 	UpdateProgress(id string, bytesRead int64)
+	UpdateDownloadProgress(id string, bytesDownloaded int64)
 	UpdateBufferedOffset(id string, offset int64)
 	Remove(id string)
+	IncArticlesDownloaded()
+	IncArticlesPosted()
 }
 
 // normalizePath normalizes file paths for consistent database lookups

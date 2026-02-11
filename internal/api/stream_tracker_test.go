@@ -10,7 +10,7 @@ import (
 )
 
 func TestStreamTracker_GetAll_Grouping(t *testing.T) {
-	tracker := NewStreamTracker()
+	tracker := NewStreamTracker(nil)
 	defer tracker.Stop()
 
 	// Add 3 connections for the same file
@@ -55,7 +55,7 @@ func TestStreamTracker_GetAll_Grouping(t *testing.T) {
 }
 
 func TestStreamTracker_GetAll_Sorting(t *testing.T) {
-	tracker := NewStreamTracker()
+	tracker := NewStreamTracker(nil)
 	defer tracker.Stop()
 
 	// Add an older stream

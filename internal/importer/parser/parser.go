@@ -465,6 +465,11 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 				}, nil
 			}
 
+			if p.poolManager != nil {
+				p.poolManager.IncArticlesDownloaded()
+				p.poolManager.UpdateDownloadProgress("", int64(len(result.Bytes)))
+			}
+
 			headers := result.YEnc
 
 			// Use decoded bytes from result (up to 16KB for PAR2 detection)
@@ -502,6 +507,11 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 							"segment_index", segIdx,
 							"error", err)
 						break // Stop trying, use what we have
+					}
+
+					if p.poolManager != nil {
+						p.poolManager.IncArticlesDownloaded()
+						p.poolManager.UpdateDownloadProgress("", int64(len(segResult.Bytes)))
 					}
 
 					// Copy remaining bytes needed from this segment
@@ -601,12 +611,24 @@ func (p *Parser) fetchYencHeaders(ctx context.Context, segment nzbparser.NzbSegm
 		if headers.PartSize <= 0 {
 			return nntppool.YEncMeta{}, errors.NewNonRetryableError("invalid part size from yenc header", nil)
 		}
+
+		if p.poolManager != nil {
+			p.poolManager.IncArticlesDownloaded()
+			p.poolManager.UpdateDownloadProgress("", int64(headers.PartSize))
+		}
+
 		return headers, nil
 	case result := <-resultCh:
 		// BodyAsync completed before onMeta fired — either error or non-yEnc article
 		if result.Err != nil {
 			return nntppool.YEncMeta{}, errors.NewNonRetryableError("failed to get body", result.Err)
 		}
+
+		if p.poolManager != nil {
+			p.poolManager.IncArticlesDownloaded()
+			p.poolManager.UpdateDownloadProgress("", int64(result.Body.YEnc.PartSize))
+		}
+
 		// onMeta didn't fire but body completed — use headers from result
 		headers := result.Body.YEnc
 		if headers.PartSize <= 0 {
