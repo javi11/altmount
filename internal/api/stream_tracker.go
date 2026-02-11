@@ -294,6 +294,14 @@ func (t *StreamTracker) IncArticlesDownloaded() {
 // IncArticlesPosted satisfies the usenet.MetricsTracker interface
 func (t *StreamTracker) IncArticlesPosted() {}
 
+// UpdateCurrentOffset updates the current playback offset for a stream by ID
+func (t *StreamTracker) UpdateCurrentOffset(id string, offset int64) {
+	if val, ok := t.streams.Load(id); ok {
+		stream := val.(*streamInternal)
+		atomic.StoreInt64(&stream.CurrentOffset, offset)
+	}
+}
+
 // UpdateBufferedOffset updates the buffered offset for a stream by ID
 func (t *StreamTracker) UpdateBufferedOffset(id string, offset int64) {
 	if val, ok := t.streams.Load(id); ok {

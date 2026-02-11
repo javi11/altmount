@@ -23,17 +23,17 @@ export function ActivityHub() {
 				const isStreaming = s.status === "Streaming";
 				
 				// Heuristic: Filter out metadata probes and very short system scans
-				// 1. If reading the very end of the file (last 10MB), it's likely a probe
-				const isAtEnd = s.total_size > 0 && s.current_offset > (s.total_size - (10 * 1024 * 1024));
-				// 2. If it's very new and hasn't sent much data yet, hide it temporarily 
-				// (Plex/Infuse will pass this threshold in seconds)
-				const isTooNew = s.bytes_sent < (20 * 1024 * 1024);
+				// 1. If reading the very end of the file (last 5MB), it's likely a probe
+				const isAtEnd = s.total_size > 0 && s.current_offset > (s.total_size - (5 * 1024 * 1024));
+				// 2. If it's very new and hasn't sent much data yet, hide it briefly
+				// (Reduced thresholds to show streams faster)
+				const isTooNew = s.bytes_sent < (5 * 1024 * 1024);
 				const ageSeconds = (new Date().getTime() - new Date(s.started_at).getTime()) / 1000;
 				
 				if (isAtEnd) return false;
-				if (isTooNew && ageSeconds < 15) return false;
+				if (isTooNew && ageSeconds < 5) return false;
 				
-				return isSystemSource && isStreaming;
+				return isSystemSource && (isStreaming || s.status === "Buffering");
 			}
 		);
 
