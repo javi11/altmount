@@ -1231,7 +1231,11 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
+<<<<<<< HEAD
 	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID)
+=======
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxCacheSizeMB, mvf.streamTracker, mvf.streamID)
+>>>>>>> 04fcb51 (fix(frontend): show real-time download speed (IN) in Activity Hub playback)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

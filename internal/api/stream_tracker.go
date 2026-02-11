@@ -285,7 +285,11 @@ func (t *StreamTracker) UpdateDownloadProgress(id string, bytesDownloaded int64)
 }
 
 // IncArticlesDownloaded satisfies the usenet.MetricsTracker interface
-func (t *StreamTracker) IncArticlesDownloaded() {}
+func (t *StreamTracker) IncArticlesDownloaded() {
+	if t.metricsTracker != nil {
+		t.metricsTracker.IncArticlesDownloaded()
+	}
+}
 
 // IncArticlesPosted satisfies the usenet.MetricsTracker interface
 func (t *StreamTracker) IncArticlesPosted() {}
