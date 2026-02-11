@@ -34,6 +34,7 @@ type StreamTracker interface {
 	Add(filePath, source, userName, clientIP, userAgent string, totalSize int64) string
 	UpdateProgress(id string, bytesRead int64)
 	UpdateDownloadProgress(id string, bytesDownloaded int64)
+	UpdateCurrentOffset(id string, offset int64)
 	UpdateBufferedOffset(id string, offset int64)
 	Remove(id string)
 	IncArticlesDownloaded()
