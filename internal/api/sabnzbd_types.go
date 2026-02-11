@@ -8,6 +8,7 @@ import (
 
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/importer/utils"
+	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/altmount/internal/progress"
 )
 
@@ -422,9 +423,10 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 	if item.StoragePath != nil && *item.StoragePath != "" {
 		// Construct the full absolute path on the mount
 		// We use filepath.ToSlash to ensure consistent forward slashes for the API
-		storagePath := filepath.ToSlash(*item.StoragePath)
+		storagePath := *item.StoragePath
 		// Ensure storagePath is treated as relative to basePath even if it starts with /
-		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, strings.TrimPrefix(storagePath, "/")))
+		fullStoragePath := pathutil.JoinAbsPath(basePath, storagePath)
+		fullStoragePath = filepath.ToSlash(fullStoragePath)
 
 		// Determine the job folder
 		jobFolder := fullStoragePath

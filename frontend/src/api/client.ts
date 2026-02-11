@@ -74,18 +74,27 @@ export class APIClient {
 
 			if (!response.ok) {
 				const errorData = await response.json();
-				throw new APIError(
-					response.status,
-					errorData.message || `HTTP ${response.status}: ${response.statusText}`,
-					errorData.details || "",
-				);
+				const errorMessage =
+					(typeof errorData.error === "object" ? errorData.error?.message : errorData.error) ||
+					errorData.message ||
+					`HTTP ${response.status}: ${response.statusText}`;
+				const errorDetails =
+					(typeof errorData.error === "object" ? errorData.error?.details : "") ||
+					errorData.details ||
+					"";
+
+				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
 			const data: APIResponse<T> = await response.json();
 
 			if (!data.success) {
 				// Handle error in the success=false format
-				throw new APIError(response.status, data.error || "API request failed", "");
+				const errorMessage =
+					(typeof data.error === "object" ? data.error?.message : data.error) ||
+					"API request failed";
+				const errorDetails = (typeof data.error === "object" ? data.error?.details : "") || "";
+				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
 			return data.data as T;
@@ -119,12 +128,20 @@ export class APIClient {
 				// Try to parse error response
 				try {
 					const errorData = await response.json();
-					throw new APIError(
-						response.status,
-						errorData.message || `HTTP ${response.status}: ${response.statusText}`,
-						errorData.details || "",
-					);
-				} catch {
+					const errorMessage =
+						(typeof errorData.error === "object" ? errorData.error?.message : errorData.error) ||
+						errorData.message ||
+						`HTTP ${response.status}: ${response.statusText}`;
+					const errorDetails =
+						(typeof errorData.error === "object" ? errorData.error?.details : "") ||
+						errorData.details ||
+						"";
+
+					throw new APIError(response.status, errorMessage, errorDetails);
+				} catch (e) {
+					if (e instanceof APIError) {
+						throw e;
+					}
 					// If parsing fails, use generic error
 					throw new APIError(
 						response.status,
@@ -138,7 +155,11 @@ export class APIClient {
 
 			if (!data.success) {
 				// Handle error in the success=false format
-				throw new APIError(response.status, data.error || "API request failed", "");
+				const errorMessage =
+					(typeof data.error === "object" ? data.error?.message : data.error) ||
+					"API request failed";
+				const errorDetails = (typeof data.error === "object" ? data.error?.details : "") || "";
+				throw new APIError(response.status, errorMessage, errorDetails);
 			}
 
 			return data;
@@ -228,6 +249,14 @@ export class APIClient {
 
 	async getQueueStats() {
 		return this.request<QueueStats>("/queue/stats");
+	}
+
+	async getQueueHistory(days?: number) {
+		const searchParams = new URLSearchParams();
+		if (days) searchParams.set("days", days.toString());
+
+		const query = searchParams.toString();
+		return this.request<any>(`/queue/stats/history${query ? `?${query}` : ""}`);
 	}
 
 	async clearCompletedQueue(olderThan?: string) {
@@ -654,6 +683,12 @@ export class APIClient {
 		return this.request<SystemBrowseResponse>(`/system/browse${query ? `?${query}` : ""}`);
 	}
 
+	async resetSystemStats() {
+		return this.request<{ message: string }>("/system/stats/reset", {
+			method: "POST",
+		});
+	}
+
 	// Provider endpoints
 	async testProvider(data: ProviderTestRequest) {
 		return this.request<ProviderTestResponse>("/providers/test", {
@@ -708,6 +743,14 @@ export class APIClient {
 
 	async getScanStatus() {
 		return this.request<ScanStatusResponse>("/import/scan/status");
+	}
+
+	async getImportHistory(limit?: number) {
+		const searchParams = new URLSearchParams();
+		if (limit) searchParams.set("limit", limit.toString());
+
+		const query = searchParams.toString();
+		return this.request<any[]>(`/import/history${query ? `?${query}` : ""}`);
 	}
 
 	async cancelScan() {

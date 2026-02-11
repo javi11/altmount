@@ -157,16 +157,11 @@ export function HealthConfigSection({
 					)}
 					<div className="label flex-col items-start whitespace-normal text-sm">
 						<div>
-							Path to your organized media library that contains symlinks pointing to altmount
-							files. When a repair is triggered, the system will search for symlinks in this
-							directory and use the library path for ARR rescan instead of the mount path.
+							Path to your organized media library. For symlink/STRM strategies, this contains
+							the generated link files. For <strong>NONE</strong> strategy, this allows the system
+							to track files moved or renamed by Sonarr/Radarr, ensuring health checks and repairs
+							always use the correct paths.
 						</div>
-						{config.import.import_strategy === "NONE" && (
-							<span className="mt-1 text-info">
-								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy, you can
-								leave this empty. The system will use your mount path for repairs.
-							</span>
-						)}
 						{formData.enabled && config.import.import_strategy !== "NONE" && (
 							<strong className="mt-1 text-error">
 								Required when Health System is enabled with {config.import.import_strategy}{" "}
@@ -218,8 +213,9 @@ export function HealthConfigSection({
 						)}
 						{config.import.import_strategy === "NONE" && (
 							<span className="mt-1 text-info">
-								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system only performs
-								metadata-only sync. It will not delete library files.
+								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system performs a
+								full library sync if a Library Directory is configured, allowing it to track
+								renames. Cleanup will only remove database records for missing files.
 							</span>
 						)}
 					</div>
@@ -299,9 +295,9 @@ export function HealthConfigSection({
 			<details className="collapse bg-base-200">
 				<summary className="collapse-title font-medium">Advanced Settings</summary>
 				<div className="collapse-content">
-					<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+					<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 						{formData.check_interval_seconds !== undefined && (
-							<fieldset className="fieldset">
+							<fieldset className="fieldset min-w-[250px]">
 								<legend className="fieldset-legend">Check Interval (seconds)</legend>
 								<input
 									type="number"
@@ -324,7 +320,7 @@ export function HealthConfigSection({
 							</fieldset>
 						)}
 						{formData.max_connections_for_health_checks !== undefined && (
-							<fieldset className="fieldset">
+							<fieldset className="fieldset min-w-[250px]">
 								<legend className="fieldset-legend">Max Connections for Health Checks</legend>
 								<input
 									type="number"
@@ -346,7 +342,7 @@ export function HealthConfigSection({
 							</fieldset>
 						)}
 						{formData.max_concurrent_jobs !== undefined && (
-							<fieldset className="fieldset">
+							<fieldset className="fieldset min-w-[250px]">
 								<legend className="fieldset-legend">Max Concurrent Jobs</legend>
 								<input
 									type="number"
@@ -367,7 +363,7 @@ export function HealthConfigSection({
 								</p>
 							</fieldset>
 						)}
-						<fieldset className="fieldset">
+						<fieldset className="fieldset min-w-[250px]">
 							<legend className="fieldset-legend">Check All Segments</legend>
 							<label className="label cursor-pointer">
 								<span className="label-text">Deep segment checking</span>
@@ -385,7 +381,7 @@ export function HealthConfigSection({
 							</p>
 						</fieldset>
 						{!formData.check_all_segments && (
-							<fieldset className="fieldset">
+							<fieldset className="fieldset min-w-[250px]">
 								<legend className="fieldset-legend">Hybrid Data Verification</legend>
 								<label className="label cursor-pointer">
 									<span className="label-text">Verify data (1 byte)</span>
@@ -404,7 +400,7 @@ export function HealthConfigSection({
 							</fieldset>
 						)}
 						{formData.segment_sample_percentage !== undefined && !formData.check_all_segments && (
-							<fieldset className="fieldset">
+							<fieldset className="fieldset min-w-[250px]">
 								<legend className="fieldset-legend">Segment Sample Percentage</legend>
 								<input
 									type="number"
@@ -427,7 +423,7 @@ export function HealthConfigSection({
 							</fieldset>
 						)}
 						{formData.library_sync_interval_minutes !== undefined && (
-							<fieldset className="fieldset">
+							<fieldset className="fieldset min-w-[250px]">
 								<legend className="fieldset-legend">Library Sync Interval (minutes)</legend>
 								<input
 									type="number"
@@ -450,7 +446,7 @@ export function HealthConfigSection({
 								</p>
 							</fieldset>
 						)}
-						<fieldset className="fieldset">
+						<fieldset className="fieldset min-w-[250px]">
 							<legend className="fieldset-legend">Smart Repair Resolution</legend>
 							<label className="label cursor-pointer">
 								<span className="label-text">Resolve repairs on import</span>

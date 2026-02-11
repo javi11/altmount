@@ -232,6 +232,28 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 	})
 }
 
+// handleGetImportHistory handles GET /api/import/history
+func (s *Server) handleGetImportHistory(c *fiber.Ctx) error {
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		if _, err := fmt.Sscanf(l, "%d", &limit); err != nil {
+			limit = 50
+		}
+	}
+
+	history, err := s.queueRepo.ListImportHistory(c.Context(), limit)
+	if err != nil {
+		return RespondInternalError(c, "Failed to list import history", err.Error())
+	}
+
+	response := make([]*ImportHistoryResponse, len(history))
+	for i, h := range history {
+		response[i] = ToImportHistoryResponse(h)
+	}
+
+	return RespondSuccess(c, response)
+}
+
 // toScanStatusResponse converts importer.ScanInfo to ScanStatusResponse
 func toScanStatusResponse(scanInfo importer.ScanInfo) *ScanStatusResponse {
 	return &ScanStatusResponse{
