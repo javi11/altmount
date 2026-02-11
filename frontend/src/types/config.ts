@@ -398,6 +398,7 @@ export interface ProviderUpdateRequest {
 	username?: string;
 	password?: string;
 	max_connections?: number;
+	inflight_requests?: number;
 	tls?: boolean;
 	insecure_tls?: boolean;
 	proxy_url?: string;
@@ -735,6 +736,7 @@ export interface ProviderCreateRequest {
 	username: string;
 	password: string;
 	max_connections: number;
+	inflight_requests?: number;
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url?: string;

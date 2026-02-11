@@ -242,8 +242,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								max={50}
 							/>
 							<p className="mt-2 text-base-content/60 text-xs">
-								Concurrent requests per connection (pipelining). Higher values may cause slowness if the
-								provider does not support it well.
+								Concurrent requests per connection (pipelining). Higher values may cause slowness if
+								the provider does not support it well.
 							</p>
 						</fieldset>
 					</div>
