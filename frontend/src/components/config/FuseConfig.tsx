@@ -18,7 +18,6 @@ export function FuseConfig() {
 		debug: false,
 		attr_timeout_seconds: 1,
 		entry_timeout_seconds: 1,
-		max_download_workers: 15,
 		max_cache_size_mb: 128,
 		max_read_ahead_mb: 128,
 		// Metadata cache defaults
@@ -305,23 +304,6 @@ export function FuseConfig() {
 						<h4 className="font-medium text-base">Streaming Cache Settings</h4>
 
 						<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Max Download Workers</legend>
-								<input
-									type="number"
-									className="input"
-									value={formData.max_download_workers ?? 15}
-									onChange={(e) =>
-										setFormData({
-											...formData,
-											max_download_workers: Number.parseInt(e.target.value, 10) || 0,
-										})
-									}
-									disabled={isRunning}
-								/>
-								<p className="label">Concurrent download workers for this mount</p>
-							</fieldset>
-
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">Max Cache Size</legend>
 								<div className="join">

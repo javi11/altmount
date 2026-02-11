@@ -5,341 +5,65 @@ import (
 	"io"
 	"sync"
 	"testing"
-	"time"
 )
 
-// TestSegmentWriter_WriteAfterClose verifies that writes after close return io.ErrClosedPipe
-func TestSegmentWriter_WriteAfterClose(t *testing.T) {
+// TestSegment_SetData_ThenGetReader verifies basic data flow: SetData -> GetReader -> Read
+func TestSegment_SetData_ThenGetReader(t *testing.T) {
 	t.Parallel()
 
-	// Create a segment with a pipe
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:     "test-segment",
-		reader: reader,
-		writer: writer,
-	}
+	seg := newSegment("test-segment", 0, 9, 10, nil)
 
-	// Get writer reference
-	w := seg.Writer()
+	// Set data
+	seg.SetData([]byte("0123456789"))
 
-	// Close the segment
-	if err := seg.Close(); err != nil {
-		t.Fatalf("Close() failed: %v", err)
-	}
-
-	// Attempt to write after close
-	_, err := w.Write([]byte("test data"))
-	if err == nil {
-		t.Fatal("Expected error when writing after close, got nil")
-	}
-
-	if !errors.Is(err, io.ErrClosedPipe) {
-		t.Errorf("Expected io.ErrClosedPipe, got: %v", err)
-	}
-}
-
-// TestSegmentWriter_ConcurrentWriteAndClose tests race condition between write and close
-func TestSegmentWriter_ConcurrentWriteAndClose(t *testing.T) {
-	t.Parallel()
-
-	// Run this test multiple times to increase chance of catching race
-	for i := 0; i < 10; i++ {
-		reader, writer := io.Pipe()
-		seg := &segment{
-			Id:     "test-segment",
-			reader: reader,
-			writer: writer,
-		}
-
-		w := seg.Writer()
-		var wg sync.WaitGroup
-		writeErr := make(chan error, 1)
-
-		// Start goroutine that writes slowly
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			data := make([]byte, 1024)
-			for j := 0; j < 100; j++ {
-				_, err := w.Write(data)
-				if err != nil {
-					writeErr <- err
-					return
-				}
-				time.Sleep(time.Microsecond) // Small delay to increase race likelihood
-			}
-		}()
-
-		// Close segment from main goroutine during write
-		time.Sleep(time.Millisecond)
-		if err := seg.Close(); err != nil {
-			t.Errorf("Close() failed: %v", err)
-		}
-
-		wg.Wait()
-		close(writeErr)
-
-		// The writer should either succeed or get io.ErrClosedPipe
-		// The important thing is no panic occurred
-		if err := <-writeErr; err != nil && !errors.Is(err, io.ErrClosedPipe) {
-			t.Errorf("Expected nil or io.ErrClosedPipe, got: %v", err)
-		}
-	}
-}
-
-// TestSegmentClose_Idempotent verifies that calling Close() multiple times is safe
-func TestSegmentClose_Idempotent(t *testing.T) {
-	t.Parallel()
-
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:     "test-segment",
-		reader: reader,
-		writer: writer,
-	}
-
-	// Close multiple times
-	for i := 0; i < 5; i++ {
-		if err := seg.Close(); err != nil {
-			t.Errorf("Close() call %d failed: %v", i+1, err)
-		}
-	}
-
-	// Verify closed flag is set
-	seg.mx.Lock()
-	if !seg.closed {
-		t.Error("Expected segment to be marked as closed")
-	}
-	seg.mx.Unlock()
-}
-
-// TestSafeWriter_ReturnsErrorWhenClosed verifies Writer() returns safe writer even after close
-func TestSafeWriter_ReturnsErrorWhenClosed(t *testing.T) {
-	t.Parallel()
-
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:     "test-segment",
-		reader: reader,
-		writer: writer,
-	}
-
-	// Close first
-	if err := seg.Close(); err != nil {
-		t.Fatalf("Close() failed: %v", err)
-	}
-
-	// Get writer after close
-	w := seg.Writer()
-	if w == nil {
-		t.Fatal("Writer() returned nil")
-	}
-
-	// Attempt to write - should get clean error
-	_, err := w.Write([]byte("test data"))
-	if err == nil {
-		t.Fatal("Expected error when writing to closed segment, got nil")
-	}
-
-	if !errors.Is(err, io.ErrClosedPipe) {
-		t.Errorf("Expected io.ErrClosedPipe, got: %v", err)
-	}
-}
-
-// TestSegmentWriter_ConcurrentWrites tests multiple concurrent writers with close
-func TestSegmentWriter_ConcurrentWrites(t *testing.T) {
-	t.Parallel()
-
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:     "test-segment",
-		reader: reader,
-		writer: writer,
-	}
-
-	w := seg.Writer()
-	var wg sync.WaitGroup
-	numWriters := 10
-	errChan := make(chan error, numWriters)
-
-	// Start multiple concurrent writers
-	for i := 0; i < numWriters; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			data := make([]byte, 100)
-			for j := 0; j < 50; j++ {
-				_, err := w.Write(data)
-				if err != nil {
-					errChan <- err
-					return
-				}
-				time.Sleep(time.Microsecond)
-			}
-		}(i)
-	}
-
-	// Close segment during concurrent writes
-	time.Sleep(5 * time.Millisecond)
-	if err := seg.Close(); err != nil {
-		t.Errorf("Close() failed: %v", err)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// All errors should be io.ErrClosedPipe
-	for err := range errChan {
-		if !errors.Is(err, io.ErrClosedPipe) {
-			t.Errorf("Expected io.ErrClosedPipe, got: %v", err)
-		}
-	}
-}
-
-// TestSegmentWriter_NilWriter verifies handling of nil writer
-func TestSegmentWriter_NilWriter(t *testing.T) {
-	t.Parallel()
-
-	seg := &segment{
-		Id:     "test-segment",
-		writer: nil, // Nil writer
-	}
-
-	w := seg.Writer()
-	_, err := w.Write([]byte("test"))
-	if err == nil {
-		t.Fatal("Expected error when writing to nil writer, got nil")
-	}
-
-	if !errors.Is(err, io.ErrClosedPipe) {
-		t.Errorf("Expected io.ErrClosedPipe for nil writer, got: %v", err)
-	}
-}
-
-// TestSegmentClose_NilSegment verifies Close() handles nil segment safely
-func TestSegmentClose_NilSegment(t *testing.T) {
-	t.Parallel()
-
-	var seg *segment
-	if err := seg.Close(); err != nil {
-		t.Errorf("Close() on nil segment should return nil, got: %v", err)
-	}
-}
-
-// TestSegmentWriter_RaceDetection is designed to be run with -race flag
-func TestSegmentWriter_RaceDetection(t *testing.T) {
-	t.Parallel()
-
-	// This test is specifically designed to catch data races
-	// Run with: go test -race -run TestSegmentWriter_RaceDetection
-	for iteration := 0; iteration < 20; iteration++ {
-		reader, writer := io.Pipe()
-		seg := &segment{
-			Id:     "test-segment",
-			reader: reader,
-			writer: writer,
-		}
-
-		w := seg.Writer()
-		var wg sync.WaitGroup
-
-		// Multiple goroutines accessing Writer() and Close() concurrently
-		for i := 0; i < 5; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_ = seg.Writer()
-			}()
-		}
-
-		for i := 0; i < 5; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_, _ = w.Write([]byte("test"))
-			}()
-		}
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(time.Microsecond)
-			_ = seg.Close()
-		}()
-
-		wg.Wait()
-	}
-}
-
-// TestSegment_CloseWithError_StoresError verifies that CloseWithError stores the error
-func TestSegment_CloseWithError_StoresError(t *testing.T) {
-	t.Parallel()
-
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:     "test-segment",
-		Start:  0,
-		End:    100,
-		reader: reader,
-		writer: writer,
-	}
-
-	testErr := errors.New("article not found in providers")
-
-	// Get writer and close with error
-	sw := seg.Writer()
-	safeW, ok := sw.(interface{ CloseWithError(error) error })
-	if !ok {
-		t.Fatal("Writer does not implement CloseWithError")
-	}
-
-	err := safeW.CloseWithError(testErr)
-	if err != nil {
-		t.Fatalf("CloseWithError failed: %v", err)
-	}
-
-	// Check that error is stored
-	storedErr := seg.GetDownloadError()
-	if storedErr == nil {
-		t.Fatal("Expected download error to be stored, got nil")
-	}
-	if !errors.Is(storedErr, testErr) {
-		t.Errorf("Expected error %v, got %v", testErr, storedErr)
-	}
-}
-
-// TestSegment_GetReader_PropagatesStoredError verifies that stored errors are returned on Read
-func TestSegment_GetReader_PropagatesStoredError(t *testing.T) {
-	t.Parallel()
-
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:          "test-segment",
-		Start:       0,
-		End:         100,
-		SegmentSize: 100,
-		reader:      reader,
-		writer:      writer,
-	}
-
-	testErr := errors.New("article not found in providers")
-
-	// Close with error before reading
-	sw := seg.Writer()
-	safeW, ok := sw.(interface{ CloseWithError(error) error })
-	if !ok {
-		t.Fatal("Writer does not implement CloseWithError")
-	}
-	_ = safeW.CloseWithError(testErr)
-
-	// GetReader should work
+	// Read it back
 	r := seg.GetReader()
-	if r == nil {
-		t.Fatal("GetReader returned nil")
+	buf := make([]byte, 10)
+	n, err := r.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("Read() failed: %v", err)
 	}
+	if n != 10 {
+		t.Fatalf("Expected 10 bytes, got %d", n)
+	}
+	if string(buf[:n]) != "0123456789" {
+		t.Fatalf("Expected '0123456789', got '%s'", string(buf[:n]))
+	}
+}
 
-	// Read should return the stored error
+// TestSegment_SetData_WithOffset verifies that Start offset is applied correctly
+func TestSegment_SetData_WithOffset(t *testing.T) {
+	t.Parallel()
+
+	// Segment reads bytes [3, 6] from a 10-byte segment
+	seg := newSegment("test-segment", 3, 6, 10, nil)
+
+	seg.SetData([]byte("0123456789"))
+
+	r := seg.GetReader()
+	buf := make([]byte, 10)
+	n, err := r.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("Read() failed: %v", err)
+	}
+	if n != 4 {
+		t.Fatalf("Expected 4 bytes, got %d", n)
+	}
+	if string(buf[:n]) != "3456" {
+		t.Fatalf("Expected '3456', got '%s'", string(buf[:n]))
+	}
+}
+
+// TestSegment_SetError_PropagatesOnRead verifies that SetError makes GetReader return the error
+func TestSegment_SetError_PropagatesOnRead(t *testing.T) {
+	t.Parallel()
+
+	seg := newSegment("test-segment", 0, 100, 101, nil)
+	testErr := errors.New("article not found in providers")
+
+	seg.SetError(testErr)
+
+	r := seg.GetReader()
 	buf := make([]byte, 10)
 	_, err := r.Read(buf)
 	if err == nil {
@@ -350,31 +74,97 @@ func TestSegment_GetReader_PropagatesStoredError(t *testing.T) {
 	}
 }
 
-// TestSegment_SetDownloadError_FirstWriteWins verifies first-write-wins semantics
-func TestSegment_SetDownloadError_FirstWriteWins(t *testing.T) {
+// TestSegment_SetError_FirstWriteWins verifies first-write-wins semantics
+func TestSegment_SetError_FirstWriteWins(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:     "test-segment",
-		reader: reader,
-		writer: writer,
-	}
-	defer seg.Close()
+	seg := newSegment("test-segment", 0, 100, 101, nil)
 
 	firstErr := errors.New("first error")
 	secondErr := errors.New("second error")
 
-	// Set first error
-	seg.SetDownloadError(firstErr)
+	seg.SetError(firstErr)
+	seg.SetError(secondErr)
 
-	// Try to set second error
-	seg.SetDownloadError(secondErr)
-
-	// Should still have first error
 	storedErr := seg.GetDownloadError()
 	if !errors.Is(storedErr, firstErr) {
 		t.Errorf("Expected first error to be preserved, got %v", storedErr)
+	}
+}
+
+// TestSegment_Close_Idempotent verifies that calling Close() multiple times is safe
+func TestSegment_Close_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	seg := newSegment("test-segment", 0, 100, 101, nil)
+
+	for i := 0; i < 5; i++ {
+		if err := seg.Close(); err != nil {
+			t.Errorf("Close() call %d failed: %v", i+1, err)
+		}
+	}
+
+	seg.mx.Lock()
+	if !seg.released {
+		t.Error("Expected segment to be marked as released")
+	}
+	seg.mx.Unlock()
+}
+
+// TestSegment_Release_UnblocksGetReader verifies that Release unblocks a waiting GetReader
+func TestSegment_Release_UnblocksGetReader(t *testing.T) {
+	t.Parallel()
+
+	seg := newSegment("test-segment", 0, 100, 101, nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r := seg.GetReader()
+		buf := make([]byte, 10)
+		_, err := r.Read(buf)
+		if err == nil {
+			t.Error("Expected error after release, got nil")
+		}
+	}()
+
+	// Release should unblock the GetReader
+	seg.Release()
+	<-done
+}
+
+// TestSegment_SetData_AfterRelease verifies that SetData after Release is a no-op
+func TestSegment_SetData_AfterRelease(t *testing.T) {
+	t.Parallel()
+
+	seg := newSegment("test-segment", 0, 100, 101, nil)
+	seg.Release()
+
+	// Should not panic
+	seg.SetData([]byte("data"))
+
+	seg.mx.Lock()
+	if seg.data != nil {
+		t.Error("Expected data to be nil after Release")
+	}
+	seg.mx.Unlock()
+}
+
+// TestSegment_DataLen(t *testing.T) verifies DataLen returns correct values
+func TestSegment_DataLen(t *testing.T) {
+	t.Parallel()
+
+	seg := newSegment("test-segment", 0, 9, 10, nil)
+
+	// Before data is set
+	if seg.DataLen() != 0 {
+		t.Errorf("Expected DataLen 0 before SetData, got %d", seg.DataLen())
+	}
+
+	seg.SetData([]byte("0123456789"))
+
+	if seg.DataLen() != 10 {
+		t.Errorf("Expected DataLen 10 after SetData, got %d", seg.DataLen())
 	}
 }
 
@@ -388,67 +178,79 @@ func TestSegment_GetDownloadError_NilSegment(t *testing.T) {
 	}
 }
 
-// TestSegment_SetDownloadError_NilSegment verifies nil segment handling
-func TestSegment_SetDownloadError_NilSegment(t *testing.T) {
+// TestSegment_SetError_NilSegment verifies nil segment handling
+func TestSegment_SetError_NilSegment(t *testing.T) {
 	t.Parallel()
 
 	var seg *segment
 	// Should not panic
-	seg.SetDownloadError(errors.New("test error"))
+	seg.SetError(errors.New("test error"))
 }
 
-// TestSegment_ErrorAwareReader_PropagatesErrorBeforeRead verifies error check before read
-func TestSegment_ErrorAwareReader_PropagatesErrorBeforeRead(t *testing.T) {
+// TestSegment_SetData_NilSegment verifies nil segment handling
+func TestSegment_SetData_NilSegment(t *testing.T) {
 	t.Parallel()
 
-	reader, writer := io.Pipe()
-	seg := &segment{
-		Id:          "test-segment",
-		Start:       0,
-		End:         100,
-		SegmentSize: 100,
-		reader:      reader,
-		writer:      writer,
-	}
+	var seg *segment
+	// Should not panic
+	seg.SetData([]byte("data"))
+}
 
-	// Set error before calling GetReader
-	testErr := errors.New("download failed")
-	seg.SetDownloadError(testErr)
+// TestSegment_Close_NilSegment verifies Close() handles nil segment safely
+func TestSegment_Close_NilSegment(t *testing.T) {
+	t.Parallel()
 
-	// GetReader and attempt to read
-	r := seg.GetReader()
-	buf := make([]byte, 10)
-	_, err := r.Read(buf)
-
-	if !errors.Is(err, testErr) {
-		t.Errorf("Expected error %v, got %v", testErr, err)
+	var seg *segment
+	if err := seg.Close(); err != nil {
+		t.Errorf("Close() on nil segment should return nil, got: %v", err)
 	}
 }
 
-// TestSegment_ErrorPropagation_ConcurrentAccess tests thread safety of error propagation
-func TestSegment_ErrorPropagation_ConcurrentAccess(t *testing.T) {
+// TestSegment_ConcurrentSetDataAndGetReader tests that SetData and GetReader
+// don't race. Only one goroutine reads (matching real usage in UsenetReader.Read).
+func TestSegment_ConcurrentSetDataAndGetReader(t *testing.T) {
 	t.Parallel()
 
-	for iteration := 0; iteration < 10; iteration++ {
-		reader, writer := io.Pipe()
-		seg := &segment{
-			Id:          "test-segment",
-			Start:       0,
-			End:         100,
-			SegmentSize: 100,
-			reader:      reader,
-			writer:      writer,
-		}
+	for iteration := 0; iteration < 20; iteration++ {
+		seg := newSegment("test-segment", 0, 9, 10, nil)
 
-		testErr := errors.New("concurrent error")
 		var wg sync.WaitGroup
 
-		// Multiple goroutines setting and getting error
+		// One reader goroutine (matches real usage)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := seg.GetReader()
+			buf := make([]byte, 10)
+			_, _ = r.Read(buf)
+		}()
+
+		// Set data from another goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			seg.SetData([]byte("0123456789"))
+		}()
+
+		wg.Wait()
+	}
+}
+
+// TestSegment_ConcurrentSetErrorAndGetReader tests concurrent error + read access
+func TestSegment_ConcurrentSetErrorAndGetReader(t *testing.T) {
+	t.Parallel()
+
+	for iteration := 0; iteration < 20; iteration++ {
+		seg := newSegment("test-segment", 0, 100, 101, nil)
+		testErr := errors.New("concurrent error")
+
+		var wg sync.WaitGroup
+
 		for i := 0; i < 5; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				seg.SetDownloadError(testErr)
+				seg.SetError(testErr)
 			}()
 		}
 
@@ -462,81 +264,90 @@ func TestSegment_ErrorPropagation_ConcurrentAccess(t *testing.T) {
 
 		wg.Wait()
 
-		// Error should be set
 		if seg.GetDownloadError() == nil {
 			t.Error("Expected error to be set after concurrent access")
 		}
+	}
+}
 
-		_ = seg.Close()
+// TestSegment_ConcurrentReleaseAndGetReader tests race between release and read
+func TestSegment_ConcurrentReleaseAndGetReader(t *testing.T) {
+	t.Parallel()
+
+	for iteration := 0; iteration < 20; iteration++ {
+		seg := newSegment("test-segment", 0, 9, 10, nil)
+
+		var wg sync.WaitGroup
+
+		// One reader goroutine (matches real usage)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := seg.GetReader()
+			buf := make([]byte, 10)
+			_, _ = r.Read(buf)
+		}()
+
+		// Release from another goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			seg.Release()
+		}()
+
+		wg.Wait()
 	}
 }
 
 // =============================================================================
-// Tests for segmentRange.Clear() early return bug fix
+// Tests for segmentRange.Clear()
 // =============================================================================
 
-// TestSegmentRangeClear_ContinuesOnError is the critical test for the memory leak fix.
-// It verifies that Clear() continues closing ALL segments even when some return errors.
-// This is a regression test for: https://github.com/javi11/altmount/issues/XXX
-func TestSegmentRangeClear_ContinuesOnError(t *testing.T) {
+// TestSegmentRangeClear_ContinuesOnAllSegments verifies that Clear() releases ALL segments.
+func TestSegmentRangeClear_ContinuesOnAllSegments(t *testing.T) {
 	t.Parallel()
 
 	const numSegments = 5
 
-	// Create segments
 	segments := make([]*segment, numSegments)
 	for i := 0; i < numSegments; i++ {
-		r, w := io.Pipe()
-		segments[i] = &segment{
-			Id:     "segment-" + string(rune('0'+i)),
-			reader: r,
-			writer: w,
-		}
+		segments[i] = newSegment("segment-"+string(rune('0'+i)), 0, 100, 101, nil)
 	}
 
-	// Pre-close segment 2 to simulate a condition where Close returns "already closed"
-	_ = segments[2].Close()
+	// Pre-release segment 2 to simulate already-closed state
+	segments[2].Release()
 
 	sr := &segmentRange{
 		segments: segments,
 		current:  0,
 	}
 
-	// Call Clear - this should close ALL segments, not stop at segment 2
 	_ = sr.Clear()
 
-	// Verify all segments are closed (closed flag should be true)
 	for i := 0; i < numSegments; i++ {
 		segments[i].mx.Lock()
-		isClosed := segments[i].closed
+		isReleased := segments[i].released
 		segments[i].mx.Unlock()
 
-		if !isClosed {
-			t.Errorf("Segment %d should be closed after Clear(), but closed=%v", i, isClosed)
+		if !isReleased {
+			t.Errorf("Segment %d should be released after Clear(), but released=%v", i, isReleased)
 		}
 	}
 
-	// segments slice should be nil
 	if sr.segments != nil {
 		t.Error("Expected segments slice to be nil after Clear()")
 	}
 }
 
-// TestSegmentRangeClear_AllSegmentsClosed verifies that all segments are properly
-// closed when Clear() is called on a fresh segmentRange.
-func TestSegmentRangeClear_AllSegmentsClosed(t *testing.T) {
+// TestSegmentRangeClear_AllSegmentsReleased verifies proper release on fresh segmentRange.
+func TestSegmentRangeClear_AllSegmentsReleased(t *testing.T) {
 	t.Parallel()
 
 	const numSegments = 10
 
 	segments := make([]*segment, numSegments)
 	for i := 0; i < numSegments; i++ {
-		r, w := io.Pipe()
-		segments[i] = &segment{
-			Id:     "segment",
-			reader: r,
-			writer: w,
-		}
+		segments[i] = newSegment("segment", 0, 100, 101, nil)
 	}
 
 	sr := &segmentRange{
@@ -544,24 +355,21 @@ func TestSegmentRangeClear_AllSegmentsClosed(t *testing.T) {
 		current:  0,
 	}
 
-	// Clear should close all segments
 	err := sr.Clear()
 	if err != nil {
-		t.Logf("Clear() returned error (expected with fix): %v", err)
+		t.Logf("Clear() returned error (unexpected): %v", err)
 	}
 
-	// All segments should have closed=true
 	for i, seg := range segments {
 		seg.mx.Lock()
-		isClosed := seg.closed
+		isReleased := seg.released
 		seg.mx.Unlock()
 
-		if !isClosed {
-			t.Errorf("Segment %d should be closed after Clear()", i)
+		if !isReleased {
+			t.Errorf("Segment %d should be released after Clear()", i)
 		}
 	}
 
-	// segments slice should be nil
 	if sr.segments != nil {
 		t.Error("Expected segments slice to be nil after Clear()")
 	}
@@ -572,35 +380,30 @@ func TestSegmentRangeClear_AllSegmentsClosed(t *testing.T) {
 func TestSegmentRangeClear_NilSegmentsHandled(t *testing.T) {
 	t.Parallel()
 
-	r1, w1 := io.Pipe()
-	r2, w2 := io.Pipe()
-
 	segments := []*segment{
-		{Id: "s1", reader: r1, writer: w1},
+		newSegment("s1", 0, 100, 101, nil),
 		nil, // nil segment
-		{Id: "s2", reader: r2, writer: w2},
+		newSegment("s2", 0, 100, 101, nil),
 	}
 
 	sr := &segmentRange{
 		segments: segments,
 	}
 
-	// Clear should not panic and should close non-nil segments
 	err := sr.Clear()
 	if err != nil {
 		t.Logf("Clear() returned error: %v", err)
 	}
 
-	// Non-nil segments should be closed
 	segments[0].mx.Lock()
-	if !segments[0].closed {
-		t.Error("Segment 0 should be closed")
+	if !segments[0].released {
+		t.Error("Segment 0 should be released")
 	}
 	segments[0].mx.Unlock()
 
 	segments[2].mx.Lock()
-	if !segments[2].closed {
-		t.Error("Segment 2 should be closed")
+	if !segments[2].released {
+		t.Error("Segment 2 should be released")
 	}
 	segments[2].mx.Unlock()
 }
@@ -613,7 +416,6 @@ func TestSegmentRangeClear_EmptyRange(t *testing.T) {
 		segments: []*segment{},
 	}
 
-	// Clear should succeed without error
 	err := sr.Clear()
 	if err != nil {
 		t.Errorf("Clear() on empty range returned error: %v", err)
@@ -628,7 +430,6 @@ func TestSegmentRangeClear_NilRange(t *testing.T) {
 		segments: nil,
 	}
 
-	// Clear should succeed without error
 	err := sr.Clear()
 	if err != nil {
 		t.Errorf("Clear() on nil segments returned error: %v", err)
@@ -643,19 +444,13 @@ func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
 	segments := make([]*segment, numSegments)
 
 	for i := 0; i < numSegments; i++ {
-		r, w := io.Pipe()
-		segments[i] = &segment{
-			Id:     "segment",
-			reader: r,
-			writer: w,
-		}
+		segments[i] = newSegment("segment", 0, 100, 101, nil)
 	}
 
 	sr := &segmentRange{
 		segments: segments,
 	}
 
-	// Call Clear from multiple goroutines
 	var wg sync.WaitGroup
 
 	for i := 0; i < 3; i++ {
@@ -667,8 +462,6 @@ func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
 	}
 
 	wg.Wait()
-
-	// Should not panic and should complete
 }
 
 // BenchmarkClear benchmarks the Clear operation
@@ -677,12 +470,7 @@ func BenchmarkClear(b *testing.B) {
 		b.StopTimer()
 		segments := make([]*segment, 100)
 		for j := 0; j < 100; j++ {
-			r, w := io.Pipe()
-			segments[j] = &segment{
-				Id:     "segment",
-				reader: r,
-				writer: w,
-			}
+			segments[j] = newSegment("segment", 0, 100, 101, nil)
 		}
 		sr := &segmentRange{segments: segments}
 		b.StartTimer()

@@ -58,29 +58,13 @@ export function StreamingConfigSection({
 					<p className="label">Maximum cache size in MB for ahead download chunks</p>
 					<BytesDisplay bytes={formData.max_cache_size_mb * 1024 * 1024} mode="badge" />
 				</fieldset>
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Download Workers</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_download_workers}
-						readOnly={isReadOnly}
-						min={1}
-						max={50}
-						onChange={(e) =>
-							handleInputChange("max_download_workers", Number.parseInt(e.target.value, 10) || 1)
-						}
-					/>
-					<p className="label">Number of concurrent download threads</p>
-				</fieldset>
 			</div>
 			<div className="alert alert-info">
 				<div>
 					<div className="font-bold">Note</div>
 					<div className="text-sm">
-						Cache size controls memory usage for ahead downloading of segments. Download workers
-						control the number of concurrent downloads from NNTP servers. If you don't understand
-						these settings, it's recommended to keep the default values.
+						Cache size controls memory usage for ahead downloading of segments. If you don't
+						understand this setting, it's recommended to keep the default value.
 					</div>
 				</div>
 			</div>

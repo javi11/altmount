@@ -99,6 +99,8 @@ export function ProviderHealth() {
 									<th>Provider Host</th>
 									<th>State</th>
 									<th>Connections</th>
+									<th>Missing</th>
+									<th>Current Speed</th>
 									<th>Top Speed</th>
 									<th>Last Activity</th>
 								</tr>
@@ -140,6 +142,35 @@ export function ProviderHealth() {
 													{provider.used_connections}/{provider.max_connections}
 												</span>
 											</div>
+										</td>
+										<td>
+											{provider.missing_count > 0 ? (
+												<div className="flex flex-col">
+													<span
+														className={`font-medium ${provider.missing_warning ? "text-error" : "text-warning"}`}
+													>
+														{provider.missing_count.toLocaleString()}
+													</span>
+													{provider.missing_rate_per_minute > 0 && (
+														<span
+															className={`text-xs ${provider.missing_warning ? "text-error/70" : "text-base-content/50"}`}
+														>
+															~{Math.round(provider.missing_rate_per_minute)}/min
+														</span>
+													)}
+												</div>
+											) : (
+												<span className="text-base-content/50">0</span>
+											)}
+										</td>
+										<td>
+											{provider.current_speed_bytes_per_sec > 0 ? (
+												<span className="font-medium font-mono text-info">
+													{formatBytes(provider.current_speed_bytes_per_sec)}/s
+												</span>
+											) : (
+												<span className="text-base-content/50">-</span>
+											)}
 										</td>
 										<td>
 											{provider.last_speed_test_mbps > 0 ? (

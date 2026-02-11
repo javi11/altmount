@@ -12,7 +12,6 @@ metadata:
     root_path: /config/metadata
     delete_source_nzb_on_removal: false
 streaming:
-    max_download_workers: 15
     max_cache_size_mb: 32
 health:
     enabled: false
@@ -133,7 +132,6 @@ fuse:
     debug: false
     attr_timeout_seconds: 1
     entry_timeout_seconds: 1
-    max_download_workers: 15
     max_cache_size_mb: 128
     max_read_ahead_mb: 128
 providers: []

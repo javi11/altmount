@@ -28,7 +28,6 @@ metadata:
 
 # Streaming and download configuration
 streaming:
-  max_download_workers: 15 # Number of download workers
   max_cache_size_mb: 32 # Maximum cache size in MB for ahead download chunks (default: 32MB)
 
 # RClone configuration (optional)
@@ -233,6 +232,7 @@ providers:
     username: 'your_username' # Replace with your username
     password: 'your_password' # Replace with your password
     max_connections: 20
+    inflight_requests: 3 # Concurrent requests per connection (pipelining, default: 3)
     tls: true
     insecure_tls: false
     enabled: true # Enable/disable this provider (default: true)
@@ -245,6 +245,7 @@ providers:
     username: 'your_username' # Replace with your username
     password: 'your_password' # Replace with your password
     max_connections: 10
+    inflight_requests: 3 # Concurrent requests per connection (pipelining, default: 3)
     tls: false
     insecure_tls: false
     enabled: true

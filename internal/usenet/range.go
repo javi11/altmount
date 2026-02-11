@@ -3,7 +3,6 @@ package usenet
 import (
 	"context"
 	"fmt"
-	"io"
 )
 
 type SegmentLoader interface {
@@ -103,16 +102,7 @@ func GetSegmentsInRangeFromIndex(ctx context.Context, start, end int64, ml Segme
 			continue
 		}
 
-		r, w := io.Pipe()
-		seg := &segment{
-			Id:          src.Id,
-			Start:       readStart,
-			End:         readEnd,
-			SegmentSize: src.Size,
-			groups:      groups,
-			reader:      r,
-			writer:      w,
-		}
+		seg := newSegment(src.Id, readStart, readEnd, src.Size, groups)
 		segments = append(segments, seg)
 
 		logicalFilePos += usableLen

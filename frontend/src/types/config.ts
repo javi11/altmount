@@ -61,7 +61,6 @@ export interface MetadataBackupConfig {
 
 // Streaming configuration
 export interface StreamingConfig {
-	max_download_workers: number;
 	max_cache_size_mb: number;
 }
 
@@ -173,7 +172,6 @@ export interface FuseConfig {
 	debug: boolean;
 	attr_timeout_seconds: number;
 	entry_timeout_seconds: number;
-	max_download_workers: number;
 	max_cache_size_mb: number;
 	max_read_ahead_mb: number;
 	// Metadata cache settings
@@ -222,6 +220,7 @@ export interface ProviderConfig {
 	port: number;
 	username: string;
 	max_connections: number;
+	inflight_requests: number;
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url?: string;
@@ -303,7 +302,6 @@ export interface MetadataUpdateRequest {
 
 // Streaming update request
 export interface StreamingUpdateRequest {
-	max_download_workers?: number;
 	max_cache_size_mb?: number;
 }
 
@@ -400,6 +398,7 @@ export interface ProviderUpdateRequest {
 	username?: string;
 	password?: string;
 	max_connections?: number;
+	inflight_requests?: number;
 	tls?: boolean;
 	insecure_tls?: boolean;
 	proxy_url?: string;
@@ -476,7 +475,6 @@ export interface MetadataFormData {
 }
 
 export interface StreamingFormData {
-	max_download_workers: number;
 	max_cache_size_mb: number;
 }
 
@@ -593,6 +591,7 @@ export interface ProviderFormData {
 	username: string;
 	password: string;
 	max_connections: number;
+	inflight_requests: number;
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url: string;
@@ -737,6 +736,7 @@ export interface ProviderCreateRequest {
 	username: string;
 	password: string;
 	max_connections: number;
+	inflight_requests?: number;
 	tls: boolean;
 	insecure_tls: boolean;
 	proxy_url?: string;

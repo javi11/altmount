@@ -3,7 +3,6 @@ package usenet
 import (
 	"context"
 	"fmt"
-	"io"
 	"testing"
 	"time"
 
@@ -15,16 +14,8 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a dummy segment range
-	r, w := io.Pipe()
 	segments := []*segment{
-		{
-			Id:          "1",
-			Start:       0,
-			End:         100,
-			SegmentSize: 101,
-			reader:      r,
-			writer:      w,
-		},
+		newSegment("1", 0, 100, 101, nil),
 	}
 	rg := &segmentRange{
 		segments: segments,
@@ -38,7 +29,7 @@ func TestUsenetReader_Race_Close_GetBufferedOffset(t *testing.T) {
 		return nil, fmt.Errorf("mock error")
 	}
 
-	ur, err := NewUsenetReader(ctx, poolGetter, rg, 1, 10)
+	ur, err := NewUsenetReader(ctx, poolGetter, rg, 10)
 	if err != nil {
 		t.Fatalf("Failed to create UsenetReader: %v", err)
 	}

@@ -360,6 +360,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Username         string `json:"username"`
 		Password         string `json:"password"`
 		MaxConnections   int    `json:"max_connections"`
+		InflightRequests int    `json:"inflight_requests"`
 		TLS              bool   `json:"tls"`
 		InsecureTLS      bool   `json:"insecure_tls"`
 		ProxyURL         string `json:"proxy_url"`
@@ -396,6 +397,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Username:         createReq.Username,
 		Password:         createReq.Password,
 		MaxConnections:   createReq.MaxConnections,
+		InflightRequests: createReq.InflightRequests,
 		TLS:              createReq.TLS,
 		InsecureTLS:      createReq.InsecureTLS,
 		ProxyURL:         createReq.ProxyURL,
@@ -433,6 +435,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		PasswordSet:      newProvider.Password != "",
 		Enabled:          newProvider.Enabled != nil && *newProvider.Enabled,
 		IsBackupProvider: newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
+		InflightRequests: newProvider.InflightRequests,
 	}
 
 	return RespondSuccess(c, response)
@@ -476,6 +479,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		Username         *string `json:"username,omitempty"`
 		Password         *string `json:"password,omitempty"`
 		MaxConnections   *int    `json:"max_connections,omitempty"`
+		InflightRequests *int    `json:"inflight_requests,omitempty"`
 		TLS              *bool   `json:"tls,omitempty"`
 		InsecureTLS      *bool   `json:"insecure_tls,omitempty"`
 		ProxyURL         *string `json:"proxy_url,omitempty"`
@@ -520,6 +524,9 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 			return RespondValidationError(c, "MaxConnections must be positive", "INVALID_MAX_CONNECTIONS")
 		}
 		provider.MaxConnections = *updateReq.MaxConnections
+	}
+	if updateReq.InflightRequests != nil {
+		provider.InflightRequests = *updateReq.InflightRequests
 	}
 	if updateReq.TLS != nil {
 		provider.TLS = *updateReq.TLS
@@ -566,6 +573,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		PasswordSet:      provider.Password != "",
 		Enabled:          provider.Enabled != nil && *provider.Enabled,
 		IsBackupProvider: provider.IsBackupProvider != nil && *provider.IsBackupProvider,
+		InflightRequests: provider.InflightRequests,
 	}
 
 	return RespondSuccess(c, response)
@@ -706,6 +714,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 			PasswordSet:      p.Password != "",
 			Enabled:          p.Enabled != nil && *p.Enabled,
 			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
+			InflightRequests: p.InflightRequests,
 		}
 	}
 

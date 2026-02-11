@@ -17,6 +17,7 @@ const defaultFormData: ProviderFormData = {
 	username: "",
 	password: "",
 	max_connections: 10,
+	inflight_requests: 3,
 	tls: false,
 	insecure_tls: false,
 	proxy_url: "",
@@ -46,6 +47,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				username: provider.username,
 				password: "", // Always start with empty password for security
 				max_connections: provider.max_connections,
+				inflight_requests: provider.inflight_requests || 3,
 				tls: provider.tls,
 				insecure_tls: provider.insecure_tls,
 				proxy_url: provider.proxy_url || "",
@@ -141,6 +143,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				if (formData.password) updateData.password = formData.password; // Only include if not empty
 				if (formData.max_connections !== provider.max_connections)
 					updateData.max_connections = formData.max_connections;
+				if (formData.inflight_requests !== provider.inflight_requests)
+					updateData.inflight_requests = formData.inflight_requests;
 				if (formData.tls !== provider.tls) updateData.tls = formData.tls;
 				if (formData.insecure_tls !== provider.insecure_tls)
 					updateData.insecure_tls = formData.insecure_tls;
@@ -222,6 +226,25 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								min={1}
 								max={50}
 							/>
+						</fieldset>
+
+						<fieldset className="rounded-lg border border-base-300 p-4">
+							<legend className="px-2 font-medium">Inflight Requests</legend>
+							<input
+								id="inflight_requests"
+								type="number"
+								className="input input-bordered w-full"
+								value={formData.inflight_requests}
+								onChange={(e) =>
+									handleInputChange("inflight_requests", Number.parseInt(e.target.value, 10) || 1)
+								}
+								min={1}
+								max={50}
+							/>
+							<p className="mt-2 text-base-content/60 text-xs">
+								Concurrent requests per connection (pipelining). Higher values may cause slowness if
+								the provider does not support it well.
+							</p>
 						</fieldset>
 					</div>
 
