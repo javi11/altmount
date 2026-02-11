@@ -452,7 +452,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 			defer cancel()
 
 			// Get body for the first segment (v4 returns decoded bytes + YEnc metadata)
-			result, err := cp.Body(ctx, firstSegment.ID)
+			result, err := cp.BodyPriority(ctx, firstSegment.ID)
 			if err != nil {
 				return fetchResult{
 					segmentID: firstSegment.ID,
@@ -495,7 +495,7 @@ func (p *Parser) fetchAllFirstSegments(ctx context.Context, files []nzbparser.Nz
 					// Create a new context for this segment
 					segCtx, segCancel := context.WithTimeout(ctx, time.Second*30)
 
-					segResult, err := cp.Body(segCtx, segment.ID)
+					segResult, err := cp.BodyPriority(segCtx, segment.ID)
 					segCancel()
 					if err != nil {
 						p.log.DebugContext(ctx, "Failed to read additional segment for 16KB completion",

@@ -55,7 +55,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		strmParser:              parser.NewStrmParser(),
 		metadataService:         metadataService,
 		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxImportConnections, importCacheSizeMB, readTimeout),
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, importCacheSizeMB, readTimeout),
 		poolManager:             poolManager,
 		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,

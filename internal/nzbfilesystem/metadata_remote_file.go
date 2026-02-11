@@ -72,10 +72,6 @@ func NewMetadataRemoteFile(
 }
 
 // Helper methods to get dynamic config values
-func (mrf *MetadataRemoteFile) getMaxDownloadWorkers() int {
-	return mrf.configGetter().Streaming.MaxDownloadWorkers
-}
-
 func (mrf *MetadataRemoteFile) getMaxCacheSizeMB() int {
 	return mrf.configGetter().Streaming.MaxCacheSizeMB
 }
@@ -164,8 +160,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
-	// Extract workers and cache size from context if available (overrides global config)
-	maxWorkers := mrf.getMaxDownloadWorkers()
+	// Extract cache size from context if available (overrides global config)
 	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
 
 	if size, ok := ctx.Value(utils.MaxCacheSizeKey).(int); ok && size > 0 {
@@ -218,7 +213,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		healthRepository: mrf.healthRepository,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
-		maxWorkers:       maxWorkers,
 		maxCacheSizeMB:   maxCacheSizeMB,
 		rcloneCipher:     mrf.rcloneCipher,
 		aesCipher:        mrf.aesCipher,
@@ -651,7 +645,6 @@ type MetadataVirtualFile struct {
 	healthRepository *database.HealthRepository
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
-	maxWorkers       int
 	maxCacheSizeMB   int // Maximum cache size in MB for ahead downloads
 	rcloneCipher     *rclone.RcloneCrypt
 	aesCipher        *aes.AesCipher
@@ -1212,7 +1205,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxWorkers, mvf.maxCacheSizeMB)
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxCacheSizeMB)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

@@ -57,7 +57,6 @@ type FuseConfig struct {
 	Debug               bool   `yaml:"debug" mapstructure:"debug" json:"debug"`
 	AttrTimeoutSeconds  int    `yaml:"attr_timeout_seconds" mapstructure:"attr_timeout_seconds" json:"attr_timeout_seconds"`
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
-	MaxDownloadWorkers  int    `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
 
@@ -106,8 +105,7 @@ type MetadataBackupConfig struct {
 
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxDownloadWorkers int `yaml:"max_download_workers" mapstructure:"max_download_workers" json:"max_download_workers"`
-	MaxCacheSizeMB     int `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
+	MaxCacheSizeMB int `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -235,6 +233,7 @@ type ProviderConfig struct {
 	Username          string     `yaml:"username" mapstructure:"username" json:"username"`
 	Password          string     `yaml:"password" mapstructure:"password" json:"-"`
 	MaxConnections    int        `yaml:"max_connections" mapstructure:"max_connections" json:"max_connections"`
+	InflightRequests  int        `yaml:"inflight_requests" mapstructure:"inflight_requests" json:"inflight_requests"`
 	TLS               bool       `yaml:"tls" mapstructure:"tls" json:"tls"`
 	InsecureTLS       bool       `yaml:"insecure_tls" mapstructure:"insecure_tls" json:"insecure_tls"`
 	ProxyURL          string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
@@ -315,10 +314,6 @@ func (c *Config) DeepCopy() *Config {
 func (c *Config) Validate() error {
 	if c.WebDAV.Port <= 0 || c.WebDAV.Port > 65535 {
 		return fmt.Errorf("webdav port must be between 1 and 65535")
-	}
-
-	if c.Streaming.MaxDownloadWorkers <= 0 {
-		return fmt.Errorf("streaming max_download_workers must be greater than 0")
 	}
 
 	if c.Streaming.MaxCacheSizeMB <= 0 {
@@ -580,9 +575,6 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate Fuse configuration
-	if c.Fuse.MaxDownloadWorkers <= 0 {
-		c.Fuse.MaxDownloadWorkers = 15 // Default
-	}
 	if c.Fuse.MaxCacheSizeMB <= 0 {
 		c.Fuse.MaxCacheSizeMB = 32 // Default
 	}
@@ -684,13 +676,18 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 		}
 	}
 
+	inflight := p.InflightRequests
+	if inflight <= 0 {
+		inflight = 3
+	}
+
 	return nntppool.Provider{
 		Host:        host,
 		TLSConfig:   tlsCfg,
 		Auth:        nntppool.Auth{Username: p.Username, Password: p.Password},
 		Connections: p.MaxConnections,
 		Backup:      isBackup,
-		Inflight:    3,
+		Inflight:    inflight,
 		IdleTimeout: 60 * time.Second,
 	}
 }
@@ -1126,8 +1123,7 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Streaming: StreamingConfig{
-			MaxDownloadWorkers: 15, // Default: 15 download workers
-			MaxCacheSizeMB:     32, // Default: 32MB cache for ahead downloads
+			MaxCacheSizeMB: 32, // Default: 32MB cache for ahead downloads
 		},
 		RClone: RCloneConfig{
 			Path:         rclonePath,
@@ -1254,7 +1250,6 @@ func DefaultConfig(configDir ...string) *Config {
 			Debug:                   false,
 			AttrTimeoutSeconds:      1,
 			EntryTimeoutSeconds:     1,
-			MaxDownloadWorkers:      15,
 			MaxCacheSizeMB:          128,
 			MaxReadAheadMB:          128,
 			MetadataCacheEnabled:    &fuseEnabled, // Disabled by default (same as fuse)

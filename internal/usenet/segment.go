@@ -1,6 +1,7 @@
 package usenet
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -74,8 +75,8 @@ func (r *segmentRange) Next() (*segment, error) {
 		return nil, ErrSegmentLimit
 	}
 
-	// Ignore close errors
-	_ = r.segments[r.current].Close()
+	// Release data from consumed segment to allow GC
+	r.segments[r.current].Release()
 	r.segments[r.current] = nil
 
 	r.current += 1
@@ -89,7 +90,7 @@ func (r *segmentRange) CloseWithError(err error) {
 	defer r.mu.RUnlock()
 	for _, s := range r.segments {
 		if s != nil {
-			_ = s.CloseWithError(err)
+			s.SetError(err)
 		}
 	}
 }
@@ -99,7 +100,7 @@ func (r *segmentRange) CloseSegments() {
 	defer r.mu.RUnlock()
 	for _, s := range r.segments {
 		if s != nil {
-			_ = s.Close()
+			s.Release()
 		}
 	}
 }
@@ -108,50 +109,85 @@ func (r *segmentRange) Clear() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Collect all errors instead of returning early on first error.
-	// This prevents resource leaks when one segment fails to close.
-	// See: Memory leak root cause analysis - Clear() early return bug
-	var errs []error
 	for _, s := range r.segments {
 		if s != nil {
-			if err := s.Close(); err != nil {
-				errs = append(errs, err)
-				// Continue closing remaining segments - don't return early!
-			}
+			s.Release()
 		}
 	}
 
 	r.segments = nil
 
-	return errors.Join(errs...)
+	return nil
 }
 
 type segment struct {
-	Id            string
-	Start         int64
-	End           int64
-	SegmentSize   int64
-	groups        []string
-	reader        *io.PipeReader
-	writer        *io.PipeWriter
-	once          sync.Once
-	limitedReader io.Reader // Cached limited reader to prevent multiple LimitReader wraps
-	mx            sync.Mutex
-	closed        bool  // Tracks if segment has been closed
-	downloadErr   error // Stores download error for explicit retrieval
+	Id          string
+	Start       int64
+	End         int64
+	SegmentSize int64
+	groups      []string
+
+	// Data handoff fields (replaces io.Pipe)
+	data      []byte       // Downloaded segment data (set once by downloader)
+	dataErr   error        // Download error (set once by downloader)
+	dataReady chan struct{} // Closed when data or dataErr is set
+	readyOnce sync.Once    // Guards closing dataReady channel
+
+	once          sync.Once  // Guards GetReader initialization
+	limitedReader io.Reader  // Cached limited reader
+	mx            sync.Mutex // Protects released flag
+	released      bool       // Tracks if segment data has been released
 }
 
-// SetDownloadError stores the download error for later retrieval.
-// Uses first-write-wins semantics to preserve the original error.
-func (s *segment) SetDownloadError(err error) {
+// newSegment creates a segment with an initialized dataReady channel.
+func newSegment(id string, start, end, segmentSize int64, groups []string) *segment {
+	return &segment{
+		Id:          id,
+		Start:       start,
+		End:         end,
+		SegmentSize: segmentSize,
+		groups:      groups,
+		dataReady:   make(chan struct{}),
+	}
+}
+
+// signalReady safely closes the dataReady channel exactly once.
+func (s *segment) signalReady() {
+	s.readyOnce.Do(func() {
+		close(s.dataReady)
+	})
+}
+
+// SetData stores the downloaded data and signals readers.
+// Non-blocking, safe to call from any goroutine.
+func (s *segment) SetData(data []byte) {
+	if s == nil {
+		return
+	}
+	s.mx.Lock()
+	if s.released {
+		s.mx.Unlock()
+		return
+	}
+	s.data = data
+	s.mx.Unlock()
+
+	s.signalReady()
+}
+
+// SetError stores a download error and signals readers.
+// Non-blocking, safe to call from any goroutine.
+func (s *segment) SetError(err error) {
 	if s == nil || err == nil {
 		return
 	}
 	s.mx.Lock()
-	defer s.mx.Unlock()
-	if s.downloadErr == nil {
-		s.downloadErr = err
+	if s.dataErr == nil {
+		s.dataErr = err
 	}
+	s.mx.Unlock()
+
+	s.signalReady()
 }
 
 // GetDownloadError returns any download error that occurred.
@@ -161,182 +197,98 @@ func (s *segment) GetDownloadError() error {
 	}
 	s.mx.Lock()
 	defer s.mx.Unlock()
-	return s.downloadErr
+	return s.dataErr
 }
 
-// errorAwareReader wraps a reader and checks segment error state.
-// This ensures that download errors are always propagated to the reader,
-// even if the error occurred during pipe operations.
-type errorAwareReader struct {
-	s      *segment
-	reader io.Reader
-}
-
-func (r *errorAwareReader) Read(p []byte) (n int, err error) {
-	// Check for stored download error before reading
-	if downloadErr := r.s.GetDownloadError(); downloadErr != nil {
-		return 0, downloadErr
+// DataLen returns the length of the downloaded data.
+// Returns 0 if data hasn't been set yet.
+func (s *segment) DataLen() int {
+	if s == nil {
+		return 0
 	}
-
-	n, err = r.reader.Read(p)
-
-	// On any read error (except EOF), check if there's a more specific download error
-	if err != nil && err != io.EOF {
-		if downloadErr := r.s.GetDownloadError(); downloadErr != nil {
-			return n, downloadErr
-		}
-	}
-
-	return n, err
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	return len(s.data)
 }
 
+// GetReader returns a reader for the segment data.
+// Blocks until data is available or an error is set.
+// The reader is limited to the range [Start, End] within the segment.
 func (s *segment) GetReader() io.Reader {
 	s.once.Do(func() {
+		// Wait for data to be ready
+		<-s.dataReady
+
+		// Check for error first
+		s.mx.Lock()
+		err := s.dataErr
+		data := s.data
+		s.mx.Unlock()
+
+		if err != nil {
+			s.limitedReader = &errorReader{err: err}
+			return
+		}
+
+		// Create a reader over the full data
+		fullReader := bytes.NewReader(data)
+
 		// Skip to Start position
 		if s.Start > 0 {
-			// Seek to the start of the segment
-			_, err := io.CopyN(io.Discard, s.reader, s.Start)
-			if err != nil && err != io.EOF {
-				// Store the error for later retrieval
+			_, seekErr := fullReader.Seek(s.Start, io.SeekStart)
+			if seekErr != nil {
 				s.mx.Lock()
-				if s.downloadErr == nil {
-					s.downloadErr = err
+				if s.dataErr == nil {
+					s.dataErr = seekErr
 				}
 				s.mx.Unlock()
+				s.limitedReader = &errorReader{err: seekErr}
+				return
 			}
 		}
 
-		// Create LimitReader once - this ensures the limit is enforced correctly
-		// across multiple Read() calls in usenet_reader.go
-		// Without this, each GetReader() call would create a NEW LimitReader with
-		// the full limit, allowing reading beyond the intended End offset
-		limited := io.LimitReader(s.reader, s.End-s.Start+1)
-
-		// Wrap in errorAwareReader to ensure download errors are always propagated
-		s.limitedReader = &errorAwareReader{s: s, reader: limited}
+		// Create LimitReader for the range [Start, End]
+		s.limitedReader = io.LimitReader(fullReader, s.End-s.Start+1)
 	})
 
 	return s.limitedReader
 }
 
-func (s *segment) Close() error {
+// Release frees the segment data to allow GC. Safe to call multiple times.
+func (s *segment) Release() {
 	if s == nil {
-		return nil
+		return
 	}
 
 	s.mx.Lock()
-	defer s.mx.Unlock()
-
-	// Prevent multiple closes
-	if s.closed {
-		return nil
+	if s.released {
+		s.mx.Unlock()
+		return
 	}
-	s.closed = true
-
-	var e1, e2 error
-
-	if s.reader != nil {
-		e1 = s.reader.Close()
+	s.released = true
+	s.data = nil
+	if s.dataErr == nil {
+		s.dataErr = io.ErrClosedPipe
 	}
+	s.mx.Unlock()
 
-	if s.writer != nil {
-		e2 = s.writer.Close()
-	}
-
-	return errors.Join(e1, e2)
+	// Ensure dataReady is closed so any waiting readers unblock
+	s.signalReady()
 }
 
+// Close releases the segment data. Kept for API compatibility with segmentRange.
+func (s *segment) Close() error {
+	s.Release()
+	return nil
+}
+
+// CloseWithError stores the error and releases the segment.
 func (s *segment) CloseWithError(err error) error {
 	if s == nil {
 		return nil
 	}
-
-	s.mx.Lock()
-	defer s.mx.Unlock()
-
-	// Prevent multiple closes
-	if s.closed {
-		return nil
-	}
-	s.closed = true
-
-	var e1, e2 error
-
-	if s.reader != nil {
-		e1 = s.reader.CloseWithError(err)
-	}
-
-	if s.writer != nil {
-		e2 = s.writer.CloseWithError(err)
-	}
-
-	return errors.Join(e1, e2)
-}
-
-// safeWriter wraps the segment writer and returns error if closed
-type safeWriter struct {
-	s *segment
-}
-
-func (sw *safeWriter) Write(p []byte) (n int, err error) {
-	sw.s.mx.Lock()
-	closed := sw.s.closed
-	writer := sw.s.writer
-	sw.s.mx.Unlock()
-
-	if closed || writer == nil {
-		return 0, io.ErrClosedPipe
-	}
-
-	return writer.Write(p)
-}
-
-func (sw *safeWriter) Close() error {
-	if sw.s == nil {
-		return nil
-	}
-	sw.s.mx.Lock()
-	defer sw.s.mx.Unlock()
-
-	// Only close the writer pipe to signal EOF to readers
-	// The reader pipe stays open until segment.Close() is called
-	if sw.s.writer != nil {
-		return sw.s.writer.Close()
-	}
+	s.SetError(err)
 	return nil
-}
-
-func (sw *safeWriter) CloseWithError(err error) error {
-	if sw.s == nil {
-		return nil
-	}
-
-	sw.s.mx.Lock()
-	defer sw.s.mx.Unlock()
-
-	if sw.s.closed {
-		return nil
-	}
-	sw.s.closed = true
-
-	// Store the download error for explicit retrieval by the reader
-	if err != nil && sw.s.downloadErr == nil {
-		sw.s.downloadErr = err
-	}
-
-	var e1, e2 error
-	if sw.s.reader != nil {
-		e1 = sw.s.reader.CloseWithError(err)
-	}
-	if sw.s.writer != nil {
-		e2 = sw.s.writer.CloseWithError(err)
-	}
-
-	return errors.Join(e1, e2)
-}
-
-func (s *segment) Writer() io.Writer {
-	return &safeWriter{s: s}
 }
 
 func (s *segment) ID() string {
@@ -345,4 +297,13 @@ func (s *segment) ID() string {
 
 func (s *segment) Groups() []string {
 	return s.groups
+}
+
+// errorReader is a reader that always returns an error.
+type errorReader struct {
+	err error
+}
+
+func (r *errorReader) Read(_ []byte) (int, error) {
+	return 0, r.err
 }

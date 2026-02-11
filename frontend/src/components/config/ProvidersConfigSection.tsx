@@ -363,6 +363,10 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 												<div className="font-mono">{provider.max_connections}</div>
 											</div>
 											<div>
+												<span className="text-base-content/60">Pipeline:</span>
+												<div className="font-mono">{provider.inflight_requests || 3}</div>
+											</div>
+											<div>
 												<span className="text-base-content/60">TLS:</span>
 												<div className="flex items-center space-x-1">
 													{provider.tls ? (

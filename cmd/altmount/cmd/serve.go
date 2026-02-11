@@ -198,7 +198,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"webdav_path", "/webdav",
 		"api_path", "/api",
 		"providers", len(cfg.Providers),
-		"download_workers", cfg.Streaming.MaxDownloadWorkers,
 		"processor_workers", cfg.Import.MaxProcessorWorkers)
 
 	// Set up signal handling for graceful shutdown

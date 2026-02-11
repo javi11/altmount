@@ -29,17 +29,15 @@ import (
 type sevenZipProcessor struct {
 	log            *slog.Logger
 	poolManager    pool.Manager
-	maxWorkers     int
 	maxCacheSizeMB int
 	readTimeout    time.Duration
 }
 
 // NewProcessor creates a new 7zip processor
-func NewProcessor(poolManager pool.Manager, maxWorkers int, maxCacheSizeMB int, readTimeout time.Duration) Processor {
+func NewProcessor(poolManager pool.Manager, maxCacheSizeMB int, readTimeout time.Duration) Processor {
 	return &sevenZipProcessor{
 		log:            slog.Default().With("component", "7z-processor"),
 		poolManager:    poolManager,
-		maxWorkers:     maxWorkers,
 		maxCacheSizeMB: maxCacheSizeMB,
 		readTimeout:    readTimeout,
 	}
@@ -127,7 +125,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 
 	// Create Usenet filesystem for 7zip access - this enables sevenzip to access
 	// 7zip part files directly from Usenet without downloading
-	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxWorkers, sz.maxCacheSizeMB, progressTracker, sz.readTimeout)
+	ufs := filesystem.NewUsenetFileSystem(ctx, sz.poolManager, sortedFiles, sz.maxCacheSizeMB, progressTracker, sz.readTimeout)
 
 	// Extract filenames for first part detection
 	fileNames := make([]string, len(sortedFiles))
