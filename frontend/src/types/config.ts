@@ -30,6 +30,7 @@ export interface WebDAVConfig {
 	user: string;
 	password: string;
 	host?: string;
+	debug?: boolean;
 }
 
 // API server configuration
@@ -667,7 +668,9 @@ export interface ArrsConfig {
 	sonarr_instances: ArrsInstanceConfig[];
 	queue_cleanup_enabled?: boolean;
 	queue_cleanup_interval_seconds?: number;
+	queue_cleanup_grace_period_minutes?: number;
 	queue_cleanup_allowlist?: IgnoredMessage[];
+	cleanup_automatic_import_failure?: boolean;
 }
 
 // Sync status and progress types
@@ -704,6 +707,10 @@ export interface ArrsFormData {
 	webhook_base_url?: string;
 	radarr_instances: ArrsInstanceConfig[];
 	sonarr_instances: ArrsInstanceConfig[];
+	queue_cleanup_enabled?: boolean;
+	queue_cleanup_interval_seconds?: number;
+	queue_cleanup_grace_period_minutes?: number;
+	cleanup_automatic_import_failure?: boolean;
 }
 
 // Helper type for configuration sections

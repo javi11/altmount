@@ -139,7 +139,7 @@ export function ActiveStreamsCard() {
 													{/* Download (Input) Speed */}
 													{stream.download_speed > 0 && (
 														<div className="flex items-center gap-1 text-info">
-															<span className="opacity-60 text-[8px]">IN:</span>
+															<span className="text-[8px] opacity-60">IN:</span>
 															<span className="whitespace-nowrap font-bold">
 																{formatBytes(stream.download_speed)}/s
 															</span>
@@ -153,7 +153,7 @@ export function ActiveStreamsCard() {
 													{/* Playback (Output) Speed */}
 													{stream.bytes_per_second > 0 && (
 														<div className="flex items-center gap-1 text-success">
-															<span className="opacity-60 text-[8px]">OUT:</span>
+															<span className="text-[8px] opacity-60">OUT:</span>
 															<span className="whitespace-nowrap font-bold">
 																{formatBytes(stream.bytes_per_second)}/s
 															</span>

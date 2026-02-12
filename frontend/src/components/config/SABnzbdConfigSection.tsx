@@ -39,8 +39,6 @@ export function SABnzbdConfigSection({
 	const [newCategory, setNewCategory] = useState<NewCategoryForm>(DEFAULT_NEW_CATEGORY);
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [fallbackApiKey, setFallbackApiKey] = useState<string>("");
-	const [regSuccess, setRegSuccess] = useState<string | null>(null);
-	const [regError, setRegError] = useState<string | null>(null);
 	const [testResults, setTestResults] = useState<Record<string, string> | null>(null);
 
 	const registerDownloadClient = useRegisterArrsDownloadClients();
@@ -56,28 +54,19 @@ export function SABnzbdConfigSection({
 	}, [config.sabnzbd]);
 
 	const handleRegisterDownloadClient = async () => {
-		setRegSuccess(null);
-		setRegError(null);
-		setTestResults(null);
 		try {
 			await registerDownloadClient.mutateAsync();
-			setRegSuccess("Download client registration triggered successfully.");
-			// Hide success message after 5 seconds
-			setTimeout(() => setRegSuccess(null), 5000);
 		} catch (error) {
-			setRegError(error instanceof Error ? error.message : "Failed to register download client.");
+			console.error("Failed to register download client:", error);
 		}
 	};
 
 	const handleTestDownloadClient = async () => {
-		setRegSuccess(null);
-		setRegError(null);
-		setTestResults(null);
 		try {
 			const results = await testDownloadClient.mutateAsync();
 			setTestResults(results);
 		} catch (error) {
-			setRegError(error instanceof Error ? error.message : "Failed to test connections.");
+			console.error("Failed to test connections:", error);
 		}
 	};
 
@@ -206,452 +195,211 @@ export function SABnzbdConfigSection({
 	const canSave = hasChanges && validationErrors.length === 0 && !isUpdating;
 
 	return (
-		<div className="space-y-6">
-			<h3 className="font-semibold text-lg">SABnzbd API Configuration</h3>
-
-			{/* Validation Errors */}
-			{validationErrors.length > 0 && (
-				<div className="alert alert-error">
-					<AlertTriangle className="h-6 w-6" />
-					<div>
-						<div className="font-bold">Configuration Errors</div>
-						<ul className="mt-2 list-inside list-disc text-sm">
-							{validationErrors.map((error, index) => (
-								<li key={index}>{error}</li>
-							))}
-						</ul>
-					</div>
+		<div className="space-y-10">
+			{/* SABnzbd Service Status */}
+			<section className="space-y-4">
+				<div className="mb-2 flex items-center gap-2">
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Service Status</h4>
+					<div className="h-px flex-1 bg-base-300" />
 				</div>
-			)}
-
-			{/* Enable/Disable Toggle */}
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">Enable SABnzbd API</legend>
-				<label className="label cursor-pointer">
-					<span className="label-text">
-						Enable SABnzbd-compatible API endpoint for download clients
-					</span>
-					<input
-						type="checkbox"
-						className="toggle toggle-primary"
-						checked={formData.enabled}
-						disabled={isReadOnly}
-						onChange={(e) => handleEnabledChange(e.target.checked)}
-					/>
-				</label>
-				<p className="label">
-					When enabled, provides SABnzbd-compatible API endpoints at <code>/sabnzbd</code>
-				</p>
-			</fieldset>
-
-			{/* Configuration when enabled */}
-			{formData.enabled && (
-				<>
-					{/* Complete Directory */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Complete directory</legend>
-						<input
-							type="text"
-							className="input"
-							value={formData.complete_dir}
-							readOnly={isReadOnly}
-							placeholder="/"
-							onChange={(e) => handleCompleteDirChange(e.target.value)}
-						/>
-						<p className="label">
-							Base virtual directory (relative to mount point, defaults to root).
-						</p>
-					</fieldset>
-
-					{/* Download Client Base URL */}
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">AltMount URL (for download clients)</legend>
-						<input
-							type="url"
-							className="input"
-							value={formData.download_client_base_url || ""}
-							onChange={(e) => updateFormData({ download_client_base_url: e.target.value })}
-							placeholder="http://altmount:8080/sabnzbd"
-							disabled={isReadOnly}
-						/>
-						<p className="label">
-							The URL ARR instances will use to talk back to AltMount SABnzbd API. Default:{" "}
-							<code>http://altmount:8080/sabnzbd</code>
-						</p>
-					</fieldset>
-
-					{/* Fallback SABnzbd Configuration */}
-					<div className="space-y-4">
-						<div>
-							<h4 className="font-medium">Fallback to External SABnzbd (Optional)</h4>
-							<p className="text-base-content/70 text-sm">
-								Configure an external SABnzbd instance to automatically receive failed imports after
-								max retries. This provides a fallback when internal processing fails.
-							</p>
-						</div>
-
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Fallback SABnzbd Host</legend>
-							<input
-								type="text"
-								name="fallback_host"
-								autoComplete="off"
-								className="input"
-								value={formData.fallback_host || ""}
-								readOnly={isReadOnly}
-								placeholder="http://localhost:8080 or https://sabnzbd.example.com"
-								onChange={(e) => handleFallbackHostChange(e.target.value)}
-							/>
-							<p className="label">
-								URL of the external SABnzbd instance (including http:// or https://)
-							</p>
-						</fieldset>
-
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Fallback SABnzbd API Key</legend>
-							<input
-								type="password"
-								name="fallback_api_key"
-								autoComplete="new-password"
-								className="input"
-								value={fallbackApiKey}
-								readOnly={isReadOnly}
-								placeholder={
-									formData.fallback_host && config.sabnzbd.fallback_api_key_set
-										? "••••••••••••••••"
-										: "Enter API key"
-								}
-								onChange={(e) => handleFallbackApiKeyChange(e.target.value)}
-							/>
-							<p className="label">
-								API key for the external SABnzbd instance. Leave empty to keep existing key.
-								{config.sabnzbd.fallback_api_key_set && " (Currently set)"}
-							</p>
-						</fieldset>
-
-						{formData.fallback_host && (
-							<div className="alert alert-info">
-								<div>
-									<div className="font-bold">Fallback Enabled</div>
-									<div className="text-sm">
-										Failed imports will be automatically sent to{" "}
-										<code>{formData.fallback_host}</code> after max retries are exceeded.
-									</div>
-								</div>
-							</div>
-						)}
-					</div>
-
-					{/* Categories Section */}
-					<div className="space-y-4">
-						<div className="flex items-center justify-between">
-							<div>
-								<h4 className="font-medium">Categories</h4>
-								<p className="text-base-content/70 text-sm">
-									Configure download categories for organization. If no categories are configured, a
-									default category will be used.
+				
+				<div className="card border border-base-300 bg-base-200/50 shadow-sm">
+					<div className="card-body p-4 sm:p-6">
+						<div className="flex items-center justify-between gap-4">
+							<div className="min-w-0 flex-1">
+								<h3 className="flex items-center gap-2 font-bold text-sm sm:text-base">
+									Enable SABnzbd API compatibility
+									<span className="badge badge-ghost badge-xs font-mono uppercase">/sabnzbd</span>
+								</h3>
+								<p className="mt-1 text-base-content/60 text-xs leading-relaxed">
+									Expose a compatible endpoint for download clients like Radarr/Sonarr.
 								</p>
 							</div>
-							{!isReadOnly && (
-								<button
-									type="button"
-									className="btn btn-outline btn-sm"
-									onClick={() => setShowAddCategory(true)}
-								>
-									<Plus className="h-4 w-4" />
-									Add Category
-								</button>
-							)}
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.enabled}
+								onChange={(e) => handleEnabledChange(e.target.checked)}
+								disabled={isReadOnly}
+							/>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			{formData.enabled && (
+				<div className="fade-in animate-in space-y-10 duration-500">
+					{/* Virtual Filesystem Settings */}
+					<section className="space-y-6">
+						<div className="flex items-center gap-2">
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Virtual Filesystem</h4>
+							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
-						{/* Existing Categories */}
-						{formData.categories.length > 0 && (
-							<div className="space-y-3">
-								{formData.categories
-									.sort((a, b) => a.order - b.order)
-									.map((category, index) => {
-										const isDefault = isDefaultCategory(category.name);
-										return (
-											<div
-												key={index}
-												className={`card shadow-sm ${isDefault ? "border border-primary/30 bg-base-300" : "bg-base-200"}`}
-											>
-												<div className="card-body p-4">
-													{isDefault && (
-														<div className="badge badge-primary badge-sm mb-2">
-															System Default (name cannot be changed)
-														</div>
+						<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-semibold">Complete Directory</legend>
+								<input type="text" className="input w-full bg-base-200/50 font-mono" value={formData.complete_dir} disabled={isReadOnly} placeholder="/" onChange={(e) => handleCompleteDirChange(e.target.value)} />
+								<p className="label text-[10px] opacity-60">Base path relative to mount point (usually /).</p>
+							</fieldset>
+
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-semibold">External API URL</legend>
+								<input type="url" className="input w-full bg-base-200/50 font-mono" value={formData.download_client_base_url || ""} disabled={isReadOnly} placeholder="http://altmount:8080/sabnzbd" onChange={(e) => updateFormData({ download_client_base_url: e.target.value })} />
+								<p className="label text-[10px] opacity-60">The URL ARR instances will use to communicate.</p>
+							</fieldset>
+						</div>
+					</section>
+
+					{/* Fallback Section */}
+					<section className="space-y-6">
+						<div className="flex items-center gap-2">
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">External Fallback (Optional)</h4>
+							<div className="h-px flex-1 bg-base-300" />
+						</div>
+
+						<div className="grid grid-cols-1 gap-6 rounded-2xl border border-base-300 bg-base-200/30 p-6 lg:grid-cols-2">
+							<div className="space-y-4">
+								<fieldset className="fieldset min-w-0">
+									<legend className="fieldset-legend font-semibold">Fallback Host</legend>
+									<input type="text" className="input input-sm w-full bg-base-100 font-mono" value={formData.fallback_host || ""} disabled={isReadOnly} placeholder="http://localhost:8080" onChange={(e) => handleFallbackHostChange(e.target.value)} />
+								</fieldset>
+								<fieldset className="fieldset min-w-0">
+									<legend className="fieldset-legend font-semibold">API Key {config.sabnzbd.fallback_api_key_set && <span className="badge badge-success badge-xs ml-1 origin-left scale-75 uppercase">Set</span>}</legend>
+									<input type="password" className="input input-sm w-full bg-base-100 font-mono" value={fallbackApiKey} disabled={isReadOnly} placeholder="••••••••••••••••" onChange={(e) => handleFallbackApiKeyChange(e.target.value)} />
+								</fieldset>
+							</div>
+							<div className="flex flex-col justify-center">
+								<div className={`alert ${formData.fallback_host ? "alert-info" : "bg-base-100/50"} py-3 text-xs leading-relaxed`}>
+									<AlertTriangle className="h-4 w-4 shrink-0" />
+									<p>Failed imports can be automatically forwarded to a real SABnzbd instance for repair or alternate handling.</p>
+								</div>
+							</div>
+						</div>
+					</section>
+
+					{/* Categories Section */}
+					<section className="space-y-6">
+						<div className="flex items-center justify-between">
+							<div className="flex flex-1 items-center gap-2">
+								<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Download Categories</h4>
+								<div className="h-px flex-1 bg-base-300" />
+							</div>
+							<button type="button" className="btn btn-xs btn-primary btn-outline ml-4 px-4" onClick={() => setShowAddCategory(true)} disabled={isReadOnly}><Plus className="h-3 w-3" /> Add Category</button>
+						</div>
+
+						{showAddCategory && (
+							<div className="card fade-in animate-in border-2 border-primary/30 bg-base-100 shadow-md duration-300">
+								<div className="card-body p-4">
+									<h5 className="mb-4 font-bold text-primary text-xs uppercase">Add New Category</h5>
+									<div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-4">
+										<fieldset className="fieldset min-w-0">
+											<legend className="fieldset-legend font-bold text-[10px] opacity-50">NAME</legend>
+											<input type="text" className="input input-xs w-full bg-base-200" value={newCategory.name} onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })} placeholder="e.g. movies-4k" />
+										</fieldset>
+										<fieldset className="fieldset min-w-0">
+											<legend className="fieldset-legend font-bold text-[10px] opacity-50">SUBDIRECTORY</legend>
+											<input type="text" className="input input-xs w-full bg-base-200 font-mono" value={newCategory.dir} onChange={(e) => setNewCategory({ ...newCategory, dir: e.target.value })} placeholder="Optional" />
+										</fieldset>
+										<div className="grid grid-cols-2 gap-4">
+											<fieldset className="fieldset min-w-0">
+												<legend className="fieldset-legend font-bold text-[10px] opacity-50">ORDER</legend>
+												<input type="number" className="input input-xs w-full bg-base-200" value={newCategory.order} onChange={(e) => setNewCategory({ ...newCategory, order: Number.parseInt(e.target.value, 10) || 0 })} />
+											</fieldset>
+											<fieldset className="fieldset min-w-0">
+												<legend className="fieldset-legend font-bold text-[10px] opacity-50">PRIORITY</legend>
+												<select className="select select-xs w-full bg-base-200" value={newCategory.priority} onChange={(e) => setNewCategory({ ...newCategory, priority: Number.parseInt(e.target.value, 10) })}>
+													<option value={-1}>Low</option>
+													<option value={0}>Normal</option>
+													<option value={1}>High</option>
+												</select>
+											</fieldset>
+										</div>
+										<div className="flex justify-end gap-2">
+											<button type="button" className="btn btn-ghost btn-xs" onClick={() => setShowAddCategory(false)}>Cancel</button>
+											<button type="button" className="btn btn-primary btn-xs px-4" onClick={handleAddCategory}>Add Category</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						)}
+
+						<div className="grid grid-cols-1 gap-4">
+							{formData.categories.sort((a, b) => a.order - b.order).map((category, index) => {
+								const isDefault = isDefaultCategory(category.name);
+								return (
+									<div key={index} className={`card ${isDefault ? "border-primary/20 bg-primary/5" : "border-base-300 bg-base-200/50"} border shadow-sm`}>
+										<div className="card-body p-4">
+											<div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-4">
+												<fieldset className="fieldset min-w-0">
+													<legend className="fieldset-legend font-bold text-[10px] opacity-50">NAME</legend>
+													<input type="text" className="input input-xs w-full bg-base-100 font-bold" value={category.name} disabled={isReadOnly || isDefault} onChange={(e) => handleCategoryUpdate(index, { name: e.target.value })} />
+												</fieldset>
+												<fieldset className="fieldset min-w-0">
+													<legend className="fieldset-legend font-bold text-[10px] opacity-50">SUBDIRECTORY</legend>
+													<input type="text" className="input input-xs w-full bg-base-100 font-mono" value={category.dir} disabled={isReadOnly} placeholder="Optional" onChange={(e) => handleCategoryUpdate(index, { dir: e.target.value })} />
+												</fieldset>
+												<div className="grid grid-cols-2 gap-4">
+													<fieldset className="fieldset min-w-0">
+														<legend className="fieldset-legend font-bold text-[10px] opacity-50">ORDER</legend>
+														<input type="number" className="input input-xs w-full bg-base-100 font-mono" value={category.order} disabled={isReadOnly} onChange={(e) => handleCategoryUpdate(index, { order: Number.parseInt(e.target.value, 10) || 0 })} />
+													</fieldset>
+													<fieldset className="fieldset min-w-0">
+														<legend className="fieldset-legend font-bold text-[10px] opacity-50">PRIORITY</legend>
+														<select className="select select-xs w-full bg-base-100" value={category.priority} disabled={isReadOnly} onChange={(e) => handleCategoryUpdate(index, { priority: Number.parseInt(e.target.value, 10) })}>
+															<option value={-1}>Low</option>
+															<option value={0}>Normal</option>
+															<option value={1}>High</option>
+														</select>
+													</fieldset>
+												</div>
+												<div className="flex justify-end">
+													{!isDefault && !isReadOnly && (
+														<button type="button" className="btn btn-ghost btn-xs text-error" onClick={() => handleRemoveCategory(index)}><Trash2 className="h-3.5 w-3.5" /></button>
 													)}
-													<div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-														<fieldset className="fieldset">
-															<legend className="fieldset-legend">Name</legend>
-															<input
-																type="text"
-																className="input input-sm"
-																value={category.name}
-																readOnly={isReadOnly || isDefault}
-																disabled={isDefault}
-																onChange={(e) =>
-																	handleCategoryUpdate(index, { name: e.target.value })
-																}
-															/>
-															{isDefault && (
-																<p className="label text-base-content/60 text-xs">
-																	Name is immutable
-																</p>
-															)}
-														</fieldset>
-														<fieldset className="fieldset">
-															<legend className="fieldset-legend">Order</legend>
-															<input
-																type="number"
-																className="input input-sm"
-																value={category.order}
-																readOnly={isReadOnly}
-																onChange={(e) =>
-																	handleCategoryUpdate(index, {
-																		order: Number.parseInt(e.target.value, 10) || 0,
-																	})
-																}
-															/>
-														</fieldset>
-														<fieldset className="fieldset">
-															<legend className="fieldset-legend">Priority</legend>
-															<select
-																className="select select-sm"
-																value={category.priority}
-																disabled={isReadOnly}
-																onChange={(e) =>
-																	handleCategoryUpdate(index, {
-																		priority: Number.parseInt(e.target.value, 10),
-																	})
-																}
-															>
-																<option value={-1}>Low</option>
-																<option value={0}>Normal</option>
-																<option value={1}>High</option>
-															</select>
-														</fieldset>
-														<fieldset className="fieldset">
-															<legend className="fieldset-legend">Subdirectory</legend>
-															<input
-																type="text"
-																className="input input-sm"
-																value={category.dir}
-																readOnly={isReadOnly}
-																placeholder={isDefault ? "complete" : "Optional subdirectory"}
-																onChange={(e) =>
-																	handleCategoryUpdate(index, { dir: e.target.value })
-																}
-															/>
-															{isDefault && (
-																<p className="label text-base-content/60 text-xs">
-																	Default: complete
-																</p>
-															)}
-														</fieldset>
-													</div>
-													{!isReadOnly && !isDefault && (
-														<div className="mt-2 flex justify-end">
-															<button
-																type="button"
-																className="btn btn-ghost btn-sm btn-error"
-																onClick={() => handleRemoveCategory(index)}
-															>
-																<Trash2 className="h-4 w-4" />
-																Remove
-															</button>
-														</div>
-													)}
+													{isDefault && <span className="badge badge-primary badge-outline badge-xs px-2 font-bold uppercase">System</span>}
 												</div>
 											</div>
-										);
-									})}
-							</div>
-						)}
-
-						{/* Add Category Form */}
-						{showAddCategory && !isReadOnly && (
-							<div className="card border-2 border-primary border-dashed bg-base-200 shadow-sm">
-								<div className="card-body p-4">
-									<h5 className="mb-3 font-medium">Add New Category</h5>
-									<div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Name</legend>
-											<input
-												type="text"
-												className="input input-sm"
-												value={newCategory.name}
-												placeholder="movies"
-												onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-											/>
-										</fieldset>
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Order</legend>
-											<input
-												type="number"
-												className="input input-sm"
-												value={newCategory.order}
-												onChange={(e) =>
-													setNewCategory({
-														...newCategory,
-														order: Number.parseInt(e.target.value, 10) || 1,
-													})
-												}
-											/>
-										</fieldset>
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Priority</legend>
-											<select
-												className="select select-sm"
-												value={newCategory.priority}
-												onChange={(e) =>
-													setNewCategory({
-														...newCategory,
-														priority: Number.parseInt(e.target.value, 10),
-													})
-												}
-											>
-												<option value={-1}>Low</option>
-												<option value={0}>Normal</option>
-												<option value={1}>High</option>
-											</select>
-										</fieldset>
-										<fieldset className="fieldset">
-											<legend className="fieldset-legend">Subdirectory</legend>
-											<input
-												type="text"
-												className="input input-sm"
-												value={newCategory.dir}
-												placeholder="movies"
-												onChange={(e) => setNewCategory({ ...newCategory, dir: e.target.value })}
-											/>
-										</fieldset>
-									</div>
-									<div className="mt-3 flex justify-end space-x-2">
-										<button
-											type="button"
-											className="btn btn-ghost btn-sm"
-											onClick={() => {
-												setShowAddCategory(false);
-												setNewCategory(DEFAULT_NEW_CATEGORY);
-											}}
-										>
-											Cancel
-										</button>
-										<button
-											type="button"
-											className="btn btn-primary btn-sm"
-											onClick={handleAddCategory}
-											disabled={!newCategory.name.trim()}
-										>
-											Add Category
-										</button>
-									</div>
-								</div>
-							</div>
-						)}
-
-						{/* Empty State */}
-						{formData.categories.length === 0 && !showAddCategory && (
-							<div className="py-8 text-center text-base-content/70">
-								<p>No categories configured. A default category will be used.</p>
-								{!isReadOnly && (
-									<button
-										type="button"
-										className="btn btn-outline btn-sm mt-2"
-										onClick={() => setShowAddCategory(true)}
-									>
-										<Plus className="h-4 w-4" />
-										Add First Category
-									</button>
-								)}
-							</div>
-						)}
-					</div>
-				</>
-			)}
-
-			{/* Save Button */}
-			{!isReadOnly && (
-				<div className="flex flex-col space-y-4">
-					<div className="flex justify-end space-x-2">
-						<button
-							type="button"
-							className="btn btn-outline btn-secondary"
-							onClick={handleTestDownloadClient}
-							disabled={testDownloadClient.isPending}
-							title="Test if enabled ARR instances can connect back to AltMount"
-						>
-							{testDownloadClient.isPending ? (
-								<span className="loading loading-spinner loading-sm" />
-							) : (
-								<CheckCircle className="h-4 w-4" />
-							)}
-							{testDownloadClient.isPending ? "Testing..." : "Test ARR Connectivity"}
-						</button>
-						<button
-							type="button"
-							className="btn btn-outline btn-info"
-							onClick={handleRegisterDownloadClient}
-							disabled={registerDownloadClient.isPending}
-							title="Register AltMount as a SABnzbd download client in all enabled ARR instances"
-						>
-							{registerDownloadClient.isPending ? (
-								<span className="loading loading-spinner loading-sm" />
-							) : (
-								<Download className="h-4 w-4" />
-							)}
-							{registerDownloadClient.isPending
-								? "Registering..."
-								: "Auto-Setup ARR Download Clients"}
-						</button>
-						<button
-							type="button"
-							className="btn btn-primary"
-							onClick={handleSave}
-							disabled={!canSave}
-						>
-							{isUpdating ? (
-								<span className="loading loading-spinner loading-sm" />
-							) : (
-								<Save className="h-4 w-4" />
-							)}
-							{isUpdating ? "Saving..." : "Save Changes"}
-						</button>
-					</div>
-					{regSuccess && <div className="alert alert-success py-2">{regSuccess}</div>}
-					{regError && <div className="alert alert-error py-2">{regError}</div>}
-					{testResults && (
-						<div className="alert border-base-300 bg-base-200 py-2">
-							<div className="flex w-full flex-col">
-								<div className="mb-1 font-bold">Connection Test Results:</div>
-								<div className="space-y-1">
-									{Object.entries(testResults).map(([instance, result]) => (
-										<div key={instance} className="flex justify-between text-sm">
-											<span>{instance}:</span>
-											<span className={result === "OK" ? "text-success" : "font-mono text-error"}>
-												{result}
-											</span>
 										</div>
-									))}
-								</div>
+									</div>
+								);
+							})}
+						</div>
+					</section>
+
+					{/* Action Buttons */}
+					{!isReadOnly && (
+						<div className="flex flex-col gap-6 border-base-200 border-t pt-6">
+							<div className="flex flex-wrap justify-end gap-3">
+								<button type="button" className="btn btn-outline btn-sm px-6" onClick={handleTestDownloadClient} disabled={testDownloadClient.isPending}><CheckCircle className="h-4 w-4" /> Test Connectivity</button>
+								<button type="button" className="btn btn-outline btn-info btn-sm px-6" onClick={handleRegisterDownloadClient} disabled={registerDownloadClient.isPending}><Download className="h-4 w-4" /> Auto-Setup ARR</button>
+								<button type="button" className={`btn btn-primary btn-md px-10 ${hasChanges ? "shadow-lg shadow-primary/20" : ""}`} onClick={handleSave} disabled={!canSave}><Save className="h-4 w-4" /> Save SABnzbd Configuration</button>
 							</div>
+
+							{testResults && (
+								<div className="fade-in animate-in rounded-xl border border-base-300 bg-base-200/50 p-4 duration-300">
+									<span className="mb-3 block font-bold text-[10px] uppercase opacity-50">Connection Test Results</span>
+									<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
+										{Object.entries(testResults).map(([instance, result]) => (
+											<div key={instance} className="flex items-center justify-between rounded-lg border border-base-200 bg-base-100 p-2 px-3">
+												<span className="mr-2 truncate font-semibold text-xs">{instance}</span>
+												<span className={`rounded-full px-2 py-0.5 font-mono text-[10px] ${result === "OK" ? "bg-success/10 text-success" : "bg-error/10 text-error"}`}>{result}</span>
+											</div>
+										))}
+									</div>
+								</div>
+							)}
 						</div>
 					)}
 				</div>
 			)}
 
-			{/* Information when disabled */}
 			{!formData.enabled && (
-				<div className="alert alert-info">
-					<AlertTriangle className="h-6 w-6" />
+				<div className="alert border-info/20 bg-info/5 py-6 shadow-sm">
+					<AlertTriangle className="h-6 w-6 text-info" />
 					<div>
-						<div className="font-bold">SABnzbd API Disabled</div>
-						<div className="text-sm">
-							Enable the SABnzbd API to make AltMount compatible with SABnzbd download clients.
-							You'll need to configure the complete directory and optionally set up categories.
-						</div>
+						<h4 className="font-bold text-info">SABnzbd API Interface Disabled</h4>
+						<p className="mt-1 text-sm opacity-80">Enable this to allow Radarr/Sonarr to communicate with AltMount as if it were a local SABnzbd instance.</p>
 					</div>
 				</div>
 			)}

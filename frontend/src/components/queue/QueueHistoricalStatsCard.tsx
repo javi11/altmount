@@ -51,7 +51,7 @@ export function QueueHistoricalStatsCard() {
 								type="number"
 								className="input input-bordered input-sm w-16"
 								value={days}
-								onChange={(e) => setDays(Math.max(1, Math.min(365, Number.parseInt(e.target.value) || 1)))}
+								onChange={(e) => setDays(Math.max(1, Math.min(365, Number.parseInt(e.target.value, 10) || 1)))}
 								min="1"
 								max="365"
 							/>
@@ -110,10 +110,10 @@ export function QueueHistoricalStatsCard() {
 											title={`${day.day}: ${day.completed} success, ${day.failed} fail`}
 										>
 											<div
-												className="w-full bg-primary/20 hover:bg-primary transition-all rounded-t-sm"
+												className="w-full rounded-t-sm bg-primary/20 transition-all hover:bg-primary"
 												style={{ height: `${height}%` }}
 											/>
-											<div className="bg-success w-full absolute bottom-0" 
+											<div className="absolute bottom-0 w-full bg-success" 
 												 style={{ height: `${total > 0 ? (day.completed / total) * height : 0}%` }} 
 											/>
 										</div>
