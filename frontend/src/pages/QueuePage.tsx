@@ -367,17 +367,38 @@ export function QueuePage() {
                             Cleanup
                         </div>
                         <ul tabIndex={0} className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
-                            {stats && stats.total_completed > 0 && (
-                                <li><button type="button" onClick={handleClearCompleted} className="text-success"><Trash2 className="h-4 w-4" /> Clear Completed</button></li>
-                            )}
-                            {stats && stats.total_queued > 0 && (
-                                <li><button type="button" onClick={handleClearPending} className="text-warning"><Trash2 className="h-4 w-4" /> Clear Pending</button></li>
-                            )}
-                            {stats && stats.total_failed > 0 && (
-                                <li><button type="button" onClick={handleClearFailed} className="text-error"><Trash2 className="h-4 w-4" /> Clear Failed</button></li>
-                            )}
+                            <li>
+                                <button 
+                                    type="button" 
+                                    onClick={handleClearCompleted} 
+                                    className="text-success"
+                                    disabled={!stats || stats.total_completed === 0 || clearCompleted.isPending}
+                                >
+                                    <Trash2 className="h-4 w-4" /> Clear Completed
+                                </button>
+                            </li>
+                            <li>
+                                <button 
+                                    type="button" 
+                                    onClick={handleClearPending} 
+                                    className="text-warning"
+                                    disabled={!stats || stats.total_queued === 0 || clearPending.isPending}
+                                >
+                                    <Trash2 className="h-4 w-4" /> Clear Pending
+                                </button>
+                            </li>
+                            <li>
+                                <button 
+                                    type="button" 
+                                    onClick={handleClearFailed} 
+                                    className="text-error"
+                                    disabled={!stats || stats.total_failed === 0 || clearFailed.isPending}
+                                >
+                                    <Trash2 className="h-4 w-4" /> Clear Failed
+                                </button>
+                            </li>
                             <div className="divider my-1 opacity-50" />
-                            <div className="px-4 py-2 font-bold text-[9px] text-base-content/40 uppercase tracking-widest">Testing</div>
+                            <li className="menu-title px-4 py-2 font-bold text-[9px] text-base-content/40 uppercase tracking-widest">Testing</li>
                             <li>
                                 <button type="button" onClick={() => handleAddTestFile("100MB")} disabled={addTestQueueItem.isPending}>Add 100MB Test</button>
                             </li>
