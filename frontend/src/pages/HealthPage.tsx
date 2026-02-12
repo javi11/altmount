@@ -611,7 +611,7 @@ export function HealthPage() {
 				</div>
 
 				<div className="flex items-center gap-2">
-                    <div className="dropdown dropdown-end">
+                    <div className="dropdown">
                         <div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
                             <Settings className="h-3.5 w-3.5" />
                             Maintenance
