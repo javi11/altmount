@@ -4,9 +4,9 @@ import {
 	Database,
 	FolderInput,
 	FolderOpen,
-	HardDrive,
 	Play,
 	Square,
+	Upload,
 	UploadCloud,
 	FileText,
 	Box,
@@ -32,17 +32,17 @@ type ImportTab = "nzbdav" | "directory" | "upload";
 const IMPORT_SECTIONS = {
 	nzbdav: {
 		title: "From NZBDav",
-		description: "Import data from an existing NZBDav SQLite database",
+		description: "Import your existing NZBDav database to populate the library.",
 		icon: Database,
 	},
 	directory: {
 		title: "From Directory",
-		description: "Scan a server directory for NZB files to import",
+		description: "Scan a directory on the server to find and import NZB files into the queue.",
 		icon: FolderOpen,
 	},
 	upload: {
 		title: "Upload NZBs",
-		description: "Upload individual NZB files or folders from your computer",
+		description: "Upload NZB files directly from your computer. You can select multiple files or a folder.",
 		icon: UploadCloud,
 	},
 };
@@ -59,8 +59,8 @@ export function ImportPage() {
 						<Box className="h-8 w-8 text-primary" />
 					</div>
 					<div>
-						<h1 className="font-bold text-3xl tracking-tight">Data Import</h1>
-						<p className="text-base-content/60 text-sm">Expand your library by importing existing data</p>
+						<h1 className="font-bold text-3xl tracking-tight">Import</h1>
+						<p className="text-base-content/60 text-sm">Import existing data from NZBDav database, scan a directory, or upload NZB files.</p>
 					</div>
 				</div>
 			</div>
@@ -196,14 +196,14 @@ function UploadSection() {
 		<div className="space-y-8">
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Select Files</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Selection</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
 				<div className="grid grid-cols-1 gap-8 md:grid-cols-2">
 					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-semibold">Individual Files</legend>
+							<legend className="fieldset-legend font-semibold">Select Files</legend>
 							<div className="flex flex-col gap-4">
 								<input
 									type="file"
@@ -214,14 +214,14 @@ function UploadSection() {
 									disabled={isUploading}
 									ref={fileInputRef}
 								/>
-								<p className="text-[10px] opacity-60">Upload multiple .nzb files directly.</p>
+								<p className="text-[10px] opacity-60">Select individual .nzb files</p>
 							</div>
 						</fieldset>
 					</div>
 
 					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-semibold">Entire Folder</legend>
+							<legend className="fieldset-legend font-semibold">Select Folder</legend>
 							<div className="flex flex-col gap-4">
 								<input
 									type="file"
@@ -233,7 +233,7 @@ function UploadSection() {
 									disabled={isUploading}
 									ref={dirInputRef}
 								/>
-								<p className="text-[10px] opacity-60">Select a folder to upload all contained .nzb files.</p>
+								<p className="text-[10px] opacity-60">Upload all .nzb files in a folder</p>
 							</div>
 						</fieldset>
 					</div>
@@ -252,7 +252,7 @@ function UploadSection() {
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-2">
 									<span className="loading loading-spinner loading-xs text-primary" />
-									<span className="font-bold text-sm">Uploading {progress.total} files...</span>
+									<span className="font-bold text-sm">Uploading...</span>
 								</div>
 								<span className="font-mono text-xs">{progress.current} / {progress.total}</span>
 							</div>
@@ -262,8 +262,8 @@ function UploadSection() {
 								max={progress.total}
 							/>
 							<div className="flex gap-4 font-mono text-[10px]">
-								<span className="text-success">SUCCESS: {progress.successes}</span>
-								<span className="text-error">FAILED: {progress.failures}</span>
+								<span className="text-success">Success: {progress.successes}</span>
+								<span className="text-error">Failed: {progress.failures}</span>
 							</div>
 						</div>
 					</div>
@@ -364,6 +364,11 @@ function NzbDavImportSection() {
 	const handleCancel = async () => {
 		try {
 			await cancelImport.mutateAsync();
+			showToast({
+				title: "Cancellation Requested",
+				message: "Stopping the import process...",
+				type: "info",
+			});
 		} catch (error) {
 			console.error("Failed to cancel import:", error);
 		}
@@ -384,7 +389,7 @@ function NzbDavImportSection() {
 			{isRunning || isCanceling || isCompleted || hasResults ? (
 				<section className="space-y-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Active Import Status</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Status</h4>
 						<div className="h-px flex-1 bg-base-300" />
 					</div>
 
@@ -402,10 +407,10 @@ function NzbDavImportSection() {
 								</div>
 								<div>
 									<h3 className="font-bold text-lg">
-										{isRunning ? "Importing Database" : isCanceling ? "Canceling..." : "Import Finished"}
+										{isRunning ? "Importing Database..." : isCanceling ? "Canceling Import..." : "Import Complete"}
 									</h3>
 									<p className="text-base-content/60 text-xs">
-										{isRunning ? "Processing records from source database" : "The process has concluded"}
+										{isRunning ? "Processing records in background" : "Process finished"}
 									</p>
 								</div>
 							</div>
@@ -413,12 +418,12 @@ function NzbDavImportSection() {
 							<div className="flex gap-2">
 								{isRunning && !isCanceling && (
 									<button type="button" className="btn btn-outline btn-error btn-xs px-4" onClick={handleCancel} disabled={cancelImport.isPending}>
-										Stop
+										Stop Import
 									</button>
 								)}
 								{!isRunning && !isCanceling && (
 									<button type="button" className="btn btn-primary btn-xs px-6" onClick={handleReset} disabled={resetImport.isPending}>
-										Clear Results
+										Done
 									</button>
 								)}
 							</div>
@@ -427,31 +432,32 @@ function NzbDavImportSection() {
 						{/* Progress */}
 						<div className="mb-8 space-y-2">
 							<div className="flex justify-between font-bold font-mono text-[10px] opacity-60">
-								<span>PERCENTAGE</span>
+								<span>PROGRESS</span>
 								<span>{Math.round(progressPercent)}%</span>
 							</div>
-							<progress
-								className={`progress w-full ${isCanceling ? "progress-warning" : "progress-primary"}`}
-								value={progressPercent}
-								max={100}
-							/>
+							<div className="h-2.5 w-full overflow-hidden rounded-full bg-base-300">
+								<div
+									className={`h-full transition-all duration-300 ${isCanceling ? "bg-warning" : "bg-primary"}`}
+									style={{ width: `${progressPercent}%` }}
+								/>
+							</div>
 						</div>
 
 						{/* Stats Grid */}
 						<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-							<div className="rounded-xl bg-base-100 p-4 shadow-sm">
+							<div className="rounded-xl bg-base-100 p-4 shadow-sm text-center">
 								<span className="block font-bold text-[9px] text-base-content/40 uppercase tracking-wider">Total</span>
 								<span className="font-bold font-mono text-2xl">{importStatus?.total || 0}</span>
 							</div>
-							<div className="rounded-xl border-success/20 border-l-4 bg-base-100 p-4 shadow-sm">
+							<div className="rounded-xl border-success/20 border-b-2 bg-base-100 p-4 shadow-sm text-center">
 								<span className="block font-bold text-[9px] text-success/60 uppercase tracking-wider">Added</span>
 								<span className="font-bold font-mono text-2xl text-success">{importStatus?.added || 0}</span>
 							</div>
-							<div className="rounded-xl border-warning/20 border-l-4 bg-base-100 p-4 shadow-sm">
+							<div className="rounded-xl border-warning/20 border-b-2 bg-base-100 p-4 shadow-sm text-center">
 								<span className="block font-bold text-[9px] text-warning/60 uppercase tracking-wider">Skipped</span>
 								<span className="font-bold font-mono text-2xl text-warning">{importStatus?.skipped || 0}</span>
 							</div>
-							<div className="rounded-xl border-error/20 border-l-4 bg-base-100 p-4 shadow-sm">
+							<div className="rounded-xl border-error/20 border-b-2 bg-base-100 p-4 shadow-sm text-center">
 								<span className="block font-bold text-[9px] text-error/60 uppercase tracking-wider">Failed</span>
 								<span className="font-bold font-mono text-2xl text-error">{importStatus?.failed || 0}</span>
 							</div>
@@ -469,13 +475,13 @@ function NzbDavImportSection() {
 				<form onSubmit={handleSubmit} className="space-y-8">
 					<section className="space-y-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Configuration</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Parameters</h4>
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
 						<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-semibold">Target Virtual Directory</legend>
+								<legend className="fieldset-legend font-semibold">Target Directory Name</legend>
 								<div className="flex items-center gap-3">
 									<div className="rounded-lg bg-base-200 p-2.5">
 										<FolderInput className="h-5 w-5 text-base-content/60" />
@@ -489,26 +495,32 @@ function NzbDavImportSection() {
 										required
 									/>
 								</div>
-								<p className="label text-[10px] opacity-60">Creates /movies and /tv subfolders under this name.</p>
+								<p className="label text-[10px] opacity-60">This will create /movies and /tv subdirectories under this name.</p>
 							</fieldset>
 
 							<div className="flex flex-col justify-center space-y-3">
-								<label className="label mb-1 font-semibold text-xs opacity-60">Database Source</label>
-								<div className="join w-full">
-									<button 
-										type="button" 
-										className={`btn btn-sm join-item flex-1 ${inputMethod === "server" ? "btn-primary" : "btn-ghost bg-base-200/50"}`}
-										onClick={() => setInputMethod("server")}
-									>
-										Server File
-									</button>
-									<button 
-										type="button" 
-										className={`btn btn-sm join-item flex-1 ${inputMethod === "upload" ? "btn-primary" : "btn-ghost bg-base-200/50"}`}
-										onClick={() => setInputMethod("upload")}
-									>
-										Upload New
-									</button>
+								<label className="label mb-1 font-semibold text-xs opacity-60">Input Method</label>
+								<div className="flex gap-4">
+									<label className="label cursor-pointer gap-2">
+										<input
+											type="radio"
+											name="inputMethod"
+											className="radio radio-primary radio-sm"
+											checked={inputMethod === "server"}
+											onChange={() => setInputMethod("server")}
+										/>
+										<span className="label-text">File on Server</span>
+									</label>
+									<label className="label cursor-pointer gap-2">
+										<input
+											type="radio"
+											name="inputMethod"
+											className="radio radio-primary radio-sm"
+											checked={inputMethod === "upload"}
+											onChange={() => setInputMethod("upload")}
+										/>
+										<span className="label-text">Upload File</span>
+									</label>
 								</div>
 							</div>
 						</div>
@@ -516,18 +528,18 @@ function NzbDavImportSection() {
 
 					<section className="space-y-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Database Selection</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Source Selection</h4>
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
 						<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
 							{inputMethod === "server" ? (
 								<fieldset className="fieldset min-w-0">
-									<legend className="fieldset-legend font-semibold text-xs">SQLite File Path</legend>
+									<legend className="fieldset-legend font-semibold text-xs">Select Database File from Server</legend>
 									<div className="join w-full">
 										<input
 											type="text"
-											placeholder="/path/to/nzbdav.sqlite"
+											placeholder="e.g. /data/nzbdav/db.sqlite"
 											className="input join-item w-full bg-base-100 font-mono"
 											value={selectedDbPath}
 											onChange={(e) => setSelectedDbPath(e.target.value)}
@@ -541,11 +553,10 @@ function NzbDavImportSection() {
 											Browse
 										</button>
 									</div>
-									<p className="label text-[10px] opacity-60">Select an existing database file on the server.</p>
 								</fieldset>
 							) : (
 								<fieldset className="fieldset min-w-0">
-									<legend className="fieldset-legend font-semibold text-xs">File Upload</legend>
+									<legend className="fieldset-legend font-semibold text-xs">Upload Database File</legend>
 									<input
 										type="file"
 										accept=".sqlite,.db"
@@ -553,7 +564,6 @@ function NzbDavImportSection() {
 										onChange={handleFileUpload}
 										required={inputMethod === "upload"}
 									/>
-									<p className="label text-[10px] opacity-60">Upload a .sqlite or .db file from your local machine.</p>
 								</fieldset>
 							)}
 						</div>
@@ -569,8 +579,8 @@ function NzbDavImportSection() {
 								(inputMethod === "server" ? !selectedDbPath : !selectedFile)
 							}
 						>
-							{isLoading ? <LoadingSpinner size="sm" /> : <Play className="h-4 w-4" />}
-							Execute Database Import
+							{isLoading ? <LoadingSpinner size="sm" /> : <Upload className="h-4 w-4" />}
+							Start Import
 						</button>
 					</div>
 				</form>
@@ -611,7 +621,7 @@ function DirectoryScanSection() {
 			return false;
 		}
 		if (!path.startsWith("/")) {
-			setValidationError("Path must be absolute");
+			setValidationError("Path must be absolute (start with /)");
 			return false;
 		}
 		return true;
@@ -643,20 +653,17 @@ function DirectoryScanSection() {
 		<div className="space-y-8">
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Scanner Configuration</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Configuration</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
-				<div className="grid grid-cols-1 gap-6">
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">Target Directory Path</legend>
+				<div className="flex flex-col gap-4 sm:flex-row">
+					<fieldset className="fieldset flex-1 min-w-0">
+						<legend className="fieldset-legend font-semibold">Directory Path</legend>
 						<div className="join w-full">
-							<div className="join-item flex items-center bg-base-200/50 px-4">
-								<HardDrive className="h-5 w-5 text-base-content/40" />
-							</div>
 							<input
 								type="text"
-								placeholder="/mnt/usenet/downloads"
+								placeholder="/path/to/directory"
 								className={`input join-item w-full bg-base-200/50 font-mono ${validationError ? "input-error" : ""}`}
 								value={scanPath}
 								onChange={(e) => setScanPath(e.target.value)}
@@ -673,96 +680,111 @@ function DirectoryScanSection() {
 						</div>
 						{validationError && <p className="label text-[10px] text-error">{validationError}</p>}
 					</fieldset>
+
+                    <div className="flex items-end gap-2">
+                        {isIdle && (
+                            <button 
+                                type="button" 
+                                className="btn btn-primary btn-md px-8 shadow-lg shadow-primary/20" 
+                                onClick={handleStartScan} 
+                                disabled={startScan.isPending || !scanPath.trim()}
+                            >
+                                <Play className="h-4 w-4" /> Start Scan
+                            </button>
+                        )}
+                        {(isScanning || isCanceling) && (
+                            <button 
+                                type="button" 
+                                className="btn btn-warning btn-md px-8" 
+                                onClick={handleCancelScan} 
+                                disabled={cancelScan.isPending || isCanceling}
+                            >
+                                <Square className="h-4 w-4" /> {isCanceling ? "Canceling..." : "Cancel"}
+                            </button>
+                        )}
+                    </div>
 				</div>
 			</section>
 
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Control & Status</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Status</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
 				<div className={`rounded-2xl border ${isScanning ? "border-primary/20 bg-primary/5" : "border-base-300 bg-base-200/30"} p-6 shadow-sm`}>
-					<div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-						<div className="flex items-center gap-4">
-							<div className={`rounded-xl p-3 ${isScanning ? "bg-primary/20" : isCanceling ? "bg-warning/20" : "bg-success/20"}`}>
-								{isScanning ? (
-									<LoadingSpinner size="sm" />
-								) : isCanceling ? (
-									<Square className="h-6 w-6 text-warning" />
-								) : (
-									<CheckCircle2 className="h-6 w-6 text-success" />
-								)}
-							</div>
-							<div>
-								<h3 className="font-bold text-lg">
-									{isScanning ? "Scanning Directory" : isCanceling ? "Canceling..." : "Scanner Idle"}
-								</h3>
-								<p className="text-base-content/60 text-xs">
-									{isScanning ? `Processing files in ${scanStatus?.path || scanPath}` : "Ready to start new scan"}
-								</p>
-							</div>
-						</div>
-						
-						<div className="flex gap-2">
-							{isIdle ? (
-								<button type="button" className="btn btn-primary btn-md px-10 shadow-lg shadow-primary/20" onClick={handleStartScan} disabled={startScan.isPending || !scanPath.trim()}>
-									<Play className="h-4 w-4" /> Start Scan
-								</button>
-							) : (
-								<button type="button" className="btn btn-outline btn-error btn-md px-10" onClick={handleCancelScan} disabled={cancelScan.isPending || isCanceling}>
-									<Square className="h-4 w-4" /> {isCanceling ? "Stopping..." : "Cancel"}
-								</button>
-							)}
-						</div>
-					</div>
+                    <div className="mb-6 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            {isScanning ? <Play className="h-4 w-4 animate-pulse text-info" /> : isCanceling ? <Square className="h-4 w-4 text-warning" /> : scanStatus?.last_error ? <AlertCircle className="h-4 w-4 text-error" /> : <CheckCircle2 className="h-4 w-4 text-success" />}
+                            <span className="font-medium">Status: {isCanceling ? "Canceling..." : isScanning ? "Scanning" : scanStatus?.last_error ? "Error" : "Idle"}</span>
+                        </div>
+
+                        <div className="flex gap-4 text-base-content/70 text-sm">
+                            <span>Files Found: {scanStatus?.files_found || 0}</span>
+                            <span>Files Added: {scanStatus?.files_added || 0}</span>
+                        </div>
+                    </div>
 
 					{/* Progress and Details */}
 					{(isScanning || isCanceling || (scanStatus?.files_found || 0) > 0) && (
 						<div className="space-y-6">
 							<div className="space-y-2">
 								<div className="flex justify-between font-bold font-mono text-[10px] opacity-60">
-									<span>SCAN PROGRESS</span>
+									<span>PROGRESS</span>
 									<span>{Math.round(getProgressPercentage())}%</span>
 								</div>
-								<progress
-									className={`progress w-full ${isCanceling ? "progress-warning" : "progress-primary"}`}
-									value={getProgressPercentage()}
-									max={100}
-								/>
-							</div>
-
-							<div className="grid grid-cols-2 gap-4">
-								<div className="rounded-xl bg-base-100 p-4 shadow-sm">
-									<span className="block font-bold text-[9px] text-base-content/40 uppercase tracking-wider">Files Found</span>
-									<span className="font-bold font-mono text-2xl">{scanStatus?.files_found || 0}</span>
-								</div>
-								<div className="rounded-xl border-success/20 border-l-4 bg-base-100 p-4 shadow-sm">
-									<span className="block font-bold text-[9px] text-success/60 uppercase tracking-wider">Added to Queue</span>
-									<span className="font-bold font-mono text-2xl text-success">{scanStatus?.files_added || 0}</span>
-								</div>
+								<div className="h-2 w-full rounded-full bg-base-300">
+                                    <div
+                                        className="h-2 rounded-full bg-primary transition-all duration-300"
+                                        style={{ width: `${getProgressPercentage()}%` }}
+                                    />
+                                </div>
 							</div>
 
 							{isScanning && scanStatus?.current_file && (
 								<div className="rounded-lg bg-base-100 p-3">
 									<div className="flex items-center gap-2 font-bold text-[9px] text-base-content/40 uppercase tracking-widest">
 										<FileText className="h-3 w-3" />
-										<span>Processing File</span>
+										<span>Current</span>
 									</div>
 									<p className="mt-1 truncate font-mono text-xs opacity-80">
-										{scanStatus.current_file}
+                                        {scanStatus.current_file.length > 60
+                                            ? `...${scanStatus.current_file.slice(-60)}`
+                                            : scanStatus.current_file}
 									</p>
 								</div>
 							)}
+
+                            {scanStatus?.path && scanStatus.path !== scanPath && (
+                                <div className="mt-1 text-base-content/70 text-xs">
+                                    <span>Scanning: </span>
+                                    <span className="font-mono">{scanStatus.path}</span>
+                                </div>
+                            )}
 						</div>
 					)}
 
 					{scanStatus?.last_error && (
-						<div className="alert alert-error mt-6 text-xs sm:text-sm">
-							<AlertCircle className="h-4 w-4" />
-							<span>{scanStatus.last_error}</span>
+						<div className="mt-4">
+							<ErrorAlert
+								error={new Error(scanStatus.last_error)}
+								onRetry={() => scanStatus?.path && handleStartScan()}
+							/>
 						</div>
 					)}
+
+                    {/* API Error Display */}
+                    {(startScan.error || cancelScan.error) && (
+                        <div className="mt-4">
+                            <ErrorAlert
+                                error={(startScan.error || cancelScan.error) as Error}
+                                onRetry={() => {
+                                    startScan.reset();
+                                    cancelScan.reset();
+                                }}
+                            />
+                        </div>
+                    )}
 				</div>
 			</section>
 

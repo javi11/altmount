@@ -137,8 +137,8 @@ export function FileExplorer({
 				<div className="rounded-full bg-primary/10 p-6">
                     <Wifi className="h-12 w-12 animate-pulse text-primary" />
                 </div>
-				<h3 className="mt-6 font-bold text-base-content/70 text-xl tracking-tight">Synchronizing...</h3>
-				<p className="mt-2 text-base-content/50 text-sm">Accessing WebDAV storage</p>
+				<h3 className="mt-6 font-bold text-base-content/70 text-xl tracking-tight">Connecting...</h3>
+				<p className="mt-2 text-base-content/50 text-sm">Authenticating with WebDAV server</p>
 				<div className="mt-8">
                     <LoadingSpinner />
                 </div>
@@ -154,7 +154,7 @@ export function FileExplorer({
                 </div>
 				<h3 className="mt-6 font-bold text-base-content/70 text-xl tracking-tight">Connection Failed</h3>
 				<p className="mt-2 max-w-xs text-base-content/50 text-sm leading-relaxed">
-					{connectionError.message || "Unable to establish a connection to the WebDAV server."}
+					{connectionError.message || "Unable to connect to WebDAV server"}
 				</p>
 				<button type="button" className="btn btn-primary btn-md mt-10 px-8 shadow-lg shadow-primary/20" onClick={onRetryConnection}>
 					<RefreshCw className="h-4 w-4" />

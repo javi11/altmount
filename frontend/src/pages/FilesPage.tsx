@@ -171,10 +171,9 @@ export function FilesPage() {
 				{/* Main Content */}
 				<div className="lg:col-span-3">
 					<div className="card min-h-[600px] border border-base-200 bg-base-100 shadow-sm">
-						<div className="card-body p-0 sm:p-0"> {/* P-0 to let FileExplorer handle its own internal padding if needed, but we'll update it */}
+						<div className="card-body p-0 sm:p-0">
 							<div className="p-4 sm:p-8">
                                 <FileExplorer
-                                    key={initialPath} // Reset explorer state when shortcut clicked
                                     isConnected={isConnected}
                                     hasConnectionFailed={hasConnectionFailed}
                                     isConnecting={isConnecting}
