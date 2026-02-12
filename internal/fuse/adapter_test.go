@@ -123,34 +123,28 @@ func (m *MockFileInfo) ModTime() time.Time { return m.modTime }
 func (m *MockFileInfo) IsDir() bool        { return m.isDir }
 func (m *MockFileInfo) Sys() interface{}   { return nil }
 
-// TestAltMountFile_Read_Concurrency tests that FileHandle correctly serializes
-// concurrent read requests using Seek+Read with mutex protection.
-// This is intentional behavior - we use Seek+Read exclusively because the
-// underlying UsenetReader is forward-only, and ReadAt would create a new
-// reader per call, causing data corruption for streaming media.
-func TestAltMountFile_Read_Concurrency(t *testing.T) {
+// TestHandle_Read_Concurrency tests that Handle correctly serializes
+// concurrent read requests using Seek+Read with mutex protection in fallback mode.
+func TestHandle_Read_Concurrency(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
-	// Both reads are at different non-zero offsets, so both will require seeks.
-	// Due to concurrency, either could run first, so we allow seeks to both offsets.
 	mockFile.On("Seek", int64(100), 0).Return(int64(100), nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
 	mockFile.On("Seek", int64(200), 0).Return(int64(200), nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
-	handle := &FileHandle{
+	handle := &Handle{
 		file:     mockFile,
 		logger:   logger,
 		path:     "testfile",
-		position: 0, // Initial position - both reads will need seeks
+		position: 0,
 	}
 
 	ctx := context.Background()
 	dest := make([]byte, 10)
 
-	// Execute reads concurrently - should use Seek+Read with mutex serialization
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -171,70 +165,14 @@ func TestAltMountFile_Read_Concurrency(t *testing.T) {
 	mockFile.AssertExpectations(t)
 }
 
-// TestAltMountFile_Read_SeekError tests that FileHandle returns EIO when Seek fails
-func TestAltMountFile_Read_SeekError(t *testing.T) {
+// TestHandle_Read_SeekError tests that Handle returns EIO when Seek fails
+func TestHandle_Read_SeekError(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
-	// Setup Seek to fail at a non-zero offset (seeks are skipped when offset == position)
 	mockFile.On("Seek", int64(100), 0).Return(int64(0), os.ErrPermission).Once()
 
-	handle := &FileHandle{
-		file:     mockFile,
-		logger:   logger,
-		path:     "testfile",
-		position: 0, // Position is 0, so seeking to 100 will trigger a seek
-	}
-
-	ctx := context.Background()
-	dest := make([]byte, 10)
-
-	// Should fail because Seek returns error
-	_, status := handle.Read(ctx, dest, 100)
-	assert.Equal(t, syscall.EIO, status)
-
-	mockFile.AssertExpectations(t)
-}
-
-// TestAltMountFile_Read_ReadError tests that FileHandle returns EIO when Read fails
-func TestAltMountFile_Read_ReadError(t *testing.T) {
-	mockFile := new(MockFile)
-	logger := slog.Default()
-
-	// Setup Read to fail (no seek needed when position matches offset)
-	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(0, os.ErrPermission).Once()
-
-	handle := &FileHandle{
-		file:     mockFile,
-		logger:   logger,
-		path:     "testfile",
-		position: 0, // Position is 0, reading at offset 0 skips seek
-	}
-
-	ctx := context.Background()
-	dest := make([]byte, 10)
-
-	// Should fail because Read returns error
-	_, status := handle.Read(ctx, dest, 0)
-	assert.Equal(t, syscall.EIO, status)
-
-	mockFile.AssertExpectations(t)
-}
-
-// TestAltMountFile_Read_SequentialSkipsSeek tests that sequential reads skip unnecessary seeks.
-// This is the key optimization: FUSE calls Read with ~4KB chunks at consecutive offsets.
-// By tracking position, we avoid Seek() calls when reading sequentially.
-func TestAltMountFile_Read_SequentialSkipsSeek(t *testing.T) {
-	mockFile := new(MockFile)
-	logger := slog.Default()
-
-	// Simulate 3 sequential reads of 10 bytes each (like kernel reads)
-	// First read at offset 0: No seek (position starts at 0)
-	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Times(3)
-
-	// No Seek calls expected for sequential reads!
-
-	handle := &FileHandle{
+	handle := &Handle{
 		file:     mockFile,
 		logger:   logger,
 		path:     "testfile",
@@ -244,28 +182,73 @@ func TestAltMountFile_Read_SequentialSkipsSeek(t *testing.T) {
 	ctx := context.Background()
 	dest := make([]byte, 10)
 
-	// Read 1: offset 0, position 0 -> no seek, read, position becomes 10
+	_, status := handle.Read(ctx, dest, 100)
+	assert.Equal(t, syscall.EIO, status)
+
+	mockFile.AssertExpectations(t)
+}
+
+// TestHandle_Read_ReadError tests that Handle returns EIO when Read fails
+func TestHandle_Read_ReadError(t *testing.T) {
+	mockFile := new(MockFile)
+	logger := slog.Default()
+
+	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(0, os.ErrPermission).Once()
+
+	handle := &Handle{
+		file:     mockFile,
+		logger:   logger,
+		path:     "testfile",
+		position: 0,
+	}
+
+	ctx := context.Background()
+	dest := make([]byte, 10)
+
+	_, status := handle.Read(ctx, dest, 0)
+	assert.Equal(t, syscall.EIO, status)
+
+	mockFile.AssertExpectations(t)
+}
+
+// TestHandle_Read_SequentialSkipsSeek tests that sequential reads skip unnecessary seeks.
+func TestHandle_Read_SequentialSkipsSeek(t *testing.T) {
+	mockFile := new(MockFile)
+	logger := slog.Default()
+
+	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Times(3)
+
+	handle := &Handle{
+		file:     mockFile,
+		logger:   logger,
+		path:     "testfile",
+		position: 0,
+	}
+
+	ctx := context.Background()
+	dest := make([]byte, 10)
+
+	// Read 1: offset 0, position 0 -> no seek
 	result, status := handle.Read(ctx, dest, 0)
 	assert.Equal(t, syscall.Errno(0), status)
 	assert.NotNil(t, result)
 
-	// Read 2: offset 10, position 10 -> no seek, read, position becomes 20
+	// Read 2: offset 10, position 10 -> no seek
 	result, status = handle.Read(ctx, dest, 10)
 	assert.Equal(t, syscall.Errno(0), status)
 	assert.NotNil(t, result)
 
-	// Read 3: offset 20, position 20 -> no seek, read, position becomes 30
+	// Read 3: offset 20, position 20 -> no seek
 	result, status = handle.Read(ctx, dest, 20)
 	assert.Equal(t, syscall.Errno(0), status)
 	assert.NotNil(t, result)
 
-	// Verify position tracking worked (no seeks were called)
 	mockFile.AssertExpectations(t)
 	mockFile.AssertNotCalled(t, "Seek", mock.Anything, mock.Anything)
 }
 
-// TestAltMountFile_Read_RandomSeeksWhenNeeded tests that random reads trigger seeks
-func TestAltMountFile_Read_RandomSeeksWhenNeeded(t *testing.T) {
+// TestHandle_Read_RandomSeeksWhenNeeded tests that random reads trigger seeks
+func TestHandle_Read_RandomSeeksWhenNeeded(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
 
@@ -280,7 +263,7 @@ func TestAltMountFile_Read_RandomSeeksWhenNeeded(t *testing.T) {
 	mockFile.On("Seek", int64(500), 0).Return(int64(500), nil).Once()
 	mockFile.On("Read", mock.AnythingOfType("[]uint8")).Return(10, nil).Once()
 
-	handle := &FileHandle{
+	handle := &Handle{
 		file:     mockFile,
 		logger:   logger,
 		path:     "testfile",
@@ -305,23 +288,44 @@ func TestAltMountFile_Read_RandomSeeksWhenNeeded(t *testing.T) {
 	mockFile.AssertExpectations(t)
 }
 
-func TestAltMountRoot_Getattr(t *testing.T) {
-	mockFs := new(MockFs)
+func TestDir_Getattr(t *testing.T) {
 	logger := slog.Default()
 
-	root := NewAltMountRoot(mockFs, "/root", logger, 1000, 1000, nil)
-	root.isRootDir = false // Force it to check fs.Stat
-
-	// Test Directory Getattr
-	dirInfo := &MockFileInfo{name: "subdir", isDir: true, mode: 0755, size: 0}
-	mockFs.On("Stat", "/root").Return(dirInfo, nil)
-
+	// Test root directory
+	root := NewDir(nil, "", logger, 1000, 1000, nil)
 	ctx := context.Background()
 	out := &fuse.AttrOut{}
 	errno := root.Getattr(ctx, nil, out)
 
 	assert.Equal(t, syscall.Errno(0), errno)
-	assert.Equal(t, uint64(0), out.Size)
 	assert.True(t, out.Mode&syscall.S_IFDIR != 0)
 	assert.Equal(t, uint32(0755|syscall.S_IFDIR), out.Mode)
+	assert.Equal(t, uint32(1000), out.Uid)
+	assert.Equal(t, uint32(1000), out.Gid)
+}
+
+func TestHandle_Release_Idempotent(t *testing.T) {
+	mockFile := new(MockFile)
+	logger := slog.Default()
+
+	mockFile.On("Close").Return(nil).Once()
+
+	handle := &Handle{
+		file:   mockFile,
+		logger: logger,
+		path:   "testfile",
+	}
+
+	ctx := context.Background()
+
+	// First release should close
+	errno := handle.Release(ctx)
+	assert.Equal(t, syscall.Errno(0), errno)
+
+	// Second release should be a no-op (atomic CompareAndSwap)
+	errno = handle.Release(ctx)
+	assert.Equal(t, syscall.Errno(0), errno)
+
+	// Close should only be called once
+	mockFile.AssertNumberOfCalls(t, "Close", 1)
 }

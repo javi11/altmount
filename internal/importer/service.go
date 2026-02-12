@@ -19,7 +19,6 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
-	fusecache "github.com/javi11/altmount/internal/fuse/cache"
 	"github.com/javi11/altmount/internal/importer/filesystem"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/postprocessor"
@@ -182,14 +181,14 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	maxImportConnections := currentConfig.Import.MaxImportConnections
 	segmentSamplePercentage := currentConfig.Import.SegmentSamplePercentage
 	allowedFileExtensions := currentConfig.Import.AllowedFileExtensions
-	importCacheSizeMB := currentConfig.Import.ImportCacheSizeMB
+	maxDownloadPrefetch := currentConfig.Import.MaxDownloadPrefetch
 	readTimeout := time.Duration(currentConfig.Import.ReadTimeoutSeconds) * time.Second
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
 	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, importCacheSizeMB, readTimeout, broadcaster, configGetter)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -418,19 +417,6 @@ func (s *Service) SetArrsService(service *arrs.Service) {
 	}
 }
 
-// SetFuseCache sets or updates the FUSE metadata cache for invalidation
-func (s *Service) SetFuseCache(cache fusecache.Cache) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.postProcessor != nil {
-		s.postProcessor.SetFuseCache(cache)
-	}
-	if cache != nil {
-		s.log.InfoContext(s.ctx, "FUSE metadata cache connected to import service")
-	} else {
-		s.log.InfoContext(s.ctx, "FUSE metadata cache disconnected from import service")
-	}
-}
 
 // GetQueueStats returns current queue statistics from database
 func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {

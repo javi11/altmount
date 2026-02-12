@@ -1,6 +1,7 @@
 package fuse
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,25 +13,26 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/config"
-	fusecache "github.com/javi11/altmount/internal/fuse/cache"
-	"github.com/spf13/afero"
+	"github.com/javi11/altmount/internal/fuse/vfs"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 )
 
 // Server manages the FUSE mount
 type Server struct {
 	mountPoint string
-	fileSystem afero.Fs
+	nzbfs      *nzbfilesystem.NzbFilesystem
 	logger     *slog.Logger
 	server     *fuse.Server
 	config     config.FuseConfig
-	cache      fusecache.Cache // Metadata cache (can be nil if disabled)
+	vfsm       *vfs.Manager // VFS disk cache manager (nil if disabled)
 }
 
-// NewServer creates a new FUSE server instance
-func NewServer(mountPoint string, fileSystem afero.Fs, logger *slog.Logger, cfg config.FuseConfig) *Server {
+// NewServer creates a new FUSE server instance.
+// Takes NzbFilesystem directly (no ContextAdapter needed).
+func NewServer(mountPoint string, nzbfs *nzbfilesystem.NzbFilesystem, logger *slog.Logger, cfg config.FuseConfig) *Server {
 	return &Server{
 		mountPoint: mountPoint,
-		fileSystem: fileSystem,
+		nzbfs:      nzbfs,
 		logger:     logger,
 		config:     cfg,
 	}
@@ -55,43 +57,67 @@ func (s *Server) Mount() error {
 	uid := uint32(getIDFromEnv("PUID", 1000))
 	gid := uint32(getIDFromEnv("PGID", 1000))
 
-	// Initialize metadata cache if enabled
-	var metadataCache fusecache.Cache
-	if s.config.MetadataCacheEnabled != nil && *s.config.MetadataCacheEnabled {
-		cfg := fusecache.Config{
-			StatCacheSize:     s.config.StatCacheSize,
-			DirCacheSize:      s.config.DirCacheSize,
-			NegativeCacheSize: s.config.NegativeCacheSize,
-			StatTTL:           time.Duration(s.config.StatCacheTTLSeconds) * time.Second,
-			DirTTL:            time.Duration(s.config.DirCacheTTLSeconds) * time.Second,
-			NegativeTTL:       time.Duration(s.config.NegativeCacheTTLSeconds) * time.Second,
+	// Initialize VFS disk cache if enabled
+	var vfsm *vfs.Manager
+	if s.config.DiskCacheEnabled != nil && *s.config.DiskCacheEnabled {
+		cachePath := s.config.DiskCachePath
+		if cachePath == "" {
+			cachePath = "/tmp/altmount-vfs-cache"
 		}
+
+		maxSizeGB := s.config.DiskCacheMaxSizeGB
+		if maxSizeGB <= 0 {
+			maxSizeGB = 10
+		}
+
+		expiryH := s.config.DiskCacheExpiryH
+		if expiryH <= 0 {
+			expiryH = 24
+		}
+
+		chunkSizeMB := s.config.ChunkSizeMB
+		if chunkSizeMB <= 0 {
+			chunkSizeMB = 4
+		}
+
+		readAheadChunks := s.config.ReadAheadChunks
+		if readAheadChunks <= 0 {
+			readAheadChunks = 4
+		}
+
+		vfsCfg := vfs.ManagerConfig{
+			Enabled:         true,
+			CachePath:       cachePath,
+			MaxSizeBytes:    int64(maxSizeGB) * 1024 * 1024 * 1024,
+			ExpiryDuration:  time.Duration(expiryH) * time.Hour,
+			ChunkSize:       int64(chunkSizeMB) * 1024 * 1024,
+			ReadAheadChunks: readAheadChunks,
+		}
+
 		var err error
-		metadataCache, err = fusecache.NewLRUCache(cfg)
+		vfsm, err = vfs.NewManager(vfsCfg, s.logger.With("component", "vfs"))
 		if err != nil {
-			s.logger.Warn("Failed to create metadata cache, running without cache", "error", err)
+			s.logger.Warn("Failed to create VFS disk cache, running without disk cache", "error", err)
 		} else {
-			s.logger.Info("FUSE metadata cache enabled",
-				"stat_cache_size", cfg.StatCacheSize,
-				"dir_cache_size", cfg.DirCacheSize,
-				"negative_cache_size", cfg.NegativeCacheSize,
-				"stat_ttl", cfg.StatTTL,
-				"dir_ttl", cfg.DirTTL,
-				"negative_ttl", cfg.NegativeTTL)
+			vfsm.Start(context.Background())
+			s.logger.Info("VFS disk cache enabled",
+				"cache_path", cachePath,
+				"max_size_gb", maxSizeGB,
+				"expiry_hours", expiryH,
+				"chunk_size_mb", chunkSizeMB,
+				"read_ahead_chunks", readAheadChunks)
 		}
 	}
-	s.cache = metadataCache
+	s.vfsm = vfsm
 
-	root := NewAltMountRoot(s.fileSystem, "", s.logger, uid, gid, metadataCache)
+	root := NewDir(s.nzbfs, "", s.logger, uid, gid, vfsm)
 
 	// Configure FUSE options
-	// We want to enable some caching to avoid hitting metadata service too often
 	attrTimeout := time.Duration(s.config.AttrTimeoutSeconds) * time.Second
 	entryTimeout := time.Duration(s.config.EntryTimeoutSeconds) * time.Second
 
-	// Ensure timeouts are at least 1s if they were 0/defaulted weirdly, though config validator should handle it.
 	if attrTimeout == 0 {
-		attrTimeout = 1 * time.Second
+		attrTimeout = 30 * time.Second
 	}
 	if entryTimeout == 0 {
 		entryTimeout = 1 * time.Second
@@ -99,20 +125,24 @@ func (s *Server) Mount() error {
 
 	opts := &fs.Options{
 		MountOptions: fuse.MountOptions{
-			AllowOther:   s.config.AllowOther,
-			Name:         "altmount",
-			Debug:        s.config.Debug,
-			MaxReadAhead: s.config.MaxReadAheadMB * 1024 * 1024,
-			// AsyncRead:    true,
+			AllowOther:           s.config.AllowOther,
+			Name:                 "altmount",
+			Debug:                s.config.Debug,
+			MaxReadAhead:         s.config.MaxReadAheadMB * 1024 * 1024,
+			DisableXAttrs:        true,
+			IgnoreSecurityLabels: true,
+			MaxWrite:             1024 * 1024, // 1MB
 		},
-		// Cache timeout settings
 		EntryTimeout:    &entryTimeout,
 		AttrTimeout:     &attrTimeout,
-		NegativeTimeout: &entryTimeout, // Use same as entry timeout
+		NegativeTimeout: &entryTimeout,
 	}
 
 	server, err := fs.Mount(s.mountPoint, root, opts)
 	if err != nil {
+		if vfsm != nil {
+			vfsm.Stop()
+		}
 		return fmt.Errorf("failed to mount FUSE filesystem: %w", err)
 	}
 
@@ -121,6 +151,12 @@ func (s *Server) Mount() error {
 
 	// Block until unmount
 	s.server.Wait()
+
+	// Stop VFS manager on unmount
+	if s.vfsm != nil {
+		s.vfsm.Stop()
+	}
+
 	return nil
 }
 
@@ -153,19 +189,11 @@ func (s *Server) ForceUnmount() error {
 			return nil
 		}
 	}
-	// Add macOS/Windows logic if needed, but Linux is primary target
 	return fmt.Errorf("failed to force unmount %s", s.mountPoint)
 }
 
 // CleanupMount checks for and cleans up stale mounts at the mountpoint
 func (s *Server) CleanupMount() {
-	// Simple check: try to unmount. If it fails, it probably wasn't mounted or we lack perms.
-	// We ignore errors here as we just want to ensure it's clean for the new mount.
 	_ = s.ForceUnmount()
 }
 
-// GetCache returns the metadata cache for external access (e.g., import service invalidation).
-// Returns nil if caching is disabled.
-func (s *Server) GetCache() fusecache.Cache {
-	return s.cache
-}

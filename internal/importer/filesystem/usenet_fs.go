@@ -38,7 +38,7 @@ type UsenetFileSystem struct {
 	ctx             context.Context
 	poolManager     pool.Manager
 	files           map[string]parser.ParsedFile
-	maxCacheSizeMB  int
+	maxPrefetch int
 	progressTracker *progress.Tracker
 	filesCompleted  int32 // atomic counter
 	totalFiles      int
@@ -52,7 +52,7 @@ type UsenetFileInfo struct {
 }
 
 // NewUsenetFileSystem creates a new filesystem for accessing RAR parts from Usenet
-func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxCacheSizeMB int, progressTracker *progress.Tracker, readTimeout time.Duration) *UsenetFileSystem {
+func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []parser.ParsedFile, maxPrefetch int, progressTracker *progress.Tracker, readTimeout time.Duration) *UsenetFileSystem {
 	filesMap := make(map[string]parser.ParsedFile)
 	for _, file := range files {
 		filesMap[file.Filename] = file
@@ -62,7 +62,7 @@ func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []
 		ctx:             ctx,
 		poolManager:     poolManager,
 		files:           filesMap,
-		maxCacheSizeMB:  maxCacheSizeMB,
+		maxPrefetch: maxPrefetch,
 		progressTracker: progressTracker,
 		filesCompleted:  0,
 		totalFiles:      len(files),
@@ -91,7 +91,7 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 		file:           &file,
 		poolManager:    ufs.poolManager,
 		ctx:            ctx,
-		maxCacheSizeMB: ufs.maxCacheSizeMB,
+		maxPrefetch: ufs.maxPrefetch,
 		size:           file.Size,
 		position:       0,
 		closed:         false,
@@ -128,7 +128,7 @@ type UsenetFile struct {
 	file           *parser.ParsedFile
 	poolManager    pool.Manager
 	ctx            context.Context
-	maxCacheSizeMB int
+	maxPrefetch int
 	size           int64
 	reader         io.ReadCloser
 	position       int64
@@ -306,7 +306,7 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 	}
 
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
-	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxCacheSizeMB)
+	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch)
 }
 
 // dbSegmentLoader implements the segment loader interface for database segments

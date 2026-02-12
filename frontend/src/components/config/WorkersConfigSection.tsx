@@ -135,19 +135,19 @@ export function ImportConfigSection({
 				</fieldset>
 
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Import Cache Size (MB)</legend>
+					<legend className="fieldset-legend">Max Download Prefetch</legend>
 					<input
 						type="number"
 						className="input"
-						value={formData.import_cache_size_mb}
+						value={formData.max_download_prefetch}
 						readOnly={isReadOnly}
-						min={16}
-						max={512}
+						min={1}
+						max={50}
 						onChange={(e) =>
-							handleInputChange("import_cache_size_mb", Number.parseInt(e.target.value, 10) || 64)
+							handleInputChange("max_download_prefetch", Number.parseInt(e.target.value, 10) || 3)
 						}
 					/>
-					<p className="label">Cache size in MB for archive analysis.</p>
+					<p className="label">Maximum segments prefetched ahead during archive analysis.</p>
 				</fieldset>
 
 				<fieldset className="fieldset">

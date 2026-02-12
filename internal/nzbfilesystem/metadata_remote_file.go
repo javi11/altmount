@@ -72,8 +72,8 @@ func NewMetadataRemoteFile(
 }
 
 // Helper methods to get dynamic config values
-func (mrf *MetadataRemoteFile) getMaxCacheSizeMB() int {
-	return mrf.configGetter().Streaming.MaxCacheSizeMB
+func (mrf *MetadataRemoteFile) getMaxPrefetch() int {
+	return mrf.configGetter().Streaming.MaxPrefetch
 }
 
 func (mrf *MetadataRemoteFile) getGlobalPassword() string {
@@ -160,11 +160,11 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
-	// Extract cache size from context if available (overrides global config)
-	maxCacheSizeMB := mrf.getMaxCacheSizeMB()
+	// Extract max prefetch from context if available (overrides global config)
+	maxPrefetch := mrf.getMaxPrefetch()
 
-	if size, ok := ctx.Value(utils.MaxCacheSizeKey).(int); ok && size > 0 {
-		maxCacheSizeMB = size
+	if w, ok := ctx.Value(utils.MaxPrefetchKey).(int); ok && w > 0 {
+		maxPrefetch = w
 	}
 
 	// Start tracking stream if tracker available
@@ -213,7 +213,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		healthRepository: mrf.healthRepository,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
-		maxCacheSizeMB:   maxCacheSizeMB,
+		maxPrefetch:      maxPrefetch,
 		rcloneCipher:     mrf.rcloneCipher,
 		aesCipher:        mrf.aesCipher,
 		globalPassword:   mrf.getGlobalPassword(),
@@ -645,7 +645,7 @@ type MetadataVirtualFile struct {
 	healthRepository *database.HealthRepository
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
-	maxCacheSizeMB   int // Maximum cache size in MB for ahead downloads
+	maxPrefetch      int // Maximum segments prefetched ahead of current read position
 	rcloneCipher     *rclone.RcloneCrypt
 	aesCipher        *aes.AesCipher
 	globalPassword   string
@@ -1205,7 +1205,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxCacheSizeMB)
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
