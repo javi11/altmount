@@ -7,7 +7,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/fuse"
-	fusecache "github.com/javi11/altmount/internal/fuse/cache"
 )
 
 // FuseManager handles the lifecycle of the FUSE server
@@ -38,18 +37,6 @@ func (m *FuseManager) Stop() {
 		m.server = nil
 		m.status = "stopped"
 	}
-}
-
-// GetCache returns the FUSE metadata cache if available.
-// Returns nil if FUSE is not running or cache is disabled.
-func (m *FuseManager) GetCache() fusecache.Cache {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.server == nil {
-		return nil
-	}
-	return m.server.GetCache()
 }
 
 // handleStartFuseMount starts the FUSE mount
@@ -103,8 +90,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		ctx := c.Context()
 		cfg := s.configManager.GetConfig()
 		logger := slog.With("component", "fuse")
-		adapter := fuse.NewContextAdapter(s.nzbFilesystem, cfg.Fuse)
-		server := fuse.NewServer(req.Path, adapter, logger, cfg.Fuse)
+		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server
@@ -117,26 +103,12 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 			s.fuseManager.status = "error"
 			s.fuseManager.server = nil
 			s.fuseManager.mu.Unlock()
-			// Disconnect cache from import service on failure
-			if s.importerService != nil {
-				s.importerService.SetFuseCache(nil)
-			}
 		} else {
-			// Wire up cache to import service after successful mount
-			if s.importerService != nil {
-				if cache := server.GetCache(); cache != nil {
-					s.importerService.SetFuseCache(cache)
-				}
-			}
 			// Mount returned (unmounted)
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "stopped"
 			s.fuseManager.server = nil
 			s.fuseManager.mu.Unlock()
-			// Disconnect cache from import service on unmount
-			if s.importerService != nil {
-				s.importerService.SetFuseCache(nil)
-			}
 		}
 	}()
 
@@ -235,8 +207,7 @@ func (s *Server) AutoStartFuse() {
 
 	go func() {
 		logger := slog.With("component", "fuse")
-		adapter := fuse.NewContextAdapter(s.nzbFilesystem, cfg.Fuse)
-		server := fuse.NewServer(cfg.Fuse.MountPath, adapter, logger, cfg.Fuse)
+		server := fuse.NewServer(cfg.Fuse.MountPath, s.nzbFilesystem, logger, cfg.Fuse)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server
@@ -249,25 +220,11 @@ func (s *Server) AutoStartFuse() {
 			s.fuseManager.status = "error"
 			s.fuseManager.server = nil
 			s.fuseManager.mu.Unlock()
-			// Disconnect cache from import service on failure
-			if s.importerService != nil {
-				s.importerService.SetFuseCache(nil)
-			}
 		} else {
-			// Wire up cache to import service after successful mount
-			if s.importerService != nil {
-				if cache := server.GetCache(); cache != nil {
-					s.importerService.SetFuseCache(cache)
-				}
-			}
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "stopped"
 			s.fuseManager.server = nil
 			s.fuseManager.mu.Unlock()
-			// Disconnect cache from import service on unmount
-			if s.importerService != nil {
-				s.importerService.SetFuseCache(nil)
-			}
 		}
 	}()
 }

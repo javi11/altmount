@@ -73,12 +73,12 @@ func (c *Config) GetMaxImportConnections() int {
 	return c.Import.MaxImportConnections
 }
 
-// GetImportCacheSizeMB returns import cache size in MB with a default fallback.
-func (c *Config) GetImportCacheSizeMB() int {
-	if c.Import.ImportCacheSizeMB <= 0 {
-		return 100 // Default: 100 MB
+// GetMaxDownloadPrefetch returns max download prefetch with a default fallback.
+func (c *Config) GetMaxDownloadPrefetch() int {
+	if c.Import.MaxDownloadPrefetch <= 0 {
+		return 3 // Default: 3 segments prefetched ahead
 	}
-	return c.Import.ImportCacheSizeMB
+	return c.Import.MaxDownloadPrefetch
 }
 
 // GetReadTimeoutSeconds returns read timeout in seconds with a default fallback.

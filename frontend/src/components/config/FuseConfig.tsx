@@ -16,18 +16,17 @@ export function FuseConfig() {
 		enabled: false,
 		allow_other: true,
 		debug: false,
-		attr_timeout_seconds: 1,
+		attr_timeout_seconds: 30,
 		entry_timeout_seconds: 1,
 		max_cache_size_mb: 128,
 		max_read_ahead_mb: 128,
-		// Metadata cache defaults
-		metadata_cache_enabled: false,
-		stat_cache_size: 10000,
-		dir_cache_size: 1000,
-		negative_cache_size: 5000,
-		stat_cache_ttl_seconds: 30,
-		dir_cache_ttl_seconds: 60,
-		negative_cache_ttl_seconds: 10,
+		// VFS disk cache defaults
+		disk_cache_enabled: false,
+		disk_cache_path: "/tmp/altmount-vfs-cache",
+		disk_cache_max_size_gb: 10,
+		disk_cache_expiry_hours: 24,
+		chunk_size_mb: 4,
+		read_ahead_chunks: 4,
 	});
 
 	const [isLoading, setIsLoading] = useState(false);
@@ -326,152 +325,128 @@ export function FuseConfig() {
 						</div>
 					</div>
 
-					{/* Metadata Cache Settings */}
+					{/* VFS Disk Cache Settings */}
 					<div className="space-y-4">
-						<h4 className="font-medium text-base">Metadata Cache Settings</h4>
+						<h4 className="font-medium text-base">VFS Disk Cache Settings</h4>
 
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Enable Metadata Cache</legend>
+							<legend className="fieldset-legend">Enable VFS Disk Cache</legend>
 							<label className="label cursor-pointer">
-								<span className="label-text">Cache file and directory metadata</span>
+								<span className="label-text">Cache file content to local disk</span>
 								<input
 									type="checkbox"
 									className="checkbox"
-									checked={formData.metadata_cache_enabled ?? false}
+									checked={formData.disk_cache_enabled ?? false}
 									onChange={(e) =>
-										setFormData({ ...formData, metadata_cache_enabled: e.target.checked })
+										setFormData({ ...formData, disk_cache_enabled: e.target.checked })
 									}
 									disabled={isRunning}
 								/>
 							</label>
 							<p className="label">
-								Reduces filesystem lookups by caching file attributes and directory listings
+								Caches downloaded file data locally to avoid re-downloading on seeks and replays
 							</p>
 						</fieldset>
 
-						{formData.metadata_cache_enabled && (
+						{formData.disk_cache_enabled && (
 							<>
-								<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+								<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Stat Cache Size</legend>
-										<div className="join">
-											<input
-												type="number"
-												className="input join-item w-full"
-												value={formData.stat_cache_size ?? 10000}
-												onChange={(e) =>
-													setFormData({
-														...formData,
-														stat_cache_size: Number.parseInt(e.target.value, 10) || 0,
-													})
-												}
-												disabled={isRunning}
-											/>
-											<span className="btn no-animation join-item">entries</span>
-										</div>
-										<p className="label">Max cached file metadata entries</p>
+										<legend className="fieldset-legend">Cache Path</legend>
+										<input
+											type="text"
+											className="input w-full"
+											value={formData.disk_cache_path ?? "/tmp/altmount-vfs-cache"}
+											onChange={(e) =>
+												setFormData({ ...formData, disk_cache_path: e.target.value })
+											}
+											disabled={isRunning}
+										/>
+										<p className="label">Local directory for cached file data</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Dir Cache Size</legend>
+										<legend className="fieldset-legend">Max Cache Size</legend>
 										<div className="join">
 											<input
 												type="number"
 												className="input join-item w-full"
-												value={formData.dir_cache_size ?? 1000}
+												value={formData.disk_cache_max_size_gb ?? 10}
 												onChange={(e) =>
 													setFormData({
 														...formData,
-														dir_cache_size: Number.parseInt(e.target.value, 10) || 0,
+														disk_cache_max_size_gb: Number.parseInt(e.target.value, 10) || 0,
 													})
 												}
 												disabled={isRunning}
 											/>
-											<span className="btn no-animation join-item">entries</span>
+											<span className="btn no-animation join-item">GB</span>
 										</div>
-										<p className="label">Max cached directory listings</p>
-									</fieldset>
-
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Negative Cache Size</legend>
-										<div className="join">
-											<input
-												type="number"
-												className="input join-item w-full"
-												value={formData.negative_cache_size ?? 5000}
-												onChange={(e) =>
-													setFormData({
-														...formData,
-														negative_cache_size: Number.parseInt(e.target.value, 10) || 0,
-													})
-												}
-												disabled={isRunning}
-											/>
-											<span className="btn no-animation join-item">entries</span>
-										</div>
-										<p className="label">Max cached "not found" results</p>
+										<p className="label">Maximum disk space used for cached data</p>
 									</fieldset>
 								</div>
 
 								<div className="grid grid-cols-1 gap-4 md:grid-cols-3">
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Stat Cache TTL</legend>
+										<legend className="fieldset-legend">Cache Expiry</legend>
 										<div className="join">
 											<input
 												type="number"
 												className="input join-item w-full"
-												value={formData.stat_cache_ttl_seconds ?? 30}
+												value={formData.disk_cache_expiry_hours ?? 24}
 												onChange={(e) =>
 													setFormData({
 														...formData,
-														stat_cache_ttl_seconds: Number.parseInt(e.target.value, 10) || 0,
+														disk_cache_expiry_hours: Number.parseInt(e.target.value, 10) || 0,
 													})
 												}
 												disabled={isRunning}
 											/>
-											<span className="btn no-animation join-item">sec</span>
+											<span className="btn no-animation join-item">hours</span>
 										</div>
-										<p className="label">File metadata cache lifetime</p>
+										<p className="label">How long cached data is kept before expiry</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Dir Cache TTL</legend>
+										<legend className="fieldset-legend">Chunk Size</legend>
 										<div className="join">
 											<input
 												type="number"
 												className="input join-item w-full"
-												value={formData.dir_cache_ttl_seconds ?? 60}
+												value={formData.chunk_size_mb ?? 4}
 												onChange={(e) =>
 													setFormData({
 														...formData,
-														dir_cache_ttl_seconds: Number.parseInt(e.target.value, 10) || 0,
+														chunk_size_mb: Number.parseInt(e.target.value, 10) || 0,
 													})
 												}
 												disabled={isRunning}
 											/>
-											<span className="btn no-animation join-item">sec</span>
+											<span className="btn no-animation join-item">MB</span>
 										</div>
-										<p className="label">Directory listing cache lifetime</p>
+										<p className="label">Size of each cached chunk downloaded from backend</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Negative Cache TTL</legend>
+										<legend className="fieldset-legend">Read-Ahead Chunks</legend>
 										<div className="join">
 											<input
 												type="number"
 												className="input join-item w-full"
-												value={formData.negative_cache_ttl_seconds ?? 10}
+												value={formData.read_ahead_chunks ?? 4}
 												onChange={(e) =>
 													setFormData({
 														...formData,
-														negative_cache_ttl_seconds: Number.parseInt(e.target.value, 10) || 0,
+														read_ahead_chunks: Number.parseInt(e.target.value, 10) || 0,
 													})
 												}
 												disabled={isRunning}
 											/>
-											<span className="btn no-animation join-item">sec</span>
+											<span className="btn no-animation join-item">chunks</span>
 										</div>
-										<p className="label">"Not found" cache lifetime</p>
+										<p className="label">
+											Number of chunks prefetched ahead during sequential reads
+										</p>
 									</fieldset>
 								</div>
 							</>

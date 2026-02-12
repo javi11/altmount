@@ -60,14 +60,13 @@ type FuseConfig struct {
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
 
-	// Metadata cache configuration
-	MetadataCacheEnabled    *bool `yaml:"metadata_cache_enabled" mapstructure:"metadata_cache_enabled" json:"metadata_cache_enabled"`
-	StatCacheSize           int   `yaml:"stat_cache_size" mapstructure:"stat_cache_size" json:"stat_cache_size"`
-	DirCacheSize            int   `yaml:"dir_cache_size" mapstructure:"dir_cache_size" json:"dir_cache_size"`
-	NegativeCacheSize       int   `yaml:"negative_cache_size" mapstructure:"negative_cache_size" json:"negative_cache_size"`
-	StatCacheTTLSeconds     int   `yaml:"stat_cache_ttl_seconds" mapstructure:"stat_cache_ttl_seconds" json:"stat_cache_ttl_seconds"`
-	DirCacheTTLSeconds      int   `yaml:"dir_cache_ttl_seconds" mapstructure:"dir_cache_ttl_seconds" json:"dir_cache_ttl_seconds"`
-	NegativeCacheTTLSeconds int   `yaml:"negative_cache_ttl_seconds" mapstructure:"negative_cache_ttl_seconds" json:"negative_cache_ttl_seconds"`
+	// VFS disk cache configuration
+	DiskCacheEnabled   *bool  `yaml:"disk_cache_enabled" mapstructure:"disk_cache_enabled" json:"disk_cache_enabled"`
+	DiskCachePath      string `yaml:"disk_cache_path" mapstructure:"disk_cache_path" json:"disk_cache_path"`
+	DiskCacheMaxSizeGB int    `yaml:"disk_cache_max_size_gb" mapstructure:"disk_cache_max_size_gb" json:"disk_cache_max_size_gb"`
+	DiskCacheExpiryH   int    `yaml:"disk_cache_expiry_hours" mapstructure:"disk_cache_expiry_hours" json:"disk_cache_expiry_hours"`
+	ChunkSizeMB        int    `yaml:"chunk_size_mb" mapstructure:"chunk_size_mb" json:"chunk_size_mb"`
+	ReadAheadChunks    int    `yaml:"read_ahead_chunks" mapstructure:"read_ahead_chunks" json:"read_ahead_chunks"`
 }
 
 // APIConfig represents REST API configuration
@@ -105,7 +104,7 @@ type MetadataBackupConfig struct {
 
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxCacheSizeMB int `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
+	MaxPrefetch int `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -181,7 +180,7 @@ type ImportConfig struct {
 	QueueProcessingIntervalSeconds int            `yaml:"queue_processing_interval_seconds" mapstructure:"queue_processing_interval_seconds" json:"queue_processing_interval_seconds"`
 	AllowedFileExtensions          []string       `yaml:"allowed_file_extensions" mapstructure:"allowed_file_extensions" json:"allowed_file_extensions"`
 	MaxImportConnections           int            `yaml:"max_import_connections" mapstructure:"max_import_connections" json:"max_import_connections"`
-	ImportCacheSizeMB              int            `yaml:"import_cache_size_mb" mapstructure:"import_cache_size_mb" json:"import_cache_size_mb"`
+	MaxDownloadPrefetch            int            `yaml:"max_download_prefetch" mapstructure:"max_download_prefetch" json:"max_download_prefetch"`
 	SegmentSamplePercentage        int            `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage"`
 	ReadTimeoutSeconds             int            `yaml:"read_timeout_seconds" mapstructure:"read_timeout_seconds" json:"read_timeout_seconds"`
 	ImportStrategy                 ImportStrategy `yaml:"import_strategy" mapstructure:"import_strategy" json:"import_strategy"`
@@ -316,8 +315,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("webdav port must be between 1 and 65535")
 	}
 
-	if c.Streaming.MaxCacheSizeMB <= 0 {
-		c.Streaming.MaxCacheSizeMB = 32 // Default to 32MB if not set
+	if c.Streaming.MaxPrefetch <= 0 {
+		c.Streaming.MaxPrefetch = 30 // Default to 30 segments prefetched ahead if not set
 	}
 
 	if c.Import.MaxProcessorWorkers <= 0 {
@@ -336,8 +335,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("import max_import_connections must be greater than 0")
 	}
 
-	if c.Import.ImportCacheSizeMB <= 0 {
-		return fmt.Errorf("import import_cache_size_mb must be greater than 0")
+	if c.Import.MaxDownloadPrefetch <= 0 {
+		return fmt.Errorf("import max_download_prefetch must be greater than 0")
 	}
 
 	if c.Import.SegmentSamplePercentage < 1 || c.Import.SegmentSamplePercentage > 100 {
@@ -582,26 +581,6 @@ func (c *Config) Validate() error {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
 	}
 
-	// Validate FUSE metadata cache configuration with defaults
-	if c.Fuse.StatCacheSize <= 0 {
-		c.Fuse.StatCacheSize = 10000 // Default: 10K entries (~1.5 MB)
-	}
-	if c.Fuse.DirCacheSize <= 0 {
-		c.Fuse.DirCacheSize = 1000 // Default: 1K entries (~500 KB)
-	}
-	if c.Fuse.NegativeCacheSize <= 0 {
-		c.Fuse.NegativeCacheSize = 5000 // Default: 5K entries (~200 KB)
-	}
-	if c.Fuse.StatCacheTTLSeconds <= 0 {
-		c.Fuse.StatCacheTTLSeconds = 30 // Default: 30 seconds
-	}
-	if c.Fuse.DirCacheTTLSeconds <= 0 {
-		c.Fuse.DirCacheTTLSeconds = 60 // Default: 60 seconds
-	}
-	if c.Fuse.NegativeCacheTTLSeconds <= 0 {
-		c.Fuse.NegativeCacheTTLSeconds = 10 // Default: 10 seconds
-	}
-
 	// Validate FUSE mount_path is set when enabled
 	if c.Fuse.Enabled != nil && *c.Fuse.Enabled && c.Fuse.MountPath == "" {
 		return fmt.Errorf("fuse.mount_path is required when fuse is enabled")
@@ -635,7 +614,7 @@ func (c *Config) ValidateDirectories() error {
 type ProviderChangeType int
 
 const (
-	ProviderAdded   ProviderChangeType = iota
+	ProviderAdded ProviderChangeType = iota
 	ProviderRemoved
 	ProviderModified
 )
@@ -736,8 +715,8 @@ func (c *Config) ProvidersDiff(other *Config) []ProviderChange {
 		if _, exists := oldMap[id]; !exists {
 			newCopy := newP
 			changes = append(changes, ProviderChange{
-				Type:       ProviderAdded,
-				ProviderID: id,
+				Type:        ProviderAdded,
+				ProviderID:  id,
 				NewProvider: &newCopy,
 			})
 		}
@@ -1123,7 +1102,7 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Streaming: StreamingConfig{
-			MaxCacheSizeMB: 32, // Default: 32MB cache for ahead downloads
+			MaxPrefetch: 30, // Default: 30 segments prefetched ahead
 		},
 		RClone: RCloneConfig{
 			Path:         rclonePath,
@@ -1177,7 +1156,7 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
-			ImportCacheSizeMB:       64,                 // Default: 64MB cache for archive analysis
+			MaxDownloadPrefetch:     3,                  // Default: 3 segments prefetched ahead for archive analysis
 			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
 			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
@@ -1244,21 +1223,14 @@ func DefaultConfig(configDir ...string) *Config {
 			},
 		},
 		Fuse: FuseConfig{
-			Enabled:                 &fuseEnabled,
-			MountPath:               "",
-			AllowOther:              true,
-			Debug:                   false,
-			AttrTimeoutSeconds:      1,
-			EntryTimeoutSeconds:     1,
-			MaxCacheSizeMB:          128,
-			MaxReadAheadMB:          128,
-			MetadataCacheEnabled:    &fuseEnabled, // Disabled by default (same as fuse)
-			StatCacheSize:           10000,        // 10K entries (~1.5 MB)
-			DirCacheSize:            1000,         // 1K entries (~500 KB)
-			NegativeCacheSize:       5000,         // 5K entries (~200 KB)
-			StatCacheTTLSeconds:     30,           // 30 seconds
-			DirCacheTTLSeconds:      60,           // 60 seconds
-			NegativeCacheTTLSeconds: 10,           // 10 seconds
+			Enabled:             &fuseEnabled,
+			MountPath:           "",
+			AllowOther:          true,
+			Debug:               false,
+			AttrTimeoutSeconds:  30,
+			EntryTimeoutSeconds: 1,
+			MaxCacheSizeMB:      128,
+			MaxReadAheadMB:      128,
 		},
 		MountPath: "", // Empty by default - required when ARRs is enabled
 	}

@@ -12,7 +12,7 @@ metadata:
     root_path: /config/metadata
     delete_source_nzb_on_removal: false
 streaming:
-    max_cache_size_mb: 32
+    max_prefetch: 30
 health:
     enabled: false
     library_dir: null
@@ -25,10 +25,10 @@ health:
     library_sync_concurrency: 0
 rclone:
     path: /config
-    password: ""
-    salt: ""
+    password: ''
+    salt: ''
     rc_enabled: false
-    rc_url: ""
+    rc_url: ''
     rc_port: 5573
     rc_user: admin
     rc_pass: admin
@@ -39,14 +39,14 @@ rclone:
     log_level: INFO
     uid: 1000
     gid: 1000
-    umask: "002"
+    umask: '002'
     buffer_size: 32M
     attr_timeout: 1s
     transfers: 4
     cache_dir: /config/cache
     vfs_cache_mode: full
-    vfs_cache_poll_interval: ""
-    vfs_read_chunk_size: ""
+    vfs_cache_poll_interval: ''
+    vfs_read_chunk_size: ''
     vfs_cache_max_size: 50G
     vfs_cache_max_age: 504h
     read_chunk_size: 32M
@@ -103,7 +103,7 @@ import:
         - .mk3d
         - .dvr-ms
     max_import_connections: 5
-    import_cache_size_mb: 64
+    max_download_prefetch: 3
     segment_sample_percentage: 1
     import_strategy: NONE
     import_dir: null
@@ -118,15 +118,15 @@ sabnzbd:
     enabled: false
     complete_dir: /complete
     categories: []
-    fallback_host: ""
-    fallback_api_key: ""
+    fallback_host: ''
+    fallback_api_key: ''
 arrs:
     enabled: false
     max_workers: 5
     radarr_instances: []
     sonarr_instances: []
 fuse:
-    mount_path: ""
+    mount_path: ''
     enabled: false
     allow_other: true
     debug: false
@@ -135,5 +135,5 @@ fuse:
     max_cache_size_mb: 128
     max_read_ahead_mb: 128
 providers: []
-mount_path: ""
+mount_path: ''
 profiler_enabled: false
