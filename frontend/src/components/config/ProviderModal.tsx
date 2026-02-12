@@ -17,7 +17,7 @@ const defaultFormData: ProviderFormData = {
 	username: "",
 	password: "",
 	max_connections: 10,
-	inflight_requests: 3,
+	inflight_requests: 10,
 	tls: false,
 	insecure_tls: false,
 	proxy_url: "",
@@ -47,7 +47,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 				username: provider.username,
 				password: "", // Always start with empty password for security
 				max_connections: provider.max_connections,
-				inflight_requests: provider.inflight_requests || 3,
+				inflight_requests: provider.inflight_requests || 10,
 				tls: provider.tls,
 				insecure_tls: provider.insecure_tls,
 				proxy_url: provider.proxy_url || "",
@@ -364,9 +364,8 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 						{connectionTestResult && (
 							<div
-								className={`alert ${
-									connectionTestResult.success ? "alert-success" : "alert-error"
-								}`}
+								className={`alert ${connectionTestResult.success ? "alert-success" : "alert-error"
+									}`}
 							>
 								{connectionTestResult.success ? (
 									<Check className="h-5 w-5" />

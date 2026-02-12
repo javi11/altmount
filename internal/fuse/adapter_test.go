@@ -292,7 +292,7 @@ func TestDir_Getattr(t *testing.T) {
 	logger := slog.Default()
 
 	// Test root directory
-	root := NewDir(nil, "", logger, 1000, 1000, nil)
+	root := NewDir(nil, "", logger, 1000, 1000, nil, nil)
 	ctx := context.Background()
 	out := &fuse.AttrOut{}
 	errno := root.Getattr(ctx, nil, out)

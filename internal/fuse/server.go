@@ -19,22 +19,24 @@ import (
 
 // Server manages the FUSE mount
 type Server struct {
-	mountPoint string
-	nzbfs      *nzbfilesystem.NzbFilesystem
-	logger     *slog.Logger
-	server     *fuse.Server
-	config     config.FuseConfig
-	vfsm       *vfs.Manager // VFS disk cache manager (nil if disabled)
+	mountPoint    string
+	nzbfs         *nzbfilesystem.NzbFilesystem
+	logger        *slog.Logger
+	server        *fuse.Server
+	config        config.FuseConfig
+	vfsm          *vfs.Manager // VFS disk cache manager (nil if disabled)
+	streamTracker StreamTracker
 }
 
 // NewServer creates a new FUSE server instance.
 // Takes NzbFilesystem directly (no ContextAdapter needed).
-func NewServer(mountPoint string, nzbfs *nzbfilesystem.NzbFilesystem, logger *slog.Logger, cfg config.FuseConfig) *Server {
+func NewServer(mountPoint string, nzbfs *nzbfilesystem.NzbFilesystem, logger *slog.Logger, cfg config.FuseConfig, st StreamTracker) *Server {
 	return &Server{
-		mountPoint: mountPoint,
-		nzbfs:      nzbfs,
-		logger:     logger,
-		config:     cfg,
+		mountPoint:    mountPoint,
+		nzbfs:         nzbfs,
+		logger:        logger,
+		config:        cfg,
+		streamTracker: st,
 	}
 }
 
@@ -77,21 +79,27 @@ func (s *Server) Mount() error {
 
 		chunkSizeMB := s.config.ChunkSizeMB
 		if chunkSizeMB <= 0 {
-			chunkSizeMB = 4
+			chunkSizeMB = 8
 		}
 
 		readAheadChunks := s.config.ReadAheadChunks
 		if readAheadChunks <= 0 {
-			readAheadChunks = 4
+			readAheadChunks = 6
+		}
+
+		prefetchConcurrency := s.config.PrefetchConcurrency
+		if prefetchConcurrency <= 0 {
+			prefetchConcurrency = 3
 		}
 
 		vfsCfg := vfs.ManagerConfig{
-			Enabled:         true,
-			CachePath:       cachePath,
-			MaxSizeBytes:    int64(maxSizeGB) * 1024 * 1024 * 1024,
-			ExpiryDuration:  time.Duration(expiryH) * time.Hour,
-			ChunkSize:       int64(chunkSizeMB) * 1024 * 1024,
-			ReadAheadChunks: readAheadChunks,
+			Enabled:             true,
+			CachePath:           cachePath,
+			MaxSizeBytes:        int64(maxSizeGB) * 1024 * 1024 * 1024,
+			ExpiryDuration:      time.Duration(expiryH) * time.Hour,
+			ChunkSize:           int64(chunkSizeMB) * 1024 * 1024,
+			ReadAheadChunks:     readAheadChunks,
+			PrefetchConcurrency: prefetchConcurrency,
 		}
 
 		var err error
@@ -105,12 +113,13 @@ func (s *Server) Mount() error {
 				"max_size_gb", maxSizeGB,
 				"expiry_hours", expiryH,
 				"chunk_size_mb", chunkSizeMB,
-				"read_ahead_chunks", readAheadChunks)
+				"read_ahead_chunks", readAheadChunks,
+				"prefetch_concurrency", prefetchConcurrency)
 		}
 	}
 	s.vfsm = vfsm
 
-	root := NewDir(s.nzbfs, "", s.logger, uid, gid, vfsm)
+	root := NewDir(s.nzbfs, "", s.logger, uid, gid, vfsm, s.streamTracker)
 
 	// Configure FUSE options
 	attrTimeout := time.Duration(s.config.AttrTimeoutSeconds) * time.Second

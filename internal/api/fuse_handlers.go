@@ -90,7 +90,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		ctx := c.Context()
 		cfg := s.configManager.GetConfig()
 		logger := slog.With("component", "fuse")
-		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse)
+		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server
@@ -207,7 +207,7 @@ func (s *Server) AutoStartFuse() {
 
 	go func() {
 		logger := slog.With("component", "fuse")
-		server := fuse.NewServer(cfg.Fuse.MountPath, s.nzbFilesystem, logger, cfg.Fuse)
+		server := fuse.NewServer(cfg.Fuse.MountPath, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server
