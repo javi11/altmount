@@ -1,7 +1,6 @@
 import { Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, StreamingConfig } from "../../types/config";
-import { BytesDisplay } from "../ui/BytesDisplay";
 
 interface StreamingConfigSectionProps {
 	config: ConfigResponse;
@@ -42,29 +41,28 @@ export function StreamingConfigSection({
 			<h3 className="font-semibold text-lg">Streaming & Download Configuration</h3>
 			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Max Cache Size</legend>
+					<legend className="fieldset-legend">Max Prefetch</legend>
 					<input
 						type="number"
 						className="input"
-						value={formData.max_cache_size_mb}
+						value={formData.max_prefetch}
 						readOnly={isReadOnly}
 						min={1}
-						max={1024} // 1GB max
-						step={1} // 1MB steps
+						step={1}
 						onChange={(e) =>
-							handleInputChange("max_cache_size_mb", Number.parseInt(e.target.value, 10) || 1)
+							handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10) || 1)
 						}
 					/>
-					<p className="label">Maximum cache size in MB for ahead download chunks</p>
-					<BytesDisplay bytes={formData.max_cache_size_mb * 1024 * 1024} mode="badge" />
+					<p className="label">Maximum segments prefetched ahead per stream</p>
 				</fieldset>
 			</div>
 			<div className="alert alert-info">
 				<div>
 					<div className="font-bold">Note</div>
 					<div className="text-sm">
-						Cache size controls memory usage for ahead downloading of segments. If you don't
-						understand this setting, it's recommended to keep the default value.
+						Controls how many segments are prefetched ahead of the current read position per stream.
+						Higher values may improve streaming performance but use more memory. If you don't understand
+						this setting, it's recommended to keep the default value.
 					</div>
 				</div>
 			</div>

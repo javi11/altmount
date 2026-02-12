@@ -61,7 +61,7 @@ export interface MetadataBackupConfig {
 
 // Streaming configuration
 export interface StreamingConfig {
-	max_cache_size_mb: number;
+	max_prefetch: number;
 }
 
 // Health configuration
@@ -174,14 +174,13 @@ export interface FuseConfig {
 	entry_timeout_seconds: number;
 	max_cache_size_mb: number;
 	max_read_ahead_mb: number;
-	// Metadata cache settings
-	metadata_cache_enabled?: boolean;
-	stat_cache_size?: number;
-	dir_cache_size?: number;
-	negative_cache_size?: number;
-	stat_cache_ttl_seconds?: number;
-	dir_cache_ttl_seconds?: number;
-	negative_cache_ttl_seconds?: number;
+	// VFS disk cache settings
+	disk_cache_enabled?: boolean;
+	disk_cache_path?: string;
+	disk_cache_max_size_gb?: number;
+	disk_cache_expiry_hours?: number;
+	chunk_size_mb?: number;
+	read_ahead_chunks?: number;
 }
 
 // Import strategy type
@@ -193,7 +192,7 @@ export interface ImportConfig {
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
 	allowed_file_extensions: string[];
 	max_import_connections: number;
-	import_cache_size_mb: number;
+	max_download_prefetch: number;
 	segment_sample_percentage: number; // Percentage of segments to check (1-100)
 	read_timeout_seconds: number;
 	import_strategy: ImportStrategy;
@@ -302,7 +301,7 @@ export interface MetadataUpdateRequest {
 
 // Streaming update request
 export interface StreamingUpdateRequest {
-	max_cache_size_mb?: number;
+	max_prefetch?: number;
 }
 
 // Health update request
@@ -475,7 +474,7 @@ export interface MetadataFormData {
 }
 
 export interface StreamingFormData {
-	max_cache_size_mb: number;
+	max_prefetch: number;
 }
 
 export interface RCloneFormData {

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -18,7 +17,7 @@ import (
 )
 
 const (
-	defaultMaxCacheSize = 32 * 1024 * 1024 // Default to 32MB
+	defaultMaxPrefetch = 30 // Default to 30 segments prefetched ahead
 )
 
 var (
@@ -44,19 +43,15 @@ type UsenetReader struct {
 	wg             sync.WaitGroup
 	cancel         context.CancelFunc
 	rg             *segmentRange
-	maxCacheSize   int64 // Maximum cache size in bytes
+	maxPrefetch    int // Maximum segments prefetched ahead of current read position
 	init           chan any
 	initDownload   sync.Once
 	closeOnce      sync.Once
 	totalBytesRead int64
 	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
 
-	// Cache-budget-based download tracking
-	nextToDownload int            // Index of next segment to schedule
-	cachedBytes    int64          // Total bytes of downloaded-but-unread segments
-	activeDownload int32          // Number of goroutines currently downloading
-	downloadCond   *sync.Cond    // Condition variable for download coordination
-	downloadWg     sync.WaitGroup // WaitGroup for download goroutines
+	// Prefetch-based download tracking
+	nextToDownload int // Index of next segment to schedule
 
 	mu sync.Mutex
 }
@@ -65,26 +60,23 @@ func NewUsenetReader(
 	ctx context.Context,
 	poolGetter func() (*nntppool.Client, error),
 	rg *segmentRange,
-	maxCacheSizeMB int,
+	maxPrefetch int,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
 
-	// Convert MB to bytes
-	maxCacheSize := int64(maxCacheSizeMB) * 1024 * 1024
-	if maxCacheSize <= 0 {
-		maxCacheSize = defaultMaxCacheSize
+	if maxPrefetch <= 0 {
+		maxPrefetch = defaultMaxPrefetch
 	}
 
 	ur := &UsenetReader{
-		log:          log,
-		cancel:       cancel,
-		rg:           rg,
-		init:         make(chan any, 1),
-		maxCacheSize: maxCacheSize,
-		poolGetter:   poolGetter,
+		log:         log,
+		cancel:      cancel,
+		rg:          rg,
+		init:        make(chan any, 1),
+		maxPrefetch: maxPrefetch,
+		poolGetter:  poolGetter,
 	}
-	ur.downloadCond = sync.NewCond(&ur.mu)
 
 	ur.wg.Add(1)
 	go func() {
@@ -121,11 +113,6 @@ func (b *UsenetReader) Close() error {
 		if b.rg != nil {
 			b.rg.CloseSegments()
 		}
-
-		// Wake up the download manager if it's waiting
-		b.mu.Lock()
-		b.downloadCond.Broadcast()
-		b.mu.Unlock()
 
 		// Wait synchronously with timeout to prevent goroutine leaks
 		done := make(chan struct{})
@@ -213,9 +200,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				// Segment fully read — account for freed cache bytes
-				freedBytes := int64(s.DataLen())
-
+				// Segment fully read — move to next segment
 				b.mu.Lock()
 				rg := b.rg
 				b.mu.Unlock()
@@ -225,15 +210,6 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 				}
 
 				s, err = rg.Next()
-
-				// Free cache budget and signal download manager
-				b.mu.Lock()
-				b.cachedBytes -= freedBytes
-				if b.cachedBytes < 0 {
-					b.cachedBytes = 0
-				}
-				b.downloadCond.Signal()
-				b.mu.Unlock()
 
 				if err != nil {
 					if n > 0 {
@@ -367,24 +343,9 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			return
 		}
 
-		// Ensure any pending Wait() is woken up on context cancellation
-		go func() {
-			<-ctx.Done()
-			b.mu.Lock()
-			b.downloadCond.Broadcast()
-			b.mu.Unlock()
-		}()
-
 		if b.rg.Len() == 0 {
 			return
 		}
-
-		// Get average segment size for cache budget estimation
-		s0, err := b.rg.GetSegment(0)
-		if err != nil || s0 == nil {
-			return
-		}
-		avgSegmentSize := s0.SegmentSize
 
 		for ctx.Err() == nil {
 			b.mu.Lock()
@@ -400,18 +361,17 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 				break
 			}
 
-			// Check if cache budget allows more downloads
-			// Use estimated size (avgSegmentSize) for scheduling since we don't know actual size yet
-			estimatedNewBytes := b.cachedBytes + int64(atomic.LoadInt32(&b.activeDownload))*avgSegmentSize
-			if estimatedNewBytes+avgSegmentSize > b.maxCacheSize {
-				// Cache full — wait for reader to consume segments
-				if ctx.Err() != nil {
-					b.mu.Unlock()
-					break
-				}
-				b.downloadCond.Wait()
+			// Limit how far ahead we prefetch beyond the current read position
+			currentRead := b.rg.GetCurrentIndex()
+			if b.nextToDownload-currentRead >= b.maxPrefetch {
 				b.mu.Unlock()
-				continue
+				// Wait briefly before re-checking
+				select {
+				case <-time.After(50 * time.Millisecond):
+					continue
+				case <-ctx.Done():
+					return
+				}
 			}
 
 			// Schedule next segment for download
@@ -424,22 +384,12 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 				continue
 			}
 
-			atomic.AddInt32(&b.activeDownload, 1)
-			b.downloadWg.Add(1)
 			go func(segIdx int, s *segment) {
 				defer func() {
-					atomic.AddInt32(&b.activeDownload, -1)
-					b.downloadWg.Done()
-
 					if p := recover(); p != nil {
 						b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
 						s.SetError(fmt.Errorf("panic in download task: %v", p))
 					}
-
-					// Signal manager that a download finished (frees estimated budget)
-					b.mu.Lock()
-					b.downloadCond.Signal()
-					b.mu.Unlock()
 				}()
 
 				taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segIdx)
@@ -449,17 +399,9 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 					s.SetError(err)
 				} else {
 					s.SetData(data)
-
-					// Add actual bytes to cache budget
-					b.mu.Lock()
-					b.cachedBytes += int64(len(data))
-					b.mu.Unlock()
 				}
 			}(idx, seg)
 		}
-
-		// Wait for all in-flight downloads to complete
-		b.downloadWg.Wait()
 
 	case <-ctx.Done():
 		return
