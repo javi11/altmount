@@ -5,7 +5,6 @@ import type { ConfigResponse, WebDAVConfig } from "../../types/config";
 
 interface WebDAVFormData extends WebDAVConfig {
 	mount_path: string;
-	debug?: boolean;
 }
 
 interface WebDAVConfigSectionProps {
@@ -24,7 +23,6 @@ export function WebDAVConfigSection({
 	const [formData, setFormData] = useState<WebDAVFormData>({
 		...config.webdav,
 		mount_path: config.mount_path,
-		debug: config.webdav.debug || false,
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 
@@ -33,7 +31,6 @@ export function WebDAVConfigSection({
 		setFormData({
 			...config.webdav,
 			mount_path: config.mount_path,
-			debug: config.webdav.debug || false,
 		});
 		setHasChanges(false);
 	}, [config.webdav, config.mount_path]);
@@ -44,7 +41,6 @@ export function WebDAVConfigSection({
 		const currentConfig = {
 			...config.webdav,
 			mount_path: config.mount_path,
-			debug: config.webdav.debug || false,
 		};
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(currentConfig));
 	};
@@ -57,7 +53,6 @@ export function WebDAVConfigSection({
 				user: formData.user,
 				password: formData.password,
 				host: formData.host || "",
-				debug: formData.debug || false,
 			};
 			await onUpdate("webdav", webdavData);
 
@@ -70,135 +65,111 @@ export function WebDAVConfigSection({
 		}
 	};
 	return (
-		<div className="space-y-10">
-			{/* Server Connection Section */}
-			<section className="space-y-6">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
-						Server Connection
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
-				</div>
+		<div className="space-y-4">
+			<h3 className="font-semibold text-lg">WebDAV Server Settings</h3>
 
-				<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">WebDAV Mount Path</legend>
-						<input
-							type="text"
-							className="input w-full bg-base-200/50"
-							value={formData.mount_path}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("mount_path", e.target.value)}
-							placeholder="/mnt/altmount"
-						/>
-						<p className="label text-[10px] opacity-60">
-							Absolute host path where WebDAV is mounted.
+			{/* Mount Path Configuration */}
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">WebDAV Mount Path</legend>
+				<input
+					type="text"
+					className="input"
+					value={formData.mount_path}
+					disabled={isReadOnly}
+					onChange={(e) => handleInputChange("mount_path", e.target.value)}
+					placeholder="/mnt/altmount"
+				/>
+				<p className="label">
+					Absolute path where WebDAV is mounted. Required when ARRs is enabled. This path will be
+					stripped from file paths when communicating with Radarr/Sonarr.
+				</p>
+
+				{/* Automated RClone Mount */}
+				<div className="mt-4 rounded-lg border border-info/20 bg-info/5 p-4">
+					<h4 className="mb-3 font-medium text-info text-sm">🔧 Automated RClone Mount</h4>
+					<div className="space-y-3 text-base-content/80 text-sm">
+						<p>
+							You can now mount this WebDAV server automatically using our integrated RClone
+							configuration. No manual command-line setup required!
 						</p>
-					</fieldset>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">External Host</legend>
-						<input
-							type="text"
-							className="input w-full bg-base-200/50"
-							value={formData.host || ""}
-							readOnly={isReadOnly}
-							onChange={(e) => handleInputChange("host", e.target.value)}
-							placeholder="localhost"
-						/>
-						<p className="label text-[10px] opacity-60">Hostname for .strm file generation.</p>
-					</fieldset>
+						<div className="flex items-center gap-3">
+							<Link to="/config/rclone" className="btn btn-info btn-sm">
+								Configure RClone Mount
+							</Link>
+						</div>
 
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">Port</legend>
-						<input
-							type="number"
-							className="input w-full bg-base-200/50 font-mono"
-							value={formData.port}
-							readOnly={isReadOnly}
-							onChange={(e) => handleInputChange("port", Number.parseInt(e.target.value, 10) || 0)}
-						/>
-						<p className="label text-[10px] opacity-60">WebDAV server connection port.</p>
-					</fieldset>
+						<div className="space-y-1 text-xs">
+							<div className="font-medium text-base-content/70">Benefits:</div>
+							<ul className="ml-4 list-disc space-y-0.5 text-base-content/60">
+								<li>No manual command-line setup</li>
+								<li>Automatic configuration management</li>
+								<li>Built-in mount status monitoring</li>
+								<li>Easy enable/disable toggle</li>
+							</ul>
+						</div>
+					</div>
 				</div>
-			</section>
+			</fieldset>
 
-			{/* Authentication & Security Section */}
-			<section className="space-y-6">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
-						Authentication & Debug
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
-				</div>
-
-				<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">Username</legend>
-						<input
-							type="text"
-							className="input w-full bg-base-200/50 font-mono"
-							value={formData.user}
-							readOnly={isReadOnly}
-							onChange={(e) => handleInputChange("user", e.target.value)}
-							autoComplete="username"
-						/>
-					</fieldset>
-
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">Password</legend>
-						<input
-							type="password"
-							className="input w-full bg-base-200/50 font-mono"
-							value={formData.password}
-							readOnly={isReadOnly}
-							onChange={(e) => handleInputChange("password", e.target.value)}
-							placeholder="••••••••"
-							autoComplete="current-password"
-						/>
-					</fieldset>
-
-					<fieldset className="fieldset flex min-w-0 flex-col justify-center">
-						<legend className="fieldset-legend font-semibold">Debugging</legend>
-						<label className="label cursor-pointer justify-start gap-4">
-							<span className="label-text">Enable WebDAV Debug</span>
-							<input
-								type="checkbox"
-								className="checkbox checkbox-primary"
-								checked={formData.debug ?? false}
-								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("debug", e.target.checked)}
-							/>
-						</label>
-						<p className="label text-[10px] opacity-60">Verbose logging for WebDAV requests.</p>
-					</fieldset>
-				</div>
-			</section>
-
-			{/* RClone Integration Alert */}
-			<div className="alert border-info/20 bg-info/5 shadow-sm">
-				<div className="flex-1">
-					<h4 className="flex items-center gap-2 font-bold text-info text-sm">
-						<Link to="/config/rclone" className="hover:underline">
-							🔧 Integrated RClone Mount Available
-						</Link>
-					</h4>
-					<p className="mt-1 text-xs leading-relaxed opacity-80">
-						We recommend using the integrated RClone service for automatic management, monitoring,
-						and easier setup.
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">External Host</legend>
+					<input
+						type="text"
+						className="input"
+						value={formData.host || ""}
+						readOnly={isReadOnly}
+						onChange={(e) => handleInputChange("host", e.target.value)}
+						placeholder="localhost"
+					/>
+					<p className="label">
+						External hostname or IP address used for .strm file generation. Defaults to localhost if
+						empty.
 					</p>
-				</div>
-				<Link to="/config/rclone" className="btn btn-xs btn-info">
-					Configure
-				</Link>
+				</fieldset>
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Port</legend>
+					<input
+						type="number"
+						className="input"
+						value={formData.port}
+						readOnly={isReadOnly}
+						onChange={(e) => handleInputChange("port", Number.parseInt(e.target.value, 10) || 0)}
+					/>
+					<p className="label">WebDAV server port for client connections</p>
+				</fieldset>
+			</div>
+			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Username</legend>
+					<input
+						type="text"
+						className="input"
+						value={formData.user}
+						readOnly={isReadOnly}
+						onChange={(e) => handleInputChange("user", e.target.value)}
+					/>
+				</fieldset>
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Password</legend>
+					<input
+						type="password"
+						className="input"
+						value={formData.password}
+						readOnly={isReadOnly}
+						onChange={(e) => handleInputChange("password", e.target.value)}
+					/>
+					<p className="label">WebDAV server password</p>
+				</fieldset>
 			</div>
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end border-base-200 border-t pt-6">
+				<div className="flex justify-end">
 					<button
 						type="button"
-						className={`btn btn-primary btn-md px-10 ${hasChanges ? "shadow-lg shadow-primary/20" : ""}`}
+						className="btn btn-primary"
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
@@ -207,7 +178,7 @@ export function WebDAVConfigSection({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						Save WebDAV Configuration
+						{isUpdating ? "Saving..." : "Save Changes"}
 					</button>
 				</div>
 			)}

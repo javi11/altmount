@@ -100,102 +100,97 @@ export function ProviderHealth() {
 									<th>State</th>
 									<th>Connections</th>
 									<th>Missing</th>
-									<th>Current Speed</th>
-									<th>Top Speed</th>
-									<th>Last Activity</th>
-								</tr>
-							</thead>
-							<tbody>
-								{data.providers.map((provider) => (
-									<tr key={provider.id}>
-										<td className="font-medium">
-											<div className="flex flex-col">
-												<span>{provider.host}</span>
-												<span className="cursor-pointer font-mono text-base-content/50 text-xs blur-sm transition-all hover:blur-none">
-													{provider.username}
-												</span>
-											</div>
-										</td>
-										<td>
-											<div className="flex items-center gap-2">
-												{provider.state === "connected" || provider.state === "active" ? (
-													<span className="badge badge-success badge-sm gap-1">
-														<Wifi className="h-3 w-3" /> Connected
-													</span>
-												) : provider.state === "disconnected" ? (
-													<span className="badge badge-ghost badge-sm gap-1">
-														<WifiOff className="h-3 w-3" /> Disconnected
-													</span>
-												) : (
-													<span className="badge badge-warning badge-sm">{provider.state}</span>
-												)}
-											</div>
-										</td>
-										<td>
-											<div className="flex items-center gap-2">
-												<progress
-													className="progress progress-primary w-20"
-													value={provider.used_connections}
-													max={provider.max_connections}
-												/>
-												<span className="font-mono text-sm">
-													{provider.used_connections}/{provider.max_connections}
-												</span>
-											</div>
-										</td>
-										<td>
-											{provider.missing_count > 0 ? (
-												<div className="flex flex-col">
-													<span
-														className={`font-medium ${provider.missing_warning ? "text-error" : "text-warning"}`}
-													>
-														{provider.missing_count.toLocaleString()}
-													</span>
-													{provider.missing_rate_per_minute > 0 && (
-														<span
-															className={`text-xs ${provider.missing_warning ? "text-error/70" : "text-base-content/50"}`}
-														>
-															~{Math.round(provider.missing_rate_per_minute)}/min
-														</span>
-													)}
-												</div>
-											) : (
-												<span className="text-base-content/50">0</span>
-											)}
-										</td>
-										<td>
-											{provider.current_speed_bytes_per_sec > 0 ? (
-												<span className="font-medium font-mono text-info">
-													{formatBytes(provider.current_speed_bytes_per_sec)}/s
-												</span>
-											) : (
-												<span className="text-base-content/50">-</span>
-											)}
-										</td>
-										<td>
-											{provider.last_speed_test_mbps > 0 ? (
-												<div className="flex flex-col">
-													<span className="font-medium text-success">
-														{provider.last_speed_test_mbps.toFixed(2)} Mbps
-													</span>
-													{provider.last_speed_test_time && (
-														<span className="text-base-content/50 text-xs">
-															{formatRelativeTime(provider.last_speed_test_time)}
-														</span>
-													)}
-												</div>
-											) : (
-												<span className="text-base-content/50">-</span>
-											)}
-										</td>
-										<td className="text-base-content/70 text-sm">
-											{provider.last_successful_connect
-												? formatRelativeTime(provider.last_successful_connect)
-												: "Never"}
-										</td>
-									</tr>
-								))}
-							</tbody>
+																   <th>Current Speed</th>
+																   <th>Top Speed</th>
+																   </tr>
+																</thead>
+																<tbody>
+																   {data.providers.map((provider) => (
+																   <tr key={provider.id}>
+																   <td className="font-medium">
+																   <div className="flex flex-col">
+																   <span>{provider.host}</span>
+																   <span className="cursor-pointer font-mono text-base-content/50 text-xs blur-sm transition-all hover:blur-none">
+																   {provider.username}
+																   </span>
+																   </div>
+																   </td>
+																   <td>
+																   <div className="flex items-center gap-2">
+																   {provider.state === "connected" || provider.state === "active" ? (
+																   <span className="badge badge-success badge-sm gap-1">
+																   <Wifi className="h-3 w-3" /> Connected
+																   </span>
+																   ) : provider.state === "disconnected" ? (
+																   <span className="badge badge-ghost badge-sm gap-1">
+																   <WifiOff className="h-3 w-3" /> Disconnected
+																   </span>
+																   ) : (
+																   <span className="badge badge-warning badge-sm">{provider.state}</span>
+																   )}
+																   </div>
+																   </td>
+																   <td>
+																   <div className="flex items-center gap-2">
+																   <progress
+																   className="progress progress-primary w-20"
+																   value={provider.used_connections}
+																   max={provider.max_connections}
+																   />
+																   <span className="font-mono text-sm">
+																   {provider.used_connections}/{provider.max_connections}
+																   </span>
+																   </div>
+																   </td>
+																   <td>
+																   {provider.missing_count > 0 ? (
+																   <div className="flex flex-col">
+																   <span
+																   className={`font-medium ${provider.missing_warning ? "text-error" : "text-warning"}`}
+																   >
+																   {provider.missing_count.toLocaleString()}
+																   </span>
+																   {provider.missing_rate_per_minute > 0 && (
+																   <span
+																   className={`text-xs ${provider.missing_warning ? "text-error/70" : "text-base-content/50"}`}
+																   >
+																   ~{Math.round(provider.missing_rate_per_minute)}/min
+																   </span>
+																   )}
+																   </div>
+																   ) : (
+																   <span className="text-base-content/50">0</span>
+																   )}
+																   </td>
+																   <td>
+																   {provider.current_speed_bytes_per_sec > 0 ? (
+																   <span className="font-medium font-mono text-info">
+																   {formatBytes(provider.current_speed_bytes_per_sec)}/s
+																   </span>
+																   ) : (
+																   <span className="text-base-content/50">-</span>
+																   )}
+																   </td>
+																   <td>
+																   {provider.last_speed_test_mbps > 0 ? (
+																   <div className="flex flex-col">
+																   <span className="font-medium text-success">
+																   {provider.last_speed_test_mbps.toFixed(2)} Mbps
+																   </span>
+																   {provider.last_speed_test_time && (
+																   <span className="text-base-content/50 text-xs">
+																   {formatRelativeTime(provider.last_speed_test_time)}
+																   </span>
+																   )}
+																   </div>
+																   ) : (
+																   <span className="text-base-content/50">-</span>
+																   )}
+																   </td>
+																   </tr>
+																   ))}
+																</tbody>
+									
 						</table>
 					</div>
 				</div>

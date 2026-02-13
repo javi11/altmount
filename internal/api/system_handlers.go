@@ -218,6 +218,25 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 	return result
 }
 
+// handleResetSystemStats handles POST /api/system/stats/reset
+func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
+	// Reset pool metrics
+	if s.poolManager != nil {
+		if err := s.poolManager.ResetMetrics(c.Context()); err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"success": false,
+				"message": "Failed to reset pool metrics",
+				"details": err.Error(),
+			})
+		}
+	}
+
+	return c.Status(200).JSON(fiber.Map{
+		"success": true,
+		"message": "System statistics reset successfully",
+	})
+}
+
 // performRestart performs the actual server restart
 func (s *Server) performRestart(ctx context.Context) {
 	slog.InfoContext(ctx, "Initiating server restart process")
@@ -325,9 +344,8 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 
 		if config != nil {
 			for _, p := range config.Providers {
-				// Match by provider name (v4 uses host:port as Name)
-				providerHost := fmt.Sprintf("%s:%d", p.Host, p.Port)
-				if ps.Name == providerHost || ps.Name == p.Host {
+				// Match by provider name (v4 uses host:port or host:port+username)
+				if ps.Name == p.NNTPPoolName() {
 					providerID = p.ID
 					host = p.Host
 					username = p.Username
@@ -369,6 +387,7 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			State:                   "active",
 			ErrorCount:              errorCount,
 			CurrentSpeedBytesPerSec: ps.AvgSpeed,
+			PingMs:                  0,
 			LastSpeedTestMbps:       lastSpeedTestMbps,
 			LastSpeedTestTime:       lastSpeedTestTime,
 			MissingCount:            ps.Missing,
@@ -469,27 +488,5 @@ func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
 			"parent_path":  filepath.Dir(path),
 			"files":        files,
 		},
-	})
-}
-
-// handleResetSystemStats handles POST /api/system/stats/reset
-func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
-	if s.poolManager == nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Pool manager not available",
-		})
-	}
-
-	if err := s.poolManager.ResetMetrics(c.Context()); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to reset system statistics",
-			"details": err.Error(),
-		})
-	}
-
-	return c.Status(200).JSON(fiber.Map{
-		"success": true,
 	})
 }
