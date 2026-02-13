@@ -81,7 +81,7 @@ func TestCacheItem_ReadWrite(t *testing.T) {
 	assert.Equal(t, data, buf)
 
 	// Read from uncached range should fail
-	n, ok = item.ReadAt(buf, 0)
+	_, ok = item.ReadAt(buf, 0)
 	assert.False(t, ok)
 }
 

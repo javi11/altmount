@@ -100,12 +100,3 @@ func CheckFileDirectoryWritable(filePath string, fileType string) error {
 
 	return nil
 }
-
-// JoinAbsPath joins the base path with the sub path and returns the absolute path.
-// If subPath is already absolute, it's cleaned and returned.
-func JoinAbsPath(base, sub string) string {
-	if filepath.IsAbs(sub) {
-		return filepath.Clean(sub)
-	}
-	return filepath.Clean(filepath.Join(base, sub))
-}
