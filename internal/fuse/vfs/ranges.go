@@ -1,4 +1,3 @@
-// Package vfs provides a VFS disk cache layer for the FUSE filesystem.
 package vfs
 
 import "sort"

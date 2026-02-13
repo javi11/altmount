@@ -241,4 +241,3 @@ func (s *Server) ValidateMount() (bool, error) {
 func (s *Server) CleanupMount() {
 	_ = s.ForceUnmount()
 }
-

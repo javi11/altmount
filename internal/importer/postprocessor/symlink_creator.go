@@ -123,6 +123,7 @@ func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) erro
 		}
 	}
 
+	// Create the symlink using the absolute actual path
 	if err := os.Symlink(actualPath, symlinkPath); err != nil {
 		return fmt.Errorf("failed to create symlink: %w", err)
 	}
