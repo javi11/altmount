@@ -21,6 +21,16 @@ const MountProvider = "altmount"
 const DefaultCategoryName = "Default"
 const DefaultCategoryDir = "complete"
 
+// MountType represents the active mount system
+type MountType string
+
+const (
+	MountTypeNone           MountType = "none"
+	MountTypeRClone         MountType = "rclone"
+	MountTypeFuse           MountType = "fuse"
+	MountTypeRCloneExternal MountType = "rclone_external"
+)
+
 // Config represents the complete application configuration
 type Config struct {
 	WebDAV          WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
@@ -37,7 +47,8 @@ type Config struct {
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
+	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	MountType       MountType        `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
@@ -484,23 +495,40 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Auto-enable RC when mount is enabled (mount requires RC to function)
-	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
-		if c.RClone.RCEnabled == nil || !*c.RClone.RCEnabled {
-			// Auto-enable RC since mount requires it
-			enabled := true
-			c.RClone.RCEnabled = &enabled
-		}
-	}
-
-	// Validate RClone Mount configuration
-	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
+	// Enforce mutual exclusion via MountType and sync legacy flags
+	falseVal := false
+	trueVal := true
+	switch c.MountType {
+	case MountTypeNone, "":
+		c.RClone.MountEnabled = &falseVal
+		c.Fuse.Enabled = &falseVal
+		// Leave RCEnabled as-is (user may want RC without mount)
+	case MountTypeRClone:
 		if c.MountPath == "" {
-			return fmt.Errorf("rclone mount_path cannot be empty when mount is enabled")
+			return fmt.Errorf("mount_path cannot be empty when mount type is rclone")
 		}
 		if !filepath.IsAbs(c.MountPath) {
-			return fmt.Errorf("rclone mount_path must be an absolute path")
+			return fmt.Errorf("mount_path must be an absolute path")
 		}
+		c.RClone.MountEnabled = &trueVal
+		c.RClone.RCEnabled = &trueVal // mount requires RC
+		c.Fuse.Enabled = &falseVal
+	case MountTypeFuse:
+		if c.MountPath == "" {
+			return fmt.Errorf("mount_path cannot be empty when mount type is fuse")
+		}
+		if !filepath.IsAbs(c.MountPath) {
+			return fmt.Errorf("mount_path must be an absolute path")
+		}
+		c.RClone.MountEnabled = &falseVal
+		c.Fuse.Enabled = &trueVal
+		c.Fuse.MountPath = c.MountPath
+	case MountTypeRCloneExternal:
+		c.RClone.MountEnabled = &falseVal
+		c.RClone.RCEnabled = &trueVal
+		c.Fuse.Enabled = &falseVal
+	default:
+		return fmt.Errorf("invalid mount_type: %s (must be none, rclone, fuse, or rclone_external)", c.MountType)
 	}
 
 	// Validate SABnzbd configuration
@@ -580,11 +608,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Fuse.MaxReadAheadMB <= 0 {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
-	}
-
-	// Validate FUSE mount_path is set when enabled
-	if c.Fuse.Enabled != nil && *c.Fuse.Enabled && c.Fuse.MountPath == "" {
-		return fmt.Errorf("fuse.mount_path is required when fuse is enabled")
 	}
 
 	return nil
@@ -967,6 +990,19 @@ func (m *Manager) ReloadConfig() error {
 		config.Fuse.Enabled = &defaultEnabled
 	}
 
+	// Migrate: infer mount_type from legacy enabled flags if not set
+	if config.MountType == "" {
+		if config.RClone.MountEnabled != nil && *config.RClone.MountEnabled {
+			config.MountType = MountTypeRClone
+		} else if config.Fuse.Enabled != nil && *config.Fuse.Enabled {
+			config.MountType = MountTypeFuse
+		} else if config.RClone.RCEnabled != nil && *config.RClone.RCEnabled {
+			config.MountType = MountTypeRCloneExternal
+		} else {
+			config.MountType = MountTypeNone
+		}
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
@@ -1233,7 +1269,8 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxCacheSizeMB:      128,
 			MaxReadAheadMB:      128,
 		},
-		MountPath: "", // Empty by default - required when ARRs is enabled
+		MountPath: "",            // Empty by default - required when ARRs is enabled
+		MountType: MountTypeNone, // No mount system active by default
 	}
 }
 
@@ -1316,6 +1353,19 @@ func LoadConfig(configFile string) (*Config, error) {
 	if config.Fuse.Enabled == nil {
 		defaultEnabled := false
 		config.Fuse.Enabled = &defaultEnabled
+	}
+
+	// Migrate: infer mount_type from legacy enabled flags if not set
+	if config.MountType == "" {
+		if config.RClone.MountEnabled != nil && *config.RClone.MountEnabled {
+			config.MountType = MountTypeRClone
+		} else if config.Fuse.Enabled != nil && *config.Fuse.Enabled {
+			config.MountType = MountTypeFuse
+		} else if config.RClone.RCEnabled != nil && *config.RClone.RCEnabled {
+			config.MountType = MountTypeRCloneExternal
+		} else {
+			config.MountType = MountTypeNone
+		}
 	}
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,

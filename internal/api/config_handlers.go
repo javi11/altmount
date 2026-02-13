@@ -172,7 +172,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	// Decode into the specific section based on the URL parameter
 	var err error
 	switch section {
-	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "system", "mount_path":
+	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "system", "mount_path", "mount":
 		err = c.BodyParser(newConfig)
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
@@ -208,8 +208,8 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to save configuration", err.Error())
 	}
 
-	// Try to start RC server if RClone section was updated or full config update
-	if section == "rclone" || section == "" {
+	// Try to start RC server if RClone/mount section was updated or full config update
+	if section == "rclone" || section == "mount" || section == "" {
 		s.startRCServerIfNeeded(c.Context())
 	}
 

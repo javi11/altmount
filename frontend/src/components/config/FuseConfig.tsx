@@ -68,7 +68,7 @@ export function FuseConfig() {
 	const handleSave = async () => {
 		try {
 			await updateConfig.mutateAsync({
-				section: "fuse",
+				section: "mount",
 				config: { fuse: formData },
 			});
 			return true;
@@ -86,7 +86,7 @@ export function FuseConfig() {
 			// We also update mount_path in formData for consistency
 			const updatedData = { ...formData, mount_path: path };
 			await updateConfig.mutateAsync({
-				section: "fuse",
+				section: "mount",
 				config: { fuse: updatedData },
 			});
 
@@ -139,7 +139,7 @@ export function FuseConfig() {
 
 			// Save the config
 			await updateConfig.mutateAsync({
-				section: "fuse",
+				section: "mount",
 				config: { fuse: { ...formData, enabled } },
 			});
 

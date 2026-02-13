@@ -31,19 +31,28 @@ func NewMountService(cfm *config.Manager) *MountService {
 func (s *MountService) Start(ctx context.Context) error {
 	cfg := s.cfm.GetConfig()
 
-	// Only start if mount is enabled
-	if cfg.RClone.MountEnabled == nil || !*cfg.RClone.MountEnabled {
-		slog.InfoContext(ctx, "RClone mount is disabled in configuration")
+	switch cfg.MountType {
+	case config.MountTypeRClone:
+		// Start RC server + mount
+		slog.InfoContext(ctx, "Starting RClone mount (mount_type=rclone)")
+		if err := s.manager.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start rclone RC server: %w", err)
+		}
+		return s.Mount(ctx)
+
+	case config.MountTypeRCloneExternal:
+		// Start RC server only (no mount)
+		slog.InfoContext(ctx, "Starting RClone RC server only (mount_type=rclone_external)")
+		if err := s.manager.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start rclone RC server: %w", err)
+		}
+		return nil
+
+	default:
+		slog.InfoContext(ctx, "RClone mount is disabled in configuration",
+			"mount_type", cfg.MountType)
 		return nil
 	}
-
-	// Start RC server
-	if err := s.manager.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start rclone RC server: %w", err)
-	}
-
-	// Create and start mount
-	return s.Mount(ctx)
 }
 
 // Mount creates the rclone mount
