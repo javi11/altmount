@@ -103,7 +103,7 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 func (c *Coordinator) createSingleStrmFile(ctx context.Context, virtualPath string, port int) error {
 	cfg := c.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath))
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(virtualPath, "/")))
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create STRM directory: %w", err)
@@ -111,7 +111,7 @@ func (c *Coordinator) createSingleStrmFile(ctx context.Context, virtualPath stri
 
 	// Keep original filename and add .strm extension
 	filename := filepath.Base(virtualPath) + ".strm"
-	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(virtualPath), filename)
+	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(virtualPath, "/")), filename)
 
 	// Get first admin user's API key for authentication
 	if c.userRepo == nil {

@@ -21,14 +21,14 @@ var _ fs.FileReleaser = (*Handle)(nil)
 // Handle wraps either a VFS CachedFile (ReadAt) or an afero.File (Seek+Read).
 // Uses atomic closed state to prevent double-close.
 type Handle struct {
-	cachedFile    *vfs.CachedFile              // Used when VFS enabled (ReadAt, no mutex needed)
-	file          afero.File                   // Fallback when VFS disabled (Seek+Read)
+	cachedFile    *vfs.CachedFile             // Used when VFS enabled (ReadAt, no mutex needed)
+	file          afero.File                  // Fallback when VFS disabled (Seek+Read)
 	closed        atomic.Bool
 	logger        *slog.Logger
 	path          string
-	vfsm          *vfs.Manager                 // For notifying close (nil in fallback mode)
-	stream        *nzbfilesystem.ActiveStream  // FUSE-level stream for progress tracking
-	streamTracker StreamTracker                // For UpdateProgress/Remove (nil if no tracker)
+	vfsm          *vfs.Manager                // For notifying close (nil in fallback mode)
+	stream        *nzbfilesystem.ActiveStream // FUSE-level stream for progress tracking
+	streamTracker StreamTracker               // For UpdateProgress/Remove (nil if no tracker)
 
 	// Only used for fallback Seek+Read mode
 	mu       sync.Mutex

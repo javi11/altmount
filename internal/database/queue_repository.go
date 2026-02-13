@@ -259,9 +259,13 @@ func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, s
 	case QueueStatusCompleted:
 		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
 		args = []interface{}{status, now, now, id}
+		// Track successful import
+		_ = r.IncrementDailyStat(ctx, "completed")
 	case QueueStatusFailed:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
 		args = []interface{}{status, errorMessage, now, id}
+		// Track failed import
+		_ = r.IncrementDailyStat(ctx, "failed")
 	default:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
 		args = []interface{}{status, errorMessage, now, id}
@@ -273,6 +277,115 @@ func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, s
 	}
 
 	return nil
+}
+
+// IncrementDailyStat increments the completed or failed count for the current day
+func (r *QueueRepository) IncrementDailyStat(ctx context.Context, statType string) error {
+	column := "completed_count"
+	if statType == "failed" {
+		column = "failed_count"
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO import_daily_stats (day, %s, updated_at)
+		VALUES (date('now'), 1, datetime('now'))
+		ON CONFLICT(day) DO UPDATE SET
+		%s = %s + 1,
+		updated_at = datetime('now')
+	`, column, column, column)
+
+	_, err := r.db.ExecContext(ctx, query)
+	return err
+}
+
+// GetImportHistory retrieves historical import statistics for the last N days
+func (r *QueueRepository) GetImportHistory(ctx context.Context, days int) ([]*ImportDailyStat, error) {
+	query := `
+		SELECT day, completed_count, failed_count, updated_at
+		FROM import_daily_stats
+		WHERE day >= date('now', ?)
+		ORDER BY day ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf("-%d days", days))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get import history: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []*ImportDailyStat
+	for rows.Next() {
+		var s ImportDailyStat
+		err := rows.Scan(&s.Day, &s.CompletedCount, &s.FailedCount, &s.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan import daily stat: %w", err)
+		}
+
+		stats = append(stats, &s)
+	}
+
+	return stats, nil
+}
+
+// AddImportHistory records a successful file import in the persistent history table
+func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportHistory) error {
+	query := `
+		INSERT INTO import_history (nzb_id, nzb_name, file_name, file_size, virtual_path, category, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		history.NzbID, history.NzbName, history.FileName, history.FileSize,
+		history.VirtualPath, history.Category)
+	if err != nil {
+		return fmt.Errorf("failed to add import history: %w", err)
+	}
+	return nil
+}
+
+// ListImportHistory retrieves the last N successful imports from the persistent history
+func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*ImportHistory, error) {
+	query := `
+		SELECT id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, completed_at
+		FROM import_history
+		ORDER BY completed_at DESC
+		LIMIT ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list import history: %w", err)
+	}
+	defer rows.Close()
+
+	var history []*ImportHistory
+	for rows.Next() {
+		var h ImportHistory
+		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.Category, &h.CompletedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan import history: %w", err)
+		}
+		history = append(history, &h)
+	}
+	return history, nil
+}
+
+// IncrementRetryCountAndResetStatus increments the retry count and resets the status to pending
+func (r *QueueRepository) IncrementRetryCountAndResetStatus(ctx context.Context, id int64, errorMessage *string) (bool, error) {
+	query := `
+		UPDATE import_queue 
+		SET status = 'pending', retry_count = retry_count + 1, started_at = NULL, error_message = ?, updated_at = datetime('now')
+		WHERE id = ? AND retry_count < max_retries
+	`
+	result, err := r.db.ExecContext(ctx, query, errorMessage, id)
+	if err != nil {
+		return false, fmt.Errorf("failed to increment retry count: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected > 0, nil
 }
 
 // FilterExistingNzbdavIds checks a list of nzbdav IDs and returns those that already exist in the queue
