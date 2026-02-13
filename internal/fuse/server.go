@@ -184,21 +184,57 @@ func (s *Server) Unmount() error {
 	return s.ForceUnmount()
 }
 
-// ForceUnmount attempts to lazy/force unmount the mountpoint
+// ForceUnmount attempts to lazy/force unmount the mountpoint using platform-specific commands
 func (s *Server) ForceUnmount() error {
-	if runtime.GOOS == "linux" {
-		// Try fusermount -uz (lazy unmount)
-		if err := exec.Command("fusermount", "-uz", s.mountPoint).Run(); err == nil {
-			s.logger.Info("Successfully lazy unmounted using fusermount")
-			return nil
+	var methods [][]string
+
+	if runtime.GOOS == "darwin" {
+		methods = [][]string{
+			{"umount", "-f", s.mountPoint},
+			{"diskutil", "unmount", "force", s.mountPoint},
+			{"umount", s.mountPoint},
 		}
-		// Fallback to umount -l
-		if err := exec.Command("umount", "-l", s.mountPoint).Run(); err == nil {
-			s.logger.Info("Successfully lazy unmounted using umount")
+	} else {
+		methods = [][]string{
+			{"fusermount", "-uz", s.mountPoint},
+			{"umount", s.mountPoint},
+			{"umount", "-l", s.mountPoint},
+			{"fusermount3", "-uz", s.mountPoint},
+		}
+	}
+
+	for _, method := range methods {
+		if err := exec.Command(method[0], method[1:]...).Run(); err == nil {
+			s.logger.Info("Successfully force unmounted", "command", method, "path", s.mountPoint)
 			return nil
 		}
 	}
-	return fmt.Errorf("failed to force unmount %s", s.mountPoint)
+
+	return fmt.Errorf("all force unmount attempts failed for %s", s.mountPoint)
+}
+
+// ValidateMount checks if the mount point is responsive by stat-ing the directory with a timeout.
+// A stuck FUSE mount hangs on stat indefinitely, so the timeout catches it.
+func (s *Server) ValidateMount() (bool, error) {
+	type statResult struct {
+		err error
+	}
+
+	ch := make(chan statResult, 1)
+	go func() {
+		_, err := os.Stat(s.mountPoint)
+		ch <- statResult{err: err}
+	}()
+
+	select {
+	case result := <-ch:
+		if result.err != nil {
+			return false, fmt.Errorf("mount point stat failed: %w", result.err)
+		}
+		return true, nil
+	case <-time.After(5 * time.Second):
+		return false, fmt.Errorf("mount point not responding (stat timed out after 5s)")
+	}
 }
 
 // CleanupMount checks for and cleans up stale mounts at the mountpoint

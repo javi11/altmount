@@ -501,8 +501,8 @@ func (c *Config) Validate() error {
 	switch c.MountType {
 	case MountTypeNone, "":
 		c.RClone.MountEnabled = &falseVal
+		c.RClone.RCEnabled = &falseVal
 		c.Fuse.Enabled = &falseVal
-		// Leave RCEnabled as-is (user may want RC without mount)
 	case MountTypeRClone:
 		if c.MountPath == "" {
 			return fmt.Errorf("mount_path cannot be empty when mount type is rclone")
@@ -521,6 +521,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("mount_path must be an absolute path")
 		}
 		c.RClone.MountEnabled = &falseVal
+		c.RClone.RCEnabled = &falseVal
 		c.Fuse.Enabled = &trueVal
 		c.Fuse.MountPath = c.MountPath
 	case MountTypeRCloneExternal:
