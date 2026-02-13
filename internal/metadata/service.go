@@ -405,6 +405,10 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 	if isEmpty && path != ms.rootPath && !ms.isCompleteDir(path) {
 		// Check protected list
 		base := filepath.Base(path)
+		if strings.EqualFold(base, "corrupted_metadata") {
+			return nil
+		}
+
 		for _, p := range protected {
 			if strings.EqualFold(base, p) {
 				return nil
@@ -415,6 +419,52 @@ func (ms *MetadataService) cleanupEmptyDirsRecursive(path string, protected []st
 		return os.Remove(path)
 	}
 
+	return nil
+}
+
+// MoveToCorrupted moves a metadata file to a special corrupted directory for safety
+func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath string) error {
+	// Normalize path and remove leading slashes to ensure it joins correctly
+	cleanPath := filepath.FromSlash(strings.TrimPrefix(virtualPath, "/"))
+	dir := filepath.Dir(cleanPath)
+	filename := filepath.Base(cleanPath)
+
+	truncatedFilename := ms.truncateFilename(filename)
+	metadataPath := filepath.Join(ms.rootPath, dir, truncatedFilename+".meta")
+
+	// Check if source exists
+	if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+		return nil
+	}
+
+	// Define corrupted directory path (root/corrupted_metadata/...)
+	// We use a visible folder name as requested.
+	corruptedRoot := filepath.Join(ms.rootPath, "corrupted_metadata")
+	targetDir := filepath.Join(corruptedRoot, dir)
+
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("failed to create corrupted metadata directory: %w", err)
+	}
+
+	targetPath := filepath.Join(targetDir, truncatedFilename+".meta")
+
+	// Move the .meta file
+	if err := os.Rename(metadataPath, targetPath); err != nil {
+		slog.WarnContext(ctx, "Failed to move corrupted metadata, trying copy fallback", "error", err)
+		// Rename can fail across different volumes, though usually metadata is on one volume.
+		// For simplicity, we return the error here as it's unexpected for metadata.
+		return err
+	}
+
+	// Also try to move the .id file if it exists
+	idPath := metadataPath + ".id"
+	if _, err := os.Stat(idPath); err == nil {
+		_ = os.Rename(idPath, targetPath+".id")
+	}
+
+	slog.InfoContext(ctx, "Moved corrupted metadata to safety folder preserving structure",
+		"original", metadataPath,
+		"target", targetPath)
 	return nil
 }
 
