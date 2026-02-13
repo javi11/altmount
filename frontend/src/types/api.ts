@@ -409,4 +409,6 @@ export interface SystemBrowseResponse {
 export interface FuseStatus {
 	status: "stopped" | "starting" | "running" | "error";
 	path: string;
+	healthy?: boolean;
+	health_error?: string;
 }

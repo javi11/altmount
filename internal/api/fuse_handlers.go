@@ -47,26 +47,17 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&req); err != nil {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid JSON",
-		})
+		return RespondValidationError(c, "Invalid JSON", err.Error())
 	}
 
 	if req.Path == "" {
-		return c.Status(422).JSON(fiber.Map{
-			"success": false,
-			"message": "Mount path is required",
-		})
+		return RespondValidationError(c, "Mount path is required", "")
 	}
 
 	s.fuseManager.mu.Lock()
 	if s.fuseManager.status == "running" {
 		s.fuseManager.mu.Unlock()
-		return c.Status(409).JSON(fiber.Map{
-			"success": false,
-			"message": "FUSE is already mounted",
-		})
+		return RespondConflict(c, "FUSE is already mounted", "")
 	}
 	s.fuseManager.status = "starting"
 	s.fuseManager.path = req.Path
@@ -78,17 +69,12 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "error"
 			s.fuseManager.mu.Unlock()
-			return c.Status(500).JSON(fiber.Map{
-				"success": false,
-				"message": "Failed to create mount directory",
-				"details": err.Error(),
-			})
+			return RespondInternalError(c, "Failed to create mount directory", err.Error())
 		}
 	}
 
 	// Start FUSE server in background
 	go func() {
-		ctx := c.Context()
 		cfg := s.configManager.GetConfig()
 		logger := slog.With("component", "fuse")
 		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker)
@@ -99,7 +85,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		s.fuseManager.mu.Unlock()
 
 		if err := server.Mount(); err != nil {
-			slog.ErrorContext(ctx, "FUSE mount failed", "error", err)
+			slog.Error("FUSE mount failed", "error", err)
 			s.fuseManager.mu.Lock()
 			s.fuseManager.status = "error"
 			s.fuseManager.server = nil
@@ -113,10 +99,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		}
 	}()
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"message": "FUSE mount starting",
-	})
+	return RespondMessage(c, "FUSE mount starting")
 }
 
 // handleStopFuseMount stops the FUSE mount
@@ -125,24 +108,42 @@ func (s *Server) handleStopFuseMount(c *fiber.Ctx) error {
 	defer s.fuseManager.mu.Unlock()
 
 	if s.fuseManager.server == nil {
-		return c.Status(404).JSON(fiber.Map{
-			"success": false,
-			"message": "FUSE is not running",
-		})
+		return RespondNotFound(c, "FUSE mount", "FUSE is not running")
 	}
 
 	if err := s.fuseManager.server.Unmount(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to unmount",
-			"details": err.Error(),
-		})
+		// Reset state so user isn't stuck in permanent "running"
+		s.fuseManager.status = "error"
+		s.fuseManager.server = nil
+		return RespondInternalError(c, "Failed to unmount", err.Error())
 	}
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"message": "FUSE unmount requested",
-	})
+	return RespondMessage(c, "FUSE unmount requested")
+}
+
+// handleForceStopFuseMount force-unmounts the FUSE mount using platform-specific commands
+func (s *Server) handleForceStopFuseMount(c *fiber.Ctx) error {
+	s.fuseManager.mu.Lock()
+	defer s.fuseManager.mu.Unlock()
+
+	if s.fuseManager.status == "stopped" {
+		return RespondNotFound(c, "FUSE mount", "FUSE is not running")
+	}
+
+	if s.fuseManager.server != nil {
+		if err := s.fuseManager.server.ForceUnmount(); err != nil {
+			slog.Error("Force unmount failed", "error", err)
+			// Still reset state so user can retry
+			s.fuseManager.server = nil
+			s.fuseManager.status = "stopped"
+			return RespondInternalError(c, "Force unmount failed", err.Error())
+		}
+	}
+
+	s.fuseManager.server = nil
+	s.fuseManager.status = "stopped"
+
+	return RespondMessage(c, "FUSE force unmount completed")
 }
 
 // handleGetFuseStatus returns the current status
@@ -150,20 +151,32 @@ func (s *Server) handleGetFuseStatus(c *fiber.Ctx) error {
 	s.fuseManager.mu.Lock()
 	defer s.fuseManager.mu.Unlock()
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"data": fiber.Map{
-			"status": s.fuseManager.status,
-			"path":   s.fuseManager.path,
-		},
-	})
+	data := fiber.Map{
+		"status": s.fuseManager.status,
+		"path":   s.fuseManager.path,
+	}
+
+	// Check mount health when status is "running"
+	if s.fuseManager.status == "running" && s.fuseManager.server != nil {
+		healthy, err := s.fuseManager.server.ValidateMount()
+		data["healthy"] = healthy
+		if err != nil {
+			data["health_error"] = err.Error()
+			// Auto-correct status if mount is unresponsive
+			if !healthy {
+				s.fuseManager.status = "error"
+				data["status"] = "error"
+			}
+		}
+	}
+
+	return RespondSuccess(c, data)
 }
 
 // AutoStartFuse automatically starts the FUSE mount if enabled in config
 func (s *Server) AutoStartFuse() {
 	cfg := s.configManager.GetConfig()
 
-	// Log diagnostic info for troubleshooting
 	slog.Debug("Checking FUSE auto-start conditions",
 		"mount_type", cfg.MountType,
 		"mount_path", cfg.Fuse.MountPath)
@@ -180,9 +193,6 @@ func (s *Server) AutoStartFuse() {
 	}
 
 	slog.Info("Auto-starting FUSE mount", "path", cfg.Fuse.MountPath)
-
-	// Create a fake fiber context for the internal call or just extract logic
-	// For simplicity, let's just trigger it manually since we have all info
 
 	s.fuseManager.mu.Lock()
 	if s.fuseManager.status == "running" {

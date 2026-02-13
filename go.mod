@@ -1,6 +1,6 @@
 module github.com/javi11/altmount
 
-go 1.25.1
+go 1.26.0
 
 tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint

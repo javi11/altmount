@@ -34,7 +34,7 @@ RUN --mount=type=cache,target=/tmp/bun-build-cache,sharing=locked \
     bun run build
 
 # Backend build stage with native arch support (no cross-compilation)
-FROM golang:1.25-alpine AS backend-builder
+FROM golang:1.26-alpine AS backend-builder
 
 # Install build dependencies including sqlite with cache mount
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
