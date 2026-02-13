@@ -61,8 +61,8 @@ export function StreamingConfigSection({
 					<div className="font-bold">Note</div>
 					<div className="text-sm">
 						Controls how many segments are prefetched ahead of the current read position per stream.
-						Higher values may improve streaming performance but use more memory. If you don't understand
-						this setting, it's recommended to keep the default value.
+						Higher values may improve streaming performance but use more memory. If you don't
+						understand this setting, it's recommended to keep the default value.
 					</div>
 				</div>
 			</div>

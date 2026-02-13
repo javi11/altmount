@@ -20,5 +20,6 @@ const (
 	StreamUserNameKey = contextKey("streamUserName")
 	ClientIPKey       = contextKey("clientIP")
 	UserAgentKey      = contextKey("userAgent")
-	MaxPrefetchKey    = contextKey("maxPrefetch")
+	MaxPrefetchKey              = contextKey("maxPrefetch")
+	SuppressStreamTrackingKey   = contextKey("suppressStreamTracking")
 )

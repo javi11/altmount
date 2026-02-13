@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/fuse"
 )
 
@@ -90,7 +91,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 		ctx := c.Context()
 		cfg := s.configManager.GetConfig()
 		logger := slog.With("component", "fuse")
-		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse)
+		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server
@@ -164,20 +165,17 @@ func (s *Server) AutoStartFuse() {
 
 	// Log diagnostic info for troubleshooting
 	slog.Debug("Checking FUSE auto-start conditions",
+		"mount_type", cfg.MountType,
 		"mount_path", cfg.Fuse.MountPath)
 
-	if cfg.Fuse.Enabled == nil {
-		slog.Info("FUSE auto-start skipped: enabled flag not configured")
-		return
-	}
-
-	if !*cfg.Fuse.Enabled {
-		slog.Debug("FUSE auto-start skipped: disabled in configuration")
+	if cfg.MountType != config.MountTypeFuse {
+		slog.Debug("FUSE auto-start skipped: mount_type is not fuse",
+			"mount_type", cfg.MountType)
 		return
 	}
 
 	if cfg.Fuse.MountPath == "" {
-		slog.Warn("FUSE auto-start skipped: mount_path is empty despite being enabled")
+		slog.Warn("FUSE auto-start skipped: mount_path is empty despite mount_type=fuse")
 		return
 	}
 
@@ -207,7 +205,7 @@ func (s *Server) AutoStartFuse() {
 
 	go func() {
 		logger := slog.With("component", "fuse")
-		server := fuse.NewServer(cfg.Fuse.MountPath, s.nzbFilesystem, logger, cfg.Fuse)
+		server := fuse.NewServer(cfg.Fuse.MountPath, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server

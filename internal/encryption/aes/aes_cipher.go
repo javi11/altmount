@@ -79,7 +79,11 @@ func (c *AesCipher) Open(
 	// Wrap with AES decryption
 	// The decrypt reader will lazily initialize the source reader when needed
 	// Pass both decrypted size (for output limiting) and encrypted size (for source reading)
-	decryptReader, err := newAesDecryptReader(ctx, getReader, key, iv, decryptedFileSize, encryptedSize)
+	requestEnd := int64(-1)
+	if rh != nil {
+		requestEnd = rh.End
+	}
+	decryptReader, err := newAesDecryptReader(ctx, getReader, key, iv, decryptedFileSize, encryptedSize, requestEnd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AES decrypt reader: %w", err)
 	}

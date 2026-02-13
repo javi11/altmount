@@ -10,8 +10,28 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/fuse/vfs"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
+
+// StreamTracker is the subset of stream tracking needed by the FUSE layer.
+// *api.StreamTracker satisfies this interface.
+type StreamTracker interface {
+	AddStream(filePath, source, userName, clientIP, userAgent string, totalSize int64) *nzbfilesystem.ActiveStream
+	UpdateProgress(id string, bytesRead int64)
+	Remove(id string)
+}
+
+// suppressStreamOpener wraps a FileOpener to inject SuppressStreamTrackingKey
+// so that backend opens (VFS cache-miss fetches) don't create their own streams.
+type suppressStreamOpener struct {
+	inner vfs.FileOpener
+}
+
+func (o *suppressStreamOpener) Open(ctx context.Context, name string) (afero.File, error) {
+	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
+	return o.inner.Open(ctx, name)
+}
 
 // ensure File implements fs.Node* interfaces
 var _ fs.NodeOpener = (*File)(nil)
@@ -23,13 +43,14 @@ var _ fs.NodeSetattrer = (*File)(nil)
 // Talks directly to NzbFilesystem with FUSE context propagation.
 type File struct {
 	fs.Inode
-	nzbfs  *nzbfilesystem.NzbFilesystem
-	vfsm   *vfs.Manager // VFS disk cache manager (nil if disabled)
-	path   string
-	logger *slog.Logger
-	size   int64
-	uid    uint32
-	gid    uint32
+	nzbfs         *nzbfilesystem.NzbFilesystem
+	vfsm          *vfs.Manager // VFS disk cache manager (nil if disabled)
+	streamTracker StreamTracker
+	path          string
+	logger        *slog.Logger
+	size          int64
+	uid           uint32
+	gid           uint32
 }
 
 // Getattr implements fs.NodeGetattrer.
@@ -60,20 +81,37 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EACCES
 	}
 
+	// Create a FUSE-level stream (one per file open) that lives for the
+	// duration of the handle. Backend opens will be told to suppress their
+	// own stream creation via SuppressStreamTrackingKey.
+	var stream *nzbfilesystem.ActiveStream
+	if f.streamTracker != nil {
+		stream = f.streamTracker.AddStream(f.path, "FUSE", "FUSE", "", "", f.size)
+	}
+
+	// Suppress backend stream creation for all downstream opens
+	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
+
 	// VFS mode: use disk cache with ReadAt support
 	if f.vfsm != nil {
-		opener := &nzbfsFileOpener{nzbfs: f.nzbfs}
+		opener := &suppressStreamOpener{inner: &nzbfsFileOpener{nzbfs: f.nzbfs}}
 		cachedFile, err := f.vfsm.Open(ctx, f.path, f.size, opener)
 		if err != nil {
+			// Clean up stream on failure
+			if stream != nil {
+				f.streamTracker.Remove(stream.ID)
+			}
 			f.logger.ErrorContext(ctx, "VFS Open failed", "path", f.path, "error", err)
 			return nil, 0, syscall.EIO
 		}
 
 		handle := &Handle{
-			cachedFile: cachedFile,
-			logger:     f.logger,
-			path:       f.path,
-			vfsm:       f.vfsm,
+			cachedFile:    cachedFile,
+			logger:        f.logger,
+			path:          f.path,
+			vfsm:          f.vfsm,
+			stream:        stream,
+			streamTracker: f.streamTracker,
 		}
 		return handle, fuse.FOPEN_KEEP_CACHE, 0
 	}
@@ -81,6 +119,10 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 	// Fallback mode: direct file access with Seek+Read
 	aferoFile, err := f.nzbfs.Open(ctx, f.path)
 	if err != nil {
+		// Clean up stream on failure
+		if stream != nil {
+			f.streamTracker.Remove(stream.ID)
+		}
 		f.logger.ErrorContext(ctx, "File Open failed", "path", f.path, "error", err)
 		return nil, 0, syscall.EIO
 	}
@@ -91,9 +133,11 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 	}
 
 	handle := &Handle{
-		file:   aferoFile,
-		logger: f.logger,
-		path:   f.path,
+		file:          aferoFile,
+		logger:        f.logger,
+		path:          f.path,
+		stream:        stream,
+		streamTracker: f.streamTracker,
 	}
 	return handle, fuse.FOPEN_KEEP_CACHE, 0
 }

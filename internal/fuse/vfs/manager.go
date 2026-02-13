@@ -13,8 +13,9 @@ type ManagerConfig struct {
 	CachePath      string
 	MaxSizeBytes   int64
 	ExpiryDuration time.Duration
-	ChunkSize      int64
-	ReadAheadChunks int
+	ChunkSize           int64
+	ReadAheadChunks     int
+	PrefetchConcurrency int
 }
 
 // Manager manages the VFS disk cache lifecycle.
@@ -116,6 +117,7 @@ func (m *Manager) Open(ctx context.Context, path string, size int64, opener File
 			size,
 			m.config.ChunkSize,
 			m.config.ReadAheadChunks,
+			m.config.PrefetchConcurrency,
 			m.logger,
 		)
 		m.files.Store(path, dl)

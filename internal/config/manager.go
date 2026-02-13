@@ -21,6 +21,16 @@ const MountProvider = "altmount"
 const DefaultCategoryName = "Default"
 const DefaultCategoryDir = "complete"
 
+// MountType represents the active mount system
+type MountType string
+
+const (
+	MountTypeNone           MountType = "none"
+	MountTypeRClone         MountType = "rclone"
+	MountTypeFuse           MountType = "fuse"
+	MountTypeRCloneExternal MountType = "rclone_external"
+)
+
 // Config represents the complete application configuration
 type Config struct {
 	WebDAV          WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
@@ -37,7 +47,8 @@ type Config struct {
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"` // WebDAV mount path
+	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	MountType       MountType        `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
 	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
 }
 
@@ -61,12 +72,13 @@ type FuseConfig struct {
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
 
 	// VFS disk cache configuration
-	DiskCacheEnabled   *bool  `yaml:"disk_cache_enabled" mapstructure:"disk_cache_enabled" json:"disk_cache_enabled"`
-	DiskCachePath      string `yaml:"disk_cache_path" mapstructure:"disk_cache_path" json:"disk_cache_path"`
-	DiskCacheMaxSizeGB int    `yaml:"disk_cache_max_size_gb" mapstructure:"disk_cache_max_size_gb" json:"disk_cache_max_size_gb"`
-	DiskCacheExpiryH   int    `yaml:"disk_cache_expiry_hours" mapstructure:"disk_cache_expiry_hours" json:"disk_cache_expiry_hours"`
-	ChunkSizeMB        int    `yaml:"chunk_size_mb" mapstructure:"chunk_size_mb" json:"chunk_size_mb"`
-	ReadAheadChunks    int    `yaml:"read_ahead_chunks" mapstructure:"read_ahead_chunks" json:"read_ahead_chunks"`
+	DiskCacheEnabled    *bool  `yaml:"disk_cache_enabled" mapstructure:"disk_cache_enabled" json:"disk_cache_enabled"`
+	DiskCachePath       string `yaml:"disk_cache_path" mapstructure:"disk_cache_path" json:"disk_cache_path"`
+	DiskCacheMaxSizeGB  int    `yaml:"disk_cache_max_size_gb" mapstructure:"disk_cache_max_size_gb" json:"disk_cache_max_size_gb"`
+	DiskCacheExpiryH    int    `yaml:"disk_cache_expiry_hours" mapstructure:"disk_cache_expiry_hours" json:"disk_cache_expiry_hours"`
+	ChunkSizeMB         int    `yaml:"chunk_size_mb" mapstructure:"chunk_size_mb" json:"chunk_size_mb"`
+	ReadAheadChunks     int    `yaml:"read_ahead_chunks" mapstructure:"read_ahead_chunks" json:"read_ahead_chunks"`
+	PrefetchConcurrency int    `yaml:"prefetch_concurrency" mapstructure:"prefetch_concurrency" json:"prefetch_concurrency"`
 }
 
 // APIConfig represents REST API configuration
@@ -483,23 +495,40 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Auto-enable RC when mount is enabled (mount requires RC to function)
-	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
-		if c.RClone.RCEnabled == nil || !*c.RClone.RCEnabled {
-			// Auto-enable RC since mount requires it
-			enabled := true
-			c.RClone.RCEnabled = &enabled
-		}
-	}
-
-	// Validate RClone Mount configuration
-	if c.RClone.MountEnabled != nil && *c.RClone.MountEnabled {
+	// Enforce mutual exclusion via MountType and sync legacy flags
+	falseVal := false
+	trueVal := true
+	switch c.MountType {
+	case MountTypeNone, "":
+		c.RClone.MountEnabled = &falseVal
+		c.Fuse.Enabled = &falseVal
+		// Leave RCEnabled as-is (user may want RC without mount)
+	case MountTypeRClone:
 		if c.MountPath == "" {
-			return fmt.Errorf("rclone mount_path cannot be empty when mount is enabled")
+			return fmt.Errorf("mount_path cannot be empty when mount type is rclone")
 		}
 		if !filepath.IsAbs(c.MountPath) {
-			return fmt.Errorf("rclone mount_path must be an absolute path")
+			return fmt.Errorf("mount_path must be an absolute path")
 		}
+		c.RClone.MountEnabled = &trueVal
+		c.RClone.RCEnabled = &trueVal // mount requires RC
+		c.Fuse.Enabled = &falseVal
+	case MountTypeFuse:
+		if c.MountPath == "" {
+			return fmt.Errorf("mount_path cannot be empty when mount type is fuse")
+		}
+		if !filepath.IsAbs(c.MountPath) {
+			return fmt.Errorf("mount_path must be an absolute path")
+		}
+		c.RClone.MountEnabled = &falseVal
+		c.Fuse.Enabled = &trueVal
+		c.Fuse.MountPath = c.MountPath
+	case MountTypeRCloneExternal:
+		c.RClone.MountEnabled = &falseVal
+		c.RClone.RCEnabled = &trueVal
+		c.Fuse.Enabled = &falseVal
+	default:
+		return fmt.Errorf("invalid mount_type: %s (must be none, rclone, fuse, or rclone_external)", c.MountType)
 	}
 
 	// Validate SABnzbd configuration
@@ -581,11 +610,6 @@ func (c *Config) Validate() error {
 		c.Fuse.MaxReadAheadMB = 128 // Default 128MB
 	}
 
-	// Validate FUSE mount_path is set when enabled
-	if c.Fuse.Enabled != nil && *c.Fuse.Enabled && c.Fuse.MountPath == "" {
-		return fmt.Errorf("fuse.mount_path is required when fuse is enabled")
-	}
-
 	return nil
 }
 
@@ -657,7 +681,7 @@ func (p *ProviderConfig) ToNNTPProvider() nntppool.Provider {
 
 	inflight := p.InflightRequests
 	if inflight <= 0 {
-		inflight = 3
+		inflight = 10
 	}
 
 	return nntppool.Provider{
@@ -966,6 +990,19 @@ func (m *Manager) ReloadConfig() error {
 		config.Fuse.Enabled = &defaultEnabled
 	}
 
+	// Migrate: infer mount_type from legacy enabled flags if not set
+	if config.MountType == "" {
+		if config.RClone.MountEnabled != nil && *config.RClone.MountEnabled {
+			config.MountType = MountTypeRClone
+		} else if config.Fuse.Enabled != nil && *config.Fuse.Enabled {
+			config.MountType = MountTypeFuse
+		} else if config.RClone.RCEnabled != nil && *config.RClone.RCEnabled {
+			config.MountType = MountTypeRCloneExternal
+		} else {
+			config.MountType = MountTypeNone
+		}
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
@@ -1232,7 +1269,8 @@ func DefaultConfig(configDir ...string) *Config {
 			MaxCacheSizeMB:      128,
 			MaxReadAheadMB:      128,
 		},
-		MountPath: "", // Empty by default - required when ARRs is enabled
+		MountPath: "",            // Empty by default - required when ARRs is enabled
+		MountType: MountTypeNone, // No mount system active by default
 	}
 }
 
@@ -1315,6 +1353,19 @@ func LoadConfig(configFile string) (*Config, error) {
 	if config.Fuse.Enabled == nil {
 		defaultEnabled := false
 		config.Fuse.Enabled = &defaultEnabled
+	}
+
+	// Migrate: infer mount_type from legacy enabled flags if not set
+	if config.MountType == "" {
+		if config.RClone.MountEnabled != nil && *config.RClone.MountEnabled {
+			config.MountType = MountTypeRClone
+		} else if config.Fuse.Enabled != nil && *config.Fuse.Enabled {
+			config.MountType = MountTypeFuse
+		} else if config.RClone.RCEnabled != nil && *config.RClone.RCEnabled {
+			config.MountType = MountTypeRCloneExternal
+		} else {
+			config.MountType = MountTypeNone
+		}
 	}
 
 	// If log file was not explicitly set in the config file and we have a specific config file path,

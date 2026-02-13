@@ -17,11 +17,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
-import { FuseConfig } from "../components/config/FuseConfig";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
 import { MetadataConfigSection } from "../components/config/MetadataConfigSection";
+import { MountConfigSection } from "../components/config/MountConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
-import { RCloneConfigSection } from "../components/config/RCloneConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
@@ -47,8 +46,6 @@ import type {
 	ImportConfig,
 	LogFormData,
 	MetadataConfig,
-	RCloneMountFormData,
-	RCloneRCFormData,
 	SABnzbdConfig,
 	StreamingConfig,
 	WebDAVConfig,
@@ -83,16 +80,20 @@ export function ConfigurationPage() {
 	// Get active section from URL parameter, default to webdav
 	const activeSection = (() => {
 		if (!section) return "webdav";
+		// Redirect legacy rclone/fuse paths to mount
+		if (section === "rclone" || section === "fuse") return "mount" as ConfigSection;
 		const validSections = Object.keys(CONFIG_SECTIONS) as (ConfigSection | "system")[];
 		return validSections.includes(section as ConfigSection | "system")
 			? (section as ConfigSection | "system")
 			: "webdav";
 	})();
 
-	// Redirect to default section if no section is specified
+	// Redirect to default section if no section is specified, or legacy paths
 	useEffect(() => {
 		if (!section) {
 			navigate("/config/webdav", { replace: true });
+		} else if (section === "rclone" || section === "fuse") {
+			navigate("/config/mount", { replace: true });
 		}
 	}, [section, navigate]);
 
@@ -160,26 +161,11 @@ export function ConfigurationPage() {
 	};
 
 	// Handle configuration updates with restart detection
-	const handleConfigUpdate = async (
-		section: string,
-		data:
-			| WebDAVConfig
-			| AuthConfig
-			| StreamingConfig
-			| HealthConfig
-			| ImportConfig
-			| MetadataConfig
-			| RCloneRCFormData
-			| RCloneMountFormData
-			| LogFormData
-			| SABnzbdConfig
-			| ArrsConfig
-			| { mount_path: string }
-			| { rclone: RCloneMountFormData; mount_path: string },
-	) => {
+	// biome-ignore lint/suspicious/noExplicitAny: handleConfigUpdate accepts various config types from child components
+	const handleConfigUpdate = async (section: string, data: any) => {
 		try {
 			if (section === "webdav" && config) {
-				const webdavData = data as WebDAVConfig;
+				const webdavData = data as unknown as WebDAVConfig;
 				const portChanged = webdavData.port !== config.webdav.port;
 
 				await updateConfigSection.mutateAsync({
@@ -187,22 +173,21 @@ export function ConfigurationPage() {
 					config: { webdav: webdavData },
 				});
 
-				// Only add restart requirement after successful update
 				if (portChanged) {
 					addRestartRequiredConfig("WebDAV Port");
 				}
 			} else if (section === "auth") {
 				await updateConfigSection.mutateAsync({
 					section: "auth",
-					config: { auth: data as AuthConfig },
+					config: { auth: data as unknown as AuthConfig },
 				});
 			} else if (section === "streaming") {
 				await updateConfigSection.mutateAsync({
 					section: "streaming",
-					config: { streaming: data as StreamingConfig },
+					config: { streaming: data as unknown as StreamingConfig },
 				});
 			} else if (section === "import" && config) {
-				const importData = data as ImportConfig;
+				const importData = data as unknown as ImportConfig;
 				const workersChanged =
 					importData.max_processor_workers !== config.import.max_processor_workers;
 
@@ -211,12 +196,11 @@ export function ConfigurationPage() {
 					config: { import: importData },
 				});
 
-				// Only add restart requirement after successful update
 				if (workersChanged) {
 					addRestartRequiredConfig("Import Max Processor Workers");
 				}
 			} else if (section === "metadata" && config) {
-				const metadataData = data as MetadataConfig;
+				const metadataData = data as unknown as MetadataConfig;
 				const rootPathChanged = metadataData.root_path !== config.metadata.root_path;
 
 				await updateConfigSection.mutateAsync({
@@ -224,57 +208,39 @@ export function ConfigurationPage() {
 					config: { metadata: metadataData },
 				});
 
-				// Only add restart requirement after successful update
 				if (rootPathChanged) {
 					addRestartRequiredConfig("Metadata Root Path");
 				}
-			} else if (section === "rclone") {
+			} else if (section === "mount") {
+				// Unified mount section — pass through all fields (mount_type, mount_path, rclone, fuse, etc.)
 				await updateConfigSection.mutateAsync({
-					section: "rclone",
-					config: { rclone: data as RCloneMountFormData },
-				});
-			} else if (section === "rclone_with_path") {
-				// Handle combined RClone settings + mount path to avoid validation errors
-				const combinedData = data as { rclone: RCloneMountFormData; mount_path: string };
-				await updateConfigSection.mutateAsync({
-					section: "rclone",
-					config: {
-						rclone: combinedData.rclone,
-						mount_path: combinedData.mount_path,
-					},
-				});
-			} else if (section === "mount_path") {
-				// For mount_path, we need to update the system section with mount_path
-				const mountPathData = data as { mount_path: string };
-				await updateConfigSection.mutateAsync({
-					section: "system",
-					config: mountPathData,
+					section: "mount",
+					config: data,
 				});
 			} else if (section === "sabnzbd") {
 				await updateConfigSection.mutateAsync({
 					section: "sabnzbd",
-					config: { sabnzbd: data as SABnzbdConfig },
+					config: { sabnzbd: data as unknown as SABnzbdConfig },
 				});
 			} else if (section === "arrs") {
 				await updateConfigSection.mutateAsync({
 					section: "arrs",
-					config: { arrs: data as ArrsConfig },
+					config: { arrs: data as unknown as ArrsConfig },
 				});
 			} else if (section === "health") {
 				await updateConfigSection.mutateAsync({
 					section: "health",
-					config: { health: data as HealthConfig },
+					config: { health: data as unknown as HealthConfig },
 				});
 			} else if (section === "log") {
 				await updateConfigSection.mutateAsync({
 					section: "system",
-					config: { log: data as LogFormData },
+					config: { log: data as unknown as LogFormData },
 				});
 			}
 		} catch (error) {
-			// If update fails, don't show restart banner
 			console.error("Failed to update configuration:", error);
-			throw error; // Re-throw to let the component handle the error
+			throw error;
 		}
 	};
 
@@ -541,8 +507,8 @@ export function ConfigurationPage() {
 
 								{activeSection === "providers" && <ProvidersConfigSection config={config} />}
 
-								{activeSection === "rclone" && (
-									<RCloneConfigSection
+								{activeSection === "mount" && (
+									<MountConfigSection
 										config={config}
 										onUpdate={handleConfigUpdate}
 										isUpdating={updateConfigSection.isPending}
@@ -573,8 +539,6 @@ export function ConfigurationPage() {
 									/>
 								)}
 
-								{activeSection === "fuse" && <FuseConfig />}
-
 								{/* Placeholder for other sections */}
 								{![
 									"webdav",
@@ -584,11 +548,10 @@ export function ConfigurationPage() {
 									"streaming",
 									"system",
 									"providers",
-									"rclone",
+									"mount",
 									"sabnzbd",
 									"arrs",
 									"health",
-									"fuse",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

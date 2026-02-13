@@ -232,7 +232,7 @@ providers:
     username: 'your_username' # Replace with your username
     password: 'your_password' # Replace with your password
     max_connections: 20
-    inflight_requests: 3 # Concurrent requests per connection (pipelining, default: 3)
+    inflight_requests: 10 # Concurrent requests per connection (pipelining, default: 3)
     tls: true
     insecure_tls: false
     enabled: true # Enable/disable this provider (default: true)
@@ -245,7 +245,7 @@ providers:
     username: 'your_username' # Replace with your username
     password: 'your_password' # Replace with your password
     max_connections: 10
-    inflight_requests: 3 # Concurrent requests per connection (pipelining, default: 3)
+    inflight_requests: 10 # Concurrent requests per connection (pipelining, default: 3)
     tls: false
     insecure_tls: false
     enabled: true
