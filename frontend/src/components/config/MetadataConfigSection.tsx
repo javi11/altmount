@@ -26,7 +26,13 @@ export function MetadataConfigSection({
 		setHasChanges(false);
 	}, [config.metadata]);
 
-	const handleInputChange = (field: keyof MetadataConfig, value: string | boolean) => {
+	const handleInputChange = (field: keyof MetadataConfig, value: string) => {
+		const newData = { ...formData, [field]: value };
+		setFormData(newData);
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
+	};
+
+	const handleCheckboxChange = (field: keyof MetadataConfig, value: boolean) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.metadata));
@@ -55,187 +61,167 @@ export function MetadataConfigSection({
 	};
 
 	return (
-		<div className="space-y-10">
-			{/* Storage Location Section */}
-			<section className="space-y-6">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
-						Storage Location
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
-				</div>
+		<div className="space-y-4">
+			<h3 className="font-semibold text-lg">Metadata Storage Configuration</h3>
+			<div className="grid grid-cols-1 gap-4">
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Root Path</legend>
+					<input
+						type="text"
+						className="input"
+						value={formData.root_path}
+						readOnly={isReadOnly}
+						onChange={(e) => handleInputChange("root_path", e.target.value)}
+						placeholder="/path/to/metadata"
+						required
+					/>
+					<p className="label">Directory path where file metadata will be stored (required)</p>
+				</fieldset>
 
-				<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">Metadata Root Path</legend>
-						<input
-							type="text"
-							className="input w-full bg-base-200/50"
-							value={formData.root_path}
-							readOnly={isReadOnly}
-							onChange={(e) => handleInputChange("root_path", e.target.value)}
-							placeholder="/path/to/metadata"
-							required
-						/>
-						<p className="label text-[10px] opacity-60">
-							Directory path where file metadata (.meta) is stored.
-						</p>
-					</fieldset>
-
-					<div className="flex flex-col justify-end pb-1">
-						<button
-							type="button"
-							className="btn btn-outline btn-sm w-full lg:w-auto"
-							onClick={() => batchExport.mutate("/")}
-							disabled={batchExport.isPending || !formData.root_path.trim()}
-						>
-							{batchExport.isPending ? (
-								<span className="loading loading-spinner loading-xs" />
-							) : (
-								<Download className="h-3.5 w-3.5" />
-							)}
-							Export All Metadata as NZB
-						</button>
-					</div>
-				</div>
-			</section>
-
-			{/* Deletion & Cleanup Section */}
-			<section className="space-y-6">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
-						Auto-Cleanup & Deletion
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
-				</div>
-
-				<div className="grid grid-cols-1 gap-6 rounded-2xl border border-base-300 bg-base-200/30 p-6 sm:grid-cols-2 lg:grid-cols-3">
-					<label className="label cursor-pointer justify-start gap-4 p-0">
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Backup Options</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Enable Automatic Backups</span>
 						<input
 							type="checkbox"
-							className="checkbox checkbox-sm checkbox-primary"
-							checked={formData.delete_source_nzb_on_removal ?? false}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("delete_source_nzb_on_removal", e.target.checked)}
-						/>
-						<div className="flex flex-col">
-							<span className="label-text font-semibold text-xs">Sync NZB Deletion</span>
-							<span className="label-text-alt text-[9px] opacity-60">
-								Delete original NZB with metadata
-							</span>
-						</div>
-					</label>
-
-					<label className="label cursor-pointer justify-start gap-4 p-0">
-						<input
-							type="checkbox"
-							className="checkbox checkbox-sm checkbox-primary"
-							checked={formData.delete_failed_nzb ?? true}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("delete_failed_nzb", e.target.checked)}
-						/>
-						<div className="flex flex-col">
-							<span className="label-text font-semibold text-xs">Cleanup Failed Imports</span>
-							<span className="label-text-alt text-[9px] opacity-60">
-								Delete NZB if import fails
-							</span>
-						</div>
-					</label>
-
-					<label className="label cursor-pointer justify-start gap-4 p-0">
-						<input
-							type="checkbox"
-							className="checkbox checkbox-sm checkbox-primary"
-							checked={formData.delete_completed_nzb ?? false}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("delete_completed_nzb", e.target.checked)}
-						/>
-						<div className="flex flex-col">
-							<span className="label-text font-semibold text-xs">Cleanup Successful Imports</span>
-							<span className="label-text-alt text-[9px] opacity-60">Delete NZB after success</span>
-						</div>
-					</label>
-				</div>
-			</section>
-
-			{/* Mirroring & Backup Section */}
-			<section className="space-y-6">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
-						Mirroring & Backups
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
-				</div>
-
-				<div className="space-y-6">
-					<div className="flex items-center gap-4">
-						<input
-							type="checkbox"
-							className="toggle toggle-primary toggle-sm"
+							className="checkbox"
 							checked={formData.backup?.enabled ?? false}
 							disabled={isReadOnly}
 							onChange={(e) => handleBackupChange("enabled", e.target.checked)}
 						/>
-						<div>
-							<span className="font-bold text-sm">Enable Periodic Metadata Mirroring</span>
-							<p className="text-[10px] opacity-60">
-								Periodically mirror .meta files to an alternate directory.
-							</p>
+					</label>
+					<p className="label">
+						When enabled, all .meta files will be periodically mirrored to the backup directory
+					</p>
+
+					<div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+						<div className="form-control">
+							<label className="label">
+								<span className="label-text">Backup Interval (Hours)</span>
+							</label>
+							<input
+								type="number"
+								className="input"
+								value={formData.backup?.interval_hours ?? 24}
+								disabled={isReadOnly || !formData.backup?.enabled}
+								onChange={(e) =>
+									handleBackupChange("interval_hours", Number.parseInt(e.target.value, 10))
+								}
+								min="1"
+							/>
+						</div>
+
+						<div className="form-control">
+							<label className="label">
+								<span className="label-text">Keep Backups</span>
+							</label>
+							<input
+								type="number"
+								className="input"
+								value={formData.backup?.keep_backups ?? 10}
+								disabled={isReadOnly || !formData.backup?.enabled}
+								onChange={(e) =>
+									handleBackupChange("keep_backups", Number.parseInt(e.target.value, 10))
+								}
+								min="1"
+							/>
 						</div>
 					</div>
 
-					{formData.backup?.enabled && (
-						<div className="slide-in-from-top-2 grid animate-in grid-cols-1 gap-6 duration-300 md:grid-cols-2 lg:grid-cols-4">
-							<fieldset className="fieldset min-w-0 md:col-span-2">
-								<legend className="fieldset-legend font-semibold">Backup Target Path</legend>
-								<input
-									type="text"
-									className="input w-full bg-base-200/50"
-									value={formData.backup?.path ?? ""}
-									disabled={isReadOnly}
-									onChange={(e) => handleBackupChange("path", e.target.value)}
-									placeholder="/path/to/backups"
-								/>
-							</fieldset>
+					<div className="form-control mt-4">
+						<label className="label">
+							<span className="label-text">Backup Path</span>
+						</label>
+						<input
+							type="text"
+							className="input"
+							value={formData.backup?.path ?? ""}
+							disabled={isReadOnly || !formData.backup?.enabled}
+							onChange={(e) => handleBackupChange("path", e.target.value)}
+							placeholder="/path/to/backups"
+						/>
+						<p className="label">Absolute path where metadata mirrors will be stored</p>
+					</div>
+				</fieldset>
 
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-semibold">Interval (Hours)</legend>
-								<input
-									type="number"
-									className="input w-full bg-base-200/50 font-mono"
-									value={formData.backup?.interval_hours ?? 24}
-									disabled={isReadOnly}
-									onChange={(e) =>
-										handleBackupChange("interval_hours", Number.parseInt(e.target.value, 10) || 24)
-									}
-									min="1"
-								/>
-							</fieldset>
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Deletion Options</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">Delete original NZB when metadata is removed</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.delete_source_nzb_on_removal ?? false}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleCheckboxChange("delete_source_nzb_on_removal", e.target.checked)
+							}
+						/>
+					</label>
+					<p className="label">
+						When enabled, the original NZB file will be permanently deleted when its metadata is
+						removed
+					</p>
 
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-semibold">Retention Count</legend>
-								<input
-									type="number"
-									className="input w-full bg-base-200/50 font-mono"
-									value={formData.backup?.keep_backups ?? 10}
-									disabled={isReadOnly}
-									onChange={(e) =>
-										handleBackupChange("keep_backups", Number.parseInt(e.target.value, 10) || 10)
-									}
-									min="1"
-								/>
-							</fieldset>
-						</div>
-					)}
-				</div>
-			</section>
+					<label className="label mt-4 cursor-pointer">
+						<span className="label-text">Delete failed NZB files</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.delete_failed_nzb ?? true}
+							disabled={isReadOnly}
+							onChange={(e) => handleCheckboxChange("delete_failed_nzb", e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						When enabled, failed NZB files will be permanently deleted. When disabled, they will be
+						moved to a 'failed' directory.
+					</p>
+
+					<label className="label mt-4 cursor-pointer">
+						<span className="label-text">Delete completed NZB files</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={formData.delete_completed_nzb ?? false}
+							disabled={isReadOnly}
+							onChange={(e) => handleCheckboxChange("delete_completed_nzb", e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						When enabled, the original NZB file will be permanently deleted after successful import.
+						Warning: This removes the ability to re-generate metadata without re-uploading the NZB.
+					</p>
+				</fieldset>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Batch Export</legend>
+					<button
+						type="button"
+						className="btn btn-secondary w-xs"
+						onClick={() => batchExport.mutate("/")}
+						disabled={batchExport.isPending || !formData.root_path.trim()}
+					>
+						{batchExport.isPending ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Download className="h-4 w-4" />
+						)}
+						{batchExport.isPending ? "Exporting..." : "Export All as NZB"}
+					</button>
+					<p className="label">
+						Export all file metadata as NZB files in a single ZIP archive. Archives (RAR/7zip) and
+						encrypted files are automatically excluded.
+					</p>
+				</fieldset>
+			</div>
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end border-base-200 border-t pt-6">
+				<div className="flex justify-end">
 					<button
 						type="button"
-						className={`btn btn-primary btn-md px-10 ${hasChanges ? "shadow-lg shadow-primary/20" : ""}`}
+						className="btn btn-primary"
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating || !formData.root_path.trim()}
 					>
@@ -244,7 +230,7 @@ export function MetadataConfigSection({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						Save Metadata Configuration
+						{isUpdating ? "Saving..." : "Save Changes"}
 					</button>
 				</div>
 			)}

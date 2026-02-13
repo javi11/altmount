@@ -447,6 +447,8 @@ export type ConfigSection =
 	| "import"
 	| "providers"
 	| "mount"
+	| "rclone"
+	| "fuse"
 	| "sabnzbd"
 	| "arrs"
 	| "system";
@@ -806,6 +808,20 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description: "Usenet provider configuration for downloads",
 		icon: "Radio",
 		canEdit: true,
+	},
+	rclone: {
+		title: "RClone",
+		description: "RClone configuration",
+		icon: "HardDrive",
+		canEdit: true,
+		hidden: true,
+	},
+	fuse: {
+		title: "FUSE",
+		description: "Native FUSE configuration",
+		icon: "HardDrive",
+		canEdit: true,
+		hidden: true,
 	},
 	sabnzbd: {
 		title: "SABnzbd API",
