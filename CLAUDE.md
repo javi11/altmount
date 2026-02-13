@@ -763,12 +763,14 @@ function App() {
 
 ### Before Committing
 
-1. **Run type checking**: `bun run check` (TypeScript validation, linting, formatting, and code quality)
-2. **Test build**: `bun run build` (TypeScript compilation + Vite build)
-3. **Review changes**: Ensure code follows these standards
+1. **Run full build**: `make` (Build both backend and frontend, run all checks)
+2. **Run type checking**: `bun run check` (TypeScript validation, linting, formatting, and code quality)
+3. **Test build**: `bun run build` (TypeScript compilation + Vite build)
+4. **Review changes**: Ensure code follows these standards
 
 **Command Reference:**
 
+- `make` - Full project build (Go backend + frontend, all validations) - **REQUIRED before commit**
 - `bun run check` - Comprehensive validation (TypeScript + linting + formatting)
 - `bun run lint` - Linting-only checks when needed
 - `bun run build` - Production build validation
