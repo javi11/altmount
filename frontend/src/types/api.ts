@@ -365,6 +365,7 @@ export interface ProviderStatus {
 	last_successful_connect: string;
 	failure_reason: string;
 	current_speed_bytes_per_sec: number;
+	ping_ms: number;
 	last_speed_test_mbps: number;
 	last_speed_test_time?: string;
 	missing_count: number;
