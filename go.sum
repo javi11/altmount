@@ -353,6 +353,8 @@ github.com/javi11/nzbparser v0.5.4 h1:0aYyORZipp7iX8eNpT/efnzCeVO+9C0sE2HWCGc/Ja
 github.com/javi11/nzbparser v0.5.4/go.mod h1:ikF7WI3BUGs5IHQJmKzmtTkX29NZW5nvUdo6ZWFZgL4=
 github.com/javi11/rardecode/v2 v2.1.2-0.20251031153435-d6d75db6d6ca h1:mHecHsKVdm31tMLNKV9pt/K+OivzHpEojXb+YeF5q/I=
 github.com/javi11/rardecode/v2 v2.1.2-0.20251031153435-d6d75db6d6ca/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
+github.com/javi11/rardecode/v2 v2.1.2-0.20260213142800-2b1c601a8d62 h1:wtGdVKKSgOo2NfPS5TfHclAn8AzAfU2vvwbWk8e82Uc=
+github.com/javi11/rardecode/v2 v2.1.2-0.20260213142800-2b1c601a8d62/go.mod h1:Bv+b+FzxIO1GhbQB6Rl+um+6nGsfcB+1eug62+8P9OM=
 github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239 h1:XbptA/1kHKOeDZChh599BXNGQ9jfuW1RG8y/e5Oclkc=
 github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239/go.mod h1:+nqMTvWJKqRUQRE0uWjip5scep1PoEk+ZPDX2YwWSSo=
 github.com/jgautheron/goconst v1.8.2 h1:y0XF7X8CikZ93fSNT6WBTb/NElBu9IjaY7CCYQrCMX4=
