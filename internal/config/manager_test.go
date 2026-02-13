@@ -7,9 +7,6 @@ import (
 )
 
 func TestConfig_Validate_MountPaths(t *testing.T) {
-	enabled := true
-	disabled := false
-
 	tests := []struct {
 		name        string
 		config      *Config
@@ -17,16 +14,10 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 		errContains string
 	}{
 		{
-			name: "both enabled same path - error",
+			name: "mount type fuse - ok",
 			config: &Config{
+				MountType: MountTypeFuse,
 				MountPath: "/mnt/altmount",
-				RClone: RCloneConfig{
-					MountEnabled: &enabled,
-				},
-				Fuse: FuseConfig{
-					Enabled:   &enabled,
-					MountPath: "/mnt/altmount",
-				},
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},
@@ -34,89 +25,13 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 					Port: 8080,
 				},
 				Streaming: StreamingConfig{
-					MaxDownloadWorkers: 15,
+					MaxPrefetch: 30,
 				},
 				Import: ImportConfig{
 					MaxProcessorWorkers:            2,
 					QueueProcessingIntervalSeconds: 5,
 					MaxImportConnections:           5,
-					ImportCacheSizeMB:              64,
-					SegmentSamplePercentage:        1,
-					ImportStrategy:                 ImportStrategyNone,
-				},
-				Health: HealthConfig{
-					CheckIntervalSeconds:          5,
-					MaxConnectionsForHealthChecks: 5,
-					MaxConcurrentJobs:             1,
-					SegmentSamplePercentage:       5,
-				},
-			},
-			wantErr:     true,
-			errContains: "rclone mount and native mount cannot use the same path",
-		},
-		{
-			name: "both enabled same path via fallback - error",
-			config: &Config{
-				MountPath: "/mnt/altmount",
-				RClone: RCloneConfig{
-					MountEnabled: &enabled,
-				},
-				Fuse: FuseConfig{
-					Enabled:   &enabled,
-					MountPath: "", // fallback to MountPath
-				},
-				Metadata: MetadataConfig{
-					RootPath: "/metadata",
-				},
-				WebDAV: WebDAVConfig{
-					Port: 8080,
-				},
-				Streaming: StreamingConfig{
-					MaxDownloadWorkers: 15,
-				},
-				Import: ImportConfig{
-					MaxProcessorWorkers:            2,
-					QueueProcessingIntervalSeconds: 5,
-					MaxImportConnections:           5,
-					ImportCacheSizeMB:              64,
-					SegmentSamplePercentage:        1,
-					ImportStrategy:                 ImportStrategyNone,
-				},
-				Health: HealthConfig{
-					CheckIntervalSeconds:          5,
-					MaxConnectionsForHealthChecks: 5,
-					MaxConcurrentJobs:             1,
-					SegmentSamplePercentage:       5,
-				},
-			},
-			wantErr:     true,
-			errContains: "rclone mount and native mount cannot use the same path",
-		},
-		{
-			name: "both enabled different paths - ok",
-			config: &Config{
-				MountPath: "/mnt/rclone",
-				RClone: RCloneConfig{
-					MountEnabled: &enabled,
-				},
-				Fuse: FuseConfig{
-					Enabled:   &enabled,
-					MountPath: "/mnt/fuse",
-				},
-				Metadata: MetadataConfig{
-					RootPath: "/metadata",
-				},
-				WebDAV: WebDAVConfig{
-					Port: 8080,
-				},
-				Streaming: StreamingConfig{
-					MaxDownloadWorkers: 15,
-				},
-				Import: ImportConfig{
-					MaxProcessorWorkers:            2,
-					QueueProcessingIntervalSeconds: 5,
-					MaxImportConnections:           5,
-					ImportCacheSizeMB:              64,
+					MaxDownloadPrefetch:            3,
 					SegmentSamplePercentage:        1,
 					ImportStrategy:                 ImportStrategyNone,
 				},
@@ -130,16 +45,10 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "only fuse enabled same path - ok",
+			name: "mount type rclone - ok",
 			config: &Config{
+				MountType: MountTypeRClone,
 				MountPath: "/mnt/altmount",
-				RClone: RCloneConfig{
-					MountEnabled: &disabled,
-				},
-				Fuse: FuseConfig{
-					Enabled:   &enabled,
-					MountPath: "", // fallback to MountPath
-				},
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},
@@ -147,13 +56,13 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 					Port: 8080,
 				},
 				Streaming: StreamingConfig{
-					MaxDownloadWorkers: 15,
+					MaxPrefetch: 30,
 				},
 				Import: ImportConfig{
 					MaxProcessorWorkers:            2,
 					QueueProcessingIntervalSeconds: 5,
 					MaxImportConnections:           5,
-					ImportCacheSizeMB:              64,
+					MaxDownloadPrefetch:            3,
 					SegmentSamplePercentage:        1,
 					ImportStrategy:                 ImportStrategyNone,
 				},
@@ -167,16 +76,9 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "only rclone enabled same path - ok",
+			name: "mount type none - ok",
 			config: &Config{
-				MountPath: "/mnt/altmount",
-				RClone: RCloneConfig{
-					MountEnabled: &enabled,
-				},
-				Fuse: FuseConfig{
-					Enabled:   &disabled,
-					MountPath: "/mnt/altmount",
-				},
+				MountType: MountTypeNone,
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},
@@ -184,13 +86,13 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 					Port: 8080,
 				},
 				Streaming: StreamingConfig{
-					MaxDownloadWorkers: 15,
+					MaxPrefetch: 30,
 				},
 				Import: ImportConfig{
 					MaxProcessorWorkers:            2,
 					QueueProcessingIntervalSeconds: 5,
 					MaxImportConnections:           5,
-					ImportCacheSizeMB:              64,
+					MaxDownloadPrefetch:            3,
 					SegmentSamplePercentage:        1,
 					ImportStrategy:                 ImportStrategyNone,
 				},
