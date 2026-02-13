@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -41,6 +43,9 @@ type Downloader struct {
 	consecutiveErrors atomic.Int32
 	circuitOpen       atomic.Bool
 	circuitOpenedAt   atomic.Int64
+
+	// Fetch deduplication (shared with CachedFile sync path)
+	fetchGroup singleflight.Group
 
 	// Prefetch concurrency control
 	prefetching    atomic.Bool
@@ -237,7 +242,21 @@ func (d *Downloader) prefetchWithCtx(ctx context.Context, fromOffset int64) {
 	}
 }
 
+// FetchGroup returns the shared singleflight group for fetch deduplication.
+// CachedFile uses this to collapse sync-path fetches with in-flight prefetches.
+func (d *Downloader) FetchGroup() *singleflight.Group {
+	return &d.fetchGroup
+}
+
 func (d *Downloader) fetchChunkWithCtx(ctx context.Context, start, end int64) error {
+	key := fmt.Sprintf("%d-%d", start, end)
+	_, err, _ := d.fetchGroup.Do(key, func() (interface{}, error) {
+		return nil, d.doFetchChunk(ctx, start, end)
+	})
+	return err
+}
+
+func (d *Downloader) doFetchChunk(ctx context.Context, start, end int64) error {
 	file, err := d.opener.Open(ctx, d.path)
 	if err != nil {
 		return err

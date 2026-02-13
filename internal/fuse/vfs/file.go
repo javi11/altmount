@@ -13,6 +13,9 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// noopFetchGroup is used when no downloader is present (standalone CachedFile).
+var noopFetchGroup singleflight.Group
+
 var fetchBufPool = sync.Pool{
 	New: func() any {
 		buf := make([]byte, 256*1024) // 256KB default
@@ -38,9 +41,10 @@ type CachedFile struct {
 	downloader *Downloader
 	closed     atomic.Bool
 
-	// fetchGroup deduplicates concurrent fetches for the same chunk range
-	// while allowing fetches for different chunks to proceed in parallel.
-	fetchGroup singleflight.Group
+	// fetchGroup deduplicates concurrent fetches for the same chunk range.
+	// Shared with the Downloader so that sync-path and prefetch-path fetches
+	// for the same range are collapsed into a single download.
+	fetchGroup *singleflight.Group
 }
 
 // NewCachedFile creates a new CachedFile wrapping a CacheItem.
@@ -57,6 +61,15 @@ func NewCachedFile(
 		return nil, fmt.Errorf("open cache item: %w", err)
 	}
 
+	// Share the fetch dedup group with the downloader so that sync-path
+	// and prefetch-path fetches for the same chunk are collapsed.
+	var fg *singleflight.Group
+	if downloader != nil {
+		fg = downloader.FetchGroup()
+	} else {
+		fg = &noopFetchGroup
+	}
+
 	return &CachedFile{
 		item:       item,
 		opener:     opener,
@@ -65,6 +78,7 @@ func NewCachedFile(
 		chunkSize:  chunkSize,
 		logger:     logger,
 		downloader: downloader,
+		fetchGroup: fg,
 	}, nil
 }
 
