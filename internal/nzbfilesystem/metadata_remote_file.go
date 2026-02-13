@@ -26,8 +26,6 @@ import (
 	"github.com/spf13/afero"
 )
 
-const maxReadWindow = 8 * 1024 * 1024 // 8MB
-
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService

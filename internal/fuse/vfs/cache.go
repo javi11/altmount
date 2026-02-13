@@ -33,15 +33,15 @@ type itemMeta struct {
 
 // CacheItem represents a single cached file on disk.
 type CacheItem struct {
-	mu         sync.RWMutex
-	meta       itemMeta
-	ranges     *Ranges
-	dataPath   string
-	metaPath   string
-	dataFile   *os.File
-	openCount  int
-	dirty      bool
-	chunkSize  int64
+	mu        sync.RWMutex
+	meta      itemMeta
+	ranges    *Ranges
+	dataPath  string
+	metaPath  string
+	dataFile  *os.File
+	openCount int
+	dirty     bool
+	chunkSize int64
 }
 
 // Cache manages disk-cached files.
@@ -419,11 +419,12 @@ func sanitizePath(path string) string {
 	safe := make([]byte, 0, len(path))
 	for i := 0; i < len(path); i++ {
 		c := path[i]
-		if c == '/' || c == '\\' {
+		switch c {
+		case '/', '\\':
 			safe = append(safe, '_')
-		} else if c == '_' {
+		case '_':
 			safe = append(safe, '_', '_')
-		} else {
+		default:
 			safe = append(safe, c)
 		}
 	}

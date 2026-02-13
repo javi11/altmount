@@ -1,7 +1,6 @@
 package fuse
 
 import (
-	"hash/fnv"
 	"os"
 	"syscall"
 
@@ -29,11 +28,4 @@ func fillAttr(info os.FileInfo, out *fuse.Attr, uid, gid uint32) {
 		out.Mode = 0644 | syscall.S_IFREG
 		out.Nlink = 1
 	}
-}
-
-// hashPath returns a stable inode number for a given path using FNV hash.
-func hashPath(path string) uint64 {
-	h := fnv.New64a()
-	h.Write([]byte(path))
-	return h.Sum64()
 }
