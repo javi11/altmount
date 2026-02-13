@@ -1,28 +1,28 @@
 import {
+	Activity,
 	AlertCircle,
+	Box,
+	CheckCircle2,
 	ChevronDown,
 	ChevronUp,
+	Clock,
 	Download,
+	FileCode,
+	Filter,
+	List,
+	MoreVertical,
 	PlayCircle,
 	RefreshCw,
+	Search,
+	Settings,
 	Trash2,
 	XCircle,
-    List,
-    Clock,
-    Activity,
-    CheckCircle2,
-    XOctagon,
-    MoreVertical,
-    FileCode,
-    Search,
-    Filter,
-    Settings,
-    Box
+	XOctagon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
-import { LoadingTable, LoadingSpinner } from "../components/ui/LoadingSpinner";
+import { LoadingSpinner, LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
 import { PathDisplay } from "../components/ui/PathDisplay";
 import { StatusBadge } from "../components/ui/StatusBadge";
@@ -48,11 +48,11 @@ import { type QueueItem, QueueStatus } from "../types/api";
 type QueueFilter = "" | "pending" | "processing" | "completed" | "failed";
 
 const QUEUE_SECTIONS = [
-    { id: "", title: "All Items", icon: List },
-    { id: "pending", title: "Pending", icon: Clock },
-    { id: "processing", title: "Processing", icon: Activity },
-    { id: "completed", title: "Completed", icon: CheckCircle2 },
-    { id: "failed", title: "Failed", icon: XOctagon },
+	{ id: "", title: "All Items", icon: List },
+	{ id: "pending", title: "Pending", icon: Clock },
+	{ id: "processing", title: "Processing", icon: Activity },
+	{ id: "completed", title: "Completed", icon: CheckCircle2 },
+	{ id: "failed", title: "Failed", icon: XOctagon },
 ];
 
 export function QueuePage() {
@@ -300,7 +300,8 @@ export function QueuePage() {
 		clearSelection();
 	};
 
-	const isAllSelected = queueData && queueData.length > 0 && queueData.every((item) => selectedItems.has(item.id));
+	const isAllSelected =
+		queueData && queueData.length > 0 && queueData.every((item) => selectedItems.has(item.id));
 	const isIndeterminate = queueData && selectedItems.size > 0 && !isAllSelected;
 
 	useEffect(() => {
@@ -334,8 +335,12 @@ export function QueuePage() {
 		setCountdown(0);
 	}, [nextRefreshTime, autoRefreshEnabled, userInteracting, refreshInterval]);
 
-	useEffect(() => { setPage(0); }, [statusFilter, searchTerm]);
-	useEffect(() => { clearSelection(); }, [clearSelection]);
+	useEffect(() => {
+		setPage(0);
+	}, []);
+	useEffect(() => {
+		clearSelection();
+	}, [clearSelection]);
 
 	if (error) {
 		return (
@@ -361,52 +366,66 @@ export function QueuePage() {
 				</div>
 
 				<div className="flex items-center gap-2">
-                    <div className="dropdown">
-                        <div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
-                            <Settings className="h-3.5 w-3.5" />
-                            Cleanup
-                        </div>
-                        <ul tabIndex={0} className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
-                            <li>
-                                <button 
-                                    type="button" 
-                                    onClick={handleClearCompleted} 
-                                    className="text-success"
-                                    disabled={!stats || stats.total_completed === 0 || clearCompleted.isPending}
-                                >
-                                    <Trash2 className="h-4 w-4" /> Clear Completed
-                                </button>
-                            </li>
-                            <li>
-                                <button 
-                                    type="button" 
-                                    onClick={handleClearPending} 
-                                    className="text-warning"
-                                    disabled={!stats || stats.total_queued === 0 || clearPending.isPending}
-                                >
-                                    <Trash2 className="h-4 w-4" /> Clear Pending
-                                </button>
-                            </li>
-                            <li>
-                                <button 
-                                    type="button" 
-                                    onClick={handleClearFailed} 
-                                    className="text-error"
-                                    disabled={!stats || stats.total_failed === 0 || clearFailed.isPending}
-                                >
-                                    <Trash2 className="h-4 w-4" /> Clear Failed
-                                </button>
-                            </li>
-                            <div className="divider my-1 opacity-50" />
-                            <li className="menu-title px-4 py-2 font-bold text-[9px] text-base-content/40 uppercase tracking-widest">Testing</li>
-                            <li>
-                                <button type="button" onClick={() => handleAddTestFile("100MB")} disabled={addTestQueueItem.isPending}>Add 100MB Test</button>
-                            </li>
-                            <li>
-                                <button type="button" onClick={() => handleAddTestFile("1GB")} disabled={addTestQueueItem.isPending}>Add 1GB Test</button>
-                            </li>
-                        </ul>
-                    </div>
+					<div className="dropdown">
+						<div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
+							<Settings className="h-3.5 w-3.5" />
+							Cleanup
+						</div>
+						<ul className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
+							<li>
+								<button
+									type="button"
+									onClick={handleClearCompleted}
+									className="text-success"
+									disabled={!stats || stats.total_completed === 0 || clearCompleted.isPending}
+								>
+									<Trash2 className="h-4 w-4" /> Clear Completed
+								</button>
+							</li>
+							<li>
+								<button
+									type="button"
+									onClick={handleClearPending}
+									className="text-warning"
+									disabled={!stats || stats.total_queued === 0 || clearPending.isPending}
+								>
+									<Trash2 className="h-4 w-4" /> Clear Pending
+								</button>
+							</li>
+							<li>
+								<button
+									type="button"
+									onClick={handleClearFailed}
+									className="text-error"
+									disabled={!stats || stats.total_failed === 0 || clearFailed.isPending}
+								>
+									<Trash2 className="h-4 w-4" /> Clear Failed
+								</button>
+							</li>
+							<div className="divider my-1 opacity-50" />
+							<li className="menu-title px-4 py-2 font-bold text-[9px] text-base-content/40 uppercase tracking-widest">
+								Testing
+							</li>
+							<li>
+								<button
+									type="button"
+									onClick={() => handleAddTestFile("100MB")}
+									disabled={addTestQueueItem.isPending}
+								>
+									Add 100MB Test
+								</button>
+							</li>
+							<li>
+								<button
+									type="button"
+									onClick={() => handleAddTestFile("1GB")}
+									disabled={addTestQueueItem.isPending}
+								>
+									Add 1GB Test
+								</button>
+							</li>
+						</ul>
+					</div>
 
 					<div className="join">
 						<button
@@ -431,367 +450,429 @@ export function QueuePage() {
 				</div>
 			</div>
 
-            <DragDropUpload />
+			<DragDropUpload />
 
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
 				{/* Sidebar Navigation */}
 				<div className="lg:col-span-1">
-                    <div className="space-y-6">
-                        <div className="card border border-base-200 bg-base-100 shadow-sm">
-                            <div className="card-body p-2 sm:p-4">
-                                <div>
-                                    <h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-                                        Filters
-                                    </h3>
-                                    <ul className="menu menu-md gap-1 p-0">
-                                        {QUEUE_SECTIONS.map((section) => {
-                                            const IconComponent = section.icon;
-                                            const isActive = statusFilter === section.id;
-                                            const count = section.id === "" 
-                                                ? (stats ? stats.total_queued + stats.total_processing + stats.total_completed + stats.total_failed : 0)
-                                                : section.id === "pending" ? stats?.total_queued
-                                                : section.id === "processing" ? stats?.total_processing
-                                                : section.id === "completed" ? stats?.total_completed
-                                                : stats?.total_failed;
+					<div className="space-y-6">
+						<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card-body p-2 sm:p-4">
+								<div>
+									<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+										Filters
+									</h3>
+									<ul className="menu menu-md gap-1 p-0">
+										{QUEUE_SECTIONS.map((section) => {
+											const IconComponent = section.icon;
+											const isActive = statusFilter === section.id;
+											const count =
+												section.id === ""
+													? stats
+														? stats.total_queued +
+															stats.total_processing +
+															stats.total_completed +
+															stats.total_failed
+														: 0
+													: section.id === "pending"
+														? stats?.total_queued
+														: section.id === "processing"
+															? stats?.total_processing
+															: section.id === "completed"
+																? stats?.total_completed
+																: stats?.total_failed;
 
-                                            return (
-                                                <li key={section.id}>
-                                                    <button
-                                                        type="button"
-                                                        className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-                                                            isActive 
-                                                                ? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20" 
-                                                                : "hover:bg-base-200"
-                                                        }`}
-                                                        onClick={() => setStatusFilter(section.id as QueueFilter)}
-                                                    >
-                                                        <IconComponent className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
-                                                        <div className="min-w-0 flex-1 text-left">
-                                                            <div className="text-sm">{section.title}</div>
-                                                        </div>
-                                                        {count !== undefined && (
-                                                            <span className={`badge badge-xs py-2 px-2 font-bold font-mono ${isActive ? "badge-secondary" : "badge-ghost opacity-60"}`}>
-                                                                {count}
-                                                            </span>
-                                                        )}
-                                                    </button>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
+											return (
+												<li key={section.id}>
+													<button
+														type="button"
+														className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
+															isActive
+																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
+																: "hover:bg-base-200"
+														}`}
+														onClick={() => setStatusFilter(section.id as QueueFilter)}
+													>
+														<IconComponent
+															className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`}
+														/>
+														<div className="min-w-0 flex-1 text-left">
+															<div className="text-sm">{section.title}</div>
+														</div>
+														{count !== undefined && (
+															<span
+																className={`badge badge-xs px-2 py-2 font-bold font-mono ${isActive ? "badge-secondary" : "badge-ghost opacity-60"}`}
+															>
+																{count}
+															</span>
+														)}
+													</button>
+												</li>
+											);
+										})}
+									</ul>
+								</div>
+							</div>
+						</div>
 
-                        {/* Search Mini-Card */}
-                        <div className="card border border-base-200 bg-base-100 shadow-sm">
-                            <div className="card-body p-4">
-                                <h3 className="mb-3 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Search</h3>
-                                <div className="relative">
-                                    <Search className="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 opacity-40" />
-                                    <input
-                                        type="text"
-                                        placeholder="Find item..."
-                                        className="input input-sm w-full bg-base-200/50 pl-9 text-xs"
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        onFocus={handleUserInteractionStart}
-                                        onBlur={handleUserInteractionEnd}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+						{/* Search Mini-Card */}
+						<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card-body p-4">
+								<h3 className="mb-3 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Search
+								</h3>
+								<div className="relative">
+									<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-3.5 w-3.5 opacity-40" />
+									<input
+										type="text"
+										placeholder="Find item..."
+										className="input input-sm w-full bg-base-200/50 pl-9 text-xs"
+										value={searchTerm}
+										onChange={(e) => setSearchTerm(e.target.value)}
+										onFocus={handleUserInteractionStart}
+										onBlur={handleUserInteractionEnd}
+									/>
+								</div>
+							</div>
+						</div>
+					</div>
 				</div>
 
 				{/* Content Area */}
 				<div className="lg:col-span-3">
-                    <div className="space-y-6">
-                        {/* Bulk Actions Toolbar */}
-                        {selectedItems.size > 0 && (
-                            <div className="card border border-primary/20 bg-primary/5 shadow-sm">
-                                <div className="card-body p-4 sm:p-6">
-                                    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                                        <div className="flex items-center gap-4">
-                                            <div className="rounded-lg bg-primary/20 p-2">
-                                                <Filter className="h-5 w-5 text-primary" />
-                                            </div>
-                                            <div>
-                                                <span className="font-bold text-sm">
-                                                    {selectedItems.size} item{selectedItems.size !== 1 ? "s" : ""} selected
-                                                </span>
-                                                <button
-                                                    type="button"
-                                                    className="ml-2 btn btn-link btn-xs no-underline opacity-60 hover:opacity-100"
-                                                    onClick={() => setSelectedItems(new Set())}
-                                                >
-                                                    Clear Selection
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <button
-                                                type="button"
-                                                className="btn btn-primary btn-xs px-4"
-                                                onClick={handleBulkRestart}
-                                                disabled={restartBulk.isPending}
-                                            >
-                                                {restartBulk.isPending ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-3 w-3" />}
-                                                Restart
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="btn btn-outline btn-warning btn-xs px-4"
-                                                onClick={handleBulkCancel}
-                                                disabled={cancelBulk.isPending}
-                                            >
-                                                <XCircle className="h-3 w-3" />
-                                                Cancel
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="btn btn-outline btn-error btn-xs px-4"
-                                                onClick={handleBulkDelete}
-                                                disabled={deleteBulk.isPending}
-                                            >
-                                                <Trash2 className="h-3 w-3" />
-                                                Delete
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+					<div className="space-y-6">
+						{/* Bulk Actions Toolbar */}
+						{selectedItems.size > 0 && (
+							<div className="card border border-primary/20 bg-primary/5 shadow-sm">
+								<div className="card-body p-4 sm:p-6">
+									<div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+										<div className="flex items-center gap-4">
+											<div className="rounded-lg bg-primary/20 p-2">
+												<Filter className="h-5 w-5 text-primary" />
+											</div>
+											<div>
+												<span className="font-bold text-sm">
+													{selectedItems.size} item{selectedItems.size !== 1 ? "s" : ""} selected
+												</span>
+												<button
+													type="button"
+													className="btn btn-link btn-xs ml-2 no-underline opacity-60 hover:opacity-100"
+													onClick={() => setSelectedItems(new Set())}
+												>
+													Clear Selection
+												</button>
+											</div>
+										</div>
+										<div className="flex flex-wrap items-center gap-2">
+											<button
+												type="button"
+												className="btn btn-primary btn-xs px-4"
+												onClick={handleBulkRestart}
+												disabled={restartBulk.isPending}
+											>
+												{restartBulk.isPending ? (
+													<LoadingSpinner size="sm" />
+												) : (
+													<RefreshCw className="h-3 w-3" />
+												)}
+												Restart
+											</button>
+											<button
+												type="button"
+												className="btn btn-outline btn-warning btn-xs px-4"
+												onClick={handleBulkCancel}
+												disabled={cancelBulk.isPending}
+											>
+												<XCircle className="h-3 w-3" />
+												Cancel
+											</button>
+											<button
+												type="button"
+												className="btn btn-outline btn-error btn-xs px-4"
+												onClick={handleBulkDelete}
+												disabled={deleteBulk.isPending}
+											>
+												<Trash2 className="h-3 w-3" />
+												Delete
+											</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						)}
 
-                        {/* Queue Table Card */}
-                        <div className="card border border-base-200 bg-base-100 shadow-sm">
-                            <div className="card-body p-0">
-                                {isLoading ? (
-                                    <div className="p-12"><LoadingTable columns={9} /></div>
-                                ) : queueData && queueData.length > 0 ? (
-                                    <div className="overflow-x-auto">
-                                        <table className="table-zebra table table-sm sm:table-md">
-                                            <thead className="bg-base-200/50">
-                                                <tr>
-                                                    <th className="w-12 text-center">
-                                                        <input
-                                                            type="checkbox"
-                                                            className="checkbox checkbox-xs"
-                                                            checked={isAllSelected}
-                                                            ref={(input) => {
-                                                                if (input) input.indeterminate = Boolean(isIndeterminate);
-                                                            }}
-                                                            onChange={(e) => handleSelectAll(e.target.checked)}
-                                                        />
-                                                    </th>
-                                                    <th>
-                                                        <button
-                                                            type="button"
-                                                            className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
-                                                            onClick={() => handleSort("nzb_path")}
-                                                        >
-                                                            NZB File
-                                                            {sortBy === "nzb_path" && (sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-                                                        </button>
-                                                    </th>
-                                                    <th className="font-bold text-[10px] uppercase tracking-widest opacity-60">Category</th>
-                                                    <th className="font-bold text-[10px] uppercase tracking-widest opacity-60">Size</th>
-                                                    <th className="font-bold text-[10px] uppercase tracking-widest opacity-60">Status</th>
-                                                    <th>
-                                                        <button
-                                                            type="button"
-                                                            className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
-                                                            onClick={() => handleSort("updated_at")}
-                                                        >
-                                                            Updated
-                                                            {sortBy === "updated_at" && (sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-                                                        </button>
-                                                    </th>
-                                                    <th className="w-16"></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {enrichedQueueData?.map((item: QueueItem) => (
-                                                    <tr
-                                                        key={item.id}
-                                                        className={`hover transition-colors ${selectedItems.has(item.id) ? "bg-primary/5" : ""}`}
-                                                    >
-                                                        <td className="text-center">
-                                                            <input
-                                                                type="checkbox"
-                                                                className="checkbox checkbox-xs"
-                                                                checked={selectedItems.has(item.id)}
-                                                                onChange={(e) => handleSelectItem(item.id, e.target.checked)}
-                                                            />
-                                                        </td>
-                                                        <td>
-                                                            <div className="flex flex-col min-w-0">
-                                                                <div className="flex items-center gap-2">
-                                                                    <FileCode className="h-3.5 w-3.5 shrink-0 opacity-40" />
-                                                                    <div className="truncate font-bold text-sm">
-                                                                        <PathDisplay path={item.nzb_path} maxLength={80} showFileName={true} />
-                                                                    </div>
-                                                                </div>
-                                                                <div className="mt-1 truncate pl-5.5 text-base-content/40 text-[10px]">
-                                                                    {item.target_path ? (
-                                                                        <span className="flex items-center gap-1">
-                                                                            <Box className="h-2.5 w-2.5" />
-                                                                            <PathDisplay path={item.target_path} maxLength={60} />
-                                                                        </span>
-                                                                    ) : `ID: ${item.id}`}
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                        <td>
-                                                            {item.category ? (
-                                                                <span className="badge badge-outline badge-xs py-2 font-semibold tracking-wide uppercase">{item.category}</span>
-                                                            ) : (
-                                                                <span className="opacity-30">—</span>
-                                                            )}
-                                                        </td>
-                                                        <td>
-                                                            {item.file_size ? (
-                                                                <span className="font-mono text-xs opacity-70">{formatBytes(item.file_size)}</span>
-                                                            ) : (
-                                                                <span className="opacity-30">—</span>
-                                                            )}
-                                                        </td>
-                                                        <td>
-                                                            <div className="flex flex-col gap-1">
-                                                                {item.status === QueueStatus.FAILED && item.error_message ? (
-                                                                    <div className="tooltip tooltip-left" data-tip={truncateText(item.error_message, 200)}>
-                                                                        <div className="flex items-center gap-1">
-                                                                            <StatusBadge status={item.status} />
-                                                                            <AlertCircle className="h-3 w-3 text-error" />
-                                                                        </div>
-                                                                    </div>
-                                                                ) : item.status === QueueStatus.PROCESSING && item.percentage != null ? (
-                                                                    <div className="flex flex-col gap-1 w-24">
-                                                                        <div className="flex justify-between text-[9px] font-bold font-mono opacity-60">
-                                                                            <span>PROGRESS</span>
-                                                                            <span>{item.percentage}%</span>
-                                                                        </div>
-                                                                        <progress
-                                                                            className="progress progress-primary h-1.5 w-full"
-                                                                            value={item.percentage}
-                                                                            max={100}
-                                                                        />
-                                                                    </div>
-                                                                ) : (
-                                                                    <StatusBadge status={item.status} />
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                        <td>
-                                                            <div className="flex flex-col">
-                                                                <span className="text-xs opacity-70">{formatRelativeTime(item.updated_at)}</span>
-                                                                {item.retry_count > 0 && (
-                                                                    <span className="mt-0.5 text-warning text-[9px] font-bold uppercase tracking-tighter">
-                                                                        {item.retry_count} Retries
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                        <td className="text-right">
-                                                            <div className="dropdown dropdown-end">
-                                                                <button tabIndex={0} type="button" className="btn btn-ghost btn-xs btn-square">
-                                                                    <MoreVertical className="h-4 w-4" />
-                                                                </button>
-                                                                <ul className="dropdown-content menu z-[10] w-48 rounded-box border border-base-200 bg-base-100 p-2 shadow-xl">
-                                                                    {(item.status === QueueStatus.PENDING ||
-                                                                        item.status === QueueStatus.FAILED ||
-                                                                        item.status === QueueStatus.COMPLETED) && (
-                                                                        <li>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleRetry(item.id)}
-                                                                                disabled={retryItem.isPending}
-                                                                            >
-                                                                                <PlayCircle className="h-4 w-4 text-primary" />
-                                                                                {item.status === QueueStatus.PENDING ? "Start Now" : "Retry Task"}
-                                                                            </button>
-                                                                        </li>
-                                                                    )}
-                                                                    {item.status === QueueStatus.PROCESSING && (
-                                                                        <li>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleCancel(item.id)}
-                                                                                disabled={cancelItem.isPending}
-                                                                                className="text-warning"
-                                                                            >
-                                                                                <XCircle className="h-4 w-4" />
-                                                                                Cancel Process
-                                                                            </button>
-                                                                        </li>
-                                                                    )}
-                                                                    <li>
-                                                                        <button type="button" onClick={() => handleDownload(item.id)}>
-                                                                            <Download className="h-4 w-4" />
-                                                                            Download NZB
-                                                                        </button>
-                                                                    </li>
-                                                                    <div className="divider my-1 opacity-50" />
-                                                                    {item.status !== QueueStatus.PROCESSING && (
-                                                                        <li>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleDelete(item.id)}
-                                                                                disabled={deleteItem.isPending}
-                                                                                className="text-error"
-                                                                            >
-                                                                                <Trash2 className="h-4 w-4" />
-                                                                                Delete Record
-                                                                            </button>
-                                                                        </li>
-                                                                    )}
-                                                                </ul>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center py-24">
-                                        <div className="rounded-full bg-base-200 p-6">
-                                            <List className="h-12 w-12 opacity-20" />
-                                        </div>
-                                        <h3 className="mt-6 font-bold text-base-content/60 text-lg">Empty Queue</h3>
-                                        <p className="mt-1 text-base-content/40 text-sm">
-                                            {searchTerm || statusFilter
-                                                ? "No items match your active filters"
-                                                : "There are currently no items in the processing queue"}
-                                        </p>
-                                        {(searchTerm || statusFilter) && (
-                                            <button 
-                                                type="button" 
-                                                className="btn btn-ghost btn-sm mt-6 text-primary"
-                                                onClick={() => { setSearchTerm(""); setStatusFilter(""); }}
-                                            >
-                                                Reset Filters
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+						{/* Queue Table Card */}
+						<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card-body p-0">
+								{isLoading ? (
+									<div className="p-12">
+										<LoadingTable columns={9} />
+									</div>
+								) : queueData && queueData.length > 0 ? (
+									<div className="overflow-x-auto">
+										<table className="table-zebra table-sm sm:table-md table">
+											<thead className="bg-base-200/50">
+												<tr>
+													<th className="w-12 text-center">
+														<input
+															type="checkbox"
+															className="checkbox checkbox-xs"
+															checked={isAllSelected}
+															ref={(input) => {
+																if (input) input.indeterminate = Boolean(isIndeterminate);
+															}}
+															onChange={(e) => handleSelectAll(e.target.checked)}
+														/>
+													</th>
+													<th>
+														<button
+															type="button"
+															className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
+															onClick={() => handleSort("nzb_path")}
+														>
+															NZB File
+															{sortBy === "nzb_path" &&
+																(sortOrder === "asc" ? (
+																	<ChevronUp className="h-3 w-3" />
+																) : (
+																	<ChevronDown className="h-3 w-3" />
+																))}
+														</button>
+													</th>
+													<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+														Category
+													</th>
+													<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+														Size
+													</th>
+													<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+														Status
+													</th>
+													<th>
+														<button
+															type="button"
+															className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
+															onClick={() => handleSort("updated_at")}
+														>
+															Updated
+															{sortBy === "updated_at" &&
+																(sortOrder === "asc" ? (
+																	<ChevronUp className="h-3 w-3" />
+																) : (
+																	<ChevronDown className="h-3 w-3" />
+																))}
+														</button>
+													</th>
+													<th className="w-16" />
+												</tr>
+											</thead>
+											<tbody>
+												{enrichedQueueData?.map((item: QueueItem) => (
+													<tr
+														key={item.id}
+														className={`hover transition-colors ${selectedItems.has(item.id) ? "bg-primary/5" : ""}`}
+													>
+														<td className="text-center">
+															<input
+																type="checkbox"
+																className="checkbox checkbox-xs"
+																checked={selectedItems.has(item.id)}
+																onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+															/>
+														</td>
+														<td>
+															<div className="flex min-w-0 flex-col">
+																<div className="flex items-center gap-2">
+																	<FileCode className="h-3.5 w-3.5 shrink-0 opacity-40" />
+																	<div className="truncate font-bold text-sm">
+																		<PathDisplay
+																			path={item.nzb_path}
+																			maxLength={80}
+																			showFileName={true}
+																		/>
+																	</div>
+																</div>
+																<div className="mt-1 truncate pl-5.5 text-[10px] text-base-content/40">
+																	{item.target_path ? (
+																		<span className="flex items-center gap-1">
+																			<Box className="h-2.5 w-2.5" />
+																			<PathDisplay path={item.target_path} maxLength={60} />
+																		</span>
+																	) : (
+																		`ID: ${item.id}`
+																	)}
+																</div>
+															</div>
+														</td>
+														<td>
+															{item.category ? (
+																<span className="badge badge-outline badge-xs py-2 font-semibold uppercase tracking-wide">
+																	{item.category}
+																</span>
+															) : (
+																<span className="opacity-30">—</span>
+															)}
+														</td>
+														<td>
+															{item.file_size ? (
+																<span className="font-mono text-xs opacity-70">
+																	{formatBytes(item.file_size)}
+																</span>
+															) : (
+																<span className="opacity-30">—</span>
+															)}
+														</td>
+														<td>
+															<div className="flex flex-col gap-1">
+																{item.status === QueueStatus.FAILED && item.error_message ? (
+																	<div
+																		className="tooltip tooltip-left"
+																		data-tip={truncateText(item.error_message, 200)}
+																	>
+																		<div className="flex items-center gap-1">
+																			<StatusBadge status={item.status} />
+																			<AlertCircle className="h-3 w-3 text-error" />
+																		</div>
+																	</div>
+																) : item.status === QueueStatus.PROCESSING &&
+																	item.percentage != null ? (
+																	<div className="flex w-24 flex-col gap-1">
+																		<div className="flex justify-between font-bold font-mono text-[9px] opacity-60">
+																			<span>PROGRESS</span>
+																			<span>{item.percentage}%</span>
+																		</div>
+																		<progress
+																			className="progress progress-primary h-1.5 w-full"
+																			value={item.percentage}
+																			max={100}
+																		/>
+																	</div>
+																) : (
+																	<StatusBadge status={item.status} />
+																)}
+															</div>
+														</td>
+														<td>
+															<div className="flex flex-col">
+																<span className="text-xs opacity-70">
+																	{formatRelativeTime(item.updated_at)}
+																</span>
+																{item.retry_count > 0 && (
+																	<span className="mt-0.5 font-bold text-[9px] text-warning uppercase tracking-tighter">
+																		{item.retry_count} Retries
+																	</span>
+																)}
+															</div>
+														</td>
+														<td className="text-right">
+															<div className="dropdown dropdown-end">
+																<button
+																	tabIndex={0}
+																	type="button"
+																	className="btn btn-ghost btn-xs btn-square"
+																>
+																	<MoreVertical className="h-4 w-4" />
+																</button>
+																<ul className="dropdown-content menu z-[10] w-48 rounded-box border border-base-200 bg-base-100 p-2 shadow-xl">
+																	{(item.status === QueueStatus.PENDING ||
+																		item.status === QueueStatus.FAILED ||
+																		item.status === QueueStatus.COMPLETED) && (
+																		<li>
+																			<button
+																				type="button"
+																				onClick={() => handleRetry(item.id)}
+																				disabled={retryItem.isPending}
+																			>
+																				<PlayCircle className="h-4 w-4 text-primary" />
+																				{item.status === QueueStatus.PENDING
+																					? "Start Now"
+																					: "Retry Task"}
+																			</button>
+																		</li>
+																	)}
+																	{item.status === QueueStatus.PROCESSING && (
+																		<li>
+																			<button
+																				type="button"
+																				onClick={() => handleCancel(item.id)}
+																				disabled={cancelItem.isPending}
+																				className="text-warning"
+																			>
+																				<XCircle className="h-4 w-4" />
+																				Cancel Process
+																			</button>
+																		</li>
+																	)}
+																	<li>
+																		<button type="button" onClick={() => handleDownload(item.id)}>
+																			<Download className="h-4 w-4" />
+																			Download NZB
+																		</button>
+																	</li>
+																	<div className="divider my-1 opacity-50" />
+																	{item.status !== QueueStatus.PROCESSING && (
+																		<li>
+																			<button
+																				type="button"
+																				onClick={() => handleDelete(item.id)}
+																				disabled={deleteItem.isPending}
+																				className="text-error"
+																			>
+																				<Trash2 className="h-4 w-4" />
+																				Delete Record
+																			</button>
+																		</li>
+																	)}
+																</ul>
+															</div>
+														</td>
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+								) : (
+									<div className="flex flex-col items-center justify-center py-24">
+										<div className="rounded-full bg-base-200 p-6">
+											<List className="h-12 w-12 opacity-20" />
+										</div>
+										<h3 className="mt-6 font-bold text-base-content/60 text-lg">Empty Queue</h3>
+										<p className="mt-1 text-base-content/40 text-sm">
+											{searchTerm || statusFilter
+												? "No items match your active filters"
+												: "There are currently no items in the processing queue"}
+										</p>
+										{(searchTerm || statusFilter) && (
+											<button
+												type="button"
+												className="btn btn-ghost btn-sm mt-6 text-primary"
+												onClick={() => {
+													setSearchTerm("");
+													setStatusFilter("");
+												}}
+											>
+												Reset Filters
+											</button>
+										)}
+									</div>
+								)}
+							</div>
+						</div>
 
-                        {/* Pagination */}
-                        {totalPages > 1 && (
-                            <div className="mt-2">
-                                <Pagination
-                                    currentPage={page + 1}
-                                    totalPages={totalPages}
-                                    onPageChange={(newPage) => setPage(newPage - 1)}
-                                    totalItems={meta?.total}
-                                    itemsPerPage={pageSize}
-                                    showSummary={true}
-                                />
-                            </div>
-                        )}
-                    </div>
+						{/* Pagination */}
+						{totalPages > 1 && (
+							<div className="mt-2">
+								<Pagination
+									currentPage={page + 1}
+									totalPages={totalPages}
+									onPageChange={(newPage) => setPage(newPage - 1)}
+									totalItems={meta?.total}
+									itemsPerPage={pageSize}
+									showSummary={true}
+								/>
+							</div>
+						)}
+					</div>
 				</div>
 			</div>
 		</div>

@@ -59,7 +59,9 @@ export function MetadataConfigSection({
 			{/* Storage Location Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Storage Location</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Storage Location
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
@@ -75,7 +77,9 @@ export function MetadataConfigSection({
 							placeholder="/path/to/metadata"
 							required
 						/>
-						<p className="label text-[10px] opacity-60">Directory path where file metadata (.meta) is stored.</p>
+						<p className="label text-[10px] opacity-60">
+							Directory path where file metadata (.meta) is stored.
+						</p>
 					</fieldset>
 
 					<div className="flex flex-col justify-end pb-1">
@@ -85,7 +89,11 @@ export function MetadataConfigSection({
 							onClick={() => batchExport.mutate("/")}
 							disabled={batchExport.isPending || !formData.root_path.trim()}
 						>
-							{batchExport.isPending ? <span className="loading loading-spinner loading-xs" /> : <Download className="h-3.5 w-3.5" />}
+							{batchExport.isPending ? (
+								<span className="loading loading-spinner loading-xs" />
+							) : (
+								<Download className="h-3.5 w-3.5" />
+							)}
 							Export All Metadata as NZB
 						</button>
 					</div>
@@ -95,7 +103,9 @@ export function MetadataConfigSection({
 			{/* Deletion & Cleanup Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Auto-Cleanup & Deletion</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Auto-Cleanup & Deletion
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
@@ -110,7 +120,9 @@ export function MetadataConfigSection({
 						/>
 						<div className="flex flex-col">
 							<span className="label-text font-semibold text-xs">Sync NZB Deletion</span>
-							<span className="label-text-alt text-[9px] opacity-60">Delete original NZB with metadata</span>
+							<span className="label-text-alt text-[9px] opacity-60">
+								Delete original NZB with metadata
+							</span>
 						</div>
 					</label>
 
@@ -124,7 +136,9 @@ export function MetadataConfigSection({
 						/>
 						<div className="flex flex-col">
 							<span className="label-text font-semibold text-xs">Cleanup Failed Imports</span>
-							<span className="label-text-alt text-[9px] opacity-60">Delete NZB if import fails</span>
+							<span className="label-text-alt text-[9px] opacity-60">
+								Delete NZB if import fails
+							</span>
 						</div>
 					</label>
 
@@ -147,7 +161,9 @@ export function MetadataConfigSection({
 			{/* Mirroring & Backup Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Mirroring & Backups</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Mirroring & Backups
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
@@ -162,7 +178,9 @@ export function MetadataConfigSection({
 						/>
 						<div>
 							<span className="font-bold text-sm">Enable Periodic Metadata Mirroring</span>
-							<p className="text-[10px] opacity-60">Periodically mirror .meta files to an alternate directory.</p>
+							<p className="text-[10px] opacity-60">
+								Periodically mirror .meta files to an alternate directory.
+							</p>
 						</div>
 					</div>
 
@@ -187,7 +205,9 @@ export function MetadataConfigSection({
 									className="input w-full bg-base-200/50 font-mono"
 									value={formData.backup?.interval_hours ?? 24}
 									disabled={isReadOnly}
-									onChange={(e) => handleBackupChange("interval_hours", Number.parseInt(e.target.value, 10) || 24)}
+									onChange={(e) =>
+										handleBackupChange("interval_hours", Number.parseInt(e.target.value, 10) || 24)
+									}
 									min="1"
 								/>
 							</fieldset>
@@ -199,7 +219,9 @@ export function MetadataConfigSection({
 									className="input w-full bg-base-200/50 font-mono"
 									value={formData.backup?.keep_backups ?? 10}
 									disabled={isReadOnly}
-									onChange={(e) => handleBackupChange("keep_backups", Number.parseInt(e.target.value, 10) || 10)}
+									onChange={(e) =>
+										handleBackupChange("keep_backups", Number.parseInt(e.target.value, 10) || 10)
+									}
 									min="1"
 								/>
 							</fieldset>
@@ -217,7 +239,11 @@ export function MetadataConfigSection({
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating || !formData.root_path.trim()}
 					>
-						{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
 						Save Metadata Configuration
 					</button>
 				</div>

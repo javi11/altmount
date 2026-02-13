@@ -64,11 +64,17 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 				<div className="flex items-start justify-between">
 					<div className="min-w-0 flex-1">
 						<div className="flex items-center gap-2">
-							<div className={`h-2 w-2 rounded-full shrink-0 ${
-								provider.state.toLowerCase() === 'active' 
-									? (provider.error_count > 10 ? 'bg-warning animate-pulse' : 'bg-success') 
-									: (provider.state.toLowerCase() === 'failed' ? 'bg-error' : 'bg-base-300')
-							}`} />
+							<div
+								className={`h-2 w-2 shrink-0 rounded-full ${
+									provider.state.toLowerCase() === "active"
+										? provider.error_count > 10
+											? "animate-pulse bg-warning"
+											: "bg-success"
+										: provider.state.toLowerCase() === "failed"
+											? "bg-error"
+											: "bg-base-300"
+								}`}
+							/>
 							<h3 className="card-title truncate font-medium text-base">{provider.host}</h3>
 						</div>
 						{provider.username && (

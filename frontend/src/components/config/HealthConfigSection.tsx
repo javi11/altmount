@@ -98,17 +98,20 @@ export function HealthConfigSection({
 			{/* Health System Status */}
 			<section className="space-y-4">
 				<div className="mb-2 flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Service Status</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Service Status
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
-				
+
 				<div className="card border border-base-300 bg-base-200/50 shadow-sm">
 					<div className="card-body p-4 sm:p-6">
 						<div className="flex items-center justify-between gap-4">
 							<div className="flex-1">
 								<h3 className="font-bold text-sm sm:text-base">Enable Health Monitoring</h3>
 								<p className="mt-1 text-base-content/60 text-xs leading-relaxed">
-									Automatically scan your library for corrupted or missing segments and trigger repairs.
+									Automatically scan your library for corrupted or missing segments and trigger
+									repairs.
 								</p>
 							</div>
 							<input
@@ -128,7 +131,9 @@ export function HealthConfigSection({
 					{/* Library Synchronization Section */}
 					<section className="space-y-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Library Discovery</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+								Library Discovery
+							</h4>
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
@@ -150,30 +155,56 @@ export function HealthConfigSection({
 											<span>{validationError}</span>
 										</div>
 									)}
-									<p className="label text-[10px] opacity-60">Base directory where your media is organized.</p>
+									<p className="label text-[10px] opacity-60">
+										Base directory where your media is organized.
+									</p>
 								</fieldset>
 
 								<div className="flex flex-wrap items-center gap-6">
 									<label className="label cursor-pointer justify-start gap-3 p-0">
-										<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.cleanup_orphaned_metadata ?? false} disabled={isReadOnly} onChange={(e) => handleInputChange("cleanup_orphaned_metadata", e.target.checked)} />
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary"
+											checked={formData.cleanup_orphaned_metadata ?? false}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleInputChange("cleanup_orphaned_metadata", e.target.checked)
+											}
+										/>
 										<div className="flex flex-col">
-											<span className="label-text font-semibold text-xs">Auto-Cleanup Orphaned Files</span>
-											<span className="label-text-alt text-[9px] opacity-60">Delete missing library/meta files</span>
+											<span className="label-text font-semibold text-xs">
+												Auto-Cleanup Orphaned Files
+											</span>
+											<span className="label-text-alt text-[9px] opacity-60">
+												Delete missing library/meta files
+											</span>
 										</div>
 									</label>
-									
+
 									<label className="label cursor-pointer justify-start gap-3 p-0">
-										<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.resolve_repair_on_import ?? false} disabled={isReadOnly} onChange={(e) => handleInputChange("resolve_repair_on_import", e.target.checked)} />
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary"
+											checked={formData.resolve_repair_on_import ?? false}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleInputChange("resolve_repair_on_import", e.target.checked)
+											}
+										/>
 										<div className="flex flex-col">
 											<span className="label-text font-semibold text-xs">Resolve on Import</span>
-											<span className="label-text-alt text-[9px] opacity-60">Auto-fix repairs when new file arrives</span>
+											<span className="label-text-alt text-[9px] opacity-60">
+												Auto-fix repairs when new file arrives
+											</span>
 										</div>
 									</label>
 								</div>
 							</div>
 
 							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Test Sync Strategy</h5>
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Test Sync Strategy
+								</h5>
 								<div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
 									<button
 										type="button"
@@ -181,21 +212,33 @@ export function HealthConfigSection({
 										onClick={handleDryRun}
 										disabled={!formData.library_dir?.trim() || dryRunLoading || isReadOnly}
 									>
-										{dryRunLoading ? <span className="loading loading-spinner loading-xs" /> : <TestTube className="h-3 w-3" />}
+										{dryRunLoading ? (
+											<span className="loading loading-spinner loading-xs" />
+										) : (
+											<TestTube className="h-3 w-3" />
+										)}
 										Perform Dry Run
 									</button>
 
 									{dryRunResult ? (
 										<div className="grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-[10px]">
 											<span className="uppercase opacity-60">Metadata Orphans:</span>
-											<span className="text-right font-bold">{dryRunResult.orphaned_metadata_count}</span>
+											<span className="text-right font-bold">
+												{dryRunResult.orphaned_metadata_count}
+											</span>
 											<span className="uppercase opacity-60">Library Orphans:</span>
-											<span className="text-right font-bold">{dryRunResult.orphaned_library_files}</span>
+											<span className="text-right font-bold">
+												{dryRunResult.orphaned_library_files}
+											</span>
 											<span className="uppercase opacity-60">Stale DB Records:</span>
-											<span className="text-right font-bold">{dryRunResult.database_records_to_clean}</span>
+											<span className="text-right font-bold">
+												{dryRunResult.database_records_to_clean}
+											</span>
 										</div>
 									) : (
-										<p className="py-2 text-center text-[10px] italic opacity-40">No test data available.</p>
+										<p className="py-2 text-center text-[10px] italic opacity-40">
+											No test data available.
+										</p>
 									)}
 								</div>
 							</div>
@@ -205,54 +248,126 @@ export function HealthConfigSection({
 					{/* Performance & Validation Tuning Section */}
 					<section className="space-y-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Validation & Performance</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+								Validation & Performance
+							</h4>
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
 						<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
 							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-semibold">Max Connections</legend>
-								<input type="number" className="input input-sm w-full bg-base-200/50 font-mono" value={formData.max_connections_for_health_checks} disabled={isReadOnly} min={1} onChange={(e) => handleInputChange("max_connections_for_health_checks", Number.parseInt(e.target.value, 10) || 1)} />
+								<input
+									type="number"
+									className="input input-sm w-full bg-base-200/50 font-mono"
+									value={formData.max_connections_for_health_checks}
+									disabled={isReadOnly}
+									min={1}
+									onChange={(e) =>
+										handleInputChange(
+											"max_connections_for_health_checks",
+											Number.parseInt(e.target.value, 10) || 1,
+										)
+									}
+								/>
 								<p className="label text-[9px] opacity-50">Concurrent NNTP requests.</p>
 							</fieldset>
 
 							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-semibold">Max Concurrent Jobs</legend>
-								<input type="number" className="input input-sm w-full bg-base-200/50 font-mono" value={formData.max_concurrent_jobs} disabled={isReadOnly} min={1} onChange={(e) => handleInputChange("max_concurrent_jobs", Number.parseInt(e.target.value, 10) || 1)} />
+								<input
+									type="number"
+									className="input input-sm w-full bg-base-200/50 font-mono"
+									value={formData.max_concurrent_jobs}
+									disabled={isReadOnly}
+									min={1}
+									onChange={(e) =>
+										handleInputChange(
+											"max_concurrent_jobs",
+											Number.parseInt(e.target.value, 10) || 1,
+										)
+									}
+								/>
 								<p className="label text-[9px] opacity-50">Simultaneous file scans.</p>
 							</fieldset>
 
 							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-semibold">Scan Interval (s)</legend>
-								<input type="number" className="input input-sm w-full bg-base-200/50 font-mono" value={formData.check_interval_seconds} disabled={isReadOnly} min={5} onChange={(e) => handleInputChange("check_interval_seconds", Number.parseInt(e.target.value, 10) || 5)} />
+								<input
+									type="number"
+									className="input input-sm w-full bg-base-200/50 font-mono"
+									value={formData.check_interval_seconds}
+									disabled={isReadOnly}
+									min={5}
+									onChange={(e) =>
+										handleInputChange(
+											"check_interval_seconds",
+											Number.parseInt(e.target.value, 10) || 5,
+										)
+									}
+								/>
 								<p className="label text-[9px] opacity-50">Queue processing delay.</p>
 							</fieldset>
 
 							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-semibold">Sync Interval (m)</legend>
-								<input type="number" className="input input-sm w-full bg-base-200/50 font-mono" value={formData.library_sync_interval_minutes} disabled={isReadOnly} min={0} onChange={(e) => handleInputChange("library_sync_interval_minutes", Number.parseInt(e.target.value, 10) || 0)} />
+								<input
+									type="number"
+									className="input input-sm w-full bg-base-200/50 font-mono"
+									value={formData.library_sync_interval_minutes}
+									disabled={isReadOnly}
+									min={0}
+									onChange={(e) =>
+										handleInputChange(
+											"library_sync_interval_minutes",
+											Number.parseInt(e.target.value, 10) || 0,
+										)
+									}
+								/>
 								<p className="label text-[9px] opacity-50">Library discovery frequency.</p>
 							</fieldset>
 						</div>
 
 						<div className="mt-4 grid grid-cols-1 gap-8 rounded-2xl border border-base-300 bg-base-200/30 p-6 lg:grid-cols-2">
 							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Verification Strategy</h5>
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Verification Strategy
+								</h5>
 								<div className="flex flex-wrap gap-x-8 gap-y-4">
 									<label className="label cursor-pointer justify-start gap-3 p-0">
-										<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.check_all_segments ?? false} disabled={isReadOnly} onChange={(e) => handleInputChange("check_all_segments", e.target.checked)} />
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary"
+											checked={formData.check_all_segments ?? false}
+											disabled={isReadOnly}
+											onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+										/>
 										<div className="flex flex-col">
-											<span className="label-text font-semibold text-xs">Deep Check (All Segments)</span>
-											<span className="label-text-alt text-[9px] opacity-60">Full file validation (Slower)</span>
+											<span className="label-text font-semibold text-xs">
+												Deep Check (All Segments)
+											</span>
+											<span className="label-text-alt text-[9px] opacity-60">
+												Full file validation (Slower)
+											</span>
 										</div>
 									</label>
 
 									{!formData.check_all_segments && (
 										<label className="label cursor-pointer justify-start gap-3 p-0">
-											<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.verify_data ?? false} disabled={isReadOnly} onChange={(e) => handleInputChange("verify_data", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-sm checkbox-primary"
+												checked={formData.verify_data ?? false}
+												disabled={isReadOnly}
+												onChange={(e) => handleInputChange("verify_data", e.target.checked)}
+											/>
 											<div className="flex flex-col">
-												<span className="label-text font-semibold text-xs">Hybrid Verification</span>
-												<span className="label-text-alt text-[9px] opacity-60">Read 1-byte per segment</span>
+												<span className="label-text font-semibold text-xs">
+													Hybrid Verification
+												</span>
+												<span className="label-text-alt text-[9px] opacity-60">
+													Read 1-byte per segment
+												</span>
 											</div>
 										</label>
 									)}
@@ -261,13 +376,31 @@ export function HealthConfigSection({
 
 							{!formData.check_all_segments && (
 								<div className="space-y-4">
-									<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Random Sampling</h5>
+									<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+										Random Sampling
+									</h5>
 									<fieldset className="fieldset min-w-0 p-0">
 										<div className="flex items-center gap-4">
-											<input type="range" min="1" max="100" value={formData.segment_sample_percentage} className="range range-primary range-xs flex-1" onChange={(e) => handleInputChange("segment_sample_percentage", Number.parseInt(e.target.value, 10))} />
-											<span className="w-12 text-right font-bold font-mono text-xs">{formData.segment_sample_percentage}%</span>
+											<input
+												type="range"
+												min="1"
+												max="100"
+												value={formData.segment_sample_percentage}
+												className="range range-primary range-xs flex-1"
+												onChange={(e) =>
+													handleInputChange(
+														"segment_sample_percentage",
+														Number.parseInt(e.target.value, 10),
+													)
+												}
+											/>
+											<span className="w-12 text-right font-bold font-mono text-xs">
+												{formData.segment_sample_percentage}%
+											</span>
 										</div>
-										<p className="label mt-1 text-[9px] opacity-50">Percentage of segments to randomly verify per file.</p>
+										<p className="label mt-1 text-[9px] opacity-50">
+											Percentage of segments to randomly verify per file.
+										</p>
 									</fieldset>
 								</div>
 							)}
@@ -283,7 +416,11 @@ export function HealthConfigSection({
 								onClick={handleSave}
 								disabled={isUpdating || !!validationError || !hasChanges}
 							>
-								{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+								{isUpdating ? (
+									<span className="loading loading-spinner loading-sm" />
+								) : (
+									<Save className="h-4 w-4" />
+								)}
 								Save Health Configuration
 							</button>
 						</div>

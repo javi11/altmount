@@ -262,10 +262,12 @@ export function ArrsConfigSection({
 			{/* Enable/Disable Arrs */}
 			<section className="space-y-4">
 				<div className="mb-2 flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Service Status</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Service Status
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
-				
+
 				<div className="card border border-base-300 bg-base-200/50 shadow-sm">
 					<div className="card-body p-4 sm:p-6">
 						<div className="flex items-center justify-between gap-4">
@@ -292,7 +294,9 @@ export function ArrsConfigSection({
 					{/* Connectivity Settings */}
 					<section className="space-y-4">
 						<div className="mb-2 flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Connectivity</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+								Connectivity
+							</h4>
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
@@ -328,15 +332,21 @@ export function ArrsConfigSection({
 								</button>
 							</div>
 						</div>
-						
-						{webhookSuccess && <div className="alert alert-success py-2 text-xs shadow-sm">{webhookSuccess}</div>}
-						{webhookError && <div className="alert alert-error py-2 text-xs shadow-sm">{webhookError}</div>}
+
+						{webhookSuccess && (
+							<div className="alert alert-success py-2 text-xs shadow-sm">{webhookSuccess}</div>
+						)}
+						{webhookError && (
+							<div className="alert alert-error py-2 text-xs shadow-sm">{webhookError}</div>
+						)}
 					</section>
 
 					{/* Queue Maintenance Section */}
 					<section className="space-y-4">
 						<div className="mb-2 flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Queue Maintenance</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+								Queue Maintenance
+							</h4>
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
@@ -344,84 +354,109 @@ export function ArrsConfigSection({
 							<div className="space-y-6">
 								<div className="space-y-3">
 									<label className="label cursor-pointer justify-start gap-3 py-0">
-										<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.queue_cleanup_enabled ?? true} onChange={(e) => handleFormChange("queue_cleanup_enabled", e.target.checked)} disabled={isReadOnly} />
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary"
+											checked={formData.queue_cleanup_enabled ?? true}
+											onChange={(e) => handleFormChange("queue_cleanup_enabled", e.target.checked)}
+											disabled={isReadOnly}
+										/>
 										<span className="label-text font-medium text-xs">Enable Automatic Cleanup</span>
 									</label>
 									<label className="label cursor-pointer justify-start gap-3 py-0">
-										<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.cleanup_automatic_import_failure ?? false} onChange={(e) => handleFormChange("cleanup_automatic_import_failure", e.target.checked)} disabled={isReadOnly} />
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary"
+											checked={formData.cleanup_automatic_import_failure ?? false}
+											onChange={(e) =>
+												handleFormChange("cleanup_automatic_import_failure", e.target.checked)
+											}
+											disabled={isReadOnly}
+										/>
 										<span className="label-text font-medium text-xs">Cleanup failed imports</span>
 									</label>
 								</div>
 
-																<div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+								<div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+									<div className="space-y-1">
+										<span className="font-bold text-[10px] uppercase opacity-50">Interval (s)</span>
 
-																	<div className="space-y-1">
+										<input
+											type="number"
+											className="input input-xs input-bordered w-full font-mono"
+											value={formData.queue_cleanup_interval_seconds ?? 10}
+											onChange={(e) =>
+												handleFormChange(
+													"queue_cleanup_interval_seconds",
+													Number.parseInt(e.target.value, 10) || 10,
+												)
+											}
+										/>
+									</div>
 
-																		<span className="font-bold text-[10px] uppercase opacity-50">Interval (s)</span>
+									<div className="space-y-1">
+										<span className="font-bold text-[10px] uppercase opacity-50">
+											Grace Period (m)
+										</span>
 
-																		<input
+										<input
+											type="number"
+											className="input input-xs input-bordered w-full font-mono"
+											value={formData.queue_cleanup_grace_period_minutes ?? 10}
+											onChange={(e) =>
+												handleFormChange(
+													"queue_cleanup_grace_period_minutes",
+													Number.parseInt(e.target.value, 10) || 10,
+												)
+											}
+										/>
+									</div>
 
-																			type="number"
+									<div className="col-span-2 space-y-1 lg:col-span-1">
+										<span className="font-bold text-[10px] uppercase opacity-50">Max Workers</span>
 
-																			className="input input-xs input-bordered w-full font-mono"
-
-																			value={formData.queue_cleanup_interval_seconds ?? 10}
-
-																			onChange={(e) => handleFormChange("queue_cleanup_interval_seconds", Number.parseInt(e.target.value, 10) || 10)}
-
-																		/>
-
-																	</div>
-
-																	<div className="space-y-1">
-
-																		<span className="font-bold text-[10px] uppercase opacity-50">Grace Period (m)</span>
-
-																		<input
-
-																			type="number"
-
-																			className="input input-xs input-bordered w-full font-mono"
-
-																			value={formData.queue_cleanup_grace_period_minutes ?? 10}
-
-																			onChange={(e) => handleFormChange("queue_cleanup_grace_period_minutes", Number.parseInt(e.target.value, 10) || 10)}
-
-																		/>
-
-																	</div>
-
-																	<div className="col-span-2 space-y-1 lg:col-span-1">
-
-																		<span className="font-bold text-[10px] uppercase opacity-50">Max Workers</span>
-
-																		<input
-
-																			type="number"
-
-																			className="input input-xs input-bordered w-full font-mono"
-
-																			value={formData.max_workers ?? 1}
-
-																			onChange={(e) => handleFormChange("max_workers", Number.parseInt(e.target.value, 10) || 1)}
-
-																		/>
-
-																	</div>
-
-																</div>
+										<input
+											type="number"
+											className="input input-xs input-bordered w-full font-mono"
+											value={formData.max_workers ?? 1}
+											onChange={(e) =>
+												handleFormChange("max_workers", Number.parseInt(e.target.value, 10) || 1)
+											}
+										/>
+									</div>
+								</div>
 							</div>
 
 							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Ignored Error Rules</h5>
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Ignored Error Rules
+								</h5>
 								<div className="custom-scrollbar max-h-40 space-y-2 overflow-y-auto pr-2">
 									{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
-										<div key={index} className="flex items-center justify-between gap-2 rounded-lg bg-base-200 p-2">
+										<div
+											key={index}
+											className="flex items-center justify-between gap-2 rounded-lg bg-base-200 p-2"
+										>
 											<div className="flex min-w-0 flex-1 items-center gap-2">
-												<input type="checkbox" className="checkbox checkbox-xs" checked={msg.enabled} onChange={() => handleToggleIgnoreMessage(index)} />
-												<span className={`truncate font-mono text-[10px] ${!msg.enabled ? "line-through opacity-40" : ""}`}>{msg.message}</span>
+												<input
+													type="checkbox"
+													className="checkbox checkbox-xs"
+													checked={msg.enabled}
+													onChange={() => handleToggleIgnoreMessage(index)}
+												/>
+												<span
+													className={`truncate font-mono text-[10px] ${!msg.enabled ? "line-through opacity-40" : ""}`}
+												>
+													{msg.message}
+												</span>
 											</div>
-											<button type="button" className="btn btn-ghost btn-xs px-1" onClick={() => handleRemoveIgnoreMessage(index)}><Trash2 className="h-3 w-3 text-error" /></button>
+											<button
+												type="button"
+												className="btn btn-ghost btn-xs px-1"
+												onClick={() => handleRemoveIgnoreMessage(index)}
+											>
+												<Trash2 className="h-3 w-3 text-error" />
+											</button>
 										</div>
 									))}
 								</div>
@@ -439,7 +474,13 @@ export function ArrsConfigSection({
 											}
 										}}
 									/>
-									<button type="button" className="btn btn-primary btn-xs" onClick={handleAddIgnoreMessage}>Add</button>
+									<button
+										type="button"
+										className="btn btn-primary btn-xs"
+										onClick={handleAddIgnoreMessage}
+									>
+										Add
+									</button>
 								</div>
 							</div>
 						</div>
@@ -450,24 +491,60 @@ export function ArrsConfigSection({
 						{/* Radarr */}
 						<section className="space-y-4">
 							<div className="mb-2 flex items-center justify-between">
-								<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Radarr Instances</h4>
-								<button type="button" className="btn btn-xs btn-primary btn-outline px-4" onClick={() => { setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" }); setShowAddInstance(true); }} disabled={isReadOnly}><Plus className="h-3 w-3" /> Add Radarr</button>
+								<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+									Radarr Instances
+								</h4>
+								<button
+									type="button"
+									className="btn btn-xs btn-primary btn-outline px-4"
+									onClick={() => {
+										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" });
+										setShowAddInstance(true);
+									}}
+									disabled={isReadOnly}
+								>
+									<Plus className="h-3 w-3" /> Add Radarr
+								</button>
 							</div>
 							<div className="grid grid-cols-1 gap-4">
-								{formData.radarr_instances.map((instance, index) => renderInstance(instance, "radarr", index))}
-								{formData.radarr_instances.length === 0 && <div className="rounded-xl border border-base-300 border-dashed bg-base-200/30 py-6 text-center text-base-content/40 text-xs">No Radarr instances configured.</div>}
+								{formData.radarr_instances.map((instance, index) =>
+									renderInstance(instance, "radarr", index),
+								)}
+								{formData.radarr_instances.length === 0 && (
+									<div className="rounded-xl border border-base-300 border-dashed bg-base-200/30 py-6 text-center text-base-content/40 text-xs">
+										No Radarr instances configured.
+									</div>
+								)}
 							</div>
 						</section>
 
 						{/* Sonarr */}
 						<section className="space-y-4">
 							<div className="mb-2 flex items-center justify-between">
-								<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Sonarr Instances</h4>
-								<button type="button" className="btn btn-xs btn-primary btn-outline px-4" onClick={() => { setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" }); setShowAddInstance(true); }} disabled={isReadOnly}><Plus className="h-3 w-3" /> Add Sonarr</button>
+								<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+									Sonarr Instances
+								</h4>
+								<button
+									type="button"
+									className="btn btn-xs btn-primary btn-outline px-4"
+									onClick={() => {
+										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" });
+										setShowAddInstance(true);
+									}}
+									disabled={isReadOnly}
+								>
+									<Plus className="h-3 w-3" /> Add Sonarr
+								</button>
 							</div>
 							<div className="grid grid-cols-1 gap-4">
-								{formData.sonarr_instances.map((instance, index) => renderInstance(instance, "sonarr", index))}
-								{formData.sonarr_instances.length === 0 && <div className="rounded-xl border border-base-300 border-dashed bg-base-200/30 py-6 text-center text-base-content/40 text-xs">No Sonarr instances configured.</div>}
+								{formData.sonarr_instances.map((instance, index) =>
+									renderInstance(instance, "sonarr", index),
+								)}
+								{formData.sonarr_instances.length === 0 && (
+									<div className="rounded-xl border border-base-300 border-dashed bg-base-200/30 py-6 text-center text-base-content/40 text-xs">
+										No Sonarr instances configured.
+									</div>
+								)}
 							</div>
 						</section>
 					</div>
@@ -481,7 +558,11 @@ export function ArrsConfigSection({
 								onClick={handleSave}
 								disabled={isUpdating || validationErrors.length > 0}
 							>
-								{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+								{isUpdating ? (
+									<span className="loading loading-spinner loading-sm" />
+								) : (
+									<Save className="h-4 w-4" />
+								)}
 								Save Arrs Configuration
 							</button>
 						</div>
@@ -493,31 +574,74 @@ export function ArrsConfigSection({
 			{showAddInstance && (
 				<div className="modal modal-open">
 					<div className="modal-box max-w-sm border border-base-300 p-4 shadow-2xl sm:max-w-md sm:p-6">
-						<h3 className="mb-6 border-base-300 border-b pb-2 font-bold text-lg">Add {newInstance.type === "radarr" ? "Radarr" : "Sonarr"} Instance</h3>
+						<h3 className="mb-6 border-base-300 border-b pb-2 font-bold text-lg">
+							Add {newInstance.type === "radarr" ? "Radarr" : "Sonarr"} Instance
+						</h3>
 						<div className="space-y-4">
 							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-bold text-[10px]">NAME</legend>
-								<input type="text" className="input input-bordered w-full" value={newInstance.name} onChange={(e) => setNewInstance({ ...newInstance, name: e.target.value })} placeholder="My Instance" />
+								<input
+									type="text"
+									className="input input-bordered w-full"
+									value={newInstance.name}
+									onChange={(e) => setNewInstance({ ...newInstance, name: e.target.value })}
+									placeholder="My Instance"
+								/>
 							</fieldset>
 							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-bold text-[10px]">URL</legend>
-								<input type="url" className="input input-bordered w-full" value={newInstance.url} onChange={(e) => setNewInstance({ ...newInstance, url: e.target.value })} placeholder="http://192.168.1.10:7878" />
+								<input
+									type="url"
+									className="input input-bordered w-full"
+									value={newInstance.url}
+									onChange={(e) => setNewInstance({ ...newInstance, url: e.target.value })}
+									placeholder="http://192.168.1.10:7878"
+								/>
 							</fieldset>
 							<fieldset className="fieldset min-w-0">
 								<legend className="fieldset-legend font-bold text-[10px]">API KEY</legend>
-								<input type="password" placeholder="••••••••" className="input input-bordered w-full" value={newInstance.api_key} onChange={(e) => setNewInstance({ ...newInstance, api_key: e.target.value })} />
+								<input
+									type="password"
+									placeholder="••••••••"
+									className="input input-bordered w-full"
+									value={newInstance.api_key}
+									onChange={(e) => setNewInstance({ ...newInstance, api_key: e.target.value })}
+								/>
 							</fieldset>
 							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-bold text-[10px]">CATEGORY (OPTIONAL)</legend>
-								<select className="select select-bordered w-full" value={newInstance.category} onChange={(e) => setNewInstance({ ...newInstance, category: e.target.value })}>
+								<legend className="fieldset-legend font-bold text-[10px]">
+									CATEGORY (OPTIONAL)
+								</legend>
+								<select
+									className="select select-bordered w-full"
+									value={newInstance.category}
+									onChange={(e) => setNewInstance({ ...newInstance, category: e.target.value })}
+								>
 									<option value="">Default</option>
-									{config.sabnzbd?.categories?.map((cat) => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
+									{config.sabnzbd?.categories?.map((cat) => (
+										<option key={cat.name} value={cat.name}>
+											{cat.name}
+										</option>
+									))}
 								</select>
 							</fieldset>
 						</div>
 						<div className="modal-action mt-8">
-							<button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowAddInstance(false)}>Cancel</button>
-							<button type="button" className="btn btn-primary btn-sm px-6" onClick={addInstance} disabled={!newInstance.name || !newInstance.url || !newInstance.api_key}>Add Instance</button>
+							<button
+								type="button"
+								className="btn btn-ghost btn-sm"
+								onClick={() => setShowAddInstance(false)}
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								className="btn btn-primary btn-sm px-6"
+								onClick={addInstance}
+								disabled={!newInstance.name || !newInstance.url || !newInstance.api_key}
+							>
+								Add Instance
+							</button>
 						</div>
 					</div>
 				</div>
@@ -528,8 +652,12 @@ export function ArrsConfigSection({
 				<div className="alert alert-warning border-warning/20 py-3 text-xs shadow-sm">
 					<AlertTriangle className="h-4 w-4" />
 					<ul className="ml-4 flex-1 list-disc space-y-1">
-						{validationErrors.slice(0, 3).map((err, i) => <li key={i}>{err}</li>)}
-						{validationErrors.length > 3 && <li>...and {validationErrors.length - 3} more issues</li>}
+						{validationErrors.slice(0, 3).map((err, i) => (
+							<li key={i}>{err}</li>
+						))}
+						{validationErrors.length > 3 && (
+							<li>...and {validationErrors.length - 3} more issues</li>
+						)}
 					</ul>
 				</div>
 			)}

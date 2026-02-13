@@ -208,7 +208,11 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 						</p>
 					)}
 				</div>
-				<button type="button" className="btn btn-primary btn-sm w-full sm:w-auto" onClick={handleCreate}>
+				<button
+					type="button"
+					className="btn btn-primary btn-sm w-full sm:w-auto"
+					onClick={handleCreate}
+				>
 					<Plus className="h-4 w-4" />
 					Add Provider
 				</button>
@@ -219,7 +223,11 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 				<div className="rounded-lg bg-base-200 py-12 text-center">
 					<Wifi className="mx-auto mb-4 h-12 w-12 text-base-content/30" />
 					<h4 className="mb-2 font-medium text-lg">No Providers Configured</h4>
-					<button type="button" className="btn btn-primary mx-auto w-full max-w-xs sm:w-auto" onClick={handleCreate}>
+					<button
+						type="button"
+						className="btn btn-primary mx-auto w-full max-w-xs sm:w-auto"
+						onClick={handleCreate}
+					>
 						<Plus className="h-4 w-4" />
 						Add First Provider
 					</button>
@@ -277,9 +285,13 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 																provider.enabled ? "bg-success" : "bg-base-300"
 															}`}
 														/>
-														<span className="font-mono text-base-content/50 text-xs">#{index + 1}</span>
+														<span className="font-mono text-base-content/50 text-xs">
+															#{index + 1}
+														</span>
 														{provider.is_backup_provider && (
-															<span className="badge badge-warning badge-outline badge-xs px-1 font-bold text-[8px] uppercase">Backup</span>
+															<span className="badge badge-warning badge-outline badge-xs px-1 font-bold text-[8px] uppercase">
+																Backup
+															</span>
 														)}
 													</div>
 													<h4 className="flex items-center gap-1.5 break-all font-bold text-sm leading-tight sm:text-base">
@@ -291,7 +303,7 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													<div className="mt-1 flex flex-col gap-1">
 														<div className="flex w-fit items-center gap-1.5 rounded-md border border-primary/10 bg-primary/5 px-1.5 py-0.5 font-mono text-[10px] text-primary sm:text-xs">
 															<ExternalLink className="h-3 w-3" />
-															{provider.tls ? 'nntps' : 'nntp'}://{provider.host}:{provider.port}
+															{provider.tls ? "nntps" : "nntp"}://{provider.host}:{provider.port}
 														</div>
 														<div className="flex items-center gap-1.5 font-mono text-[10px] text-base-content/60 sm:text-xs">
 															<User className="h-3 w-3" />
@@ -322,7 +334,10 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 														className={`btn btn-xs sm:btn-sm ${
 															provider.enabled ? "btn-warning" : "btn-success"
 														}`}
-														onClick={(e) => { e.stopPropagation(); handleToggleEnabled(provider); }}
+														onClick={(e) => {
+															e.stopPropagation();
+															handleToggleEnabled(provider);
+														}}
 														disabled={togglingProviderId === provider.id}
 													>
 														{togglingProviderId === provider.id ? (
@@ -336,7 +351,10 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													<button
 														type="button"
 														className="btn btn-xs sm:btn-sm btn-info"
-														onClick={(e) => { e.stopPropagation(); handleSpeedTest(provider); }}
+														onClick={(e) => {
+															e.stopPropagation();
+															handleSpeedTest(provider);
+														}}
 														disabled={testingSpeedProviderId === provider.id || !provider.enabled}
 													>
 														{testingSpeedProviderId === provider.id ? (
@@ -348,14 +366,20 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 													<button
 														type="button"
 														className="btn btn-xs sm:btn-sm btn-outline"
-														onClick={(e) => { e.stopPropagation(); handleEdit(provider); }}
+														onClick={(e) => {
+															e.stopPropagation();
+															handleEdit(provider);
+														}}
 													>
 														<Edit className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
 													</button>
 													<button
 														type="button"
 														className="btn btn-xs sm:btn-sm btn-error"
-														onClick={(e) => { e.stopPropagation(); handleDelete(provider.id); }}
+														onClick={(e) => {
+															e.stopPropagation();
+															handleDelete(provider.id);
+														}}
 														disabled={deletingProviderId === provider.id}
 													>
 														{deletingProviderId === provider.id ? (
@@ -380,27 +404,41 @@ export function ProvidersConfigSection({ config }: ProvidersConfigSectionProps) 
 											</div>
 											<div>
 												<span className="mb-1 block text-base-content/50 uppercase">Security</span>
-												<div className={`flex items-center gap-1 font-bold ${provider.tls ? 'text-success' : 'text-warning'}`}>
-													{provider.tls ? <ShieldCheck className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+												<div
+													className={`flex items-center gap-1 font-bold ${provider.tls ? "text-success" : "text-warning"}`}
+												>
+													{provider.tls ? (
+														<ShieldCheck className="h-3.5 w-3.5" />
+													) : (
+														<Unlock className="h-3.5 w-3.5" />
+													)}
 													{provider.tls ? "TLS" : "PLAIN"}
 												</div>
 											</div>
 											<div>
 												<span className="mb-1 block text-base-content/50 uppercase">Auth</span>
-												<div className={`flex items-center gap-1 font-bold ${provider.password_set ? 'text-success' : 'text-error'}`}>
-													{provider.password_set ? <Lock className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-													{provider.password_set ? 'OK' : 'MISSING'}
+												<div
+													className={`flex items-center gap-1 font-bold ${provider.password_set ? "text-success" : "text-error"}`}
+												>
+													{provider.password_set ? (
+														<Lock className="h-3.5 w-3.5" />
+													) : (
+														<XCircle className="h-3.5 w-3.5" />
+													)}
+													{provider.password_set ? "OK" : "MISSING"}
 												</div>
 											</div>
 											<div>
 												<span className="mb-1 block text-base-content/50 uppercase">Top Speed</span>
 												<div className="truncate font-bold font-mono text-success">
-													{provider.last_speed_test_mbps?.toFixed(1) || '0'} MB/s
+													{provider.last_speed_test_mbps?.toFixed(1) || "0"} MB/s
 												</div>
 											</div>
 											<div>
 												<span className="mb-1 block text-base-content/50 uppercase">Port</span>
-												<div className="font-bold font-mono text-base-content/70">{provider.port}</div>
+												<div className="font-bold font-mono text-base-content/70">
+													{provider.port}
+												</div>
 											</div>
 										</div>
 									</div>

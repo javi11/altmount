@@ -129,7 +129,10 @@ export function ActiveStreamsCard() {
 											<div className="flex items-center gap-2">
 												<span className="font-medium text-primary">{progress}%</span>
 												<span className="text-base-content/40">•</span>
-												<span className="text-base-content/40" title="Total downloaded for this session">
+												<span
+													className="text-base-content/40"
+													title="Total downloaded for this session"
+												>
 													DL: {formatBytes(stream.bytes_downloaded)}
 												</span>
 											</div>
@@ -145,7 +148,7 @@ export function ActiveStreamsCard() {
 															</span>
 														</div>
 													)}
-													
+
 													{stream.bytes_per_second > 0 && stream.download_speed > 0 && (
 														<span className="opacity-20">|</span>
 													)}
