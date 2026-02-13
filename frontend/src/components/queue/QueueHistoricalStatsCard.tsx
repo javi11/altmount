@@ -1,8 +1,8 @@
 import { History } from "lucide-react";
 import { useState } from "react";
 import { useQueueHistory } from "../../hooks/useApi";
-import { LoadingSpinner } from "../ui/LoadingSpinner";
 import type { DailyStat } from "../../types/api";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 export function QueueHistoricalStatsCard() {
 	const [days, setDays] = useState(30);
@@ -51,7 +51,9 @@ export function QueueHistoricalStatsCard() {
 								type="number"
 								className="input input-bordered input-sm w-16"
 								value={days}
-								onChange={(e) => setDays(Math.max(1, Math.min(365, Number.parseInt(e.target.value, 10) || 1)))}
+								onChange={(e) =>
+									setDays(Math.max(1, Math.min(365, Number.parseInt(e.target.value, 10) || 1)))
+								}
 								min="1"
 								max="365"
 							/>
@@ -69,15 +71,11 @@ export function QueueHistoricalStatsCard() {
 						<div className="flex items-end justify-between gap-4">
 							<div className="flex flex-col">
 								<span className="text-base-content/70 text-sm">Success Rate</span>
-								<span className="font-bold text-3xl">
-									{data.percentage.toFixed(1)}%
-								</span>
+								<span className="font-bold text-3xl">{data.percentage.toFixed(1)}%</span>
 							</div>
 							<div className="flex flex-col text-right">
 								<span className="text-base-content/70 text-sm">Processed</span>
-								<span className="font-medium text-lg">
-									{data.completed + data.failed} items
-								</span>
+								<span className="font-medium text-lg">{data.completed + data.failed} items</span>
 							</div>
 						</div>
 
@@ -113,8 +111,9 @@ export function QueueHistoricalStatsCard() {
 												className="w-full rounded-t-sm bg-primary/20 transition-all hover:bg-primary"
 												style={{ height: `${height}%` }}
 											/>
-											<div className="absolute bottom-0 w-full bg-success" 
-												 style={{ height: `${total > 0 ? (day.completed / total) * height : 0}%` }} 
+											<div
+												className="absolute bottom-0 w-full bg-success"
+												style={{ height: `${total > 0 ? (day.completed / total) * height : 0}%` }}
 											/>
 										</div>
 									);

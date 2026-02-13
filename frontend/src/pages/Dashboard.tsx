@@ -1,11 +1,11 @@
 import { AlertTriangle, Network } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
-import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
-import { ProviderCard } from "../components/system/ProviderCard";
 import { QueueHistoricalStatsCard } from "../components/queue/QueueHistoricalStatsCard";
 import { ActivityHub } from "../components/system/ActivityHub";
-import { ImportStatusCard } from "../components/system/ImportStatusCard";
 import { HealthStatusCard } from "../components/system/HealthStatusCard";
+import { ImportStatusCard } from "../components/system/ImportStatusCard";
+import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
+import { ProviderCard } from "../components/system/ProviderCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { useToast } from "../contexts/ToastContext";
 import { useHealthStats, usePoolMetrics, useQueueStats } from "../hooks/useApi";

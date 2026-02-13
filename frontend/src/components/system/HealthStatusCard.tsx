@@ -1,4 +1,4 @@
-import { Shield, ShieldCheck, ShieldAlert, Activity, Wrench, Search } from "lucide-react";
+import { Activity, Search, Shield, ShieldAlert, ShieldCheck, Wrench } from "lucide-react";
 import { useMemo } from "react";
 import { useHealthStats, useHealthWorkerStatus } from "../../hooks/useApi";
 
@@ -52,7 +52,7 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 			checkingPercent,
 			pendingPercent,
 			isWorking,
-			workerStatus: worker?.status || "idle"
+			workerStatus: worker?.status || "idle",
 		};
 	}, [stats, worker]);
 
@@ -77,7 +77,7 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 					<div className="flex items-center justify-between">
 						<div>
 							<h2 className="card-title font-medium text-base-content/70 text-sm">File Health</h2>
-							<div className="text-base-content/30 text-sm italic mt-1">No files monitored</div>
+							<div className="mt-1 text-base-content/30 text-sm italic">No files monitored</div>
 						</div>
 						<Shield className="h-8 w-8 text-base-content/20" />
 					</div>
@@ -93,12 +93,12 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 			<div className="card-body">
 				<div className="flex items-start justify-between">
 					<div className="min-w-0 flex-1">
-						<h2 className="card-title font-medium text-base-content/70 text-sm">
-							File Health
-						</h2>
+						<h2 className="card-title font-medium text-base-content/70 text-sm">File Health</h2>
 						<div className="flex items-baseline gap-2">
-							<div className={`font-bold text-2xl ${metrics.corrupted > 0 ? 'text-error' : 'text-success'}`}>
-								{metrics.corrupted > 0 ? `${metrics.corrupted} Corrupted` : 'All Healthy'}
+							<div
+								className={`font-bold text-2xl ${metrics.corrupted > 0 ? "text-error" : "text-success"}`}
+							>
+								{metrics.corrupted > 0 ? `${metrics.corrupted} Corrupted` : "All Healthy"}
 							</div>
 						</div>
 					</div>
@@ -106,7 +106,7 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 						{metrics.corrupted > 0 ? (
 							<ShieldAlert className="h-8 w-8 text-error" />
 						) : metrics.isWorking ? (
-							<Activity className="h-8 w-8 text-info animate-pulse" />
+							<Activity className="h-8 w-8 animate-pulse text-info" />
 						) : (
 							<ShieldCheck className="h-8 w-8 text-success" />
 						)}
@@ -116,25 +116,25 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 				{/* Segmented Progress Bar */}
 				<div className="mt-3">
 					<div className="flex h-2 w-full overflow-hidden rounded-full bg-base-300">
-						<div 
-							className="h-full bg-success transition-all duration-500" 
+						<div
+							className="h-full bg-success transition-all duration-500"
 							style={{ width: `${metrics.healthyPercent}%` }}
 							title={`Healthy: ${metrics.healthy}`}
 						/>
-						<div 
-							className="h-full bg-error transition-all duration-500" 
+						<div
+							className="h-full bg-error transition-all duration-500"
 							style={{ width: `${metrics.corruptedPercent}%` }}
 							title={`Corrupted: ${metrics.corrupted}`}
 						/>
-						<div 
-							className="h-full bg-info transition-all duration-500" 
+						<div
+							className="h-full bg-info transition-all duration-500"
 							style={{ width: `${metrics.checkingPercent}%` }}
 							title={`Checking/Repairing: ${metrics.checking + metrics.repairing}`}
 						/>
 					</div>
-					
+
 					{/* Legend / Stats */}
-					<div className="mt-3 grid grid-cols-2 gap-y-2 gap-x-4 text-[10px] uppercase tracking-wider font-bold opacity-70">
+					<div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 font-bold text-[10px] uppercase tracking-wider opacity-70">
 						<div className="flex items-center gap-1.5">
 							<div className="h-2 w-2 rounded-full bg-success" />
 							<span className="truncate">{metrics.healthy} Healthy</span>
@@ -144,17 +144,17 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 							<span className="truncate">{metrics.corrupted} Corrupted</span>
 						</div>
 						{metrics.isWorking ? (
-							<div className="flex items-center gap-1.5 col-span-2 text-info animate-pulse">
+							<div className="col-span-2 flex animate-pulse items-center gap-1.5 text-info">
 								<Search className="h-3 w-3" />
 								<span>Worker Active: Checking {metrics.checking} files</span>
 							</div>
 						) : metrics.repairing > 0 ? (
-							<div className="flex items-center gap-1.5 col-span-2 text-warning">
+							<div className="col-span-2 flex items-center gap-1.5 text-warning">
 								<Wrench className="h-3 w-3" />
 								<span>{metrics.repairing} Repairs Triggered</span>
 							</div>
 						) : (
-							<div className="flex items-center gap-1.5 col-span-2 text-base-content/40">
+							<div className="col-span-2 flex items-center gap-1.5 text-base-content/40">
 								<span>{metrics.total} total files monitored</span>
 							</div>
 						)}

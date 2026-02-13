@@ -1,4 +1,14 @@
-import { AlertTriangle, CheckCircle, Loader2, Play, RefreshCw, X, Search, Clock, Activity } from "lucide-react";
+import {
+	Activity,
+	AlertTriangle,
+	CheckCircle,
+	Clock,
+	Loader2,
+	Play,
+	RefreshCw,
+	Search,
+	X,
+} from "lucide-react";
 import { formatFutureTime, formatRelativeTime } from "../../../lib/utils";
 
 interface LibrarySyncProgress {
@@ -30,7 +40,7 @@ interface LibraryScanStatusProps {
 	onStart: () => void;
 	onCancel: () => void;
 	onRetry: () => void;
-    variant?: "default" | "sidebar";
+	variant?: "default" | "sidebar";
 }
 
 export function LibraryScanStatus({
@@ -43,7 +53,7 @@ export function LibraryScanStatus({
 	onStart,
 	onCancel,
 	onRetry,
-    variant = "default"
+	variant = "default",
 }: LibraryScanStatusProps) {
 	// Calculate next sync time
 	const calculateNextSyncTime = (): Date | null => {
@@ -64,119 +74,141 @@ export function LibraryScanStatus({
 
 	const nextSyncTime = calculateNextSyncTime();
 
-    if (variant === "sidebar") {
-        return (
-            <div className="card border border-base-200 bg-base-100 shadow-sm">
-                <div className="card-body p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                        <h3 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Library Sync</h3>
-                        {status?.is_running && <span className="loading loading-ring loading-xs text-primary" />}
-                    </div>
+	if (variant === "sidebar") {
+		return (
+			<div className="card border border-base-200 bg-base-100 shadow-sm">
+				<div className="card-body p-4">
+					<div className="mb-3 flex items-center justify-between">
+						<h3 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Library Sync
+						</h3>
+						{status?.is_running && (
+							<span className="loading loading-ring loading-xs text-primary" />
+						)}
+					</div>
 
-                    {isLoading ? (
-                        <div className="flex items-center gap-2 text-xs opacity-60">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>Loading...</span>
-                        </div>
-                    ) : error ? (
-                        <div className="flex flex-col gap-2">
-                            <div className="flex items-center gap-2 text-error text-xs">
-                                <AlertTriangle className="h-3 w-3" />
-                                <span className="font-medium">Failed to load</span>
-                            </div>
-                            <button type="button" className="btn btn-ghost btn-xs w-full" onClick={onRetry}>Retry</button>
-                        </div>
-                    ) : (
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    {status?.is_running ? (
-                                        <div className="badge badge-info badge-xs gap-1 py-2">
-                                            <Activity className="h-2 w-2" /> RUNNING
-                                        </div>
-                                    ) : (
-                                        <div className="badge badge-success badge-outline badge-xs gap-1 py-2">
-                                            <CheckCircle className="h-2 w-2" /> IDLE
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="flex gap-1">
-                                    {status?.is_running ? (
-                                        <button 
-                                            type="button" 
-                                            className="btn btn-ghost btn-xs text-error" 
-                                            onClick={onCancel}
-                                            disabled={isCancelPending}
-                                        >
-                                            <X className="h-3 w-3" />
-                                        </button>
-                                    ) : (
-                                        <button 
-                                            type="button" 
-                                            className="btn btn-ghost btn-xs text-primary" 
-                                            onClick={onStart}
-                                            disabled={isStartPending}
-                                        >
-                                            <Play className="h-3 w-3" />
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
+					{isLoading ? (
+						<div className="flex items-center gap-2 text-xs opacity-60">
+							<Loader2 className="h-3 w-3 animate-spin" />
+							<span>Loading...</span>
+						</div>
+					) : error ? (
+						<div className="flex flex-col gap-2">
+							<div className="flex items-center gap-2 text-error text-xs">
+								<AlertTriangle className="h-3 w-3" />
+								<span className="font-medium">Failed to load</span>
+							</div>
+							<button type="button" className="btn btn-ghost btn-xs w-full" onClick={onRetry}>
+								Retry
+							</button>
+						</div>
+					) : (
+						<div className="space-y-4">
+							<div className="flex items-center justify-between">
+								<div className="flex items-center gap-2">
+									{status?.is_running ? (
+										<div className="badge badge-info badge-xs gap-1 py-2">
+											<Activity className="h-2 w-2" /> RUNNING
+										</div>
+									) : (
+										<div className="badge badge-success badge-outline badge-xs gap-1 py-2">
+											<CheckCircle className="h-2 w-2" /> IDLE
+										</div>
+									)}
+								</div>
+								<div className="flex gap-1">
+									{status?.is_running ? (
+										<button
+											type="button"
+											className="btn btn-ghost btn-xs text-error"
+											onClick={onCancel}
+											disabled={isCancelPending}
+										>
+											<X className="h-3 w-3" />
+										</button>
+									) : (
+										<button
+											type="button"
+											className="btn btn-ghost btn-xs text-primary"
+											onClick={onStart}
+											disabled={isStartPending}
+										>
+											<Play className="h-3 w-3" />
+										</button>
+									)}
+								</div>
+							</div>
 
-                            {status?.is_running && status.progress && (
-                                <div className="space-y-1.5">
-                                    <div className="flex justify-between font-bold font-mono text-[9px] opacity-60">
-                                        <span>PROGRESS</span>
-                                        <span>{status.progress.total_files > 0 ? Math.round((status.progress.processed_files / status.progress.total_files) * 100) : 0}%</span>
-                                    </div>
-                                    <progress
-                                        className="progress progress-primary h-1 w-full"
-                                        value={status.progress.processed_files}
-                                        max={status.progress.total_files}
-                                    />
-                                    <div className="text-[9px] opacity-50">
-                                        {status.progress.processed_files} / {status.progress.total_files} items
-                                    </div>
-                                </div>
-                            )}
+							{status?.is_running && status.progress && (
+								<div className="space-y-1.5">
+									<div className="flex justify-between font-bold font-mono text-[9px] opacity-60">
+										<span>PROGRESS</span>
+										<span>
+											{status.progress.total_files > 0
+												? Math.round(
+														(status.progress.processed_files / status.progress.total_files) * 100,
+													)
+												: 0}
+											%
+										</span>
+									</div>
+									<progress
+										className="progress progress-primary h-1 w-full"
+										value={status.progress.processed_files}
+										max={status.progress.total_files}
+									/>
+									<div className="text-[9px] opacity-50">
+										{status.progress.processed_files} / {status.progress.total_files} items
+									</div>
+								</div>
+							)}
 
-                            {!status?.is_running && (
-                                <div className="space-y-3">
-                                    {status?.last_sync_result && (
-                                        <div className="rounded-lg bg-base-200/50 p-2 text-[10px]">
-                                            <div className="mb-1 font-bold opacity-40 uppercase">LAST SCAN</div>
-                                            <div className="flex flex-wrap gap-x-3 gap-y-1">
-                                                <span>Added: <strong>{status.last_sync_result.files_added}</strong></span>
-                                                <span>Gone: <strong>{status.last_sync_result.files_deleted}</strong></span>
-                                                <span>Took: <strong>{(status.last_sync_result.duration / 1e9).toFixed(1)}s</strong></span>
-                                            </div>
-                                            <div className="mt-1 opacity-60">
-                                                {formatRelativeTime(new Date(status.last_sync_result.completed_at))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    
-                                    <div className="flex items-center gap-2 px-1 text-[9px] opacity-50">
-                                        <Clock className="h-3 w-3" />
-                                        {nextSyncTime ? (
-                                            <span>Next: {formatFutureTime(nextSyncTime)}</span>
-                                        ) : (
-                                            <span>Auto-sync disabled</span>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }
+							{!status?.is_running && (
+								<div className="space-y-3">
+									{status?.last_sync_result && (
+										<div className="rounded-lg bg-base-200/50 p-2 text-[10px]">
+											<div className="mb-1 font-bold uppercase opacity-40">LAST SCAN</div>
+											<div className="flex flex-wrap gap-x-3 gap-y-1">
+												<span>
+													Added: <strong>{status.last_sync_result.files_added}</strong>
+												</span>
+												<span>
+													Gone: <strong>{status.last_sync_result.files_deleted}</strong>
+												</span>
+												<span>
+													Took:{" "}
+													<strong>{(status.last_sync_result.duration / 1e9).toFixed(1)}s</strong>
+												</span>
+											</div>
+											<div className="mt-1 opacity-60">
+												{formatRelativeTime(new Date(status.last_sync_result.completed_at))}
+											</div>
+										</div>
+									)}
+
+									<div className="flex items-center gap-2 px-1 text-[9px] opacity-50">
+										<Clock className="h-3 w-3" />
+										{nextSyncTime ? (
+											<span>Next: {formatFutureTime(nextSyncTime)}</span>
+										) : (
+											<span>Auto-sync disabled</span>
+										)}
+									</div>
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+			</div>
+		);
+	}
 
 	return (
-		<div className="card bg-base-100 shadow-lg border border-base-200">
+		<div className="card border border-base-200 bg-base-100 shadow-lg">
 			<div className="card-body">
-				<h3 className="card-title text-sm font-bold opacity-60 tracking-widest uppercase">Library Scan Status</h3>
+				<h3 className="card-title font-bold text-sm uppercase tracking-widest opacity-60">
+					Library Scan Status
+				</h3>
 
 				{/* Loading State */}
 				{isLoading && (
@@ -208,11 +240,11 @@ export function LibraryScanStatus({
 							<div className="flex-1">
 								<div className="flex items-center gap-2">
 									{status.is_running ? (
-										<div className="badge badge-info gap-2 py-3 px-4 font-bold text-xs">
+										<div className="badge badge-info gap-2 px-4 py-3 font-bold text-xs">
 											<Loader2 className="h-3.5 w-3.5 animate-spin" /> RUNNING
 										</div>
 									) : (
-										<div className="badge badge-success badge-outline gap-2 py-3 px-4 font-bold text-xs">
+										<div className="badge badge-success badge-outline gap-2 px-4 py-3 font-bold text-xs">
 											<CheckCircle className="h-3.5 w-3.5" /> IDLE
 										</div>
 									)}
@@ -253,7 +285,10 @@ export function LibraryScanStatus({
 						{status.is_running && status.progress && (
 							<div className="mt-6 space-y-3">
 								<div className="flex justify-between font-bold font-mono text-[10px] opacity-60">
-									<span>SCANNING: {status.progress.processed_files} / {status.progress.total_files} ITEMS</span>
+									<span>
+										SCANNING: {status.progress.processed_files} / {status.progress.total_files}{" "}
+										ITEMS
+									</span>
 									<span>
 										{status.progress.total_files > 0
 											? Math.round(
@@ -264,14 +299,14 @@ export function LibraryScanStatus({
 									</span>
 								</div>
 								<progress
-									className="progress progress-primary w-full h-2"
+									className="progress progress-primary h-2 w-full"
 									value={status.progress.processed_files}
 									max={status.progress.total_files}
 								/>
 								{status.progress.start_time && (
-									<div className="text-[10px] opacity-50 flex items-center gap-1.5">
+									<div className="flex items-center gap-1.5 text-[10px] opacity-50">
 										<Clock className="h-3 w-3" />
-                                        Elapsed: {formatRelativeTime(new Date(status.progress.start_time))}
+										Elapsed: {formatRelativeTime(new Date(status.progress.start_time))}
 									</div>
 								)}
 							</div>
@@ -279,57 +314,65 @@ export function LibraryScanStatus({
 
 						{/* Last Scan Result */}
 						{!status.is_running && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                                {status.last_sync_result && (
-                                    <div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
-                                        <div className="font-bold text-[10px] opacity-40 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                            <Search className="h-3 w-3" />
-                                            Last Scan Results
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-xs">
-                                            <div className="flex flex-col">
-                                                <span className="opacity-50 text-[9px] uppercase font-bold">Added</span>
-                                                <span className="font-mono text-lg">{status.last_sync_result.files_added}</span>
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <span className="opacity-50 text-[9px] uppercase font-bold">Deleted</span>
-                                                <span className="font-mono text-lg">{status.last_sync_result.files_deleted}</span>
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <span className="opacity-50 text-[9px] uppercase font-bold">Duration</span>
-                                                <span className="font-mono">{(status.last_sync_result.duration / 1e9).toFixed(2)}s</span>
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <span className="opacity-50 text-[9px] uppercase font-bold">Completed</span>
-                                                <span className="font-mono">{formatRelativeTime(new Date(status.last_sync_result.completed_at))}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
+							<div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+								{status.last_sync_result && (
+									<div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
+										<div className="mb-3 flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest opacity-40">
+											<Search className="h-3 w-3" />
+											Last Scan Results
+										</div>
+										<div className="grid grid-cols-2 gap-x-2 gap-y-3 text-xs">
+											<div className="flex flex-col">
+												<span className="font-bold text-[9px] uppercase opacity-50">Added</span>
+												<span className="font-mono text-lg">
+													{status.last_sync_result.files_added}
+												</span>
+											</div>
+											<div className="flex flex-col">
+												<span className="font-bold text-[9px] uppercase opacity-50">Deleted</span>
+												<span className="font-mono text-lg">
+													{status.last_sync_result.files_deleted}
+												</span>
+											</div>
+											<div className="flex flex-col">
+												<span className="font-bold text-[9px] uppercase opacity-50">Duration</span>
+												<span className="font-mono">
+													{(status.last_sync_result.duration / 1e9).toFixed(2)}s
+												</span>
+											</div>
+											<div className="flex flex-col">
+												<span className="font-bold text-[9px] uppercase opacity-50">Completed</span>
+												<span className="font-mono">
+													{formatRelativeTime(new Date(status.last_sync_result.completed_at))}
+												</span>
+											</div>
+										</div>
+									</div>
+								)}
 
-                                <div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
-                                    <div className="font-bold text-[10px] opacity-40 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                        <Clock className="h-3 w-3" />
-                                        Next Scheduled Scan
-                                    </div>
-                                    {nextSyncTime ? (
-                                        <div className="space-y-1">
-                                            <div className="text-sm font-semibold text-primary">
-                                                {formatFutureTime(nextSyncTime)}
-                                            </div>
-                                            <div className="text-[10px] opacity-50 font-mono">
-                                                {nextSyncTime.toLocaleString()}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="text-xs opacity-50 italic py-2">
-                                            {syncIntervalMinutes === 0
-                                                ? "Automatic sync disabled (interval set to 0)"
-                                                : "Automatic sync not configured"}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
+								<div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
+									<div className="mb-3 flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest opacity-40">
+										<Clock className="h-3 w-3" />
+										Next Scheduled Scan
+									</div>
+									{nextSyncTime ? (
+										<div className="space-y-1">
+											<div className="font-semibold text-primary text-sm">
+												{formatFutureTime(nextSyncTime)}
+											</div>
+											<div className="font-mono text-[10px] opacity-50">
+												{nextSyncTime.toLocaleString()}
+											</div>
+										</div>
+									) : (
+										<div className="py-2 text-xs italic opacity-50">
+											{syncIntervalMinutes === 0
+												? "Automatic sync disabled (interval set to 0)"
+												: "Automatic sync not configured"}
+										</div>
+									)}
+								</div>
+							</div>
 						)}
 					</div>
 				)}

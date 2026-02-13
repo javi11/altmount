@@ -1,8 +1,8 @@
 import { Network, RotateCcw } from "lucide-react";
 import { usePoolMetrics, useResetSystemStats } from "../../hooks/useApi";
+import { formatSpeed } from "../../lib/utils";
 import { BytesDisplay } from "../ui/BytesDisplay";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
-import { formatSpeed } from "../../lib/utils";
 
 interface PoolMetricsCardProps {
 	className?: string;
@@ -108,17 +108,16 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 
 						{/* Total Errors - Only show if > 0 */}
 						{poolMetrics.total_errors > 0 && (
-														<div className="flex items-center justify-between text-sm">
-															<span className="text-base-content/70">Total Errors</span>
-															<span className="font-medium text-error">
-																{poolMetrics.total_errors.toLocaleString()}
-															</span>
-														</div>
-													)}
-												</div>
-											)}
-										</div>
-									</div>
-								);
-							}
-							
+							<div className="flex items-center justify-between text-sm">
+								<span className="text-base-content/70">Total Errors</span>
+								<span className="font-medium text-error">
+									{poolMetrics.total_errors.toLocaleString()}
+								</span>
+							</div>
+						)}
+					</div>
+				)}
+			</div>
+		</div>
+	);
+}

@@ -560,7 +560,9 @@ export function RCloneConfigSection({
 			{/* Mount Configuration Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">Automated Mount</h4>
+					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+						Automated Mount
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
@@ -570,7 +572,9 @@ export function RCloneConfigSection({
 						<label className="label cursor-pointer justify-start gap-4">
 							<span className="label-text font-medium">
 								Mount WebDAV locally
-								{isMountToggleSaving && <span className="loading loading-spinner loading-xs ml-2" />}
+								{isMountToggleSaving && (
+									<span className="loading loading-spinner loading-xs ml-2" />
+								)}
 							</span>
 							<input
 								type="checkbox"
@@ -581,7 +585,8 @@ export function RCloneConfigSection({
 							/>
 						</label>
 						<p className="label max-w-2xl whitespace-normal text-xs leading-relaxed opacity-70">
-							Automatically manages a background RClone process to expose your Usenet files as a local filesystem.
+							Automatically manages a background RClone process to expose your Usenet files as a
+							local filesystem.
 						</p>
 						{mountFormData.mount_enabled && hasMountChanges && (
 							<div className="alert alert-warning mt-2 py-2 text-xs">
@@ -606,27 +611,53 @@ export function RCloneConfigSection({
 											onChange={(e) => handleMountPathChange(e.target.value)}
 											placeholder="/mnt/altmount"
 										/>
-										<p className="label text-[10px] opacity-60">Absolute path on the host system.</p>
+										<p className="label text-[10px] opacity-60">
+											Absolute path on the host system.
+										</p>
 									</fieldset>
 								</div>
-								
+
 								<div className="flex flex-col justify-end lg:col-span-1">
 									{mountStatus && (
-										<div className={`alert ${mountStatus.mounted ? "alert-success" : "alert-warning"} flex-nowrap py-3 shadow-sm`}>
+										<div
+											className={`alert ${mountStatus.mounted ? "alert-success" : "alert-warning"} flex-nowrap py-3 shadow-sm`}
+										>
 											<HardDrive className="h-5 w-5 shrink-0" />
 											<div className="min-w-0 flex-1">
-												<div className="font-bold text-xs">{mountStatus.mounted ? "System Mounted" : "Not Mounted"}</div>
+												<div className="font-bold text-xs">
+													{mountStatus.mounted ? "System Mounted" : "Not Mounted"}
+												</div>
 												{mountStatus.mounted && (
-													<div className="truncate font-mono text-[9px] opacity-70">{mountStatus.mount_point}</div>
+													<div className="truncate font-mono text-[9px] opacity-70">
+														{mountStatus.mount_point}
+													</div>
 												)}
 											</div>
 											{mountStatus.mounted ? (
-												<button type="button" className="btn btn-xs btn-ghost" onClick={handleStopMount} disabled={isMountLoading}>
-													{isMountLoading ? <span className="loading loading-spinner loading-xs" /> : <Square className="h-3 w-3 text-error" />}
+												<button
+													type="button"
+													className="btn btn-xs btn-ghost"
+													onClick={handleStopMount}
+													disabled={isMountLoading}
+												>
+													{isMountLoading ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : (
+														<Square className="h-3 w-3 text-error" />
+													)}
 												</button>
 											) : (
-												<button type="button" className="btn btn-xs btn-ghost" onClick={handleStartMount} disabled={isMountLoading || !mountPath}>
-													{isMountLoading ? <span className="loading loading-spinner loading-xs" /> : <Play className="h-3 w-3 text-success" />}
+												<button
+													type="button"
+													className="btn btn-xs btn-ghost"
+													onClick={handleStartMount}
+													disabled={isMountLoading || !mountPath}
+												>
+													{isMountLoading ? (
+														<span className="loading loading-spinner loading-xs" />
+													) : (
+														<Play className="h-3 w-3 text-success" />
+													)}
 												</button>
 											)}
 										</div>
@@ -636,32 +667,60 @@ export function RCloneConfigSection({
 
 							{/* 2. Basic Options */}
 							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Basic Options</h5>
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Basic Options
+								</h5>
 								<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
 									<div className="space-y-2">
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.allow_other} onChange={(e) => handleMountInputChange("allow_other", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.allow_other}
+												onChange={(e) => handleMountInputChange("allow_other", e.target.checked)}
+											/>
 											<span className="label-text text-xs">Allow other users</span>
 										</label>
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.allow_non_empty} onChange={(e) => handleMountInputChange("allow_non_empty", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.allow_non_empty}
+												onChange={(e) =>
+													handleMountInputChange("allow_non_empty", e.target.checked)
+												}
+											/>
 											<span className="label-text text-xs">Allow non-empty mount</span>
 										</label>
 									</div>
 									<div className="space-y-2">
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.read_only} onChange={(e) => handleMountInputChange("read_only", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.read_only}
+												onChange={(e) => handleMountInputChange("read_only", e.target.checked)}
+											/>
 											<span className="label-text text-xs">Read-only mount</span>
 										</label>
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.syslog} onChange={(e) => handleMountInputChange("syslog", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.syslog}
+												onChange={(e) => handleMountInputChange("syslog", e.target.checked)}
+											/>
 											<span className="label-text text-xs">Enable syslog</span>
 										</label>
 									</div>
 									<div className="space-y-2">
 										<div className="flex items-center gap-2">
 											<span className="font-bold text-[10px] uppercase opacity-50">Log Level</span>
-											<select className="select select-bordered select-xs flex-1 font-mono" value={mountFormData.log_level} onChange={(e) => handleMountInputChange("log_level", e.target.value)}>
+											<select
+												className="select select-bordered select-xs flex-1 font-mono"
+												value={mountFormData.log_level}
+												onChange={(e) => handleMountInputChange("log_level", e.target.value)}
+											>
 												<option value="DEBUG">DEBUG</option>
 												<option value="INFO">INFO</option>
 												<option value="WARN">WARN</option>
@@ -670,7 +729,12 @@ export function RCloneConfigSection({
 										</div>
 										<div className="flex items-center gap-2">
 											<span className="font-bold text-[10px] uppercase opacity-50">Timeout</span>
-											<input type="text" className="input input-bordered input-xs flex-1 font-mono" value={mountFormData.timeout} onChange={(e) => handleMountInputChange("timeout", e.target.value)} />
+											<input
+												type="text"
+												className="input input-bordered input-xs flex-1 font-mono"
+												value={mountFormData.timeout}
+												onChange={(e) => handleMountInputChange("timeout", e.target.value)}
+											/>
 										</div>
 									</div>
 								</div>
@@ -678,11 +742,17 @@ export function RCloneConfigSection({
 
 							{/* 3. VFS Cache Settings */}
 							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">VFS Cache Management</h5>
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									VFS Cache Management
+								</h5>
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4">
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">CACHE MODE</span>
-										<select className="select select-bordered select-sm w-full" value={mountFormData.vfs_cache_mode} onChange={(e) => handleMountInputChange("vfs_cache_mode", e.target.value)}>
+										<select
+											className="select select-bordered select-sm w-full"
+											value={mountFormData.vfs_cache_mode}
+											onChange={(e) => handleMountInputChange("vfs_cache_mode", e.target.value)}
+										>
 											<option value="off">Off</option>
 											<option value="minimal">Minimal</option>
 											<option value="writes">Writes</option>
@@ -691,106 +761,241 @@ export function RCloneConfigSection({
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">MAX SIZE</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.vfs_cache_max_size} onChange={(e) => handleMountInputChange("vfs_cache_max_size", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.vfs_cache_max_size}
+											onChange={(e) => handleMountInputChange("vfs_cache_max_size", e.target.value)}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">MAX AGE</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.vfs_cache_max_age} onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.vfs_cache_max_age}
+											onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">MIN FREE SPACE</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.vfs_cache_min_free_space} onChange={(e) => handleMountInputChange("vfs_cache_min_free_space", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.vfs_cache_min_free_space}
+											onChange={(e) =>
+												handleMountInputChange("vfs_cache_min_free_space", e.target.value)
+											}
+										/>
 									</div>
 									<div className="space-y-1 sm:col-span-2">
 										<span className="block font-bold text-[10px] opacity-50">CACHE DIRECTORY</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.cache_dir} onChange={(e) => handleMountInputChange("cache_dir", e.target.value)} placeholder="/config/cache" />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.cache_dir}
+											onChange={(e) => handleMountInputChange("cache_dir", e.target.value)}
+											placeholder="/config/cache"
+										/>
 									</div>
 									<div className="space-y-1 sm:col-span-2">
 										<span className="block font-bold text-[10px] opacity-50">DISK SPACE TOTAL</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.vfs_disk_space_total} onChange={(e) => handleMountInputChange("vfs_disk_space_total", e.target.value)} placeholder="1T" />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.vfs_disk_space_total}
+											onChange={(e) =>
+												handleMountInputChange("vfs_disk_space_total", e.target.value)
+											}
+											placeholder="1T"
+										/>
 									</div>
 								</div>
 							</div>
 
 							{/* 4. Performance Settings */}
 							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Performance & Chunks</h5>
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Performance & Chunks
+								</h5>
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4">
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">BUFFER SIZE</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.buffer_size} onChange={(e) => handleMountInputChange("buffer_size", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.buffer_size}
+											onChange={(e) => handleMountInputChange("buffer_size", e.target.value)}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">READ AHEAD</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.vfs_read_ahead} onChange={(e) => handleMountInputChange("vfs_read_ahead", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.vfs_read_ahead}
+											onChange={(e) => handleMountInputChange("vfs_read_ahead", e.target.value)}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">CHUNK SIZE</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.read_chunk_size} onChange={(e) => handleMountInputChange("read_chunk_size", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.read_chunk_size}
+											onChange={(e) => handleMountInputChange("read_chunk_size", e.target.value)}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">CHUNK LIMIT</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.read_chunk_size_limit} onChange={(e) => handleMountInputChange("read_chunk_size_limit", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.read_chunk_size_limit}
+											onChange={(e) =>
+												handleMountInputChange("read_chunk_size_limit", e.target.value)
+											}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">TRANSFERS</span>
-										<input type="number" className="input input-bordered input-sm w-full font-mono" value={mountFormData.transfers} onChange={(e) => handleMountInputChange("transfers", Number.parseInt(e.target.value, 10) || 4)} />
+										<input
+											type="number"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.transfers}
+											onChange={(e) =>
+												handleMountInputChange(
+													"transfers",
+													Number.parseInt(e.target.value, 10) || 4,
+												)
+											}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">CHUNK STREAMS</span>
-										<input type="number" className="input input-bordered input-sm w-full font-mono" value={mountFormData.vfs_read_chunk_streams} onChange={(e) => handleMountInputChange("vfs_read_chunk_streams", Number.parseInt(e.target.value, 10) || 4)} />
+										<input
+											type="number"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.vfs_read_chunk_streams}
+											onChange={(e) =>
+												handleMountInputChange(
+													"vfs_read_chunk_streams",
+													Number.parseInt(e.target.value, 10) || 4,
+												)
+											}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">ATTR TIMEOUT</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.attr_timeout} onChange={(e) => handleMountInputChange("attr_timeout", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.attr_timeout}
+											onChange={(e) => handleMountInputChange("attr_timeout", e.target.value)}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">DIR CACHE TIME</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.dir_cache_time} onChange={(e) => handleMountInputChange("dir_cache_time", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.dir_cache_time}
+											onChange={(e) => handleMountInputChange("dir_cache_time", e.target.value)}
+										/>
 									</div>
 								</div>
 							</div>
 
 							{/* 5. Advanced & Identity */}
 							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">System & Advanced</h5>
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									System & Advanced
+								</h5>
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4">
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">UID</span>
-										<input type="number" className="input input-bordered input-sm w-full font-mono" value={mountFormData.uid} onChange={(e) => handleMountInputChange("uid", Number.parseInt(e.target.value, 10) || 1000)} />
+										<input
+											type="number"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.uid}
+											onChange={(e) =>
+												handleMountInputChange("uid", Number.parseInt(e.target.value, 10) || 1000)
+											}
+										/>
 									</div>
 									<div className="space-y-1">
 										<span className="block font-bold text-[10px] opacity-50">GID</span>
-										<input type="number" className="input input-bordered input-sm w-full font-mono" value={mountFormData.gid} onChange={(e) => handleMountInputChange("gid", Number.parseInt(e.target.value, 10) || 1000)} />
+										<input
+											type="number"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.gid}
+											onChange={(e) =>
+												handleMountInputChange("gid", Number.parseInt(e.target.value, 10) || 1000)
+											}
+										/>
 									</div>
 									<div className="space-y-1 sm:col-span-2">
 										<span className="block font-bold text-[10px] uppercase opacity-50">Umask</span>
-										<input type="text" className="input input-bordered input-sm w-full font-mono" value={mountFormData.umask} onChange={(e) => handleMountInputChange("umask", e.target.value)} />
+										<input
+											type="text"
+											className="input input-bordered input-sm w-full font-mono"
+											value={mountFormData.umask}
+											onChange={(e) => handleMountInputChange("umask", e.target.value)}
+										/>
 									</div>
 									<div className="flex flex-wrap gap-x-6 gap-y-2 pt-2 sm:col-span-4">
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.async_read} onChange={(e) => handleMountInputChange("async_read", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.async_read}
+												onChange={(e) => handleMountInputChange("async_read", e.target.checked)}
+											/>
 											<span className="label-text text-xs">Async read</span>
 										</label>
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.no_mod_time} onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.no_mod_time}
+												onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)}
+											/>
 											<span className="label-text text-xs">No mod-time</span>
 										</label>
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.no_checksum} onChange={(e) => handleMountInputChange("no_checksum", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.no_checksum}
+												onChange={(e) => handleMountInputChange("no_checksum", e.target.checked)}
+											/>
 											<span className="label-text text-xs">No checksum</span>
 										</label>
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.vfs_fast_fingerprint} onChange={(e) => handleMountInputChange("vfs_fast_fingerprint", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.vfs_fast_fingerprint}
+												onChange={(e) =>
+													handleMountInputChange("vfs_fast_fingerprint", e.target.checked)
+												}
+											/>
 											<span className="label-text text-xs">Fast Fingerprint</span>
 										</label>
 										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input type="checkbox" className="checkbox checkbox-xs" checked={mountFormData.use_mmap} onChange={(e) => handleMountInputChange("use_mmap", e.target.checked)} />
+											<input
+												type="checkbox"
+												className="checkbox checkbox-xs"
+												checked={mountFormData.use_mmap}
+												onChange={(e) => handleMountInputChange("use_mmap", e.target.checked)}
+											/>
 											<span className="label-text text-xs">Use Mmap</span>
 										</label>
 									</div>
 									<div className="space-y-1 sm:col-span-4">
-										<span className="block font-bold text-[10px] uppercase tracking-widest opacity-50">Custom Mount Options (JSON)</span>
+										<span className="block font-bold text-[10px] uppercase tracking-widest opacity-50">
+											Custom Mount Options (JSON)
+										</span>
 										<textarea
 											className="textarea textarea-bordered textarea-sm min-h-[100px] w-full font-mono text-[10px]"
 											value={JSON.stringify(mountFormData.mount_options, null, 2)}
@@ -815,9 +1020,15 @@ export function RCloneConfigSection({
 										type="button"
 										className={`btn btn-primary btn-sm px-8 ${hasMountChanges || hasMountPathChanges ? "shadow-md" : ""}`}
 										onClick={handleSaveMount}
-										disabled={(!hasMountChanges && !hasMountPathChanges) || isUpdating || isMountLoading}
+										disabled={
+											(!hasMountChanges && !hasMountPathChanges) || isUpdating || isMountLoading
+										}
 									>
-										{isUpdating || isMountLoading ? <span className="loading loading-spinner loading-xs" /> : <Save className="h-3 w-3" />}
+										{isUpdating || isMountLoading ? (
+											<span className="loading loading-spinner loading-xs" />
+										) : (
+											<Save className="h-3 w-3" />
+										)}
 										Save Mount Configuration
 									</button>
 								</div>
@@ -830,7 +1041,9 @@ export function RCloneConfigSection({
 			{/* RC Configuration Settings */}
 			<section className="space-y-6 pt-4">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">Remote Control API</h4>
+					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+						Remote Control API
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
@@ -853,7 +1066,8 @@ export function RCloneConfigSection({
 							/>
 						</label>
 						<p className="label max-w-2xl whitespace-normal text-xs leading-relaxed opacity-70">
-							Required for cache refresh notifications. If Mount is enabled, this is managed automatically.
+							Required for cache refresh notifications. If Mount is enabled, this is managed
+							automatically.
 						</p>
 					</fieldset>
 
@@ -867,7 +1081,9 @@ export function RCloneConfigSection({
 										className="input input-bordered input-sm w-full font-mono"
 										value={formData.rc_port}
 										disabled={isReadOnly || mountFormData.mount_enabled}
-										onChange={(e) => handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)}
+										onChange={(e) =>
+											handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
+										}
 									/>
 								</fieldset>
 								<fieldset className="fieldset min-w-0 sm:col-span-2">
@@ -906,7 +1122,14 @@ export function RCloneConfigSection({
 									/>
 								</fieldset>
 								<fieldset className="fieldset min-w-0">
-									<legend className="fieldset-legend font-bold text-[10px]">RC PASSWORD {config.rclone.rc_pass_set && <span className="badge badge-success badge-xs ml-1 origin-left scale-75 font-normal uppercase">Set</span>}</legend>
+									<legend className="fieldset-legend font-bold text-[10px]">
+										RC PASSWORD{" "}
+										{config.rclone.rc_pass_set && (
+											<span className="badge badge-success badge-xs ml-1 origin-left scale-75 font-normal uppercase">
+												Set
+											</span>
+										)}
+									</legend>
 									<input
 										type="password"
 										className="input input-bordered input-sm w-full font-mono"
@@ -920,7 +1143,9 @@ export function RCloneConfigSection({
 							</div>
 
 							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-bold text-[10px] uppercase tracking-widest opacity-50">Custom RC Options (JSON)</legend>
+								<legend className="fieldset-legend font-bold text-[10px] uppercase tracking-widest opacity-50">
+									Custom RC Options (JSON)
+								</legend>
 								<textarea
 									className="textarea textarea-bordered textarea-sm min-h-[80px] w-full font-mono text-[10px]"
 									value={JSON.stringify(formData.rc_options, null, 2)}
@@ -947,7 +1172,11 @@ export function RCloneConfigSection({
 								onClick={handleTestConnection}
 								disabled={isTestingConnection}
 							>
-								{isTestingConnection ? <span className="loading loading-spinner loading-xs" /> : <TestTube className="h-3 w-3" />}
+								{isTestingConnection ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<TestTube className="h-3 w-3" />
+								)}
 								Test Connection
 							</button>
 							<button
@@ -956,7 +1185,11 @@ export function RCloneConfigSection({
 								onClick={handleSave}
 								disabled={!hasChanges || isUpdating}
 							>
-								{isUpdating ? <span className="loading loading-spinner loading-xs" /> : <Save className="h-3 w-3" />}
+								{isUpdating ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<Save className="h-3 w-3" />
+								)}
 								Save RC Changes
 							</button>
 						</div>
@@ -965,7 +1198,9 @@ export function RCloneConfigSection({
 			</section>
 
 			{testResult && (
-				<div className={`alert ${testResult.success ? "alert-success" : "alert-error"} py-3 text-xs shadow-sm`}>
+				<div
+					className={`alert ${testResult.success ? "alert-success" : "alert-error"} py-3 text-xs shadow-sm`}
+				>
 					<span>{testResult.message}</span>
 				</div>
 			)}
