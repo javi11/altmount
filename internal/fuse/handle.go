@@ -2,6 +2,7 @@ package fuse
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -55,6 +56,13 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 				}
 				return fuse.ReadResultData(nil), 0
 			}
+
+			// Context cancellation is expected (user stopped playback/closed file)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				h.logger.DebugContext(ctx, "VFS Read canceled", "path", h.path, "offset", off)
+				return nil, syscall.EINTR
+			}
+
 			h.logger.ErrorContext(ctx, "VFS Read failed", "path", h.path, "offset", off, "error", err)
 			return nil, syscall.EIO
 		}
@@ -81,6 +89,12 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 		atomic.StoreInt64(&h.stream.CurrentOffset, off+int64(n))
 	}
 	if err != nil && err != io.EOF {
+		// Context cancellation is expected (user stopped playback/closed file)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			h.logger.DebugContext(ctx, "Read canceled", "path", h.path, "offset", off)
+			return nil, syscall.EINTR
+		}
+
 		h.logger.ErrorContext(ctx, "Read failed", "path", h.path, "offset", off, "size", len(dest), "error", err)
 		return nil, syscall.EIO
 	}
