@@ -1,16 +1,22 @@
-import { Download, Play, FileVideo, History, CheckCircle2 } from "lucide-react";
-import { useState, useMemo } from "react";
-import { useActiveStreams, useQueue, useImportHistory } from "../../hooks/useApi";
+import { CheckCircle2, Download, FileVideo, History, Play } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useActiveStreams, useImportHistory, useQueue } from "../../hooks/useApi";
 import { useProgressStream } from "../../hooks/useProgressStream";
-import { LoadingSpinner } from "../ui/LoadingSpinner";
-import { formatBytes, formatSpeed, formatDuration, formatRelativeTime } from "../../lib/utils";
+import { formatBytes, formatDuration, formatRelativeTime, formatSpeed } from "../../lib/utils";
 import type { ActiveStream } from "../../types/api";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 export function ActivityHub() {
 	const [activeTab, setActiveTab] = useState<"playback" | "imports" | "history">("playback");
 	const { data: allStreams, isLoading: streamsLoading } = useActiveStreams();
-	const { data: queueResponse, isLoading: queueLoading } = useQueue({ status: "processing", limit: 10 });
-	const { data: importHistory, isLoading: historyLoading } = useImportHistory(20, activeTab === "history" ? 10000 : 60000);
+	const { data: queueResponse, isLoading: queueLoading } = useQueue({
+		status: "processing",
+		limit: 10,
+	});
+	const { data: importHistory, isLoading: historyLoading } = useImportHistory(
+		20,
+		activeTab === "history" ? 10000 : 60000,
+	);
 
 	const queueItems = queueResponse?.data;
 	const hasProcessingItems = (queueItems?.length || 0) > 0;
@@ -28,30 +34,28 @@ export function ActivityHub() {
 	// Group streams by file_path to show "unique playback sessions"
 	const groupedStreams = useMemo(() => {
 		if (!allStreams) return [];
-		
+
 		// Filter to show only active streaming sessions (WebDAV or FUSE)
-		const streamingOnly = allStreams.filter(
-			(s) => {
-				const isSystemSource = (s.source === "WebDAV" || s.source === "FUSE");
-				const isStreaming = s.status === "Streaming";
-				
-				// Heuristic: Filter out metadata probes and very short system scans
-				// 1. If reading the very end of the file (last 5MB), it's likely a probe
-				const isAtEnd = s.total_size > 0 && s.current_offset > (s.total_size - (5 * 1024 * 1024));
-				// 2. If it's very new and hasn't sent much data yet, hide it briefly
-				// (Reduced thresholds to show streams faster)
-				const isTooNew = s.bytes_sent < (5 * 1024 * 1024);
-				const ageSeconds = (Date.now()- new Date(s.started_at).getTime()) / 1000;
-				
-				if (isAtEnd) return false;
-				if (isTooNew && ageSeconds < 5) return false;
-				
-				return isSystemSource && (isStreaming || s.status === "Buffering");
-			}
-		);
+		const streamingOnly = allStreams.filter((s) => {
+			const isSystemSource = s.source === "WebDAV" || s.source === "FUSE";
+			const isStreaming = s.status === "Streaming";
+
+			// Heuristic: Filter out metadata probes and very short system scans
+			// 1. If reading the very end of the file (last 5MB), it's likely a probe
+			const isAtEnd = s.total_size > 0 && s.current_offset > s.total_size - 5 * 1024 * 1024;
+			// 2. If it's very new and hasn't sent much data yet, hide it briefly
+			// (Reduced thresholds to show streams faster)
+			const isTooNew = s.bytes_sent < 5 * 1024 * 1024;
+			const ageSeconds = (Date.now() - new Date(s.started_at).getTime()) / 1000;
+
+			if (isAtEnd) return false;
+			if (isTooNew && ageSeconds < 5) return false;
+
+			return isSystemSource && (isStreaming || s.status === "Buffering");
+		});
 
 		const groups: Record<string, ActiveStream> = {};
-		
+
 		for (const stream of streamingOnly) {
 			if (!groups[stream.file_path]) {
 				groups[stream.file_path] = { ...stream };
@@ -71,7 +75,7 @@ export function ActivityHub() {
 				}
 			}
 		}
-		
+
 		return Object.values(groups);
 	}, [allStreams]);
 
@@ -89,7 +93,9 @@ export function ActivityHub() {
 					>
 						<Play className="h-4 w-4" />
 						Playback
-						{playbackCount > 0 && <span className="badge badge-sm badge-primary">{playbackCount}</span>}
+						{playbackCount > 0 && (
+							<span className="badge badge-sm badge-primary">{playbackCount}</span>
+						)}
 					</button>
 					<button
 						type="button"
@@ -98,7 +104,9 @@ export function ActivityHub() {
 					>
 						<Download className="h-4 w-4" />
 						Imports
-						{importCount > 0 && <span className="badge badge-sm badge-secondary">{importCount}</span>}
+						{importCount > 0 && (
+							<span className="badge badge-sm badge-secondary">{importCount}</span>
+						)}
 					</button>
 					<button
 						type="button"
@@ -114,15 +122,25 @@ export function ActivityHub() {
 					{activeTab === "playback" && (
 						<div className="space-y-4">
 							{streamsLoading ? (
-								<div className="flex justify-center py-10"><LoadingSpinner /></div>
+								<div className="flex justify-center py-10">
+									<LoadingSpinner />
+								</div>
 							) : groupedStreams.length > 0 ? (
 								groupedStreams.map((stream) => {
-									const position = stream.current_offset > 0 ? stream.current_offset : stream.bytes_sent;
-									const progress = stream.total_size > 0 ? Math.round((position / stream.total_size) * 100) : 0;
-									const bufferedProgress = stream.total_size > 0 ? Math.round((stream.buffered_offset / stream.total_size) * 100) : 0;
+									const position =
+										stream.current_offset > 0 ? stream.current_offset : stream.bytes_sent;
+									const progress =
+										stream.total_size > 0 ? Math.round((position / stream.total_size) * 100) : 0;
+									const bufferedProgress =
+										stream.total_size > 0
+											? Math.round((stream.buffered_offset / stream.total_size) * 100)
+											: 0;
 
 									return (
-										<div key={stream.id} className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3">
+										<div
+											key={stream.id}
+											className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3"
+										>
 											<div className="flex items-center gap-3">
 												<FileVideo className="h-8 w-8 shrink-0 text-primary/70" />
 												<div className="min-w-0 flex-1">
@@ -132,7 +150,9 @@ export function ActivityHub() {
 													<div className="mt-1 flex items-center gap-2">
 														<span className="font-bold text-[10px] text-success">STREAMING</span>
 														<span className="text-[10px] text-base-content/40">•</span>
-														<span className="text-[10px] text-base-content/60">{formatBytes(stream.total_size)}</span>
+														<span className="text-[10px] text-base-content/60">
+															{formatBytes(stream.total_size)}
+														</span>
 													</div>
 												</div>
 												<div className="shrink-0 text-right">
@@ -161,11 +181,16 @@ export function ActivityHub() {
 													<div className="flex items-center gap-2">
 														<span className="font-medium text-primary">{progress}%</span>
 														<span className="text-base-content/40">•</span>
-														<span className="text-base-content/40" title="Total downloaded from Usenet for this session">
+														<span
+															className="text-base-content/40"
+															title="Total downloaded from Usenet for this session"
+														>
 															DL: {formatBytes(stream.bytes_downloaded)}
 														</span>
 													</div>
-													<span className="text-base-content/40">{formatBytes(position)} / {formatBytes(stream.total_size)}</span>
+													<span className="text-base-content/40">
+														{formatBytes(position)} / {formatBytes(stream.total_size)}
+													</span>
 												</div>
 												<div className="relative h-1.5 w-full overflow-hidden rounded-full bg-neutral">
 													{bufferedProgress > progress && (
@@ -195,45 +220,58 @@ export function ActivityHub() {
 					{activeTab === "imports" && (
 						<div className="space-y-4">
 							{queueLoading ? (
-								<div className="flex justify-center py-10"><LoadingSpinner /></div>
+								<div className="flex justify-center py-10">
+									<LoadingSpinner />
+								</div>
 							) : enrichedQueueItems.length > 0 ? (
 								enrichedQueueItems.map((item) => {
 									const progress = item.percentage ?? 0;
-									
+
 									return (
-										<div key={item.id} className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3">
+										<div
+											key={item.id}
+											className="group flex flex-col gap-2 rounded-lg bg-base-200/30 p-3"
+										>
 											<div className="flex items-center gap-3">
 												<div className="relative">
-													<Download className={`h-8 w-8 shrink-0 ${progress > 0 ? 'text-secondary' : 'text-base-content/20'}`} />
+													<Download
+														className={`h-8 w-8 shrink-0 ${progress > 0 ? "text-secondary" : "text-base-content/20"}`}
+													/>
 													{progress > 0 && (
-														<span className="absolute -top-1 -right-1 flex h-3 w-3">
-															<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-75" />
-															<span className="relative inline-flex rounded-full h-3 w-3 bg-secondary" />
+														<span className="-top-1 -right-1 absolute flex h-3 w-3">
+															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-secondary opacity-75" />
+															<span className="relative inline-flex h-3 w-3 rounded-full bg-secondary" />
 														</span>
 													)}
 												</div>
 												<div className="min-w-0 flex-1">
 													<div className="truncate font-medium text-sm" title={item.nzb_path}>
-														{item.target_path || item.nzb_path.split('/').pop()}
+														{item.target_path || item.nzb_path.split("/").pop()}
 													</div>
 													<div className="mt-1 flex items-center gap-2">
 														<span className="font-bold text-[10px] text-secondary">IMPORTING</span>
 														<span className="text-[10px] text-base-content/40">•</span>
-														<span className="text-[10px] text-base-content/60">Worker #{item.id % 10}</span>
+														<span className="text-[10px] text-base-content/60">
+															Worker #{item.id % 10}
+														</span>
 														{item.file_size && (
 															<>
 																<span className="text-[10px] text-base-content/40">•</span>
-																<span className="text-[10px] text-base-content/60">{formatBytes(item.file_size)}</span>
+																<span className="text-[10px] text-base-content/60">
+																	{formatBytes(item.file_size)}
+																</span>
 															</>
 														)}
 													</div>
 												</div>
 												<div className="shrink-0 text-right">
 													<div className="font-bold text-secondary text-sm">{progress}%</div>
-													<div className="text-[10px] text-base-content/40">Attempt {item.retry_count + 1}</div>
+													<div className="text-[10px] text-base-content/40">
+														Attempt {item.retry_count + 1}
+													</div>
 												</div>
 											</div>
-											
+
 											<div className="mt-1 space-y-1">
 												<div className="relative h-1.5 w-full overflow-hidden rounded-full bg-neutral">
 													<div
@@ -257,10 +295,15 @@ export function ActivityHub() {
 					{activeTab === "history" && (
 						<div className="space-y-3">
 							{historyLoading ? (
-								<div className="flex justify-center py-10"><LoadingSpinner /></div>
+								<div className="flex justify-center py-10">
+									<LoadingSpinner />
+								</div>
 							) : importHistory && importHistory.length > 0 ? (
 								importHistory.map((item) => (
-									<div key={item.id} className="flex items-center justify-between gap-4 rounded-lg border-success border-l-4 bg-base-200/30 p-2 text-sm">
+									<div
+										key={item.id}
+										className="flex items-center justify-between gap-4 rounded-lg border-success border-l-4 bg-base-200/30 p-2 text-sm"
+									>
 										<div className="flex min-w-0 items-center gap-3 truncate">
 											<CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
 											<div className="flex flex-col truncate">

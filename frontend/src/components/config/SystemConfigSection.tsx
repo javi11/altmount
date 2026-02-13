@@ -85,7 +85,7 @@ export function SystemConfigSection({
 				max_backups: formData.max_backups,
 				compress: formData.compress,
 			};
-			
+
 			const currentLogConfig = {
 				file: config.log.file,
 				level: config.log.level,
@@ -169,20 +169,36 @@ export function SystemConfigSection({
 			{/* Application Identity Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">App Identity</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						App Identity
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
 				<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend font-semibold">Database Path</legend>
-						<input type="text" className="input w-full bg-base-200/50 font-mono" value={formData.db_path} disabled={isReadOnly} onChange={(e) => handleInputChange("db_path", e.target.value)} placeholder="/app/data/altmount.db" />
+						<input
+							type="text"
+							className="input w-full bg-base-200/50 font-mono"
+							value={formData.db_path}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("db_path", e.target.value)}
+							placeholder="/app/data/altmount.db"
+						/>
 						<p className="label text-[10px] italic opacity-60">Location of the SQLite database.</p>
 					</fieldset>
 
 					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend font-semibold">API Prefix</legend>
-						<input type="text" className="input w-full bg-base-200/50 font-mono" value={formData.api_prefix} disabled={isReadOnly} onChange={(e) => handleInputChange("api_prefix", e.target.value)} placeholder="/api" />
+						<input
+							type="text"
+							className="input w-full bg-base-200/50 font-mono"
+							value={formData.api_prefix}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("api_prefix", e.target.value)}
+							placeholder="/api"
+						/>
 						<p className="label text-[10px] italic opacity-60">Base path for all REST endpoints.</p>
 					</fieldset>
 				</div>
@@ -193,7 +209,13 @@ export function SystemConfigSection({
 						<div className="min-w-0 flex-1">
 							<span className="mb-1 block font-bold text-sm">System API Key</span>
 							<div className="flex items-center gap-2">
-								<input type="text" className="input input-xs flex-1 bg-base-100 font-mono" value={config.api_key || "No key generated"} readOnly disabled />
+								<input
+									type="text"
+									className="input input-xs flex-1 bg-base-100 font-mono"
+									value={config.api_key || "No key generated"}
+									readOnly
+									disabled
+								/>
 								{config.api_key && (
 									<button type="button" className="btn btn-ghost btn-xs" onClick={handleCopyAPIKey}>
 										<Copy className="h-3 w-3" />
@@ -201,8 +223,17 @@ export function SystemConfigSection({
 								)}
 							</div>
 						</div>
-						<button type="button" className="btn btn-warning btn-sm" onClick={handleRegenerateAPIKey} disabled={regenerateAPIKey.isPending}>
-							{regenerateAPIKey.isPending ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw className="h-3.5 w-3.5" />}
+						<button
+							type="button"
+							className="btn btn-warning btn-sm"
+							onClick={handleRegenerateAPIKey}
+							disabled={regenerateAPIKey.isPending}
+						>
+							{regenerateAPIKey.isPending ? (
+								<span className="loading loading-spinner loading-xs" />
+							) : (
+								<RefreshCw className="h-3.5 w-3.5" />
+							)}
 							Rotate Key
 						</button>
 					</div>
@@ -212,14 +243,21 @@ export function SystemConfigSection({
 			{/* Logging Configuration Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Diagnostics & Logs</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Diagnostics & Logs
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
 				<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
 					<fieldset className="fieldset min-w-0">
 						<legend className="fieldset-legend font-semibold">Log Level</legend>
-						<select className="select select-bordered w-full bg-base-200/50 font-mono" value={formData.level} disabled={isReadOnly} onChange={(e) => handleInputChange("level", e.target.value)}>
+						<select
+							className="select select-bordered w-full bg-base-200/50 font-mono"
+							value={formData.level}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("level", e.target.value)}
+						>
 							<option value="debug">DEBUG</option>
 							<option value="info">INFO</option>
 							<option value="warn">WARNING</option>
@@ -229,26 +267,62 @@ export function SystemConfigSection({
 
 					<fieldset className="fieldset min-w-0 sm:col-span-2">
 						<legend className="fieldset-legend font-semibold">Log File Path</legend>
-						<input type="text" className="input w-full bg-base-200/50 font-mono" value={formData.file} disabled={isReadOnly} onChange={(e) => handleInputChange("file", e.target.value)} />
+						<input
+							type="text"
+							className="input w-full bg-base-200/50 font-mono"
+							value={formData.file}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("file", e.target.value)}
+						/>
 					</fieldset>
 				</div>
 
 				<div className="grid grid-cols-1 gap-6 rounded-2xl border border-base-300 bg-base-200/30 p-6 sm:grid-cols-2 lg:grid-cols-4">
 					<div className="space-y-1">
 						<span className="block font-bold text-[10px] uppercase opacity-50">Max Size (MB)</span>
-						<input type="number" className="input input-sm w-full bg-base-100 font-mono" value={formData.max_size} disabled={isReadOnly} onChange={(e) => handleInputChange("max_size", Number.parseInt(e.target.value, 10) || 100)} />
+						<input
+							type="number"
+							className="input input-sm w-full bg-base-100 font-mono"
+							value={formData.max_size}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleInputChange("max_size", Number.parseInt(e.target.value, 10) || 100)
+							}
+						/>
 					</div>
 					<div className="space-y-1">
 						<span className="block font-bold text-[10px] uppercase opacity-50">Max Age (Days)</span>
-						<input type="number" className="input input-sm w-full bg-base-100 font-mono" value={formData.max_age} disabled={isReadOnly} onChange={(e) => handleInputChange("max_age", Number.parseInt(e.target.value, 10) || 28)} />
+						<input
+							type="number"
+							className="input input-sm w-full bg-base-100 font-mono"
+							value={formData.max_age}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleInputChange("max_age", Number.parseInt(e.target.value, 10) || 28)
+							}
+						/>
 					</div>
 					<div className="space-y-1">
 						<span className="block font-bold text-[10px] uppercase opacity-50">Retention</span>
-						<input type="number" className="input input-sm w-full bg-base-100 font-mono" value={formData.max_backups} disabled={isReadOnly} onChange={(e) => handleInputChange("max_backups", Number.parseInt(e.target.value, 10) || 3)} />
+						<input
+							type="number"
+							className="input input-sm w-full bg-base-100 font-mono"
+							value={formData.max_backups}
+							disabled={isReadOnly}
+							onChange={(e) =>
+								handleInputChange("max_backups", Number.parseInt(e.target.value, 10) || 3)
+							}
+						/>
 					</div>
 					<div className="flex flex-col justify-center">
 						<label className="label cursor-pointer justify-start gap-3 p-0">
-							<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.compress} disabled={isReadOnly} onChange={(e) => handleInputChange("compress", e.target.checked)} />
+							<input
+								type="checkbox"
+								className="checkbox checkbox-sm checkbox-primary"
+								checked={formData.compress}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("compress", e.target.checked)}
+							/>
 							<span className="label-text font-semibold text-xs">Compress Rotated Logs</span>
 						</label>
 					</div>
@@ -264,7 +338,11 @@ export function SystemConfigSection({
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
-						{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
 						Save System Configuration
 					</button>
 				</div>

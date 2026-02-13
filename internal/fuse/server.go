@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -26,6 +27,11 @@ type Server struct {
 	config        config.FuseConfig
 	vfsm          *vfs.Manager // VFS disk cache manager (nil if disabled)
 	streamTracker StreamTracker
+
+	// ValidateMount goroutine leak guard
+	validating   atomic.Int32
+	lastHealthy  atomic.Bool
+	lastHealthTS atomic.Int64 // unix nano timestamp of last validation
 }
 
 // NewServer creates a new FUSE server instance.
@@ -50,9 +56,10 @@ func getIDFromEnv(key string, defaultID int) int {
 	return defaultID
 }
 
-// Mount mounts the filesystem and starts serving
-// This method blocks until the filesystem is unmounted
-func (s *Server) Mount() error {
+// Mount mounts the filesystem and starts serving.
+// The onReady callback is called after the kernel mount is confirmed live (via WaitMount).
+// This method blocks until the filesystem is unmounted.
+func (s *Server) Mount(onReady func()) error {
 	// Try to cleanup stale mount first
 	s.CleanupMount()
 
@@ -156,7 +163,22 @@ func (s *Server) Mount() error {
 	}
 
 	s.server = server
-	s.logger.Info("FUSE filesystem mounted", "mountpoint", s.mountPoint)
+
+	// Wait until the kernel mount is actually ready before declaring success
+	if err := s.server.WaitMount(); err != nil {
+		s.logger.Error("WaitMount failed, unmounting", "error", err)
+		_ = s.server.Unmount()
+		if vfsm != nil {
+			vfsm.Stop()
+		}
+		return fmt.Errorf("FUSE mount not ready: %w", err)
+	}
+
+	s.logger.Info("FUSE filesystem mounted and ready", "mountpoint", s.mountPoint)
+
+	if onReady != nil {
+		onReady()
+	}
 
 	// Block until unmount
 	s.server.Wait()
@@ -214,14 +236,25 @@ func (s *Server) ForceUnmount() error {
 }
 
 // ValidateMount checks if the mount point is responsive by stat-ing the directory with a timeout.
-// A stuck FUSE mount hangs on stat indefinitely, so the timeout catches it.
+// Uses an atomic guard to prevent multiple concurrent os.Stat goroutines (which leak when the
+// mount is stuck). If a validation is already in-flight, returns the last cached result.
 func (s *Server) ValidateMount() (bool, error) {
+	// If another goroutine is already validating, return cached result
+	if !s.validating.CompareAndSwap(0, 1) {
+		healthy := s.lastHealthy.Load()
+		if !healthy {
+			return false, fmt.Errorf("mount point validation in progress (last check: unhealthy)")
+		}
+		return true, nil
+	}
+
 	type statResult struct {
 		err error
 	}
 
 	ch := make(chan statResult, 1)
 	go func() {
+		defer s.validating.Store(0)
 		_, err := os.Stat(s.mountPoint)
 		ch <- statResult{err: err}
 	}()
@@ -229,10 +262,17 @@ func (s *Server) ValidateMount() (bool, error) {
 	select {
 	case result := <-ch:
 		if result.err != nil {
+			s.lastHealthy.Store(false)
+			s.lastHealthTS.Store(time.Now().UnixNano())
 			return false, fmt.Errorf("mount point stat failed: %w", result.err)
 		}
+		s.lastHealthy.Store(true)
+		s.lastHealthTS.Store(time.Now().UnixNano())
 		return true, nil
 	case <-time.After(5 * time.Second):
+		// Goroutine is leaked but guarded — only one can be in-flight at a time
+		s.lastHealthy.Store(false)
+		s.lastHealthTS.Store(time.Now().UnixNano())
 		return false, fmt.Errorf("mount point not responding (stat timed out after 5s)")
 	}
 }

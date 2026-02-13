@@ -51,9 +51,7 @@ export function AuthConfigSection({
 				<legend className="fieldset-legend">Login Required</legend>
 				<div className="space-y-3">
 					<label className="label cursor-pointer justify-start gap-4">
-						<span className="label-text">
-							Require user authentication
-						</span>
+						<span className="label-text">Require user authentication</span>
 						<input
 							type="checkbox"
 							className="checkbox"
@@ -71,9 +69,7 @@ export function AuthConfigSection({
 							<AlertTriangle className="h-6 w-6" />
 							<div className="text-xs sm:text-sm">
 								<div className="font-bold">Security Warning</div>
-								<p>
-									Disabling login requirement allows anyone to access your application.
-								</p>
+								<p>Disabling login requirement allows anyone to access your application.</p>
 							</div>
 						</div>
 					)}

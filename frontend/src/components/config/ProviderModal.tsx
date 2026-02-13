@@ -319,9 +319,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 							/>
 							<div>
 								<span className="label-text font-medium">Backup Provider</span>
-								<div className="text-[10px] text-base-content/60">
-									Only used as a fallback.
-								</div>
+								<div className="text-[10px] text-base-content/60">Only used as a fallback.</div>
 							</div>
 						</label>
 					</fieldset>
@@ -375,9 +373,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 											? `Success!${connectionTestResult.rttMs ? ` (${connectionTestResult.rttMs}ms)` : ""}`
 											: "Failed"}
 									</div>
-									{connectionTestResult.message && (
-										<p>{connectionTestResult.message}</p>
-									)}
+									{connectionTestResult.message && <p>{connectionTestResult.message}</p>}
 								</div>
 							</div>
 						)}

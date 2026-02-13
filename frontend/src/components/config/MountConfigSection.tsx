@@ -260,9 +260,10 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 		mountType === "rclone"
 			? rcloneMountStatus?.mounted === true
 			: mountType === "fuse"
-				? fuseStatus?.status === "running" || fuseStatus?.status === "starting"
+				? fuseStatus?.status === "running"
 				: false;
 
+	const isStarting = mountType === "fuse" && fuseStatus?.status === "starting";
 	const isFuseError = mountType === "fuse" && fuseStatus?.status === "error";
 
 	// Whether to show mount controls
@@ -292,9 +293,11 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			: mountType === "fuse"
 				? fuseStatus?.status === "running"
 					? "alert-success"
-					: fuseStatus?.status === "error"
-						? "alert-error"
-						: "alert-warning"
+					: fuseStatus?.status === "starting"
+						? "alert-info"
+						: fuseStatus?.status === "error"
+							? "alert-error"
+							: "alert-warning"
 				: "alert-warning";
 
 	const mountTypeOptions: { value: MountType; label: string; description: string }[] = [
@@ -448,6 +451,11 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 									<Zap className="h-4 w-4" />
 								)}
 								Force Unmount
+							</button>
+						) : isStarting ? (
+							<button type="button" className="btn btn-sm btn-disabled" disabled>
+								<span className="loading loading-spinner loading-xs" />
+								Starting...
 							</button>
 						) : isMounted ? (
 							<>

@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
-import { 
-    FileCheck, 
-    Server, 
-    Settings, 
-    RefreshCw, 
-    Trash2, 
-    RotateCcw,
-    ShieldCheck,
-    Clock
+import {
+	Clock,
+	FileCheck,
+	RefreshCw,
+	RotateCcw,
+	Server,
+	Settings,
+	ShieldCheck,
+	Trash2,
 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { Pagination } from "../components/ui/Pagination";
 import { useConfirm } from "../contexts/ModalContext";
@@ -606,22 +606,36 @@ export function HealthPage() {
 					</div>
 					<div>
 						<h1 className="font-bold text-3xl tracking-tight">Health Monitoring</h1>
-						<p className="text-base-content/60 text-sm">Monitor library integrity and provider status</p>
+						<p className="text-base-content/60 text-sm">
+							Monitor library integrity and provider status
+						</p>
 					</div>
 				</div>
 
 				<div className="flex items-center gap-2">
-                    <div className="dropdown">
-                        <div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
-                            <Settings className="h-3.5 w-3.5" />
-                            Maintenance
-                        </div>
-                        <ul tabIndex={0} className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
-                            <li><button type="button" onClick={handleResetAll} className="gap-2 text-warning"><RotateCcw className="h-4 w-4" /> Reset All Checks</button></li>
-                            <li><button type="button" onClick={handleCleanup} className="gap-2 text-error"><Trash2 className="h-4 w-4" /> Cleanup Records</button></li>
-                            <li><button type="button" onClick={handleRegenerateSymlinks} className="gap-2"><RefreshCw className="h-4 w-4" /> Regenerate Symlinks</button></li>
-                        </ul>
-                    </div>
+					<div className="dropdown">
+						<div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
+							<Settings className="h-3.5 w-3.5" />
+							Maintenance
+						</div>
+						<ul className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
+							<li>
+								<button type="button" onClick={handleResetAll} className="gap-2 text-warning">
+									<RotateCcw className="h-4 w-4" /> Reset All Checks
+								</button>
+							</li>
+							<li>
+								<button type="button" onClick={handleCleanup} className="gap-2 text-error">
+									<Trash2 className="h-4 w-4" /> Cleanup Records
+								</button>
+							</li>
+							<li>
+								<button type="button" onClick={handleRegenerateSymlinks} className="gap-2">
+									<RefreshCw className="h-4 w-4" /> Regenerate Symlinks
+								</button>
+							</li>
+						</ul>
+					</div>
 
 					<div className="join">
 						<button
@@ -629,7 +643,11 @@ export function HealthPage() {
 							className={`btn btn-outline btn-sm join-item ${autoRefreshEnabled ? "btn-primary" : ""}`}
 							onClick={toggleAutoRefresh}
 						>
-							{autoRefreshEnabled ? <Clock className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5 opacity-50" />}
+							{autoRefreshEnabled ? (
+								<Clock className="h-3.5 w-3.5" />
+							) : (
+								<Clock className="h-3.5 w-3.5 opacity-50" />
+							)}
 							{autoRefreshEnabled ? `${countdown}s` : "Off"}
 						</button>
 
@@ -639,7 +657,11 @@ export function HealthPage() {
 							onClick={() => refetch()}
 							disabled={isLoading}
 						>
-							{isLoading ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw className="h-3.5 w-3.5" />}
+							{isLoading ? (
+								<span className="loading loading-spinner loading-xs" />
+							) : (
+								<RefreshCw className="h-3.5 w-3.5" />
+							)}
 							Refresh
 						</button>
 					</div>
@@ -649,164 +671,170 @@ export function HealthPage() {
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
 				{/* Sidebar Navigation */}
 				<div className="lg:col-span-1">
-                    <div className="space-y-6">
-                        <div className="card border border-base-200 bg-base-100 shadow-sm">
-                            <div className="card-body p-2 sm:p-4">
-                                <div>
-                                    <h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-                                        Monitoring
-                                    </h3>
-                                    <ul className="menu menu-md gap-1 p-0">
-                                        {(Object.entries(HEALTH_SECTIONS) as [HealthTab, typeof HEALTH_SECTIONS.files][]).map(([key, section]) => {
-                                            const IconComponent = section.icon;
-                                            const isActive = activeTab === key;
-                                            return (
-                                                <li key={key}>
-                                                    <button
-                                                        type="button"
-                                                        className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-                                                            isActive 
-                                                                ? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20" 
-                                                                : "hover:bg-base-200"
-                                                        }`}
-                                                        onClick={() => setActiveTab(key)}
-                                                    >
-                                                        <IconComponent className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
-                                                        <div className="min-w-0 flex-1 text-left">
-                                                            <div className="text-sm">{section.title}</div>
-                                                        </div>
-                                                    </button>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
+					<div className="space-y-6">
+						<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card-body p-2 sm:p-4">
+								<div>
+									<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+										Monitoring
+									</h3>
+									<ul className="menu menu-md gap-1 p-0">
+										{(
+											Object.entries(HEALTH_SECTIONS) as [HealthTab, typeof HEALTH_SECTIONS.files][]
+										).map(([key, section]) => {
+											const IconComponent = section.icon;
+											const isActive = activeTab === key;
+											return (
+												<li key={key}>
+													<button
+														type="button"
+														className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
+															isActive
+																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
+																: "hover:bg-base-200"
+														}`}
+														onClick={() => setActiveTab(key)}
+													>
+														<IconComponent
+															className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`}
+														/>
+														<div className="min-w-0 flex-1 text-left">
+															<div className="text-sm">{section.title}</div>
+														</div>
+													</button>
+												</li>
+											);
+										})}
+									</ul>
+								</div>
+							</div>
+						</div>
 
-                        {/* Library Sync Mini Card */}
-                        <LibraryScanStatus
-                            status={librarySyncStatus}
-                            isLoading={librarySyncLoading}
-                            error={librarySyncError}
-                            isStartPending={startLibrarySync.isPending}
-                            isCancelPending={cancelLibrarySync.isPending}
-                            syncIntervalMinutes={config?.health.library_sync_interval_minutes}
-                            onStart={handleStartLibrarySync}
-                            onCancel={handleCancelLibrarySync}
-                            onRetry={refetchLibrarySync}
-                            variant="sidebar"
-                        />
-                    </div>
+						{/* Library Sync Mini Card */}
+						<LibraryScanStatus
+							status={librarySyncStatus}
+							isLoading={librarySyncLoading}
+							error={librarySyncError}
+							isStartPending={startLibrarySync.isPending}
+							isCancelPending={cancelLibrarySync.isPending}
+							syncIntervalMinutes={config?.health.library_sync_interval_minutes}
+							onStart={handleStartLibrarySync}
+							onCancel={handleCancelLibrarySync}
+							onRetry={refetchLibrarySync}
+							variant="sidebar"
+						/>
+					</div>
 				</div>
 
 				{/* Content Area */}
 				<div className="lg:col-span-3">
-                    <div className="space-y-6">
-                        {/* Section Description Card */}
-                        <div className="card border border-base-200 bg-base-100 shadow-sm">
-                            <div className="card-body p-4 sm:p-6">
-                                <div className="flex items-center space-x-4">
-                                    <div className="rounded-xl bg-primary/10 p-3">
-                                        {(() => {
-                                            const IconComponent = HEALTH_SECTIONS[activeTab].icon;
-                                            return <IconComponent className="h-6 w-6 text-primary" />;
-                                        })()}
-                                    </div>
-                                    <div>
-                                        <h2 className="font-bold text-2xl tracking-tight">{HEALTH_SECTIONS[activeTab].title}</h2>
-                                        <p className="max-w-2xl text-base-content/60 text-sm">
-                                            {HEALTH_SECTIONS[activeTab].description}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+					<div className="space-y-6">
+						{/* Section Description Card */}
+						<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card-body p-4 sm:p-6">
+								<div className="flex items-center space-x-4">
+									<div className="rounded-xl bg-primary/10 p-3">
+										{(() => {
+											const IconComponent = HEALTH_SECTIONS[activeTab].icon;
+											return <IconComponent className="h-6 w-6 text-primary" />;
+										})()}
+									</div>
+									<div>
+										<h2 className="font-bold text-2xl tracking-tight">
+											{HEALTH_SECTIONS[activeTab].title}
+										</h2>
+										<p className="max-w-2xl text-base-content/60 text-sm">
+											{HEALTH_SECTIONS[activeTab].description}
+										</p>
+									</div>
+								</div>
+							</div>
+						</div>
 
-                        {activeTab === "files" ? (
-                            <div className="space-y-6">
-                                <HealthStatsCards stats={stats} />
+						{activeTab === "files" ? (
+							<div className="space-y-6">
+								<HealthStatsCards stats={stats} />
 
-                                <div className="card border border-base-200 bg-base-100 shadow-sm">
-                                    <div className="card-body p-4 sm:p-8">
-                                        <HealthFilters
-                                            searchTerm={searchTerm}
-                                            statusFilter={statusFilter}
-                                            onSearchChange={setSearchTerm}
-                                            onStatusFilterChange={setStatusFilter}
-                                            onUserInteractionStart={handleUserInteractionStart}
-                                            onUserInteractionEnd={handleUserInteractionEnd}
-                                        />
+								<div className="card border border-base-200 bg-base-100 shadow-sm">
+									<div className="card-body p-4 sm:p-8">
+										<HealthFilters
+											searchTerm={searchTerm}
+											statusFilter={statusFilter}
+											onSearchChange={setSearchTerm}
+											onStatusFilterChange={setStatusFilter}
+											onUserInteractionStart={handleUserInteractionStart}
+											onUserInteractionEnd={handleUserInteractionEnd}
+										/>
 
-                                        <BulkActionsToolbar
-                                            selectedCount={selectedItems.size}
-                                            isRestartPending={restartBulkItems.isPending}
-                                            isDeletePending={deleteBulkItems.isPending}
-                                            isRepairPending={repairBulkItems.isPending}
-                                            onClearSelection={() => setSelectedItems(new Set())}
-                                            onBulkRestart={handleBulkRestart}
-                                            onBulkDelete={handleBulkDelete}
-                                            onBulkRepair={handleBulkRepair}
-                                        />
+										<BulkActionsToolbar
+											selectedCount={selectedItems.size}
+											isRestartPending={restartBulkItems.isPending}
+											isDeletePending={deleteBulkItems.isPending}
+											isRepairPending={repairBulkItems.isPending}
+											onClearSelection={() => setSelectedItems(new Set())}
+											onBulkRestart={handleBulkRestart}
+											onBulkDelete={handleBulkDelete}
+											onBulkRepair={handleBulkRepair}
+										/>
 
-                                        <div className="mt-6">
-                                            <HealthTable
-                                                data={data}
-                                                isLoading={isLoading}
-                                                selectedItems={selectedItems}
-                                                sortBy={sortBy}
-                                                sortOrder={sortOrder}
-                                                searchTerm={searchTerm}
-                                                statusFilter={statusFilter}
-                                                isCancelPending={cancelHealthCheck.isPending}
-                                                isDirectCheckPending={directHealthCheck.isPending}
-                                                isRepairPending={repairHealthItem.isPending}
-                                                isDeletePending={deleteItem.isPending}
-                                                onSelectItem={handleSelectItem}
-                                                onSelectAll={handleSelectAll}
-                                                onSort={handleSort}
-                                                onCancelCheck={handleCancelCheck}
-                                                onManualCheck={handleManualCheck}
-                                                onRepair={handleRepair}
-                                                onDelete={handleDelete}
-                                                onSetPriority={handleSetPriority}
-                                            />
-                                        </div>
+										<div className="mt-6">
+											<HealthTable
+												data={data}
+												isLoading={isLoading}
+												selectedItems={selectedItems}
+												sortBy={sortBy}
+												sortOrder={sortOrder}
+												searchTerm={searchTerm}
+												statusFilter={statusFilter}
+												isCancelPending={cancelHealthCheck.isPending}
+												isDirectCheckPending={directHealthCheck.isPending}
+												isRepairPending={repairHealthItem.isPending}
+												isDeletePending={deleteItem.isPending}
+												onSelectItem={handleSelectItem}
+												onSelectAll={handleSelectAll}
+												onSort={handleSort}
+												onCancelCheck={handleCancelCheck}
+												onManualCheck={handleManualCheck}
+												onRepair={handleRepair}
+												onDelete={handleDelete}
+												onSetPriority={handleSetPriority}
+											/>
+										</div>
 
-                                        {meta?.total && meta.total > pageSize && (
-                                            <div className="mt-6">
-                                                <Pagination
-                                                    currentPage={page + 1}
-                                                    totalPages={Math.ceil(meta.total / pageSize)}
-                                                    onPageChange={(newPage) => setPage(newPage - 1)}
-                                                    totalItems={meta.total}
-                                                    itemsPerPage={pageSize}
-                                                    showSummary={true}
-                                                />
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
+										{meta?.total && meta.total > pageSize && (
+											<div className="mt-6">
+												<Pagination
+													currentPage={page + 1}
+													totalPages={Math.ceil(meta.total / pageSize)}
+													onPageChange={(newPage) => setPage(newPage - 1)}
+													totalItems={meta.total}
+													itemsPerPage={pageSize}
+													showSummary={true}
+												/>
+											</div>
+										)}
+									</div>
+								</div>
 
-                                <HealthStatusAlert stats={stats} />
+								<HealthStatusAlert stats={stats} />
 
-                                <CleanupModal
-                                    show={showCleanupModal}
-                                    config={cleanupConfig}
-                                    isPending={cleanupHealth.isPending}
-                                    onClose={() => setShowCleanupModal(false)}
-                                    onConfigChange={setCleanupConfig}
-                                    onConfirm={handleCleanupConfirm}
-                                />
-                            </div>
-                        ) : (
-                            <div className="card border border-base-200 bg-base-100 shadow-sm">
-                                <div className="card-body p-4 sm:p-8">
-                                    <ProviderHealth />
-                                </div>
-                            </div>
-                        )}
-                    </div>
+								<CleanupModal
+									show={showCleanupModal}
+									config={cleanupConfig}
+									isPending={cleanupHealth.isPending}
+									onClose={() => setShowCleanupModal(false)}
+									onConfigChange={setCleanupConfig}
+									onConfirm={handleCleanupConfirm}
+								/>
+							</div>
+						) : (
+							<div className="card border border-base-200 bg-base-100 shadow-sm">
+								<div className="card-body p-4 sm:p-8">
+									<ProviderHealth />
+								</div>
+							</div>
+						)}
+					</div>
 				</div>
 			</div>
 		</div>

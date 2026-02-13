@@ -1,28 +1,19 @@
+import { Film, Folder, HardDrive, History, Star, Tv, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { 
-    Folder, 
-    Film, 
-    Tv, 
-    Wifi, 
-    WifiOff, 
-    HardDrive,
-    History,
-    Star
-} from "lucide-react";
 import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
 
 type FileView = "all" | "movies" | "tv" | "recent" | "starred";
 
 const FILE_SHORTCUTS = [
-    { id: "all", title: "All Files", path: "/", icon: Folder },
-    { id: "movies", title: "Movies", path: "/movies", icon: Film },
-    { id: "tv", title: "TV Shows", path: "/tv", icon: Tv },
+	{ id: "all", title: "All Files", path: "/", icon: Folder },
+	{ id: "movies", title: "Movies", path: "/movies", icon: Film },
+	{ id: "tv", title: "TV Shows", path: "/tv", icon: Tv },
 ];
 
 const SECONDARY_SHORTCUTS = [
-    { id: "recent", title: "Recently Added", icon: History },
-    { id: "starred", title: "Starred", icon: Star },
+	{ id: "recent", title: "Recently Added", icon: History },
+	{ id: "starred", title: "Starred", icon: Star },
 ];
 
 export function FilesPage() {
@@ -77,7 +68,9 @@ export function FilesPage() {
 					</div>
 					<div>
 						<h1 className="font-bold text-3xl tracking-tight">File Explorer</h1>
-						<p className="text-base-content/60 text-sm">Browse and manage your cloud media library</p>
+						<p className="text-base-content/60 text-sm">
+							Browse and manage your cloud media library
+						</p>
 					</div>
 				</div>
 
@@ -120,8 +113,8 @@ export function FilesPage() {
 													<button
 														type="button"
 														className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-															isActive 
-																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20" 
+															isActive
+																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																: "hover:bg-base-200"
 														}`}
 														onClick={() => handleViewChange(item.id as FileView, item.path)}
@@ -148,15 +141,17 @@ export function FilesPage() {
 													<button
 														type="button"
 														className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-															isActive 
-																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20" 
+															isActive
+																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 																: "hover:bg-base-200"
 														}`}
 														onClick={() => handleViewChange(item.id as FileView)}
 													>
 														<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
 														<span className="text-sm">{item.title}</span>
-														<span className="badge badge-ghost badge-xs ml-auto opacity-50">Soon</span>
+														<span className="badge badge-ghost badge-xs ml-auto opacity-50">
+															Soon
+														</span>
 													</button>
 												</li>
 											);
@@ -173,15 +168,15 @@ export function FilesPage() {
 					<div className="card min-h-[600px] border border-base-200 bg-base-100 shadow-sm">
 						<div className="card-body p-0 sm:p-0">
 							<div className="p-4 sm:p-8">
-                                <FileExplorer
-                                    isConnected={isConnected}
-                                    hasConnectionFailed={hasConnectionFailed}
-                                    isConnecting={isConnecting}
-                                    connectionError={connectionError}
-                                    onRetryConnection={handleRetryConnection}
-                                    initialPath={initialPath}
-                                />
-                            </div>
+								<FileExplorer
+									isConnected={isConnected}
+									hasConnectionFailed={hasConnectionFailed}
+									isConnecting={isConnecting}
+									connectionError={connectionError}
+									onRetryConnection={handleRetryConnection}
+									initialPath={initialPath}
+								/>
+							</div>
 						</div>
 					</div>
 				</div>

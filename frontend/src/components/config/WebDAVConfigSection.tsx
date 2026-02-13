@@ -74,7 +74,9 @@ export function WebDAVConfigSection({
 			{/* Server Connection Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Server Connection</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Server Connection
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
@@ -89,7 +91,9 @@ export function WebDAVConfigSection({
 							onChange={(e) => handleInputChange("mount_path", e.target.value)}
 							placeholder="/mnt/altmount"
 						/>
-						<p className="label text-[10px] opacity-60">Absolute host path where WebDAV is mounted.</p>
+						<p className="label text-[10px] opacity-60">
+							Absolute host path where WebDAV is mounted.
+						</p>
 					</fieldset>
 
 					<fieldset className="fieldset min-w-0">
@@ -122,7 +126,9 @@ export function WebDAVConfigSection({
 			{/* Authentication & Security Section */}
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Authentication & Debug</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						Authentication & Debug
+					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
@@ -173,13 +179,18 @@ export function WebDAVConfigSection({
 			<div className="alert border-info/20 bg-info/5 shadow-sm">
 				<div className="flex-1">
 					<h4 className="flex items-center gap-2 font-bold text-info text-sm">
-						<Link to="/config/rclone" className="hover:underline">🔧 Integrated RClone Mount Available</Link>
+						<Link to="/config/rclone" className="hover:underline">
+							🔧 Integrated RClone Mount Available
+						</Link>
 					</h4>
 					<p className="mt-1 text-xs leading-relaxed opacity-80">
-						We recommend using the integrated RClone service for automatic management, monitoring, and easier setup.
+						We recommend using the integrated RClone service for automatic management, monitoring,
+						and easier setup.
 					</p>
 				</div>
-				<Link to="/config/rclone" className="btn btn-xs btn-info">Configure</Link>
+				<Link to="/config/rclone" className="btn btn-xs btn-info">
+					Configure
+				</Link>
 			</div>
 
 			{/* Save Button */}
@@ -191,7 +202,11 @@ export function WebDAVConfigSection({
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
-						{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+						{isUpdating ? (
+							<span className="loading loading-spinner loading-sm" />
+						) : (
+							<Save className="h-4 w-4" />
+						)}
 						Save WebDAV Configuration
 					</button>
 				</div>
