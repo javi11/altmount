@@ -2,6 +2,7 @@ package fuse
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"syscall"
@@ -101,6 +102,13 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 			if stream != nil {
 				f.streamTracker.Remove(stream.ID)
 			}
+
+			// Context cancellation is expected
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				f.logger.DebugContext(ctx, "VFS Open canceled", "path", f.path)
+				return nil, 0, syscall.EINTR
+			}
+
 			f.logger.ErrorContext(ctx, "VFS Open failed", "path", f.path, "error", err)
 			return nil, 0, syscall.EIO
 		}
@@ -123,6 +131,13 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		if stream != nil {
 			f.streamTracker.Remove(stream.ID)
 		}
+
+		// Context cancellation is expected
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			f.logger.DebugContext(ctx, "File Open canceled", "path", f.path)
+			return nil, 0, syscall.EINTR
+		}
+
 		f.logger.ErrorContext(ctx, "File Open failed", "path", f.path, "error", err)
 		return nil, 0, syscall.EIO
 	}
