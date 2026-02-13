@@ -99,7 +99,7 @@ func NewServer(
 		startTime:           time.Now(),
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
-		fuseManager:         NewFuseManager(),
+		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 	}
 
 	return server
