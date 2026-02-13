@@ -828,6 +828,13 @@ export class APIClient {
 			body: JSON.stringify({}),
 		});
 	}
+
+	async forceStopFuseMount() {
+		return this.request<{ message: string }>("/fuse/force-stop", {
+			method: "POST",
+			body: JSON.stringify({}),
+		});
+	}
 }
 
 // Export a default instance

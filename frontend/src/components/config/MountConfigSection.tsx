@@ -1,4 +1,14 @@
-import { Eye, EyeOff, HardDrive, Play, Save, Square, TestTube } from "lucide-react";
+import {
+	AlertTriangle,
+	Eye,
+	EyeOff,
+	HardDrive,
+	Play,
+	Save,
+	Square,
+	TestTube,
+	Zap,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useConfirm } from "../../contexts/ModalContext";
@@ -221,6 +231,30 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 		}
 	};
 
+	const handleForceStopMount = async () => {
+		const confirmed = await confirmAction(
+			"Force Unmount",
+			"This will forcefully unmount the FUSE filesystem using system commands. This should only be used when the normal unmount fails or the mount is unresponsive. Continue?",
+			{ type: "warning", confirmText: "Force Unmount", confirmButtonClass: "btn-error" },
+		);
+		if (!confirmed) return;
+
+		setIsMountLoading(true);
+		try {
+			await apiClient.forceStopFuseMount();
+			await fetchMountStatus();
+			showToast({ type: "success", title: "Mount force unmounted" });
+		} catch (err) {
+			showToast({
+				type: "error",
+				title: "Force unmount failed",
+				message: err instanceof Error ? err.message : "Unknown error",
+			});
+		} finally {
+			setIsMountLoading(false);
+		}
+	};
+
 	// Determine if mount is running
 	const isMounted =
 		mountType === "rclone"
@@ -228,6 +262,8 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			: mountType === "fuse"
 				? fuseStatus?.status === "running" || fuseStatus?.status === "starting"
 				: false;
+
+	const isFuseError = mountType === "fuse" && fuseStatus?.status === "error";
 
 	// Whether to show mount controls
 	const showMountControls = mountType === "rclone" || mountType === "fuse";
@@ -391,36 +427,71 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 						{mountType === "fuse" && fuseStatus?.status !== "stopped" && mountPath && (
 							<div className="text-sm">Mount point: {mountPath}</div>
 						)}
+						{mountType === "fuse" && fuseStatus?.health_error && (
+							<div className="mt-1 flex items-center gap-1 text-sm">
+								<AlertTriangle className="h-3 w-3" />
+								{fuseStatus.health_error}
+							</div>
+						)}
 					</div>
-					{isMounted ? (
-						<button
-							type="button"
-							className="btn btn-sm btn-outline"
-							onClick={handleStopMount}
-							disabled={isMountLoading}
-						>
-							{isMountLoading ? (
-								<span className="loading loading-spinner loading-xs" />
-							) : (
-								<Square className="h-4 w-4" />
-							)}
-							{isMountLoading ? "Stopping..." : "Unmount"}
-						</button>
-					) : (
-						<button
-							type="button"
-							className="btn btn-sm btn-primary"
-							onClick={handleStartMount}
-							disabled={isMountLoading || !mountPath}
-						>
-							{isMountLoading ? (
-								<span className="loading loading-spinner loading-xs" />
-							) : (
-								<Play className="h-4 w-4" />
-							)}
-							{isMountLoading ? "Starting..." : "Mount"}
-						</button>
-					)}
+					<div className="flex gap-2">
+						{isFuseError ? (
+							<button
+								type="button"
+								className="btn btn-sm btn-error btn-outline"
+								onClick={handleForceStopMount}
+								disabled={isMountLoading}
+							>
+								{isMountLoading ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<Zap className="h-4 w-4" />
+								)}
+								Force Unmount
+							</button>
+						) : isMounted ? (
+							<>
+								<button
+									type="button"
+									className="btn btn-sm btn-outline"
+									onClick={handleStopMount}
+									disabled={isMountLoading}
+								>
+									{isMountLoading ? (
+										<span className="loading loading-spinner loading-xs" />
+									) : (
+										<Square className="h-4 w-4" />
+									)}
+									Unmount
+								</button>
+								{mountType === "fuse" && (
+									<button
+										type="button"
+										className="btn btn-sm btn-error btn-outline"
+										onClick={handleForceStopMount}
+										disabled={isMountLoading}
+									>
+										<Zap className="h-4 w-4" />
+										Force
+									</button>
+								)}
+							</>
+						) : (
+							<button
+								type="button"
+								className="btn btn-sm btn-primary"
+								onClick={handleStartMount}
+								disabled={isMountLoading || !mountPath}
+							>
+								{isMountLoading ? (
+									<span className="loading loading-spinner loading-xs" />
+								) : (
+									<Play className="h-4 w-4" />
+								)}
+								Mount
+							</button>
+						)}
+					</div>
 				</div>
 			)}
 		</div>

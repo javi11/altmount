@@ -239,6 +239,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// FUSE endpoints
 	api.Post("/fuse/start", s.handleStartFuseMount)
 	api.Post("/fuse/stop", s.handleStopFuseMount)
+	api.Post("/fuse/force-stop", s.handleForceStopFuseMount)
 	api.Get("/fuse/status", s.handleGetFuseStatus)
 
 	// Provider management endpoints

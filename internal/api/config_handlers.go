@@ -729,6 +729,16 @@ func (s *Server) startRCServerIfNeeded(ctx context.Context) {
 		return
 	}
 
+	// Only start RC server for rclone-based mount types
+	if s.configManager != nil {
+		cfg := s.configManager.GetConfig()
+		if cfg != nil && cfg.MountType != config.MountTypeRClone && cfg.MountType != config.MountTypeRCloneExternal {
+			slog.DebugContext(ctx, "Skipping RC server start, mount_type is not rclone-based",
+				"mount_type", string(cfg.MountType))
+			return
+		}
+	}
+
 	// Use the mount service to start the RC server (non-blocking for config save)
 	go func() {
 		if err := s.mountService.StartRCServer(ctx); err != nil {
