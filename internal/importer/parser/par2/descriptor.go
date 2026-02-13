@@ -102,7 +102,7 @@ func readFileDescriptors(
 
 	// Create sequential reader that will read ALL segments of the PAR2 file
 	// This is critical because FileDesc packets can be in any segment, not just the first
-	r, err := usenet.NewSequentialReader(ctx, par2File.Segments, nil, cp)
+	r, err := usenet.NewSequentialReader(ctx, par2File.Segments, nil, cp, poolManager)
 	if err != nil {
 		return descriptors, fmt.Errorf("failed to create sequential reader: %w", err)
 	}

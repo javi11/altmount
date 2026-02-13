@@ -241,7 +241,7 @@ func (s *Server) handleGetImportHistory(c *fiber.Ctx) error {
 		}
 	}
 
-	history, err := s.queueRepo.ListImportHistory(c.Context(), limit)
+	history, err := s.queueRepo.ListImportHistory(c.Context(), limit, 0, "", "")
 	if err != nil {
 		return RespondInternalError(c, "Failed to list import history", err.Error())
 	}

@@ -59,18 +59,12 @@ type MetricsTracker struct {
 
 // metricsample represents a single metrics sample at a point in time
 type metricsample struct {
-<<<<<<< HEAD
+	totalBytes      int64
 	avgSpeed        float64
 	totalErrors     int64
 	providerErrors  map[string]int64
 	providerMissing map[string]int64
 	timestamp       time.Time
-=======
-	totalBytes     int64
-	totalErrors    int64
-	providerErrors map[string]int64
-	timestamp      time.Time
->>>>>>> 664266d (feat(metrics): implement windowed real-time speed tracking)
 }
 
 // NewMetricsTracker creates a new metrics tracker
@@ -401,18 +395,12 @@ func (mt *MetricsTracker) takeSample() {
 
 	// Create sample
 	sample := metricsample{
-<<<<<<< HEAD
+		totalBytes:      bytesDownloaded,
 		avgSpeed:        stats.AvgSpeed,
 		totalErrors:     totalErrors,
 		providerErrors:  copyProviderErrors(providerErrors),
 		providerMissing: copyProviderErrors(providerMissing),
 		timestamp:       time.Now(),
-=======
-		totalBytes:     bytesDownloaded,
-		totalErrors:    totalErrors,
-		providerErrors: copyProviderErrors(providerErrors),
-		timestamp:      time.Now(),
->>>>>>> 664266d (feat(metrics): implement windowed real-time speed tracking)
 	}
 
 	// Add sample

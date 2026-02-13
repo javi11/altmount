@@ -310,7 +310,7 @@ func (s *Server) handleGetQueueHistoricalStats(c *fiber.Ctx) error {
 		days = 365
 	}
 
-	stats, err := s.queueRepo.GetImportHistory(c.Context(), days)
+	stats, err := s.queueRepo.GetImportDailyStats(c.Context(), days)
 	if err != nil {
 		return RespondInternalError(c, "Failed to retrieve queue historical statistics", err.Error())
 	}

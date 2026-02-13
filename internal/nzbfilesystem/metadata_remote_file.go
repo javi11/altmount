@@ -637,7 +637,7 @@ func (mvd *MetadataVirtualDirectory) WriteAt(p []byte, off int64) (n int, err er
 }
 
 // WriteString implements afero.File.WriteString (not supported)
-func (mvd *MetadataVirtualFile) WriteString(s string) (ret int, err error) {
+func (mvd *MetadataVirtualDirectory) WriteString(s string) (ret int, err error) {
 	return 0, os.ErrPermission
 }
 
@@ -1231,11 +1231,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-<<<<<<< HEAD
 	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID)
-=======
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxCacheSizeMB, mvf.streamTracker, mvf.streamID)
->>>>>>> 04fcb51 (fix(frontend): show real-time download speed (IN) in Activity Hub playback)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
