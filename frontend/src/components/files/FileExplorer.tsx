@@ -1,5 +1,5 @@
-import { AlertTriangle, RefreshCw, Search, Wifi, WifiOff, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { AlertTriangle, RefreshCw, Search, Wifi, WifiOff, X, FolderTree, Info } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
 import { useFilePreview } from "../../hooks/useFilePreview";
 import { useWebDAVDirectory, useWebDAVFileOperations } from "../../hooks/useWebDAV";
 import type { WebDAVFile } from "../../types/webdav";
@@ -16,6 +16,7 @@ interface FileExplorerProps {
 	isConnecting: boolean;
 	connectionError: Error | null;
 	onRetryConnection: () => void;
+    initialPath?: string;
 }
 
 export function FileExplorer({
@@ -24,10 +25,16 @@ export function FileExplorer({
 	isConnecting,
 	connectionError,
 	onRetryConnection,
+    initialPath = "/",
 }: FileExplorerProps) {
-	const [currentPath, setCurrentPath] = useState("/");
+	const [currentPath, setCurrentPath] = useState(initialPath);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [showCorrupted, setShowCorrupted] = useState(false);
+
+    // Sync currentPath if initialPath changes (from sidebar)
+    useEffect(() => {
+        setCurrentPath(initialPath);
+    }, [initialPath]);
 
 	const {
 		data: directory,
@@ -96,7 +103,6 @@ export function FileExplorer({
 	};
 
 	const handleFileInfo = (path: string) => {
-		// Find the file object from the filtered files
 		const file = filteredFiles.find((f) => {
 			const filePath = `${currentPath}/${f.basename}`.replace(/\/+/g, "/");
 			return filePath === path;
@@ -107,7 +113,6 @@ export function FileExplorer({
 				isOpen: true,
 				file,
 			});
-			// Fetch metadata for the file
 			getFileMetadata(path);
 		}
 	};
@@ -126,29 +131,32 @@ export function FileExplorer({
 		}
 	};
 
-	// Show connecting state
 	if (isConnecting) {
 		return (
-			<div className="flex flex-col items-center justify-center py-16">
-				<Wifi className="mb-4 h-16 w-16 animate-pulse text-primary" />
-				<h3 className="mb-2 font-semibold text-base-content/70 text-xl">Connecting...</h3>
-				<p className="mb-6 text-base-content/50">Authenticating with WebDAV server</p>
-				<LoadingSpinner />
+			<div className="flex flex-col items-center justify-center py-20">
+				<div className="rounded-full bg-primary/10 p-6">
+                    <Wifi className="h-12 w-12 animate-pulse text-primary" />
+                </div>
+				<h3 className="mt-6 font-bold text-base-content/70 text-xl tracking-tight">Connecting...</h3>
+				<p className="mt-2 text-base-content/50 text-sm">Authenticating with WebDAV server</p>
+				<div className="mt-8">
+                    <LoadingSpinner />
+                </div>
 			</div>
 		);
 	}
 
-	// Show connection error state
 	if (!isConnected && connectionError) {
 		return (
-			<div className="flex flex-col items-center justify-center py-16">
-				<WifiOff className="mb-4 h-16 w-16 text-error" />
-				<h3 className="mb-2 font-semibold text-base-content/70 text-xl">Connection Failed</h3>
-				<p className="mb-4 text-base-content/50">
+			<div className="flex flex-col items-center justify-center py-20 text-center">
+				<div className="rounded-full bg-error/10 p-6">
+                    <WifiOff className="h-12 w-12 text-error" />
+                </div>
+				<h3 className="mt-6 font-bold text-base-content/70 text-xl tracking-tight">Connection Failed</h3>
+				<p className="mt-2 max-w-xs text-base-content/50 text-sm leading-relaxed">
 					{connectionError.message || "Unable to connect to WebDAV server"}
 				</p>
-				<p className="mb-6 text-base-content/40">Make sure you're logged in to the application</p>
-				<button type="button" className="btn btn-primary" onClick={onRetryConnection}>
+				<button type="button" className="btn btn-primary btn-md mt-10 px-8 shadow-lg shadow-primary/20" onClick={onRetryConnection}>
 					<RefreshCw className="h-4 w-4" />
 					Retry Connection
 				</button>
@@ -156,29 +164,17 @@ export function FileExplorer({
 		);
 	}
 
-	// Show generic not connected state (shouldn't normally happen with auto-connect)
-	if (!isConnected) {
-		return (
-			<div className="flex flex-col items-center justify-center py-16">
-				<WifiOff className="mb-4 h-16 w-16 text-base-content/30" />
-				<h3 className="mb-2 font-semibold text-base-content/70 text-xl">Not Connected</h3>
-				<p className="mb-6 text-base-content/50">WebDAV connection required to browse files</p>
-				<button type="button" className="btn btn-primary" onClick={onRetryConnection}>
-					<Wifi className="h-4 w-4" />
-					Connect
-				</button>
-			</div>
-		);
-	}
-
 	if (error) {
 		return (
-			<div className="space-y-4">
+			<div className="space-y-6 py-4">
 				<div className="flex items-center justify-between">
-					<h2 className="font-bold text-2xl">Files</h2>
-					<button type="button" className="btn btn-outline" onClick={() => refetch()}>
-						<RefreshCw className="h-4 w-4" />
-						Retry
+					<div className="flex items-center gap-2">
+                        <AlertTriangle className="h-5 w-5 text-error" />
+                        <h2 className="font-bold text-xl tracking-tight">Navigation Error</h2>
+                    </div>
+					<button type="button" className="btn btn-outline btn-xs px-4" onClick={() => refetch()}>
+						<RefreshCw className="h-3 w-3" />
+						Reload
 					</button>
 				</div>
 				<ErrorAlert error={error as Error} onRetry={() => refetch()} />
@@ -187,141 +183,136 @@ export function FileExplorer({
 	}
 
 	return (
-		<div className="space-y-6">
-			{/* Header */}
-			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h2 className="font-bold text-2xl">Files</h2>
-					<p className="text-base-content/70">Browse WebDAV filesystem</p>
-				</div>
-				<div className="flex items-center gap-2">
-					<div className="flex items-center space-x-2">
-						<Wifi className="h-4 w-4 text-success" />
-						<span className="text-sm text-success">Connected</span>
-					</div>
-					<button
-						type="button"
-						className="btn btn-outline btn-sm"
-						onClick={() => refetch()}
-						disabled={isLoading}
-					>
-						<RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-						Refresh
-					</button>
-				</div>
-			</div>
+		<div className="space-y-8">
+			{/* Breadcrumb & Global Actions */}
+			<section className="space-y-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex-1 overflow-hidden">
+                        <div className="flex items-center gap-2 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+                            <FolderTree className="h-3 w-3" />
+                            <span>Current Location</span>
+                        </div>
+                        <div className="mt-2 overflow-x-auto rounded-lg bg-base-200/50 p-2 scrollbar-hide">
+                            <BreadcrumbNav path={currentPath} onNavigate={handleNavigate} />
+                        </div>
+                    </div>
+                    
+                    <div className="flex shrink-0 items-center gap-2">
+                        <button
+                            type="button"
+                            className="btn btn-ghost btn-sm gap-2 opacity-60 hover:opacity-100"
+                            onClick={() => refetch()}
+                            disabled={isLoading}
+                        >
+                            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+                            <span className="text-xs">Refresh</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
 
-			{/* Search Bar */}
-			<div className="card bg-base-100 shadow-md">
-				<div className="card-body p-4">
-					<div className="space-y-3">
-						<div className="relative">
-							<div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-								<Search className="h-4 w-4 text-base-content/50" />
-							</div>
-							<input
-								type="text"
-								placeholder="Search in current directory..."
-								className="input input-bordered w-full pr-10 pl-10"
-								value={searchTerm}
-								onChange={(e) => setSearchTerm(e.target.value)}
-							/>
-							{searchTerm && (
-								<button
-									type="button"
-									className="absolute inset-y-0 right-0 flex items-center pr-3 hover:text-base-content/70"
-									onClick={handleClearSearch}
-									aria-label="Clear search"
-								>
-									<X className="h-4 w-4 text-base-content/50" />
-								</button>
-							)}
+			{/* Search & Filters Section */}
+			<section className="space-y-4">
+                <div className="flex items-center gap-2">
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Search & Filters</h4>
+					<div className="h-px flex-1 bg-base-300" />
+				</div>
+
+				<div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+					<div className="relative md:col-span-2">
+						<div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+							<Search className="h-4 w-4 text-base-content/40" />
 						</div>
-						<label className="label cursor-pointer justify-start gap-2">
-							<input
-								type="checkbox"
-								className="checkbox checkbox-sm"
-								checked={showCorrupted}
-								onChange={(e) => setShowCorrupted(e.target.checked)}
-							/>
-							<span className="label-text flex items-center gap-2">
-								<AlertTriangle className="h-4 w-4" />
-								Show corrupted files
-							</span>
-						</label>
+						<input
+							type="text"
+							placeholder="Search files in this directory..."
+							className="input input-sm w-full bg-base-200/50 pl-10 font-medium"
+							value={searchTerm}
+							onChange={(e) => setSearchTerm(e.target.value)}
+						/>
+						{searchTerm && (
+							<button
+								type="button"
+								className="absolute inset-y-0 right-0 flex items-center pr-3 text-base-content/40 hover:text-error"
+								onClick={handleClearSearch}
+							>
+								<X className="h-4 w-4" />
+							</button>
+						)}
 					</div>
+					
+					<div className="flex items-center justify-end">
+                        <label className="label cursor-pointer gap-3 p-0">
+                            <input
+                                type="checkbox"
+                                className="checkbox checkbox-sm checkbox-primary"
+                                checked={showCorrupted}
+                                onChange={(e) => setShowCorrupted(e.target.checked)}
+                            />
+                            <div className="flex flex-col">
+                                <span className="label-text font-semibold text-xs">Corrupted Files</span>
+                                <span className="label-text-alt text-[9px] opacity-60">Show items with errors</span>
+                            </div>
+                        </label>
+                    </div>
 				</div>
-			</div>
+			</section>
 
-			{/* Breadcrumb Navigation */}
-			<div className="card bg-base-100 shadow-md">
-				<div className="card-body p-4">
-					<BreadcrumbNav path={currentPath} onNavigate={handleNavigate} />
-				</div>
-			</div>
-
-			{/* Error Messages */}
+			{/* Operation Errors */}
 			{(downloadError || deleteError || exportNZBError) && (
-				<div className="alert alert-error">
-					<AlertTriangle className="h-6 w-6" />
-					<div>
-						<div className="font-bold">Operation Failed</div>
-						<div className="text-sm">
+				<div className="alert alert-error animate-in fade-in slide-in-from-top-2 text-sm shadow-md">
+					<AlertTriangle className="h-5 w-5" />
+					<div className="flex-1">
+						<div className="font-bold">FileSystem Operation Failed</div>
+						<div className="text-xs opacity-90">
 							{downloadError?.message || deleteError?.message || exportNZBError?.message}
 						</div>
 					</div>
 				</div>
 			)}
 
-			{/* File List */}
-			<div className="card bg-base-100 shadow-md">
-				<div className="card-body p-6">
-					{/* Search Results Info */}
+			{/* File List Section */}
+			<section className="space-y-4">
+                <div className="flex items-center gap-2">
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Contents</h4>
+					<div className="h-px flex-1 bg-base-300" />
+				</div>
+
+				<div className="min-h-[300px] rounded-2xl border border-base-300 bg-base-200/30 p-2 sm:p-6">
 					{searchTerm && directory && (
-						<div className="mb-4">
+						<div className="mb-6 flex items-center gap-2 px-2 text-base-content/60 text-xs">
+                            <Info className="h-3 w-3" />
 							{directory.files.length === 0 ? (
-								<div className="text-base-content/70 text-sm">
-									Cannot search - directory is empty
-								</div>
+								<span>Directory is empty</span>
 							) : filteredFiles.length === 0 ? (
-								<div className="text-base-content/70 text-sm">
-									No items match "{searchTerm}" in this directory ({directory.files.length} total
-									items)
-								</div>
+								<span>No matches for "{searchTerm}" ({directory.files.length} total items)</span>
 							) : (
-								<div className="text-base-content/70 text-sm">
-									{filteredFiles.length} of {directory.files.length} items match "{searchTerm}"
-								</div>
+								<span>Showing {filteredFiles.length} of {directory.files.length} items matching "{searchTerm}"</span>
 							)}
 						</div>
 					)}
 
-					{/* Loading State */}
 					{isLoading && isConnected ? (
-						<LoadingSpinner />
+						<div className="flex h-64 items-center justify-center">
+                            <LoadingSpinner />
+                        </div>
 					) : directory ? (
-						/* Directory Content */
 						searchTerm && filteredFiles.length === 0 && directory.files.length > 0 ? (
-							/* No Search Results State */
-							<div className="flex flex-col items-center justify-center py-12">
-								<Search className="mb-4 h-12 w-12 text-base-content/30" />
-								<h3 className="mb-2 font-semibold text-base-content/70 text-lg">
-									No Search Results
-								</h3>
-								<p className="mb-4 text-center text-base-content/50">
-									No files match "{searchTerm}" in this directory
+							<div className="flex flex-col items-center justify-center py-20">
+								<Search className="mb-4 h-12 w-12 text-base-content/20" />
+								<h3 className="font-bold text-base-content/60 text-lg">No Results Found</h3>
+								<p className="mt-1 text-base-content/40 text-sm">
+									Try adjusting your search terms
 								</p>
 								<button
 									type="button"
-									className="btn btn-outline btn-sm"
+									className="btn btn-ghost btn-sm mt-6 text-primary"
 									onClick={handleClearSearch}
 								>
-									<X className="h-4 w-4" />
-									Clear Search
+									Clear Filter
 								</button>
 							</div>
 						) : (
-							/* File List or Empty Directory */
 							<FileList
 								files={filteredFiles}
 								currentPath={currentPath}
@@ -338,9 +329,9 @@ export function FileExplorer({
 						)
 					) : null}
 				</div>
-			</div>
+			</section>
 
-			{/* File Preview Modal */}
+			{/* Modals */}
 			<FilePreview
 				isOpen={preview.isOpen}
 				file={preview.file}
@@ -355,7 +346,6 @@ export function FileExplorer({
 				currentPath={preview.currentPath || undefined}
 			/>
 
-			{/* File Info Modal */}
 			<FileInfoModal
 				isOpen={fileInfoModal.isOpen}
 				file={fileInfoModal.file}
