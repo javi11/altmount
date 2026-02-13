@@ -19,7 +19,7 @@ require (
 	github.com/javi11/nntppool/v4 v4.2.1
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
-	github.com/javi11/rardecode/v2 v2.1.2-0.20251031153435-d6d75db6d6ca
+	github.com/javi11/rardecode/v2 v2.1.2-0.20260213142800-2b1c601a8d62
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
 	github.com/jinzhu/copier v0.4.0
 	github.com/mattn/go-sqlite3 v1.14.22
