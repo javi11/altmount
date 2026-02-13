@@ -1,5 +1,8 @@
 // Configuration types that match the backend API structure
 
+// Mount type for unified mount configuration
+export type MountType = "none" | "rclone" | "fuse" | "rclone_external";
+
 // Base configuration response from API
 export interface ConfigResponse {
 	webdav: WebDAVConfig;
@@ -17,6 +20,7 @@ export interface ConfigResponse {
 	arrs: ArrsConfig;
 	providers: ProviderConfig[];
 	mount_path: string;
+	mount_type: MountType;
 	api_key?: string;
 }
 
@@ -266,6 +270,7 @@ export interface ConfigUpdateRequest {
 	arrs?: ArrsConfig;
 	providers?: ProviderUpdateRequest[];
 	mount_path?: string;
+	mount_type?: MountType;
 }
 
 // WebDAV update request
@@ -440,8 +445,7 @@ export type ConfigSection =
 	| "health"
 	| "import"
 	| "providers"
-	| "rclone"
-	| "fuse"
+	| "mount"
 	| "sabnzbd"
 	| "arrs"
 	| "system";
@@ -760,15 +764,9 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		icon: "Shield",
 		canEdit: true,
 	},
-	rclone: {
-		title: "Rclone Mount",
-		description: "RClone mount and VFS settings",
-		icon: "HardDrive",
-		canEdit: true,
-	},
-	fuse: {
-		title: "Altmount Native Mount",
-		description: "Configure altmount native FUSE mount settings",
+	mount: {
+		title: "Mount",
+		description: "Configure filesystem mount (RClone or native FUSE)",
 		icon: "HardDrive",
 		canEdit: true,
 	},

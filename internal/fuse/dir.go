@@ -25,25 +25,27 @@ var _ fs.NodeSetattrer = (*Dir)(nil)
 // Talks directly to NzbFilesystem with FUSE context propagation.
 type Dir struct {
 	fs.Inode
-	nzbfs     *nzbfilesystem.NzbFilesystem
-	vfsm      *vfs.Manager // VFS disk cache manager (nil if disabled)
-	path      string
-	logger    *slog.Logger
-	isRootDir bool
-	uid       uint32
-	gid       uint32
+	nzbfs         *nzbfilesystem.NzbFilesystem
+	vfsm          *vfs.Manager // VFS disk cache manager (nil if disabled)
+	streamTracker StreamTracker
+	path          string
+	logger        *slog.Logger
+	isRootDir     bool
+	uid           uint32
+	gid           uint32
 }
 
 // NewDir creates a new root directory node for the FUSE filesystem.
-func NewDir(nzbfs *nzbfilesystem.NzbFilesystem, path string, logger *slog.Logger, uid, gid uint32, vfsm *vfs.Manager) *Dir {
+func NewDir(nzbfs *nzbfilesystem.NzbFilesystem, path string, logger *slog.Logger, uid, gid uint32, vfsm *vfs.Manager, st StreamTracker) *Dir {
 	return &Dir{
-		nzbfs:     nzbfs,
-		vfsm:      vfsm,
-		path:      path,
-		logger:    logger,
-		isRootDir: path == "" || path == "/",
-		uid:       uid,
-		gid:       gid,
+		nzbfs:         nzbfs,
+		vfsm:          vfsm,
+		streamTracker: st,
+		path:          path,
+		logger:        logger,
+		isRootDir:     path == "" || path == "/",
+		uid:           uid,
+		gid:           gid,
 	}
 }
 
@@ -98,24 +100,26 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 
 	if info.IsDir() {
 		node := &Dir{
-			nzbfs:  d.nzbfs,
-			vfsm:   d.vfsm,
-			path:   fullPath,
-			logger: d.logger,
-			uid:    d.uid,
-			gid:    d.gid,
+			nzbfs:         d.nzbfs,
+			vfsm:          d.vfsm,
+			streamTracker: d.streamTracker,
+			path:          fullPath,
+			logger:        d.logger,
+			uid:           d.uid,
+			gid:           d.gid,
 		}
 		return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFDIR}), 0
 	}
 
 	node := &File{
-		nzbfs:  d.nzbfs,
-		vfsm:   d.vfsm,
-		path:   fullPath,
-		logger: d.logger,
-		size:   info.Size(),
-		uid:    d.uid,
-		gid:    d.gid,
+		nzbfs:         d.nzbfs,
+		vfsm:          d.vfsm,
+		streamTracker: d.streamTracker,
+		path:          fullPath,
+		logger:        d.logger,
+		size:          info.Size(),
+		uid:           d.uid,
+		gid:           d.gid,
 	}
 	return d.NewInode(ctx, node, fs.StableAttr{Mode: fuse.S_IFREG}), 0
 }

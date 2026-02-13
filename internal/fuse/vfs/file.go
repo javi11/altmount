@@ -7,9 +7,14 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/spf13/afero"
+	"golang.org/x/sync/singleflight"
 )
+
+// noopFetchGroup is used when no downloader is present (standalone CachedFile).
+var noopFetchGroup singleflight.Group
 
 var fetchBufPool = sync.Pool{
 	New: func() any {
@@ -36,8 +41,10 @@ type CachedFile struct {
 	downloader *Downloader
 	closed     atomic.Bool
 
-	// For fetching missing data from backend
-	fetchMu sync.Mutex
+	// fetchGroup deduplicates concurrent fetches for the same chunk range.
+	// Shared with the Downloader so that sync-path and prefetch-path fetches
+	// for the same range are collapsed into a single download.
+	fetchGroup *singleflight.Group
 }
 
 // NewCachedFile creates a new CachedFile wrapping a CacheItem.
@@ -54,6 +61,15 @@ func NewCachedFile(
 		return nil, fmt.Errorf("open cache item: %w", err)
 	}
 
+	// Share the fetch dedup group with the downloader so that sync-path
+	// and prefetch-path fetches for the same chunk are collapsed.
+	var fg *singleflight.Group
+	if downloader != nil {
+		fg = downloader.FetchGroup()
+	} else {
+		fg = &noopFetchGroup
+	}
+
 	return &CachedFile{
 		item:       item,
 		opener:     opener,
@@ -62,6 +78,7 @@ func NewCachedFile(
 		chunkSize:  chunkSize,
 		logger:     logger,
 		downloader: downloader,
+		fetchGroup: fg,
 	}, nil
 }
 
@@ -113,6 +130,8 @@ func (cf *CachedFile) ReadAt(p []byte, off int64) (int, error) {
 
 // fetchRange fetches data from the backend and writes it to cache.
 // Fetches aligned chunks to maximize cache reuse.
+// Uses singleflight to deduplicate concurrent fetches for the same range
+// while allowing fetches for different ranges to proceed in parallel.
 func (cf *CachedFile) fetchRange(start, end int64) error {
 	// Align to chunk boundaries
 	alignedStart := (start / cf.chunkSize) * cf.chunkSize
@@ -121,23 +140,21 @@ func (cf *CachedFile) fetchRange(start, end int64) error {
 		alignedEnd = cf.size
 	}
 
-	// Find which parts are actually missing
+	// Quick check — avoid singleflight overhead when already cached
 	missing := cf.item.MissingRanges(alignedStart, alignedEnd)
 	if len(missing) == 0 {
 		return nil
 	}
 
-	cf.fetchMu.Lock()
-	defer cf.fetchMu.Unlock()
-
-	// Re-check after acquiring lock (another goroutine may have fetched)
-	missing = cf.item.MissingRanges(alignedStart, alignedEnd)
-	if len(missing) == 0 {
-		return nil
-	}
-
+	// Fetch each missing range via singleflight:
+	// - Different chunks proceed in parallel (different keys)
+	// - Same chunk from concurrent readers is deduplicated (same key)
 	for _, r := range missing {
-		if err := cf.fetchAndCache(r.Start, r.End); err != nil {
+		key := fmt.Sprintf("%d-%d", r.Start, r.End)
+		_, err, _ := cf.fetchGroup.Do(key, func() (interface{}, error) {
+			return nil, cf.fetchAndCache(r.Start, r.End)
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -149,7 +166,8 @@ func (cf *CachedFile) fetchRange(start, end int64) error {
 // ReadAt creates a bounded reader covering only the requested range, avoiding
 // the unbounded offset→EOF readers that Seek+Read would create.
 func (cf *CachedFile) fetchAndCache(start, end int64) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	file, err := cf.opener.Open(ctx, cf.path)
 	if err != nil {

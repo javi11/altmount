@@ -11,6 +11,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/fuse/vfs"
+	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/spf13/afero"
 )
 
@@ -20,12 +21,14 @@ var _ fs.FileReleaser = (*Handle)(nil)
 // Handle wraps either a VFS CachedFile (ReadAt) or an afero.File (Seek+Read).
 // Uses atomic closed state to prevent double-close.
 type Handle struct {
-	cachedFile *vfs.CachedFile // Used when VFS enabled (ReadAt, no mutex needed)
-	file       afero.File      // Fallback when VFS disabled (Seek+Read)
-	closed     atomic.Bool
-	logger     *slog.Logger
-	path       string
-	vfsm       *vfs.Manager // For notifying close (nil in fallback mode)
+	cachedFile    *vfs.CachedFile              // Used when VFS enabled (ReadAt, no mutex needed)
+	file          afero.File                   // Fallback when VFS disabled (Seek+Read)
+	closed        atomic.Bool
+	logger        *slog.Logger
+	path          string
+	vfsm          *vfs.Manager                 // For notifying close (nil in fallback mode)
+	stream        *nzbfilesystem.ActiveStream  // FUSE-level stream for progress tracking
+	streamTracker StreamTracker                // For UpdateProgress/Remove (nil if no tracker)
 
 	// Only used for fallback Seek+Read mode
 	mu       sync.Mutex
@@ -41,6 +44,10 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	// VFS mode: use ReadAt (position-independent, no mutex needed)
 	if h.cachedFile != nil {
 		n, err := h.cachedFile.ReadAt(dest, off)
+		if n > 0 && h.stream != nil {
+			h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
+			atomic.StoreInt64(&h.stream.CurrentOffset, off+int64(n))
+		}
 		if err != nil {
 			if err == io.EOF {
 				if n > 0 {
@@ -69,6 +76,10 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	}
 
 	n, err := h.file.Read(dest)
+	if n > 0 && h.stream != nil {
+		h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
+		atomic.StoreInt64(&h.stream.CurrentOffset, off+int64(n))
+	}
 	if err != nil && err != io.EOF {
 		h.logger.ErrorContext(ctx, "Read failed", "path", h.path, "offset", off, "size", len(dest), "error", err)
 		return nil, syscall.EIO
@@ -82,6 +93,12 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 func (h *Handle) Release(ctx context.Context) syscall.Errno {
 	if !h.closed.CompareAndSwap(false, true) {
 		return 0 // Already closed
+	}
+
+	// Remove the FUSE-level stream before closing the underlying file
+	if h.stream != nil && h.streamTracker != nil {
+		h.streamTracker.Remove(h.stream.ID)
+		h.stream = nil
 	}
 
 	if h.cachedFile != nil {

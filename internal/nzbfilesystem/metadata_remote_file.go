@@ -26,6 +26,8 @@ import (
 	"github.com/spf13/afero"
 )
 
+const maxReadWindow = 8 * 1024 * 1024 // 8MB
+
 // MetadataRemoteFile implements the RemoteFile interface for metadata-backed virtual files
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
@@ -169,7 +171,10 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 
 	// Start tracking stream if tracker available
 	streamID := ""
-	if mrf.streamTracker != nil {
+	if suppress, _ := ctx.Value(utils.SuppressStreamTrackingKey).(bool); suppress {
+		// Stream tracking handled at caller level (e.g. FUSE Handle)
+		streamID = ""
+	} else if mrf.streamTracker != nil {
 		// Check if we already have a stream ID in context
 		if id, ok := ctx.Value(utils.StreamIDKey).(string); ok && id != "" {
 			streamID = id
@@ -664,7 +669,8 @@ type MetadataVirtualFile struct {
 	// Segment offset index for O(1) offset→segment lookup
 	segmentIndex *segmentOffsetIndex
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	closeWg sync.WaitGroup // tracks background reader closes during seek
 }
 
 // segmentOffsetIndex provides O(1) lookup for offset→segment mapping using binary search
@@ -988,13 +994,16 @@ func (mvf *MetadataVirtualFile) Close() error {
 	}
 
 	mvf.mu.Lock()
-	defer mvf.mu.Unlock()
 	if mvf.reader != nil {
-		err := mvf.reader.Close()
+		mvf.reader.Close()
 		mvf.reader = nil
 		mvf.readerInitialized = false
-		return err
 	}
+	mvf.mu.Unlock()
+
+	// Wait for any background reader closes from previous seeks
+	mvf.closeWg.Wait()
+
 	return nil
 }
 
@@ -1075,11 +1084,15 @@ func (mvf *MetadataVirtualFile) hasMoreDataToRead() bool {
 	return false
 }
 
-// closeCurrentReader closes the current reader and resets reader state
+// closeCurrentReader detaches the current reader and closes it in the background.
+// This avoids blocking Seek on UsenetReader.Close() which may wait for in-flight downloads.
 func (mvf *MetadataVirtualFile) closeCurrentReader() {
 	if mvf.reader != nil {
-		mvf.reader.Close()
+		reader := mvf.reader
 		mvf.reader = nil
+		mvf.closeWg.Go(func() {
+			reader.Close()
+		})
 	}
 	mvf.readerInitialized = false
 }

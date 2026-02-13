@@ -2,11 +2,15 @@ package vfs
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -19,12 +23,13 @@ const (
 // Downloader coordinates background prefetch for a cached file.
 // Detects sequential access patterns and prefetches upcoming chunks.
 type Downloader struct {
-	item      *CacheItem
-	opener    FileOpener
-	path      string
-	fileSize  int64
-	chunkSize int64
-	readAhead int
+	item                *CacheItem
+	opener              FileOpener
+	path                string
+	fileSize            int64
+	chunkSize           int64
+	readAhead           int
+	prefetchConcurrency int
 
 	logger *slog.Logger
 
@@ -39,8 +44,12 @@ type Downloader struct {
 	circuitOpen       atomic.Bool
 	circuitOpenedAt   atomic.Int64
 
+	// Fetch deduplication (shared with CachedFile sync path)
+	fetchGroup singleflight.Group
+
 	// Prefetch concurrency control
-	prefetching atomic.Bool
+	prefetching    atomic.Bool
+	prefetchCancel context.CancelFunc // cancels the running prefetch goroutine
 
 	// Lifecycle
 	ctx      context.Context
@@ -58,22 +67,27 @@ func NewDownloader(
 	fileSize int64,
 	chunkSize int64,
 	readAhead int,
+	prefetchConcurrency int,
 	logger *slog.Logger,
 ) *Downloader {
 	if readAhead <= 0 {
 		readAhead = defaultReadAheadChunks
 	}
+	if prefetchConcurrency <= 0 {
+		prefetchConcurrency = 3
+	}
 
 	d := &Downloader{
-		item:           item,
-		opener:         opener,
-		path:           path,
-		fileSize:       fileSize,
-		chunkSize:      chunkSize,
-		readAhead:      readAhead,
-		logger:         logger,
-		lastAccessOff:  -1,
-		sequentialHits: 0,
+		item:                item,
+		opener:              opener,
+		path:                path,
+		fileSize:            fileSize,
+		chunkSize:           chunkSize,
+		readAhead:           readAhead,
+		prefetchConcurrency: prefetchConcurrency,
+		logger:              logger,
+		lastAccessOff:       -1,
+		sequentialHits:      0,
 	}
 	d.lastSeen.Store(time.Now().Unix())
 
@@ -97,6 +111,13 @@ func (d *Downloader) Stop() {
 	if !d.stopped.CompareAndSwap(false, true) {
 		return
 	}
+	// Cancel any running prefetch first
+	d.mu.Lock()
+	if d.prefetchCancel != nil {
+		d.prefetchCancel()
+		d.prefetchCancel = nil
+	}
+	d.mu.Unlock()
 	if d.cancel != nil {
 		d.cancel()
 	}
@@ -132,6 +153,11 @@ func (d *Downloader) RecordAccess(offset int64) {
 		} else {
 			d.sequentialHits = 0
 			d.isSequential = false
+			// Cancel running prefetch to free NNTP connections for the seek
+			if d.prefetchCancel != nil {
+				d.prefetchCancel()
+				d.prefetchCancel = nil
+			}
 		}
 	}
 
@@ -140,62 +166,98 @@ func (d *Downloader) RecordAccess(offset int64) {
 	if d.isSequential && !d.stopped.Load() {
 		// Only spawn if no prefetch is already running
 		if d.prefetching.CompareAndSwap(false, true) {
+			pctx, pcancel := context.WithCancel(d.ctx)
+			d.prefetchCancel = pcancel
 			d.wg.Add(1)
 			go func() {
 				defer d.wg.Done()
 				defer d.prefetching.Store(false)
-				d.prefetch(offset)
+				d.prefetchWithCtx(pctx, offset)
 			}()
 		}
 	}
 }
 
-// prefetch downloads upcoming chunks starting from the given offset.
-func (d *Downloader) prefetch(fromOffset int64) {
-	if d.stopped.Load() || d.circuitOpen.Load() {
-		return
-	}
-
-	// Start prefetching from the next chunk boundary after the current read
+// prefetchWithCtx continuously downloads upcoming chunks starting from the given offset.
+// Uses bounded parallelism via errgroup for concurrent chunk downloads.
+// Runs in a loop advancing by readAhead windows so the pipeline stays full.
+// The context is cancelled when a seek is detected, freeing NNTP connections.
+func (d *Downloader) prefetchWithCtx(ctx context.Context, fromOffset int64) {
 	startChunk := (fromOffset / d.chunkSize) + 1
 
-	for i := range d.readAhead {
-		if d.stopped.Load() || d.circuitOpen.Load() {
-			break
+	for {
+		if d.stopped.Load() || d.circuitOpen.Load() || ctx.Err() != nil {
+			return
 		}
-
-		chunkStart := (startChunk + int64(i)) * d.chunkSize
-		chunkEnd := chunkStart + d.chunkSize
-		if chunkStart >= d.fileSize {
-			break
-		}
-		if chunkEnd > d.fileSize {
-			chunkEnd = d.fileSize
-		}
-
-		// Skip if already cached
-		if d.item.HasRange(chunkStart, chunkEnd) {
-			continue
-		}
-
-		if err := d.fetchChunk(chunkStart, chunkEnd); err != nil {
-			errCount := d.consecutiveErrors.Add(1)
-			if errCount >= maxConsecutiveErrors {
-				d.circuitOpen.Store(true)
-				d.circuitOpenedAt.Store(time.Now().Unix())
-				d.logger.Warn("Downloader circuit breaker opened",
-					"path", d.path,
-					"errors", errCount)
-			}
+		if startChunk*d.chunkSize >= d.fileSize {
 			return
 		}
 
-		d.consecutiveErrors.Store(0)
+		g := new(errgroup.Group)
+		g.SetLimit(d.prefetchConcurrency)
+		fetched := 0
+
+		for i := range d.readAhead {
+			if ctx.Err() != nil {
+				break
+			}
+
+			chunkStart := (startChunk + int64(i)) * d.chunkSize
+			if chunkStart >= d.fileSize {
+				break
+			}
+			chunkEnd := min(chunkStart+d.chunkSize, d.fileSize)
+
+			if d.item.HasRange(chunkStart, chunkEnd) {
+				continue
+			}
+			fetched++
+
+			g.Go(func() error {
+				if err := d.fetchChunkWithCtx(ctx, chunkStart, chunkEnd); err != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					errCount := d.consecutiveErrors.Add(1)
+					if errCount >= maxConsecutiveErrors {
+						d.circuitOpen.Store(true)
+						d.circuitOpenedAt.Store(time.Now().Unix())
+						d.logger.Warn("Downloader circuit breaker opened",
+							"path", d.path,
+							"errors", errCount)
+					}
+					return nil // don't cancel other goroutines
+				}
+				d.consecutiveErrors.Store(0)
+				return nil
+			})
+		}
+
+		g.Wait()
+
+		if fetched == 0 {
+			return // window fully cached, nothing to do
+		}
+		startChunk += int64(d.readAhead)
 	}
 }
 
-func (d *Downloader) fetchChunk(start, end int64) error {
-	file, err := d.opener.Open(d.ctx, d.path)
+// FetchGroup returns the shared singleflight group for fetch deduplication.
+// CachedFile uses this to collapse sync-path fetches with in-flight prefetches.
+func (d *Downloader) FetchGroup() *singleflight.Group {
+	return &d.fetchGroup
+}
+
+func (d *Downloader) fetchChunkWithCtx(ctx context.Context, start, end int64) error {
+	key := fmt.Sprintf("%d-%d", start, end)
+	_, err, _ := d.fetchGroup.Do(key, func() (interface{}, error) {
+		return nil, d.doFetchChunk(ctx, start, end)
+	})
+	return err
+}
+
+func (d *Downloader) doFetchChunk(ctx context.Context, start, end int64) error {
+	file, err := d.opener.Open(ctx, d.path)
 	if err != nil {
 		return err
 	}
