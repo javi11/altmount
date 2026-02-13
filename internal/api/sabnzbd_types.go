@@ -422,9 +422,12 @@ func ToSABnzbdHistorySlot(item *database.ImportQueueItem, index int, basePath st
 	if item.StoragePath != nil && *item.StoragePath != "" {
 		// Construct the full absolute path on the mount
 		// We use filepath.ToSlash to ensure consistent forward slashes for the API
-		storagePath := filepath.ToSlash(*item.StoragePath)
-		// Ensure storagePath is treated as relative to basePath even if it starts with /
-		fullStoragePath := filepath.ToSlash(filepath.Join(basePath, strings.TrimPrefix(storagePath, "/")))
+		storagePath := *item.StoragePath
+		fullStoragePath := storagePath
+		if !strings.HasPrefix(storagePath, basePath) {
+			fullStoragePath = filepath.Join(basePath, strings.TrimPrefix(storagePath, "/"))
+		}
+		fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
 
 		// Determine the job folder
 		jobFolder := fullStoragePath

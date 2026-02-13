@@ -169,6 +169,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
 	api.Get("/queue/stats", s.handleGetQueueStats)
+	api.Get("/queue/stats/history", s.handleGetQueueHistoricalStats)
 	api.Get("/queue/progress/stream", s.handleProgressStream) // SSE endpoint for real-time progress
 	api.Delete("/queue/completed", s.handleClearCompletedQueue)
 	api.Delete("/queue/failed", s.handleClearFailedQueue)
@@ -222,11 +223,13 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/scan", s.handleStartManualScan)
 	api.Get("/import/scan/status", s.handleGetScanStatus)
 	api.Delete("/import/scan", s.handleCancelScan)
+	api.Get("/import/history", s.handleGetImportHistory)
 	// System endpoints
 	api.Get("/system/stats", s.handleGetSystemStats)
 	api.Get("/system/health", s.handleGetSystemHealth)
 	api.Get("/system/browse", s.handleSystemBrowse)
 	api.Get("/system/pool/metrics", s.handleGetPoolMetrics)
+	api.Post("/system/stats/reset", s.handleResetSystemStats)
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)
 

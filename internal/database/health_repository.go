@@ -149,75 +149,8 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 		return nil, fmt.Errorf("failed to iterate unhealthy files: %w", err)
 	}
 
-				return files, nil
-
-	
-
-			}
-
-	
-
-	// RelinkFileByFilename attempts to find a health record with the same filename and update its paths
-
-	func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, fileName, newVirtualPath, newLibraryPath string) error {
-
-		newVirtualPath = strings.TrimPrefix(newVirtualPath, "/")
-
-		
-
-		// We look for a record that:
-
-		// 1. Ends with the same filename
-
-		// 2. Is NOT already at the correct path
-
-		// 3. Either has a NULL library_path or is in /complete/
-
-		query := `
-
-			UPDATE file_health
-
-			SET file_path = ?,
-
-			    library_path = ?,
-
-			    updated_at = datetime('now')
-
-			WHERE (file_path LIKE '%' || ? OR library_path LIKE '%' || ?)
-
-			  AND file_path != ?
-
-			  AND (library_path IS NULL OR library_path LIKE '%/complete/%' OR library_path LIKE 'complete/%')
-
-		`
-
-	
-
-		result, err := r.db.ExecContext(ctx, query, newVirtualPath, newLibraryPath, fileName, fileName, newVirtualPath)
-
-		if err != nil {
-
-			return err
-
-		}
-
-	
-
-		rows, _ := result.RowsAffected()
-
-		if rows == 0 {
-
-			return fmt.Errorf("no matching record found to re-link")
-
-		}
-
-	
-
-		return nil
-
-	}
-
-	
+	return files, nil
+}
 
 // SetPriority sets the priority for a file health record
 func (r *HealthRepository) SetPriority(ctx context.Context, id int64, priority HealthPriority) error {
@@ -1471,7 +1404,78 @@ func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath strin
 	return nil
 }
 
-// UpdateSystemState updates a system state string (JSON) by key
+// RenameHealthRecord updates the file_path of a health record or records under a directory after a MOVE operation
+func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newPath string) error {
+	oldPath = strings.TrimPrefix(oldPath, "/")
+	newPath = strings.TrimPrefix(newPath, "/")
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Rename exact match
+	_, err = tx.ExecContext(ctx, "UPDATE file_health SET file_path = ?, updated_at = datetime('now') WHERE file_path = ?", newPath, oldPath)
+	if err != nil {
+		return err
+	}
+
+	// 2. Rename children if it's a directory
+	oldPrefix := oldPath + "/"
+	newPrefix := newPath + "/"
+	_, err = tx.ExecContext(ctx, `
+		UPDATE file_health 
+		SET file_path = ? || substr(file_path, ?),
+		    updated_at = datetime('now')
+		WHERE file_path LIKE ?`,
+		newPrefix, len(oldPrefix)+1, oldPrefix+"%")
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// RelinkFileByFilename updates the file_path and library_path for a corrupted/triggered record that matches by filename
+func (r *HealthRepository) RelinkFileByFilename(ctx context.Context, filename, filePath, libraryPath string) error {
+	filePath = strings.TrimPrefix(filePath, "/")
+	libraryPath = strings.TrimPrefix(libraryPath, "/")
+	query := `
+		UPDATE file_health
+		SET file_path = ?,
+		    library_path = ?,
+		    status = 'pending',
+		    updated_at = datetime('now'),
+		    scheduled_check_at = datetime('now')
+		WHERE (file_path LIKE ? OR file_path = ?)
+		  AND status IN ('repair_triggered', 'corrupted')
+	`
+
+	likePattern := "%/" + filename
+	_, err := r.db.ExecContext(ctx, query, filePath, libraryPath, likePattern, filename)
+	if err != nil {
+		return fmt.Errorf("failed to relink file by filename: %w", err)
+	}
+
+	return nil
+}
+
+// GetSystemState retrieves a persistent state value
+func (r *HealthRepository) GetSystemState(ctx context.Context, key string) (string, error) {
+	query := `SELECT value FROM system_state WHERE key = ?`
+	var value string
+	err := r.db.QueryRowContext(ctx, query, key).Scan(&value)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get system state: %w", err)
+	}
+	return value, nil
+}
+
+// UpdateSystemState updates or inserts a persistent state value
 func (r *HealthRepository) UpdateSystemState(ctx context.Context, key string, value string) error {
 	query := `
 		INSERT INTO system_state (key, value, updated_at)
@@ -1482,61 +1486,7 @@ func (r *HealthRepository) UpdateSystemState(ctx context.Context, key string, va
 	`
 	_, err := r.db.ExecContext(ctx, query, key, value)
 	if err != nil {
-		return fmt.Errorf("failed to update system state %s: %w", key, err)
+		return fmt.Errorf("failed to update system state: %w", err)
 	}
 	return nil
 }
-
-// GetSystemState retrieves a system state string by key
-func (r *HealthRepository) GetSystemState(ctx context.Context, key string) (string, error) {
-	query := `SELECT value FROM system_state WHERE key = ?`
-	var value string
-	err := r.db.QueryRowContext(ctx, query, key).Scan(&value)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", nil
-		}
-		return "", fmt.Errorf("failed to get system state %s: %w", key, err)
-	}
-	return value, nil
-}
-
-// RenameHealthRecord updates the file_path for a health record when a file is moved
-func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newPath string) error {
-	oldPath = strings.TrimPrefix(oldPath, "/")
-	newPath = strings.TrimPrefix(newPath, "/")
-
-		query := `
-
-			UPDATE file_health
-
-			SET file_path = ?,
-
-			    library_path = CASE 
-
-					WHEN library_path IS NULL OR library_path = ? OR library_path = '/' || ? OR library_path LIKE '%' || ? THEN ? 
-
-					ELSE library_path 
-
-				END,
-
-			    updated_at = datetime('now')
-
-			WHERE file_path = ?
-
-		`
-
-	
-
-		_, err := r.db.ExecContext(ctx, query, newPath, oldPath, oldPath, oldPath, newPath, oldPath)
-
-	
-        if err != nil {
-                return fmt.Errorf("failed to rename health record: %w", err)
-        }
-
-        	return nil
-
-        }
-
-        

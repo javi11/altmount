@@ -43,7 +43,6 @@ export function ArrsConfigSection({
 	const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
 	const [webhookSuccess, setWebhookSuccess] = useState<string | null>(null);
 	const [webhookError, setWebhookError] = useState<string | null>(null);
-	const [saveError, setSaveError] = useState<string | null>(null);
 	const [newIgnoreMessage, setNewIgnoreMessage] = useState("");
 
 	const registerWebhooks = useRegisterArrsWebhooks();
@@ -53,7 +52,6 @@ export function ArrsConfigSection({
 		setFormData(config.arrs);
 		setHasChanges(false);
 		setValidationErrors([]);
-		setSaveError(null);
 	}, [config.arrs]);
 
 	const handleRegisterWebhooks = async () => {
@@ -223,14 +221,12 @@ export function ArrsConfigSection({
 
 	const handleSave = async () => {
 		if (!onUpdate || validationErrors.length > 0) return;
-		setSaveError(null);
 
 		try {
 			await onUpdate("arrs", formData);
 			setHasChanges(false);
 		} catch (error) {
 			console.error("Failed to save arrs configuration:", error);
-			setSaveError(error instanceof Error ? error.message : "Failed to save configuration");
 		}
 	};
 
@@ -262,429 +258,279 @@ export function ArrsConfigSection({
 	};
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-10">
 			{/* Enable/Disable Arrs */}
-			<div className="card bg-base-200">
-				<div className="card-body">
-					<div className="flex items-center justify-between">
-						<div>
-							<h3 className="font-semibold">Enable Arrs Service</h3>
-							<p className="text-base-content/70 text-sm">
-								Enable health monitoring and file repair for Radarr and Sonarr instances. This
-								allows automatic detection and repair of corrupted files.
-							</p>
-						</div>
-						<input
-							type="checkbox"
-							className="checkbox checkbox-primary"
-							checked={formData.enabled}
-							onChange={(e) => handleFormChange("enabled", e.target.checked)}
-							disabled={isReadOnly}
-						/>
-					</div>
+			<section className="space-y-4">
+				<div className="mb-2 flex items-center gap-2">
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Service Status</h4>
+					<div className="h-px flex-1 bg-base-300" />
 				</div>
-			</div>
-
-			{/* Webhooks Auto-Registration */}
-			{formData.enabled && (
-				<div className="card bg-base-200">
-					<div className="card-body">
-						<div className="flex flex-col space-y-4">
-							<div>
-								<h3 className="font-semibold">Connect Webhooks</h3>
-								<p className="text-base-content/70 text-sm">
-									Automatically configure AltMount webhooks in all enabled Radarr and Sonarr
-									instances. This ensures AltMount is notified when files are upgraded or renamed.
+				
+				<div className="card border border-base-300 bg-base-200/50 shadow-sm">
+					<div className="card-body p-4 sm:p-6">
+						<div className="flex items-center justify-between gap-4">
+							<div className="flex-1">
+								<h3 className="font-bold text-sm sm:text-base">Enable Arrs Automation</h3>
+								<p className="mt-1 text-base-content/60 text-xs leading-relaxed">
+									Connect Radarr and Sonarr for automatic health monitoring and file repair.
 								</p>
 							</div>
+							<input
+								type="checkbox"
+								className="toggle toggle-primary"
+								checked={formData.enabled}
+								onChange={(e) => handleFormChange("enabled", e.target.checked)}
+								disabled={isReadOnly}
+							/>
+						</div>
+					</div>
+				</div>
+			</section>
 
-							<div className="flex flex-col space-y-4 md:flex-row md:items-end md:space-x-4 md:space-y-0">
-								<fieldset className="fieldset flex-1">
-									<legend className="fieldset-legend">AltMount URL (for webhooks)</legend>
-									<input
-										type="url"
-										className="input w-full"
-										value={formData.webhook_base_url ?? "http://altmount:8080"}
-										onChange={(e) => handleFormChange("webhook_base_url", e.target.value)}
-										placeholder="http://altmount:8080"
-										disabled={isReadOnly}
-									/>
-									<p className="label text-base-content/70 text-xs">
-										The URL ARR instances will use to talk back to AltMount.
-									</p>
-								</fieldset>
+			{formData.enabled && (
+				<div className="fade-in animate-in space-y-10 duration-500">
+					{/* Connectivity Settings */}
+					<section className="space-y-4">
+						<div className="mb-2 flex items-center gap-2">
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Connectivity</h4>
+							<div className="h-px flex-1 bg-base-300" />
+						</div>
 
+						<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-semibold">AltMount Webhook URL</legend>
+								<input
+									type="url"
+									className="input w-full bg-base-200/50"
+									value={formData.webhook_base_url ?? "http://altmount:8080"}
+									onChange={(e) => handleFormChange("webhook_base_url", e.target.value)}
+									placeholder="http://altmount:8080"
+									disabled={isReadOnly}
+								/>
+								<p className="label mt-1 text-[10px] leading-relaxed opacity-60">
+									URL used by ARR instances to notify AltMount of changes.
+								</p>
+							</fieldset>
+
+							<div className="flex flex-col justify-end pb-1">
 								<button
 									type="button"
-									className="btn btn-primary"
+									className="btn btn-outline btn-sm w-full"
 									onClick={handleRegisterWebhooks}
 									disabled={isReadOnly || registerWebhooks.isPending || hasChanges}
-									title={hasChanges ? "Save changes before registering webhooks" : ""}
 								>
 									{registerWebhooks.isPending ? (
-										<span className="loading loading-spinner loading-sm" />
+										<span className="loading loading-spinner loading-xs" />
 									) : (
-										<Webhook className="h-4 w-4" />
+										<Webhook className="h-3.5 w-3.5" />
 									)}
 									Auto-Setup ARR Webhooks
 								</button>
 							</div>
 						</div>
-						{webhookSuccess && (
-							<div className="alert alert-success mt-4 py-2">{webhookSuccess}</div>
-						)}
-						{webhookError && <div className="alert alert-error mt-4 py-2">{webhookError}</div>}
-					</div>
-				</div>
-			)}
+						
+						{webhookSuccess && <div className="alert alert-success py-2 text-xs shadow-sm">{webhookSuccess}</div>}
+						{webhookError && <div className="alert alert-error py-2 text-xs shadow-sm">{webhookError}</div>}
+					</section>
 
-			{/* Queue Cleanup Settings */}
-			{formData.enabled && (
-				<div className="card bg-base-200">
-					<div className="card-body">
-						<h3 className="mb-4 font-semibold">Queue Cleanup</h3>
-						<p className="mb-4 text-base-content/70 text-sm">
-							Automatically clean up empty folders from import pending items in Radarr/Sonarr
-							queues. This removes stale queue entries where the download folder no longer contains
-							any files.
-						</p>
+					{/* Queue Maintenance Section */}
+					<section className="space-y-4">
+						<div className="mb-2 flex items-center gap-2">
+							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Queue Maintenance</h4>
+							<div className="h-px flex-1 bg-base-300" />
+						</div>
 
-						<div className="space-y-4">
-							<div className="flex items-center justify-between">
-								<div>
-									<span className="font-medium">Enable Queue Cleanup</span>
-									<p className="text-base-content/70 text-sm">
-										Periodically check for and remove empty import pending folders
-									</p>
+						<div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+							<div className="space-y-6">
+								<div className="space-y-3">
+									<label className="label cursor-pointer justify-start gap-3 py-0">
+										<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.queue_cleanup_enabled ?? true} onChange={(e) => handleFormChange("queue_cleanup_enabled", e.target.checked)} disabled={isReadOnly} />
+										<span className="label-text font-medium text-xs">Enable Automatic Cleanup</span>
+									</label>
+									<label className="label cursor-pointer justify-start gap-3 py-0">
+										<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.cleanup_automatic_import_failure ?? false} onChange={(e) => handleFormChange("cleanup_automatic_import_failure", e.target.checked)} disabled={isReadOnly} />
+										<span className="label-text font-medium text-xs">Cleanup failed imports</span>
+									</label>
 								</div>
-								<input
-									type="checkbox"
-									className="checkbox checkbox-primary"
-									checked={formData.queue_cleanup_enabled ?? true}
-									onChange={(e) => handleFormChange("queue_cleanup_enabled", e.target.checked)}
-									disabled={isReadOnly}
-								/>
+
+																<div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+
+																	<div className="space-y-1">
+
+																		<span className="font-bold text-[10px] uppercase opacity-50">Interval (s)</span>
+
+																		<input
+
+																			type="number"
+
+																			className="input input-xs input-bordered w-full font-mono"
+
+																			value={formData.queue_cleanup_interval_seconds ?? 10}
+
+																			onChange={(e) => handleFormChange("queue_cleanup_interval_seconds", Number.parseInt(e.target.value, 10) || 10)}
+
+																		/>
+
+																	</div>
+
+																	<div className="space-y-1">
+
+																		<span className="font-bold text-[10px] uppercase opacity-50">Grace Period (m)</span>
+
+																		<input
+
+																			type="number"
+
+																			className="input input-xs input-bordered w-full font-mono"
+
+																			value={formData.queue_cleanup_grace_period_minutes ?? 10}
+
+																			onChange={(e) => handleFormChange("queue_cleanup_grace_period_minutes", Number.parseInt(e.target.value, 10) || 10)}
+
+																		/>
+
+																	</div>
+
+																	<div className="col-span-2 space-y-1 lg:col-span-1">
+
+																		<span className="font-bold text-[10px] uppercase opacity-50">Max Workers</span>
+
+																		<input
+
+																			type="number"
+
+																			className="input input-xs input-bordered w-full font-mono"
+
+																			value={formData.max_workers ?? 1}
+
+																			onChange={(e) => handleFormChange("max_workers", Number.parseInt(e.target.value, 10) || 1)}
+
+																		/>
+
+																	</div>
+
+																</div>
 							</div>
 
-							{(formData.queue_cleanup_enabled ?? true) && (
-								<>
-									<fieldset className="fieldset">
-										<legend className="fieldset-legend">Cleanup Interval (seconds)</legend>
-										<input
-											type="number"
-											className="input w-full max-w-xs"
-											value={formData.queue_cleanup_interval_seconds ?? 10}
-											onChange={(e) =>
-												handleFormChange(
-													"queue_cleanup_interval_seconds",
-													Number.parseInt(e.target.value, 10) || 10,
-												)
+							<div className="space-y-4">
+								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Ignored Error Rules</h5>
+								<div className="custom-scrollbar max-h-40 space-y-2 overflow-y-auto pr-2">
+									{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
+										<div key={index} className="flex items-center justify-between gap-2 rounded-lg bg-base-200 p-2">
+											<div className="flex min-w-0 flex-1 items-center gap-2">
+												<input type="checkbox" className="checkbox checkbox-xs" checked={msg.enabled} onChange={() => handleToggleIgnoreMessage(index)} />
+												<span className={`truncate font-mono text-[10px] ${!msg.enabled ? "line-through opacity-40" : ""}`}>{msg.message}</span>
+											</div>
+											<button type="button" className="btn btn-ghost btn-xs px-1" onClick={() => handleRemoveIgnoreMessage(index)}><Trash2 className="h-3 w-3 text-error" /></button>
+										</div>
+									))}
+								</div>
+								<div className="flex gap-2">
+									<input
+										type="text"
+										className="input input-xs input-bordered flex-1"
+										placeholder="Add rule..."
+										value={newIgnoreMessage}
+										onChange={(e) => setNewIgnoreMessage(e.target.value)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter") {
+												e.preventDefault();
+												handleAddIgnoreMessage();
 											}
-											min={1}
-											max={3600}
-											disabled={isReadOnly}
-										/>
-										<p className="label text-base-content/70">
-											How often to check for empty import pending folders (default: 10 seconds)
-										</p>
-									</fieldset>
-
-									<div className="divider" />
-
-									<div>
-										<h4 className="mb-2 font-medium">Ignored Error Messages</h4>
-										<p className="mb-4 text-base-content/70 text-sm">
-											Additional error messages that are safe to auto-cleanup. You can
-											enable/disable default rules or add custom ones.
-										</p>
-
-										{/* List of ignored messages */}
-										<div className="mb-4 space-y-2">
-											{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
-												<div
-													key={index}
-													className="flex items-center justify-between rounded-lg bg-base-300 p-2"
-												>
-													<div className="mr-4 flex flex-1 items-center">
-														<input
-															type="checkbox"
-															className="checkbox checkbox-sm checkbox-primary mr-3"
-															checked={msg.enabled}
-															onChange={() => handleToggleIgnoreMessage(index)}
-															disabled={isReadOnly}
-														/>
-														<span
-															className={`break-all font-mono text-sm ${!msg.enabled ? "line-through opacity-50" : ""}`}
-														>
-															{msg.message}
-														</span>
-													</div>
-													<button
-														type="button"
-														className="btn btn-ghost btn-xs btn-circle text-error"
-														onClick={() => handleRemoveIgnoreMessage(index)}
-														disabled={isReadOnly}
-														title="Delete rule"
-													>
-														<Trash2 className="h-4 w-4" />
-													</button>
-												</div>
-											))}
-											{(formData.queue_cleanup_allowlist || []).length === 0 && (
-												<div className="rounded-lg bg-base-100 py-4 text-center text-base-content/50 text-sm italic">
-													No ignored messages configured
-												</div>
-											)}
-										</div>
-
-										{/* Add new message input */}
-										<div className="flex gap-2">
-											<input
-												type="text"
-												className="input input-sm w-full"
-												placeholder="e.g. Not a Custom Format upgrade"
-												value={newIgnoreMessage}
-												onChange={(e) => setNewIgnoreMessage(e.target.value)}
-												onKeyDown={(e) => {
-													if (e.key === "Enter") {
-														e.preventDefault();
-														handleAddIgnoreMessage();
-													}
-												}}
-												disabled={isReadOnly}
-											/>
-											<button
-												type="button"
-												className="btn btn-sm btn-primary"
-												onClick={handleAddIgnoreMessage}
-												disabled={isReadOnly || !newIgnoreMessage.trim()}
-											>
-												<Plus className="h-4 w-4" />
-												Add
-											</button>
-										</div>
-									</div>
-								</>
-							)}
+										}}
+									/>
+									<button type="button" className="btn btn-primary btn-xs" onClick={handleAddIgnoreMessage}>Add</button>
+								</div>
+							</div>
 						</div>
-					</div>
-				</div>
-			)}
+					</section>
 
-			{/* Radarr Instances */}
-			{formData.enabled && (
-				<div className="card bg-base-100">
-					<div className="card-body">
-						<div className="mb-4 flex items-center justify-between">
-							<h3 className="font-semibold">Radarr Instances</h3>
+					{/* Instances Section */}
+					<div className="grid grid-cols-1 gap-10">
+						{/* Radarr */}
+						<section className="space-y-4">
+							<div className="mb-2 flex items-center justify-between">
+								<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Radarr Instances</h4>
+								<button type="button" className="btn btn-xs btn-primary btn-outline px-4" onClick={() => { setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" }); setShowAddInstance(true); }} disabled={isReadOnly}><Plus className="h-3 w-3" /> Add Radarr</button>
+							</div>
+							<div className="grid grid-cols-1 gap-4">
+								{formData.radarr_instances.map((instance, index) => renderInstance(instance, "radarr", index))}
+								{formData.radarr_instances.length === 0 && <div className="rounded-xl border border-base-300 border-dashed bg-base-200/30 py-6 text-center text-base-content/40 text-xs">No Radarr instances configured.</div>}
+							</div>
+						</section>
+
+						{/* Sonarr */}
+						<section className="space-y-4">
+							<div className="mb-2 flex items-center justify-between">
+								<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Sonarr Instances</h4>
+								<button type="button" className="btn btn-xs btn-primary btn-outline px-4" onClick={() => { setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" }); setShowAddInstance(true); }} disabled={isReadOnly}><Plus className="h-3 w-3" /> Add Sonarr</button>
+							</div>
+							<div className="grid grid-cols-1 gap-4">
+								{formData.sonarr_instances.map((instance, index) => renderInstance(instance, "sonarr", index))}
+								{formData.sonarr_instances.length === 0 && <div className="rounded-xl border border-base-300 border-dashed bg-base-200/30 py-6 text-center text-base-content/40 text-xs">No Sonarr instances configured.</div>}
+							</div>
+						</section>
+					</div>
+
+					{/* Save Button */}
+					{!isReadOnly && (
+						<div className="flex justify-end border-base-200 border-t pt-6">
 							<button
 								type="button"
-								className="btn btn-sm btn-primary"
-								onClick={() => {
-									setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" });
-									setShowAddInstance(true);
-								}}
-								disabled={isReadOnly}
+								className={`btn btn-primary btn-md px-10 ${hasChanges ? "shadow-lg shadow-primary/20" : ""}`}
+								onClick={handleSave}
+								disabled={isUpdating || validationErrors.length > 0}
 							>
-								<Plus className="h-4 w-4" />
-								Add Radarr
+								{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+								Save Arrs Configuration
 							</button>
 						</div>
-
-						{formData.radarr_instances.length === 0 && (
-							<div className="py-8 text-center text-base-content/70">
-								<p>No Radarr instances configured</p>
-							</div>
-						)}
-
-						<div className="space-y-4">
-							{formData.radarr_instances.map((instance, index) =>
-								renderInstance(instance, "radarr", index),
-							)}
-						</div>
-					</div>
-				</div>
-			)}
-
-			{/* Sonarr Instances */}
-			{formData.enabled && (
-				<div className="card bg-base-100">
-					<div className="card-body">
-						<div className="mb-4 flex items-center justify-between">
-							<h3 className="font-semibold">Sonarr Instances</h3>
-							<button
-								type="button"
-								className="btn btn-sm btn-primary"
-								onClick={() => {
-									setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" });
-									setShowAddInstance(true);
-								}}
-								disabled={isReadOnly}
-							>
-								<Plus className="h-4 w-4" />
-								Add Sonarr
-							</button>
-						</div>
-
-						{formData.sonarr_instances.length === 0 && (
-							<div className="py-8 text-center text-base-content/70">
-								<p>No Sonarr instances configured</p>
-							</div>
-						)}
-
-						<div className="space-y-4">
-							{formData.sonarr_instances.map((instance, index) =>
-								renderInstance(instance, "sonarr", index),
-							)}
-						</div>
-					</div>
+					)}
 				</div>
 			)}
 
 			{/* Add Instance Modal */}
 			{showAddInstance && (
 				<div className="modal modal-open">
-					<div className="modal-box">
-						<h3 className="mb-4 font-bold text-lg">
-							Add {newInstance.type === "radarr" ? "Radarr" : "Sonarr"} Instance
-						</h3>
-
+					<div className="modal-box max-w-sm border border-base-300 p-4 shadow-2xl sm:max-w-md sm:p-6">
+						<h3 className="mb-6 border-base-300 border-b pb-2 font-bold text-lg">Add {newInstance.type === "radarr" ? "Radarr" : "Sonarr"} Instance</h3>
 						<div className="space-y-4">
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Instance Name</legend>
-								<input
-									type="text"
-									className="input"
-									value={newInstance.name}
-									onChange={(e) => setNewInstance((prev) => ({ ...prev, name: e.target.value }))}
-									placeholder="My Radarr/Sonarr"
-								/>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-bold text-[10px]">NAME</legend>
+								<input type="text" className="input input-bordered w-full" value={newInstance.name} onChange={(e) => setNewInstance({ ...newInstance, name: e.target.value })} placeholder="My Instance" />
 							</fieldset>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">URL</legend>
-								<input
-									type="url"
-									className="input"
-									value={newInstance.url}
-									onChange={(e) => setNewInstance((prev) => ({ ...prev, url: e.target.value }))}
-									placeholder="http://localhost:7878"
-								/>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-bold text-[10px]">URL</legend>
+								<input type="url" className="input input-bordered w-full" value={newInstance.url} onChange={(e) => setNewInstance({ ...newInstance, url: e.target.value })} placeholder="http://192.168.1.10:7878" />
 							</fieldset>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">API Key</legend>
-								<input
-									type="password"
-									className="input"
-									value={newInstance.api_key}
-									onChange={(e) => setNewInstance((prev) => ({ ...prev, api_key: e.target.value }))}
-									placeholder="API key from settings"
-								/>
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-bold text-[10px]">API KEY</legend>
+								<input type="password" placeholder="••••••••" className="input input-bordered w-full" value={newInstance.api_key} onChange={(e) => setNewInstance({ ...newInstance, api_key: e.target.value })} />
 							</fieldset>
-
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Download Category (Optional)</legend>
-								<select
-									className="select"
-									value={newInstance.category}
-									onChange={(e) =>
-										setNewInstance((prev) => ({ ...prev, category: e.target.value }))
-									}
-								>
-									<option value="">None</option>
-									{config.sabnzbd?.categories?.map((cat) => (
-										<option key={cat.name} value={cat.name}>
-											{cat.name}
-										</option>
-									))}
+							<fieldset className="fieldset min-w-0">
+								<legend className="fieldset-legend font-bold text-[10px]">CATEGORY (OPTIONAL)</legend>
+								<select className="select select-bordered w-full" value={newInstance.category} onChange={(e) => setNewInstance({ ...newInstance, category: e.target.value })}>
+									<option value="">Default</option>
+									{config.sabnzbd?.categories?.map((cat) => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
 								</select>
 							</fieldset>
-
-							<label className="label cursor-pointer">
-								<span className="label-text">Enable this instance</span>
-								<input
-									type="checkbox"
-									className="checkbox"
-									checked={newInstance.enabled}
-									onChange={(e) =>
-										setNewInstance((prev) => ({ ...prev, enabled: e.target.checked }))
-									}
-								/>
-							</label>
 						</div>
-
-						<div className="modal-action">
-							<button
-								type="button"
-								className="btn btn-ghost"
-								onClick={() => {
-									setShowAddInstance(false);
-									setNewInstance(DEFAULT_NEW_INSTANCE);
-								}}
-							>
-								Cancel
-							</button>
-							<button
-								type="button"
-								className="btn btn-primary"
-								onClick={addInstance}
-								disabled={
-									!newInstance.name.trim() || !newInstance.url.trim() || !newInstance.api_key.trim()
-								}
-							>
-								<Plus className="h-4 w-4" />
-								Add Instance
-							</button>
+						<div className="modal-action mt-8">
+							<button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowAddInstance(false)}>Cancel</button>
+							<button type="button" className="btn btn-primary btn-sm px-6" onClick={addInstance} disabled={!newInstance.name || !newInstance.url || !newInstance.api_key}>Add Instance</button>
 						</div>
 					</div>
 				</div>
 			)}
 
-			{/* Validation Errors */}
+			{/* Validation Summary */}
 			{validationErrors.length > 0 && (
-				<div className="alert alert-warning">
-					<AlertTriangle className="h-6 w-6" />
-					<div>
-						<div className="font-bold">Configuration Issues</div>
-						<ul className="mt-2 space-y-1">
-							{validationErrors.map((error, index) => (
-								<li key={index} className="text-sm">
-									• {error}
-								</li>
-							))}
-						</ul>
-					</div>
-				</div>
-			)}
-
-			{/* Save Error */}
-			{saveError && (
-				<div className="alert alert-error">
-					<AlertTriangle className="h-6 w-6" />
-					<div>
-						<div className="font-bold">Save Failed</div>
-						<div className="text-sm">{saveError}</div>
-					</div>
-				</div>
-			)}
-
-			{/* Save Button */}
-			{hasChanges && onUpdate && (
-				<div className="flex justify-end border-base-300 border-t pt-4">
-					<button
-						type="button"
-						className="btn btn-primary"
-						onClick={handleSave}
-						disabled={isUpdating || validationErrors.length > 0}
-					>
-						{isUpdating ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Save className="h-4 w-4" />
-						)}
-						{isUpdating ? "Saving..." : "Save Changes"}
-					</button>
+				<div className="alert alert-warning border-warning/20 py-3 text-xs shadow-sm">
+					<AlertTriangle className="h-4 w-4" />
+					<ul className="ml-4 flex-1 list-disc space-y-1">
+						{validationErrors.slice(0, 3).map((err, i) => <li key={i}>{err}</li>)}
+						{validationErrors.length > 3 && <li>...and {validationErrors.length - 3} more issues</li>}
+					</ul>
 				</div>
 			)}
 		</div>

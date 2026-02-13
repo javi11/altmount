@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/pathutil"
 )
 
 // handleListHealth handles GET /api/health
@@ -287,14 +288,14 @@ func (s *Server) handleRepairHealth(c *fiber.Ctx) error {
 	// Determine final path for ARR rescan
 	pathForRescan := libraryPath
 	if pathForRescan == "" && cfg.Import.ImportStrategy == config.ImportStrategySYMLINK && cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(item.FilePath, "/"))
+		pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
 		slog.InfoContext(ctx, "Using symlink import path for manual repair",
 			"file_path", item.FilePath,
 			"symlink_path", pathForRescan)
 	}
 	if pathForRescan == "" {
 		// Fallback to mount path if no library path found
-		pathForRescan = filepath.Join(cfg.MountPath, strings.TrimPrefix(item.FilePath, "/"))
+		pathForRescan = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
 		slog.InfoContext(ctx, "Using mount path fallback for manual repair",
 			"file_path", item.FilePath,
 			"mount_path", pathForRescan)
@@ -381,7 +382,7 @@ func (s *Server) handleRepairHealthBulk(c *fiber.Ctx) error {
 
 		pathForRescan := libraryPath
 		if pathForRescan == "" {
-			pathForRescan = filepath.Join(cfg.MountPath, strings.TrimPrefix(item.FilePath, "/"))
+			pathForRescan = pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
 		}
 
 		// Trigger rescan
@@ -595,11 +596,7 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 				pathToDelete = *item.LibraryPath
 			} else {
 				// Fallback to mount path
-				if filepath.IsAbs(item.FilePath) {
-					pathToDelete = item.FilePath
-				} else {
-					pathToDelete = filepath.Join(mountPath, item.FilePath)
-				}
+				pathToDelete = pathutil.JoinAbsPath(mountPath, item.FilePath)
 			}
 
 			// Attempt to delete the physical file using os.Remove
@@ -1015,10 +1012,10 @@ func (s *Server) handleRegenerateSymlinks(c *fiber.Ctx) error {
 
 	for _, file := range files {
 		// Build the actual file path in the mount
-		actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(file.FilePath, "/"))
+		actualPath := pathutil.JoinAbsPath(cfg.MountPath, file.FilePath)
 
 		// Build the symlink path in the import directory
-		symlinkPath := filepath.Join(*cfg.Import.ImportDir, strings.TrimPrefix(file.FilePath, "/"))
+		symlinkPath := pathutil.JoinAbsPath(*cfg.Import.ImportDir, file.FilePath)
 
 		// Create directory if needed
 		baseDir := filepath.Dir(symlinkPath)

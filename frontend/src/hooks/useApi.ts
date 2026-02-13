@@ -36,6 +36,15 @@ export const useQueueStats = () => {
 	});
 };
 
+export const useQueueHistory = (days?: number) => {
+	return useQuery({
+		queryKey: ["queue", "history", days],
+		queryFn: () => apiClient.getQueueHistory(days),
+		// Refetch historical stats less frequently (every 5 minutes)
+		refetchInterval: 5 * 60 * 1000,
+	});
+};
+
 export const useDeleteQueueItem = () => {
 	const queryClient = useQueryClient();
 
@@ -401,6 +410,14 @@ export const useCancelScan = () => {
 	});
 };
 
+export const useImportHistory = (limit?: number, refetchInterval?: number) => {
+	return useQuery({
+		queryKey: ["import", "history", limit],
+		queryFn: () => apiClient.getImportHistory(limit),
+		refetchInterval: refetchInterval,
+	});
+};
+
 // NZBDav Import hooks
 export const useNzbdavImportStatus = (refetchInterval?: number) => {
 	return useQuery({
@@ -512,6 +529,18 @@ export const useSystemBrowse = (path?: string) => {
 	return useQuery({
 		queryKey: ["system", "browse", path],
 		queryFn: () => apiClient.getSystemBrowse(path),
+	});
+};
+
+export const useResetSystemStats = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: () => apiClient.resetSystemStats(),
+		onSuccess: () => {
+			// Invalidate pool metrics to show reset values
+			queryClient.invalidateQueries({ queryKey: ["system", "pool", "metrics"] });
+		},
 	});
 };
 

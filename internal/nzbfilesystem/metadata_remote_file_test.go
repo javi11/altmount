@@ -1,6 +1,7 @@
 package nzbfilesystem
 
 import (
+	"context"
 	"io"
 	"sync"
 	"testing"
@@ -359,6 +360,16 @@ func (m *mockPoolManager) HasPool() bool {
 func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 	return pool.MetricsSnapshot{}, nil
 }
+
+func (m *mockPoolManager) ResetMetrics(_ context.Context) error {
+	return nil
+}
+
+func (m *mockPoolManager) IncArticlesDownloaded() {}
+
+func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64) {}
+
+func (m *mockPoolManager) IncArticlesPosted() {}
 
 func (m *mockPoolManager) AddProvider(_ nntppool.Provider) error {
 	return nil

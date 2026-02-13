@@ -2,7 +2,13 @@
 export interface APIResponse<T = unknown> {
 	success: boolean;
 	data?: T;
-	error?: string;
+	error?:
+		| string
+		| {
+				code: string;
+				message: string;
+				details: string;
+		  };
 	meta?: APIMeta;
 }
 
@@ -56,6 +62,26 @@ export interface QueueStats {
 	total_failed: number;
 	avg_processing_time_ms: number;
 	last_updated: string;
+}
+
+export interface QueueHistoryRange {
+	completed: number;
+	failed: number;
+	percentage: number;
+}
+
+export interface DailyStat {
+	day: string;
+	completed: number;
+	failed: number;
+}
+
+export interface QueueHistoricalStatsResponse {
+	last_24_hours: QueueHistoryRange;
+	last_7_days: QueueHistoryRange;
+	last_30_days: QueueHistoryRange;
+	last_365_days: QueueHistoryRange;
+	daily: DailyStat[];
 }
 
 // NZBLNK upload types
@@ -355,8 +381,10 @@ export interface ActiveStream {
 	client_ip?: string;
 	user_agent?: string;
 	bytes_sent: number;
+	bytes_downloaded: number;
 	current_offset: number;
 	bytes_per_second: number;
+	download_speed: number;
 	speed_avg: number;
 	total_size: number;
 	eta: number;

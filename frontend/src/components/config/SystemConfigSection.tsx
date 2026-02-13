@@ -5,9 +5,14 @@ import { useToast } from "../../contexts/ToastContext";
 import { useRegenerateAPIKey } from "../../hooks/useAuth";
 import type { ConfigResponse, LogFormData } from "../../types/config";
 
+interface SystemFormData extends LogFormData {
+	db_path: string;
+	api_prefix: string;
+}
+
 interface SystemConfigSectionProps {
 	config: ConfigResponse;
-	onUpdate?: (section: string, data: LogFormData) => Promise<void>;
+	onUpdate?: (section: string, data: unknown) => Promise<void>;
 	onRefresh?: () => Promise<void>;
 	isReadOnly?: boolean;
 	isUpdating?: boolean;
@@ -20,13 +25,15 @@ export function SystemConfigSection({
 	isReadOnly = false,
 	isUpdating = false,
 }: SystemConfigSectionProps) {
-	const [formData, setFormData] = useState<LogFormData>({
+	const [formData, setFormData] = useState<SystemFormData>({
 		file: config.log.file,
 		level: config.log.level,
 		max_size: config.log.max_size,
 		max_age: config.log.max_age,
 		max_backups: config.log.max_backups,
 		compress: config.log.compress,
+		db_path: config.database.path,
+		api_prefix: config.api.prefix,
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 
@@ -44,35 +51,64 @@ export function SystemConfigSection({
 			max_age: config.log.max_age,
 			max_backups: config.log.max_backups,
 			compress: config.log.compress,
+			db_path: config.database.path,
+			api_prefix: config.api.prefix,
 		};
 		setFormData(newFormData);
 		setHasChanges(false);
-	}, [
-		config.log.file,
-		config.log.level,
-		config.log.max_size,
-		config.log.max_age,
-		config.log.max_backups,
-		config.log.compress,
-	]);
+	}, [config.log, config.database.path, config.api.prefix]);
 
-	const handleInputChange = (field: keyof LogFormData, value: string | number | boolean) => {
+	const handleInputChange = (field: keyof SystemFormData, value: string | number | boolean) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
-		const configData = {
+		const currentConfig = {
 			file: config.log.file,
 			level: config.log.level,
 			max_size: config.log.max_size,
 			max_age: config.log.max_age,
 			max_backups: config.log.max_backups,
 			compress: config.log.compress,
+			db_path: config.database.path,
+			api_prefix: config.api.prefix,
 		};
-		setHasChanges(JSON.stringify(newData) !== JSON.stringify(configData));
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(currentConfig));
 	};
 
 	const handleSave = async () => {
 		if (onUpdate && hasChanges) {
-			await onUpdate("log", formData);
+			// Update Logging
+			const logData: LogFormData = {
+				file: formData.file,
+				level: formData.level,
+				max_size: formData.max_size,
+				max_age: formData.max_age,
+				max_backups: formData.max_backups,
+				compress: formData.compress,
+			};
+			
+			const currentLogConfig = {
+				file: config.log.file,
+				level: config.log.level,
+				max_size: config.log.max_size,
+				max_age: config.log.max_age,
+				max_backups: config.log.max_backups,
+				compress: config.log.compress,
+			};
+
+			if (JSON.stringify(logData) !== JSON.stringify(currentLogConfig)) {
+				await onUpdate("log", logData);
+			}
+
+			// Update Database Path
+			if (formData.db_path !== config.database.path) {
+				await onUpdate("database", { path: formData.db_path });
+			}
+
+			// Update API Prefix
+			if (formData.api_prefix !== config.api.prefix) {
+				await onUpdate("api", { prefix: formData.api_prefix });
+			}
+
 			setHasChanges(false);
 		}
 	};
@@ -110,7 +146,6 @@ export function SystemConfigSection({
 		if (confirmed) {
 			try {
 				await regenerateAPIKey.mutateAsync();
-				// Refresh config to get the new API key and update the UI
 				if (onRefresh) {
 					await onRefresh();
 				}
@@ -128,84 +163,109 @@ export function SystemConfigSection({
 			}
 		}
 	};
-	return (
-		<div className="space-y-4">
-			<h3 className="font-semibold text-lg">System</h3>
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">Log Level</legend>
-				<select
-					className="select"
-					value={formData.level}
-					disabled={isReadOnly}
-					onChange={(e) => handleInputChange("level", e.target.value)}
-				>
-					<option value="debug">Debug</option>
-					<option value="info">Info</option>
-					<option value="warn">Warning</option>
-					<option value="error">Error</option>
-				</select>
-				<p className="label">Set the minimum logging level for the system</p>
-			</fieldset>
 
-			{/* API Key Section */}
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">API Key</legend>
-				<div className="space-y-3">
-					<div className="flex items-center space-x-2">
-						<input
-							type="text"
-							className="input flex-1"
-							value={config.api_key ? config.api_key : "No API key generated"}
-							readOnly
-							disabled
-						/>
-						{config.api_key && (
-							<button
-								type="button"
-								className="btn btn-outline btn-sm"
-								onClick={handleCopyAPIKey}
-								title="Copy API key to clipboard"
-							>
-								<Copy className="h-4 w-4" />
-							</button>
-						)}
-					</div>
-					<div className="flex items-center space-x-2">
-						<button
-							type="button"
-							className="btn btn-warning btn-sm"
-							onClick={handleRegenerateAPIKey}
-							disabled={regenerateAPIKey.isPending}
-						>
-							{regenerateAPIKey.isPending ? (
-								<span className="loading loading-spinner loading-sm" />
-							) : (
-								<RefreshCw className="h-4 w-4" />
-							)}
-							{regenerateAPIKey.isPending ? "Regenerating..." : "Regenerate API Key"}
+	return (
+		<div className="space-y-10">
+			{/* Application Identity Section */}
+			<section className="space-y-6">
+				<div className="flex items-center gap-2">
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">App Identity</h4>
+					<div className="h-px flex-1 bg-base-300" />
+				</div>
+
+				<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+					<fieldset className="fieldset min-w-0">
+						<legend className="fieldset-legend font-semibold">Database Path</legend>
+						<input type="text" className="input w-full bg-base-200/50 font-mono" value={formData.db_path} disabled={isReadOnly} onChange={(e) => handleInputChange("db_path", e.target.value)} placeholder="/app/data/altmount.db" />
+						<p className="label text-[10px] italic opacity-60">Location of the SQLite database.</p>
+					</fieldset>
+
+					<fieldset className="fieldset min-w-0">
+						<legend className="fieldset-legend font-semibold">API Prefix</legend>
+						<input type="text" className="input w-full bg-base-200/50 font-mono" value={formData.api_prefix} disabled={isReadOnly} onChange={(e) => handleInputChange("api_prefix", e.target.value)} placeholder="/api" />
+						<p className="label text-[10px] italic opacity-60">Base path for all REST endpoints.</p>
+					</fieldset>
+				</div>
+
+				{/* API Key Management */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+					<div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+						<div className="min-w-0 flex-1">
+							<span className="mb-1 block font-bold text-sm">System API Key</span>
+							<div className="flex items-center gap-2">
+								<input type="text" className="input input-xs flex-1 bg-base-100 font-mono" value={config.api_key || "No key generated"} readOnly disabled />
+								{config.api_key && (
+									<button type="button" className="btn btn-ghost btn-xs" onClick={handleCopyAPIKey}>
+										<Copy className="h-3 w-3" />
+									</button>
+								)}
+							</div>
+						</div>
+						<button type="button" className="btn btn-warning btn-sm" onClick={handleRegenerateAPIKey} disabled={regenerateAPIKey.isPending}>
+							{regenerateAPIKey.isPending ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw className="h-3.5 w-3.5" />}
+							Rotate Key
 						</button>
 					</div>
-					<p className="label">
-						Personal API key for authentication. Keep this secure and don't share it with others.
-					</p>
 				</div>
-			</fieldset>
+			</section>
+
+			{/* Logging Configuration Section */}
+			<section className="space-y-6">
+				<div className="flex items-center gap-2">
+					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">Diagnostics & Logs</h4>
+					<div className="h-px flex-1 bg-base-300" />
+				</div>
+
+				<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+					<fieldset className="fieldset min-w-0">
+						<legend className="fieldset-legend font-semibold">Log Level</legend>
+						<select className="select select-bordered w-full bg-base-200/50 font-mono" value={formData.level} disabled={isReadOnly} onChange={(e) => handleInputChange("level", e.target.value)}>
+							<option value="debug">DEBUG</option>
+							<option value="info">INFO</option>
+							<option value="warn">WARNING</option>
+							<option value="error">ERROR</option>
+						</select>
+					</fieldset>
+
+					<fieldset className="fieldset min-w-0 sm:col-span-2">
+						<legend className="fieldset-legend font-semibold">Log File Path</legend>
+						<input type="text" className="input w-full bg-base-200/50 font-mono" value={formData.file} disabled={isReadOnly} onChange={(e) => handleInputChange("file", e.target.value)} />
+					</fieldset>
+				</div>
+
+				<div className="grid grid-cols-1 gap-6 rounded-2xl border border-base-300 bg-base-200/30 p-6 sm:grid-cols-2 lg:grid-cols-4">
+					<div className="space-y-1">
+						<span className="block font-bold text-[10px] uppercase opacity-50">Max Size (MB)</span>
+						<input type="number" className="input input-sm w-full bg-base-100 font-mono" value={formData.max_size} disabled={isReadOnly} onChange={(e) => handleInputChange("max_size", Number.parseInt(e.target.value, 10) || 100)} />
+					</div>
+					<div className="space-y-1">
+						<span className="block font-bold text-[10px] uppercase opacity-50">Max Age (Days)</span>
+						<input type="number" className="input input-sm w-full bg-base-100 font-mono" value={formData.max_age} disabled={isReadOnly} onChange={(e) => handleInputChange("max_age", Number.parseInt(e.target.value, 10) || 28)} />
+					</div>
+					<div className="space-y-1">
+						<span className="block font-bold text-[10px] uppercase opacity-50">Retention</span>
+						<input type="number" className="input input-sm w-full bg-base-100 font-mono" value={formData.max_backups} disabled={isReadOnly} onChange={(e) => handleInputChange("max_backups", Number.parseInt(e.target.value, 10) || 3)} />
+					</div>
+					<div className="flex flex-col justify-center">
+						<label className="label cursor-pointer justify-start gap-3 p-0">
+							<input type="checkbox" className="checkbox checkbox-sm checkbox-primary" checked={formData.compress} disabled={isReadOnly} onChange={(e) => handleInputChange("compress", e.target.checked)} />
+							<span className="label-text font-semibold text-xs">Compress Rotated Logs</span>
+						</label>
+					</div>
+				</div>
+			</section>
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end">
+				<div className="flex justify-end border-base-200 border-t pt-6">
 					<button
 						type="button"
-						className="btn btn-primary"
+						className={`btn btn-primary btn-md px-10 ${hasChanges ? "shadow-lg shadow-primary/20" : ""}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
-						{isUpdating ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Save className="h-4 w-4" />
-						)}
-						{isUpdating ? "Saving..." : "Save Changes"}
+						{isUpdating ? <span className="loading loading-spinner loading-sm" /> : <Save className="h-4 w-4" />}
+						Save System Configuration
 					</button>
 				</div>
 			)}

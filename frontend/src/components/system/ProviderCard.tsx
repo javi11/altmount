@@ -63,7 +63,14 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 				{/* Header with host and state badge */}
 				<div className="flex items-start justify-between">
 					<div className="min-w-0 flex-1">
-						<h3 className="card-title truncate font-medium text-base">{provider.host}</h3>
+						<div className="flex items-center gap-2">
+							<div className={`h-2 w-2 rounded-full shrink-0 ${
+								provider.state.toLowerCase() === 'active' 
+									? (provider.error_count > 10 ? 'bg-warning animate-pulse' : 'bg-success') 
+									: (provider.state.toLowerCase() === 'failed' ? 'bg-error' : 'bg-base-300')
+							}`} />
+							<h3 className="card-title truncate font-medium text-base">{provider.host}</h3>
+						</div>
 						{provider.username && (
 							<p className="cursor-pointer truncate text-base-content/60 text-sm blur-sm transition-all hover:blur-none">
 								@{provider.username}

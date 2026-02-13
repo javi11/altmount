@@ -16,6 +16,14 @@ export function formatBytes(bytes: number, decimals = 2) {
 	return `${Number.parseFloat((bytes / k ** i).toFixed(dm))} ${sizes[i]}`;
 }
 
+export function formatSpeed(bytesPerSec: number) {
+	if (bytesPerSec === 0) return "0 B/s";
+	const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+	const index = Math.floor(Math.log(bytesPerSec) / Math.log(1024));
+	const value = bytesPerSec / 1024 ** index;
+	return `${value.toFixed(1)} ${units[index]}`;
+}
+
 export function formatDuration(seconds: number) {
 	let s = seconds;
 

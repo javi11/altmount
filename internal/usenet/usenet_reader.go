@@ -24,6 +24,12 @@ var (
 	_ io.ReadCloser = &UsenetReader{}
 )
 
+type MetricsTracker interface {
+	IncArticlesDownloaded()
+	IncArticlesPosted()
+	UpdateDownloadProgress(id string, bytesDownloaded int64)
+}
+
 type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
@@ -49,6 +55,8 @@ type UsenetReader struct {
 	closeOnce      sync.Once
 	totalBytesRead int64
 	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
+	metricsTracker MetricsTracker
+	streamID       string
 
 	// Prefetch-based download tracking
 	nextToDownload int // Index of next segment to schedule
@@ -61,6 +69,8 @@ func NewUsenetReader(
 	poolGetter func() (*nntppool.Client, error),
 	rg *segmentRange,
 	maxPrefetch int,
+	metricsTracker MetricsTracker,
+	streamID string,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
@@ -70,12 +80,14 @@ func NewUsenetReader(
 	}
 
 	ur := &UsenetReader{
-		log:         log,
-		cancel:      cancel,
-		rg:          rg,
-		init:        make(chan any, 1),
-		maxPrefetch: maxPrefetch,
-		poolGetter:  poolGetter,
+		log:            log,
+		cancel:         cancel,
+		rg:             rg,
+		init:           make(chan any, 1),
+		maxPrefetch:    maxPrefetch,
+		poolGetter:     poolGetter,
+		metricsTracker: metricsTracker,
+		streamID:       streamID,
 	}
 
 	ur.wg.Add(1)
@@ -313,18 +325,21 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			}
 
 			resultBytes = buf.Bytes()
+
+			if b.metricsTracker != nil {
+				b.metricsTracker.IncArticlesDownloaded()
+
+				if b.streamID != "" {
+					b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(resultBytes)))
+				}
+			}
+
 			return nil
 		},
 		retry.Attempts(10),
 		retry.Delay(50*time.Millisecond),
 		retry.MaxDelay(2*time.Second),
 		retry.DelayType(retry.BackOffDelay),
-		retry.RetryIf(func(err error) bool {
-			if b.isArticleNotFoundError(err) {
-				return false
-			}
-			return b.isPoolUnavailableError(err) || errors.Is(err, context.DeadlineExceeded)
-		}),
 		retry.OnRetry(func(n uint, err error) {
 			b.log.DebugContext(ctx, "Pool unavailable or timeout, retrying segment download",
 				"attempt", n+1,
