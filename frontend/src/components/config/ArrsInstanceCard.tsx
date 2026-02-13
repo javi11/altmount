@@ -100,33 +100,33 @@ export function ArrsInstanceCard({
 
 	return (
 		<div key={instanceKey} className="card bg-base-200">
-			<div className="card-body p-4">
-				<div className="mb-4 flex items-center justify-between">
+			<div className="card-body p-3 sm:p-4">
+				<div className="mb-4 flex flex-wrap items-center justify-between gap-2">
 					<div className="flex items-center space-x-3">
-						<h4 className="font-semibold capitalize">{type} Instance</h4>
+						<h4 className="font-semibold text-sm capitalize sm:text-base">{type} Instance</h4>
 					</div>
-					<div className="flex items-center space-x-2">
+					<div className="flex items-center">
 						<button
 							type="button"
-							className="btn btn-sm btn-error btn-outline"
+							className="btn btn-xs sm:btn-sm btn-error btn-outline w-full sm:w-auto"
 							onClick={onRemove}
 							disabled={isReadOnly}
 						>
-							<Trash2 className="h-4 w-4" />
+							<Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
 							Remove
 						</button>
 					</div>
 				</div>
 
-				<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Instance Name</legend>
+						<legend className="fieldset-legend">Name</legend>
 						<input
 							type="text"
-							className="input"
+							className="input w-full"
 							value={instance.name}
 							onChange={(e) => handleInstanceChange("name", e.target.value)}
-							placeholder="My Radarr/Sonarr"
+							placeholder="My Instance"
 							disabled={isReadOnly}
 						/>
 					</fieldset>
@@ -135,7 +135,7 @@ export function ArrsInstanceCard({
 						<legend className="fieldset-legend">URL</legend>
 						<input
 							type="url"
-							className="input"
+							className="input w-full"
 							value={instance.url}
 							onChange={(e) => handleInstanceChange("url", e.target.value)}
 							placeholder="http://localhost:7878"
@@ -144,9 +144,9 @@ export function ArrsInstanceCard({
 					</fieldset>
 
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Download Category (Optional)</legend>
+						<legend className="fieldset-legend">Category</legend>
 						<select
-							className="select"
+							className="select w-full"
 							value={instance.category || ""}
 							onChange={(e) => handleInstanceChange("category", e.target.value)}
 							disabled={isReadOnly}
@@ -158,26 +158,22 @@ export function ArrsInstanceCard({
 								</option>
 							))}
 						</select>
-						<p className="label text-base-content/70 text-xs">
-							SABnzbd category to use for this instance. Defaults to "
-							{type === "radarr" ? "movies" : "tv"}".
-						</p>
 					</fieldset>
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">API Key</legend>
-						<div className="flex">
+						<div className="flex gap-1 sm:gap-2">
 							<input
 								type={isApiKeyVisible ? "text" : "password"}
-								className="input flex-1"
+								className="input min-w-0 flex-1"
 								value={instance.api_key}
 								onChange={(e) => handleInstanceChange("api_key", e.target.value)}
-								placeholder="API key from settings"
+								placeholder="API key"
 								disabled={isReadOnly}
 							/>
 							<button
 								type="button"
-								className="btn btn-outline ml-2"
+								className="btn btn-outline btn-sm sm:btn-md shrink-0"
 								onClick={onToggleApiKey}
 								disabled={isReadOnly}
 							>
@@ -185,7 +181,7 @@ export function ArrsInstanceCard({
 							</button>
 							<button
 								type="button"
-								className={`btn ml-2 ${
+								className={`btn btn-sm sm:btn-md shrink-0 ${
 									isTestingConnection
 										? "btn-disabled loading"
 										: testResult.type === "success"
@@ -196,14 +192,13 @@ export function ArrsInstanceCard({
 								}`}
 								onClick={testConnection}
 								disabled={isReadOnly || isTestingConnection || !instance.url || !instance.api_key}
-								aria-label="Test connection"
 							>
 								{isTestingConnection ? <div className="loading loading-spinner h-4 w-4" /> : "Test"}
 							</button>
 						</div>
 						{testResult.type && (
 							<div
-								className={`mt-2 text-sm ${
+								className={`mt-2 break-words font-medium text-xs ${
 									testResult.type === "success" ? "text-success" : "text-error"
 								}`}
 							>
@@ -214,8 +209,8 @@ export function ArrsInstanceCard({
 				</div>
 
 				<div className="mt-4">
-					<label className="label cursor-pointer">
-						<span className="label-text">Enable this instance</span>
+					<label className="label cursor-pointer justify-start gap-4">
+						<span className="label-text">Enable instance</span>
 						<input
 							type="checkbox"
 							className="checkbox"

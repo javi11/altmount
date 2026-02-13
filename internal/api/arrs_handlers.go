@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -182,12 +183,28 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 	// Helper for path normalization
 	normalize := func(path string) string {
 		normalizedPath := path
-		if mountPath != "" && strings.HasPrefix(normalizedPath, mountPath) {
-			normalizedPath = strings.TrimPrefix(normalizedPath, mountPath)
-		} else if importDir != "" && strings.HasPrefix(normalizedPath, importDir) {
-			normalizedPath = strings.TrimPrefix(normalizedPath, importDir)
-		} else if libraryDir != "" && strings.HasPrefix(normalizedPath, libraryDir) {
-			normalizedPath = strings.TrimPrefix(normalizedPath, libraryDir)
+
+		// Find the longest matching prefix to avoid over-truncation
+		prefixes := []string{}
+		if mountPath != "" {
+			prefixes = append(prefixes, mountPath)
+		}
+		if importDir != "" {
+			prefixes = append(prefixes, importDir)
+		}
+		if libraryDir != "" {
+			prefixes = append(prefixes, libraryDir)
+		}
+
+		longestPrefix := ""
+		for _, p := range prefixes {
+			if strings.HasPrefix(normalizedPath, p) && len(p) > len(longestPrefix) {
+				longestPrefix = p
+			}
+		}
+
+		if longestPrefix != "" {
+			normalizedPath = strings.TrimPrefix(normalizedPath, longestPrefix)
 		}
 		normalizedPath = strings.TrimPrefix(normalizedPath, "/")
 
@@ -306,6 +323,18 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 			var releaseDate *time.Time
 			var sourceNzb *string
 
+			// Handle Rename and Download specifically: try to find and re-link old record
+			if req.EventType == "Rename" || req.EventType == "Download" {
+				fileName := filepath.Base(normalizedPath)
+				// Try to find a record with the same filename but currently under /complete/
+				// or with a NULL library_path
+				if err := s.healthRepo.RelinkFileByFilename(c.Context(), fileName, normalizedPath, path); err == nil {
+					slog.InfoContext(c.Context(), "Successfully re-linked health record during webhook",
+						"event", req.EventType, "filename", fileName, "new_library_path", path)
+					continue // Successfully re-linked, no need to add new
+				}
+			}
+
 			// Try to read metadata to get release date
 			if s.metadataService != nil {
 				meta, err := s.metadataService.ReadFileMetadata(normalizedPath)
@@ -317,6 +346,14 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 					if meta.SourceNzbPath != "" {
 						sourceNzb = &meta.SourceNzbPath
 					}
+				} else {
+					// SAFETY: If metadata does not exist for this path, it means the file was renamed
+					// and we don't have a record for the new name yet. We should NOT add a health
+					// record for a path without metadata, as it will just be marked corrupted.
+					// The Library Sync will eventually discover the new mapping.
+					slog.DebugContext(c.Context(), "Skipping webhook health addition: no metadata found for path",
+						"path", normalizedPath)
+					continue
 				}
 			}
 

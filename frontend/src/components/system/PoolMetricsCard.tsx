@@ -1,7 +1,8 @@
-import { Network } from "lucide-react";
-import { usePoolMetrics } from "../../hooks/useApi";
+import { Network, RotateCcw } from "lucide-react";
+import { usePoolMetrics, useResetSystemStats } from "../../hooks/useApi";
 import { BytesDisplay } from "../ui/BytesDisplay";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { formatSpeed } from "../../lib/utils";
 
 interface PoolMetricsCardProps {
 	className?: string;
@@ -9,14 +10,12 @@ interface PoolMetricsCardProps {
 
 export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 	const { data: poolMetrics, isLoading, error } = usePoolMetrics();
+	const resetStats = useResetSystemStats();
 
-	// Helper function to format speed
-	const formatSpeed = (bytesPerSec: number) => {
-		if (bytesPerSec === 0) return "0 B/s";
-		const units = ["B/s", "KB/s", "MB/s", "GB/s"];
-		const index = Math.floor(Math.log(bytesPerSec) / Math.log(1024));
-		const value = bytesPerSec / 1024 ** index;
-		return `${value.toFixed(1)} ${units[index]}`;
+	const handleReset = () => {
+		if (window.confirm("Are you sure you want to reset all cumulative download statistics?")) {
+			resetStats.mutate();
+		}
 	};
 
 	if (error) {
@@ -39,10 +38,21 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 		<div className={`card bg-base-100 shadow-lg ${className || ""}`}>
 			<div className="card-body">
 				<div className="flex items-center justify-between">
-					<div>
-						<h2 className="card-title font-medium text-base-content/70 text-sm">
-							Articles Downloaded
-						</h2>
+					<div className="flex-1">
+						<div className="flex items-center gap-2">
+							<h2 className="card-title font-medium text-base-content/70 text-sm">
+								Articles Downloaded
+							</h2>
+							<button
+								type="button"
+								onClick={handleReset}
+								className={`btn btn-ghost btn-xs ${resetStats.isPending ? "loading" : ""}`}
+								title="Reset cumulative statistics"
+								disabled={resetStats.isPending}
+							>
+								{!resetStats.isPending && <RotateCcw className="h-3 w-3" />}
+							</button>
+						</div>
 						{isLoading ? (
 							<LoadingSpinner size="sm" />
 						) : poolMetrics ? (
@@ -98,16 +108,17 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 
 						{/* Total Errors - Only show if > 0 */}
 						{poolMetrics.total_errors > 0 && (
-							<div className="flex items-center justify-between text-sm">
-								<span className="text-base-content/70">Total Errors</span>
-								<span className="font-medium text-error">
-									{poolMetrics.total_errors.toLocaleString()}
-								</span>
-							</div>
-						)}
-					</div>
-				)}
-			</div>
-		</div>
-	);
-}
+														<div className="flex items-center justify-between text-sm">
+															<span className="text-base-content/70">Total Errors</span>
+															<span className="font-medium text-error">
+																{poolMetrics.total_errors.toLocaleString()}
+															</span>
+														</div>
+													)}
+												</div>
+											)}
+										</div>
+									</div>
+								);
+							}
+							

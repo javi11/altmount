@@ -50,9 +50,9 @@ export function AuthConfigSection({
 			<fieldset className="fieldset">
 				<legend className="fieldset-legend">Login Required</legend>
 				<div className="space-y-3">
-					<label className="label cursor-pointer">
+					<label className="label cursor-pointer justify-start gap-4">
 						<span className="label-text">
-							Require user authentication to access the web application
+							Require user authentication
 						</span>
 						<input
 							type="checkbox"
@@ -62,21 +62,18 @@ export function AuthConfigSection({
 							onChange={(e) => handleToggle(e.target.checked)}
 						/>
 					</label>
-					<p className="label">
-						When enabled, users must log in to access the web interface. When disabled, anyone can
-						access the application without authentication.
+					<p className="label text-xs sm:text-sm">
+						Enforces login requirement for the web interface.
 					</p>
 
 					{!formData.login_required && (
-						<div className="alert alert-warning">
+						<div className="alert alert-warning py-3 sm:py-4">
 							<AlertTriangle className="h-6 w-6" />
-							<div>
+							<div className="text-xs sm:text-sm">
 								<div className="font-bold">Security Warning</div>
-								<div className="text-sm">
-									Disabling login requirement will allow anyone to access your application without
-									authentication. Only disable this if you have other security measures in place
-									(firewall, VPN, etc.).
-								</div>
+								<p>
+									Disabling login requirement allows anyone to access your application.
+								</p>
 							</div>
 						</div>
 					)}
@@ -88,7 +85,7 @@ export function AuthConfigSection({
 				<div className="flex justify-end">
 					<button
 						type="button"
-						className="btn btn-primary"
+						className="btn btn-primary w-full sm:w-auto"
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
@@ -97,7 +94,7 @@ export function AuthConfigSection({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						{isUpdating ? "Saving..." : "Save Changes"}
+						Save Changes
 					</button>
 				</div>
 			)}
