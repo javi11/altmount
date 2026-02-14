@@ -1,4 +1,4 @@
-import { AlertTriangle, HardDrive, Play, Save, Square, TestTube } from "lucide-react";
+import { Eye, EyeOff, HardDrive, Play, Save, Square, TestTube } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -87,6 +87,7 @@ export function RCloneConfigSection({
 	const [hasChanges, setHasChanges] = useState(false);
 	const [hasMountChanges, setHasMountChanges] = useState(false);
 	const [hasMountPathChanges, setHasMountPathChanges] = useState(false);
+	const [showRCPassword, setShowRCPassword] = useState(false);
 	const [isTestingConnection, setIsTestingConnection] = useState(false);
 	const [testResult, setTestResult] = useState<{
 		success: boolean;
@@ -556,652 +557,699 @@ export function RCloneConfigSection({
 	};
 
 	return (
-		<div className="space-y-10">
+		<div className="space-y-4">
+			<h3 className="font-semibold text-lg">RClone Configuration</h3>
+
 			{/* Mount Configuration Section */}
-			<section className="space-y-6">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-						Automated Mount
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
-				</div>
+			<div className="mt-8 space-y-4">
+				<h4 className="font-medium text-base">Mount Configuration</h4>
 
-				<div className="grid grid-cols-1 gap-6">
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">Enable RClone Mount</legend>
-						<label className="label cursor-pointer justify-start gap-4">
-							<span className="label-text font-medium">
-								Mount WebDAV locally
-								{isMountToggleSaving && (
-									<span className="loading loading-spinner loading-xs ml-2" />
-								)}
-							</span>
-							<input
-								type="checkbox"
-								className="checkbox checkbox-primary"
-								checked={mountFormData.mount_enabled}
-								disabled={isReadOnly || isMountToggleSaving}
-								onChange={(e) => handleMountEnabledChange(e.target.checked)}
-							/>
-						</label>
-						<p className="label max-w-2xl whitespace-normal text-xs leading-relaxed opacity-70">
-							Automatically manages a background RClone process to expose your Usenet files as a
-							local filesystem.
-						</p>
-						{mountFormData.mount_enabled && hasMountChanges && (
-							<div className="alert alert-warning mt-2 py-2 text-xs">
-								<AlertTriangle className="h-4 w-4 shrink-0" />
-								<span>Changes not saved. Click "Save Mount Settings" below to apply.</span>
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Enable RClone Mount</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">
+							Enable RClone mount for WebDAV
+							{isMountToggleSaving && <span className="loading loading-spinner loading-xs ml-2" />}
+						</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={mountFormData.mount_enabled}
+							disabled={isReadOnly || isMountToggleSaving}
+							onChange={(e) => handleMountEnabledChange(e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						Mount the AltMount WebDAV as a local filesystem using RClone
+						{isMountToggleSaving && " (Saving...)"}
+					</p>
+					{mountFormData.mount_enabled && hasMountChanges && (
+						<div className="alert alert-warning mt-2">
+							<div className="text-sm">
+								<div className="font-semibold">Configuration not saved!</div>
+								<p className="mt-1">
+									Please configure the mount path below and click "Save Mount Changes" to apply your
+									settings.
+								</p>
 							</div>
-						)}
-					</fieldset>
-
-					{mountFormData.mount_enabled && (
-						<div className="fade-in animate-in space-y-10 duration-500">
-							{/* 1. Mount Path & Status */}
-							<div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-								<div className="lg:col-span-2">
-									<fieldset className="fieldset min-w-0">
-										<legend className="fieldset-legend font-semibold">Mount Point</legend>
-										<input
-											type="text"
-											className="input w-full bg-base-200/50"
-											value={mountPath}
-											disabled={isReadOnly}
-											onChange={(e) => handleMountPathChange(e.target.value)}
-											placeholder="/mnt/altmount"
-										/>
-										<p className="label text-[10px] opacity-60">
-											Absolute path on the host system.
-										</p>
-									</fieldset>
-								</div>
-
-								<div className="flex flex-col justify-end lg:col-span-1">
-									{mountStatus && (
-										<div
-											className={`alert ${mountStatus.mounted ? "alert-success" : "alert-warning"} flex-nowrap py-3 shadow-sm`}
-										>
-											<HardDrive className="h-5 w-5 shrink-0" />
-											<div className="min-w-0 flex-1">
-												<div className="font-bold text-xs">
-													{mountStatus.mounted ? "System Mounted" : "Not Mounted"}
-												</div>
-												{mountStatus.mounted && (
-													<div className="truncate font-mono text-[9px] opacity-70">
-														{mountStatus.mount_point}
-													</div>
-												)}
-											</div>
-											{mountStatus.mounted ? (
-												<button
-													type="button"
-													className="btn btn-xs btn-ghost"
-													onClick={handleStopMount}
-													disabled={isMountLoading}
-												>
-													{isMountLoading ? (
-														<span className="loading loading-spinner loading-xs" />
-													) : (
-														<Square className="h-3 w-3 text-error" />
-													)}
-												</button>
-											) : (
-												<button
-													type="button"
-													className="btn btn-xs btn-ghost"
-													onClick={handleStartMount}
-													disabled={isMountLoading || !mountPath}
-												>
-													{isMountLoading ? (
-														<span className="loading loading-spinner loading-xs" />
-													) : (
-														<Play className="h-3 w-3 text-success" />
-													)}
-												</button>
-											)}
-										</div>
-									)}
-								</div>
-							</div>
-
-							{/* 2. Basic Options */}
-							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-									Basic Options
-								</h5>
-								<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
-									<div className="space-y-2">
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.allow_other}
-												onChange={(e) => handleMountInputChange("allow_other", e.target.checked)}
-											/>
-											<span className="label-text text-xs">Allow other users</span>
-										</label>
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.allow_non_empty}
-												onChange={(e) =>
-													handleMountInputChange("allow_non_empty", e.target.checked)
-												}
-											/>
-											<span className="label-text text-xs">Allow non-empty mount</span>
-										</label>
-									</div>
-									<div className="space-y-2">
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.read_only}
-												onChange={(e) => handleMountInputChange("read_only", e.target.checked)}
-											/>
-											<span className="label-text text-xs">Read-only mount</span>
-										</label>
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.syslog}
-												onChange={(e) => handleMountInputChange("syslog", e.target.checked)}
-											/>
-											<span className="label-text text-xs">Enable syslog</span>
-										</label>
-									</div>
-									<div className="space-y-2">
-										<div className="flex items-center gap-2">
-											<span className="font-bold text-[10px] uppercase opacity-50">Log Level</span>
-											<select
-												className="select select-bordered select-xs flex-1 font-mono"
-												value={mountFormData.log_level}
-												onChange={(e) => handleMountInputChange("log_level", e.target.value)}
-											>
-												<option value="DEBUG">DEBUG</option>
-												<option value="INFO">INFO</option>
-												<option value="WARN">WARN</option>
-												<option value="ERROR">ERROR</option>
-											</select>
-										</div>
-										<div className="flex items-center gap-2">
-											<span className="font-bold text-[10px] uppercase opacity-50">Timeout</span>
-											<input
-												type="text"
-												className="input input-bordered input-xs flex-1 font-mono"
-												value={mountFormData.timeout}
-												onChange={(e) => handleMountInputChange("timeout", e.target.value)}
-											/>
-										</div>
-									</div>
-								</div>
-							</div>
-
-							{/* 3. VFS Cache Settings */}
-							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-									VFS Cache Management
-								</h5>
-								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4">
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">CACHE MODE</span>
-										<select
-											className="select select-bordered select-sm w-full"
-											value={mountFormData.vfs_cache_mode}
-											onChange={(e) => handleMountInputChange("vfs_cache_mode", e.target.value)}
-										>
-											<option value="off">Off</option>
-											<option value="minimal">Minimal</option>
-											<option value="writes">Writes</option>
-											<option value="full">Full</option>
-										</select>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">MAX SIZE</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.vfs_cache_max_size}
-											onChange={(e) => handleMountInputChange("vfs_cache_max_size", e.target.value)}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">MAX AGE</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.vfs_cache_max_age}
-											onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">MIN FREE SPACE</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.vfs_cache_min_free_space}
-											onChange={(e) =>
-												handleMountInputChange("vfs_cache_min_free_space", e.target.value)
-											}
-										/>
-									</div>
-									<div className="space-y-1 sm:col-span-2">
-										<span className="block font-bold text-[10px] opacity-50">CACHE DIRECTORY</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.cache_dir}
-											onChange={(e) => handleMountInputChange("cache_dir", e.target.value)}
-											placeholder="/config/cache"
-										/>
-									</div>
-									<div className="space-y-1 sm:col-span-2">
-										<span className="block font-bold text-[10px] opacity-50">DISK SPACE TOTAL</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.vfs_disk_space_total}
-											onChange={(e) =>
-												handleMountInputChange("vfs_disk_space_total", e.target.value)
-											}
-											placeholder="1T"
-										/>
-									</div>
-								</div>
-							</div>
-
-							{/* 4. Performance Settings */}
-							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-									Performance & Chunks
-								</h5>
-								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4">
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">BUFFER SIZE</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.buffer_size}
-											onChange={(e) => handleMountInputChange("buffer_size", e.target.value)}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">READ AHEAD</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.vfs_read_ahead}
-											onChange={(e) => handleMountInputChange("vfs_read_ahead", e.target.value)}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">CHUNK SIZE</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.read_chunk_size}
-											onChange={(e) => handleMountInputChange("read_chunk_size", e.target.value)}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">CHUNK LIMIT</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.read_chunk_size_limit}
-											onChange={(e) =>
-												handleMountInputChange("read_chunk_size_limit", e.target.value)
-											}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">TRANSFERS</span>
-										<input
-											type="number"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.transfers}
-											onChange={(e) =>
-												handleMountInputChange(
-													"transfers",
-													Number.parseInt(e.target.value, 10) || 4,
-												)
-											}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">CHUNK STREAMS</span>
-										<input
-											type="number"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.vfs_read_chunk_streams}
-											onChange={(e) =>
-												handleMountInputChange(
-													"vfs_read_chunk_streams",
-													Number.parseInt(e.target.value, 10) || 4,
-												)
-											}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">ATTR TIMEOUT</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.attr_timeout}
-											onChange={(e) => handleMountInputChange("attr_timeout", e.target.value)}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">DIR CACHE TIME</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.dir_cache_time}
-											onChange={(e) => handleMountInputChange("dir_cache_time", e.target.value)}
-										/>
-									</div>
-								</div>
-							</div>
-
-							{/* 5. Advanced & Identity */}
-							<div className="space-y-4">
-								<h5 className="border-base-200 border-b pb-1 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-									System & Advanced
-								</h5>
-								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4">
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">UID</span>
-										<input
-											type="number"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.uid}
-											onChange={(e) =>
-												handleMountInputChange("uid", Number.parseInt(e.target.value, 10) || 1000)
-											}
-										/>
-									</div>
-									<div className="space-y-1">
-										<span className="block font-bold text-[10px] opacity-50">GID</span>
-										<input
-											type="number"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.gid}
-											onChange={(e) =>
-												handleMountInputChange("gid", Number.parseInt(e.target.value, 10) || 1000)
-											}
-										/>
-									</div>
-									<div className="space-y-1 sm:col-span-2">
-										<span className="block font-bold text-[10px] uppercase opacity-50">Umask</span>
-										<input
-											type="text"
-											className="input input-bordered input-sm w-full font-mono"
-											value={mountFormData.umask}
-											onChange={(e) => handleMountInputChange("umask", e.target.value)}
-										/>
-									</div>
-									<div className="flex flex-wrap gap-x-6 gap-y-2 pt-2 sm:col-span-4">
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.async_read}
-												onChange={(e) => handleMountInputChange("async_read", e.target.checked)}
-											/>
-											<span className="label-text text-xs">Async read</span>
-										</label>
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.no_mod_time}
-												onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)}
-											/>
-											<span className="label-text text-xs">No mod-time</span>
-										</label>
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.no_checksum}
-												onChange={(e) => handleMountInputChange("no_checksum", e.target.checked)}
-											/>
-											<span className="label-text text-xs">No checksum</span>
-										</label>
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.vfs_fast_fingerprint}
-												onChange={(e) =>
-													handleMountInputChange("vfs_fast_fingerprint", e.target.checked)
-												}
-											/>
-											<span className="label-text text-xs">Fast Fingerprint</span>
-										</label>
-										<label className="label cursor-pointer justify-start gap-3 py-0">
-											<input
-												type="checkbox"
-												className="checkbox checkbox-xs"
-												checked={mountFormData.use_mmap}
-												onChange={(e) => handleMountInputChange("use_mmap", e.target.checked)}
-											/>
-											<span className="label-text text-xs">Use Mmap</span>
-										</label>
-									</div>
-									<div className="space-y-1 sm:col-span-4">
-										<span className="block font-bold text-[10px] uppercase tracking-widest opacity-50">
-											Custom Mount Options (JSON)
-										</span>
-										<textarea
-											className="textarea textarea-bordered textarea-sm min-h-[100px] w-full font-mono text-[10px]"
-											value={JSON.stringify(mountFormData.mount_options, null, 2)}
-											onChange={(e) => {
-												try {
-													const parsed = JSON.parse(e.target.value);
-													handleMountInputChange("mount_options", parsed);
-												} catch (_err) {
-													// Allow typing
-												}
-											}}
-											placeholder="{}"
-										/>
-									</div>
-								</div>
-							</div>
-
-							{/* Action Buttons */}
-							{!isReadOnly && (
-								<div className="mt-4 flex justify-end border-base-200 border-t pt-6">
-									<button
-										type="button"
-										className={`btn btn-primary btn-sm px-8 ${hasMountChanges || hasMountPathChanges ? "shadow-md" : ""}`}
-										onClick={handleSaveMount}
-										disabled={
-											(!hasMountChanges && !hasMountPathChanges) || isUpdating || isMountLoading
-										}
-									>
-										{isUpdating || isMountLoading ? (
-											<span className="loading loading-spinner loading-xs" />
-										) : (
-											<Save className="h-3 w-3" />
-										)}
-										Save Mount Configuration
-									</button>
-								</div>
-							)}
 						</div>
 					)}
-				</div>
-			</section>
+					{mountFormData.mount_enabled && (
+						<div className="alert alert-info mt-2">
+							<div className="text-sm">
+								<div className="font-semibold">Mount service will automatically:</div>
+								<ul className="mt-1 ml-4 list-disc">
+									<li>Start and manage the RC server on port 5572</li>
+									<li>Configure all necessary RC settings</li>
+									<li>Handle mount operations and cache management</li>
+								</ul>
+							</div>
+						</div>
+					)}
+				</fieldset>
 
-			{/* RC Configuration Settings */}
-			<section className="space-y-6 pt-4">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
-						Remote Control API
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
-				</div>
-
-				<div className="grid grid-cols-1 gap-6">
-					<fieldset className="fieldset min-w-0">
-						<legend className="fieldset-legend font-semibold">RC Connection</legend>
-						<label className="label cursor-pointer justify-start gap-4">
-							<span className="label-text font-medium">
-								Enable Remote Control
-								{mountFormData.mount_enabled && (
-									<span className="badge badge-info badge-outline badge-xs ml-2">Auto-managed</span>
-								)}
-							</span>
+				{mountFormData.mount_enabled && (
+					<>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Mount Point</legend>
 							<input
-								type="checkbox"
-								className="checkbox checkbox-primary"
-								checked={mountFormData.mount_enabled || formData.rc_enabled}
-								disabled={isReadOnly || mountFormData.mount_enabled || isRCToggleSaving}
-								onChange={(e) => handleRCEnabledChange(e.target.checked)}
+								type="text"
+								className="input"
+								value={mountPath}
+								disabled={isReadOnly}
+								onChange={(e) => handleMountPathChange(e.target.value)}
+								placeholder="/mnt/altmount"
 							/>
-						</label>
-						<p className="label max-w-2xl whitespace-normal text-xs leading-relaxed opacity-70">
-							Required for cache refresh notifications. If Mount is enabled, this is managed
-							automatically.
-						</p>
-					</fieldset>
+							<p className="label">Local filesystem path where WebDAV will be mounted</p>
+						</fieldset>
 
-					{(formData.rc_enabled || mountFormData.mount_enabled) && (
-						<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
-							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4">
-								<fieldset className="fieldset min-w-0">
-									<legend className="fieldset-legend font-bold text-[10px]">RC PORT</legend>
+						{/* Basic Mount Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">Basic Mount Settings</h5>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Allow Other Users</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Allow other users to access mount</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.allow_other}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("allow_other", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --allow-other for FUSE mount</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Allow Non-Empty</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Allow mounting over non-empty directories</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.allow_non_empty}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("allow_non_empty", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --allow-non-empty for mounting</p>
+								</fieldset>
+							</div>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Read Only</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Mount as read-only</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.read_only}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("read_only", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Prevents write operations to the mount</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Enable Syslog</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Log to syslog</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.syslog}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("syslog", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --syslog for system logging</p>
+								</fieldset>
+							</div>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Timeout</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.timeout}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("timeout", e.target.value)}
+										placeholder="10m"
+									/>
+									<p className="label text-xs">I/O timeout for mount operations (e.g., 10m, 30s)</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Log Level</legend>
+									<select
+										className="select"
+										value={mountFormData.log_level}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("log_level", e.target.value)}
+									>
+										<option value="DEBUG">DEBUG</option>
+										<option value="INFO">INFO</option>
+										<option value="WARN">WARN</option>
+										<option value="ERROR">ERROR</option>
+									</select>
+									<p className="label text-xs">Log level for rclone operations</p>
+								</fieldset>
+							</div>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">User ID (UID)</legend>
 									<input
 										type="number"
-										className="input input-bordered input-sm w-full font-mono"
-										value={formData.rc_port}
-										disabled={isReadOnly || mountFormData.mount_enabled}
-										onChange={(e) =>
-											handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
-										}
-									/>
-								</fieldset>
-								<fieldset className="fieldset min-w-0 sm:col-span-2">
-									<legend className="fieldset-legend font-bold text-[10px]">VFS NAME</legend>
-									<input
-										type="text"
-										className="input input-bordered input-sm w-full font-mono"
-										value={formData.vfs_name}
+										className="input"
+										value={mountFormData.uid}
 										disabled={isReadOnly}
-										onChange={(e) => handleInputChange("vfs_name", e.target.value)}
-									/>
-								</fieldset>
-								<fieldset className="fieldset min-w-0">
-									<legend className="fieldset-legend font-bold text-[10px]">RC URL</legend>
-									<input
-										type="text"
-										className="input input-bordered input-sm w-full font-mono"
-										value={formData.rc_url}
-										disabled={isReadOnly || mountFormData.mount_enabled}
-										onChange={(e) => handleInputChange("rc_url", e.target.value)}
-										placeholder="localhost"
-									/>
-								</fieldset>
-							</div>
-
-							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-								<fieldset className="fieldset min-w-0">
-									<legend className="fieldset-legend font-bold text-[10px]">RC USER</legend>
-									<input
-										type="text"
-										className="input input-bordered input-sm w-full font-mono"
-										value={formData.rc_user}
-										disabled={isReadOnly || mountFormData.mount_enabled}
-										onChange={(e) => handleInputChange("rc_user", e.target.value)}
-										autoComplete="username"
-									/>
-								</fieldset>
-								<fieldset className="fieldset min-w-0">
-									<legend className="fieldset-legend font-bold text-[10px]">
-										RC PASSWORD{" "}
-										{config.rclone.rc_pass_set && (
-											<span className="badge badge-success badge-xs ml-1 origin-left scale-75 font-normal uppercase">
-												Set
-											</span>
-										)}
-									</legend>
-									<input
-										type="password"
-										className="input input-bordered input-sm w-full font-mono"
-										value={formData.rc_pass}
-										disabled={isReadOnly || mountFormData.mount_enabled}
-										onChange={(e) => handleInputChange("rc_pass", e.target.value)}
-										placeholder="••••••••"
-										autoComplete="new-password"
-									/>
-								</fieldset>
-							</div>
-
-							<fieldset className="fieldset min-w-0">
-								<legend className="fieldset-legend font-bold text-[10px] uppercase tracking-widest opacity-50">
-									Custom RC Options (JSON)
-								</legend>
-								<textarea
-									className="textarea textarea-bordered textarea-sm min-h-[80px] w-full font-mono text-[10px]"
-									value={JSON.stringify(formData.rc_options, null, 2)}
-									disabled={isReadOnly || mountFormData.mount_enabled}
-									onChange={(e) => {
-										try {
-											const parsed = JSON.parse(e.target.value);
-											handleInputChange("rc_options", parsed);
-										} catch (_err) {
-											// Allow typing, but only update if valid JSON
+										onChange={(e) =>
+											handleMountInputChange("uid", Number.parseInt(e.target.value, 10) || 1000)
 										}
-									}}
-									placeholder="{}"
+										min="0"
+										max="65535"
+									/>
+									<p className="label text-xs">User ID for file ownership (default: 1000)</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Group ID (GID)</legend>
+									<input
+										type="number"
+										className="input"
+										value={mountFormData.gid}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleMountInputChange("gid", Number.parseInt(e.target.value, 10) || 1000)
+										}
+										min="0"
+										max="65535"
+									/>
+									<p className="label text-xs">Group ID for file ownership (default: 1000)</p>
+								</fieldset>
+							</div>
+						</div>
+
+						{/* VFS Cache Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">VFS Cache Settings</h5>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Cache Directory</legend>
+								<input
+									type="text"
+									className="input"
+									value={mountFormData.cache_dir}
+									disabled={isReadOnly}
+									onChange={(e) => handleMountInputChange("cache_dir", e.target.value)}
+									placeholder="Defaults to <rclone_path>/cache (e.g., /config/cache)"
 								/>
+								<p className="label text-xs">
+									Directory for VFS cache storage (leave empty to use default location)
+								</p>
+							</fieldset>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Cache Mode</legend>
+									<select
+										className="select"
+										value={mountFormData.vfs_cache_mode}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("vfs_cache_mode", e.target.value)}
+									>
+										<option value="off">Off</option>
+										<option value="minimal">Minimal</option>
+										<option value="writes">Writes</option>
+										<option value="full">Full</option>
+									</select>
+									<p className="label text-xs">
+										VFS cache mode: full recommended for best performance
+									</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Cache Max Size</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.vfs_cache_max_size}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("vfs_cache_max_size", e.target.value)}
+										placeholder="50G"
+									/>
+									<p className="label text-xs">Maximum cache size (e.g., 50G, 1T)</p>
+								</fieldset>
+							</div>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend">Cache Max Age</legend>
+								<input
+									type="text"
+									className="input"
+									value={mountFormData.vfs_cache_max_age}
+									disabled={isReadOnly}
+									onChange={(e) => handleMountInputChange("vfs_cache_max_age", e.target.value)}
+									placeholder="504h"
+								/>
+								<p className="label text-xs">Maximum cache age (e.g., 504h, 7d)</p>
 							</fieldset>
 						</div>
-					)}
 
-					{!isReadOnly && !mountFormData.mount_enabled && formData.rc_enabled && (
-						<div className="flex justify-end gap-2 pt-2">
-							<button
-								type="button"
-								className="btn btn-outline btn-sm"
-								onClick={handleTestConnection}
-								disabled={isTestingConnection}
-							>
-								{isTestingConnection ? (
-									<span className="loading loading-spinner loading-xs" />
+						{/* Performance Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">Performance Settings</h5>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Buffer Size</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.buffer_size}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("buffer_size", e.target.value)}
+										placeholder="32M"
+									/>
+									<p className="label text-xs">Buffer size for file operations (e.g., 32M, 64M)</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">VFS Read Ahead</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.vfs_read_ahead}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("vfs_read_ahead", e.target.value)}
+										placeholder="128M"
+									/>
+									<p className="label text-xs">VFS read-ahead size (e.g., 128M, 256M)</p>
+								</fieldset>
+							</div>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Read Chunk Size</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.read_chunk_size}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("read_chunk_size", e.target.value)}
+										placeholder="32M"
+									/>
+									<p className="label text-xs">VFS read chunk size (e.g., 32M, 64M)</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Read Chunk Size Limit</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.read_chunk_size_limit}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleMountInputChange("read_chunk_size_limit", e.target.value)
+										}
+										placeholder="2G"
+									/>
+									<p className="label text-xs">Maximum read chunk size (e.g., 2G, 4G)</p>
+								</fieldset>
+							</div>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Directory Cache Time</legend>
+									<input
+										type="text"
+										className="input"
+										value={mountFormData.dir_cache_time}
+										disabled={isReadOnly}
+										onChange={(e) => handleMountInputChange("dir_cache_time", e.target.value)}
+										placeholder="10m"
+									/>
+									<p className="label text-xs">Directory cache time (e.g., 10m, 1h)</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Transfers</legend>
+									<input
+										type="number"
+										className="input"
+										value={mountFormData.transfers}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleMountInputChange("transfers", Number.parseInt(e.target.value, 10) || 4)
+										}
+										min="1"
+										max="32"
+									/>
+									<p className="label text-xs">Number of parallel transfers (1-32)</p>
+								</fieldset>
+							</div>
+						</div>
+
+						{/* Advanced Settings */}
+						<div className="space-y-4">
+							<h5 className="font-medium text-base-content/70 text-sm">Advanced Settings</h5>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">Async Read</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Enable async read operations</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.async_read}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("async_read", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Enables --async-read for better performance</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">No Checksum</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Skip checksum verification</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.no_checksum}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("no_checksum", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Disable checksum verification for speed</p>
+								</fieldset>
+							</div>
+
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">No Mod Time</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Don't read/write modification time</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.no_mod_time}
+											disabled={isReadOnly}
+											onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)}
+										/>
+									</label>
+									<p className="label text-xs">Skip modification time operations</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">VFS Fast Fingerprint</legend>
+									<label className="label cursor-pointer">
+										<span className="label-text">Use fast fingerprinting</span>
+										<input
+											type="checkbox"
+											className="checkbox"
+											checked={mountFormData.vfs_fast_fingerprint}
+											disabled={isReadOnly}
+											onChange={(e) =>
+												handleMountInputChange("vfs_fast_fingerprint", e.target.checked)
+											}
+										/>
+									</label>
+									<p className="label text-xs">Enable fast VFS fingerprinting</p>
+								</fieldset>
+							</div>
+						</div>
+
+						{/* Mount Status */}
+						{mountStatus && (
+							<div className={`alert ${mountStatus.mounted ? "alert-success" : "alert-warning"}`}>
+								<HardDrive className="h-6 w-6" />
+								<div>
+									<div className="font-bold">{mountStatus.mounted ? "Mounted" : "Not Mounted"}</div>
+									{mountStatus.mounted && mountStatus.mount_point && (
+										<div className="text-sm">Mount point: {mountStatus.mount_point}</div>
+									)}
+									{mountStatus.error && <div className="text-sm">{mountStatus.error}</div>}
+								</div>
+								{mountStatus.mounted ? (
+									<button
+										type="button"
+										className="btn btn-sm btn-outline"
+										onClick={handleStopMount}
+										disabled={isReadOnly || isMountLoading}
+									>
+										{isMountLoading ? (
+											<span className="loading loading-spinner loading-xs" />
+										) : (
+											<Square className="h-4 w-4" />
+										)}
+										{isMountLoading ? "Stopping..." : "Stop Mount"}
+									</button>
 								) : (
-									<TestTube className="h-3 w-3" />
+									<button
+										type="button"
+										className="btn btn-sm btn-primary"
+										onClick={handleStartMount}
+										disabled={isReadOnly || !mountPath || isMountLoading}
+									>
+										{isMountLoading ? (
+											<span className="loading loading-spinner loading-xs" />
+										) : (
+											<Play className="h-4 w-4" />
+										)}
+										{isMountLoading ? "Starting..." : "Start Mount"}
+									</button>
 								)}
-								Test Connection
-							</button>
-							<button
-								type="button"
-								className="btn btn-primary btn-sm px-8"
-								onClick={handleSave}
-								disabled={!hasChanges || isUpdating}
-							>
-								{isUpdating ? (
-									<span className="loading loading-spinner loading-xs" />
-								) : (
-									<Save className="h-3 w-3" />
-								)}
-								Save RC Changes
-							</button>
+							</div>
+						)}
+
+						{/* Action Buttons */}
+						{!isReadOnly && (
+							<div className="flex justify-end gap-2">
+								<button
+									type="button"
+									className={`btn btn-primary ${hasMountChanges || hasMountPathChanges ? "animate-pulse" : ""}`}
+									onClick={handleSaveMount}
+									disabled={
+										(!hasMountChanges && !hasMountPathChanges) || isUpdating || isMountLoading
+									}
+								>
+									{isUpdating || isMountLoading ? (
+										<span className="loading loading-spinner loading-sm" />
+									) : (
+										<Save className="h-4 w-4" />
+									)}
+									{isUpdating
+										? "Saving..."
+										: isMountLoading
+											? "Checking Mount..."
+											: "Save Mount Changes"}
+								</button>
+							</div>
+						)}
+					</>
+				)}
+			</div>
+
+			{/* RC Configuration Settings */}
+			<div className="space-y-4">
+				<h4 className="font-medium text-base">RC (Remote Control) Settings</h4>
+
+				<fieldset className="fieldset">
+					<legend className="fieldset-legend">Enable RC Connection</legend>
+					<label className="label cursor-pointer">
+						<span className="label-text">
+							Enable RClone Remote Control for cache notifications
+							{mountFormData.mount_enabled && (
+								<span className="badge badge-info badge-sm ml-2">Auto-configured by mount</span>
+							)}
+							{isRCToggleSaving && !mountFormData.mount_enabled && (
+								<span className="loading loading-spinner loading-xs ml-2" />
+							)}
+						</span>
+						<input
+							type="checkbox"
+							className="checkbox"
+							checked={mountFormData.mount_enabled || formData.rc_enabled}
+							disabled={isReadOnly || mountFormData.mount_enabled || isRCToggleSaving}
+							onChange={(e) => handleRCEnabledChange(e.target.checked)}
+						/>
+					</label>
+					<p className="label">
+						{mountFormData.mount_enabled
+							? "RC server is automatically managed by the mount service"
+							: isRCToggleSaving
+								? "Saving..."
+								: "Enable connection to RClone RC server for cache refresh notifications"}
+					</p>
+					{mountFormData.mount_enabled && (
+						<div className="mt-2 space-y-1">
+							<span className="block text-info text-sm">
+								Mount service automatically starts and manages the RC server on port 5572
+							</span>
+							<span className="block text-base-content/70 text-xs">
+								RC configuration below is read-only when mount is enabled
+							</span>
 						</div>
 					)}
-				</div>
-			</section>
+				</fieldset>
 
+				{(formData.rc_enabled || mountFormData.mount_enabled) && (
+					<>
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">RC URL</legend>
+							<input
+								type="text"
+								className="input"
+								value={mountFormData.mount_enabled ? "" : formData.rc_url}
+								disabled={isReadOnly || mountFormData.mount_enabled}
+								onChange={(e) => handleInputChange("rc_url", e.target.value)}
+								placeholder={
+									mountFormData.mount_enabled
+										? "Internal server (managed by mount)"
+										: "http://localhost:5572 (leave empty to start internal RC server)"
+								}
+							/>
+							<p className="label">
+								{mountFormData.mount_enabled
+									? "Using internal RC server managed by mount service"
+									: "External RClone RC server URL (leave empty to use internal RC server)"}
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">VFS Name</legend>
+							<input
+								type="text"
+								className="input"
+								value={formData.vfs_name}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("vfs_name", e.target.value)}
+								placeholder="altmount"
+							/>
+							<p className="label">
+								Name of the VFS in RClone (default: altmount). Change this if your external rclone
+								mount uses a different name.
+							</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">RC Port</legend>
+							<input
+								type="number"
+								className="input"
+								value={formData.rc_port}
+								disabled={isReadOnly}
+								onChange={(e) =>
+									handleInputChange("rc_port", Number.parseInt(e.target.value, 10) || 5572)
+								}
+								placeholder="5572"
+							/>
+							<p className="label">Port for RC server (default: 5572)</p>
+						</fieldset>
+
+						{!mountFormData.mount_enabled && (
+							<>
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">RC Username</legend>
+									<input
+										type="text"
+										className="input"
+										value={formData.rc_user}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("rc_user", e.target.value)}
+										placeholder="admin"
+									/>
+									<p className="label">Username for RClone RC API authentication</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend">RC Password</legend>
+									<div className="relative">
+										<input
+											type={showRCPassword ? "text" : "password"}
+											className="input pr-10"
+											value={formData.rc_pass}
+											disabled={isReadOnly}
+											onChange={(e) => handleInputChange("rc_pass", e.target.value)}
+											placeholder={
+												config.rclone.rc_pass_set
+													? "RC password is set (enter new to change)"
+													: "admin"
+											}
+										/>
+										<button
+											type="button"
+											className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
+											onClick={() => setShowRCPassword(!showRCPassword)}
+										>
+											{showRCPassword ? (
+												<EyeOff className="h-4 w-4" />
+											) : (
+												<Eye className="h-4 w-4" />
+											)}
+										</button>
+									</div>
+									<p className="label">
+										Password for RClone RC API authentication
+										{config.rclone.rc_pass_set && " (currently set)"}
+									</p>
+								</fieldset>
+							</>
+						)}
+
+						{!isReadOnly && (
+							<div className="flex gap-2">
+								{!mountFormData.mount_enabled && (
+									<>
+										<button
+											type="button"
+											className="btn btn-outline"
+											onClick={handleTestConnection}
+											disabled={isTestingConnection || (!formData.rc_url && !formData.rc_enabled)}
+										>
+											{isTestingConnection ? (
+												<span className="loading loading-spinner loading-sm" />
+											) : (
+												<TestTube className="h-4 w-4" />
+											)}
+											{isTestingConnection ? "Testing..." : "Test Connection"}
+										</button>
+										<button
+											type="button"
+											className="btn btn-primary"
+											onClick={handleSave}
+											disabled={!hasChanges || isUpdating}
+										>
+											{isUpdating ? (
+												<span className="loading loading-spinner loading-sm" />
+											) : (
+												<Save className="h-4 w-4" />
+											)}
+											{isUpdating ? "Saving..." : "Save RC Changes"}
+										</button>
+									</>
+								)}
+							</div>
+						)}
+					</>
+				)}
+			</div>
+
+			{/* Test Result Alert */}
 			{testResult && (
-				<div
-					className={`alert ${testResult.success ? "alert-success" : "alert-error"} py-3 text-xs shadow-sm`}
-				>
-					<span>{testResult.message}</span>
+				<div className={`alert ${testResult.success ? "alert-success" : "alert-error"} mt-4`}>
+					<div>
+						<span>{testResult.message}</span>
+					</div>
 				</div>
 			)}
 		</div>

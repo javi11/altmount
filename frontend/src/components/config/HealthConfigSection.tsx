@@ -1,6 +1,7 @@
-import { AlertTriangle, Save, TestTube } from "lucide-react";
+import { AlertTriangle, Info, Save, TestTube } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, DryRunSyncResult, HealthConfig } from "../../types/config";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 interface HealthConfigSectionProps {
 	config: ConfigResponse;
@@ -70,7 +71,6 @@ export function HealthConfigSection({
 			}
 		} catch (error) {
 			console.error("Dry run failed:", error);
-			// Optionally show an error toast here
 		} finally {
 			setDryRunLoading(false);
 		}
@@ -94,406 +94,255 @@ export function HealthConfigSection({
 	};
 
 	return (
-		<div className="space-y-4">
-			<h3 className="font-semibold text-lg">Health & Repair</h3>
-			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Health System</legend>
-					<label className="label cursor-pointer">
-						<span className="label-text">Enable health system</span>
+		<div className="space-y-10">
+			<div>
+				<h3 className="text-lg font-bold text-base-content tracking-tight">Auto-Repair System</h3>
+				<p className="text-sm text-base-content/50 break-words">Monitor and automatically repair corrupted library files.</p>
+			</div>
+
+			<div className="space-y-8">
+				{/* Enable Health Toggle */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+					<div className="flex items-start justify-between gap-4">
+						<div className="min-w-0 flex-1">
+							<h4 className="font-bold text-sm text-base-content break-words">Master Engine</h4>
+							<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
+								Activate background monitoring and automatic re-downloads.
+							</p>
+						</div>
 						<input
 							type="checkbox"
-							className="checkbox"
+							className="toggle toggle-primary shrink-0 mt-1"
 							checked={formData.enabled}
 							disabled={isReadOnly}
 							onChange={(e) => handleInputChange("enabled", e.target.checked)}
 						/>
-					</label>
-					{formData.enabled && (
-						<div className="mt-3 space-y-2">
-							<p className="label font-medium text-sm">How it works:</p>
-							<ol className="ml-2 list-inside list-decimal space-y-1 text-sm">
-								<li>
-									<strong>Periodic sync:</strong> The system periodically syncs with the library
-									directory to discover files.
-								</li>
-								<li>
-									<strong>Smart scheduling:</strong> Each record is checked based on its release
-									date × 2. For example, if a file was released 1 day ago, the next check will be
-									scheduled 1 day after (2 days total).
-								</li>
-								<li>
-									<strong>Health validation:</strong> Files are validated through partial segment
-									checks or full checks. If a file is found to be unhealthy, a repair is
-									automatically triggered.
-								</li>
-								<li>
-									<strong>Automatic repair:</strong> When unhealthy files are detected, the system
-									deletes the file in the ARR application and triggers a redownload to restore file
-									integrity.
-								</li>
-							</ol>
-						</div>
-					)}
-				</fieldset>
-
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Library Directory</legend>
-					<input
-						type="text"
-						className={`input ${
-							validationError && formData.enabled ? "input-error border-error" : ""
-						}`}
-						value={formData.library_dir || ""}
-						disabled={isReadOnly}
-						placeholder="/media/library"
-						onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
-					/>
-					{validationError && formData.enabled && (
-						<div className="alert alert-error mt-2">
-							<AlertTriangle className="h-4 w-4" />
-							<span className="text-sm">{validationError}</span>
-						</div>
-					)}
-					<div className="label flex-col items-start whitespace-normal text-sm">
-						<div>
-							Path to your organized media library that contains symlinks pointing to altmount
-							files. When a repair is triggered, the system will search for symlinks in this
-							directory and use the library path for ARR rescan instead of the mount path.
-						</div>
-						{config.import.import_strategy === "NONE" && (
-							<span className="mt-1 text-info">
-								<strong>Note:</strong> Since you are using <strong>NONE</strong> strategy, you can
-								leave this empty. The system will use your mount path for repairs.
-							</span>
-						)}
-						{formData.enabled && config.import.import_strategy !== "NONE" && (
-							<strong className="mt-1 text-error">
-								Required when Health System is enabled with {config.import.import_strategy}{" "}
-								strategy.
-							</strong>
-						)}
 					</div>
-				</fieldset>
 
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Cleanup Settings</legend>
-					<label className="label cursor-pointer">
-						<span className="label-text">Cleanup orphaned files</span>
+					{formData.enabled && (
+						<div className="mt-6 border-t border-base-300/50 pt-6 animate-in fade-in slide-in-from-top-2">
+							<div className="rounded-xl bg-primary/5 border border-primary/10 p-4">
+								<div className="flex items-center gap-2 mb-3">
+									<Info className="h-4 w-4 text-primary shrink-0" />
+									<span className="font-black text-[10px] uppercase tracking-widest text-primary break-words">Workflow Overview</span>
+								</div>
+								<ul className="space-y-3">
+									<li className="flex gap-3 text-xs leading-relaxed">
+										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-[10px]">1</span>
+										<span className="break-words min-w-0 flex-1">Discover files via periodic library sync.</span>
+									</li>
+									<li className="flex gap-3 text-xs leading-relaxed">
+										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-[10px]">2</span>
+										<span className="break-words min-w-0 flex-1">Validate Usenet integrity using sampling or deep checks.</span>
+									</li>
+									<li className="flex gap-3 text-xs leading-relaxed">
+										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-[10px]">3</span>
+										<span className="break-words min-w-0 flex-1 font-bold">Unhealthy files are automatically replaced in Sonarr/Radarr.</span>
+									</li>
+								</ul>
+							</div>
+						</div>
+					)}
+				</div>
+
+				{/* Directory Configuration */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-semibold break-words">Library Parent Directory</legend>
+						<div className="flex flex-col gap-3">
+							<input
+								type="text"
+								className={`input input-bordered w-full bg-base-100 font-mono text-sm ${validationError && formData.enabled ? "input-error" : ""}`}
+								value={formData.library_dir || ""}
+								disabled={isReadOnly}
+								placeholder="/media/library"
+								onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
+							/>
+							<p className="label text-[10px] text-base-content/50 break-words leading-relaxed">
+								Path where your permanent media folders (/movies, /tv) are located. 
+								Required for mapping virtual files to physical ARR library paths.
+							</p>
+						</div>
+					</fieldset>
+
+					<div className="divider opacity-50" />
+
+					<div className="flex items-start justify-between gap-4">
+						<div className="min-w-0 flex-1">
+							<h4 className="font-bold text-sm text-base-content break-words">Orphan Cleanup</h4>
+							<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
+								Purge database records and metadata for files missing from storage.
+							</p>
+						</div>
 						<input
 							type="checkbox"
-							className="checkbox"
+							className="checkbox checkbox-primary checkbox-sm shrink-0 mt-1"
 							checked={formData.cleanup_orphaned_metadata ?? false}
 							disabled={isReadOnly}
 							onChange={(e) => handleInputChange("cleanup_orphaned_metadata", e.target.checked)}
 						/>
-					</label>
-					{formData.cleanup_orphaned_metadata && !formData.library_dir?.trim() && (
-						<div className="alert alert-warning mt-2">
-							<AlertTriangle className="h-4 w-4" />
-							<span className="text-sm">
-								Library Directory must be configured to enable file cleanup
-							</span>
-						</div>
-					)}
-					{formData.cleanup_orphaned_metadata && formData.library_dir?.trim() && (
-						<div className="alert alert-warning mt-2">
-							<AlertTriangle className="h-4 w-4" />
-							<div className="text-sm">
-								<strong>Important:</strong> When enabled, this feature will automatically DELETE
-								orphaned library files and metadata files during sync. This helps prevent storage
-								waste from orphaned files, but files will be permanently removed.
-							</div>
-						</div>
-					)}
-					<div className="label flex-col items-start whitespace-normal text-sm">
-						<div>
-							Automatically delete orphaned library files and metadata during library sync. When
-							disabled, no files will be deleted.
-						</div>
-						{formData.cleanup_orphaned_metadata && config.import.import_strategy !== "NONE" && (
-							<strong className="mt-1 text-warning">
-								Requires Library Directory to be configured.
-							</strong>
-						)}
-						{config.import.import_strategy === "NONE" && (
-							<span className="mt-1 text-info">
-								<strong>Note:</strong> In <strong>NONE</strong> strategy, the system only performs
-								metadata-only sync. It will not delete library files.
-							</span>
-						)}
 					</div>
 
-					{/* Dry Run Button */}
-					<div className="mt-4">
+					<div className="flex justify-start">
 						<button
 							type="button"
-							className="btn btn-outline btn-sm"
+							className="btn btn-ghost btn-xs border-base-300 bg-base-100 hover:bg-base-200"
 							onClick={handleDryRun}
 							disabled={!formData.library_dir?.trim() || dryRunLoading || isReadOnly}
 						>
-							{dryRunLoading ? (
-								<>
-									<span className="loading loading-spinner loading-sm" />
-									Running...
-								</>
-							) : (
-								<>
-									<TestTube className="h-4 w-4" />
-									Test Sync (Dry Run)
-								</>
-							)}
+							{dryRunLoading ? <LoadingSpinner size="sm" /> : <TestTube className="h-3 w-3" />}
+							Dry Run Test
 						</button>
-						<p className="label mt-1 text-xs">
-							Preview what would be deleted without actually deleting anything
-						</p>
 					</div>
 
-					{/* Dry Run Results */}
 					{dryRunResult && (
-						<div
-							className={`alert ${dryRunResult.would_cleanup ? "alert-warning" : "alert-info"} mt-4`}
-						>
-							<div className="w-full">
-								<div className="flex items-start justify-between">
-									<div className="flex items-center gap-2">
-										<TestTube className="h-5 w-5" />
-										<h4 className="font-semibold">Dry Run Results</h4>
+						<div className={`alert rounded-xl border p-4 animate-in zoom-in-95 ${dryRunResult.would_cleanup ? "bg-warning/5 border-warning/20" : "bg-info/5 border-info/20"}`}>
+							<div className="w-full space-y-3">
+								<h5 className="font-black text-[10px] uppercase tracking-widest opacity-60 flex items-center gap-2">
+									<TestTube className="h-3 w-3" /> Potential Cleanup Results
+								</h5>
+								<div className="grid grid-cols-3 gap-2 text-center">
+									<div className="bg-base-100 rounded-lg p-2 border border-base-300/50">
+										<div className="font-mono font-bold text-lg">{dryRunResult.orphaned_metadata_count}</div>
+										<div className="text-[8px] opacity-50 uppercase font-black">Metadata</div>
 									</div>
-								</div>
-								<div className="mt-3 space-y-2 text-sm">
-									<div className="grid grid-cols-2 gap-2">
-										<div>Metadata files to be deleted:</div>
-										<div className="font-mono font-semibold">
-											{dryRunResult.orphaned_metadata_count} files
-										</div>
-										<div>Library files to be deleted:</div>
-										<div className="font-mono font-semibold">
-											{dryRunResult.orphaned_library_files} files
-										</div>
-										<div>Database Records:</div>
-										<div className="font-mono font-semibold">
-											{dryRunResult.database_records_to_clean} records
-										</div>
+									<div className="bg-base-100 rounded-lg p-2 border border-base-300/50">
+										<div className="font-mono font-bold text-lg">{dryRunResult.orphaned_library_files}</div>
+										<div className="text-[8px] opacity-50 uppercase font-black">Links</div>
 									</div>
-									<div className="divider my-2" />
-									<div className="font-semibold">
-										{dryRunResult.would_cleanup ? (
-											<span className="text-warning">
-												These files WOULD BE DELETED in a real sync (cleanup enabled)
-											</span>
-										) : (
-											<span className="text-info">
-												No files would be deleted (cleanup disabled)
-											</span>
-										)}
+									<div className="bg-base-100 rounded-lg p-2 border border-base-300/50">
+										<div className="font-mono font-bold text-lg">{dryRunResult.database_records_to_clean}</div>
+										<div className="text-[8px] opacity-50 uppercase font-black">Records</div>
 									</div>
 								</div>
 							</div>
 						</div>
 					)}
-				</fieldset>
-			</div>
+				</div>
 
-			{/* Advanced Settings (Optional) */}
-			<details className="collapse bg-base-200">
-				<summary className="collapse-title font-medium">Advanced Settings</summary>
-				<div className="collapse-content">
-					<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-						{formData.check_interval_seconds !== undefined && (
+				{/* Advanced Performance & Logic */}
+				<div className="collapse collapse-arrow rounded-2xl border border-base-300 bg-base-200/30">
+					<input type="checkbox" /> 
+					<div className="collapse-title text-sm font-bold opacity-60 uppercase tracking-widest">
+						Performance & Deep Validation
+					</div>
+					<div className="collapse-content space-y-8">
+						<div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-8">
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Check Interval (seconds)</legend>
-								<input
-									type="number"
-									className="input"
-									value={formData.check_interval_seconds}
-									readOnly={isReadOnly}
-									min={5}
-									max={86400}
-									step={1}
-									onChange={(e) =>
-										handleInputChange(
-											"check_interval_seconds",
-											Number.parseInt(e.target.value, 10) || 5,
-										)
-									}
-								/>
-								<p className="label text-sm">
-									Time between automatic health checks (default: 5 seconds)
-								</p>
+								<legend className="fieldset-legend font-semibold break-words">Validation Intensity</legend>
+								<label className="label cursor-pointer justify-start gap-3 items-start">
+									<input
+										type="checkbox"
+										className="checkbox checkbox-sm checkbox-primary mt-1 shrink-0"
+										checked={formData.check_all_segments ?? false}
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
+									/>
+									<div className="min-w-0 flex-1">
+										<span className="label-text text-xs font-medium break-words">Verify Every Segment (100%)</span>
+										<p className="label text-[10px] opacity-50 mt-1 break-words leading-relaxed">Thorough but very slow for large libraries.</p>
+									</div>
+								</label>
 							</fieldset>
+
+							{!formData.check_all_segments && (
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold break-words">Ghost File Detection</legend>
+									<label className="label cursor-pointer justify-start gap-3 items-start">
+										<input
+											type="checkbox"
+											className="checkbox checkbox-sm checkbox-primary mt-1 shrink-0"
+											checked={formData.verify_data ?? false}
+											disabled={isReadOnly}
+											onChange={(e) => handleInputChange("verify_data", e.target.checked)}
+										/>
+										<div className="min-w-0 flex-1">
+											<span className="label-text text-xs font-medium break-words">Hybrid Data Verification</span>
+											<p className="label text-[10px] opacity-50 mt-1 break-words leading-relaxed">Reads 1 byte from each checked segment to confirm Usenet data exists.</p>
+										</div>
+									</label>
+								</fieldset>
+							)}
+						</div>
+
+						{/* Sample Percentage Slider */}
+						{!formData.check_all_segments && formData.segment_sample_percentage !== undefined && (
+							<div className="space-y-6">
+								<div className="flex items-center justify-between">
+									<h5 className="font-bold text-xs">Sampling Percentage</h5>
+									<div className="font-mono font-black text-primary text-lg">{formData.segment_sample_percentage}%</div>
+								</div>
+								<div className="space-y-4">
+									<input
+										type="range"
+										min="1"
+										max="100"
+										value={formData.segment_sample_percentage}
+										className="range range-primary range-sm"
+										step="1"
+										disabled={isReadOnly}
+										onChange={(e) => handleInputChange("segment_sample_percentage", Number.parseInt(e.target.value, 10))}
+									/>
+									<div className="flex justify-between px-2 text-[9px] font-black opacity-30">
+										<span>1% (FAST)</span>
+										<span>25%</span>
+										<span>50%</span>
+										<span>75%</span>
+										<span>100% (SLOW)</span>
+									</div>
+								</div>
+							</div>
 						)}
-						{formData.max_connections_for_health_checks !== undefined && (
+
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4">
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Max Connections for Health Checks</legend>
+								<legend className="fieldset-legend font-semibold">Parallel Processing</legend>
 								<input
 									type="number"
-									className="input"
-									value={formData.max_connections_for_health_checks}
-									readOnly={isReadOnly}
-									min={1}
-									max={10}
-									onChange={(e) =>
-										handleInputChange(
-											"max_connections_for_health_checks",
-											Number.parseInt(e.target.value, 10) || 1,
-										)
-									}
-								/>
-								<p className="label text-sm">
-									Maximum concurrent connections used during health check operations
-								</p>
-							</fieldset>
-						)}
-						{formData.max_concurrent_jobs !== undefined && (
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Max Concurrent Jobs</legend>
-								<input
-									type="number"
-									className="input"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
 									value={formData.max_concurrent_jobs}
 									readOnly={isReadOnly}
 									min={1}
 									max={100}
-									onChange={(e) =>
-										handleInputChange(
-											"max_concurrent_jobs",
-											Number.parseInt(e.target.value, 10) || 1,
-										)
-									}
+									onChange={(e) => handleInputChange("max_concurrent_jobs", Number.parseInt(e.target.value, 10) || 1)}
 								/>
-								<p className="label text-sm">
-									Maximum number of files to process in parallel (health checks and repairs).
-								</p>
+								<p className="label text-[10px] opacity-50 break-words">Max files processed at once.</p>
 							</fieldset>
-						)}
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Check All Segments</legend>
-							<label className="label cursor-pointer">
-								<span className="label-text">Deep segment checking</span>
-								<input
-									type="checkbox"
-									className="checkbox"
-									checked={formData.check_all_segments ?? false}
-									disabled={isReadOnly}
-									onChange={(e) => handleInputChange("check_all_segments", e.target.checked)}
-								/>
-							</label>
-							<p className="label text-sm">
-								When disabled, use a sampling approach for faster processing. Enable for thorough
-								validation of all segments (slower).
-							</p>
-						</fieldset>
-						{!formData.check_all_segments && (
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Hybrid Data Verification</legend>
-								<label className="label cursor-pointer">
-									<span className="label-text">Verify data (1 byte)</span>
-									<input
-										type="checkbox"
-										className="checkbox"
-										checked={formData.verify_data ?? false}
-										disabled={isReadOnly}
-										onChange={(e) => handleInputChange("verify_data", e.target.checked)}
-									/>
-								</label>
-								<p className="label text-sm">
-									Read 1 byte of data from each checked segment to verify file integrity on the
-									provider side. Catches "ghost" files.
-								</p>
-							</fieldset>
-						)}
-						{formData.segment_sample_percentage !== undefined && !formData.check_all_segments && (
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Segment Sample Percentage</legend>
+								<legend className="fieldset-legend font-semibold">Sync Interval (Minutes)</legend>
 								<input
 									type="number"
-									className="input"
-									value={formData.segment_sample_percentage}
-									readOnly={isReadOnly}
-									min={1}
-									max={100}
-									step={1}
-									onChange={(e) =>
-										handleInputChange(
-											"segment_sample_percentage",
-											Number.parseInt(e.target.value, 10) || 5,
-										)
-									}
-								/>
-								<p className="label text-sm">
-									Percentage of segments to check when sampling is enabled (1-100%, default: 5%).
-								</p>
-							</fieldset>
-						)}
-						{formData.library_sync_interval_minutes !== undefined && (
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Library Sync Interval (minutes)</legend>
-								<input
-									type="number"
-									className="input"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
 									value={formData.library_sync_interval_minutes}
 									readOnly={isReadOnly}
 									min={0}
 									max={1440}
-									step={30}
-									onChange={(e) =>
-										handleInputChange(
-											"library_sync_interval_minutes",
-											Number.parseInt(e.target.value, 10) || 0,
-										)
-									}
+									onChange={(e) => handleInputChange("library_sync_interval_minutes", Number.parseInt(e.target.value, 10) || 0)}
 								/>
-								<p className="label text-sm">
-									How often to sync the library directory to discover new files (0-1440 minutes).
-									Set to 0 to disable automatic sync. Default: 360 minutes (6 hours).
-								</p>
+								<p className="label text-[10px] opacity-50 break-words">How often to scan your library for new files.</p>
 							</fieldset>
-						)}
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Smart Repair Resolution</legend>
-							<label className="label cursor-pointer">
-								<span className="label-text">Resolve repairs on import</span>
-								<input
-									type="checkbox"
-									className="checkbox"
-									checked={formData.resolve_repair_on_import ?? false}
-									disabled={isReadOnly}
-									onChange={(e) => handleInputChange("resolve_repair_on_import", e.target.checked)}
-								/>
-							</label>
-							<p className="label text-sm">
-								Automatically resolve pending repairs in the same directory when a new file is
-								successfully imported.
-							</p>
-						</fieldset>
+						</div>
 					</div>
 				</div>
-			</details>
+			</div>
 
 			{/* Save Button */}
-			{onUpdate && !isReadOnly && hasChanges && (
-				<div className="flex flex-col items-end gap-2">
+			{!isReadOnly && hasChanges && (
+				<div className="flex flex-col items-end gap-4 border-t border-base-200 pt-6">
 					{validationError && (
-						<div className="alert alert-error">
+						<div className="alert alert-error rounded-xl py-2 px-4 text-xs font-bold shadow-sm">
 							<AlertTriangle className="h-4 w-4" />
-							<span className="text-sm">{validationError}</span>
+							<span className="break-words">{validationError}</span>
 						</div>
 					)}
 					<button
 						type="button"
-						className={`btn btn-primary ${isUpdating ? "loading" : ""}`}
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${isUpdating ? "loading" : ""}`}
 						disabled={isUpdating || !!validationError}
 						onClick={handleSave}
 					>
-						{isUpdating ? (
-							"Saving..."
-						) : (
-							<>
-								<Save className="h-4 w-4" />
-								Save Settings
-							</>
-						)}
+						{!isUpdating && <Save className="h-4 w-4" />}
+						{isUpdating ? "Saving..." : "Save Settings"}
 					</button>
 				</div>
 			)}

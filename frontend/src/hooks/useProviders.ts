@@ -12,8 +12,13 @@ import { configKeys } from "./useConfig";
 
 // Test provider connectivity
 export function useTestProvider() {
+	const queryClient = useQueryClient();
 	return useMutation<ProviderTestResponse, Error, ProviderTestRequest>({
 		mutationFn: (data) => apiClient.testProvider(data),
+		onSuccess: () => {
+			// Invalidate config cache to refetch providers (including RTT)
+			queryClient.invalidateQueries({ queryKey: configKeys.current() });
+		},
 	});
 }
 

@@ -1,4 +1,4 @@
-import { Save } from "lucide-react";
+import { Info, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, StreamingConfig } from "../../types/config";
 
@@ -36,43 +36,71 @@ export function StreamingConfigSection({
 			setHasChanges(false);
 		}
 	};
+
 	return (
-		<div className="space-y-4">
-			<h3 className="font-semibold text-lg">Streaming & Download Configuration</h3>
-			<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Max Prefetch</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_prefetch}
-						readOnly={isReadOnly}
-						min={1}
-						step={1}
-						onChange={(e) =>
-							handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10) || 1)
-						}
-					/>
-					<p className="label">Maximum segments prefetched ahead per stream</p>
-				</fieldset>
+		<div className="space-y-10">
+			<div>
+				<h3 className="text-lg font-bold text-base-content">Playback Tuning</h3>
+				<p className="text-sm text-base-content/50">Optimize how AltMount streams media to your players.</p>
 			</div>
-			<div className="alert alert-info">
-				<div>
-					<div className="font-bold">Note</div>
-					<div className="text-sm">
-						Controls how many segments are prefetched ahead of the current read position per stream.
-						Higher values may improve streaming performance but use more memory. If you don't
-						understand this setting, it's recommended to keep the default value.
+
+			<div className="space-y-8">
+				{/* Prefetch Slider */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+					<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+						<div className="min-w-0">
+							<h4 className="font-bold text-sm text-base-content">Segment Prefetch</h4>
+							<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
+								Number of Usenet articles to download ahead of current playback position.
+							</p>
+						</div>
+						<div className="flex items-center gap-3 shrink-0">
+							<span className="font-mono font-black text-xl text-primary">{formData.max_prefetch}</span>
+							<span className="text-[10px] font-bold uppercase opacity-40">segments</span>
+						</div>
+					</div>
+
+					<div className="space-y-4">
+						<input
+							type="range"
+							min="1"
+							max="50"
+							value={formData.max_prefetch}
+							className="range range-primary range-sm"
+							step="1"
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10))}
+						/>
+						<div className="flex justify-between px-2 text-[10px] font-black opacity-30">
+							<span>1</span>
+							<span>10</span>
+							<span>20</span>
+							<span>30</span>
+							<span>40</span>
+							<span>50</span>
+						</div>
+					</div>
+				</div>
+
+				{/* Guidance */}
+				<div className="alert rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm items-start">
+					<Info className="h-5 w-5 text-info shrink-0 mt-0.5" />
+					<div className="min-w-0 flex-1">
+						<div className="font-bold text-xs uppercase tracking-wider text-info">Performance Note</div>
+						<div className="text-[11px] leading-relaxed mt-1 break-words opacity-80">
+							Higher values improve stability on slow connections but increase initial memory usage. 
+							Default (3) is recommended for most 4K streaming scenarios.
+						</div>
 					</div>
 				</div>
 			</div>
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end">
+				<div className="flex justify-end pt-4 border-t border-base-200">
 					<button
 						type="button"
-						className="btn btn-primary"
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
@@ -81,7 +109,7 @@ export function StreamingConfigSection({
 						) : (
 							<Save className="h-4 w-4" />
 						)}
-						Save Changes
+						{isUpdating ? "Saving..." : "Save Changes"}
 					</button>
 				</div>
 			)}

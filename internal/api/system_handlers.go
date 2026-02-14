@@ -332,6 +332,12 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 	// Get current configuration to access provider details and speed test results
 	config := s.configManager.GetConfig()
 
+	// Calculate total speed from all providers to use for proportional scaling
+	var totalProviderSpeed float64
+	for _, ps := range poolStats.Providers {
+		totalProviderSpeed += ps.AvgSpeed
+	}
+
 	// Build provider response from pool stats + config
 	providers := make([]ProviderStatusResponse, 0, len(poolStats.Providers))
 	for _, ps := range poolStats.Providers {
@@ -378,6 +384,14 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		missingRate := metrics.ProviderMissingRates[ps.Name]
 		missingWarning := metrics.ProviderMissingWarning[ps.Name]
 
+		// Calculate proportional speed
+		// We use our accurate global speed and distribute it based on pool's relative provider speeds
+		currentProviderSpeed := ps.AvgSpeed
+		if totalProviderSpeed > 0 && metrics.DownloadSpeedBytesPerSec > 0 {
+			weight := ps.AvgSpeed / totalProviderSpeed
+			currentProviderSpeed = metrics.DownloadSpeedBytesPerSec * weight
+		}
+
 		providers = append(providers, ProviderStatusResponse{
 			ID:                      providerID,
 			Host:                    host,
@@ -386,8 +400,8 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 			MaxConnections:          ps.MaxConnections,
 			State:                   "active",
 			ErrorCount:              errorCount,
-			CurrentSpeedBytesPerSec: ps.AvgSpeed,
-			PingMs:                  0,
+			CurrentSpeedBytesPerSec: currentProviderSpeed,
+			PingMs:                  ps.Ping.RTT.Milliseconds(),
 			LastSpeedTestMbps:       lastSpeedTestMbps,
 			LastSpeedTestTime:       lastSpeedTestTime,
 			MissingCount:            ps.Missing,

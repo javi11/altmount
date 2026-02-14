@@ -157,12 +157,15 @@ export function ActivityHub() {
 												</div>
 												<div className="shrink-0 text-right">
 													<div className="flex flex-col items-end">
-														{stream.download_speed > 0 && (
-															<div className="flex items-center gap-1 font-bold text-[10px] text-info">
-																<span className="text-[8px] opacity-60">IN:</span>
-																{formatSpeed(stream.download_speed)}
-															</div>
-														)}
+														<div className="flex items-center gap-1 font-bold text-[10px] text-info">
+															<span className="text-[8px] opacity-60">IN:</span>
+															{formatSpeed(stream.download_speed)}
+															{stream.download_speed > 0 && stream.download_speed < 1024 * 1024 && (
+																<div className="badge badge-warning badge-xs h-3 px-1 text-[8px]">
+																	SLOW
+																</div>
+															)}
+														</div>
 														<div className="flex items-center gap-1 font-bold font-mono text-primary text-xs">
 															<span className="text-[8px] text-success opacity-60">OUT:</span>
 															{formatSpeed(stream.bytes_per_second)}

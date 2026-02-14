@@ -41,8 +41,6 @@ export function FuseConfig() {
 			setFormData(config.fuse);
 			if (config.fuse.mount_path) {
 				setPath(config.fuse.mount_path);
-			} else if (config.mount_path) {
-				setPath(config.mount_path);
 			}
 		}
 	}, [config]);
