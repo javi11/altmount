@@ -105,6 +105,7 @@ type ProviderAPIResponse struct {
 	Enabled           bool       `json:"enabled"`
 	IsBackupProvider  bool       `json:"is_backup_provider"`
 	InflightRequests  int        `json:"inflight_requests"`
+	LastRTTMs         int64      `json:"last_rtt_ms"`
 	LastSpeedTestMbps float64    `json:"last_speed_test_mbps"`
 	LastSpeedTestTime *time.Time `json:"last_speed_test_time,omitempty"`
 }
@@ -159,6 +160,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 			Enabled:           p.Enabled != nil && *p.Enabled,
 			IsBackupProvider:  p.IsBackupProvider != nil && *p.IsBackupProvider,
 			InflightRequests:  p.InflightRequests,
+			LastRTTMs:         p.LastRTTMs,
 			LastSpeedTestMbps: p.LastSpeedTestMbps,
 			LastSpeedTestTime: p.LastSpeedTestTime,
 		}

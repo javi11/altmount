@@ -1,9 +1,10 @@
-import { Copy, RefreshCw, Save } from "lucide-react";
+import { Copy, RefreshCw, Save, Terminal, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useRegenerateAPIKey } from "../../hooks/useAuth";
 import type { ConfigResponse, LogFormData } from "../../types/config";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 interface SystemConfigSectionProps {
 	config: ConfigResponse;
@@ -30,12 +31,10 @@ export function SystemConfigSection({
 	});
 	const [hasChanges, setHasChanges] = useState(false);
 
-	// API Key functionality
 	const regenerateAPIKey = useRegenerateAPIKey();
 	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
-	// Sync form data when config changes from external sources (reload)
 	useEffect(() => {
 		const newFormData = {
 			file: config.log.file,
@@ -47,25 +46,14 @@ export function SystemConfigSection({
 		};
 		setFormData(newFormData);
 		setHasChanges(false);
-	}, [
-		config.log.file,
-		config.log.level,
-		config.log.max_size,
-		config.log.max_age,
-		config.log.max_backups,
-		config.log.compress,
-	]);
+	}, [config.log]);
 
 	const handleInputChange = (field: keyof LogFormData, value: string | number | boolean) => {
 		const newData = { ...formData, [field]: value };
 		setFormData(newData);
 		const configData = {
-			file: config.log.file,
-			level: config.log.level,
-			max_size: config.log.max_size,
-			max_age: config.log.max_age,
-			max_backups: config.log.max_backups,
-			compress: config.log.compress,
+			file: config.log.file, level: config.log.level, max_size: config.log.max_size,
+			max_age: config.log.max_age, max_backups: config.log.max_backups, compress: config.log.compress,
 		};
 		setHasChanges(JSON.stringify(newData) !== JSON.stringify(configData));
 	};
@@ -81,17 +69,9 @@ export function SystemConfigSection({
 		if (config.api_key) {
 			try {
 				await navigator.clipboard.writeText(config.api_key);
-				showToast({
-					type: "success",
-					title: "Success",
-					message: "API key copied to clipboard",
-				});
+				showToast({ type: "success", title: "Success", message: "API key copied to clipboard" });
 			} catch (_error) {
-				showToast({
-					type: "error",
-					title: "Error",
-					message: "Failed to copy API key",
-				});
+				showToast({ type: "error", title: "Error", message: "Failed to copy API key" });
 			}
 		}
 	};
@@ -99,112 +79,110 @@ export function SystemConfigSection({
 	const handleRegenerateAPIKey = async () => {
 		const confirmed = await confirmAction(
 			"Regenerate API Key",
-			"This will generate a new API key and invalidate the current one. Make sure to update any applications using the old key.",
-			{
-				type: "warning",
-				confirmText: "Regenerate API Key",
-				confirmButtonClass: "btn-warning",
-			},
+			"This will generate a new API key and invalidate the current one. Continue?",
+			{ type: "warning", confirmText: "Regenerate", confirmButtonClass: "btn-warning" },
 		);
-
 		if (confirmed) {
 			try {
 				await regenerateAPIKey.mutateAsync();
-				// Refresh config to get the new API key and update the UI
-				if (onRefresh) {
-					await onRefresh();
-				}
-				showToast({
-					type: "success",
-					title: "Success",
-					message: "API key regenerated successfully",
-				});
+				if (onRefresh) await onRefresh();
+				showToast({ type: "success", title: "Success", message: "API key regenerated successfully" });
 			} catch (_error) {
-				showToast({
-					type: "error",
-					title: "Error",
-					message: "Failed to regenerate API key",
-				});
+				showToast({ type: "error", title: "Error", message: "Failed to regenerate API key" });
 			}
 		}
 	};
-	return (
-		<div className="space-y-4">
-			<h3 className="font-semibold text-lg">System</h3>
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">Log Level</legend>
-				<select
-					className="select"
-					value={formData.level}
-					disabled={isReadOnly}
-					onChange={(e) => handleInputChange("level", e.target.value)}
-				>
-					<option value="debug">Debug</option>
-					<option value="info">Info</option>
-					<option value="warn">Warning</option>
-					<option value="error">Error</option>
-				</select>
-				<p className="label">Set the minimum logging level for the system</p>
-			</fieldset>
 
-			{/* API Key Section */}
-			<fieldset className="fieldset">
-				<legend className="fieldset-legend">API Key</legend>
-				<div className="space-y-3">
-					<div className="flex items-center space-x-2">
-						<input
-							type="text"
-							className="input flex-1"
-							value={config.api_key ? config.api_key : "No API key generated"}
-							readOnly
-							disabled
-						/>
-						{config.api_key && (
-							<button
-								type="button"
-								className="btn btn-outline btn-sm"
-								onClick={handleCopyAPIKey}
-								title="Copy API key to clipboard"
-							>
-								<Copy className="h-4 w-4" />
-							</button>
-						)}
+	return (
+		<div className="space-y-10">
+			<div>
+				<h3 className="text-lg font-bold text-base-content tracking-tight">System Core</h3>
+				<p className="text-sm text-base-content/50 break-words">Manage global logging, security, and identity.</p>
+			</div>
+
+			<div className="space-y-8">
+				{/* Logging Configuration */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+					<div className="flex items-center gap-2">
+						<Terminal className="h-4 w-4 opacity-40" />
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Diagnostics</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
-					<div className="flex items-center space-x-2">
-						<button
-							type="button"
-							className="btn btn-warning btn-sm"
-							onClick={handleRegenerateAPIKey}
-							disabled={regenerateAPIKey.isPending}
+
+					<fieldset className="fieldset max-w-sm">
+						<legend className="fieldset-legend font-semibold text-xs">Minimum Log Level</legend>
+						<select
+							className="select select-bordered w-full bg-base-100"
+							value={formData.level}
+							disabled={isReadOnly}
+							onChange={(e) => handleInputChange("level", e.target.value)}
 						>
-							{regenerateAPIKey.isPending ? (
-								<span className="loading loading-spinner loading-sm" />
-							) : (
-								<RefreshCw className="h-4 w-4" />
-							)}
-							{regenerateAPIKey.isPending ? "Regenerating..." : "Regenerate API Key"}
-						</button>
-					</div>
-					<p className="label">
-						Personal API key for authentication. Keep this secure and don't share it with others.
-					</p>
+							<option value="debug">Debug (Verbose)</option>
+							<option value="info">Info (Standard)</option>
+							<option value="warn">Warning (Alerts)</option>
+							<option value="error">Error (Critical)</option>
+						</select>
+						<p className="label text-[10px] opacity-50 break-words mt-2">Determines how much information is stored in logs.</p>
+					</fieldset>
 				</div>
-			</fieldset>
+
+				{/* Security Section */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+					<div className="flex items-center gap-2">
+						<ShieldCheck className="h-4 w-4 opacity-40" />
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Access Identity</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
+					</div>
+
+					<div className="space-y-6">
+						<div className="min-w-0">
+							<h5 className="font-bold text-sm">AltMount API Key</h5>
+							<p className="text-[11px] text-base-content/50 break-words mt-1 leading-relaxed">
+								Your personal secret key for authenticating external applications.
+							</p>
+						</div>
+
+						<div className="flex flex-col gap-4">
+							<div className="join w-full shadow-sm max-w-lg">
+								<input
+									type="text"
+									className="input input-bordered join-item flex-1 bg-base-100 font-mono text-xs overflow-hidden"
+									value={config.api_key || "Not Generated"}
+									readOnly
+								/>
+								{config.api_key && (
+									<button type="button" className="btn btn-ghost border-base-300 join-item px-4" onClick={handleCopyAPIKey}>
+										<Copy className="h-4 w-4" />
+									</button>
+								)}
+							</div>
+
+							<div className="flex justify-start">
+								<button
+									type="button"
+									className="btn btn-ghost btn-xs border-base-300 bg-base-100 hover:bg-base-200"
+									onClick={handleRegenerateAPIKey}
+									disabled={regenerateAPIKey.isPending}
+								>
+									{regenerateAPIKey.isPending ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-3 w-3" />}
+									Regenerate Token
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end">
+				<div className="flex justify-end pt-4 border-t border-base-200">
 					<button
 						type="button"
-						className="btn btn-primary"
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
-						{isUpdating ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Save className="h-4 w-4" />
-						)}
+						{isUpdating ? <LoadingSpinner size="sm" /> : <Save className="h-4 w-4" />}
 						{isUpdating ? "Saving..." : "Save Changes"}
 					</button>
 				</div>
