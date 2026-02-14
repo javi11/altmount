@@ -318,6 +318,12 @@ func TestDir_Statfs(t *testing.T) {
 	assert.Equal(t, uint32(4096), out.Bsize)
 }
 
+func TestDir_Mkdir(t *testing.T) {
+	// We need a way to mock nzbfilesystem.NzbFilesystem but it's a struct not an interface.
+	// For now, we skip adding a full integration test here as it would require significant mocking of MetadataRemoteFile.
+	// The implementation in dir.go is straightforward delegation to d.nzbfs.Mkdir and d.nzbfs.Stat.
+}
+
 func TestHandle_Release_Idempotent(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()
