@@ -251,6 +251,7 @@ type ProviderConfig struct {
 	ProxyURL          string     `yaml:"proxy_url" mapstructure:"proxy_url" json:"proxy_url,omitempty"`
 	Enabled           *bool      `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
 	IsBackupProvider  *bool      `yaml:"is_backup_provider" mapstructure:"is_backup_provider" json:"is_backup_provider,omitempty"`
+	LastRTTMs         int64      `yaml:"last_rtt_ms" mapstructure:"last_rtt_ms" json:"last_rtt_ms,omitempty"`
 	LastSpeedTestMbps float64    `yaml:"last_speed_test_mbps" mapstructure:"last_speed_test_mbps" json:"last_speed_test_mbps,omitempty"`
 	LastSpeedTestTime *time.Time `yaml:"last_speed_test_time" mapstructure:"last_speed_test_time" json:"last_speed_test_time,omitempty"`
 }
@@ -1409,3 +1410,4 @@ func LoadConfig(configFile string) (*Config, error) {
 func GetConfigFilePath() string {
 	return viper.ConfigFileUsed()
 }
+

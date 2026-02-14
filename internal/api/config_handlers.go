@@ -172,7 +172,7 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	// Decode into the specific section based on the URL parameter
 	var err error
 	switch section {
-	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "system", "mount_path", "mount":
+	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "system", "mount_path", "mount", "providers":
 		err = c.BodyParser(newConfig)
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
@@ -289,6 +289,7 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 
 	// Decode test request
 	var testReq struct {
+		ProviderID  string `json:"provider_id"`
 		Host        string `json:"host"`
 		Port        int    `json:"port"`
 		Username    string `json:"username"`
@@ -335,9 +336,35 @@ func (s *Server) handleTestProvider(c *fiber.Ctx) error {
 		})
 	}
 
+	// If test is successful and we have a provider ID, update the config with RTT
+	rtt := result.RTT.Milliseconds()
+	if testReq.ProviderID != "" {
+		currentConfig := s.configManager.GetConfig()
+		newConfig := currentConfig.DeepCopy()
+		updated := false
+		for i, p := range newConfig.Providers {
+			if p.ID == testReq.ProviderID {
+				newConfig.Providers[i].LastRTTMs = rtt
+				updated = true
+				slog.DebugContext(c.Context(), "Updating provider latency",
+					"provider_id", testReq.ProviderID,
+					"rtt_ms", rtt)
+				break
+			}
+		}
+
+		if updated {
+			if err := s.configManager.UpdateConfig(newConfig); err == nil {
+				if err := s.configManager.SaveConfig(); err != nil {
+					slog.WarnContext(c.Context(), "Failed to save config after updating RTT", "error", err)
+				}
+			}
+		}
+	}
+
 	return RespondSuccess(c, TestProviderResponse{
 		Success: true,
-		RTTMs:   result.RTT.Milliseconds(),
+		RTTMs:   rtt,
 	})
 }
 
@@ -436,6 +463,7 @@ func (s *Server) handleCreateProvider(c *fiber.Ctx) error {
 		Enabled:          newProvider.Enabled != nil && *newProvider.Enabled,
 		IsBackupProvider: newProvider.IsBackupProvider != nil && *newProvider.IsBackupProvider,
 		InflightRequests: newProvider.InflightRequests,
+		LastRTTMs:        newProvider.LastRTTMs,
 	}
 
 	return RespondSuccess(c, response)
@@ -574,6 +602,7 @@ func (s *Server) handleUpdateProvider(c *fiber.Ctx) error {
 		Enabled:          provider.Enabled != nil && *provider.Enabled,
 		IsBackupProvider: provider.IsBackupProvider != nil && *provider.IsBackupProvider,
 		InflightRequests: provider.InflightRequests,
+		LastRTTMs:        provider.LastRTTMs,
 	}
 
 	return RespondSuccess(c, response)
@@ -715,6 +744,7 @@ func (s *Server) handleReorderProviders(c *fiber.Ctx) error {
 			Enabled:          p.Enabled != nil && *p.Enabled,
 			IsBackupProvider: p.IsBackupProvider != nil && *p.IsBackupProvider,
 			InflightRequests: p.InflightRequests,
+			LastRTTMs:        p.LastRTTMs,
 		}
 	}
 

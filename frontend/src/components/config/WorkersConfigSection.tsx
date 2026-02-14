@@ -1,6 +1,7 @@
-import { Save, X } from "lucide-react";
+import { Plus, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ConfigResponse, ImportConfig } from "../../types/config";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 interface ImportConfigSectionProps {
 	config: ConfigResponse;
@@ -46,15 +47,11 @@ export function ImportConfigSection({
 		const trimmed = extension.trim();
 		if (!trimmed) return;
 
-		// Ensure extension starts with a dot
 		const normalized = trimmed.startsWith(".")
 			? trimmed.toLowerCase()
 			: `.${trimmed.toLowerCase()}`;
 
-		// Check if already exists
-		if (formData.allowed_file_extensions.includes(normalized)) {
-			return;
-		}
+		if (formData.allowed_file_extensions.includes(normalized)) return;
 
 		const newExtensions = [...formData.allowed_file_extensions, normalized];
 		handleInputChange("allowed_file_extensions", newExtensions);
@@ -74,381 +71,228 @@ export function ImportConfigSection({
 	};
 
 	return (
-		<div className="space-y-4">
-			<h3 className="font-semibold text-lg">Import Processing Configuration</h3>
-			<div className="grid grid-cols-1 gap-4">
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Processor Workers</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_processor_workers}
-						readOnly={isReadOnly}
-						min={1}
-						max={20}
-						onChange={(e) =>
-							handleInputChange("max_processor_workers", Number.parseInt(e.target.value, 10) || 1)
-						}
-					/>
-					<p className="label">Number of concurrent NZB processing threads for import operations</p>
-				</fieldset>
+		<div className="space-y-10">
+			<div>
+				<h3 className="text-lg font-bold text-base-content tracking-tight">NZB Processor</h3>
+				<p className="text-sm text-base-content/50 break-words">Configure how workers handle new imports and validation.</p>
+			</div>
 
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Queue Processing Interval (Seconds)</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.queue_processing_interval_seconds}
-						readOnly={isReadOnly}
-						min={1}
-						max={300}
-						onChange={(e) =>
-							handleInputChange(
-								"queue_processing_interval_seconds",
-								Number.parseInt(e.target.value, 10) || 5,
-							)
-						}
-					/>
-					<p className="label">
-						How often workers check for new queue items (1-300 seconds). Changes require service
-						restart.
-					</p>
-				</fieldset>
-
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Max Import Connections</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_import_connections}
-						readOnly={isReadOnly}
-						min={1}
-						onChange={(e) =>
-							handleInputChange("max_import_connections", Number.parseInt(e.target.value, 10) || 10)
-						}
-					/>
-					<p className="label">
-						Maximum concurrent connections for each active processor worker. Example: If you have 2
-						processor workers and you set this to 5, each worker will have a maximum of 5 concurrent
-						connections.
-					</p>
-				</fieldset>
-
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Max Download Prefetch</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.max_download_prefetch}
-						readOnly={isReadOnly}
-						min={1}
-						max={50}
-						onChange={(e) =>
-							handleInputChange("max_download_prefetch", Number.parseInt(e.target.value, 10) || 3)
-						}
-					/>
-					<p className="label">Maximum segments prefetched ahead during archive analysis.</p>
-				</fieldset>
-
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Lenient Import (Skip Health Check)</legend>
-					<label className="label cursor-pointer">
-						<span className="label-text">Bypass Usenet article validation during import</span>
-						<input
-							type="checkbox"
-							className="checkbox"
-							checked={formData.skip_health_check ?? false}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
-						/>
-					</label>
-					<p className="label text-sm">
-						When enabled, files are imported instantly without checking if all segments are
-						available. This matches behavior from older versions (Alpha 5). Background health checks
-						will still occur later.
-					</p>
-				</fieldset>
-
-				{/* Import Strategy Configuration */}
-				<div className="space-y-4">
-					<div>
-						<h4 className="font-medium">Import Strategy</h4>
-						<p className="text-base-content/70 text-sm">
-							Choose how imported files should be made available to external applications. Symlinks
-							and STRM files cannot be enabled simultaneously.
-						</p>
+			<div className="space-y-8">
+				{/* Worker Core Configuration */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+					<div className="flex items-center gap-2">
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Concurrency</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Strategy Type</legend>
-						<select
-							className="select"
-							value={formData.import_strategy}
-							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("import_strategy", e.target.value)}
-						>
-							<option value="NONE">None (Direct Import)</option>
-							<option value="SYMLINK">Symlinks</option>
-							<option value="STRM">STRM Files</option>
-						</select>
-						<p className="label">
-							{formData.import_strategy === "NONE" &&
-								"Files will be only exposed via the WebDAV mount point"}
-							{formData.import_strategy === "SYMLINK" &&
-								"Create category-based symlinks for easier access by external applications"}
-							{formData.import_strategy === "STRM" &&
-								"Generate STRM files with HTTP streaming URLs for media players"}
-						</p>
-					</fieldset>
-
-					{formData.import_strategy !== "NONE" && (
+					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend">
-								{formData.import_strategy === "SYMLINK" ? "Symlink Directory" : "STRM Directory"}
-							</legend>
-							<input
-								type="text"
-								className="input"
-								value={formData.import_dir || ""}
-								readOnly={isReadOnly}
-								placeholder={
-									formData.import_strategy === "SYMLINK"
-										? "/path/to/symlinks"
-										: "/path/to/strm/files"
-								}
-								onChange={(e) => handleInputChange("import_dir", e.target.value)}
-							/>
-							<p className="label">
-								{formData.import_strategy === "SYMLINK"
-									? "Absolute path where symlinks will be created."
-									: "Absolute path where STRM files will be created."}
-							</p>
-						</fieldset>
-					)}
-
-					{formData.import_strategy === "SYMLINK" && formData.import_dir && (
-						<div className="alert alert-info">
-							<div>
-								<div className="font-bold">Symlinks Enabled</div>
-								<div className="text-sm">
-									Imported files will be available as symlinks in{" "}
-									<code>{formData.import_dir}/</code> for easier access by external applications.
-								</div>
-							</div>
-						</div>
-					)}
-
-					{formData.import_strategy === "STRM" && formData.import_dir && (
-						<div className="alert alert-info">
-							<div>
-								<div className="font-bold">STRM Files Enabled</div>
-								<div className="text-sm">
-									STRM files will be created in <code>{formData.import_dir}/</code> with HTTP
-									streaming URLs. These files support full Range request support for seeking in
-									video players.
-								</div>
-							</div>
-						</div>
-					)}
-				</div>
-
-				<div className="space-y-4">
-					<div>
-						<h4 className="font-medium">Watch Directory</h4>
-						<p className="text-base-content/70 text-sm">
-							Automatically monitor a directory for new NZB files and import them.
-						</p>
-					</div>
-
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Watch Directory Path</legend>
-						<input
-							type="text"
-							className="input"
-							value={formData.watch_dir || ""}
-							readOnly={isReadOnly}
-							placeholder="/mnt/watch"
-							onChange={(e) => handleInputChange("watch_dir", e.target.value)}
-						/>
-						<p className="label">
-							Absolute path to monitor for .nzb files. Leave empty to disable.
-						</p>
-					</fieldset>
-
-					{formData.watch_dir && (
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend">Poll Interval (Seconds)</legend>
+							<legend className="fieldset-legend font-semibold">Active Workers</legend>
 							<input
 								type="number"
-								className="input"
-								value={formData.watch_interval_seconds || 10}
+								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								value={formData.max_processor_workers}
 								readOnly={isReadOnly}
 								min={1}
-								onChange={(e) =>
-									handleInputChange(
-										"watch_interval_seconds",
-										Number.parseInt(e.target.value, 10) || 10,
-									)
-								}
+								max={20}
+								onChange={(e) => handleInputChange("max_processor_workers", Number.parseInt(e.target.value, 10) || 1)}
 							/>
-							<p className="label">How often to check for new files (default: 10 seconds).</p>
+							<p className="label text-[10px] opacity-50 break-words">Concurrent NZB processing threads.</p>
 						</fieldset>
-					)}
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend">Max Connections (per Worker)</legend>
+							<input
+								type="number"
+								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								value={formData.max_import_connections}
+								readOnly={isReadOnly}
+								min={1}
+								onChange={(e) => handleInputChange("max_import_connections", Number.parseInt(e.target.value, 10) || 10)}
+							/>
+							<p className="label text-[10px] opacity-50 break-words">Socket limit per active worker.</p>
+						</fieldset>
+					</div>
 				</div>
 
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Segment Sample Percentage</legend>
-					<input
-						type="number"
-						className="input"
-						value={formData.segment_sample_percentage}
-						readOnly={isReadOnly}
-						min={1}
-						max={100}
-						step={1}
-						onChange={(e) =>
-							handleInputChange(
-								"segment_sample_percentage",
-								Number.parseInt(e.target.value, 10) || 5,
-							)
-						}
-					/>
-					<p className="label">
-						Percentage of segments to check (1-100%, default: 5%). Set to 100% for thorough
-						validation of all segments.
-					</p>
-				</fieldset>
-
-				<fieldset className="fieldset">
-					<legend className="fieldset-legend">Allowed File Extensions</legend>
-
-					{/* Tag display area */}
-					<div className="mb-3 flex min-h-[3rem] flex-wrap gap-2 rounded-lg border border-base-300 bg-base-100 p-2">
-						{formData.allowed_file_extensions.length === 0 ? (
-							<span className="text-base-content/60 text-sm">
-								No extensions specified (all files allowed)
-							</span>
-						) : (
-							formData.allowed_file_extensions.map((ext) => (
-								<div key={ext} className="badge badge-primary gap-2">
-									<span>{ext}</span>
-									{!isReadOnly && (
-										<button
-											type="button"
-											className="btn btn-ghost btn-xs h-4 min-h-0 w-4 p-0"
-											onClick={() => removeExtension(ext)}
-											aria-label={`Remove ${ext}`}
-										>
-											<X className="h-3 w-3" />
-										</button>
-									)}
-								</div>
-							))
-						)}
+				{/* Validation Slider */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+					<div className="flex items-center gap-2">
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Validation</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					{/* Input field for adding new extensions */}
-					{!isReadOnly && (
-						<div className="mb-3">
-							<div className="flex gap-2">
+					<div className="space-y-6">
+						<div className="flex items-center justify-between">
+							<div className="min-w-0">
+								<h5 className="font-bold text-sm">Segment Verification</h5>
+								<p className="text-[11px] text-base-content/50 break-words mt-1">Percentage of Usenet segments to validate before import.</p>
+							</div>
+							<div className="font-mono font-black text-primary text-xl shrink-0">{formData.segment_sample_percentage}%</div>
+						</div>
+
+						<div className="space-y-4">
+							<input
+								type="range"
+								min="1"
+								max="100"
+								value={formData.segment_sample_percentage}
+								className="range range-primary range-sm"
+								step="1"
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("segment_sample_percentage", Number.parseInt(e.target.value, 10))}
+							/>
+							<div className="flex justify-between px-2 text-[9px] font-black opacity-30 uppercase tracking-tighter">
+								<span>Fast (1%)</span>
+								<span>Balanced</span>
+								<span>Deep (100%)</span>
+							</div>
+						</div>
+
+						<div className="divider opacity-50" />
+
+						<label className="label cursor-pointer justify-start gap-4 items-start">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.skip_health_check ?? false}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="label-text font-bold text-xs block break-words">Lenient Import (Instant)</span>
+								<span className="text-[10px] text-base-content/50 break-words block leading-relaxed mt-0.5">
+									Bypass validation entirely for immediate exposure in the library. Recommended only for high-completion providers.
+								</span>
+							</div>
+						</label>
+					</div>
+				</div>
+
+				{/* Strategy Configuration */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-8">
+					<div className="flex items-center gap-2">
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Library Strategy</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
+					</div>
+
+					<div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend font-semibold">Strategy Type</legend>
+							<select
+								className="select select-bordered w-full bg-base-100"
+								value={formData.import_strategy}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("import_strategy", e.target.value)}
+							>
+								<option value="NONE">None (Virtual Only)</option>
+								<option value="SYMLINK">Physical Symlinks</option>
+								<option value="STRM">STRM URL Files</option>
+							</select>
+							<p className="label text-[10px] opacity-50 break-words leading-relaxed mt-2">
+								{formData.import_strategy === "NONE" && "Files are only visible through the virtual FUSE/WebDAV mount."}
+								{formData.import_strategy === "SYMLINK" && "Creates real .mkv/.mp4 files in a target folder that point to AltMount."}
+								{formData.import_strategy === "STRM" && "Generates small .strm text files containing streaming URLs."}
+							</p>
+						</fieldset>
+
+						{formData.import_strategy !== "NONE" && (
+							<fieldset className="fieldset animate-in slide-in-from-right-2">
+								<legend className="fieldset-legend font-semibold">
+									{formData.import_strategy === "SYMLINK" ? "Symlink Root" : "STRM Output Root"}
+								</legend>
 								<input
 									type="text"
-									className="input input-sm flex-1"
-									placeholder="Type extension and press Enter (e.g., .mp4)"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									value={formData.import_dir || ""}
+									readOnly={isReadOnly}
+									placeholder="/path/to/media"
+									onChange={(e) => handleInputChange("import_dir", e.target.value)}
+								/>
+								<p className="label text-[10px] opacity-50 break-words mt-2">Absolute path for strategy output.</p>
+							</fieldset>
+						)}
+					</div>
+				</div>
+
+				{/* File Extensions */}
+				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+					<div className="flex items-center gap-2">
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Filters</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
+					</div>
+
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-semibold">Allowed File Extensions</legend>
+						
+						<div className="flex flex-wrap gap-2 rounded-xl border border-base-300 bg-base-100/50 p-3 min-h-[4rem] mb-4">
+							{formData.allowed_file_extensions.length === 0 ? (
+								<span className="text-xs opacity-40 self-center w-full text-center italic">All file types are currently allowed</span>
+							) : (
+								formData.allowed_file_extensions.map((ext) => (
+									<div key={ext} className="badge badge-primary gap-1 py-3 px-3 font-bold text-[10px]">
+										{ext}
+										{!isReadOnly && (
+											<button type="button" className="hover:text-white" onClick={() => removeExtension(ext)}>
+												<X className="h-3 w-3" />
+											</button>
+										)}
+									</div>
+								))
+							)}
+						</div>
+
+						{!isReadOnly && (
+							<div className="join w-full shadow-sm mb-4">
+								<input
+									type="text"
+									className="input input-bordered join-item flex-1 bg-base-100 text-sm"
+									placeholder="Add e.g. .mp4"
 									value={extensionInput}
 									onChange={(e) => setExtensionInput(e.target.value)}
 									onKeyDown={handleExtensionKeyDown}
 								/>
-								<button
-									type="button"
-									className="btn btn-primary btn-sm"
-									onClick={() => addExtension(extensionInput)}
-									disabled={!extensionInput.trim()}
-								>
-									Add
+								<button type="button" className="btn btn-primary join-item px-6" onClick={() => addExtension(extensionInput)}>
+									<Plus className="h-4 w-4" />
 								</button>
 							</div>
+						)}
+
+						<div className="flex flex-wrap gap-2">
+							<button
+								type="button"
+								className="btn btn-xs btn-outline border-base-300 opacity-60 hover:opacity-100"
+								disabled={isReadOnly}
+								onClick={() => {
+									const videoDefaults = [ ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264", ".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx", ".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms" ];
+									handleInputChange("allowed_file_extensions", videoDefaults);
+								}}
+							>
+								Reset to Video Defaults
+							</button>
+							<button
+								type="button"
+								className="btn btn-xs btn-outline border-base-300 opacity-60 hover:opacity-100"
+								disabled={isReadOnly}
+								onClick={() => handleInputChange("allowed_file_extensions", [])}
+							>
+								Clear All
+							</button>
 						</div>
-					)}
-
-					{/* Preset buttons */}
-					<div className="flex gap-2">
-						<button
-							type="button"
-							className="btn btn-sm btn-outline"
-							disabled={isReadOnly}
-							onClick={() => {
-								const videoDefaults = [
-									".mp4",
-									".mkv",
-									".avi",
-									".mov",
-									".wmv",
-									".flv",
-									".webm",
-									".m4v",
-									".mpg",
-									".mpeg",
-									".m2ts",
-									".ts",
-									".vob",
-									".3gp",
-									".3g2",
-									".h264",
-									".h265",
-									".hevc",
-									".ogv",
-									".ogm",
-									".strm",
-									".iso",
-									".img",
-									".divx",
-									".xvid",
-									".rm",
-									".rmvb",
-									".asf",
-									".asx",
-									".wtv",
-									".mk3d",
-									".dvr-ms",
-								];
-								handleInputChange("allowed_file_extensions", videoDefaults);
-							}}
-						>
-							Reset to Video Defaults
-						</button>
-						<button
-							type="button"
-							className="btn btn-sm btn-outline"
-							disabled={isReadOnly}
-							onClick={() => handleInputChange("allowed_file_extensions", [])}
-						>
-							Clear (Allow All)
-						</button>
-					</div>
-
-					<p className="label">
-						Add file extensions to allow during import validation. Press Enter or click Add to add
-						an extension. Leave empty to allow all file types. Default: common video file
-						extensions.
-					</p>
-				</fieldset>
+					</fieldset>
+				</div>
 			</div>
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end">
+				<div className="flex justify-end pt-4 border-t border-base-200">
 					<button
 						type="button"
-						className="btn btn-primary"
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>
-						{isUpdating ? (
-							<span className="loading loading-spinner loading-sm" />
-						) : (
-							<Save className="h-4 w-4" />
-						)}
+						{isUpdating ? <LoadingSpinner size="sm" /> : <Save className="h-4 w-4" />}
 						{isUpdating ? "Saving..." : "Save Changes"}
 					</button>
 				</div>
