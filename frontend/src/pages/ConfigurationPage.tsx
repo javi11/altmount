@@ -252,9 +252,14 @@ export function ConfigurationPage() {
 					config: { providers: data as unknown as ProviderConfig[] },
 				});
 			} else if (section === "log") {
+				const logData = data as unknown as LogFormData & { profiler_enabled?: boolean };
+				const { profiler_enabled, ...logConfig } = logData;
 				await updateConfigSection.mutateAsync({
 					section: "system",
-					config: { log: data as unknown as LogFormData },
+					config: { 
+						log: logConfig,
+						profiler_enabled: profiler_enabled 
+					},
 				});
 			}
 		} catch (error) {

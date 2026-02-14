@@ -113,6 +113,34 @@ export function ImportConfigSection({
 							<p className="label text-[10px] opacity-50 break-words">Socket limit per active worker.</p>
 						</fieldset>
 					</div>
+
+					<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend font-semibold">Max Download Prefetch</legend>
+							<input
+								type="number"
+								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								value={formData.max_download_prefetch}
+								readOnly={isReadOnly}
+								min={1}
+								onChange={(e) => handleInputChange("max_download_prefetch", Number.parseInt(e.target.value, 10) || 1)}
+							/>
+							<p className="label text-[10px] opacity-50 break-words">Segments prefetched ahead for archive analysis.</p>
+						</fieldset>
+
+						<fieldset className="fieldset">
+							<legend className="fieldset-legend font-semibold">Read Timeout (Seconds)</legend>
+							<input
+								type="number"
+								className="input input-bordered w-full bg-base-100 font-mono text-sm"
+								value={formData.read_timeout_seconds}
+								readOnly={isReadOnly}
+								min={1}
+								onChange={(e) => handleInputChange("read_timeout_seconds", Number.parseInt(e.target.value, 10) || 300)}
+							/>
+							<p className="label text-[10px] opacity-50 break-words">Usenet socket read timeout.</p>
+						</fieldset>
+					</div>
 				</div>
 
 				{/* Validation Slider */}
@@ -212,6 +240,45 @@ export function ImportConfigSection({
 								<p className="label text-[10px] opacity-50 break-words mt-2">Absolute path for strategy output.</p>
 							</fieldset>
 						)}
+					</div>
+
+					<div className="divider opacity-50" />
+
+					<div className="space-y-6">
+						<div>
+							<h5 className="font-bold text-sm">NZB Watch Directory</h5>
+							<p className="text-[11px] text-base-content/50 break-words mt-1 leading-relaxed">
+								Monitor a specific folder for new NZB files and import them automatically.
+							</p>
+						</div>
+
+						<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-semibold">Watch Directory Path</legend>
+								<input
+									type="text"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									value={formData.watch_dir || ""}
+									readOnly={isReadOnly}
+									placeholder="/path/to/watch"
+									onChange={(e) => handleInputChange("watch_dir", e.target.value)}
+								/>
+								<p className="label text-[10px] opacity-50 break-words mt-2">Absolute path to monitor.</p>
+							</fieldset>
+
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-semibold">Polling Interval (Seconds)</legend>
+								<input
+									type="number"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									value={formData.watch_interval_seconds || 10}
+									readOnly={isReadOnly}
+									min={1}
+									onChange={(e) => handleInputChange("watch_interval_seconds", Number.parseInt(e.target.value, 10) || 10)}
+								/>
+								<p className="label text-[10px] opacity-50 break-words mt-2">How often to check for new files.</p>
+							</fieldset>
+						</div>
 					</div>
 				</div>
 
