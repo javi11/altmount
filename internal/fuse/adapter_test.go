@@ -304,6 +304,20 @@ func TestDir_Getattr(t *testing.T) {
 	assert.Equal(t, uint32(1000), out.Gid)
 }
 
+func TestDir_Statfs(t *testing.T) {
+	logger := slog.Default()
+	root := NewDir(nil, "", logger, 1000, 1000, nil, nil)
+	ctx := context.Background()
+	out := &fuse.StatfsOut{}
+	errno := root.Statfs(ctx, out)
+
+	assert.Equal(t, syscall.Errno(0), errno)
+	assert.Equal(t, uint64(1024*1024*1024*1024*1024/4096), out.Blocks)
+	assert.Equal(t, uint64(1024*1024*1024*1024*1024/4096), out.Bfree)
+	assert.Equal(t, uint64(1024*1024*1024*1024*1024/4096), out.Bavail)
+	assert.Equal(t, uint32(4096), out.Bsize)
+}
+
 func TestHandle_Release_Idempotent(t *testing.T) {
 	mockFile := new(MockFile)
 	logger := slog.Default()

@@ -20,6 +20,7 @@ var _ fs.NodeLookuper = (*Dir)(nil)
 var _ fs.NodeGetattrer = (*Dir)(nil)
 var _ fs.NodeRenamer = (*Dir)(nil)
 var _ fs.NodeSetattrer = (*Dir)(nil)
+var _ fs.NodeStatfser = (*Dir)(nil)
 
 // Dir represents a directory in the FUSE filesystem.
 // Talks directly to NzbFilesystem with FUSE context propagation.
@@ -81,6 +82,23 @@ func (d *Dir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) 
 // Setattr implements fs.NodeSetattrer (delegates to Getattr).
 func (d *Dir) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
 	return d.Getattr(ctx, f, out)
+}
+
+// Statfs implements fs.NodeStatfser.
+func (d *Dir) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	// Provide dummy values so 'df' works correctly.
+	// We report a 1PB filesystem.
+	const totalSize = 1024 * 1024 * 1024 * 1024 * 1024 // 1PB
+	const blockSize = 4096
+
+	out.Blocks = totalSize / blockSize
+	out.Bfree = out.Blocks
+	out.Bavail = out.Blocks
+	out.Bsize = blockSize
+	out.NameLen = 255
+	out.Frsize = blockSize
+
+	return 0
 }
 
 // Lookup implements fs.NodeLookuper.
