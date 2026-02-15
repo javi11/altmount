@@ -301,6 +301,23 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 			return false, fmt.Errorf("failed to rename directory: %w", err)
 		}
 
+		// Update health records for all files under the renamed directory
+		if mrf.healthRepository != nil {
+			if err := mrf.healthRepository.RenameHealthRecord(ctx, normalizedOld, normalizedNew); err != nil {
+				slog.WarnContext(ctx, "Failed to update health records for renamed directory", "old", normalizedOld, "new", normalizedNew, "error", err)
+			}
+		}
+
+		// Update ID symlinks for all files with NzbdavId under the renamed directory
+		_ = mrf.metadataService.WalkDirectoryFiles(normalizedNew, func(fileVirtualPath string, meta *metapb.FileMetadata) error {
+			if meta.NzbdavId != "" {
+				if err := mrf.metadataService.UpdateIDSymlink(meta.NzbdavId, fileVirtualPath); err != nil {
+					slog.WarnContext(ctx, "Failed to update ID symlink after directory rename", "id", meta.NzbdavId, "path", fileVirtualPath, "error", err)
+				}
+			}
+			return nil
+		})
+
 		return true, nil
 	}
 
@@ -311,29 +328,28 @@ func (mrf *MetadataRemoteFile) RenameFile(ctx context.Context, oldName, newName 
 		return false, nil
 	}
 
-	// Read existing metadata
+	// Read metadata first to get NzbdavId before rename
 	fileMeta, err := mrf.metadataService.ReadFileMetadata(normalizedOld)
 	if err != nil {
 		return false, fmt.Errorf("failed to read old metadata: %w", err)
 	}
 
-	// Write to new location
-	if err := mrf.metadataService.WriteFileMetadata(normalizedNew, fileMeta); err != nil {
-		return false, fmt.Errorf("failed to write new metadata: %w", err)
-	}
-
-	// Delete old location
-	cfg := mrf.configGetter()
-	deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
-	if err := mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedOld, deleteSourceNzb); err != nil {
-		return false, fmt.Errorf("failed to delete old metadata: %w", err)
+	// Use atomic rename instead of read-write-delete
+	if err := mrf.metadataService.RenameFileMetadata(normalizedOld, normalizedNew); err != nil {
+		return false, fmt.Errorf("failed to rename metadata: %w", err)
 	}
 
 	slog.InfoContext(ctx, "MOVE operation successful", "source", normalizedOld, "destination", normalizedNew)
 
-	// Clean up any health records for the new location and optionally for the directory
+	// Update ID symlink if file has a NzbdavId
+	if fileMeta != nil && fileMeta.NzbdavId != "" {
+		if err := mrf.metadataService.UpdateIDSymlink(fileMeta.NzbdavId, normalizedNew); err != nil {
+			slog.WarnContext(ctx, "Failed to update ID symlink during MOVE", "id", fileMeta.NzbdavId, "error", err)
+		}
+	}
+
+	// Update health records
 	if mrf.healthRepository != nil {
-		// Update the health record path to follow the move
 		if err := mrf.healthRepository.RenameHealthRecord(ctx, normalizedOld, normalizedNew); err != nil {
 			slog.WarnContext(ctx, "Failed to update health record path during MOVE", "old", normalizedOld, "new", normalizedNew, "error", err)
 		}

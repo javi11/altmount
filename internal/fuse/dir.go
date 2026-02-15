@@ -22,6 +22,8 @@ var _ fs.NodeRenamer = (*Dir)(nil)
 var _ fs.NodeSetattrer = (*Dir)(nil)
 var _ fs.NodeStatfser = (*Dir)(nil)
 var _ fs.NodeMkdirer = (*Dir)(nil)
+var _ fs.NodeUnlinker = (*Dir)(nil)
+var _ fs.NodeRmdirer = (*Dir)(nil)
 
 // Dir represents a directory in the FUSE filesystem.
 // Talks directly to NzbFilesystem with FUSE context propagation.
@@ -184,14 +186,49 @@ func (d *Dir) Rename(ctx context.Context, oldName string, newParent fs.InodeEmbe
 	newPath := filepath.Join(targetDir.path, newName)
 
 	if err := d.nzbfs.Rename(ctx, oldPath, newPath); err != nil {
-		if os.IsNotExist(err) {
-			return syscall.ENOENT
-		}
-		d.logger.ErrorContext(ctx, "Rename failed", "old", oldPath, "new", newPath, "error", err)
-		return syscall.EIO
+		return mapError(err, d.logger, ctx, "Rename failed", "old", oldPath, "new", newPath)
 	}
 
 	return 0
+}
+
+// Unlink implements fs.NodeUnlinker — removes a file.
+func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
+	fullPath := filepath.Join(d.path, name)
+
+	if err := d.nzbfs.Remove(ctx, fullPath); err != nil {
+		return mapError(err, d.logger, ctx, "Unlink failed", "path", fullPath)
+	}
+
+	return 0
+}
+
+// Rmdir implements fs.NodeRmdirer — removes an empty directory.
+func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
+	fullPath := filepath.Join(d.path, name)
+
+	if err := d.nzbfs.Remove(ctx, fullPath); err != nil {
+		return mapError(err, d.logger, ctx, "Rmdir failed", "path", fullPath)
+	}
+
+	return 0
+}
+
+// mapError maps os-level errors to FUSE errno values.
+func mapError(err error, logger *slog.Logger, ctx context.Context, msg string, args ...any) syscall.Errno {
+	if os.IsNotExist(err) {
+		return syscall.ENOENT
+	}
+	if os.IsPermission(err) {
+		return syscall.EACCES
+	}
+	if os.IsExist(err) {
+		return syscall.EEXIST
+	}
+	logArgs := append([]any{}, args...)
+	logArgs = append(logArgs, "error", err)
+	logger.ErrorContext(ctx, msg, logArgs...)
+	return syscall.EIO
 }
 
 // Readdir implements fs.NodeReaddirer.

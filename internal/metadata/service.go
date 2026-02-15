@@ -3,6 +3,8 @@ package metadata
 import (
 	"context"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -274,6 +276,12 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 		return fmt.Errorf("failed to delete metadata file: %w", err)
 	}
 
+	// Clean up .id sidecar file
+	idPath := metadataPath + ".id"
+	if removeErr := os.Remove(idPath); removeErr != nil && !os.IsNotExist(removeErr) {
+		slog.DebugContext(ctx, "Failed to remove .id sidecar file", "path", idPath, "error", removeErr)
+	}
+
 	// Optionally delete the source NZB file (error-tolerant)
 	if deleteSourceNzb && sourceNzbPath != "" {
 		if err := os.Remove(sourceNzbPath); err != nil {
@@ -302,6 +310,152 @@ func (ms *MetadataService) DeleteDirectory(virtualPath string) error {
 	}
 
 	return nil
+}
+
+// RenameFileMetadata atomically renames a metadata file (and its .id sidecar) from oldVirtualPath to newVirtualPath.
+// Uses os.Rename for atomicity on the same filesystem, falling back to read-write-delete for cross-device moves.
+func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath string) error {
+	oldFilename := filepath.Base(oldVirtualPath)
+	oldDir := filepath.Join(ms.rootPath, filepath.Dir(oldVirtualPath))
+	oldMetaPath := filepath.Join(oldDir, oldFilename+".meta")
+
+	newFilename := filepath.Base(newVirtualPath)
+	newDir := filepath.Join(ms.rootPath, filepath.Dir(newVirtualPath))
+	newMetaPath := filepath.Join(newDir, newFilename+".meta")
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(newDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination metadata directory: %w", err)
+	}
+
+	// Try atomic rename first
+	if err := os.Rename(oldMetaPath, newMetaPath); err != nil {
+		// Fall back to read-write-delete for cross-device moves
+		if !isCrossDeviceError(err) {
+			return fmt.Errorf("failed to rename metadata file: %w", err)
+		}
+
+		if err := copyAndRemoveFile(oldMetaPath, newMetaPath); err != nil {
+			return fmt.Errorf("failed to copy metadata file across devices: %w", err)
+		}
+	}
+
+	// Also rename the .id sidecar file if it exists
+	oldIDPath := oldMetaPath + ".id"
+	newIDPath := newMetaPath + ".id"
+	if _, err := os.Stat(oldIDPath); err == nil {
+		if err := os.Rename(oldIDPath, newIDPath); err != nil {
+			// Cross-device fallback for .id file
+			if isCrossDeviceError(err) {
+				_ = copyAndRemoveFile(oldIDPath, newIDPath)
+			} else {
+				slog.Warn("Failed to rename .id sidecar file", "old", oldIDPath, "new", newIDPath, "error", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// UpdateIDSymlink creates or updates an ID-based symlink in the .ids/ sharded directory.
+func (ms *MetadataService) UpdateIDSymlink(nzbdavID, virtualPath string) error {
+	id := strings.ToLower(nzbdavID)
+	if len(id) < 5 {
+		return nil // Invalid ID for sharding
+	}
+
+	shardPath := filepath.Join(".ids", string(id[0]), string(id[1]), string(id[2]), string(id[3]), string(id[4]))
+	fullShardDir := filepath.Join(ms.rootPath, shardPath)
+
+	if err := os.MkdirAll(fullShardDir, 0755); err != nil {
+		return err
+	}
+
+	targetMetaPath := ms.GetMetadataFilePath(virtualPath)
+	linkPath := filepath.Join(fullShardDir, id+".meta")
+
+	// Remove existing symlink if present
+	os.Remove(linkPath)
+
+	// Create relative symlink
+	relTarget, err := filepath.Rel(fullShardDir, targetMetaPath)
+	if err != nil {
+		return os.Symlink(targetMetaPath, linkPath)
+	}
+
+	return os.Symlink(relTarget, linkPath)
+}
+
+// RemoveIDSymlink removes an ID-based symlink from the .ids/ sharded directory.
+func (ms *MetadataService) RemoveIDSymlink(nzbdavID string) error {
+	id := strings.ToLower(nzbdavID)
+	if len(id) < 5 {
+		return nil
+	}
+
+	shardPath := filepath.Join(".ids", string(id[0]), string(id[1]), string(id[2]), string(id[3]), string(id[4]))
+	linkPath := filepath.Join(ms.rootPath, shardPath, id+".meta")
+
+	if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// WalkDirectoryFiles walks a metadata directory and calls fn for each file's virtual path and metadata.
+func (ms *MetadataService) WalkDirectoryFiles(virtualPath string, fn func(fileVirtualPath string, meta *metapb.FileMetadata) error) error {
+	metadataDir := filepath.Join(ms.rootPath, virtualPath)
+
+	return filepath.WalkDir(metadataDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".meta") {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(ms.rootPath, path)
+		if err != nil {
+			return nil
+		}
+		fileVirtualPath := strings.TrimSuffix(relPath, ".meta")
+
+		meta, err := ms.ReadFileMetadata(fileVirtualPath)
+		if err != nil || meta == nil {
+			return nil
+		}
+
+		return fn(fileVirtualPath, meta)
+	})
+}
+
+// isCrossDeviceError checks if an error is a cross-device link error (EXDEV).
+func isCrossDeviceError(err error) bool {
+	return strings.Contains(err.Error(), "cross-device") || strings.Contains(err.Error(), "invalid cross-device link")
+}
+
+// copyAndRemoveFile copies src to dst then removes src.
+func copyAndRemoveFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		os.Remove(dst) // Clean up partial write
+		return err
+	}
+
+	if err := dstFile.Close(); err != nil {
+		return err
+	}
+	srcFile.Close()
+
+	return os.Remove(src)
 }
 
 // ValidateSourceNzb validates that the source NZB file exists and matches metadata
