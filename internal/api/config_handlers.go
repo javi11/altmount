@@ -174,6 +174,8 @@ func (s *Server) handlePatchConfigSection(c *fiber.Ctx) error {
 	switch section {
 	case "webdav", "api", "auth", "database", "metadata", "streaming", "health", "rclone", "import", "log", "sabnzbd", "arrs", "fuse", "system", "mount_path", "mount", "providers":
 		err = c.BodyParser(newConfig)
+		// BodyParser will map fields like "profiler_enabled" from JSON to the root of newConfig
+		// because Config struct has it with `json:"profiler_enabled"`.
 	default:
 		return RespondValidationError(c, fmt.Sprintf("Unknown configuration section: %s", section), "INVALID_SECTION")
 	}

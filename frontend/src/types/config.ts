@@ -22,6 +22,7 @@ export interface ConfigResponse {
 	mount_path: string;
 	mount_type: MountType;
 	api_key?: string;
+	profiler_enabled: boolean;
 }
 
 // WebDAV server configuration
@@ -79,6 +80,7 @@ export interface HealthConfig {
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	segment_sample_percentage?: number; // Percentage of segments to check (1-100)
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
+	library_sync_concurrency?: number;
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
 	resolve_repair_on_import?: boolean; // Automatically resolve pending repairs in the same directory when a new file is imported
 	verify_data?: boolean; // Verify 1 byte of data for each segment
@@ -186,6 +188,7 @@ export interface FuseConfig {
 	disk_cache_expiry_hours?: number;
 	chunk_size_mb?: number;
 	read_ahead_chunks?: number;
+	prefetch_concurrency?: number;
 }
 
 // Import strategy type
@@ -273,6 +276,7 @@ export interface ConfigUpdateRequest {
 	providers?: ProviderUpdateRequest[];
 	mount_path?: string;
 	mount_type?: MountType;
+	profiler_enabled?: boolean;
 }
 
 // WebDAV update request
@@ -318,6 +322,7 @@ export interface HealthUpdateRequest {
 	max_connections_for_health_checks?: number;
 	max_concurrent_jobs?: number; // Max concurrent health check jobs
 	library_sync_interval_minutes?: number; // Library sync interval in minutes (optional)
+	library_sync_concurrency?: number;
 	check_all_segments?: boolean; // Whether to check all segments or use sampling
 	resolve_repair_on_import?: boolean;
 	verify_data?: boolean;
@@ -469,6 +474,8 @@ export interface APIFormData {
 export interface ImportFormData {
 	max_processor_workers: number;
 	queue_processing_interval_seconds: number; // Interval in seconds for queue processing
+	max_download_prefetch: number;
+	read_timeout_seconds: number;
 	import_strategy: ImportStrategy;
 	import_dir: string;
 	watch_dir?: string;

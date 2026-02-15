@@ -933,6 +933,21 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 							<span className="label-text text-xs">Allow other users to access mount</span>
 						</label>
 					</fieldset>
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Prefetch Concurrency</legend>
+						<input
+							type="number"
+							className="input input-bordered w-full bg-base-100 font-mono text-sm"
+							value={formData.prefetch_concurrency ?? 0}
+							onChange={(e) =>
+								updateField({
+									prefetch_concurrency: Number.parseInt(e.target.value, 10) || 0,
+								})
+							}
+							disabled={isRunning}
+						/>
+						<p className="label text-[10px] opacity-50 break-words mt-1">Number of parallel segment downloads during prefetch (0 = auto).</p>
+					</fieldset>
 				</div>
 			</div>
 
