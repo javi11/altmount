@@ -336,6 +336,39 @@ export function ArrsConfigSection({
 									</div>
 								</fieldset>
 
+								<div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">Cleanup Grace Period</legend>
+										<div className="join w-full">
+											<input
+												type="number"
+												className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
+												value={formData.queue_cleanup_grace_period_minutes ?? 10}
+												onChange={(e) => handleFormChange("queue_cleanup_grace_period_minutes", parseInt(e.target.value) || 10)}
+												min={0}
+												disabled={isReadOnly}
+											/>
+											<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">min</span>
+										</div>
+										<p className="label text-[10px] opacity-50 break-words mt-1">Wait time before considering a failed item "stuck" and eligible for cleanup.</p>
+									</fieldset>
+
+									<fieldset className="fieldset">
+										<legend className="fieldset-legend font-semibold">Import Failure Cleanup</legend>
+										<label className="label cursor-pointer justify-start gap-4 items-center h-12">
+											<input
+												type="checkbox"
+												className="toggle toggle-primary toggle-sm"
+												checked={formData.cleanup_automatic_import_failure ?? false}
+												onChange={(e) => handleFormChange("cleanup_automatic_import_failure", e.target.checked)}
+												disabled={isReadOnly}
+											/>
+											<span className="label-text font-bold text-xs break-words">Purge Automatic Failures</span>
+										</label>
+										<p className="label text-[10px] opacity-50 break-words mt-1">Automatically remove items from queue that failed with "Automatic Import" errors.</p>
+									</fieldset>
+								</div>
+
 								<div className="space-y-4">
 									<h5 className="font-bold text-[10px] uppercase opacity-40">Allowlist (Ignore Errors)</h5>
 									<div className="space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">

@@ -14,12 +14,13 @@ import (
 // ConfigAPIResponse wraps config.Config with sensitive data handling
 type ConfigAPIResponse struct {
 	*config.Config
-	WebDAV    WebDAVAPIResponse     `json:"webdav"`
-	Import    ImportAPIResponse     `json:"import"`
-	RClone    RCloneAPIResponse     `json:"rclone"`
-	SABnzbd   SABnzbdAPIResponse    `json:"sabnzbd"`
-	Providers []ProviderAPIResponse `json:"providers"`
-	APIKey    string                `json:"api_key,omitempty"` // User's API key for authentication
+	WebDAV          WebDAVAPIResponse     `json:"webdav"`
+	Import          ImportAPIResponse     `json:"import"`
+	RClone          RCloneAPIResponse     `json:"rclone"`
+	SABnzbd         SABnzbdAPIResponse    `json:"sabnzbd"`
+	Providers       []ProviderAPIResponse `json:"providers"`
+	APIKey          string                `json:"api_key,omitempty"` // User's API key for authentication
+	ProfilerEnabled bool                  `json:"profiler_enabled"`
 }
 
 // WebDAVAPIResponse sanitizes WebDAV config for API responses
@@ -117,6 +118,7 @@ type ImportAPIResponse struct {
 	AllowedFileExtensions          []string              `json:"allowed_file_extensions"`
 	MaxImportConnections           int                   `json:"max_import_connections"`
 	MaxDownloadPrefetch            int                   `json:"max_download_prefetch"`
+	ReadTimeoutSeconds             int                   `json:"read_timeout_seconds"`
 	SegmentSamplePercentage        int                   `json:"segment_sample_percentage"` // Percentage of segments to check (1-100)
 	ImportStrategy                 config.ImportStrategy `json:"import_strategy"`
 	ImportDir                      *string               `json:"import_dir,omitempty"`
@@ -241,13 +243,14 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 	}
 
 	return &ConfigAPIResponse{
-		Config:    cfg,
-		WebDAV:    webdavResp,
-		Import:    ToImportAPIResponse(cfg.Import),
-		RClone:    rcloneResp,
-		SABnzbd:   sabnzbdResp,
-		Providers: providers,
-		APIKey:    apiKey,
+		Config:          cfg,
+		WebDAV:          webdavResp,
+		Import:          ToImportAPIResponse(cfg.Import),
+		RClone:          rcloneResp,
+		SABnzbd:         sabnzbdResp,
+		Providers:       providers,
+		APIKey:          apiKey,
+		ProfilerEnabled: cfg.ProfilerEnabled,
 	}
 }
 
@@ -258,6 +261,7 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		AllowedFileExtensions:          importConfig.AllowedFileExtensions,
 		MaxImportConnections:           importConfig.MaxImportConnections,
 		MaxDownloadPrefetch:            importConfig.MaxDownloadPrefetch,
+		ReadTimeoutSeconds:             importConfig.ReadTimeoutSeconds,
 		SegmentSamplePercentage:        importConfig.SegmentSamplePercentage,
 		ImportStrategy:                 importConfig.ImportStrategy,
 		ImportDir:                      importConfig.ImportDir,

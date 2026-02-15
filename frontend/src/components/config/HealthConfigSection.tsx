@@ -322,6 +322,33 @@ export function HealthConfigSection({
 								<p className="label text-[10px] opacity-50 break-words">How often to scan your library for new files.</p>
 							</fieldset>
 						</div>
+
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-semibold">Health Check Loop Interval (Sec)</legend>
+								<input
+									type="number"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									value={formData.check_interval_seconds}
+									readOnly={isReadOnly}
+									min={1}
+									onChange={(e) => handleInputChange("check_interval_seconds", Number.parseInt(e.target.value, 10) || 5)}
+								/>
+								<p className="label text-[10px] opacity-50 break-words">Idle time between background health check cycles.</p>
+							</fieldset>
+							<fieldset className="fieldset">
+								<legend className="fieldset-legend font-semibold">Sync Concurrency</legend>
+								<input
+									type="number"
+									className="input input-bordered w-full bg-base-100 font-mono text-sm"
+									value={formData.library_sync_concurrency}
+									readOnly={isReadOnly}
+									min={0}
+									onChange={(e) => handleInputChange("library_sync_concurrency", Number.parseInt(e.target.value, 10) || 0)}
+								/>
+								<p className="label text-[10px] opacity-50 break-words">Max parallel file scans during sync (0 = auto).</p>
+							</fieldset>
+						</div>
 					</div>
 				</div>
 			</div>
