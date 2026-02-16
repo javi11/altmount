@@ -25,6 +25,21 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 		return fmt.Errorf("symlink directory not configured")
 	}
 
+	// Strip SABnzbd CompleteDir prefix from resultingPath if present
+	// This prevents creating nested "complete" folders in the symlink directory
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+		if strings.HasPrefix(resultingPath, completeDir) {
+			resultingPath = strings.TrimPrefix(resultingPath, completeDir)
+			if !strings.HasPrefix(resultingPath, "/") {
+				resultingPath = "/" + resultingPath
+			}
+		}
+	}
+
 	// Get the actual metadata/mount path (where the content actually lives)
 	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
 

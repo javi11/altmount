@@ -90,10 +90,6 @@ jobs:
         id: normalize
         run: echo "image_name=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      - name: Get timestamp
-        id: timestamp
-        run: echo "timestamp=$(date +'%m.%d.%Y.%I-%M%p')" >> $GITHUB_OUTPUT
-
       - name: Build and push AMD64 image
         uses: docker/build-push-action@v6
         with:
@@ -141,10 +137,6 @@ jobs:
         id: normalize
         run: echo "image_name=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      - name: Get timestamp
-        id: timestamp
-        run: echo "timestamp=$(date +'%m.%d.%Y.%I-%M%p')" >> $GITHUB_OUTPUT
-
       - name: Build and push ARM64 image
         uses: docker/build-push-action@v6
         with:
@@ -182,7 +174,7 @@ jobs:
 
       - name: Get timestamp
         id: timestamp
-        run: echo "timestamp=$(date +'%m.%d.%Y.%I-%M%p')" >> $GITHUB_OUTPUT
+        run: echo "timestamp=$(TZ='America/New_York' date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
 
       - name: Create and push manifest
         run: |

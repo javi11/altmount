@@ -27,6 +27,20 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		return fmt.Errorf("STRM directory not configured")
 	}
 
+	// Strip SABnzbd CompleteDir prefix from resultingPath if present
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+		if strings.HasPrefix(resultingPath, completeDir) {
+			resultingPath = strings.TrimPrefix(resultingPath, completeDir)
+			if !strings.HasPrefix(resultingPath, "/") {
+				resultingPath = "/" + resultingPath
+			}
+		}
+	}
+
 	// Check the metadata directory to determine if this is a file or directory
 	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
 	fileInfo, err := os.Stat(metadataPath)
