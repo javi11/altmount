@@ -345,8 +345,8 @@ github.com/imkira/go-interpol v1.1.0 h1:KIiKr0VSG2CUW1hl1jpiyuzuJeKUUpC8iM1AIE7N
 github.com/imkira/go-interpol v1.1.0/go.mod h1:z0h2/2T3XF8kyEPpRgJ3kmNv+C43p+I/CoI+jC3w2iA=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/javi11/nntppool/v4 v4.2.1 h1:tc7Y/pfwNpCDVobZwYhWR2H6Hhwj3wcUfOfu5ya06W4=
-github.com/javi11/nntppool/v4 v4.2.1/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
+github.com/javi11/nntppool/v4 v4.3.0 h1:IQ4SKLuzkZcvinYYTenK87H+orgvURrNBk4ZenK9D/A=
+github.com/javi11/nntppool/v4 v4.3.0/go.mod h1:+UtisJLDFLXBSkW9R6uCRgdp3lS/+6pLAk7L+Wt6LMw=
 github.com/javi11/nxg v0.1.0 h1:CTThldYlaVIPIhpkrMw0HcTD0NLrW1uYMoDILjjEOtM=
 github.com/javi11/nxg v0.1.0/go.mod h1:+GvYpp+y1oq+qBOWxFMvfTjtin/0zCeomWfjiPkiu8A=
 github.com/javi11/nzbparser v0.5.4 h1:0aYyORZipp7iX8eNpT/efnzCeVO+9C0sE2HWCGc/JaI=
