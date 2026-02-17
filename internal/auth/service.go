@@ -403,7 +403,7 @@ func CreateClaimsFromUser(ctx context.Context, user *database.User) token.Claims
 
 	// Set custom attributes
 	if claims.User.Attributes == nil {
-		claims.User.Attributes = make(map[string]interface{})
+		claims.User.Attributes = make(map[string]any)
 	}
 	claims.User.Attributes["is_admin"] = user.IsAdmin
 	claims.User.Attributes["provider"] = user.Provider

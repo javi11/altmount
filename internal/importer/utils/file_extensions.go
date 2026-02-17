@@ -79,10 +79,8 @@ func HasPopularExtension(filePath string) bool {
 		return false
 	}
 	// direct membership check
-	for _, e := range allExt {
-		if e == ext {
-			return true
-		}
+	if slices.Contains(allExt, ext) {
+		return true
 	}
 	// Fallback to the package's RAR and 7zip detector on the basename
 	base := filepath.Base(filePath)

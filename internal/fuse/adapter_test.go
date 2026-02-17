@@ -121,7 +121,7 @@ func (m *MockFileInfo) Size() int64        { return m.size }
 func (m *MockFileInfo) Mode() os.FileMode  { return m.mode }
 func (m *MockFileInfo) ModTime() time.Time { return m.modTime }
 func (m *MockFileInfo) IsDir() bool        { return m.isDir }
-func (m *MockFileInfo) Sys() interface{}   { return nil }
+func (m *MockFileInfo) Sys() any           { return nil }
 
 // TestHandle_Read_Concurrency tests that Handle correctly serializes
 // concurrent read requests using Seek+Read with mutex protection in fallback mode.

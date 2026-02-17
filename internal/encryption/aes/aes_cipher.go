@@ -46,10 +46,7 @@ func (c *AesCipher) DecryptedSize(encryptedFileSize int64) (int64, error) {
 	// due to padding, but we can provide a maximum
 	blockSize := int64(16)
 	// Maximum plaintext is encrypted size minus one block (worst case padding)
-	maxPlaintext := encryptedFileSize - blockSize
-	if maxPlaintext < 0 {
-		maxPlaintext = 0
-	}
+	maxPlaintext := max(encryptedFileSize-blockSize, 0)
 	return maxPlaintext, nil
 }
 

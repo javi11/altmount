@@ -47,7 +47,7 @@ func (e *DataCorruptionError) Unwrap() error {
 type UsenetReader struct {
 	log            *slog.Logger
 	wg             sync.WaitGroup
-	ctx            context.Context    // Reader's context for cancellation
+	ctx            context.Context // Reader's context for cancellation
 	cancel         context.CancelFunc
 	rg             *segmentRange
 	maxPrefetch    int // Maximum segments prefetched ahead of current read position
@@ -92,11 +92,9 @@ func NewUsenetReader(
 		streamID:       streamID,
 	}
 
-	ur.wg.Add(1)
-	go func() {
-		defer ur.wg.Done()
+	ur.wg.Go(func() {
 		ur.downloadManager(ctx)
-	}()
+	})
 
 	return ur, nil
 }

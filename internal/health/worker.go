@@ -114,11 +114,9 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 	}
 
 	// Start the main worker goroutine
-	hw.wg.Add(1)
-	go func() {
-		defer hw.wg.Done()
+	hw.wg.Go(func() {
 		hw.run(ctx)
-	}()
+	})
 
 	hw.status = WorkerStatusRunning
 	hw.updateStats(func(s *WorkerStats) {
@@ -744,7 +742,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 			// Continue with repair attempt if read failed (could be transient), but let's be careful
 		} else if meta == nil {
 			// Metadata is missing -> File is gone.
-			slog.WarnContext(ctx, "File metadata missing during repair trigger - file likely deleted/upgraded externally. Cleaning up zombie record.", 
+			slog.WarnContext(ctx, "File metadata missing during repair trigger - file likely deleted/upgraded externally. Cleaning up zombie record.",
 				"file_path", filePath)
 
 			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {

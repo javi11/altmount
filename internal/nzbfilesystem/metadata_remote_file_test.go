@@ -602,11 +602,11 @@ func TestConcurrentSegmentIndexAccess(t *testing.T) {
 
 	// Run concurrent lookups
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(1)
 		go func(offset int64) {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				_ = idx.findSegmentForOffset(offset % 3000)
 			}
 		}(int64(i * 30))

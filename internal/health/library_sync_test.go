@@ -83,7 +83,7 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 
 	// Create some metadata files
 	numFiles := 50
-	for i := 0; i < numFiles; i++ {
+	for i := range numFiles {
 		fileName := filepath.Join("movies", "movie_"+fmt.Sprintf("%d", i)+".mkv")
 
 		// Create a dummy metadata object

@@ -98,7 +98,7 @@ func TestSegment_Close_Idempotent(t *testing.T) {
 
 	seg := newSegment("test-segment", 0, 100, 101, nil)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := seg.Close(); err != nil {
 			t.Errorf("Close() call %d failed: %v", i+1, err)
 		}
@@ -211,26 +211,22 @@ func TestSegment_Close_NilSegment(t *testing.T) {
 func TestSegment_ConcurrentSetDataAndGetReader(t *testing.T) {
 	t.Parallel()
 
-	for iteration := 0; iteration < 20; iteration++ {
+	for range 20 {
 		seg := newSegment("test-segment", 0, 9, 10, nil)
 
 		var wg sync.WaitGroup
 
 		// One reader goroutine (matches real usage)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			r := seg.GetReader()
 			buf := make([]byte, 10)
 			_, _ = r.Read(buf)
-		}()
+		})
 
 		// Set data from another goroutine
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			seg.SetData([]byte("0123456789"))
-		}()
+		})
 
 		wg.Wait()
 	}
@@ -240,26 +236,22 @@ func TestSegment_ConcurrentSetDataAndGetReader(t *testing.T) {
 func TestSegment_ConcurrentSetErrorAndGetReader(t *testing.T) {
 	t.Parallel()
 
-	for iteration := 0; iteration < 20; iteration++ {
+	for range 20 {
 		seg := newSegment("test-segment", 0, 100, 101, nil)
 		testErr := errors.New("concurrent error")
 
 		var wg sync.WaitGroup
 
-		for i := 0; i < 5; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 5 {
+			wg.Go(func() {
 				seg.SetError(testErr)
-			}()
+			})
 		}
 
-		for i := 0; i < 5; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 5 {
+			wg.Go(func() {
 				_ = seg.GetDownloadError()
-			}()
+			})
 		}
 
 		wg.Wait()
@@ -274,26 +266,22 @@ func TestSegment_ConcurrentSetErrorAndGetReader(t *testing.T) {
 func TestSegment_ConcurrentReleaseAndGetReader(t *testing.T) {
 	t.Parallel()
 
-	for iteration := 0; iteration < 20; iteration++ {
+	for range 20 {
 		seg := newSegment("test-segment", 0, 9, 10, nil)
 
 		var wg sync.WaitGroup
 
 		// One reader goroutine (matches real usage)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			r := seg.GetReader()
 			buf := make([]byte, 10)
 			_, _ = r.Read(buf)
-		}()
+		})
 
 		// Release from another goroutine
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			seg.Release()
-		}()
+		})
 
 		wg.Wait()
 	}
@@ -310,7 +298,7 @@ func TestSegmentRangeClear_ContinuesOnAllSegments(t *testing.T) {
 	const numSegments = 5
 
 	segments := make([]*segment, numSegments)
-	for i := 0; i < numSegments; i++ {
+	for i := range numSegments {
 		segments[i] = newSegment("segment-"+string(rune('0'+i)), 0, 100, 101, nil)
 	}
 
@@ -324,7 +312,7 @@ func TestSegmentRangeClear_ContinuesOnAllSegments(t *testing.T) {
 
 	_ = sr.Clear()
 
-	for i := 0; i < numSegments; i++ {
+	for i := range numSegments {
 		segments[i].mx.Lock()
 		isReleased := segments[i].released
 		segments[i].mx.Unlock()
@@ -346,7 +334,7 @@ func TestSegmentRangeClear_AllSegmentsReleased(t *testing.T) {
 	const numSegments = 10
 
 	segments := make([]*segment, numSegments)
-	for i := 0; i < numSegments; i++ {
+	for i := range numSegments {
 		segments[i] = newSegment("segment", 0, 100, 101, nil)
 	}
 
@@ -443,7 +431,7 @@ func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
 	const numSegments = 10
 	segments := make([]*segment, numSegments)
 
-	for i := 0; i < numSegments; i++ {
+	for i := range numSegments {
 		segments[i] = newSegment("segment", 0, 100, 101, nil)
 	}
 
@@ -453,12 +441,10 @@ func TestSegmentRangeClear_ConcurrentSafety(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 3 {
+		wg.Go(func() {
 			_ = sr.Clear()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -469,7 +455,7 @@ func BenchmarkClear(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		segments := make([]*segment, 100)
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			segments[j] = newSegment("segment", 0, 100, 101, nil)
 		}
 		sr := &segmentRange{segments: segments}

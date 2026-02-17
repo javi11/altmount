@@ -101,7 +101,7 @@ func (m *Manager) GetCoreStats(ctx context.Context) (*CoreStatsResponse, error) 
 
 	req := RCRequest{
 		Command: "core/stats",
-		Args:    map[string]interface{}{},
+		Args:    map[string]any{},
 	}
 
 	resp, err := m.makeRequest(req, false)
@@ -125,7 +125,7 @@ func (m *Manager) GetMemoryUsage(ctx context.Context) (*MemoryStats, error) {
 
 	req := RCRequest{
 		Command: "core/memstats",
-		Args:    map[string]interface{}{},
+		Args:    map[string]any{},
 	}
 
 	resp, err := m.makeRequest(req, false)
@@ -149,7 +149,7 @@ func (m *Manager) GetBandwidthStats(ctx context.Context) (*BandwidthStats, error
 
 	req := RCRequest{
 		Command: "core/bwlimit",
-		Args:    map[string]interface{}{},
+		Args:    map[string]any{},
 	}
 
 	resp, err := m.makeRequest(req, false)
@@ -173,7 +173,7 @@ func (m *Manager) GetVersion(ctx context.Context) (*VersionResponse, error) {
 
 	req := RCRequest{
 		Command: "core/version",
-		Args:    map[string]interface{}{},
+		Args:    map[string]any{},
 	}
 
 	resp, err := m.makeRequest(req, false)

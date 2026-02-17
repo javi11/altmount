@@ -33,7 +33,7 @@ func TestConcurrentQueueItemClaims(t *testing.T) {
 	errors := make(chan error, numWorkers)
 	var wg sync.WaitGroup
 
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -114,7 +114,7 @@ func TestConcurrentQueueItemClaims_MultipleItems(t *testing.T) {
 	errors := make(chan error, numWorkers)
 	var wg sync.WaitGroup
 
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()

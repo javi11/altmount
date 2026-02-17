@@ -44,7 +44,7 @@ const (
 var tinfoMap = make(map[reflect.Type]*typeInfo)
 var tinfoLock sync.RWMutex
 
-var nameType = reflect.TypeOf(Name{})
+var nameType = reflect.TypeFor[Name]()
 
 // getTypeInfo returns the typeInfo structure with details necessary
 // for marshalling and unmarshalling typ.
@@ -58,7 +58,7 @@ func getTypeInfo(typ reflect.Type) (*typeInfo, error) {
 	tinfo = &typeInfo{}
 	if typ.Kind() == reflect.Struct && typ != nameType {
 		n := typ.NumField()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			f := typ.Field(i)
 			if f.PkgPath != "" || f.Tag.Get("xml") == "-" {
 				continue // Private field
@@ -67,7 +67,7 @@ func getTypeInfo(typ reflect.Type) (*typeInfo, error) {
 			// For embedded structs, embed its fields.
 			if f.Anonymous {
 				t := f.Type
-				if t.Kind() == reflect.Ptr {
+				if t.Kind() == reflect.Pointer {
 					t = t.Elem()
 				}
 				if t.Kind() == reflect.Struct {
@@ -236,7 +236,7 @@ func structFieldInfo(typ reflect.Type, f *reflect.StructField) (*fieldInfo, erro
 // in case it exists and has a valid xml field tag, otherwise
 // it returns nil.
 func lookupXMLName(typ reflect.Type) (xmlname *fieldInfo) {
-	for typ.Kind() == reflect.Ptr {
+	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
 	if typ.Kind() != reflect.Struct {
@@ -256,13 +256,6 @@ func lookupXMLName(typ reflect.Type) (xmlname *fieldInfo) {
 		break
 	}
 	return nil
-}
-
-func min(a, b int) int {
-	if a <= b {
-		return a
-	}
-	return b
 }
 
 // addFieldInfo adds finfo to tinfo.fields if there are no
@@ -285,7 +278,7 @@ Loop:
 			continue
 		}
 		minl := min(len(newf.parents), len(oldf.parents))
-		for p := 0; p < minl; p++ {
+		for p := range minl {
 			if oldf.parents[p] != newf.parents[p] {
 				continue Loop
 			}
@@ -358,7 +351,7 @@ func (finfo *fieldInfo) value(v reflect.Value) reflect.Value {
 	for i, x := range finfo.idx {
 		if i > 0 {
 			t := v.Type()
-			if t.Kind() == reflect.Ptr && t.Elem().Kind() == reflect.Struct {
+			if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
 				if v.IsNil() {
 					v.Set(reflect.New(v.Type().Elem()))
 				}

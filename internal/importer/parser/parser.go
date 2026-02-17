@@ -30,11 +30,11 @@ import (
 // FirstSegmentData holds cached data from the first segment of an NZB file
 // This avoids redundant fetching when both PAR2 extraction and file parsing need the same data
 type FirstSegmentData struct {
-	File                *nzbparser.NzbFile   // Reference to the NZB file (for groups, subject, metadata)
-	Headers             nntppool.YEncMeta    // yEnc headers (FileName, FileSize, PartSize)
-	RawBytes            []byte               // Up to 16KB of raw data for PAR2 detection (may be less if segment is smaller)
-	MissingFirstSegment bool                 // True if first segment download failed (article not found, etc.)
-	OriginalIndex       int                  // Original position in the parsed NZB file list
+	File                *nzbparser.NzbFile // Reference to the NZB file (for groups, subject, metadata)
+	Headers             nntppool.YEncMeta  // yEnc headers (FileName, FileSize, PartSize)
+	RawBytes            []byte             // Up to 16KB of raw data for PAR2 detection (may be less if segment is smaller)
+	MissingFirstSegment bool               // True if first segment download failed (article not found, etc.)
+	OriginalIndex       int                // Original position in the parsed NZB file list
 }
 
 // Parser handles NZB file parsing
@@ -301,23 +301,23 @@ func (p *Parser) parseFile(ctx context.Context, meta map[string]string, nzbFilen
 
 	// Extract extra metadata from subject if present (nzbdav compatibility)
 	if strings.HasPrefix(info.NzbFile.Subject, "NZBDAV_ID:") {
-		parts := strings.Split(info.NzbFile.Subject, " ")
-		for _, part := range parts {
-			if strings.HasPrefix(part, "NZBDAV_ID:") {
-				nzbdavID = strings.TrimPrefix(part, "NZBDAV_ID:")
-			} else if strings.HasPrefix(part, "AES_KEY:") {
-				keyStr := strings.TrimPrefix(part, "AES_KEY:")
+		parts := strings.SplitSeq(info.NzbFile.Subject, " ")
+		for part := range parts {
+			if after, ok := strings.CutPrefix(part, "NZBDAV_ID:"); ok {
+				nzbdavID = after
+			} else if after, ok := strings.CutPrefix(part, "AES_KEY:"); ok {
+				keyStr := after
 				if key, err := base64.StdEncoding.DecodeString(keyStr); err == nil {
 					aesKey = key
 					enc = metapb.Encryption_AES
 				}
-			} else if strings.HasPrefix(part, "AES_IV:") {
-				ivStr := strings.TrimPrefix(part, "AES_IV:")
+			} else if after, ok := strings.CutPrefix(part, "AES_IV:"); ok {
+				ivStr := after
 				if iv, err := base64.StdEncoding.DecodeString(ivStr); err == nil {
 					aesIv = iv
 				}
-			} else if strings.HasPrefix(part, "DECODED_SIZE:") {
-				if size, err := strconv.ParseInt(strings.TrimPrefix(part, "DECODED_SIZE:"), 10, 64); err == nil && size > 0 {
+			} else if after, ok := strings.CutPrefix(part, "DECODED_SIZE:"); ok {
+				if size, err := strconv.ParseInt(after, 10, 64); err == nil && size > 0 {
 					totalSize = size
 				}
 			}

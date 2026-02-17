@@ -275,10 +275,10 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 
 // APIResponse represents a standard API response wrapper
 type APIResponse struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   *APIError   `json:"error,omitempty"`
-	Meta    *APIMeta    `json:"meta,omitempty"`
+	Success bool      `json:"success"`
+	Data    any       `json:"data,omitempty"`
+	Error   *APIError `json:"error,omitempty"`
+	Meta    *APIMeta  `json:"meta,omitempty"`
 }
 
 // APIError represents an error response
@@ -806,18 +806,18 @@ type ManualImportResponse struct {
 
 // ProviderStatusResponse represents NNTP provider connection status in API responses
 type ProviderStatusResponse struct {
-	ID                    string     `json:"id"`
-	Host                  string     `json:"host"`
-	Username              string     `json:"username"`
-	UsedConnections       int        `json:"used_connections"`
-	MaxConnections        int        `json:"max_connections"`
-	State                 string     `json:"state"`
-	ErrorCount            int64      `json:"error_count"`
-	LastConnectionAttempt time.Time  `json:"last_connection_attempt"`
-	LastSuccessfulConnect time.Time  `json:"last_successful_connect"`
-	FailureReason         string     `json:"failure_reason"`
-	LastSpeedTestMbps     float64    `json:"last_speed_test_mbps"`
-	LastSpeedTestTime     *time.Time `json:"last_speed_test_time,omitempty"`
+	ID                      string     `json:"id"`
+	Host                    string     `json:"host"`
+	Username                string     `json:"username"`
+	UsedConnections         int        `json:"used_connections"`
+	MaxConnections          int        `json:"max_connections"`
+	State                   string     `json:"state"`
+	ErrorCount              int64      `json:"error_count"`
+	LastConnectionAttempt   time.Time  `json:"last_connection_attempt"`
+	LastSuccessfulConnect   time.Time  `json:"last_successful_connect"`
+	FailureReason           string     `json:"failure_reason"`
+	LastSpeedTestMbps       float64    `json:"last_speed_test_mbps"`
+	LastSpeedTestTime       *time.Time `json:"last_speed_test_time,omitempty"`
 	CurrentSpeedBytesPerSec float64    `json:"current_speed_bytes_per_sec"`
 	PingMs                  int64      `json:"ping_ms"`
 	MissingCount            int64      `json:"missing_count"`

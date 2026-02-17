@@ -43,7 +43,7 @@ func (m *Manager) checkMountHealth(provider string) bool {
 	// Try to list the root directory of the mount
 	req := RCRequest{
 		Command: "operations/list",
-		Args: map[string]interface{}{
+		Args: map[string]any{
 			"fs":     fmt.Sprintf("%s:", provider),
 			"remote": "",
 		},

@@ -38,7 +38,7 @@ type UsenetFileSystem struct {
 	ctx             context.Context
 	poolManager     pool.Manager
 	files           map[string]parser.ParsedFile
-	maxPrefetch int
+	maxPrefetch     int
 	progressTracker *progress.Tracker
 	filesCompleted  int32 // atomic counter
 	totalFiles      int
@@ -62,7 +62,7 @@ func NewUsenetFileSystem(ctx context.Context, poolManager pool.Manager, files []
 		ctx:             ctx,
 		poolManager:     poolManager,
 		files:           filesMap,
-		maxPrefetch: maxPrefetch,
+		maxPrefetch:     maxPrefetch,
 		progressTracker: progressTracker,
 		filesCompleted:  0,
 		totalFiles:      len(files),
@@ -87,16 +87,16 @@ func (ufs *UsenetFileSystem) Open(name string) (fs.File, error) {
 	}
 
 	return &UsenetFile{
-		name:           name,
-		file:           &file,
-		poolManager:    ufs.poolManager,
-		ctx:            ctx,
+		name:        name,
+		file:        &file,
+		poolManager: ufs.poolManager,
+		ctx:         ctx,
 		maxPrefetch: ufs.maxPrefetch,
-		size:           file.Size,
-		position:       0,
-		closed:         false,
-		ufs:            ufs,
-		readTimeout:    ufs.readTimeout,
+		size:        file.Size,
+		position:    0,
+		closed:      false,
+		ufs:         ufs,
+		readTimeout: ufs.readTimeout,
 	}, nil
 }
 
@@ -124,17 +124,17 @@ func (ufs *UsenetFileSystem) Stat(path string) (os.FileInfo, error) {
 // UsenetFile implements fs.File and io.Seeker for reading individual RAR parts from Usenet
 // The Seeker interface allows rardecode.OpenReader to efficiently seek within RAR parts
 type UsenetFile struct {
-	name           string
-	file           *parser.ParsedFile
-	poolManager    pool.Manager
-	ctx            context.Context
+	name        string
+	file        *parser.ParsedFile
+	poolManager pool.Manager
+	ctx         context.Context
 	maxPrefetch int
-	size           int64
-	reader         io.ReadCloser
-	position       int64
-	closed         bool
-	ufs            *UsenetFileSystem
-	readTimeout    time.Duration
+	size        int64
+	reader      io.ReadCloser
+	position    int64
+	closed      bool
+	ufs         *UsenetFileSystem
+	readTimeout time.Duration
 }
 
 // UsenetFile methods implementing fs.File interface
@@ -339,7 +339,7 @@ func (ufi *UsenetFileInfo) Size() int64        { return ufi.size }
 func (ufi *UsenetFileInfo) Mode() fs.FileMode  { return 0644 }
 func (ufi *UsenetFileInfo) ModTime() time.Time { return time.Now() }
 func (ufi *UsenetFileInfo) IsDir() bool        { return false }
-func (ufi *UsenetFileInfo) Sys() interface{}   { return nil }
+func (ufi *UsenetFileInfo) Sys() any           { return nil }
 
 // AferoAdapter wraps UsenetFileSystem to implement afero.Fs interface
 // This allows sevenzip.OpenReader to use UsenetFileSystem as a custom filesystem

@@ -77,8 +77,8 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 func (proc *Processor) getCleanNzbName(nzbPath string, queueID int) string {
 	baseName := filepath.Base(nzbPath)
 	prefix := fmt.Sprintf("%d_", queueID)
-	if strings.HasPrefix(baseName, prefix) {
-		return strings.TrimPrefix(baseName, prefix)
+	if after, ok := strings.CutPrefix(baseName, prefix); ok {
+		return after
 	}
 	return baseName
 }

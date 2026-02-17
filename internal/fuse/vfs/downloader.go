@@ -99,11 +99,9 @@ func (d *Downloader) Start(ctx context.Context) {
 	ctx, d.cancel = context.WithCancel(ctx)
 	d.ctx = ctx
 
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.wg.Go(func() {
 		d.idleMonitor(ctx)
-	}()
+	})
 }
 
 // Stop halts the downloader and waits for goroutines to finish.
@@ -168,12 +166,10 @@ func (d *Downloader) RecordAccess(offset int64) {
 		if d.prefetching.CompareAndSwap(false, true) {
 			pctx, pcancel := context.WithCancel(d.ctx)
 			d.prefetchCancel = pcancel
-			d.wg.Add(1)
-			go func() {
-				defer d.wg.Done()
+			d.wg.Go(func() {
 				defer d.prefetching.Store(false)
 				d.prefetchWithCtx(pctx, offset)
-			}()
+			})
 		}
 	}
 }
@@ -250,7 +246,7 @@ func (d *Downloader) FetchGroup() *singleflight.Group {
 
 func (d *Downloader) fetchChunkWithCtx(ctx context.Context, start, end int64) error {
 	key := fmt.Sprintf("%d-%d", start, end)
-	_, err, _ := d.fetchGroup.Do(key, func() (interface{}, error) {
+	_, err, _ := d.fetchGroup.Do(key, func() (any, error) {
 		return nil, d.doFetchChunk(ctx, start, end)
 	})
 	return err

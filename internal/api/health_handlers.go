@@ -443,10 +443,7 @@ func (s *Server) handleListCorrupted(c *fiber.Ctx) error {
 	if pagination.Offset >= len(corruptedItems) {
 		corruptedItems = []*database.FileHealth{}
 	} else {
-		end := pagination.Offset + pagination.Limit
-		if end > len(corruptedItems) {
-			end = len(corruptedItems)
-		}
+		end := min(pagination.Offset+pagination.Limit, len(corruptedItems))
 		corruptedItems = corruptedItems[pagination.Offset:end]
 	}
 
@@ -833,7 +830,7 @@ func (s *Server) handleRestartHealthChecksBulk(c *fiber.Ctx) error {
 		return RespondNotFound(c, "Health records", "No health records found to restart")
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"message":         "Health checks restarted successfully",
 		"restarted_count": restartedCount,
 		"file_paths":      req.FilePaths,
@@ -889,7 +886,7 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to retrieve updated health record", err.Error())
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"message":      "Health check cancelled",
 		"id":           id,
 		"file_path":    item.FilePath,
@@ -947,7 +944,7 @@ func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to retrieve updated health record", err.Error())
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"message":     "Health priority updated",
 		"id":          id,
 		"file_path":   item.FilePath,
@@ -967,7 +964,7 @@ func (s *Server) handleResetAllHealthChecks(c *fiber.Ctx) error {
 		return RespondInternalError(c, "Failed to reset all health checks", err.Error())
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"message":         "All health checks reset successfully",
 		"restarted_count": restartedCount,
 		"restarted_at":    time.Now().Format(time.RFC3339),
