@@ -133,9 +133,9 @@ type segment struct {
 	dataReady chan struct{} // Closed when data or dataErr is set
 	readyOnce sync.Once    // Guards closing dataReady channel
 
-	once          sync.Once  // Guards GetReader initialization
 	limitedReader io.Reader  // Cached limited reader
-	mx            sync.Mutex // Protects released flag
+	readerReady   bool       // Whether limitedReader has been successfully initialized
+	mx            sync.Mutex // Protects released flag, limitedReader, readerReady
 	released      bool       // Tracks if segment data has been released
 }
 
@@ -211,47 +211,87 @@ func (s *segment) DataLen() int {
 	return len(s.data)
 }
 
-// GetReader returns a reader for the segment data.
-// Blocks until data is available or an error is set.
+// GetReaderContext returns a reader for the segment data.
+// Blocks until data is available, an error is set, or the context is cancelled.
 // The reader is limited to the range [Start, End] within the segment.
-func (s *segment) GetReader() io.Reader {
-	s.once.Do(func() {
-		// Wait for data to be ready
-		<-s.dataReady
+// If the context is cancelled before data arrives, returns an errorReader.
+// Subsequent calls with a valid context will retry if the previous attempt
+// was a context cancellation (unlike sync.Once which never retries).
+func (s *segment) GetReaderContext(ctx context.Context) io.Reader {
+	s.mx.Lock()
 
-		// Check for error first
-		s.mx.Lock()
-		err := s.dataErr
-		data := s.data
+	// Fast path: reader already initialized successfully
+	if s.readerReady {
+		r := s.limitedReader
 		s.mx.Unlock()
+		return r
+	}
 
-		if err != nil {
-			s.limitedReader = &errorReader{err: err}
-			return
-		}
-
-		// Create a reader over the full data
-		fullReader := bytes.NewReader(data)
-
-		// Skip to Start position
-		if s.Start > 0 {
-			_, seekErr := fullReader.Seek(s.Start, io.SeekStart)
-			if seekErr != nil {
-				s.mx.Lock()
-				if s.dataErr == nil {
-					s.dataErr = seekErr
-				}
+	// Check if we already have a non-context error cached
+	if s.limitedReader != nil {
+		if er, ok := s.limitedReader.(*errorReader); ok {
+			// If it was a real error (not context), return it
+			if !errors.Is(er.err, context.Canceled) && !errors.Is(er.err, context.DeadlineExceeded) {
+				r := s.limitedReader
 				s.mx.Unlock()
-				s.limitedReader = &errorReader{err: seekErr}
-				return
+				return r
 			}
+			// Previous was a context error — allow retry
+			s.limitedReader = nil
 		}
+	}
 
-		// Create LimitReader for the range [Start, End]
-		s.limitedReader = io.LimitReader(fullReader, s.End-s.Start+1)
-	})
+	s.mx.Unlock()
 
+	// Wait for data or context cancellation
+	select {
+	case <-s.dataReady:
+		// Data (or error) is ready
+	case <-ctx.Done():
+		return &errorReader{err: ctx.Err()}
+	}
+
+	s.mx.Lock()
+	defer s.mx.Unlock()
+
+	// Double-check: another goroutine may have initialized while we waited
+	if s.readerReady {
+		return s.limitedReader
+	}
+
+	// Check for download error
+	if s.dataErr != nil {
+		s.limitedReader = &errorReader{err: s.dataErr}
+		s.readerReady = true
+		return s.limitedReader
+	}
+
+	// Create a reader over the full data
+	fullReader := bytes.NewReader(s.data)
+
+	// Skip to Start position
+	if s.Start > 0 {
+		if _, seekErr := fullReader.Seek(s.Start, io.SeekStart); seekErr != nil {
+			if s.dataErr == nil {
+				s.dataErr = seekErr
+			}
+			s.limitedReader = &errorReader{err: seekErr}
+			s.readerReady = true
+			return s.limitedReader
+		}
+	}
+
+	// Create LimitReader for the range [Start, End]
+	s.limitedReader = io.LimitReader(fullReader, s.End-s.Start+1)
+	s.readerReady = true
 	return s.limitedReader
+}
+
+// GetReader returns a reader for the segment data.
+// Blocks indefinitely until data is available or an error is set.
+// Prefer GetReaderContext for cancellation support.
+func (s *segment) GetReader() io.Reader {
+	return s.GetReaderContext(context.Background())
 }
 
 // Release frees the segment data to allow GC. Safe to call multiple times.
