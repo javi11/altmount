@@ -47,6 +47,7 @@ func (e *DataCorruptionError) Unwrap() error {
 type UsenetReader struct {
 	log            *slog.Logger
 	wg             sync.WaitGroup
+	ctx            context.Context    // Reader's context for cancellation
 	cancel         context.CancelFunc
 	rg             *segmentRange
 	maxPrefetch    int // Maximum segments prefetched ahead of current read position
@@ -81,6 +82,7 @@ func NewUsenetReader(
 
 	ur := &UsenetReader{
 		log:            log,
+		ctx:            ctx,
 		cancel:         cancel,
 		rg:             rg,
 		init:           make(chan any, 1),
@@ -202,7 +204,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 	n := 0
 	for n < len(p) {
-		nn, err := s.GetReader().Read(p[n:])
+		nn, err := s.GetReaderContext(b.ctx).Read(p[n:])
 		n += nn
 
 		b.mu.Lock()

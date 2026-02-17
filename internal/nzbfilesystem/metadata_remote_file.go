@@ -882,8 +882,12 @@ func (mvf *MetadataVirtualFile) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 	defer reader.Close()
 
-	// Read the requested data
-	n, err = io.ReadFull(reader, p[:end-off+1])
+	// Read the requested data using a context-aware wrapper.
+	// This ensures reads are cancelled if the FUSE context expires,
+	// even if the underlying reader blocks.
+	ctx := mvf.ctx
+	buf := p[:end-off+1]
+	n, err = readFullContext(ctx, reader, buf)
 	if err == io.ErrUnexpectedEOF {
 		// Partial read is acceptable for ReadAt at end of file
 		err = nil
@@ -1358,6 +1362,29 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 		noRetry,
 	); err != nil {
 		slog.WarnContext(ctx, "Failed to update file health", "file", mvf.name, "error", err)
+	}
+}
+
+// readFullContext reads exactly len(buf) bytes from r, but returns early
+// if ctx is cancelled. This prevents io.ReadFull from blocking indefinitely
+// when the underlying reader is stuck (e.g., waiting for network data).
+func readFullContext(ctx context.Context, r io.Reader, buf []byte) (int, error) {
+	type result struct {
+		n   int
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		n, err := io.ReadFull(r, buf)
+		ch <- result{n, err}
+	}()
+	select {
+	case res := <-ch:
+		return res.n, res.err
+	case <-ctx.Done():
+		// Context cancelled — the goroutine will finish eventually when
+		// the reader is closed by the caller's defer reader.Close().
+		return 0, ctx.Err()
 	}
 }
 
