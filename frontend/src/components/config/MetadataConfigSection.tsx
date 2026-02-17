@@ -1,4 +1,4 @@
-import { Download, Save, HardDrive, ShieldAlert, Trash2, History } from "lucide-react";
+import { Download, HardDrive, History, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useBatchExportNZB } from "../../hooks/useConfig";
 import type { ConfigResponse, MetadataBackupConfig, MetadataConfig } from "../../types/config";
@@ -64,16 +64,20 @@ export function MetadataConfigSection({
 	return (
 		<div className="space-y-10">
 			<div>
-				<h3 className="text-lg font-bold text-base-content tracking-tight">Metadata Engine</h3>
-				<p className="text-sm text-base-content/50 break-words">Configure how AltMount stores and manages virtual file metadata.</p>
+				<h3 className="font-bold text-base-content text-lg tracking-tight">Metadata Engine</h3>
+				<p className="break-words text-base-content/50 text-sm">
+					Configure how AltMount stores and manages virtual file metadata.
+				</p>
 			</div>
 
 			<div className="space-y-8">
 				{/* Storage Path */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<HardDrive className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Primary Storage</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Primary Storage
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -89,7 +93,7 @@ export function MetadataConfigSection({
 								placeholder="/path/to/metadata"
 								required
 							/>
-							<p className="label text-[10px] text-base-content/50 break-words leading-relaxed">
+							<p className="label break-words text-[10px] text-base-content/50 leading-relaxed">
 								Path where .meta files (pointers to Usenet articles) will be saved. (Required)
 							</p>
 						</div>
@@ -97,10 +101,12 @@ export function MetadataConfigSection({
 				</div>
 
 				{/* Backup Options */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<History className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Mirroring</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Mirroring
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -108,7 +114,7 @@ export function MetadataConfigSection({
 						<div className="flex items-center justify-between gap-4">
 							<div className="min-w-0 flex-1">
 								<h5 className="font-bold text-sm">Automatic Backups</h5>
-								<p className="text-[11px] text-base-content/50 break-words leading-relaxed mt-1">
+								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 									Mirrors all metadata files to an external directory for disaster recovery.
 								</p>
 							</div>
@@ -122,7 +128,7 @@ export function MetadataConfigSection({
 						</div>
 
 						{formData.backup?.enabled && (
-							<div className="space-y-6 animate-in fade-in slide-in-from-top-2 pt-2">
+							<div className="fade-in slide-in-from-top-2 animate-in space-y-6 pt-2">
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend font-semibold">Backup Target Path</legend>
 									<input
@@ -143,7 +149,12 @@ export function MetadataConfigSection({
 											className="input input-bordered w-full bg-base-100 font-mono text-sm"
 											value={formData.backup?.interval_hours ?? 24}
 											disabled={isReadOnly}
-											onChange={(e) => handleBackupChange("interval_hours", parseInt(e.target.value) || 24)}
+											onChange={(e) =>
+												handleBackupChange(
+													"interval_hours",
+													Number.parseInt(e.target.value, 10) || 24,
+												)
+											}
 											min="1"
 										/>
 									</fieldset>
@@ -154,7 +165,12 @@ export function MetadataConfigSection({
 											className="input input-bordered w-full bg-base-100 font-mono text-sm"
 											value={formData.backup?.keep_backups ?? 10}
 											disabled={isReadOnly}
-											onChange={(e) => handleBackupChange("keep_backups", parseInt(e.target.value) || 10)}
+											onChange={(e) =>
+												handleBackupChange(
+													"keep_backups",
+													Number.parseInt(e.target.value, 10) || 10,
+												)
+											}
 											min="1"
 										/>
 									</fieldset>
@@ -165,43 +181,74 @@ export function MetadataConfigSection({
 				</div>
 
 				{/* Retention Logic */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<Trash2 className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Source Cleanup</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Source Cleanup
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
 					<div className="space-y-4">
-						<label className="label cursor-pointer justify-start gap-4 items-start">
-							<input type="checkbox" className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0" checked={formData.delete_source_nzb_on_removal ?? false} disabled={isReadOnly} onChange={(e) => handleCheckboxChange("delete_source_nzb_on_removal", e.target.checked)} />
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
+								checked={formData.delete_source_nzb_on_removal ?? false}
+								disabled={isReadOnly}
+								onChange={(e) =>
+									handleCheckboxChange("delete_source_nzb_on_removal", e.target.checked)
+								}
+							/>
 							<div className="min-w-0 flex-1">
-								<span className="label-text font-bold text-xs block break-words">Purge Source NZB</span>
-								<span className="text-[10px] text-base-content/50 break-words block leading-relaxed mt-0.5">
+								<span className="label-text block break-words font-bold text-xs">
+									Purge Source NZB
+								</span>
+								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
 									Delete original NZB file when metadata is manually removed from AltMount.
 								</span>
 							</div>
 						</label>
 
-						<label className="label cursor-pointer justify-start gap-4 items-start">
-							<input type="checkbox" className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0" checked={formData.delete_failed_nzb ?? true} disabled={isReadOnly} onChange={(e) => handleCheckboxChange("delete_failed_nzb", e.target.checked)} />
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
+								checked={formData.delete_failed_nzb ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleCheckboxChange("delete_failed_nzb", e.target.checked)}
+							/>
 							<div className="min-w-0 flex-1">
-								<span className="label-text font-bold text-xs block break-words">Clean Failed NZBs</span>
-								<span className="text-[10px] text-base-content/50 break-words block leading-relaxed mt-0.5">
+								<span className="label-text block break-words font-bold text-xs">
+									Clean Failed NZBs
+								</span>
+								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
 									Permanently delete NZBs that fail processing instead of moving to 'failed' folder.
 								</span>
 							</div>
 						</label>
 
-						<label className="label cursor-pointer justify-start gap-4 items-start">
-							<input type="checkbox" className="checkbox checkbox-error checkbox-sm mt-1 shrink-0" checked={formData.delete_completed_nzb ?? false} disabled={isReadOnly} onChange={(e) => handleCheckboxChange("delete_completed_nzb", e.target.checked)} />
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-error checkbox-sm mt-1 shrink-0"
+								checked={formData.delete_completed_nzb ?? false}
+								disabled={isReadOnly}
+								onChange={(e) => handleCheckboxChange("delete_completed_nzb", e.target.checked)}
+							/>
 							<div className="min-w-0 flex-1">
 								<div className="flex items-center gap-2">
-									<span className="label-text font-bold text-xs break-words">Aggressive Cleanup</span>
-									<div className="badge badge-error badge-xs font-black text-[8px] uppercase">Dangerous</div>
+									<span className="label-text break-words font-bold text-xs">
+										Aggressive Cleanup
+									</span>
+									<div className="badge badge-error badge-xs font-black text-[8px] uppercase">
+										Dangerous
+									</div>
 								</div>
-								<span className="text-[10px] text-base-content/50 break-words block leading-relaxed mt-0.5">
-									Delete original NZB immediately after metadata generation. Cannot re-scan without re-upload.
+								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
+									Delete original NZB immediately after metadata generation. Cannot re-scan without
+									re-upload.
 								</span>
 							</div>
 						</label>
@@ -209,7 +256,7 @@ export function MetadataConfigSection({
 				</div>
 
 				{/* Utility Actions */}
-				<div className="rounded-2xl border border-warning/20 bg-warning/5 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-warning/20 bg-warning/5 p-6">
 					<div className="flex items-center gap-2 text-warning">
 						<ShieldAlert className="h-4 w-4" />
 						<h4 className="font-bold text-[10px] uppercase tracking-widest">Maintenance Utility</h4>
@@ -218,9 +265,9 @@ export function MetadataConfigSection({
 					<div className="space-y-4">
 						<div className="min-w-0">
 							<h5 className="font-bold text-sm">Disaster Recovery Export</h5>
-							<p className="text-[11px] opacity-70 break-words leading-relaxed mt-1">
-								Generates a single ZIP containing all your metadata as raw NZB files. 
-								Essential for migration or manual reconstruction.
+							<p className="mt-1 break-words text-[11px] leading-relaxed opacity-70">
+								Generates a single ZIP containing all your metadata as raw NZB files. Essential for
+								migration or manual reconstruction.
 							</p>
 						</div>
 						<button
@@ -229,7 +276,11 @@ export function MetadataConfigSection({
 							onClick={() => batchExport.mutate("/")}
 							disabled={batchExport.isPending || !formData.root_path.trim()}
 						>
-							{batchExport.isPending ? <LoadingSpinner size="sm" /> : <Download className="h-4 w-4" />}
+							{batchExport.isPending ? (
+								<LoadingSpinner size="sm" />
+							) : (
+								<Download className="h-4 w-4" />
+							)}
 							Batch Export NZBs
 						</button>
 					</div>
@@ -238,10 +289,10 @@ export function MetadataConfigSection({
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end pt-4 border-t border-base-200">
+				<div className="flex justify-end border-base-200 border-t pt-4">
 					<button
 						type="button"
-						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating || !formData.root_path.trim()}
 					>

@@ -1,4 +1,4 @@
-import { Info, Save, Server, Globe, Key } from "lucide-react";
+import { Globe, Info, Key, Save, Server } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ConfigResponse, WebDAVConfig } from "../../types/config";
@@ -64,16 +64,20 @@ export function WebDAVConfigSection({
 	return (
 		<div className="space-y-10">
 			<div>
-				<h3 className="text-lg font-bold text-base-content tracking-tight">WebDAV Interface</h3>
-				<p className="text-sm text-base-content/50 break-words">Expose your virtual library over the network via WebDAV protocol.</p>
+				<h3 className="font-bold text-base-content text-lg tracking-tight">WebDAV Interface</h3>
+				<p className="break-words text-base-content/50 text-sm">
+					Expose your virtual library over the network via WebDAV protocol.
+				</p>
 			</div>
 
 			<div className="space-y-8">
 				{/* Network Configuration */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<Globe className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Network Access</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Network Access
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -88,7 +92,9 @@ export function WebDAVConfigSection({
 								onChange={(e) => handleInputChange("host", e.target.value)}
 								placeholder="localhost"
 							/>
-							<p className="label text-[10px] opacity-50 break-words mt-2">Required for .strm file generation.</p>
+							<p className="label mt-2 break-words text-[10px] opacity-50">
+								Required for .strm file generation.
+							</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
@@ -98,18 +104,24 @@ export function WebDAVConfigSection({
 								className="input input-bordered w-full bg-base-100 font-mono text-sm"
 								value={formData.port}
 								readOnly={isReadOnly}
-								onChange={(e) => handleInputChange("port", Number.parseInt(e.target.value, 10) || 0)}
+								onChange={(e) =>
+									handleInputChange("port", Number.parseInt(e.target.value, 10) || 0)
+								}
 							/>
-							<p className="label text-[10px] opacity-50 break-words mt-2">TCP port for server binding.</p>
+							<p className="label mt-2 break-words text-[10px] opacity-50">
+								TCP port for server binding.
+							</p>
 						</fieldset>
 					</div>
 				</div>
 
 				{/* Credentials Section */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<Key className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Security</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Security
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -138,15 +150,17 @@ export function WebDAVConfigSection({
 				</div>
 
 				{/* Mount Path Integration */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<Server className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">System Integration</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							System Integration
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-semibold break-words">WebDAV Mount Path</legend>
+						<legend className="fieldset-legend break-words font-semibold">WebDAV Mount Path</legend>
 						<div className="flex flex-col gap-3">
 							<input
 								type="text"
@@ -157,26 +171,28 @@ export function WebDAVConfigSection({
 								placeholder="/mnt/remotes/altmount"
 							/>
 							<div className="label p-0">
-								<span className="text-[10px] text-base-content/50 break-words leading-relaxed">
-									Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual files.
-									Required for healthy repairs.
+								<span className="break-words text-[10px] text-base-content/50 leading-relaxed">
+									Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual
+									files. Required for healthy repairs.
 								</span>
 							</div>
 						</div>
 					</fieldset>
 
-					<div className="rounded-xl border border-info/20 bg-info/5 p-5 animate-in fade-in slide-in-from-bottom-2">
-						<div className="flex gap-4 items-start">
-							<Info className="h-5 w-5 text-info shrink-0 mt-0.5" />
-							<div className="space-y-4 min-w-0 flex-1">
+					<div className="fade-in slide-in-from-bottom-2 animate-in rounded-xl border border-info/20 bg-info/5 p-5">
+						<div className="flex items-start gap-4">
+							<Info className="mt-0.5 h-5 w-5 shrink-0 text-info" />
+							<div className="min-w-0 flex-1 space-y-4">
 								<div className="min-w-0">
-									<h5 className="font-bold text-xs uppercase tracking-wider text-info break-words">Pro-Tip: Integrated Mounting</h5>
-									<p className="text-[11px] leading-relaxed mt-1 opacity-80 break-words">
+									<h5 className="break-words font-bold text-info text-xs uppercase tracking-wider">
+										Pro-Tip: Integrated Mounting
+									</h5>
+									<p className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
 										Avoid manual setup! Use our built-in high-performance mount engine for automatic
 										connectivity and lifecycle management.
 									</p>
 								</div>
-								<Link to="/config/mount" className="btn btn-info btn-xs px-4 shadow-sm h-8">
+								<Link to="/config/mount" className="btn btn-info btn-xs h-8 px-4 shadow-sm">
 									Configure Auto-Mount
 								</Link>
 							</div>
@@ -187,10 +203,10 @@ export function WebDAVConfigSection({
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end pt-4 border-t border-base-200">
+				<div className="flex justify-end border-base-200 border-t pt-4">
 					<button
 						type="button"
-						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>

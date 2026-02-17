@@ -86,7 +86,7 @@ export function Pagination({
 					className="join-item btn btn-sm"
 					onClick={() => onPageChange(1)}
 					disabled={currentPage === 1}
-					title="First page"
+					aria-label="Go to first page"
 				>
 					«
 				</button>
@@ -97,7 +97,7 @@ export function Pagination({
 					className="join-item btn btn-sm"
 					onClick={() => onPageChange(currentPage - 1)}
 					disabled={currentPage === 1}
-					title="Previous page"
+					aria-label="Go to previous page"
 				>
 					‹
 				</button>
@@ -111,6 +111,7 @@ export function Pagination({
 								type="button"
 								className="join-item btn btn-sm btn-disabled"
 								disabled
+								aria-label="More pages available"
 							>
 								...
 							</button>
@@ -124,6 +125,8 @@ export function Pagination({
 							type="button"
 							className={`join-item btn btn-sm ${pageNum === currentPage ? "btn-active" : ""}`}
 							onClick={() => onPageChange(pageNum)}
+							aria-label={`Page ${pageNum}`}
+							aria-current={pageNum === currentPage ? "page" : undefined}
 						>
 							{pageNum}
 						</button>
@@ -136,7 +139,7 @@ export function Pagination({
 					className="join-item btn btn-sm"
 					onClick={() => onPageChange(currentPage + 1)}
 					disabled={currentPage === totalPages}
-					title="Next page"
+					aria-label="Go to next page"
 				>
 					›
 				</button>
@@ -147,7 +150,7 @@ export function Pagination({
 					className="join-item btn btn-sm"
 					onClick={() => onPageChange(totalPages)}
 					disabled={currentPage === totalPages}
-					title="Last page"
+					aria-label="Go to last page"
 				>
 					»
 				</button>

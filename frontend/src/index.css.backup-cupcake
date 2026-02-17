@@ -1,0 +1,20 @@
+/** biome-ignore-all lint/suspicious/noUnknownAtRules: wrong lint */
+/** biome-ignore-all lint/correctness/noUnknownProperty: wrong lint */
+@import "tailwindcss";
+@plugin "daisyui" {
+	themes:
+		cupcake --default,
+		dim --prefersdark,
+		cupcake,
+		bumblebee,
+		emerald,
+		corporate,
+		dim,
+		dracula;
+}
+@plugin "@tailwindcss/typography";
+
+/* Fix for DaisyUI menu active state on buttons */
+.menu li > button.active {
+	@apply bg-primary text-primary-content;
+}

@@ -552,7 +552,7 @@ function NzbDavImportSection() {
 							</fieldset>
 
 							<div className="flex flex-col justify-center space-y-3">
-								<label className="label mb-1 font-semibold text-xs opacity-60">Input Method</label>
+								<div className="label mb-1 font-semibold text-xs opacity-60">Input Method</div>
 								<div className="flex gap-4">
 									<label className="label cursor-pointer gap-2">
 										<input

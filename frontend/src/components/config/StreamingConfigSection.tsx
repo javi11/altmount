@@ -40,23 +40,27 @@ export function StreamingConfigSection({
 	return (
 		<div className="space-y-10">
 			<div>
-				<h3 className="text-lg font-bold text-base-content">Playback Tuning</h3>
-				<p className="text-sm text-base-content/50">Optimize how AltMount streams media to your players.</p>
+				<h3 className="font-bold text-base-content text-lg">Playback Tuning</h3>
+				<p className="text-base-content/50 text-sm">
+					Optimize how AltMount streams media to your players.
+				</p>
 			</div>
 
 			<div className="space-y-8">
 				{/* Prefetch Slider */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
-					<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
-							<h4 className="font-bold text-sm text-base-content">Segment Prefetch</h4>
-							<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
+							<h4 className="font-bold text-base-content text-sm">Segment Prefetch</h4>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								Number of Usenet articles to download ahead of current playback position.
 							</p>
 						</div>
-						<div className="flex items-center gap-3 shrink-0">
-							<span className="font-mono font-black text-xl text-primary">{formData.max_prefetch}</span>
-							<span className="text-[10px] font-bold uppercase opacity-40">segments</span>
+						<div className="flex shrink-0 items-center gap-3">
+							<span className="font-black font-mono text-primary text-xl">
+								{formData.max_prefetch}
+							</span>
+							<span className="font-bold text-[10px] uppercase opacity-40">segments</span>
 						</div>
 					</div>
 
@@ -69,9 +73,11 @@ export function StreamingConfigSection({
 							className="range range-primary range-sm"
 							step="1"
 							disabled={isReadOnly}
-							onChange={(e) => handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10))}
+							onChange={(e) =>
+								handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10))
+							}
 						/>
-						<div className="flex justify-between px-2 text-[10px] font-black opacity-30">
+						<div className="flex justify-between px-2 font-black text-[10px] opacity-30">
 							<span>1</span>
 							<span>10</span>
 							<span>20</span>
@@ -83,12 +89,14 @@ export function StreamingConfigSection({
 				</div>
 
 				{/* Guidance */}
-				<div className="alert rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm items-start">
-					<Info className="h-5 w-5 text-info shrink-0 mt-0.5" />
+				<div className="alert items-start rounded-2xl border border-info/20 bg-info/5 p-4 shadow-sm">
+					<Info className="mt-0.5 h-5 w-5 shrink-0 text-info" />
 					<div className="min-w-0 flex-1">
-						<div className="font-bold text-xs uppercase tracking-wider text-info">Performance Note</div>
-						<div className="text-[11px] leading-relaxed mt-1 break-words opacity-80">
-							Higher values improve stability on slow connections but increase initial memory usage. 
+						<div className="font-bold text-info text-xs uppercase tracking-wider">
+							Performance Note
+						</div>
+						<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
+							Higher values improve stability on slow connections but increase initial memory usage.
 							Default (3) is recommended for most 4K streaming scenarios.
 						</div>
 					</div>
@@ -97,10 +105,10 @@ export function StreamingConfigSection({
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end pt-4 border-t border-base-200">
+				<div className="flex justify-end border-base-200 border-t pt-4">
 					<button
 						type="button"
-						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>

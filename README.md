@@ -1,7 +1,7 @@
 # AltMount
 
 <p align="center">
-  <img src="./docs/static/img/logo.png" alt="AltMount Logo" width="150" height="150" />
+  <img src="./docs/static/img/logo.jpg" alt="AltMount Logo" width="150" height="150" />
 </p>
 
 A WebDAV server backed by NZB/Usenet that provides seamless access to Usenet content through standard WebDAV protocols.

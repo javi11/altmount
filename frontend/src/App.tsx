@@ -22,7 +22,7 @@ function App() {
 				<ModalProvider>
 					<AuthProvider>
 						<BrowserRouter>
-							<div className="min-h-screen bg-base-100" data-theme="light">
+							<div className="min-h-screen bg-base-100">
 								<Routes>
 									{/* Protected routes */}
 									<Route
