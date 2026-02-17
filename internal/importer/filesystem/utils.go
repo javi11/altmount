@@ -163,8 +163,8 @@ func CreateDirectoriesForFiles(virtualDir string, files []parser.ParsedFile, met
 		parentDirName := filepath.Base(virtualDir)
 		if dir == parentDirName {
 			dir = "."
-		} else if strings.HasPrefix(dir, parentDirName+"/") {
-			dir = strings.TrimPrefix(dir, parentDirName+"/")
+		} else if after, ok := strings.CutPrefix(dir, parentDirName+"/"); ok {
+			dir = after
 		}
 
 		if dir != "." && dir != "/" {
@@ -205,8 +205,8 @@ func DetermineFileLocation(file parser.ParsedFile, baseDir string) (parentPath, 
 	parentDirName := filepath.Base(baseDir)
 	if dir == parentDirName {
 		dir = "."
-	} else if strings.HasPrefix(dir, parentDirName+"/") {
-		dir = strings.TrimPrefix(dir, parentDirName+"/")
+	} else if after, ok := strings.CutPrefix(dir, parentDirName+"/"); ok {
+		dir = after
 	}
 
 	if dir == "." || dir == "/" {

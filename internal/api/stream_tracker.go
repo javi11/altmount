@@ -78,7 +78,7 @@ func (t *StreamTracker) cleanupStale() {
 	now := time.Now()
 	var removed int
 
-	t.streams.Range(func(key, value interface{}) bool {
+	t.streams.Range(func(key, value any) bool {
 		internal := value.(*streamInternal)
 		stream := internal.ActiveStream
 		if now.Sub(stream.StartedAt) > t.timeout {
@@ -110,82 +110,82 @@ func (t *StreamTracker) snapshotLoop() {
 		select {
 		case <-t.done:
 			return
-					case <-ticker.C:
-					t.streams.Range(func(key, value interface{}) bool {
-						s := value.(*streamInternal)
-						now := time.Now()
-		
-						// Cleanup stale streams (no activity for 30 minutes)
-						// This handles cases where clients disconnect without properly closing the stream
-						if !s.lastSnapshot.IsZero() && now.Sub(s.lastSnapshot) > 30*time.Minute {
-							t.Remove(key.(string))
-							return true
+		case <-ticker.C:
+			t.streams.Range(func(key, value any) bool {
+				s := value.(*streamInternal)
+				now := time.Now()
+
+				// Cleanup stale streams (no activity for 30 minutes)
+				// This handles cases where clients disconnect without properly closing the stream
+				if !s.lastSnapshot.IsZero() && now.Sub(s.lastSnapshot) > 30*time.Minute {
+					t.Remove(key.(string))
+					return true
+				}
+
+				currentBytes := atomic.LoadInt64(&s.BytesSent)
+				currentDownloaded := atomic.LoadInt64(&s.BytesDownloaded)
+
+				// Add current sample
+				s.samples = append(s.samples, streamSample{
+					bytesSent:       currentBytes,
+					bytesDownloaded: currentDownloaded,
+					timestamp:       now,
+				})
+
+				// Cleanup old samples (keep 60 seconds of history)
+				cutoff := now.Add(-60 * time.Second)
+				keepIndex := 0
+				for i, sample := range s.samples {
+					if sample.timestamp.After(cutoff) {
+						keepIndex = i
+						break
+					}
+				}
+				if keepIndex > 0 {
+					s.samples = s.samples[keepIndex:]
+				}
+
+				// Calculate windowed speed (10 second window)
+				if len(s.samples) > 1 {
+					speedWindow := 10 * time.Second
+					windowCutoff := now.Add(-speedWindow)
+
+					var referenceSample *streamSample
+					for i := len(s.samples) - 1; i >= 0; i-- {
+						if s.samples[i].timestamp.Before(windowCutoff) {
+							referenceSample = &s.samples[i]
+							break
 						}
-		
-										currentBytes := atomic.LoadInt64(&s.BytesSent)
-										currentDownloaded := atomic.LoadInt64(&s.BytesDownloaded)
-						
-										// Add current sample
-										s.samples = append(s.samples, streamSample{
-											bytesSent:       currentBytes,
-											bytesDownloaded: currentDownloaded,
-											timestamp:       now,
-										})
-						
-										// Cleanup old samples (keep 60 seconds of history)
-										cutoff := now.Add(-60 * time.Second)
-										keepIndex := 0
-										for i, sample := range s.samples {
-											if sample.timestamp.After(cutoff) {
-												keepIndex = i
-												break
-											}
-										}
-										if keepIndex > 0 {
-											s.samples = s.samples[keepIndex:]
-										}
-						
-										// Calculate windowed speed (10 second window)
-										if len(s.samples) > 1 {
-											speedWindow := 10 * time.Second
-											windowCutoff := now.Add(-speedWindow)
-											
-											var referenceSample *streamSample
-											for i := len(s.samples) - 1; i >= 0; i-- {
-												if s.samples[i].timestamp.Before(windowCutoff) {
-													referenceSample = &s.samples[i]
-													break
-												}
-											}
-						
-											if referenceSample == nil {
-												// Fallback to oldest sample if we don't have enough history yet
-												referenceSample = &s.samples[0]
-											}
-						
-											duration := now.Sub(referenceSample.timestamp).Seconds()
-											if duration > 0 {
-												// Playback speed
-												bytesDiff := currentBytes - referenceSample.bytesSent
-												if bytesDiff >= 0 {
-													s.BytesPerSecond = int64(float64(bytesDiff) / duration)
-												}
-						
-												// Download speed
-												downloadDiff := currentDownloaded - referenceSample.bytesDownloaded
-												if downloadDiff >= 0 {
-													s.DownloadSpeed = int64(float64(downloadDiff) / duration)
-												}
-											}
-										}		
-						// Update Status
-						if currentBytes == 0 {
-							s.Status = "Buffering"
-						} else if !s.lastReadAt.IsZero() && now.Sub(s.lastReadAt) > 10*time.Second {
-							s.Status = "Stalled"
-						} else {
-							s.Status = "Streaming"
+					}
+
+					if referenceSample == nil {
+						// Fallback to oldest sample if we don't have enough history yet
+						referenceSample = &s.samples[0]
+					}
+
+					duration := now.Sub(referenceSample.timestamp).Seconds()
+					if duration > 0 {
+						// Playback speed
+						bytesDiff := currentBytes - referenceSample.bytesSent
+						if bytesDiff >= 0 {
+							s.BytesPerSecond = int64(float64(bytesDiff) / duration)
 						}
+
+						// Download speed
+						downloadDiff := currentDownloaded - referenceSample.bytesDownloaded
+						if downloadDiff >= 0 {
+							s.DownloadSpeed = int64(float64(downloadDiff) / duration)
+						}
+					}
+				}
+				// Update Status
+				if currentBytes == 0 {
+					s.Status = "Buffering"
+				} else if !s.lastReadAt.IsZero() && now.Sub(s.lastReadAt) > 10*time.Second {
+					s.Status = "Stalled"
+				} else {
+					s.Status = "Streaming"
+				}
 				// Calculate Average Speed
 				totalDuration := now.Sub(s.StartedAt).Seconds()
 				if totalDuration > 0 {
@@ -197,10 +197,7 @@ func (t *StreamTracker) snapshotLoop() {
 					currentOffset := atomic.LoadInt64(&s.CurrentOffset)
 					// Use the greater of CurrentOffset or BytesSent to determine progress
 					// This handles cases where offset tracking might be missing
-					progress := currentOffset
-					if currentBytes > progress {
-						progress = currentBytes
-					}
+					progress := max(currentBytes, currentOffset)
 
 					remainingBytes := s.TotalSize - progress
 					if remainingBytes > 0 {
@@ -365,7 +362,7 @@ func (t *StreamTracker) GetHistory() []nzbfilesystem.ActiveStream {
 	return res
 }
 
-func valueToInternal(val interface{}) *streamInternal {
+func valueToInternal(val any) *streamInternal {
 	return val.(*streamInternal)
 }
 
@@ -374,7 +371,7 @@ func (t *StreamTracker) GetAll() []nzbfilesystem.ActiveStream {
 	// Map to group streams: key -> *nzbfilesystem.ActiveStream
 	grouped := make(map[string]*nzbfilesystem.ActiveStream)
 
-	t.streams.Range(func(key, value interface{}) bool {
+	t.streams.Range(func(key, value any) bool {
 		internal := value.(*streamInternal)
 		s := internal.ActiveStream
 

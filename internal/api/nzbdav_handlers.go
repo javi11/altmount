@@ -140,8 +140,8 @@ func (s *Server) handleResetNzbdavImportStatus(c *fiber.Ctx) error {
 	})
 }
 
-func toImportStatusResponse(info importer.ImportInfo) map[string]interface{} {
-	return map[string]interface{}{
+func toImportStatusResponse(info importer.ImportInfo) map[string]any {
+	return map[string]any{
 		"status":     string(info.Status),
 		"total":      info.Total,
 		"added":      info.Added,

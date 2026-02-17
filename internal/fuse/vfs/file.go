@@ -135,10 +135,7 @@ func (cf *CachedFile) ReadAt(p []byte, off int64) (int, error) {
 func (cf *CachedFile) fetchRange(start, end int64) error {
 	// Align to chunk boundaries
 	alignedStart := (start / cf.chunkSize) * cf.chunkSize
-	alignedEnd := ((end + cf.chunkSize - 1) / cf.chunkSize) * cf.chunkSize
-	if alignedEnd > cf.size {
-		alignedEnd = cf.size
-	}
+	alignedEnd := min(((end+cf.chunkSize-1)/cf.chunkSize)*cf.chunkSize, cf.size)
 
 	// Quick check — avoid singleflight overhead when already cached
 	missing := cf.item.MissingRanges(alignedStart, alignedEnd)
@@ -151,7 +148,7 @@ func (cf *CachedFile) fetchRange(start, end int64) error {
 	// - Same chunk from concurrent readers is deduplicated (same key)
 	for _, r := range missing {
 		key := fmt.Sprintf("%d-%d", r.Start, r.End)
-		_, err, _ := cf.fetchGroup.Do(key, func() (interface{}, error) {
+		_, err, _ := cf.fetchGroup.Do(key, func() (any, error) {
 			return nil, cf.fetchAndCache(r.Start, r.End)
 		})
 		if err != nil {

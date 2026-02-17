@@ -53,7 +53,7 @@ func (m *Manager) GetOrCreateSonarrClient(instanceName, url, apiKey string) (*so
 }
 
 // GetOrCreateClient is a helper to get or create the appropriate client
-func (m *Manager) GetOrCreateClient(instance *model.ConfigInstance) (interface{}, error) {
+func (m *Manager) GetOrCreateClient(instance *model.ConfigInstance) (any, error) {
 	if instance.Type == "radarr" {
 		return m.GetOrCreateRadarrClient(instance.Name, instance.URL, instance.APIKey)
 	}

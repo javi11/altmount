@@ -21,13 +21,13 @@ type mockFile struct {
 	isClosed bool
 }
 
-func (f *mockFile) Close() error               { f.isClosed = true; return nil }
-func (f *mockFile) Name() string                { return "mock" }
-func (f *mockFile) Stat() (os.FileInfo, error)  { return nil, nil }
-func (f *mockFile) Sync() error                 { return nil }
-func (f *mockFile) Truncate(int64) error        { return nil }
-func (f *mockFile) WriteString(string) (int, error) { return 0, nil }
-func (f *mockFile) Write([]byte) (int, error)   { return 0, nil }
+func (f *mockFile) Close() error                       { f.isClosed = true; return nil }
+func (f *mockFile) Name() string                       { return "mock" }
+func (f *mockFile) Stat() (os.FileInfo, error)         { return nil, nil }
+func (f *mockFile) Sync() error                        { return nil }
+func (f *mockFile) Truncate(int64) error               { return nil }
+func (f *mockFile) WriteString(string) (int, error)    { return 0, nil }
+func (f *mockFile) Write([]byte) (int, error)          { return 0, nil }
 func (f *mockFile) WriteAt([]byte, int64) (int, error) { return 0, nil }
 func (f *mockFile) Readdir(int) ([]os.FileInfo, error) { return nil, nil }
 func (f *mockFile) Readdirnames(int) ([]string, error) { return nil, nil }
@@ -181,16 +181,14 @@ func TestCachedFile_Concurrent_Reads(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			off := int64(i * 15)
 			buf := make([]byte, 10)
 			n, err := cf.ReadAt(buf, off)
 			assert.NoError(t, err)
 			assert.Equal(t, 10, n)
 			assert.Equal(t, data[off:off+10], buf)
-		}()
+		})
 	}
 	wg.Wait()
 }

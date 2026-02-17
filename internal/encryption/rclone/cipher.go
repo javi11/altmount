@@ -187,7 +187,7 @@ func NewCipher(mode NameEncryptionMode, password, salt string, dirNameEncrypt bo
 		dirNameEncrypt:  dirNameEncrypt,
 		encryptedSuffix: ".bin",
 	}
-	c.buffers.New = func() interface{} {
+	c.buffers.New = func() any {
 		return new([blockSize]byte)
 	}
 	if password != "" {
@@ -298,7 +298,7 @@ func (c *Cipher) obfuscateSegment(plaintext string, k *key) string {
 	_, _ = result.WriteString(strconv.Itoa(dir) + ".")
 
 	// but we'll augment it with the nameKey for real calculation
-	for i := 0; i < len(k.nameKey); i++ {
+	for i := range len(k.nameKey) {
 		dir += int(k.nameKey[i])
 	}
 
@@ -365,14 +365,14 @@ func (c *Cipher) deobfuscateSegment(ciphertext string, k *key) (string, error) {
 	if ciphertext == "" {
 		return "", nil
 	}
-	pos := strings.Index(ciphertext, ".")
-	if pos == -1 {
+	before, after, ok := strings.Cut(ciphertext, ".")
+	if !ok {
 		return "", ErrorNotAnEncryptedFile
 	} // No .
-	num := ciphertext[:pos]
+	num := before
 	if num == "!" {
 		// No rotation; probably original was not valid unicode
-		return ciphertext[pos+1:], nil
+		return after, nil
 	}
 	dir, err := strconv.Atoi(num)
 	if err != nil {
@@ -380,14 +380,14 @@ func (c *Cipher) deobfuscateSegment(ciphertext string, k *key) (string, error) {
 	}
 
 	// add the nameKey to get the real rotate distance
-	for i := 0; i < len(k.nameKey); i++ {
+	for i := range len(k.nameKey) {
 		dir += int(k.nameKey[i])
 	}
 
 	var result bytes.Buffer
 
 	inQuote := false
-	for _, runeValue := range ciphertext[pos+1:] {
+	for _, runeValue := range after {
 		switch {
 		case inQuote:
 			_, _ = result.WriteRune(runeValue)
@@ -650,7 +650,7 @@ func (n *nonce) increment() {
 // add a uint64 to the nonce
 func (n *nonce) add(x uint64) {
 	carry := uint16(0)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		digit := (*n)[i]
 		xDigit := byte(x)
 		x >>= 8

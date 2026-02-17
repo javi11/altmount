@@ -21,21 +21,21 @@ import (
 
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
-	log                 *slog.Logger
-	poolManager         pool.Manager
+	log                  *slog.Logger
+	poolManager          pool.Manager
 	maxConcurrentVolumes int
-	maxPrefetch         int
-	readTimeout         time.Duration
+	maxPrefetch          int
+	readTimeout          time.Duration
 }
 
 // NewProcessor creates a new RAR processor
 func NewProcessor(poolManager pool.Manager, maxConcurrentVolumes int, maxPrefetch int, readTimeout time.Duration) Processor {
 	return &rarProcessor{
-		log:                 slog.Default().With("component", "rar-processor"),
-		poolManager:         poolManager,
+		log:                  slog.Default().With("component", "rar-processor"),
+		poolManager:          poolManager,
 		maxConcurrentVolumes: maxConcurrentVolumes,
-		maxPrefetch:         maxPrefetch,
-		readTimeout:         readTimeout,
+		maxPrefetch:          maxPrefetch,
+		readTimeout:          readTimeout,
 	}
 }
 
@@ -530,14 +530,8 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 			break
 		}
 
-		overlapStart := segAbsStart
-		if overlapStart < targetStart {
-			overlapStart = targetStart
-		}
-		overlapEnd := segAbsEnd
-		if overlapEnd > targetEnd {
-			overlapEnd = targetEnd
-		}
+		overlapStart := max(segAbsStart, targetStart)
+		overlapEnd := min(segAbsEnd, targetEnd)
 		if overlapEnd >= overlapStart {
 			// Translate back to segment-relative offsets.
 			relStart := seg.StartOffset + (overlapStart - segAbsStart)

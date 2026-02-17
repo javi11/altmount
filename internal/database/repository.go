@@ -11,9 +11,9 @@ import (
 // DBQuerier defines the interface for database query operations
 // Both *sql.DB and *sql.Tx implement this interface
 type DBQuerier interface {
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // Repository provides database operations for NZB and file management
@@ -273,25 +273,25 @@ func (r *Repository) AddBatchToQueue(ctx context.Context, items []*ImportQueueIt
 func (r *Repository) UpdateQueueItemStatus(ctx context.Context, id int64, status QueueStatus, errorMessage *string) error {
 	now := time.Now()
 	var query string
-	var args []interface{}
+	var args []any
 
 	switch status {
 	case QueueStatusProcessing:
 		query = `UPDATE import_queue SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`
-		args = []interface{}{status, now, now, id}
+		args = []any{status, now, now, id}
 	case QueueStatusCompleted:
 		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
-		args = []interface{}{status, now, now, id}
+		args = []any{status, now, now, id}
 		// Track successful import
 		_ = r.IncrementDailyStat(ctx, "completed")
 	case QueueStatusFailed:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
-		args = []interface{}{status, errorMessage, now, id}
+		args = []any{status, errorMessage, now, id}
 		// Track failed import
 		_ = r.IncrementDailyStat(ctx, "failed")
 	default:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
-		args = []interface{}{status, errorMessage, now, id}
+		args = []any{status, errorMessage, now, id}
 	}
 
 	_, err := r.db.ExecContext(ctx, query, args...)
@@ -407,7 +407,7 @@ func (r *Repository) RemoveFromQueueBulk(ctx context.Context, ids []int64) (*Bul
 
 	// Build placeholders for the IN clause
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
@@ -461,7 +461,7 @@ func (r *Repository) RestartQueueItemsBulk(ctx context.Context, ids []int64) err
 
 	// Build placeholders for the IN clause
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
@@ -581,7 +581,7 @@ func (r *Repository) UpdateQueueStats(ctx context.Context) error {
 		WHERE id = (SELECT MAX(id) FROM queue_stats)
 	`
 
-	var avgTime interface{}
+	var avgTime any
 	if avgProcessingTime.Valid {
 		avgTime = avgProcessingTime.Int64
 	} else {
@@ -599,14 +599,14 @@ func (r *Repository) UpdateQueueStats(ctx context.Context) error {
 // ListQueueItems retrieves queue items with optional filtering
 func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, search string, category string, limit, offset int, sortBy, sortOrder string) ([]*ImportQueueItem, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
 	               FROM import_queue`
 
 	var conditions []string
-	var conditionArgs []interface{}
+	var conditionArgs []any
 
 	if status != nil {
 		conditions = append(conditions, "status = ?")
@@ -679,14 +679,14 @@ func (r *Repository) ListQueueItems(ctx context.Context, status *QueueStatus, se
 // ListActiveQueueItems retrieves pending and processing queue items
 func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, category string, limit, offset int, sortBy, sortOrder string) ([]*ImportQueueItem, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	baseSelect := `SELECT id, nzb_path, relative_path, category, priority, status, created_at, updated_at,
 	               started_at, completed_at, retry_count, max_retries, error_message, batch_id, metadata, file_size, storage_path
 	               FROM import_queue`
 
 	conditions := []string{"(status = 'pending' OR status = 'processing' OR status = 'paused')"}
-	var conditionArgs []interface{}
+	var conditionArgs []any
 
 	if search != "" {
 		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
@@ -750,12 +750,12 @@ func (r *Repository) ListActiveQueueItems(ctx context.Context, search string, ca
 // CountQueueItems counts the total number of queue items matching the given filters
 func (r *Repository) CountQueueItems(ctx context.Context, status *QueueStatus, search string, category string) (int, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	baseQuery := `SELECT COUNT(*) FROM import_queue`
 
 	var conditions []string
-	var conditionArgs []interface{}
+	var conditionArgs []any
 
 	if status != nil {
 		conditions = append(conditions, "status = ?")
@@ -793,12 +793,12 @@ func (r *Repository) CountQueueItems(ctx context.Context, status *QueueStatus, s
 // CountActiveQueueItems counts the total number of pending and processing queue items
 func (r *Repository) CountActiveQueueItems(ctx context.Context, search string, category string) (int, error) {
 	var query string
-	var args []interface{}
+	var args []any
 
 	baseQuery := `SELECT COUNT(*) FROM import_queue WHERE (status = 'pending' OR status = 'processing' OR status = 'paused')`
 
 	var conditions []string
-	var conditionArgs []interface{}
+	var conditionArgs []any
 
 	if search != "" {
 		conditions = append(conditions, "(nzb_path LIKE ? OR relative_path LIKE ?)")
@@ -916,16 +916,13 @@ func (r *Repository) FilterExistingNzbdavIds(ctx context.Context, ids []string) 
 	existingIds := make([]string, 0)
 
 	for i := 0; i < len(ids); i += batchSize {
-		end := i + batchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
+		end := min(i+batchSize, len(ids))
 
 		batchIds := ids[i:end]
 
 		// Build placeholders for the IN clause
 		placeholders := make([]string, len(batchIds))
-		args := make([]interface{}, len(batchIds))
+		args := make([]any, len(batchIds))
 		for j, id := range batchIds {
 			placeholders[j] = "?"
 			args[j] = id

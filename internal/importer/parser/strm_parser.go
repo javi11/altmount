@@ -134,7 +134,7 @@ func (p *StrmParser) parseNxgLink(nxgLink string) (*ParsedFile, error) {
 
 	// Generate segment IDs using the NXG library
 	segmentIDs := make([]string, numSegments)
-	for i := int64(0); i < numSegments; i++ {
+	for i := range numSegments {
 		segmentID, err := header.GenerateSegmentID(nxg.PartTypeData, i+1)
 		if err != nil {
 			return nil, errors.NewNonRetryableError(fmt.Sprintf("failed to generate segment ID for part %d", i+1), err)

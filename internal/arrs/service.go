@@ -207,16 +207,16 @@ func (s *Service) TestConnection(ctx context.Context, instanceType, url, apiKey 
 }
 
 // GetHealth retrieves health checks from all enabled ARR instances
-func (s *Service) GetHealth(ctx context.Context) (map[string]interface{}, error) {
+func (s *Service) GetHealth(ctx context.Context) (map[string]any, error) {
 	instances := s.instances.GetAllInstances()
-	results := make(map[string]interface{})
+	results := make(map[string]any)
 
 	for _, instance := range instances {
 		if !instance.Enabled {
 			continue
 		}
 
-		var health interface{}
+		var health any
 
 		switch instance.Type {
 		case "radarr":

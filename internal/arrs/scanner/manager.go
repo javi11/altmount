@@ -74,14 +74,14 @@ func (m *Manager) findInstanceForFilePath(ctx context.Context, filePath string, 
 	return "", "", fmt.Errorf("no ARR instance found managing file path: %s", filePath)
 }
 
-func (m *Manager) managesFile(ctx context.Context, instanceType string, client interface{}, filePath string) bool {
+func (m *Manager) managesFile(ctx context.Context, instanceType string, client any, filePath string) bool {
 	if instanceType == "radarr" {
 		return m.radarrManagesFile(ctx, client.(*radarr.Radarr), filePath)
 	}
 	return m.sonarrManagesFile(ctx, client.(*sonarr.Sonarr), filePath)
 }
 
-func (m *Manager) hasFile(ctx context.Context, instanceType string, client interface{}, instanceName, relativePath string) bool {
+func (m *Manager) hasFile(ctx context.Context, instanceType string, client any, instanceName, relativePath string) bool {
 	if instanceType == "radarr" {
 		return m.radarrHasFile(ctx, client.(*radarr.Radarr), instanceName, relativePath)
 	}
@@ -365,8 +365,8 @@ func (m *Manager) triggerRadarrRescanByPath(ctx context.Context, client *radarr.
 			}
 
 			// Try match without .strm extension if filePath is a .strm file
-			if strings.HasSuffix(filePath, ".strm") {
-				strippedPath := strings.TrimSuffix(filePath, ".strm")
+			if before, ok := strings.CutSuffix(filePath, ".strm"); ok {
+				strippedPath := before
 				// Check if movie file path (without its own extension) matches stripped filePath
 				if strings.TrimSuffix(movie.MovieFile.Path, filepath.Ext(movie.MovieFile.Path)) == strippedPath {
 					targetMovie = movie
@@ -535,8 +535,8 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		}
 
 		// Try match without .strm extension
-		if strings.HasSuffix(filePath, ".strm") {
-			strippedPath := strings.TrimSuffix(filePath, ".strm")
+		if before, ok := strings.CutSuffix(filePath, ".strm"); ok {
+			strippedPath := before
 			if strings.TrimSuffix(episodeFile.Path, filepath.Ext(episodeFile.Path)) == strippedPath {
 				targetEpisodeFile = episodeFile
 				break
@@ -615,7 +615,7 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		// If we found episodes and ALL of them are already satisfied by other files,
 		// then this file is a "zombie" duplicate and can be safely deleted.
 		if len(episodeIDs) > 0 && allSatisfied {
-			slog.InfoContext(ctx, "All episodes in unlinked file are already satisfied by other files in Sonarr. Marking as zombie.", 
+			slog.InfoContext(ctx, "All episodes in unlinked file are already satisfied by other files in Sonarr. Marking as zombie.",
 				"file_path", filePath)
 			return fmt.Errorf("file %s is a zombie: %w", filePath, model.ErrEpisodeAlreadySatisfied)
 		}

@@ -29,11 +29,7 @@ func CalculateNextCheck(releaseDate, lastCheck time.Time) time.Time {
 	var interval time.Duration
 	if age < aggressiveCheckThreshold {
 		// For very new files, use their age as the interval but cap at 6 hours
-		if age < aggressiveCheckInterval {
-			interval = age
-		} else {
-			interval = aggressiveCheckInterval
-		}
+		interval = min(age, aggressiveCheckInterval)
 	} else if age < dailyCheckThreshold {
 		interval = dailyCheckInterval
 	} else {

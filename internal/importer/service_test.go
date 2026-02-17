@@ -143,10 +143,7 @@ func TestRetryBackoff_ExponentialGrowth(t *testing.T) {
 	}
 
 	for attempt, expected := range expectedDelays {
-		delay := baseDelay * (1 << attempt)
-		if delay > maxDelay {
-			delay = maxDelay
-		}
+		delay := min(baseDelay*(1<<attempt), maxDelay)
 
 		assert.Equal(t, expected, delay,
 			"Attempt %d should have delay %dms", attempt, expected)

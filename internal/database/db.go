@@ -119,10 +119,9 @@ func (db *DB) UpdateConnectionPool(workerCount int) {
 	// Formula: workers + 4 buffer for API/other operations
 	// Each worker needs 1 connection for queue claims + buffer for concurrent API requests
 	maxConns := workerCount + 4
-	idleConns := workerCount / 2
-	if idleConns < 2 {
-		idleConns = 2 // Minimum idle connections
-	}
+	idleConns := max(workerCount/2,
+		// Minimum idle connections
+		2)
 
 	db.conn.SetMaxOpenConns(maxConns)
 	db.conn.SetMaxIdleConns(idleConns)

@@ -970,7 +970,7 @@ func (s *Server) validateSABnzbdCategory(category string) (string, error) {
 }
 
 // writeSABnzbdResponseFiber writes a successful SABnzbd-compatible response (Fiber version)
-func (s *Server) writeSABnzbdResponseFiber(c *fiber.Ctx, data interface{}) error {
+func (s *Server) writeSABnzbdResponseFiber(c *fiber.Ctx, data any) error {
 	return c.Status(200).JSON(data)
 }
 

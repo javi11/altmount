@@ -56,18 +56,14 @@ func (m *Manager) Start(ctx context.Context) {
 	m.ctx, m.cancel = context.WithCancel(ctx)
 
 	// Background cleanup goroutine
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		m.cleanupLoop()
-	}()
+	})
 
 	// Background metadata flush goroutine
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		m.flushLoop()
-	}()
+	})
 
 	m.logger.Info("VFS disk cache started",
 		"cache_path", m.config.CachePath,

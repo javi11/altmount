@@ -47,7 +47,7 @@ func (m *Manager) GetMovies(ctx context.Context, client *radarr.Radarr, instance
 
 	// 2. Use singleflight to deduplicate requests
 	key := "radarr_movies_" + instanceName
-	v, err, _ := m.requestGroup.Do(key, func() (interface{}, error) {
+	v, err, _ := m.requestGroup.Do(key, func() (any, error) {
 		// Double check cache
 		m.cacheMu.RLock()
 		movies, ok := m.movieCache[instanceName]
@@ -93,7 +93,7 @@ func (m *Manager) GetSeries(ctx context.Context, client *sonarr.Sonarr, instance
 
 	// 2. Use singleflight to deduplicate requests
 	key := "sonarr_series_" + instanceName
-	v, err, _ := m.requestGroup.Do(key, func() (interface{}, error) {
+	v, err, _ := m.requestGroup.Do(key, func() (any, error) {
 		// Double check cache
 		m.cacheMu.RLock()
 		series, ok := m.seriesCache[instanceName]
@@ -140,7 +140,7 @@ func (m *Manager) GetEpisodeFiles(ctx context.Context, client *sonarr.Sonarr, in
 	}
 
 	// 2. Use singleflight to deduplicate requests
-	v, err, _ := m.requestGroup.Do(cacheKey, func() (interface{}, error) {
+	v, err, _ := m.requestGroup.Do(cacheKey, func() (any, error) {
 		// Double check cache
 		m.cacheMu.RLock()
 		files, ok := m.episodeFilesCache[cacheKey]

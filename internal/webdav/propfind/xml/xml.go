@@ -55,7 +55,7 @@ type Attr struct {
 
 // A Token is an interface holding one of the token types:
 // StartElement, EndElement, CharData, Comment, ProcInst, or Directive.
-type Token interface{}
+type Token any
 
 // A StartElement represents an XML start element.
 type StartElement struct {
@@ -659,7 +659,7 @@ func (d *Decoder) rawToken() (Token, error) {
 
 		case '[': // <![
 			// Probably <![CDATA[.
-			for i := 0; i < 6; i++ {
+			for i := range 6 {
 				if b, ok = d.mustgetc(); !ok {
 					return nil, d.err
 				}
@@ -1134,12 +1134,12 @@ func (d *Decoder) nsname() (name Name, ok bool) {
 	if !ok {
 		return
 	}
-	i := strings.Index(s, ":")
-	if i < 0 {
+	before, after, ok0 := strings.Cut(s, ":")
+	if !ok0 {
 		name.Local = s
 	} else {
-		name.Space = s[0:i]
-		name.Local = s[i+1:]
+		name.Space = before
+		name.Local = after
 	}
 	return name, true
 }
