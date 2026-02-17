@@ -1,7 +1,7 @@
 import { formatDistanceToNowStrict } from "date-fns";
 import { AlertTriangle, CheckCircle, Network, Timer, XCircle, Zap } from "lucide-react";
-import type { ProviderStatus } from "../../types/api";
 import { formatSpeed } from "../../lib/utils";
+import type { ProviderStatus } from "../../types/api";
 
 interface ProviderCardProps {
 	provider: ProviderStatus;
@@ -59,18 +59,32 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 	};
 
 	return (
-		<div className={`card bg-base-100 shadow-lg ${className || ""}`}>
+		<article
+			className={`card bg-base-100 shadow-lg transition-shadow focus-within:ring-2 focus-within:ring-primary ${className || ""}`}
+			aria-labelledby={`provider-${provider.host}`}
+		>
 			<div className="card-body">
 				{/* Header with host and state badge */}
 				<div className="flex items-start justify-between">
 					<div className="min-w-0 flex-1">
 						<div className="flex items-center gap-2">
-							<div className={`h-2 w-2 shrink-0 rounded-full ${
-								provider.state.toLowerCase() === 'active' 
-									? (provider.error_count > 10 ? 'animate-pulse bg-warning' : 'bg-success') 
-									: (provider.state.toLowerCase() === 'failed' ? 'bg-error' : 'bg-base-300')
-							}`} />
-							<h3 className="card-title truncate font-medium text-base">{provider.host}</h3>
+							<div
+								className={`h-2 w-2 shrink-0 rounded-full ${
+									provider.state.toLowerCase() === "active"
+										? provider.error_count > 10
+											? "animate-pulse bg-warning"
+											: "bg-success"
+										: provider.state.toLowerCase() === "failed"
+											? "bg-error"
+											: "bg-base-300"
+								}`}
+							/>
+							<h3
+								id={`provider-${provider.host}`}
+								className="card-title truncate font-medium text-base"
+							>
+								{provider.host}
+							</h3>
 						</div>
 						{provider.username && (
 							<p className="cursor-pointer truncate text-base-content/60 text-sm blur-sm transition-all hover:blur-none">
@@ -107,8 +121,8 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 							<span>Speed</span>
 						</div>
 						<div className="truncate font-bold font-mono text-primary text-xs">
-							{provider.current_speed_bytes_per_sec !== undefined 
-								? formatSpeed(provider.current_speed_bytes_per_sec) 
+							{provider.current_speed_bytes_per_sec !== undefined
+								? formatSpeed(provider.current_speed_bytes_per_sec)
 								: "0 B/s"}
 						</div>
 					</div>
@@ -117,16 +131,16 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 							<Timer className="h-2.5 w-2.5" />
 							<span>Ping</span>
 						</div>
-						<div className="font-bold font-mono text-info text-xs">
-							{provider.ping_ms}ms
-						</div>
+						<div className="font-bold font-mono text-info text-xs">{provider.ping_ms}ms</div>
 					</div>
 					<div className="space-y-1">
 						<div className="flex items-center justify-center gap-1 text-[9px] text-base-content/50 uppercase tracking-wider">
 							<AlertTriangle className="h-2.5 w-2.5" />
 							<span>Errors</span>
 						</div>
-						<div className={`font-bold font-mono text-xs ${provider.error_count > 0 ? 'text-error' : 'text-base-content/30'}`}>
+						<div
+							className={`font-bold font-mono text-xs ${provider.error_count > 0 ? "text-error" : "text-base-content/30"}`}
+						>
 							{provider.error_count}
 						</div>
 					</div>
@@ -188,6 +202,6 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 					</div>
 				)}
 			</div>
-		</div>
+		</article>
 	);
 }

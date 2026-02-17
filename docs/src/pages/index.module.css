@@ -23,11 +23,11 @@
 }
 
 .heroLogo {
-  width: 300px;
-  height: 300px;
+  height: 200px;
   margin: 0 auto 2rem auto;
   display: block;
   object-fit: contain;
+  border-radius: 10px;
 }
 
 /* Tablet breakpoint - matches existing heroBanner pattern at 996px */

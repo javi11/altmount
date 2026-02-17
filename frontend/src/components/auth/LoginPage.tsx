@@ -47,7 +47,7 @@ export function LoginPage() {
 	if (isLoading) {
 		return (
 			<div className="flex min-h-screen items-center justify-center bg-gray-50">
-				<div className="h-8 w-8 animate-spin rounded-full border-blue-600 border-b-2" />
+				<span className="loading loading-spinner loading-lg text-primary" />
 			</div>
 		);
 	}

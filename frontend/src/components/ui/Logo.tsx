@@ -12,7 +12,7 @@ export function Logo({ width, height, className }: LogoProps) {
 
 	return (
 		<div className={containerClass}>
-			<img src="/logo.png" alt="AltMount Logo" className="object-contain" />
+			<img src="/logo.jpg" alt="AltMount Logo" className="object-contain" />
 		</div>
 	);
 }

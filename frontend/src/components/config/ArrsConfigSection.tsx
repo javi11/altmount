@@ -2,8 +2,8 @@ import { AlertTriangle, Plus, Save, Trash2, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRegisterArrsWebhooks } from "../../hooks/useApi";
 import type { ArrsConfig, ArrsInstanceConfig, ArrsType, ConfigResponse } from "../../types/config";
-import ArrsInstanceCard from "./ArrsInstanceCard";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import ArrsInstanceCard from "./ArrsInstanceCard";
 
 interface ArrsConfigSectionProps {
 	config: ConfigResponse;
@@ -74,7 +74,9 @@ export function ArrsConfigSection({
 		const errors: string[] = [];
 		if (data.enabled) {
 			if (!config.mount_path) {
-				errors.push("Mount Path must be configured in General/System settings before enabling Arrs service");
+				errors.push(
+					"Mount Path must be configured in General/System settings before enabling Arrs service",
+				);
 			}
 			const allInstanceNames = [
 				...data.radarr_instances.map((i) => ({ name: i.name, type: "Radarr" })),
@@ -89,13 +91,19 @@ export function ArrsConfigSection({
 			});
 			[...data.radarr_instances, ...data.sonarr_instances].forEach((instance, index) => {
 				const instanceType = data.radarr_instances.includes(instance) ? "Radarr" : "Sonarr";
-				if (!instance.name.trim()) errors.push(`${instanceType} instance #${index + 1}: Name is required`);
+				if (!instance.name.trim())
+					errors.push(`${instanceType} instance #${index + 1}: Name is required`);
 				if (!instance.url.trim()) {
 					errors.push(`${instanceType} instance "${instance.name}": URL is required`);
 				} else {
-					try { new URL(instance.url); } catch { errors.push(`${instanceType} instance "${instance.name}": Invalid URL format`); }
+					try {
+						new URL(instance.url);
+					} catch {
+						errors.push(`${instanceType} instance "${instance.name}": Invalid URL format`);
+					}
 				}
-				if (!instance.api_key.trim()) errors.push(`${instanceType} instance "${instance.name}": API key is required`);
+				if (!instance.api_key.trim())
+					errors.push(`${instanceType} instance "${instance.name}": API key is required`);
 			});
 		}
 		return errors;
@@ -223,8 +231,10 @@ export function ArrsConfigSection({
 	return (
 		<div className="space-y-10">
 			<div>
-				<h3 className="text-lg font-bold text-base-content tracking-tight">ARR Applications</h3>
-				<p className="text-sm text-base-content/50 break-words">Connect Radarr and Sonarr for automatic health monitoring and repair.</p>
+				<h3 className="font-bold text-base-content text-lg tracking-tight">ARR Applications</h3>
+				<p className="break-words text-base-content/50 text-sm">
+					Connect Radarr and Sonarr for automatic health monitoring and repair.
+				</p>
 			</div>
 
 			<div className="space-y-8">
@@ -232,14 +242,14 @@ export function ArrsConfigSection({
 				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
-							<h4 className="font-bold text-sm text-base-content break-words">Service Engine</h4>
-							<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
+							<h4 className="break-words font-bold text-base-content text-sm">Service Engine</h4>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								Allows AltMount to talk to Radarr/Sonarr for repairs and updates.
 							</p>
 						</div>
 						<input
 							type="checkbox"
-							className="toggle toggle-primary shrink-0 mt-1"
+							className="toggle toggle-primary mt-1 shrink-0"
 							checked={formData.enabled}
 							onChange={(e) => handleFormChange("enabled", e.target.checked)}
 							disabled={isReadOnly}
@@ -249,17 +259,20 @@ export function ArrsConfigSection({
 
 				{/* Webhooks Auto-Registration */}
 				{formData.enabled && (
-					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6 animate-in fade-in slide-in-from-top-2">
+					<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Automation</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+								Automation
+							</h4>
 							<div className="h-px flex-1 bg-base-300/50" />
 						</div>
 
 						<div className="space-y-6">
 							<div>
 								<h5 className="font-bold text-sm">AltMount Webhooks</h5>
-								<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
-									Automatically configure hooks in Radarr/Sonarr to notify AltMount of upgrades and renames.
+								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+									Automatically configure hooks in Radarr/Sonarr to notify AltMount of upgrades and
+									renames.
 								</p>
 							</div>
 
@@ -268,7 +281,7 @@ export function ArrsConfigSection({
 									<legend className="fieldset-legend font-semibold">AltMount Callback URL</legend>
 									<input
 										type="url"
-										className="input input-bordered w-full bg-base-100 text-sm font-mono"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
 										value={formData.webhook_base_url ?? "http://altmount:8080"}
 										onChange={(e) => handleFormChange("webhook_base_url", e.target.value)}
 										placeholder="http://altmount:8080"
@@ -278,40 +291,56 @@ export function ArrsConfigSection({
 
 								<button
 									type="button"
-									className="btn btn-primary btn-sm px-6 shadow-lg shadow-primary/20 shrink-0"
+									className="btn btn-primary btn-sm shrink-0 px-6 shadow-lg shadow-primary/20"
 									onClick={handleRegisterWebhooks}
 									disabled={isReadOnly || registerWebhooks.isPending || hasChanges}
 								>
-									{registerWebhooks.isPending ? <LoadingSpinner size="sm" /> : <Webhook className="h-4 w-4" />}
+									{registerWebhooks.isPending ? (
+										<LoadingSpinner size="sm" />
+									) : (
+										<Webhook className="h-4 w-4" />
+									)}
 									{registerWebhooks.isPending ? "Connecting..." : "Setup Webhooks"}
 								</button>
 							</div>
-							
-							{hasChanges && <p className="text-[10px] text-warning font-bold">Save changes before configuring webhooks.</p>}
-							{webhookSuccess && <div className="alert alert-success py-2 text-xs rounded-xl">{webhookSuccess}</div>}
-							{webhookError && <div className="alert alert-error py-2 text-xs rounded-xl">{webhookError}</div>}
+
+							{hasChanges && (
+								<p className="font-bold text-[10px] text-warning">
+									Save changes before configuring webhooks.
+								</p>
+							)}
+							{webhookSuccess && (
+								<div className="alert alert-success rounded-xl py-2 text-xs">{webhookSuccess}</div>
+							)}
+							{webhookError && (
+								<div className="alert alert-error rounded-xl py-2 text-xs">{webhookError}</div>
+							)}
 						</div>
 					</div>
 				)}
 
 				{/* Queue Cleanup Settings */}
 				{formData.enabled && (
-					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6 animate-in fade-in slide-in-from-top-4">
+					<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Maintenance</h4>
+							<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+								Maintenance
+							</h4>
 							<div className="h-px flex-1 bg-base-300/50" />
 						</div>
 
 						<div className="flex items-start justify-between gap-4">
 							<div className="min-w-0 flex-1">
-								<h5 className="font-bold text-sm text-base-content break-words">Queue Auto-Cleanup</h5>
-								<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
+								<h5 className="break-words font-bold text-base-content text-sm">
+									Queue Auto-Cleanup
+								</h5>
+								<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 									Automatically remove empty import folders from ARR queues.
 								</p>
 							</div>
 							<input
 								type="checkbox"
-								className="checkbox checkbox-primary checkbox-sm shrink-0 mt-1"
+								className="checkbox checkbox-primary checkbox-sm mt-1 shrink-0"
 								checked={formData.queue_cleanup_enabled ?? true}
 								onChange={(e) => handleFormChange("queue_cleanup_enabled", e.target.checked)}
 								disabled={isReadOnly}
@@ -319,7 +348,7 @@ export function ArrsConfigSection({
 						</div>
 
 						{(formData.queue_cleanup_enabled ?? true) && (
-							<div className="space-y-6 animate-in fade-in zoom-in-95">
+							<div className="fade-in zoom-in-95 animate-in space-y-6">
 								<fieldset className="fieldset max-w-xs">
 									<legend className="fieldset-legend font-semibold">Cleanup Interval</legend>
 									<div className="join w-full">
@@ -327,16 +356,23 @@ export function ArrsConfigSection({
 											type="number"
 											className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
 											value={formData.queue_cleanup_interval_seconds ?? 10}
-											onChange={(e) => handleFormChange("queue_cleanup_interval_seconds", parseInt(e.target.value) || 10)}
+											onChange={(e) =>
+												handleFormChange(
+													"queue_cleanup_interval_seconds",
+													Number.parseInt(e.target.value, 10) || 10,
+												)
+											}
 											min={1}
 											max={3600}
 											disabled={isReadOnly}
 										/>
-										<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">sec</span>
+										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+											sec
+										</span>
 									</div>
 								</fieldset>
 
-								<div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 									<fieldset className="fieldset">
 										<legend className="fieldset-legend font-semibold">Cleanup Grace Period</legend>
 										<div className="join w-full">
@@ -344,37 +380,60 @@ export function ArrsConfigSection({
 												type="number"
 												className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
 												value={formData.queue_cleanup_grace_period_minutes ?? 10}
-												onChange={(e) => handleFormChange("queue_cleanup_grace_period_minutes", parseInt(e.target.value) || 10)}
+												onChange={(e) =>
+													handleFormChange(
+														"queue_cleanup_grace_period_minutes",
+														Number.parseInt(e.target.value, 10) || 10,
+													)
+												}
 												min={0}
 												disabled={isReadOnly}
 											/>
-											<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">min</span>
+											<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+												min
+											</span>
 										</div>
-										<p className="label text-[10px] opacity-50 break-words mt-1">Wait time before considering a failed item "stuck" and eligible for cleanup.</p>
+										<p className="label mt-1 break-words text-[10px] opacity-50">
+											Wait time before considering a failed item "stuck" and eligible for cleanup.
+										</p>
 									</fieldset>
 
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">Import Failure Cleanup</legend>
-										<label className="label cursor-pointer justify-start gap-4 items-center h-12">
+										<legend className="fieldset-legend font-semibold">
+											Import Failure Cleanup
+										</legend>
+										<label className="label h-12 cursor-pointer items-center justify-start gap-4">
 											<input
 												type="checkbox"
 												className="toggle toggle-primary toggle-sm"
 												checked={formData.cleanup_automatic_import_failure ?? false}
-												onChange={(e) => handleFormChange("cleanup_automatic_import_failure", e.target.checked)}
+												onChange={(e) =>
+													handleFormChange("cleanup_automatic_import_failure", e.target.checked)
+												}
 												disabled={isReadOnly}
 											/>
-											<span className="label-text font-bold text-xs break-words">Purge Automatic Failures</span>
+											<span className="label-text break-words font-bold text-xs">
+												Purge Automatic Failures
+											</span>
 										</label>
-										<p className="label text-[10px] opacity-50 break-words mt-1">Automatically remove items from queue that failed with "Automatic Import" errors.</p>
+										<p className="label mt-1 break-words text-[10px] opacity-50">
+											Automatically remove items from queue that failed with "Automatic Import"
+											errors.
+										</p>
 									</fieldset>
 								</div>
 
 								<div className="space-y-4">
-									<h5 className="font-bold text-[10px] uppercase opacity-40">Allowlist (Ignore Errors)</h5>
-									<div className="space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+									<h5 className="font-bold text-[10px] uppercase opacity-40">
+										Allowlist (Ignore Errors)
+									</h5>
+									<div className="custom-scrollbar max-h-48 space-y-2 overflow-y-auto pr-2">
 										{(formData.queue_cleanup_allowlist || []).map((msg, index) => (
-											<div key={index} className="flex items-center justify-between rounded-xl bg-base-100/50 border border-base-300/50 p-2 pl-3">
-												<div className="flex items-center gap-3 min-w-0 flex-1">
+											<div
+												key={index}
+												className="flex items-center justify-between rounded-xl border border-base-300/50 bg-base-100/50 p-2 pl-3"
+											>
+												<div className="flex min-w-0 flex-1 items-center gap-3">
 													<input
 														type="checkbox"
 														className="checkbox checkbox-xs checkbox-primary"
@@ -382,11 +441,19 @@ export function ArrsConfigSection({
 														onChange={() => handleToggleIgnoreMessage(index)}
 														disabled={isReadOnly}
 													/>
-													<span className={`truncate font-mono text-[10px] ${!msg.enabled ? "opacity-30 line-through" : ""}`} title={msg.message}>
+													<span
+														className={`truncate font-mono text-[10px] ${!msg.enabled ? "line-through opacity-30" : ""}`}
+														title={msg.message}
+													>
 														{msg.message}
 													</span>
 												</div>
-												<button type="button" className="btn btn-ghost btn-xs text-error hover:bg-error/10" onClick={() => handleRemoveIgnoreMessage(index)} disabled={isReadOnly}>
+												<button
+													type="button"
+													className="btn btn-ghost btn-xs text-error hover:bg-error/10"
+													onClick={() => handleRemoveIgnoreMessage(index)}
+													disabled={isReadOnly}
+												>
 													<Trash2 className="h-3 w-3" />
 												</button>
 											</div>
@@ -403,7 +470,12 @@ export function ArrsConfigSection({
 												onChange={(e) => setNewIgnoreMessage(e.target.value)}
 												onKeyDown={(e) => e.key === "Enter" && handleAddIgnoreMessage()}
 											/>
-											<button type="button" className="btn btn-primary join-item px-4" onClick={handleAddIgnoreMessage} disabled={!newIgnoreMessage.trim()}>
+											<button
+												type="button"
+												className="btn btn-primary join-item px-4"
+												onClick={handleAddIgnoreMessage}
+												disabled={!newIgnoreMessage.trim()}
+											>
 												<Plus className="h-4 w-4" />
 											</button>
 										</div>
@@ -416,26 +488,33 @@ export function ArrsConfigSection({
 
 				{/* Instances Lists */}
 				{formData.enabled && (
-					<div className="space-y-10 animate-in fade-in slide-in-from-top-6">
+					<div className="fade-in slide-in-from-top-6 animate-in space-y-10">
 						{/* Radarr */}
 						<div className="space-y-6">
 							<div className="flex items-center justify-between gap-4">
-								<h4 className="font-bold text-sm flex items-center gap-2">
+								<h4 className="flex items-center gap-2 font-bold text-sm">
 									<div className="h-2 w-2 rounded-full bg-primary" /> Radarr Instances
 								</h4>
 								<button
 									type="button"
 									className="btn btn-xs btn-primary px-4"
-									onClick={() => { setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" }); setShowAddInstance(true); }}
+									onClick={() => {
+										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" });
+										setShowAddInstance(true);
+									}}
 									disabled={isReadOnly}
 								>
 									<Plus className="h-3 w-3" /> Add
 								</button>
 							</div>
 							<div className="grid grid-cols-1 gap-4">
-								{formData.radarr_instances.map((instance, index) => renderInstance(instance, "radarr", index))}
+								{formData.radarr_instances.map((instance, index) =>
+									renderInstance(instance, "radarr", index),
+								)}
 								{formData.radarr_instances.length === 0 && (
-									<div className="rounded-2xl border-2 border-dashed border-base-300 p-8 text-center opacity-40 text-xs font-bold">No Radarr configured</div>
+									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-xs opacity-40">
+										No Radarr configured
+									</div>
 								)}
 							</div>
 						</div>
@@ -443,22 +522,29 @@ export function ArrsConfigSection({
 						{/* Sonarr */}
 						<div className="space-y-6">
 							<div className="flex items-center justify-between gap-4">
-								<h4 className="font-bold text-sm flex items-center gap-2">
+								<h4 className="flex items-center gap-2 font-bold text-sm">
 									<div className="h-2 w-2 rounded-full bg-secondary" /> Sonarr Instances
 								</h4>
 								<button
 									type="button"
 									className="btn btn-xs btn-primary px-4"
-									onClick={() => { setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" }); setShowAddInstance(true); }}
+									onClick={() => {
+										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" });
+										setShowAddInstance(true);
+									}}
 									disabled={isReadOnly}
 								>
 									<Plus className="h-3 w-3" /> Add
 								</button>
 							</div>
 							<div className="grid grid-cols-1 gap-4">
-								{formData.sonarr_instances.map((instance, index) => renderInstance(instance, "sonarr", index))}
+								{formData.sonarr_instances.map((instance, index) =>
+									renderInstance(instance, "sonarr", index),
+								)}
 								{formData.sonarr_instances.length === 0 && (
-									<div className="rounded-2xl border-2 border-dashed border-base-300 p-8 text-center opacity-40 text-xs font-bold">No Sonarr configured</div>
+									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-xs opacity-40">
+										No Sonarr configured
+									</div>
 								)}
 							</div>
 						</div>
@@ -470,51 +556,105 @@ export function ArrsConfigSection({
 			{showAddInstance && (
 				<div className="modal modal-open backdrop-blur-sm">
 					<div className="modal-box rounded-2xl border border-base-300 shadow-2xl">
-						<h3 className="font-black text-xl uppercase tracking-tighter mb-6">
+						<h3 className="mb-6 font-black text-xl uppercase tracking-tighter">
 							Add {newInstance.type === "radarr" ? "Radarr" : "Sonarr"}
 						</h3>
 						<div className="space-y-5">
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend font-bold">Friendly Name</legend>
-								<input type="text" className="input input-bordered w-full" value={newInstance.name} onChange={(e) => setNewInstance(prev => ({...prev, name: e.target.value}))} placeholder="My ARR Server" />
+								<input
+									type="text"
+									className="input input-bordered w-full"
+									value={newInstance.name}
+									onChange={(e) => setNewInstance((prev) => ({ ...prev, name: e.target.value }))}
+									placeholder="My ARR Server"
+								/>
 							</fieldset>
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend font-bold">Server URL</legend>
-								<input type="url" className="input input-bordered w-full font-mono text-sm" value={newInstance.url} onChange={(e) => setNewInstance(prev => ({...prev, url: e.target.value}))} placeholder="http://192.168.1.10:7878" />
+								<input
+									type="url"
+									className="input input-bordered w-full font-mono text-sm"
+									value={newInstance.url}
+									onChange={(e) => setNewInstance((prev) => ({ ...prev, url: e.target.value }))}
+									placeholder="http://192.168.1.10:7878"
+								/>
 							</fieldset>
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend font-bold">API Key</legend>
-								<input type="password" title="API Key" className="input input-bordered w-full font-mono text-sm" value={newInstance.api_key} onChange={(e) => setNewInstance(prev => ({...prev, api_key: e.target.value}))} />
+								<input
+									type="password"
+									title="API Key"
+									className="input input-bordered w-full font-mono text-sm"
+									value={newInstance.api_key}
+									onChange={(e) => setNewInstance((prev) => ({ ...prev, api_key: e.target.value }))}
+								/>
 							</fieldset>
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend font-bold">Category Mapping</legend>
-								<select className="select select-bordered w-full" value={newInstance.category} onChange={(e) => setNewInstance(prev => ({...prev, category: e.target.value}))}>
+								<select
+									className="select select-bordered w-full"
+									value={newInstance.category}
+									onChange={(e) =>
+										setNewInstance((prev) => ({ ...prev, category: e.target.value }))
+									}
+								>
 									<option value="">(Auto Detect)</option>
-									{config.sabnzbd?.categories?.map(cat => <option key={cat.name} value={cat.name}>{cat.name}</option>)}
+									{config.sabnzbd?.categories?.map((cat) => (
+										<option key={cat.name} value={cat.name}>
+											{cat.name}
+										</option>
+									))}
 								</select>
 							</fieldset>
 						</div>
 						<div className="modal-action gap-3">
-							<button type="button" className="btn btn-ghost" onClick={() => { setShowAddInstance(false); setNewInstance(DEFAULT_NEW_INSTANCE); }}>Cancel</button>
-							<button type="button" className="btn btn-primary px-8 shadow-lg shadow-primary/20" onClick={addInstance} disabled={!newInstance.name.trim() || !newInstance.url.trim() || !newInstance.api_key.trim()}>Add Server</button>
+							<button
+								type="button"
+								className="btn btn-ghost"
+								onClick={() => {
+									setShowAddInstance(false);
+									setNewInstance(DEFAULT_NEW_INSTANCE);
+								}}
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								className="btn btn-primary px-8 shadow-lg shadow-primary/20"
+								onClick={addInstance}
+								disabled={
+									!newInstance.name.trim() || !newInstance.url.trim() || !newInstance.api_key.trim()
+								}
+							>
+								Add Server
+							</button>
 						</div>
 					</div>
 				</div>
 			)}
 
 			{/* Validation & Save */}
-			<div className="space-y-4 pt-6 border-t border-base-200">
+			<div className="space-y-4 border-base-200 border-t pt-6">
 				{validationErrors.map((error, idx) => (
-					<div key={idx} className="alert alert-warning py-2 text-xs rounded-xl border border-warning/20 bg-warning/5">
+					<div
+						key={idx}
+						className="alert alert-warning rounded-xl border border-warning/20 bg-warning/5 py-2 text-xs"
+					>
 						<AlertTriangle className="h-4 w-4 shrink-0" />
 						<span className="break-words">{error}</span>
 					</div>
 				))}
-				{saveError && <div className="alert alert-error py-2 text-xs rounded-xl">{saveError}</div>}
-				
+				{saveError && <div className="alert alert-error rounded-xl py-2 text-xs">{saveError}</div>}
+
 				{hasChanges && (
 					<div className="flex justify-end">
-						<button type="button" className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${isUpdating ? "loading" : ""}`} onClick={handleSave} disabled={isUpdating || validationErrors.length > 0}>
+						<button
+							type="button"
+							className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${isUpdating ? "loading" : ""}`}
+							onClick={handleSave}
+							disabled={isUpdating || validationErrors.length > 0}
+						>
 							{!isUpdating && <Save className="h-4 w-4" />}
 							{isUpdating ? "Saving..." : "Save Changes"}
 						</button>
