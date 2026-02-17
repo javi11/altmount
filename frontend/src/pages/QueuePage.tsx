@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DragDropUpload } from "../components/queue/DragDropUpload";
+import { QueueItemCard } from "../components/queue/QueueItemCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { LoadingSpinner, LoadingTable } from "../components/ui/LoadingSpinner";
 import { Pagination } from "../components/ui/Pagination";
@@ -609,228 +610,250 @@ export function QueuePage() {
 										<LoadingTable columns={9} />
 									</div>
 								) : queueData && queueData.length > 0 ? (
-									<div className="overflow-x-auto">
-										<table className="table-zebra table-sm sm:table-md table">
-											<thead className="bg-base-200/50">
-												<tr>
-													<th className="w-12 text-center">
-														<input
-															type="checkbox"
-															className="checkbox checkbox-xs"
-															checked={isAllSelected}
-															ref={(input) => {
-																if (input) input.indeterminate = Boolean(isIndeterminate);
-															}}
-															onChange={(e) => handleSelectAll(e.target.checked)}
-														/>
-													</th>
-													<th>
-														<button
-															type="button"
-															className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
-															onClick={() => handleSort("nzb_path")}
-														>
-															NZB File
-															{sortBy === "nzb_path" &&
-																(sortOrder === "asc" ? (
-																	<ChevronUp className="h-3 w-3" />
-																) : (
-																	<ChevronDown className="h-3 w-3" />
-																))}
-														</button>
-													</th>
-													<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
-														Category
-													</th>
-													<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
-														Size
-													</th>
-													<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
-														Status
-													</th>
-													<th>
-														<button
-															type="button"
-															className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
-															onClick={() => handleSort("updated_at")}
-														>
-															Updated
-															{sortBy === "updated_at" &&
-																(sortOrder === "asc" ? (
-																	<ChevronUp className="h-3 w-3" />
-																) : (
-																	<ChevronDown className="h-3 w-3" />
-																))}
-														</button>
-													</th>
-													<th className="w-16" />
-												</tr>
-											</thead>
-											<tbody>
-												{enrichedQueueData?.map((item: QueueItem) => (
-													<tr
-														key={item.id}
-														className={`hover transition-colors ${selectedItems.has(item.id) ? "bg-primary/5" : ""}`}
-													>
-														<td className="text-center">
+									<>
+										{/* Mobile View (< 640px) */}
+										<div className="space-y-3 p-4 sm:hidden">
+											{enrichedQueueData?.map((item: QueueItem) => (
+												<QueueItemCard
+													key={item.id}
+													item={item}
+													isSelected={selectedItems.has(item.id)}
+													onSelectChange={handleSelectItem}
+													onRetry={handleRetry}
+													onCancel={handleCancel}
+													onDelete={handleDelete}
+													onDownload={handleDownload}
+													isRetryPending={retryItem.isPending}
+													isCancelPending={cancelItem.isPending}
+													isDeletePending={deleteItem.isPending}
+												/>
+											))}
+										</div>
+
+										{/* Desktop View (≥640px) - Keep Existing */}
+										<div className="hidden overflow-x-auto sm:block">
+											<table className="table-zebra table-sm sm:table-md table">
+												<thead className="bg-base-200/50">
+													<tr>
+														<th className="w-12 text-center">
 															<input
 																type="checkbox"
 																className="checkbox checkbox-xs"
-																checked={selectedItems.has(item.id)}
-																onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+																checked={isAllSelected}
+																ref={(input) => {
+																	if (input) input.indeterminate = Boolean(isIndeterminate);
+																}}
+																onChange={(e) => handleSelectAll(e.target.checked)}
 															/>
-														</td>
-														<td>
-															<div className="flex min-w-0 flex-col">
-																<div className="flex items-center gap-2">
-																	<FileCode className="h-3.5 w-3.5 shrink-0 opacity-40" />
-																	<div className="truncate font-bold text-sm">
-																		<PathDisplay
-																			path={item.nzb_path}
-																			maxLength={80}
-																			showFileName={true}
-																		/>
-																	</div>
-																</div>
-																<div className="mt-1 truncate pl-5.5 text-[10px] text-base-content/40">
-																	{item.target_path ? (
-																		<span className="flex items-center gap-1">
-																			<Box className="h-2.5 w-2.5" />
-																			<PathDisplay path={item.target_path} maxLength={60} />
-																		</span>
+														</th>
+														<th>
+															<button
+																type="button"
+																className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
+																onClick={() => handleSort("nzb_path")}
+															>
+																NZB File
+																{sortBy === "nzb_path" &&
+																	(sortOrder === "asc" ? (
+																		<ChevronUp className="h-3 w-3" />
 																	) : (
-																		`ID: ${item.id}`
+																		<ChevronDown className="h-3 w-3" />
+																	))}
+															</button>
+														</th>
+														<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+															Category
+														</th>
+														<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+															Size
+														</th>
+														<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+															Status
+														</th>
+														<th>
+															<button
+																type="button"
+																className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
+																onClick={() => handleSort("updated_at")}
+															>
+																Updated
+																{sortBy === "updated_at" &&
+																	(sortOrder === "asc" ? (
+																		<ChevronUp className="h-3 w-3" />
+																	) : (
+																		<ChevronDown className="h-3 w-3" />
+																	))}
+															</button>
+														</th>
+														<th className="w-16" />
+													</tr>
+												</thead>
+												<tbody>
+													{enrichedQueueData?.map((item: QueueItem) => (
+														<tr
+															key={item.id}
+															className={`hover transition-colors ${selectedItems.has(item.id) ? "bg-primary/5" : ""}`}
+														>
+															<td className="text-center">
+																<input
+																	type="checkbox"
+																	className="checkbox checkbox-xs"
+																	checked={selectedItems.has(item.id)}
+																	onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+																/>
+															</td>
+															<td>
+																<div className="flex min-w-0 flex-col">
+																	<div className="flex items-center gap-2">
+																		<FileCode className="h-3.5 w-3.5 shrink-0 opacity-40" />
+																		<div className="truncate font-bold text-sm">
+																			<PathDisplay
+																				path={item.nzb_path}
+																				maxLength={80}
+																				showFileName={true}
+																			/>
+																		</div>
+																	</div>
+																	<div className="mt-1 truncate pl-5.5 text-[10px] text-base-content/40">
+																		{item.target_path ? (
+																			<span className="flex items-center gap-1">
+																				<Box className="h-2.5 w-2.5" />
+																				<PathDisplay path={item.target_path} maxLength={60} />
+																			</span>
+																		) : (
+																			`ID: ${item.id}`
+																		)}
+																	</div>
+																</div>
+															</td>
+															<td>
+																{item.category ? (
+																	<span className="badge badge-outline badge-xs py-2 font-semibold uppercase tracking-wide">
+																		{item.category}
+																	</span>
+																) : (
+																	<span className="opacity-30">—</span>
+																)}
+															</td>
+															<td>
+																{item.file_size ? (
+																	<span className="font-mono text-xs opacity-70">
+																		{formatBytes(item.file_size)}
+																	</span>
+																) : (
+																	<span className="opacity-30">—</span>
+																)}
+															</td>
+															<td>
+																<div className="flex flex-col gap-1">
+																	{item.status === QueueStatus.FAILED && item.error_message ? (
+																		<div
+																			className="tooltip tooltip-left"
+																			data-tip={truncateText(item.error_message, 200)}
+																		>
+																			<div className="flex items-center gap-1">
+																				<StatusBadge status={item.status} />
+																				<AlertCircle className="h-3 w-3 text-error" />
+																			</div>
+																		</div>
+																	) : item.status === QueueStatus.PROCESSING &&
+																		item.percentage != null ? (
+																		<div className="flex w-24 flex-col gap-1">
+																			<div className="flex justify-between font-bold font-mono text-[9px] opacity-60">
+																				<span>PROGRESS</span>
+																				<span>{item.percentage}%</span>
+																			</div>
+																			<progress
+																				className="progress progress-primary h-1.5 w-full"
+																				value={item.percentage}
+																				max={100}
+																			/>
+																		</div>
+																	) : (
+																		<StatusBadge status={item.status} />
 																	)}
 																</div>
-															</div>
-														</td>
-														<td>
-															{item.category ? (
-																<span className="badge badge-outline badge-xs py-2 font-semibold uppercase tracking-wide">
-																	{item.category}
-																</span>
-															) : (
-																<span className="opacity-30">—</span>
-															)}
-														</td>
-														<td>
-															{item.file_size ? (
-																<span className="font-mono text-xs opacity-70">
-																	{formatBytes(item.file_size)}
-																</span>
-															) : (
-																<span className="opacity-30">—</span>
-															)}
-														</td>
-														<td>
-															<div className="flex flex-col gap-1">
-																{item.status === QueueStatus.FAILED && item.error_message ? (
-																	<div
-																		className="tooltip tooltip-left"
-																		data-tip={truncateText(item.error_message, 200)}
-																	>
-																		<div className="flex items-center gap-1">
-																			<StatusBadge status={item.status} />
-																			<AlertCircle className="h-3 w-3 text-error" />
-																		</div>
-																	</div>
-																) : item.status === QueueStatus.PROCESSING &&
-																	item.percentage != null ? (
-																	<div className="flex w-24 flex-col gap-1">
-																		<div className="flex justify-between font-bold font-mono text-[9px] opacity-60">
-																			<span>PROGRESS</span>
-																			<span>{item.percentage}%</span>
-																		</div>
-																		<progress
-																			className="progress progress-primary h-1.5 w-full"
-																			value={item.percentage}
-																			max={100}
-																		/>
-																	</div>
-																) : (
-																	<StatusBadge status={item.status} />
-																)}
-															</div>
-														</td>
-														<td>
-															<div className="flex flex-col">
-																<span className="text-xs opacity-70">
-																	{formatRelativeTime(item.updated_at)}
-																</span>
-																{item.retry_count > 0 && (
-																	<span className="mt-0.5 font-bold text-[9px] text-warning uppercase tracking-tighter">
-																		{item.retry_count} Retries
+															</td>
+															<td>
+																<div className="flex flex-col">
+																	<span className="text-xs opacity-70">
+																		{formatRelativeTime(item.updated_at)}
 																	</span>
-																)}
-															</div>
-														</td>
-														<td className="text-right">
-															<div className="dropdown dropdown-end">
-																<button
-																	tabIndex={0}
-																	type="button"
-																	className="btn btn-ghost btn-xs btn-square"
-																>
-																	<MoreVertical className="h-4 w-4" />
-																</button>
-																<ul className="dropdown-content menu z-[10] w-48 rounded-box border border-base-200 bg-base-100 p-2 shadow-xl">
-																	{(item.status === QueueStatus.PENDING ||
-																		item.status === QueueStatus.FAILED ||
-																		item.status === QueueStatus.COMPLETED) && (
+																	{item.retry_count > 0 && (
+																		<span className="mt-0.5 font-bold text-[9px] text-warning uppercase tracking-tighter">
+																			{item.retry_count} Retries
+																		</span>
+																	)}
+																</div>
+															</td>
+															<td className="text-right">
+																<div className="dropdown dropdown-end">
+																	<button
+																		tabIndex={0}
+																		type="button"
+																		className="btn btn-ghost btn-xs btn-square"
+																	>
+																		<MoreVertical className="h-4 w-4" />
+																	</button>
+																	<ul className="dropdown-content menu z-[10] w-48 rounded-box border border-base-200 bg-base-100 p-2 shadow-xl">
+																		{(item.status === QueueStatus.PENDING ||
+																			item.status === QueueStatus.FAILED ||
+																			item.status === QueueStatus.COMPLETED) && (
+																			<li>
+																				<button
+																					type="button"
+																					onClick={() => handleRetry(item.id)}
+																					disabled={retryItem.isPending}
+																				>
+																					<PlayCircle className="h-4 w-4 text-primary" />
+																					{item.status === QueueStatus.PENDING
+																						? "Start Now"
+																						: "Retry Task"}
+																				</button>
+																			</li>
+																		)}
+																		{item.status === QueueStatus.PROCESSING && (
+																			<li>
+																				<button
+																					type="button"
+																					onClick={() => handleCancel(item.id)}
+																					disabled={cancelItem.isPending}
+																					className="text-warning"
+																				>
+																					<XCircle className="h-4 w-4" />
+																					Cancel Process
+																				</button>
+																			</li>
+																		)}
 																		<li>
-																			<button
-																				type="button"
-																				onClick={() => handleRetry(item.id)}
-																				disabled={retryItem.isPending}
-																			>
-																				<PlayCircle className="h-4 w-4 text-primary" />
-																				{item.status === QueueStatus.PENDING
-																					? "Start Now"
-																					: "Retry Task"}
+																			<button type="button" onClick={() => handleDownload(item.id)}>
+																				<Download className="h-4 w-4" />
+																				Download NZB
 																			</button>
 																		</li>
-																	)}
-																	{item.status === QueueStatus.PROCESSING && (
-																		<li>
-																			<button
-																				type="button"
-																				onClick={() => handleCancel(item.id)}
-																				disabled={cancelItem.isPending}
-																				className="text-warning"
-																			>
-																				<XCircle className="h-4 w-4" />
-																				Cancel Process
-																			</button>
-																		</li>
-																	)}
-																	<li>
-																		<button type="button" onClick={() => handleDownload(item.id)}>
-																			<Download className="h-4 w-4" />
-																			Download NZB
-																		</button>
-																	</li>
-																	<div className="divider my-1 opacity-50" />
-																	{item.status !== QueueStatus.PROCESSING && (
-																		<li>
-																			<button
-																				type="button"
-																				onClick={() => handleDelete(item.id)}
-																				disabled={deleteItem.isPending}
-																				className="text-error"
-																			>
-																				<Trash2 className="h-4 w-4" />
-																				Delete Record
-																			</button>
-																		</li>
-																	)}
-																</ul>
-															</div>
-														</td>
-													</tr>
-												))}
-											</tbody>
-										</table>
-									</div>
+																		<div className="divider my-1 opacity-50" />
+																		{item.status !== QueueStatus.PROCESSING && (
+																			<li>
+																				<button
+																					type="button"
+																					onClick={() => handleDelete(item.id)}
+																					disabled={deleteItem.isPending}
+																					className="text-error"
+																				>
+																					<Trash2 className="h-4 w-4" />
+																					Delete Record
+																				</button>
+																			</li>
+																		)}
+																	</ul>
+																</div>
+															</td>
+														</tr>
+													))}
+												</tbody>
+											</table>
+										</div>
+									</>
 								) : (
 									<div className="flex flex-col items-center justify-center py-24">
 										<div className="rounded-full bg-base-200 p-6">
