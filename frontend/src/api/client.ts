@@ -11,10 +11,12 @@ import type {
 	HealthPriority,
 	HealthStats,
 	HealthWorkerStatus,
+	ImportHistoryItem,
 	ImportStatusResponse,
 	LibrarySyncStatus,
 	ManualScanRequest,
 	PoolMetrics,
+	QueueHistoricalStatsResponse,
 	QueueItem,
 	QueueStats,
 	SABnzbdAddResponse,
@@ -752,9 +754,7 @@ export class APIClient {
 		if (limit) searchParams.set("limit", limit.toString());
 
 		const query = searchParams.toString();
-		return this.request<Array<Record<string, unknown>>>(
-			`/import/history${query ? `?${query}` : ""}`,
-		);
+		return this.request<ImportHistoryItem[]>(`/import/history${query ? `?${query}` : ""}`);
 	}
 
 	async cancelScan() {
