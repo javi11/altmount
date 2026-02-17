@@ -68,10 +68,9 @@ export function StreamingConfigSection({
 						<input
 							type="range"
 							min="1"
-							max="50"
+							max="100"
 							value={formData.max_prefetch}
-							className="range range-primary range-sm"
-							step="1"
+							className="range range-primary range-sm [&::-webkit-slider-runnable-track]:rounded-full"
 							disabled={isReadOnly}
 							onChange={(e) =>
 								handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10))
@@ -79,11 +78,11 @@ export function StreamingConfigSection({
 						/>
 						<div className="flex justify-between px-2 font-black text-[10px] opacity-30">
 							<span>1</span>
-							<span>10</span>
 							<span>20</span>
-							<span>30</span>
 							<span>40</span>
-							<span>50</span>
+							<span>60</span>
+							<span>80</span>
+							<span>100</span>
 						</div>
 					</div>
 				</div>
