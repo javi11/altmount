@@ -69,7 +69,7 @@ const (
 // See MarshalIndent for an example.
 //
 // Marshal will return an error if asked to marshal a channel, function, or map.
-func Marshal(v interface{}) ([]byte, error) {
+func Marshal(v any) ([]byte, error) {
 	var b bytes.Buffer
 	if err := NewEncoder(&b).Encode(v); err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ type MarshalerAttr interface {
 // MarshalIndent works like Marshal, but each XML element begins on a new
 // indented line that starts with prefix and is followed by one or more
 // copies of indent according to the nesting depth.
-func MarshalIndent(v interface{}, prefix, indent string) ([]byte, error) {
+func MarshalIndent(v any, prefix, indent string) ([]byte, error) {
 	var b bytes.Buffer
 	enc := NewEncoder(&b)
 	enc.Indent(prefix, indent)
@@ -151,7 +151,7 @@ func (enc *Encoder) Indent(prefix, indent string) {
 // of Go values to XML.
 //
 // Encode calls Flush before returning.
-func (enc *Encoder) Encode(v interface{}) error {
+func (enc *Encoder) Encode(v any) error {
 	err := enc.p.marshalValue(reflect.ValueOf(v), nil, nil)
 	if err != nil {
 		return err
@@ -166,7 +166,7 @@ func (enc *Encoder) Encode(v interface{}) error {
 // of Go values to XML.
 //
 // EncodeElement calls Flush before returning.
-func (enc *Encoder) EncodeElement(v interface{}, start StartElement) error {
+func (enc *Encoder) EncodeElement(v any, start StartElement) error {
 	err := enc.p.marshalValue(reflect.ValueOf(v), nil, &start)
 	if err != nil {
 		return err
@@ -547,9 +547,9 @@ func (p *printer) setAttrPrefix(prefix, url string) {
 }
 
 var (
-	marshalerType     = reflect.TypeOf((*Marshaler)(nil)).Elem()
-	marshalerAttrType = reflect.TypeOf((*MarshalerAttr)(nil)).Elem()
-	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
+	marshalerType     = reflect.TypeFor[Marshaler]()
+	marshalerAttrType = reflect.TypeFor[MarshalerAttr]()
+	textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
 )
 
 // marshalValue writes one or more XML elements representing val.
@@ -569,7 +569,7 @@ func (p *printer) marshalValue(val reflect.Value, finfo *fieldInfo, startTemplat
 	// Drill into interfaces and pointers.
 	// This can turn into an infinite loop given a cyclic chain,
 	// but it matches the Go 1 behavior.
-	for val.Kind() == reflect.Interface || val.Kind() == reflect.Ptr {
+	for val.Kind() == reflect.Interface || val.Kind() == reflect.Pointer {
 		if val.IsNil() {
 			return nil
 		}
@@ -759,7 +759,7 @@ func (p *printer) fieldAttr(finfo *fieldInfo, val reflect.Value) (Attr, error) {
 	}
 	// Dereference or skip nil pointer, interface values.
 	switch fv.Kind() {
-	case reflect.Ptr, reflect.Interface:
+	case reflect.Pointer, reflect.Interface:
 		if fv.IsNil() {
 			return Attr{}, nil
 		}
@@ -972,7 +972,7 @@ func (p *printer) marshalStruct(tinfo *typeInfo, val reflect.Value) error {
 
 		// Dereference or skip nil pointer, interface values.
 		switch vf.Kind() {
-		case reflect.Ptr, reflect.Interface:
+		case reflect.Pointer, reflect.Interface:
 			if !vf.IsNil() {
 				vf = vf.Elem()
 			}
@@ -1170,7 +1170,7 @@ func (s *parentStack) setParents(finfo *fieldInfo, vf reflect.Value) error {
 		// No new elements to push.
 		return nil
 	}
-	if (vf.Kind() == reflect.Ptr || vf.Kind() == reflect.Interface) && vf.IsNil() {
+	if (vf.Kind() == reflect.Pointer || vf.Kind() == reflect.Interface) && vf.IsNil() {
 		// The element is nil, so no need for the start elements.
 		s.parents = s.parents[:commonParents]
 		return nil
@@ -1217,7 +1217,7 @@ func isEmptyValue(v reflect.Value) bool {
 		return v.Uint() == 0
 	case reflect.Float32, reflect.Float64:
 		return v.Float() == 0
-	case reflect.Interface, reflect.Ptr:
+	case reflect.Interface, reflect.Pointer:
 		return v.IsNil()
 	}
 	return false

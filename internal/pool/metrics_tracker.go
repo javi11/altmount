@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,8 +42,8 @@ type MetricsTracker struct {
 	calculationWindow time.Duration // Window for speed calculations (shorter than retention for accuracy)
 	maxDownloadSpeed  float64
 	// Live counters
-	articlesDownloaded atomic.Int64
-	articlesPosted     atomic.Int64
+	articlesDownloaded  atomic.Int64
+	articlesPosted      atomic.Int64
 	liveBytesDownloaded atomic.Int64
 	// Persistent counters (loaded from DB on start)
 	initialBytesDownloaded    int64
@@ -76,7 +77,7 @@ func NewMetricsTracker(pool *nntppool.Client, repo StatsRepository) *MetricsTrac
 		initialProviderErrors: make(map[string]int64),
 		sampleInterval:        2 * time.Second, // Match playback sampling for "live" feel
 		retentionPeriod:       60 * time.Second,
-		calculationWindow:     10 * time.Second, // Use 10s window for more accurate real-time speeds
+		calculationWindow:     10 * time.Second,   // Use 10s window for more accurate real-time speeds
 		persistenceThreshold:  1024 * 1024 * 1024, // Save every 1GB downloaded
 		logger:                slog.Default().With("component", "metrics-tracker"),
 	}
@@ -105,8 +106,8 @@ func (mt *MetricsTracker) Start(ctx context.Context) {
 
 			// Load provider errors (prefixed with provider_error:)
 			for k, v := range stats {
-				if strings.HasPrefix(k, "provider_error:") {
-					providerID := strings.TrimPrefix(k, "provider_error:")
+				if after, ok := strings.CutPrefix(k, "provider_error:"); ok {
+					providerID := after
 					mt.initialProviderErrors[providerID] = v
 				}
 			}
@@ -199,9 +200,7 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 
 	// Merge provider errors
 	mergedProviderErrors := make(map[string]int64)
-	for k, v := range mt.initialProviderErrors {
-		mergedProviderErrors[k] = v
-	}
+	maps.Copy(mergedProviderErrors, mt.initialProviderErrors)
 	for k, v := range providerErrors {
 		mergedProviderErrors[k] += v
 	}
@@ -409,7 +408,7 @@ func (mt *MetricsTracker) takeSample() {
 	// Adaptive Persistence: Check if we should force a save due to high activity
 	totalBytesDownloaded := bytesDownloaded + mt.initialBytesDownloaded
 	if totalBytesDownloaded-mt.lastSavedBytesDownloaded >= mt.persistenceThreshold {
-		// Use a non-blocking save or a shorter context? 
+		// Use a non-blocking save or a shorter context?
 		// For now, simple call is fine as it's a goroutine
 		go mt.saveStats(context.Background())
 	}
@@ -444,8 +443,6 @@ func copyProviderErrors(original map[string]int64) map[string]int64 {
 	}
 
 	copy := make(map[string]int64, len(original))
-	for k, v := range original {
-		copy[k] = v
-	}
+	maps.Copy(copy, original)
 	return copy
 }

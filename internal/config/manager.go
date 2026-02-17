@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,10 +40,10 @@ type Config struct {
 	Database        DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
 	Metadata        MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
 	Streaming       StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health          HealthConfig     `yaml:"health" mapstructure:"health" json:"health,omitempty"`
+	Health          HealthConfig     `yaml:"health" mapstructure:"health" json:"health"`
 	RClone          RCloneConfig     `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
 	Import          ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log,omitempty"`
+	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log"`
 	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
 	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
@@ -394,13 +395,7 @@ func (c *Config) Validate() error {
 	// Validate log level (both old and new config)
 	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
-		isValid := false
-		for _, level := range validLevels {
-			if c.Log.Level == level {
-				isValid = true
-				break
-			}
-		}
+		isValid := slices.Contains(validLevels, c.Log.Level)
 		if !isValid {
 			return fmt.Errorf("log_level must be one of: debug, info, warn, error")
 		}
@@ -409,13 +404,7 @@ func (c *Config) Validate() error {
 	// Validate log configuration
 	if c.Log.Level != "" {
 		validLevels := []string{"debug", "info", "warn", "error"}
-		isValid := false
-		for _, level := range validLevels {
-			if c.Log.Level == level {
-				isValid = true
-				break
-			}
-		}
+		isValid := slices.Contains(validLevels, c.Log.Level)
 		if !isValid {
 			return fmt.Errorf("log.level must be one of: debug, info, warn, error")
 		}
@@ -1410,4 +1399,3 @@ func LoadConfig(configFile string) (*Config, error) {
 func GetConfigFilePath() string {
 	return viper.ConfigFileUsed()
 }
-

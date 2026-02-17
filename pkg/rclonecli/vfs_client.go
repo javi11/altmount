@@ -118,7 +118,7 @@ func (c *rcloneRcClient) RefreshDir(ctx context.Context, provider string, dirs [
 	}
 
 	// Use similar logic to Manager's RefreshDir but with vfs/refresh endpoint
-	refreshArgs := map[string]interface{}{
+	refreshArgs := map[string]any{
 		"_async":    "false", // Use async refresh
 		"recursive": "false", // Non-recursive by default
 	}
@@ -139,7 +139,7 @@ func (c *rcloneRcClient) RefreshDir(ctx context.Context, provider string, dirs [
 		}
 	}
 
-	forgetArgs := make(map[string]interface{})
+	forgetArgs := make(map[string]any)
 	for k, v := range refreshArgs {
 		if k != "recursive" {
 			forgetArgs[k] = v

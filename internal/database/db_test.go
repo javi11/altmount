@@ -137,7 +137,7 @@ func TestUpdateConnectionPool_ActualConnections(t *testing.T) {
 	const numConnections = 9 // 5 + 4 buffer
 	connections := make([]*sql.Conn, numConnections)
 
-	for i := 0; i < numConnections; i++ {
+	for i := range numConnections {
 		conn, err := db.Conn(context.Background())
 		require.NoError(t, err, "Should be able to open connection %d", i+1)
 		connections[i] = conn

@@ -47,13 +47,13 @@ type MountInfo struct {
 }
 
 type RCRequest struct {
-	Command string                 `json:"command"`
-	Args    map[string]interface{} `json:"args,omitempty"`
+	Command string         `json:"command"`
+	Args    map[string]any `json:"args,omitempty"`
 }
 
 type RCResponse struct {
-	Result interface{} `json:"result,omitempty"`
-	Error  string      `json:"error,omitempty"`
+	Result any    `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // NewManager creates a new rclone RC manager
@@ -332,7 +332,7 @@ func (m *Manager) waitForServer() {
 func (m *Manager) pingServer() bool {
 	req := RCRequest{
 		Command: "core/version",
-		Args:    map[string]interface{}{},
+		Args:    map[string]any{},
 	}
 	_, err := m.makeRequest(req, true)
 	return err == nil

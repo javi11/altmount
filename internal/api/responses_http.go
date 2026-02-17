@@ -8,8 +8,8 @@ import (
 // HTTP response helpers for legacy handlers
 
 // WriteSuccess writes a success response
-func WriteSuccess(w http.ResponseWriter, data interface{}, meta interface{}) {
-	response := map[string]interface{}{
+func WriteSuccess(w http.ResponseWriter, data any, meta any) {
+	response := map[string]any{
 		"success": true,
 		"data":    data,
 	}
@@ -23,7 +23,7 @@ func WriteSuccess(w http.ResponseWriter, data interface{}, meta interface{}) {
 
 // WriteInternalError writes an internal server error response
 func WriteInternalError(w http.ResponseWriter, message string, details string) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"success": false,
 		"message": message,
 	}
@@ -37,7 +37,7 @@ func WriteInternalError(w http.ResponseWriter, message string, details string) {
 
 // WriteUnauthorized writes an unauthorized response
 func WriteUnauthorized(w http.ResponseWriter, message string, details string) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"success": false,
 		"message": message,
 	}
@@ -51,7 +51,7 @@ func WriteUnauthorized(w http.ResponseWriter, message string, details string) {
 
 // WriteForbidden writes a forbidden response
 func WriteForbidden(w http.ResponseWriter, message string, details string) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"success": false,
 		"message": message,
 	}
@@ -65,7 +65,7 @@ func WriteForbidden(w http.ResponseWriter, message string, details string) {
 
 // WriteBadRequest writes a bad request response
 func WriteBadRequest(w http.ResponseWriter, message string, details string) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"success": false,
 		"message": message,
 	}

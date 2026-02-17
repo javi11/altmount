@@ -33,16 +33,16 @@ type ArrsWebhookRequest struct {
 	// For upgrades/renames, the file path might be in other fields or need to be inferred
 	Movie struct {
 		FolderPath string `json:"folderPath"`
-	} `json:"movie,omitempty"`
+	} `json:"movie"`
 	MovieFile struct {
 		Path string `json:"path"`
-	} `json:"movieFile,omitempty"`
+	} `json:"movieFile"`
 	Series struct {
 		Path string `json:"path"`
-	} `json:"series,omitempty"`
+	} `json:"series"`
 	EpisodeFile struct {
 		Path string `json:"path"`
-	} `json:"episodeFile,omitempty"`
+	} `json:"episodeFile"`
 	DeletedFiles ArrsDeletedFiles `json:"deletedFiles,omitempty"`
 }
 

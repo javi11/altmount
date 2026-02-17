@@ -250,25 +250,25 @@ func (r *QueueRepository) ClaimNextQueueItem(ctx context.Context) (*ImportQueueI
 func (r *QueueRepository) UpdateQueueItemStatus(ctx context.Context, id int64, status QueueStatus, errorMessage *string) error {
 	now := time.Now()
 	var query string
-	var args []interface{}
+	var args []any
 
 	switch status {
 	case QueueStatusProcessing:
 		query = `UPDATE import_queue SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`
-		args = []interface{}{status, now, now, id}
+		args = []any{status, now, now, id}
 	case QueueStatusCompleted:
 		query = `UPDATE import_queue SET status = ?, completed_at = ?, updated_at = ?, error_message = NULL WHERE id = ?`
-		args = []interface{}{status, now, now, id}
+		args = []any{status, now, now, id}
 		// Track successful import
 		_ = r.IncrementDailyStat(ctx, "completed")
 	case QueueStatusFailed:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
-		args = []interface{}{status, errorMessage, now, id}
+		args = []any{status, errorMessage, now, id}
 		// Track failed import
 		_ = r.IncrementDailyStat(ctx, "failed")
 	default:
 		query = `UPDATE import_queue SET status = ?, error_message = ?, updated_at = ? WHERE id = ?`
-		args = []interface{}{status, errorMessage, now, id}
+		args = []any{status, errorMessage, now, id}
 	}
 
 	_, err := r.db.ExecContext(ctx, query, args...)
@@ -399,16 +399,13 @@ func (r *QueueRepository) FilterExistingNzbdavIds(ctx context.Context, ids []str
 	existingIds := make([]string, 0)
 
 	for i := 0; i < len(ids); i += batchSize {
-		end := i + batchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
+		end := min(i+batchSize, len(ids))
 
 		batchIds := ids[i:end]
 
 		// Build placeholders for the IN clause
 		placeholders := make([]string, len(batchIds))
-		args := make([]interface{}, len(batchIds))
+		args := make([]any, len(batchIds))
 		for j, id := range batchIds {
 			placeholders[j] = "?"
 			args[j] = id

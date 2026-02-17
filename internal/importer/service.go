@@ -425,7 +425,6 @@ func (s *Service) SetArrsService(service *arrs.Service) {
 	}
 }
 
-
 // GetQueueStats returns current queue statistics from database
 func (s *Service) GetQueueStats(ctx context.Context) (*database.QueueStats, error) {
 	return s.database.Repository.GetQueueStats(ctx)
@@ -674,8 +673,8 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 				// Strip 'failed' subdirectory if present (added when items fail and are moved to .nzbs/failed)
 				// We want to avoid including 'failed' in the virtual directory path during retries.
 				cleanRel := filepath.ToSlash(relDir)
-				if strings.HasPrefix(cleanRel, "failed/") {
-					cleanRel = strings.TrimPrefix(cleanRel, "failed/")
+				if after, ok := strings.CutPrefix(cleanRel, "failed/"); ok {
+					cleanRel = after
 				} else if cleanRel == "failed" {
 					cleanRel = ""
 				}

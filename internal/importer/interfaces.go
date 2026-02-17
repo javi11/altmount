@@ -124,11 +124,11 @@ type ImportService interface {
 	// Close releases all resources
 	Close() error
 	// SetRcloneClient sets the rclone client for VFS notifications
-	SetRcloneClient(client interface{})
+	SetRcloneClient(client any)
 	// SetArrsService sets the ARRs service for notifications
-	SetArrsService(service interface{})
+	SetArrsService(service any)
 	// RegisterConfigChangeHandler registers a handler for configuration changes
-	RegisterConfigChangeHandler(configManager interface{})
+	RegisterConfigChangeHandler(configManager any)
 }
 
 // FileSizeCalculator calculates file sizes for different file types

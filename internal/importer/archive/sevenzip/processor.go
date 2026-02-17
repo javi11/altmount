@@ -475,14 +475,8 @@ func sliceSegmentsForRange(segments []*metapb.SegmentData, offset int64, size in
 		}
 
 		// Calculate overlap
-		overlapStart := segAbsStart
-		if overlapStart < targetStart {
-			overlapStart = targetStart
-		}
-		overlapEnd := segAbsEnd
-		if overlapEnd > targetEnd {
-			overlapEnd = targetEnd
-		}
+		overlapStart := max(segAbsStart, targetStart)
+		overlapEnd := min(segAbsEnd, targetEnd)
 
 		if overlapEnd >= overlapStart {
 			// Translate back to segment-relative offsets

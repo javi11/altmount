@@ -28,8 +28,8 @@ func APIKeyMiddleware(userRepo *database.UserRepository) fiber.Handler {
 			if apiKey == "" {
 				// Check Authorization header
 				authHeader := c.Get("Authorization")
-				if strings.HasPrefix(authHeader, "Bearer ") {
-					apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+				if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
+					apiKey = after
 				}
 			}
 		}
@@ -83,8 +83,8 @@ func OptionalAPIKeyMiddleware(userRepo *database.UserRepository) fiber.Handler {
 			if apiKey == "" {
 				// Check Authorization header
 				authHeader := c.Get("Authorization")
-				if strings.HasPrefix(authHeader, "Bearer ") {
-					apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+				if after, ok := strings.CutPrefix(authHeader, "Bearer "); ok {
+					apiKey = after
 				}
 			}
 		}

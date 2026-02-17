@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 )
@@ -110,9 +111,7 @@ func (pb *ProgressBroadcaster) GetAllProgress() map[int]int {
 	defer pb.mu.RUnlock()
 
 	progressCopy := make(map[int]int, len(pb.progress))
-	for id, percentage := range pb.progress {
-		progressCopy[id] = percentage
-	}
+	maps.Copy(progressCopy, pb.progress)
 	return progressCopy
 }
 

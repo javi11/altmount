@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -327,13 +328,7 @@ func shouldExcludeFile(filename string, excludeArchives bool) bool {
 
 	// Check for common archive extensions
 	ext := strings.ToLower(filepath.Ext(filename))
-	for _, archiveExt := range archiveExts {
-		if ext == archiveExt {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(archiveExts, ext)
 }
 
 // handleBatchExportNZB handles POST /files/export-batch requests

@@ -493,7 +493,7 @@ func (mfi *MetadataFileInfo) Size() int64        { return mfi.size }
 func (mfi *MetadataFileInfo) Mode() os.FileMode  { return mfi.mode }
 func (mfi *MetadataFileInfo) ModTime() time.Time { return mfi.modTime }
 func (mfi *MetadataFileInfo) IsDir() bool        { return mfi.isDir }
-func (mfi *MetadataFileInfo) Sys() interface{}   { return nil }
+func (mfi *MetadataFileInfo) Sys() any           { return nil }
 
 // MetadataSegmentLoader adapts metadata segments to the usenet.SegmentLoader interface
 type MetadataSegmentLoader struct {

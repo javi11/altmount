@@ -29,7 +29,7 @@ func (m *Manager) mountWithRetry(ctx context.Context, provider, mountPath, webda
 			if m.IsReady() {
 				req := RCRequest{
 					Command: "mount/unmount",
-					Args: map[string]interface{}{
+					Args: map[string]any{
 						"mountPoint": mountPath,
 					},
 				}
@@ -98,11 +98,11 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 	}
 
 	// Prepare mount arguments
-	mountArgs := map[string]interface{}{
+	mountArgs := map[string]any{
 		"fs":         fmt.Sprintf("%s:", provider),
 		"mountPoint": mountPath,
 	}
-	mountOpt := map[string]interface{}{
+	mountOpt := map[string]any{
 		"AllowNonEmpty": cfg.RClone.AllowNonEmpty,
 		"AllowOther":    cfg.RClone.AllowOther,
 		"DebugFUSE":     false,
@@ -110,7 +110,7 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		"VolumeName":    provider,
 	}
 
-	configOpts := make(map[string]interface{})
+	configOpts := make(map[string]any)
 
 	if cfg.RClone.BufferSize != "" {
 		configOpts["BufferSize"] = cfg.RClone.BufferSize
@@ -120,7 +120,7 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		// Only add _config if there are options to set
 		mountArgs["_config"] = configOpts
 	}
-	vfsOpt := map[string]interface{}{
+	vfsOpt := map[string]any{
 		"CacheMode": cfg.RClone.VFSCacheMode,
 	}
 	vfsOpt["PollInterval"] = 0 // Poll interval not supported for webdav, set to 0
@@ -218,7 +218,7 @@ func (m *Manager) unmount(ctx context.Context, provider string) error {
 	// Try RC unmount first
 	req := RCRequest{
 		Command: "mount/unmount",
-		Args: map[string]interface{}{
+		Args: map[string]any{
 			"mountPoint": mountInfo.LocalPath,
 		},
 	}
@@ -325,7 +325,7 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 	if len(dirs) == 0 {
 		dirs = []string{"/"}
 	}
-	args := map[string]interface{}{
+	args := map[string]any{
 		"fs": fmt.Sprintf("%s:", provider),
 	}
 	for i, dir := range dirs {
@@ -365,10 +365,10 @@ func (m *Manager) RefreshDir(ctx context.Context, provider string, dirs []string
 func (m *Manager) createConfig(configName, webdavURL string, user, pass string) error {
 	req := RCRequest{
 		Command: "config/create",
-		Args: map[string]interface{}{
+		Args: map[string]any{
 			"name": configName,
 			"type": "webdav",
-			"parameters": map[string]interface{}{
+			"parameters": map[string]any{
 				"url":             webdavURL,
 				"vendor":          "other",
 				"pacer_min_sleep": "0",

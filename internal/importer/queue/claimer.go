@@ -59,10 +59,9 @@ func (c *Claimer) ClaimWithRetry(ctx context.Context, workerID int) (*database.I
 
 			// Calculate exponential backoff for logging
 			baseDelay := 50 * time.Millisecond
-			backoffDelay := baseDelay * (1 << n) // Exponential: 50ms, 100ms, 200ms...
-			if backoffDelay > 5*time.Second {
-				backoffDelay = 5 * time.Second
-			}
+			backoffDelay := min(
+				// Exponential: 50ms, 100ms, 200ms...
+				baseDelay*(1<<n), 5*time.Second)
 
 			// Only log warnings after first retry to reduce noise
 			if n >= 1 {

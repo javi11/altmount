@@ -8,7 +8,7 @@ import (
 // These provide a unified interface for API responses.
 
 // RespondSuccess sends a successful response with data.
-func RespondSuccess(c *fiber.Ctx, data interface{}) error {
+func RespondSuccess(c *fiber.Ctx, data any) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    data,
@@ -16,7 +16,7 @@ func RespondSuccess(c *fiber.Ctx, data interface{}) error {
 }
 
 // RespondSuccessWithMeta sends a successful response with data and pagination metadata.
-func RespondSuccessWithMeta(c *fiber.Ctx, data interface{}, meta *APIMeta) error {
+func RespondSuccessWithMeta(c *fiber.Ctx, data any, meta *APIMeta) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    data,
@@ -25,7 +25,7 @@ func RespondSuccessWithMeta(c *fiber.Ctx, data interface{}, meta *APIMeta) error
 }
 
 // RespondCreated sends a 201 Created response with data.
-func RespondCreated(c *fiber.Ctx, data interface{}) error {
+func RespondCreated(c *fiber.Ctx, data any) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    data,

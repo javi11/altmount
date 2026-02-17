@@ -152,11 +152,9 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootF
 
 	// Start batch processor
 	var batchWg sync.WaitGroup
-	batchWg.Add(1)
-	go func() {
-		defer batchWg.Done()
+	batchWg.Go(func() {
 		n.processBatch(ctx, batchChan)
-	}()
+	})
 
 	// Monitor error channel in background to catch query/DB failures early
 	go func() {
@@ -172,10 +170,8 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootF
 	}()
 
 	// Start workers
-	for i := 0; i < numWorkers; i++ {
-		workerWg.Add(1)
-		go func() {
-			defer workerWg.Done()
+	for range numWorkers {
+		workerWg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -205,7 +201,7 @@ func (n *NzbDavImporter) performImport(ctx context.Context, dbPath string, rootF
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	// Wait for workers to finish processing nzbChan
@@ -402,7 +398,7 @@ func (n *NzbDavImporter) createNzbFileAndPrepareItem(ctx context.Context, res *n
 	priority := database.QueuePriorityNormal
 
 	// Store original ID and extracted files in metadata
-	metaMap := map[string]interface{}{
+	metaMap := map[string]any{
 		"nzbdav_id": res.ID,
 	}
 	if len(res.ExtractedFiles) > 0 {

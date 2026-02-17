@@ -16,12 +16,12 @@ import (
 
 // SABnzbdResponse represents the standard SABnzbd API response wrapper
 type SABnzbdResponse struct {
-	Status  bool        `json:"status"`
-	Queue   interface{} `json:"queue,omitempty"`
-	History interface{} `json:"history,omitempty"`
-	Config  interface{} `json:"config,omitempty"`
-	Version interface{} `json:"version,omitempty"`
-	Error   *string     `json:"error,omitempty"`
+	Status  bool    `json:"status"`
+	Queue   any     `json:"queue,omitempty"`
+	History any     `json:"history,omitempty"`
+	Config  any     `json:"config,omitempty"`
+	Version any     `json:"version,omitempty"`
+	Error   *string `json:"error,omitempty"`
 }
 
 // SABnzbdQueueObject represents the nested queue object in the response

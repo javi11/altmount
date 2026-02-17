@@ -70,7 +70,8 @@ export function StreamingConfigSection({
 							min="1"
 							max="100"
 							value={formData.max_prefetch}
-							className="range range-primary range-sm [&::-webkit-slider-runnable-track]:rounded-full"
+							step="1"
+							className="range range-primary range-sm w-full [&::-webkit-slider-runnable-track]:rounded-full"
 							disabled={isReadOnly}
 							onChange={(e) =>
 								handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10))
@@ -96,7 +97,7 @@ export function StreamingConfigSection({
 						</div>
 						<div className="mt-1 break-words text-[11px] leading-relaxed opacity-80">
 							Higher values improve stability on slow connections but increase initial memory usage.
-							Default (3) is recommended for most 4K streaming scenarios.
+							Default (30) is recommended for most 4K streaming scenarios.
 						</div>
 					</div>
 				</div>
