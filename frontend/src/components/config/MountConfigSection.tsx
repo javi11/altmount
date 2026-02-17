@@ -330,11 +330,10 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 					{mountTypeOptions.map((option) => (
 						<label
 							key={option.value}
-							className={`relative cursor-pointer rounded-2xl border-2 p-5 transition-all hover:bg-base-200/50 ${
-								mountType === option.value
+							className={`relative cursor-pointer rounded-2xl border-2 p-5 transition-all hover:bg-base-200/50 ${mountType === option.value
 									? "border-primary bg-primary/5 shadow-sm"
 									: "border-base-300 bg-base-100/50"
-							}`}
+								}`}
 						>
 							<div className="flex items-start gap-4">
 								<input
@@ -361,7 +360,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Attachment</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
-					
+
 					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-semibold">Local Mount Path</legend>
@@ -371,7 +370,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 									className="input input-bordered w-full bg-base-100 font-mono text-sm"
 									value={mountPath}
 									onChange={(e) => handleMountPathChange(e.target.value)}
-									placeholder="/mnt/altmount"
+									placeholder="/mnt/remotes/altmount"
 								/>
 								<p className="label text-[10px] text-base-content/50 break-words">
 									Path where the virtual filesystem will be attached to your system.

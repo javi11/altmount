@@ -79,6 +79,14 @@ docker-build-ci: build-frontend
 build-frontend:
 	cd frontend && bun install --frozen-lockfile && bun run build
 
+.PHONY: build-docs
+build-docs:
+	cd docs && bun install && bun run build
+
+.PHONY: serve-docs
+serve-docs:
+	cd docs && bun run start
+
 .PHONY: build-cli
 build-cli: build-frontend
 	@VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \

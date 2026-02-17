@@ -157,7 +157,7 @@ health:
   resolve_repair_on_import: false # Automatically resolve pending repairs in the same directory when a new file is imported (default: false)
 
 # WebDAV mount path configuration
-mount_path: '' # WebDAV mount path, Example: '/mnt/altmount' or '/mnt/unionfs'. Must be an absolute path starting with /
+mount_path: '' # WebDAV mount path, Example: '/mnt/remotes/altmount' or '/mnt/unionfs'. Must be an absolute path starting with /
 
 # SABnzbd-compatible API configuration
 sabnzbd:
@@ -343,7 +343,7 @@ providers:
 #     - Global WebDAV mount path configuration
 #     - Used by ARRs service to strip mount prefix from file paths
 #     - Must be an absolute path when ARRs is enabled
-#     - Example: '/mnt/altmount' or '/mnt/unionfs'
+#     - Example: '/mnt/remotes/altmount' or '/mnt/unionfs'
 #
 # 13. ARRs Service:
 #     - Automatically index files from Radarr and Sonarr instances

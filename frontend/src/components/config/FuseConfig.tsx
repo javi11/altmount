@@ -203,7 +203,7 @@ export function FuseConfig() {
 								<legend className="fieldset-legend">Mount Path</legend>
 								<input
 									type="text"
-									placeholder="/mnt/altmount"
+									placeholder="/mnt/remotes/altmount"
 									className="input w-full"
 									value={path}
 									onChange={(e) => setPath(e.target.value)}
