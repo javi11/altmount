@@ -70,8 +70,7 @@ export function StreamingConfigSection({
 							min="1"
 							max="100"
 							value={formData.max_prefetch}
-							className="range range-primary range-sm"
-							step="1"
+							className="range range-primary range-sm [&::-webkit-slider-runnable-track]:rounded-full"
 							disabled={isReadOnly}
 							onChange={(e) =>
 								handleInputChange("max_prefetch", Number.parseInt(e.target.value, 10))
