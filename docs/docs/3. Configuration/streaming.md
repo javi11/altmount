@@ -1,37 +1,150 @@
 # Streaming Configuration
 
-AltMount's streaming capabilities allow direct media playback from Usenet without waiting for complete downloads. This guide covers optimizing streaming performance for your specific setup and use cases.
+AltMount's streaming system enables direct media playback from Usenet without waiting for complete downloads. It uses intelligent prefetching to keep playback smooth.
 
-## Overview
+## Configuration
 
-The streaming system provides:
+Configure the streaming prefetch through the System Configuration interface:
 
-- **Range Request Support**: Efficient seeking and partial downloads
-- **Concurrent Workers**: Parallel downloads for faster streaming
-- **Intelligent Caching**: Smart prefetching for smooth playback
-- **Adaptive Performance**: Configuration tuning for different scenarios
+![Streaming Configuration](/images/config-streaming.png)
+_Streaming settings in the system configuration_
 
-## Basic Streaming Configuration
+### Parameters
 
-### Default Settings
+| Parameter      | Description                                           | Default |
+| -------------- | ----------------------------------------------------- | ------- |
+| `max_prefetch` | Number of segments to prefetch ahead during streaming | `30`    |
 
-Configure streaming parameters through the System Configuration interface:
+```yaml
+streaming:
+  max_prefetch: 30 # Number of segments prefetched ahead (default: 30)
+```
 
-![Streaming Configuration](../../static/img/streaming_config.png)
-_Streaming settings in the system configuration showing performance parameters_
+Higher values improve playback smoothness for high-bitrate content but increase memory usage. Lower values are better for resource-constrained environments.
 
-AltMount includes reasonable defaults that work for most setups:
+## FUSE Mount Recommended Settings
 
-- **Max Range Size**: 32MB (33554432 bytes) - Maximum single range request
-- **Streaming Chunk Size**: 8MB (8388608 bytes) - Size of streaming chunks
-- **Max Download Workers**: 15 - Number of concurrent download workers
+If you use AltMount's built-in FUSE mount (`mount_type: fuse`), tuning the FUSE and VFS disk cache settings is critical for smooth streaming playback. The built-in FUSE mount avoids the need for an external rclone process and provides an integrated caching layer with intelligent prefetching.
 
-On higher values you can see the performance improvement but also the memory usage will be higher.
+```yaml
+mount_type: fuse
+mount_path: /mnt/altmount
+
+fuse:
+  allow_other: true
+  attr_timeout_seconds: 30
+  entry_timeout_seconds: 1
+  max_cache_size_mb: 128
+  max_read_ahead_mb: 128
+  disk_cache_enabled: true
+  disk_cache_path: /mnt/cache/altmount-vfs-cache
+  disk_cache_max_size_gb: 150
+  disk_cache_expiry_hours: 72
+  chunk_size_mb: 8
+  read_ahead_chunks: 6
+  prefetch_concurrency: 3
+```
+
+### Parameter Reference
+
+#### FUSE Mount Options
+
+| Parameter               | Default                   | Description                                                                                          |
+| ----------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `mount_path`            | —                         | Mount point path (synced automatically from the top-level `mount_path` when `mount_type` is `fuse`) |
+| `enabled`               | `false`                   | Whether the FUSE mount is active (set automatically based on `mount_type` — no need to set manually) |
+| `allow_other`           | `true`                    | Allows other users (e.g., media players) to access the mount                                         |
+| `debug`                 | `false`                   | Enables FUSE debug logging (very verbose — use only for troubleshooting)                             |
+| `attr_timeout_seconds`  | `30`                      | How long the kernel caches file attributes (size, timestamps)                                        |
+| `entry_timeout_seconds` | `1`                       | How long the kernel caches directory entries — lower values refresh faster                            |
+| `max_cache_size_mb`     | `128`                     | Maximum kernel-level cache size in MB                                                                |
+| `max_read_ahead_mb`     | `128`                     | Kernel-level read-ahead buffer size in MB                                                            |
+
+#### FUSE Disk Cache Options
+
+The FUSE disk cache provides a persistent on-disk caching layer with intelligent sequential-read detection and automatic prefetching. Enabling it is **strongly recommended** for media playback.
+
+| Parameter                 | Default                   | Description                                                              |
+| ------------------------- | ------------------------- | ------------------------------------------------------------------------ |
+| `disk_cache_enabled`      | `false`                   | Enables the disk cache — **set to `true` for streaming**                 |
+| `disk_cache_path`         | `/tmp/altmount-vfs-cache` | Directory for cached data (use a fast disk for best results)             |
+| `disk_cache_max_size_gb`  | `10`                      | Maximum disk space for the cache (adjust to your available disk)         |
+| `disk_cache_expiry_hours` | `24`                      | How long cached files are kept before eviction                           |
+| `chunk_size_mb`           | `8`                       | Chunk size for cache operations — all reads are aligned to this boundary |
+| `read_ahead_chunks`       | `6`                       | Number of chunks to prefetch ahead during sequential reads               |
+| `prefetch_concurrency`    | `3`                       | Number of parallel prefetch downloads per file                           |
+
+### How the VFS Cache Works
+
+When `disk_cache_enabled` is `true`, reads flow through a two-tier caching system:
+
+1. **Cache hit** — Data is served directly from the local disk cache with no network round-trip.
+2. **Cache miss** — The requested chunk is fetched from the backend, written to the disk cache, and returned to the reader.
+3. **Prefetch** — When sequential access is detected (2+ sequential reads), AltMount automatically prefetches `read_ahead_chunks` chunks ahead using `prefetch_concurrency` parallel downloads.
+
+Cache eviction runs automatically every 5 minutes, removing expired entries and enforcing the size limit via LRU (least recently used). Files that are currently open are never evicted.
+
+### Tips
+
+- **Enable `disk_cache_enabled`** for media playback. Without it, every read goes directly to the backend with no local caching, which will cause buffering.
+- **Use a fast disk** for `disk_cache_path`. An SSD or NVMe drive significantly improves cache read performance. Avoid placing the cache on the same slow storage you're mounting.
+- Increase `disk_cache_max_size_gb` based on your available disk space. For large libraries, `50`–`150` GB prevents frequent cache evictions during heavy usage.
+- Increase `disk_cache_expiry_hours` to `72` if you re-watch content frequently — this keeps popular files cached longer.
+- If playback still freezes, try increasing `read_ahead_chunks` (e.g., `10`–`12`) and `prefetch_concurrency` (e.g., `4`–`6`).
+- **`allow_other: true`** is required if media players run as a different user than the AltMount process.
+- Keep `attr_timeout_seconds` at `30` for stable libraries. Lower it (e.g., `5`) if files change frequently and you need faster metadata refresh.
+
+---
+
+## Rclone VFS Recommended Settings
+
+If you use rclone to mount AltMount's WebDAV endpoint, tuning VFS settings is critical for smooth playback. Below are community-tested recommendations:
+
+```bash
+rclone mount altmount: /mnt/remotes/altmount \
+  --vfs-cache-mode full \
+  --vfs-read-chunk-size 56M \
+  --vfs-cache-max-size 150G \
+  --vfs-cache-max-age 72h \
+  --vfs-read-ahead 80G \
+  --vfs-cache-min-free-space 1G \
+  --vfs-read-chunk-streams 4 \
+  --read-chunk-size 32M \
+  --read-chunk-size-limit 2G \
+  --dir-cache-time 5s \
+  --buffer-size 0 \
+  --allow-other
+```
+
+### Parameter Reference
+
+| Parameter                    | Recommended | Description                                                               |
+| ---------------------------- | ----------- | ------------------------------------------------------------------------- |
+| `--vfs-cache-mode`           | `full`      | Caches full files locally for smooth playback                             |
+| `--vfs-read-chunk-size`      | `56M`       | Initial chunk size for reads — larger reduces round-trips                 |
+| `--vfs-cache-max-size`       | `150G`      | Maximum disk space for the VFS cache (adjust to your available disk)      |
+| `--vfs-cache-max-age`        | `72h`       | How long cached files are kept before eviction                            |
+| `--vfs-read-ahead`           | `80G`       | Amount of data to read ahead — higher values reduce buffering             |
+| `--vfs-cache-min-free-space` | `1G`        | Minimum free disk space to maintain                                       |
+| `--vfs-read-chunk-streams`   | `4`         | Number of parallel streams per file read                                  |
+| `--read-chunk-size`          | `32M`       | Backend chunk size for reads                                              |
+| `--read-chunk-size-limit`    | `2G`        | Maximum chunk size (rclone scales up to this)                             |
+| `--dir-cache-time`           | `5s`        | How long directory listings are cached — lower values mean faster refresh |
+| `--buffer-size`              | `0`         | In-memory buffer size (0 lets VFS cache handle it)                        |
+
+### Tips
+
+- **`--vfs-cache-mode full`** is strongly recommended for media playback. Without it, seeking and multi-stream playback (e.g., subtitles) may fail.
+- Adjust `--vfs-cache-max-size` based on your available disk space. For smaller drives, `50G` works but may cause more cache evictions during heavy usage.
+- If playback still freezes, try increasing `--vfs-read-chunk-size` and `--vfs-read-ahead`.
+- Use `--allow-other` if media players run as a different user than the rclone mount process.
 
 ## Next Steps
 
-With streaming optimized:
+With streaming configured:
 
-1. **[Set up Health Monitoring](../3. Configuration/health-monitoring.md)** - Monitor performance
+1. **[Set up Health Monitoring](../3.%20Configuration/health-monitoring.md)** - Monitor file integrity
 
 ---
+
+For advanced streaming scenarios and troubleshooting, see the [Troubleshooting Guide](../5.%20Troubleshooting/performance.md).

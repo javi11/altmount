@@ -21,3 +21,29 @@
   align-items: center;
   justify-content: center;
 }
+
+.heroLogo {
+  width: 300px;
+  height: 300px;
+  margin: 0 auto 2rem auto;
+  display: block;
+  object-fit: contain;
+}
+
+/* Tablet breakpoint - matches existing heroBanner pattern at 996px */
+@media screen and (max-width: 996px) {
+  .heroLogo {
+    width: 200px;
+    height: 200px;
+    margin-bottom: 1.5rem;
+  }
+}
+
+/* Mobile breakpoint */
+@media screen and (max-width: 768px) {
+  .heroLogo {
+    width: 150px;
+    height: 150px;
+    margin-bottom: 1rem;
+  }
+}

@@ -81,7 +81,7 @@ export function RCloneConfigSection({
 	});
 
 	// Separate state for mount path since it's a root-level config
-	const [mountPath, setMountPath] = useState(config.mount_path || "/mnt/altmount");
+	const [mountPath, setMountPath] = useState(config.mount_path || "/mnt/remotes/altmount");
 
 	const [mountStatus, setMountStatus] = useState<MountStatus | null>(null);
 	const [hasChanges, setHasChanges] = useState(false);
@@ -157,7 +157,7 @@ export function RCloneConfigSection({
 		setHasMountChanges(false);
 
 		// Sync mount path
-		setMountPath(config.mount_path || "/mnt/altmount");
+		setMountPath(config.mount_path || "/mnt/remotes/altmount");
 		setHasMountPathChanges(false);
 	}, [config.rclone, config.mount_path]);
 
@@ -227,7 +227,7 @@ export function RCloneConfigSection({
 
 	const handleMountPathChange = (value: string) => {
 		setMountPath(value);
-		setHasMountPathChanges(value !== (config.mount_path || "/mnt/altmount"));
+		setHasMountPathChanges(value !== (config.mount_path || "/mnt/remotes/altmount"));
 	};
 
 	const handleSave = async () => {
@@ -618,7 +618,7 @@ export function RCloneConfigSection({
 								value={mountPath}
 								disabled={isReadOnly}
 								onChange={(e) => handleMountPathChange(e.target.value)}
-								placeholder="/mnt/altmount"
+								placeholder="/mnt/remotes/altmount"
 							/>
 							<p className="label">Local filesystem path where WebDAV will be mounted</p>
 						</fieldset>

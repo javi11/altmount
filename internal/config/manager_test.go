@@ -17,7 +17,7 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 			name: "mount type fuse - ok",
 			config: &Config{
 				MountType: MountTypeFuse,
-				MountPath: "/mnt/altmount",
+				MountPath: "/mnt/remotes/altmount",
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},
@@ -48,7 +48,7 @@ func TestConfig_Validate_MountPaths(t *testing.T) {
 			name: "mount type rclone - ok",
 			config: &Config{
 				MountType: MountTypeRClone,
-				MountPath: "/mnt/altmount",
+				MountPath: "/mnt/remotes/altmount",
 				Metadata: MetadataConfig{
 					RootPath: "/metadata",
 				},

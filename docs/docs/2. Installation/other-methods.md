@@ -1,4 +1,4 @@
-# CLI Installation with rclone
+# Other Installation Methods
 
 This guide covers installing AltMount as a standalone binary and setting it up with rclone for WebDAV mounting on Linux, macOS, and Windows systems.
 
@@ -81,15 +81,12 @@ _[Screenshot placeholder: GitHub releases page showing available downloads for d
 If you prefer to build from source or need a custom build:
 
 ```bash
-# Prerequisites: Go 1.21+ and Node.js 18+
+# Prerequisites: Go 1.24.5+ and Bun
 git clone https://github.com/javi11/altmount.git
 cd altmount
 
-# Build frontend
-cd frontend && npm install && npm run build && cd ..
-
-# Build binary
-go build -o altmount cmd/altmount/main.go
+# Build everything (frontend + backend)
+make
 
 # The binary is now available as ./altmount
 ```
@@ -126,8 +123,7 @@ Edit the `config.yaml` file with your settings. At minimum, you need to configur
 
    ```yaml
    providers:
-     - name: "primary-ssl"
-       host: "ssl-news.provider.com"
+     - host: "ssl-news.provider.com"
        port: 563
        username: "your_username"
        password: "your_password"
@@ -176,7 +172,7 @@ Once AltMount is running, set up rclone to mount the WebDAV interface:
 
    ```bash
    rclone config create altmount webdav \
-     url=http://localhost:8080/webdav \
+     url=http://localhost:8080 \
      vendor=other \
      user=usenet \
      pass=$(rclone obscure "usenet")
@@ -186,8 +182,8 @@ Once AltMount is running, set up rclone to mount the WebDAV interface:
 
    ```bash
    # Linux/macOS
-   sudo mkdir -p /mnt/altmount
-   sudo chown $USER:$USER /mnt/altmount
+   sudo mkdir -p /mnt/remotes/altmount
+   sudo chown $USER:$USER /mnt/remotes/altmount
 
    # Windows (PowerShell as Administrator)
    # Creates a network drive mapping
@@ -197,7 +193,7 @@ Once AltMount is running, set up rclone to mount the WebDAV interface:
 
    ```bash
    # Linux/macOS
-   rclone mount altmount: /mnt/altmount \
+   rclone mount altmount: /mnt/remotes/altmount \
      --vfs-cache-mode writes \
      --vfs-read-chunk-size 32M \
      --buffer-size 64M \
@@ -216,7 +212,7 @@ Once AltMount is running, set up rclone to mount the WebDAV interface:
 Verify the installation and rclone mount:
 
 1. **Check AltMount web interface**: Open http://localhost:8080 in your browser
-2. **Verify rclone mount**: `ls -la /mnt/altmount` (Linux/macOS) or check `Z:` drive (Windows)
+2. **Verify rclone mount**: `ls -la /mnt/remotes/altmount` (Linux/macOS) or check `Z:` drive (Windows)
 3. **Test health endpoint**: `curl http://localhost:8080/live` should return `OK`
 
 ## Next Steps

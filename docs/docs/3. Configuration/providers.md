@@ -18,14 +18,14 @@ AltMount supports multiple NNTP providers with automatic failover and load balan
 
 Configure NNTP providers through the AltMount web interface:
 
-![Providers Overview](../../static/img/providers.png)
+![Providers Overview](/images/config-providers.png)
 _AltMount web interface showing configured providers with status indicators_
 
 ### Adding a New Provider
 
 To add a new NNTP provider, click the "Add Provider" button:
 
-![Add Provider Dialog](../../static/img/add_provider.png)
+![Add Provider Dialog](/images/config-provider-add-modal.png)
 _Provider configuration dialog showing all available settings_
 
 **Required Fields:**
@@ -36,11 +36,14 @@ _Provider configuration dialog showing all available settings_
 - **Password**: Your account password
 - **Max Connections**: Number of concurrent connections (typically 10-50)
 
-**Security Options:**
+**Optional Fields:**
 
 - **Use TLS/SSL encryption**: Recommended for security
 - **Skip TLS certificate verification**: Only use if provider has certificate issues
-- **Use only as backup provider**: Configure as backup/fallback provider (critical feature)
+- **Use only as backup provider**: Configure as backup/fallback provider
+- **Inflight Requests**: Number of pipelined requests per connection (see [Pipelining](#inflight-requests-pipelining))
+- **Proxy URL**: Route traffic through a proxy server
+- **Enabled**: Toggle provider on/off without removing configuration
 
 **Backup Provider Strategy:**
 
@@ -55,33 +58,94 @@ The "Use only as backup provider" option is crucial for building resilient provi
 
 ### Required Parameters
 
-| Parameter         | Description                         | Example                      |
-| ----------------- | ----------------------------------- | ---------------------------- |
-| `name`            | Unique identifier for this provider | `"primary-ssl"`              |
-| `host`            | NNTP server hostname                | `"ssl-news.provider.com"`    |
-| `port`            | NNTP server port                    | `563` (SSL) or `119` (plain) |
-| `username`        | Your account username               | `"your_username"`            |
-| `password`        | Your account password               | `"your_password"`            |
-| `max_connections` | Maximum concurrent connections      | `20`                         |
+| Parameter         | Description                    | Example                      |
+| ----------------- | ------------------------------ | ---------------------------- |
+| `host`            | NNTP server hostname           | `"ssl-news.provider.com"`    |
+| `port`            | NNTP server port               | `563` (SSL) or `119` (plain) |
+| `username`        | Your account username          | `"your_username"`            |
+| `password`        | Your account password          | `"your_password"`            |
+| `max_connections` | Maximum concurrent connections | `20`                         |
 
 ### Optional Parameters
 
-| Parameter      | Description                       | Default | Notes                    |
-| -------------- | --------------------------------- | ------- | ------------------------ |
-| `tls`          | Enable SSL/TLS encryption         | `false` | Recommended for security |
-| `insecure_tls` | Skip TLS certificate verification | `false` | Only for debugging       |
+| Parameter            | Description                           | Default | Notes                                                                     |
+| -------------------- | ------------------------------------- | ------- | ------------------------------------------------------------------------- |
+| `tls`                | Enable SSL/TLS encryption             | `false` | Recommended for security                                                  |
+| `insecure_tls`       | Skip TLS certificate verification     | `false` | Only for debugging                                                        |
+| `inflight_requests`  | Max pipelined requests per connection | `10`    | See [Inflight Requests (Pipelining)](#inflight-requests-pipelining) below |
+| `proxy_url`          | Proxy server URL                      | `""`    | SOCKS5 or HTTP proxy                                                      |
+| `enabled`            | Whether this provider is active       | `true`  | Toggle without removing                                                   |
+| `is_backup_provider` | Use only as backup/fallback           | `false` | Only used when primary fails                                              |
+
+### Inflight Requests (Pipelining)
+
+The `inflight_requests` parameter controls **NNTP pipelining** — the number of requests that can be sent on a single TCP connection _before_ waiting for the server's responses.
+
+**How it works:**
+
+Without pipelining, each NNTP command follows a strict request-response cycle: send a command, wait for the full response, then send the next command. Each round-trip adds network latency, which limits throughput — especially on high-latency connections.
+
+With pipelining enabled (`inflight_requests` > 1), AltMount sends multiple NNTP commands (e.g., `BODY` requests to download article segments) on the same connection without waiting for each response. The server processes and responds to them in order, and AltMount reads the responses as they arrive. This hides network latency and significantly improves download throughput.
+
+| Value | Behavior                                                                                               | Use Case                                                                           |
+| ----- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `1`   | Sequential mode — one request at a time per connection. Most conservative and compatible.              | Troubleshooting connection issues, or providers that don't support pipelining well |
+| `10`  | (Default) Send up to 10 requests before waiting for a response. Good balance of speed and reliability. | Most providers                                                                     |
+| `20`  | Aggressive pipelining for maximum throughput on high-latency connections.                              | High-latency providers with good pipelining support                                |
+
+**Example:**
+
+```yaml
+providers:
+  - host: "ssl-news.provider.com"
+    port: 563
+    username: "your_username"
+    password: "your_password"
+    max_connections: 20
+    tls: true
+    inflight_requests: 10 # Default — good for most providers
+```
+
+:::tip
+If you experience connection drops, timeouts, corrupted downloads, or `480` errors from your provider, try setting `inflight_requests: 1` to disable pipelining. This is the safest setting and helps isolate whether pipelining is causing the issue. See the [Troubleshooting Guide](../5.%20Troubleshooting/common-issues.md#provider-pipelining-issues) for more details.
+:::
+
+:::note
+Each provider is assigned an auto-generated `id` field. You do not set a provider name — providers are identified by their host and configuration.
+:::
+
+### YAML Example
+
+```yaml
+providers:
+  # Primary provider with SSL
+  - host: "ssl-news.provider.com"
+    port: 563
+    username: "your_username"
+    password: "your_password"
+    max_connections: 20
+    tls: true
+
+  # Backup provider
+  - host: "backup.provider.com"
+    port: 563
+    username: "backup_username"
+    password: "backup_password"
+    max_connections: 10
+    tls: true
+    is_backup_provider: true
+```
 
 ## Connection Types
 
 ### SSL/TLS Connections (Recommended)
 
-![Security Options](../../static/img/add_provider.png)
+![Security Options](/images/config-provider-add-modal.png)
 _Security options in the provider configuration dialog_
 
 **Security Recommendations:**
 
 1. **Use TLS/SSL encryption**: ✅ Always enable for security
-
    - Encrypts all data between AltMount and your provider
    - Protects your credentials and download activity
    - Standard on port 563
@@ -103,7 +167,7 @@ _Security options in the provider configuration dialog_
 
 Set the "Max Connections" field based on your provider's limits and your bandwidth:
 
-![Connection Settings](../../static/img/add_provider.png)
+![Connection Settings](/images/config-provider-add-modal.png)
 _Max Connections setting in the provider configuration_
 
 **Guidelines**:
@@ -142,7 +206,7 @@ After configuring providers, test the connections:
 2. **Check the logs** for connection status
 3. **Use the web interface** to verify provider status
 
-![Provider Status Dashboard](../../static/img/providers.png)
+![Provider Status Dashboard](/images/config-providers.png)
 _Provider status dashboard showing connection counts and health indicators_
 
 ### Troubleshooting Connection Issues
@@ -150,7 +214,7 @@ _Provider status dashboard showing connection counts and health indicators_
 #### Authentication Failures
 
 ```
-ERROR Provider "primary": authentication failed
+ERROR Provider authentication failed
 ```
 
 **Solutions**:
@@ -162,7 +226,7 @@ ERROR Provider "primary": authentication failed
 #### SSL/TLS Issues
 
 ```
-ERROR Provider "primary": TLS handshake failed
+ERROR Provider TLS handshake failed
 ```
 
 **Solutions**:
@@ -174,7 +238,7 @@ ERROR Provider "primary": TLS handshake failed
 #### Connection Limits
 
 ```
-WARN Provider "primary": max connections reached (480 errors)
+WARN Provider max connections reached (480 errors)
 ```
 
 **Solutions**:
@@ -186,7 +250,7 @@ WARN Provider "primary": max connections reached (480 errors)
 #### DNS/Network Issues
 
 ```
-ERROR Provider "primary": failed to resolve host
+ERROR Provider failed to resolve host
 ```
 
 **Solutions**:
