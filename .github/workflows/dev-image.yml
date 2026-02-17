@@ -172,20 +172,31 @@ jobs:
         id: normalize
         run: echo "image_name=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
+      - name: Get timestamp
+        id: timestamp
+        run: echo "timestamp=$(TZ='America/New_York' date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+
       - name: Create and push manifest
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ steps.normalize.outputs.image_name }}
           AMD64_IMAGE="${IMAGE}:dev-amd64-temp"
           ARM64_IMAGE="${IMAGE}:dev-arm64-temp"
+          TIMESTAMP_TAG="dev_${{ steps.timestamp.outputs.timestamp }}"
 
           echo "AMD64 Image: $AMD64_IMAGE"
           echo "ARM64 Image: $ARM64_IMAGE"
           echo "Creating multi-arch manifest: ${IMAGE}:dev"
+          echo "Creating multi-arch manifest: ${IMAGE}:${TIMESTAMP_TAG}"
 
           docker manifest create ${IMAGE}:dev \
             $AMD64_IMAGE \
             $ARM64_IMAGE
           docker manifest push ${IMAGE}:dev
+
+          docker manifest create ${IMAGE}:${TIMESTAMP_TAG} \
+            $AMD64_IMAGE \
+            $ARM64_IMAGE
+          docker manifest push ${IMAGE}:${TIMESTAMP_TAG}
 
       - name: Clean up temporary tags
         run: |
