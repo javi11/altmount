@@ -1,4 +1,14 @@
-import { AlertTriangle, CheckCircle, Download, Plus, Save, Trash2, Info, Eye, EyeOff } from "lucide-react";
+import {
+	AlertTriangle,
+	CheckCircle,
+	Download,
+	Eye,
+	EyeOff,
+	Info,
+	Plus,
+	Save,
+	Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRegisterArrsDownloadClients, useTestArrsDownloadClients } from "../../hooks/useApi";
 import type { ConfigResponse, SABnzbdCategory, SABnzbdConfig } from "../../types/config";
@@ -91,9 +101,13 @@ export function SABnzbdConfigSection({
 				errors.push("Complete directory must start with /");
 			}
 			const categoryNames = data.categories.map((cat) => cat.name);
-			const duplicates = categoryNames.filter((name, index) => categoryNames.indexOf(name) !== index);
-			if (duplicates.length > 0) errors.push(`Duplicate category names: ${[...new Set(duplicates)].join(", ")}`);
-			if (data.categories.some((cat) => !cat.name.trim())) errors.push("Category names cannot be empty");
+			const duplicates = categoryNames.filter(
+				(name, index) => categoryNames.indexOf(name) !== index,
+			);
+			if (duplicates.length > 0)
+				errors.push(`Duplicate category names: ${[...new Set(duplicates)].join(", ")}`);
+			if (data.categories.some((cat) => !cat.name.trim()))
+				errors.push("Category names cannot be empty");
 		}
 		return errors;
 	};
@@ -151,15 +165,17 @@ export function SABnzbdConfigSection({
 			}
 			await onUpdate("sabnzbd", updateData);
 			setHasChanges(false);
-			setFallbackApiKey(""); 
+			setFallbackApiKey("");
 		}
 	};
 
 	return (
 		<div className="space-y-10">
 			<div>
-				<h3 className="text-lg font-bold text-base-content tracking-tight">SABnzbd Endpoint</h3>
-				<p className="text-sm text-base-content/50 break-words">Emulate a SABnzbd server to allow ARR applications to send NZBs to AltMount.</p>
+				<h3 className="font-bold text-base-content text-lg tracking-tight">SABnzbd Endpoint</h3>
+				<p className="break-words text-base-content/50 text-sm">
+					Emulate a SABnzbd server to allow ARR applications to send NZBs to AltMount.
+				</p>
 			</div>
 
 			<div className="space-y-8">
@@ -167,14 +183,16 @@ export function SABnzbdConfigSection({
 				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
-							<h4 className="font-bold text-sm text-base-content break-words">Virtual API Server</h4>
-							<p className="text-[11px] text-base-content/50 mt-1 break-words leading-relaxed">
+							<h4 className="break-words font-bold text-base-content text-sm">
+								Virtual API Server
+							</h4>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								Provides standard SABnzbd endpoints at <code>/sabnzbd</code> for full compatibility.
 							</p>
 						</div>
 						<input
 							type="checkbox"
-							className="toggle toggle-primary shrink-0 mt-1"
+							className="toggle toggle-primary mt-1 shrink-0"
 							checked={formData.enabled}
 							disabled={isReadOnly}
 							onChange={(e) => updateFormData({ enabled: e.target.checked })}
@@ -185,15 +203,19 @@ export function SABnzbdConfigSection({
 				{formData.enabled && (
 					<>
 						{/* Basic Paths */}
-						<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6 animate-in fade-in slide-in-from-top-2">
+						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 							<div className="flex items-center gap-2">
-								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Base Config</h4>
+								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Base Config
+								</h4>
 								<div className="h-px flex-1 bg-base-300/50" />
 							</div>
 
 							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 								<fieldset className="fieldset">
-									<legend className="fieldset-legend font-semibold">Virtual Root (Complete Dir)</legend>
+									<legend className="fieldset-legend font-semibold">
+										Virtual Root (Complete Dir)
+									</legend>
 									<input
 										type="text"
 										className="input input-bordered w-full bg-base-100 font-mono text-sm"
@@ -202,37 +224,43 @@ export function SABnzbdConfigSection({
 										placeholder="/"
 										onChange={(e) => updateFormData({ complete_dir: e.target.value })}
 									/>
-									<p className="label text-[10px] opacity-50 break-words">Relative to your mount point.</p>
+									<p className="label break-words text-[10px] opacity-50">
+										Relative to your mount point.
+									</p>
 								</fieldset>
 
 								<fieldset className="fieldset">
 									<legend className="fieldset-legend font-semibold">Public Callback URL</legend>
 									<input
 										type="url"
-										className="input input-bordered w-full bg-base-100 text-sm font-mono"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
 										value={formData.download_client_base_url || ""}
 										onChange={(e) => updateFormData({ download_client_base_url: e.target.value })}
 										placeholder="http://altmount:8080/sabnzbd"
 										disabled={isReadOnly}
 									/>
-									<p className="label text-[10px] opacity-50 break-words">The URL ARR instances use to reach this API.</p>
+									<p className="label break-words text-[10px] opacity-50">
+										The URL ARR instances use to reach this API.
+									</p>
 								</fieldset>
 							</div>
 						</div>
 
 						{/* External Fallback */}
-						<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6 animate-in fade-in slide-in-from-top-4">
+						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 							<div className="flex items-center gap-2">
-								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Failover Engine</h4>
+								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Failover Engine
+								</h4>
 								<div className="h-px flex-1 bg-base-300/50" />
 							</div>
 
 							<div className="space-y-6">
-								<div className="rounded-xl bg-info/5 border border-info/10 p-4">
+								<div className="rounded-xl border border-info/10 bg-info/5 p-4">
 									<div className="flex gap-3">
-										<Info className="h-4 w-4 text-info shrink-0 mt-0.5" />
-										<p className="text-[11px] leading-relaxed break-words opacity-80">
-											Failover allows internal processing failures to be automatically sent to a 
+										<Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+										<p className="break-words text-[11px] leading-relaxed opacity-80">
+											Failover allows internal processing failures to be automatically sent to a
 											real external SABnzbd instance after max retries.
 										</p>
 									</div>
@@ -259,11 +287,26 @@ export function SABnzbdConfigSection({
 												className="input input-bordered w-full bg-base-100 pr-10 font-mono text-sm"
 												value={fallbackApiKey}
 												readOnly={isReadOnly}
-												placeholder={formData.fallback_host && config.sabnzbd.fallback_api_key_set ? "••••••••••••••••" : "Paste API key..."}
-												onChange={(e) => { setFallbackApiKey(e.target.value); setHasChanges(true); }}
+												placeholder={
+													formData.fallback_host && config.sabnzbd.fallback_api_key_set
+														? "••••••••••••••••"
+														: "Paste API key..."
+												}
+												onChange={(e) => {
+													setFallbackApiKey(e.target.value);
+													setHasChanges(true);
+												}}
 											/>
-											<button type="button" className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2" onClick={() => setShowApiKey(!showApiKey)}>
-												{showApiKey ? <EyeOff className="h-4 w-4 opacity-50" /> : <Eye className="h-4 w-4 opacity-50" />}
+											<button
+												type="button"
+												className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
+												onClick={() => setShowApiKey(!showApiKey)}
+											>
+												{showApiKey ? (
+													<EyeOff className="h-4 w-4 opacity-50" />
+												) : (
+													<Eye className="h-4 w-4 opacity-50" />
+												)}
 											</button>
 										</div>
 									</fieldset>
@@ -272,73 +315,180 @@ export function SABnzbdConfigSection({
 						</div>
 
 						{/* Categories */}
-						<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6 animate-in fade-in slide-in-from-top-6">
+						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 							<div className="flex items-center justify-between gap-4">
-								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Category Mapping</h4>
+								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									Category Mapping
+								</h4>
 								{!isReadOnly && (
-									<button type="button" className="btn btn-xs btn-primary px-4 shadow-sm" onClick={() => setShowAddCategory(true)}>
+									<button
+										type="button"
+										className="btn btn-xs btn-primary px-4 shadow-sm"
+										onClick={() => setShowAddCategory(true)}
+									>
 										<Plus className="h-3 w-3" /> Add
 									</button>
 								)}
 							</div>
 
 							<div className="space-y-3">
-								{formData.categories.sort((a, b) => a.order - b.order).map((cat, idx) => {
-									const isDefault = isDefaultCategory(cat.name);
-									return (
-										<div key={idx} className={`group relative rounded-xl border p-4 transition-all ${isDefault ? 'border-primary/20 bg-primary/5' : 'border-base-300 bg-base-100/50 hover:bg-base-100'}`}>
-											{isDefault && <span className="absolute top-2 right-3 font-black text-[8px] uppercase tracking-widest text-primary opacity-60">System Core</span>}
-											
-											<div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-												<fieldset className="fieldset">
-													<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">Label</legend>
-													<input type="text" className="input input-sm input-bordered bg-base-100 font-bold" value={cat.name} readOnly={isReadOnly || isDefault} onChange={(e) => handleCategoryUpdate(idx, { name: e.target.value })} />
-												</fieldset>
-												<fieldset className="fieldset">
-													<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">Order</legend>
-													<input type="number" className="input input-sm input-bordered bg-base-100 font-mono" value={cat.order} readOnly={isReadOnly} onChange={(e) => handleCategoryUpdate(idx, { order: parseInt(e.target.value) || 0 })} />
-												</fieldset>
-												<fieldset className="fieldset">
-													<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">Priority</legend>
-													<select className="select select-sm select-bordered bg-base-100" value={cat.priority} disabled={isReadOnly} onChange={(e) => handleCategoryUpdate(idx, { priority: parseInt(e.target.value) })}>
-														<option value={-1}>Low</option>
-														<option value={0}>Normal</option>
-														<option value={1}>High</option>
-													</select>
-												</fieldset>
-												<fieldset className="fieldset">
-													<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">Dir Mapping</legend>
-													<div className="flex items-center gap-2">
-														<input type="text" className="input input-sm input-bordered flex-1 bg-base-100 font-mono text-[11px]" value={cat.dir} readOnly={isReadOnly} placeholder={isDefault ? "complete" : "optional"} onChange={(e) => handleCategoryUpdate(idx, { dir: e.target.value })} />
-														{!isReadOnly && !isDefault && (
-															<button type="button" className="btn btn-square btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleRemoveCategory(idx)}>
-																<Trash2 className="h-3.5 w-3.5" />
-															</button>
-														)}
-													</div>
-												</fieldset>
+								{formData.categories
+									.sort((a, b) => a.order - b.order)
+									.map((cat, idx) => {
+										const isDefault = isDefaultCategory(cat.name);
+										return (
+											<div
+												key={idx}
+												className={`group relative rounded-xl border p-4 transition-all ${isDefault ? "border-primary/20 bg-primary/5" : "border-base-300 bg-base-100/50 hover:bg-base-100"}`}
+											>
+												{isDefault && (
+													<span className="absolute top-2 right-3 font-black text-[8px] text-primary uppercase tracking-widest opacity-60">
+														System Core
+													</span>
+												)}
+
+												<div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+													<fieldset className="fieldset">
+														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+															Label
+														</legend>
+														<input
+															type="text"
+															className="input input-sm input-bordered bg-base-100 font-bold"
+															value={cat.name}
+															readOnly={isReadOnly || isDefault}
+															onChange={(e) => handleCategoryUpdate(idx, { name: e.target.value })}
+														/>
+													</fieldset>
+													<fieldset className="fieldset">
+														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+															Order
+														</legend>
+														<input
+															type="number"
+															className="input input-sm input-bordered bg-base-100 font-mono"
+															value={cat.order}
+															readOnly={isReadOnly}
+															onChange={(e) =>
+																handleCategoryUpdate(idx, {
+																	order: Number.parseInt(e.target.value, 10) || 0,
+																})
+															}
+														/>
+													</fieldset>
+													<fieldset className="fieldset">
+														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+															Priority
+														</legend>
+														<select
+															className="select select-sm select-bordered bg-base-100"
+															value={cat.priority}
+															disabled={isReadOnly}
+															onChange={(e) =>
+																handleCategoryUpdate(idx, {
+																	priority: Number.parseInt(e.target.value, 10),
+																})
+															}
+														>
+															<option value={-1}>Low</option>
+															<option value={0}>Normal</option>
+															<option value={1}>High</option>
+														</select>
+													</fieldset>
+													<fieldset className="fieldset">
+														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+															Dir Mapping
+														</legend>
+														<div className="flex items-center gap-2">
+															<input
+																type="text"
+																className="input input-sm input-bordered flex-1 bg-base-100 font-mono text-[11px]"
+																value={cat.dir}
+																readOnly={isReadOnly}
+																placeholder={isDefault ? "complete" : "optional"}
+																onChange={(e) => handleCategoryUpdate(idx, { dir: e.target.value })}
+															/>
+															{!isReadOnly && !isDefault && (
+																<button
+																	type="button"
+																	className="btn btn-square btn-ghost btn-xs text-error opacity-0 transition-opacity group-hover:opacity-100"
+																	onClick={() => handleRemoveCategory(idx)}
+																>
+																	<Trash2 className="h-3.5 w-3.5" />
+																</button>
+															)}
+														</div>
+													</fieldset>
+												</div>
 											</div>
-										</div>
-									);
-								})}
+										);
+									})}
 							</div>
 
 							{showAddCategory && (
-								<div className="rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 p-5 animate-in zoom-in-95 space-y-5">
+								<div className="zoom-in-95 animate-in space-y-5 rounded-xl border-2 border-primary/30 border-dashed bg-primary/5 p-5">
 									<h5 className="font-bold text-xs">New Category Definition</h5>
-									<div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-										<input type="text" className="input input-sm input-bordered" placeholder="Label (e.g. movies)" value={newCategory.name} onChange={(e) => setNewCategory({...newCategory, name: e.target.value})} />
-										<input type="number" className="input input-sm input-bordered" placeholder="Order" value={newCategory.order} onChange={(e) => setNewCategory({...newCategory, order: parseInt(e.target.value) || 1})} />
-										<select className="select select-sm select-bordered" value={newCategory.priority} onChange={(e) => setNewCategory({...newCategory, priority: parseInt(e.target.value)})}>
+									<div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+										<input
+											type="text"
+											className="input input-sm input-bordered"
+											placeholder="Label (e.g. movies)"
+											value={newCategory.name}
+											onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+										/>
+										<input
+											type="number"
+											className="input input-sm input-bordered"
+											placeholder="Order"
+											value={newCategory.order}
+											onChange={(e) =>
+												setNewCategory({
+													...newCategory,
+													order: Number.parseInt(e.target.value, 10) || 1,
+												})
+											}
+										/>
+										<select
+											className="select select-sm select-bordered"
+											value={newCategory.priority}
+											onChange={(e) =>
+												setNewCategory({
+													...newCategory,
+													priority: Number.parseInt(e.target.value, 10),
+												})
+											}
+										>
 											<option value={-1}>Low</option>
 											<option value={0}>Normal</option>
 											<option value={1}>High</option>
 										</select>
-										<input type="text" className="input input-sm input-bordered" placeholder="Subdir (optional)" value={newCategory.dir} onChange={(e) => setNewCategory({...newCategory, dir: e.target.value})} />
+										<input
+											type="text"
+											className="input input-sm input-bordered"
+											placeholder="Subdir (optional)"
+											value={newCategory.dir}
+											onChange={(e) => setNewCategory({ ...newCategory, dir: e.target.value })}
+										/>
 									</div>
 									<div className="flex justify-end gap-2">
-										<button type="button" className="btn btn-ghost btn-xs" onClick={() => { setShowAddCategory(false); setNewCategory(DEFAULT_NEW_CATEGORY); }}>Cancel</button>
-										<button type="button" className="btn btn-primary btn-xs px-4" onClick={handleAddCategory} disabled={!newCategory.name.trim()}>Save Definition</button>
+										<button
+											type="button"
+											className="btn btn-ghost btn-xs"
+											onClick={() => {
+												setShowAddCategory(false);
+												setNewCategory(DEFAULT_NEW_CATEGORY);
+											}}
+										>
+											Cancel
+										</button>
+										<button
+											type="button"
+											className="btn btn-primary btn-xs px-4"
+											onClick={handleAddCategory}
+											disabled={!newCategory.name.trim()}
+										>
+											Save Definition
+										</button>
 									</div>
 								</div>
 							)}
@@ -348,9 +498,9 @@ export function SABnzbdConfigSection({
 			</div>
 
 			{/* Actions & Save */}
-			<div className="space-y-6 pt-6 border-t border-base-200">
+			<div className="space-y-6 border-base-200 border-t pt-6">
 				{validationErrors.map((err, idx) => (
-					<div key={idx} className="alert alert-error py-2 text-xs rounded-xl shadow-sm">
+					<div key={idx} className="alert alert-error rounded-xl py-2 text-xs shadow-sm">
 						<AlertTriangle className="h-4 w-4" /> <span className="break-words">{err}</span>
 					</div>
 				))}
@@ -358,31 +508,64 @@ export function SABnzbdConfigSection({
 				{!isReadOnly && (
 					<div className="flex flex-col gap-4">
 						<div className="flex flex-wrap justify-end gap-3">
-							<button type="button" className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200" onClick={handleTestDownloadClient} disabled={testDownloadClient.isPending}>
-								{testDownloadClient.isPending ? <LoadingSpinner size="sm" /> : <CheckCircle className="h-4 w-4" />}
+							<button
+								type="button"
+								className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200"
+								onClick={handleTestDownloadClient}
+								disabled={testDownloadClient.isPending}
+							>
+								{testDownloadClient.isPending ? (
+									<LoadingSpinner size="sm" />
+								) : (
+									<CheckCircle className="h-4 w-4" />
+								)}
 								Test ARR Links
 							</button>
-							<button type="button" className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200" onClick={handleRegisterDownloadClient} disabled={registerDownloadClient.isPending || hasChanges}>
-								{registerDownloadClient.isPending ? <LoadingSpinner size="sm" /> : <Download className="h-4 w-4" />}
+							<button
+								type="button"
+								className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200"
+								onClick={handleRegisterDownloadClient}
+								disabled={registerDownloadClient.isPending || hasChanges}
+							>
+								{registerDownloadClient.isPending ? (
+									<LoadingSpinner size="sm" />
+								) : (
+									<Download className="h-4 w-4" />
+								)}
 								Auto-Setup Clients
 							</button>
-							<button type="button" className="btn btn-primary btn-sm px-10 shadow-lg shadow-primary/20" onClick={handleSave} disabled={!hasChanges || validationErrors.length > 0 || isUpdating}>
+							<button
+								type="button"
+								className="btn btn-primary btn-sm px-10 shadow-lg shadow-primary/20"
+								onClick={handleSave}
+								disabled={!hasChanges || validationErrors.length > 0 || isUpdating}
+							>
 								{isUpdating ? <LoadingSpinner size="sm" /> : <Save className="h-4 w-4" />}
 								{isUpdating ? "Saving..." : "Save Changes"}
 							</button>
 						</div>
 
-						{regSuccess && <div className="alert alert-success py-2 text-xs rounded-xl">{regSuccess}</div>}
-						{regError && <div className="alert alert-error py-2 text-xs rounded-xl">{regError}</div>}
-						
+						{regSuccess && (
+							<div className="alert alert-success rounded-xl py-2 text-xs">{regSuccess}</div>
+						)}
+						{regError && (
+							<div className="alert alert-error rounded-xl py-2 text-xs">{regError}</div>
+						)}
+
 						{testResults && (
 							<div className="rounded-xl border border-base-300 bg-base-200/50 p-4">
-								<div className="font-black text-[10px] uppercase tracking-widest opacity-40 mb-3">Connectivity Health</div>
+								<div className="mb-3 font-black text-[10px] uppercase tracking-widest opacity-40">
+									Connectivity Health
+								</div>
 								<div className="space-y-2">
 									{Object.entries(testResults).map(([instance, result]) => (
-										<div key={instance} className="flex justify-between items-center text-xs">
+										<div key={instance} className="flex items-center justify-between text-xs">
 											<span className="font-medium opacity-70">{instance}</span>
-											<span className={`font-mono font-bold ${result === "OK" ? "text-success" : "text-error"}`}>{result}</span>
+											<span
+												className={`font-bold font-mono ${result === "OK" ? "text-success" : "text-error"}`}
+											>
+												{result}
+											</span>
 										</div>
 									))}
 								</div>

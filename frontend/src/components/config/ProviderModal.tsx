@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Loader, Wifi, Save } from "lucide-react";
+import { AlertTriangle, Check, Loader, Save, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
 import { useProviders } from "../../hooks/useProviders";
@@ -242,7 +242,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								min={1}
 								max={100}
 							/>
-							<p className="label text-[10px] opacity-50 mt-1">
+							<p className="label mt-1 text-[10px] opacity-50">
 								Requests per connection. Default is 10.
 							</p>
 						</fieldset>
@@ -263,7 +263,9 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 						</fieldset>
 
 						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-bold">Password {mode === "create" ? "*" : ""}</legend>
+							<legend className="fieldset-legend font-bold">
+								Password {mode === "create" ? "*" : ""}
+							</legend>
 							<input
 								id="password"
 								type="password"
@@ -273,16 +275,20 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								placeholder={mode === "edit" ? "••••••••••••••••" : ""}
 								required={mode === "create"}
 							/>
-							{mode === "edit" && <p className="label text-[10px] opacity-50">Leave empty to keep current.</p>}
+							{mode === "edit" && (
+								<p className="label text-[10px] opacity-50">Leave empty to keep current.</p>
+							)}
 						</fieldset>
 					</div>
 
 					{/* Security Settings */}
-					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-5 space-y-4">
-						<h4 className="font-bold text-[10px] uppercase tracking-widest opacity-40">Options & Security</h4>
+					<div className="space-y-4 rounded-2xl border border-base-300 bg-base-200/30 p-5">
+						<h4 className="font-bold text-[10px] uppercase tracking-widest opacity-40">
+							Options & Security
+						</h4>
 
 						<div className="flex flex-col gap-4">
-							<label htmlFor="tls" className="label cursor-pointer justify-start gap-3 items-start">
+							<label htmlFor="tls" className="label cursor-pointer items-start justify-start gap-3">
 								<input
 									id="tls"
 									type="checkbox"
@@ -290,16 +296,18 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 									checked={formData.tls}
 									onChange={(e) => handleInputChange("tls", e.target.checked)}
 								/>
-								<div className="flex-1 min-w-0">
+								<div className="min-w-0 flex-1">
 									<span className="label-text font-bold text-xs">Use SSL/TLS</span>
-									<span className="block text-[10px] opacity-50">Highly recommended for privacy.</span>
+									<span className="block text-[10px] opacity-50">
+										Highly recommended for privacy.
+									</span>
 								</div>
 							</label>
 
 							{formData.tls && (
 								<label
 									htmlFor="insecure_tls"
-									className="label cursor-pointer justify-start gap-3 items-start ml-7"
+									className="label ml-7 cursor-pointer items-start justify-start gap-3"
 								>
 									<input
 										id="insecure_tls"
@@ -308,16 +316,20 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 										checked={formData.insecure_tls}
 										onChange={(e) => handleInputChange("insecure_tls", e.target.checked)}
 									/>
-									<div className="flex-1 min-w-0">
-										<span className="label-text font-bold text-xs">Insecure (Skip Verification)</span>
-										<span className="block text-[10px] opacity-50">Only use for self-signed certs.</span>
+									<div className="min-w-0 flex-1">
+										<span className="label-text font-bold text-xs">
+											Insecure (Skip Verification)
+										</span>
+										<span className="block text-[10px] opacity-50">
+											Only use for self-signed certs.
+										</span>
 									</div>
 								</label>
 							)}
 
 							<label
 								htmlFor="is_backup_provider"
-								className="label cursor-pointer justify-start gap-3 items-start"
+								className="label cursor-pointer items-start justify-start gap-3"
 							>
 								<input
 									id="is_backup_provider"
@@ -326,9 +338,11 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 									checked={formData.is_backup_provider}
 									onChange={(e) => handleInputChange("is_backup_provider", e.target.checked)}
 								/>
-								<div className="flex-1 min-w-0">
+								<div className="min-w-0 flex-1">
 									<span className="label-text font-bold text-xs">Backup Only</span>
-									<span className="block text-[10px] opacity-50">Only use when primary providers fail.</span>
+									<span className="block text-[10px] opacity-50">
+										Only use when primary providers fail.
+									</span>
 								</div>
 							</label>
 						</div>
@@ -348,9 +362,11 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					</fieldset>
 
 					{/* Connection Test */}
-					<div className="space-y-4 pt-4 border-t border-base-300/50">
+					<div className="space-y-4 border-base-300/50 border-t pt-4">
 						<div className="flex items-center justify-between">
-							<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">Connectivity Check</h4>
+							<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">
+								Connectivity Check
+							</h4>
 							<button
 								type="button"
 								className="btn btn-xs btn-outline px-4"
@@ -368,8 +384,10 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 
 						{connectionTestResult && (
 							<div
-								className={`alert py-2 text-xs rounded-xl ${
-									connectionTestResult.success ? "alert-success bg-success/10 border-success/20 text-success" : "alert-error bg-error/10 border-error/20 text-error"
+								className={`alert rounded-xl py-2 text-xs ${
+									connectionTestResult.success
+										? "alert-success border-success/20 bg-success/10 text-success"
+										: "alert-error border-error/20 bg-error/10 text-error"
 								}`}
 							>
 								{connectionTestResult.success ? (
@@ -378,7 +396,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 									<AlertTriangle className="h-4 w-4" />
 								)}
 								<div>
-									<div className="font-black uppercase tracking-widest text-[10px]">
+									<div className="font-black text-[10px] uppercase tracking-widest">
 										{connectionTestResult.success
 											? `Success${connectionTestResult.rttMs !== undefined ? ` • ${connectionTestResult.rttMs}ms` : ""}`
 											: "Failed"}

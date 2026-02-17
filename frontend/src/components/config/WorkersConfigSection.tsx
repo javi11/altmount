@@ -73,15 +73,19 @@ export function ImportConfigSection({
 	return (
 		<div className="space-y-10">
 			<div>
-				<h3 className="text-lg font-bold text-base-content tracking-tight">NZB Processor</h3>
-				<p className="text-sm text-base-content/50 break-words">Configure how workers handle new imports and validation.</p>
+				<h3 className="font-bold text-base-content text-lg tracking-tight">NZB Processor</h3>
+				<p className="break-words text-base-content/50 text-sm">
+					Configure how workers handle new imports and validation.
+				</p>
 			</div>
 
 			<div className="space-y-8">
 				{/* Worker Core Configuration */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Concurrency</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Concurrency
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -95,9 +99,16 @@ export function ImportConfigSection({
 								readOnly={isReadOnly}
 								min={1}
 								max={20}
-								onChange={(e) => handleInputChange("max_processor_workers", Number.parseInt(e.target.value, 10) || 1)}
+								onChange={(e) =>
+									handleInputChange(
+										"max_processor_workers",
+										Number.parseInt(e.target.value, 10) || 1,
+									)
+								}
 							/>
-							<p className="label text-[10px] opacity-50 break-words">Concurrent NZB processing threads.</p>
+							<p className="label break-words text-[10px] opacity-50">
+								Concurrent NZB processing threads.
+							</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
@@ -108,9 +119,16 @@ export function ImportConfigSection({
 								value={formData.max_import_connections}
 								readOnly={isReadOnly}
 								min={1}
-								onChange={(e) => handleInputChange("max_import_connections", Number.parseInt(e.target.value, 10) || 10)}
+								onChange={(e) =>
+									handleInputChange(
+										"max_import_connections",
+										Number.parseInt(e.target.value, 10) || 10,
+									)
+								}
 							/>
-							<p className="label text-[10px] opacity-50 break-words">Socket limit per active worker.</p>
+							<p className="label break-words text-[10px] opacity-50">
+								Socket limit per active worker.
+							</p>
 						</fieldset>
 					</div>
 
@@ -123,9 +141,16 @@ export function ImportConfigSection({
 								value={formData.max_download_prefetch}
 								readOnly={isReadOnly}
 								min={1}
-								onChange={(e) => handleInputChange("max_download_prefetch", Number.parseInt(e.target.value, 10) || 1)}
+								onChange={(e) =>
+									handleInputChange(
+										"max_download_prefetch",
+										Number.parseInt(e.target.value, 10) || 1,
+									)
+								}
 							/>
-							<p className="label text-[10px] opacity-50 break-words">Segments prefetched ahead for archive analysis.</p>
+							<p className="label break-words text-[10px] opacity-50">
+								Segments prefetched ahead for archive analysis.
+							</p>
 						</fieldset>
 
 						<fieldset className="fieldset">
@@ -136,17 +161,26 @@ export function ImportConfigSection({
 								value={formData.read_timeout_seconds}
 								readOnly={isReadOnly}
 								min={1}
-								onChange={(e) => handleInputChange("read_timeout_seconds", Number.parseInt(e.target.value, 10) || 300)}
+								onChange={(e) =>
+									handleInputChange(
+										"read_timeout_seconds",
+										Number.parseInt(e.target.value, 10) || 300,
+									)
+								}
 							/>
-							<p className="label text-[10px] opacity-50 break-words">Usenet socket read timeout.</p>
+							<p className="label break-words text-[10px] opacity-50">
+								Usenet socket read timeout.
+							</p>
 						</fieldset>
 					</div>
 				</div>
 
 				{/* Validation Slider */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Validation</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Validation
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -154,9 +188,13 @@ export function ImportConfigSection({
 						<div className="flex items-center justify-between">
 							<div className="min-w-0">
 								<h5 className="font-bold text-sm">Segment Verification</h5>
-								<p className="text-[11px] text-base-content/50 break-words mt-1">Percentage of Usenet segments to validate before import.</p>
+								<p className="mt-1 break-words text-[11px] text-base-content/50">
+									Percentage of Usenet segments to validate before import.
+								</p>
 							</div>
-							<div className="font-mono font-black text-primary text-xl shrink-0">{formData.segment_sample_percentage}%</div>
+							<div className="shrink-0 font-black font-mono text-primary text-xl">
+								{formData.segment_sample_percentage}%
+							</div>
 						</div>
 
 						<div className="space-y-4">
@@ -168,9 +206,14 @@ export function ImportConfigSection({
 								className="range range-primary range-sm"
 								step="1"
 								disabled={isReadOnly}
-								onChange={(e) => handleInputChange("segment_sample_percentage", Number.parseInt(e.target.value, 10))}
+								onChange={(e) =>
+									handleInputChange(
+										"segment_sample_percentage",
+										Number.parseInt(e.target.value, 10),
+									)
+								}
 							/>
-							<div className="flex justify-between px-2 text-[9px] font-black opacity-30 uppercase tracking-tighter">
+							<div className="flex justify-between px-2 font-black text-[9px] uppercase tracking-tighter opacity-30">
 								<span>Fast (1%)</span>
 								<span>Balanced</span>
 								<span>Deep (100%)</span>
@@ -179,7 +222,7 @@ export function ImportConfigSection({
 
 						<div className="divider opacity-50" />
 
-						<label className="label cursor-pointer justify-start gap-4 items-start">
+						<label className="label cursor-pointer items-start justify-start gap-4">
 							<input
 								type="checkbox"
 								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
@@ -188,9 +231,12 @@ export function ImportConfigSection({
 								onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
 							/>
 							<div className="min-w-0 flex-1">
-								<span className="label-text font-bold text-xs block break-words">Lenient Import (Instant)</span>
-								<span className="text-[10px] text-base-content/50 break-words block leading-relaxed mt-0.5">
-									Bypass validation entirely for immediate exposure in the library. Recommended only for high-completion providers.
+								<span className="label-text block break-words font-bold text-xs">
+									Lenient Import (Instant)
+								</span>
+								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
+									Bypass validation entirely for immediate exposure in the library. Recommended only
+									for high-completion providers.
 								</span>
 							</div>
 						</label>
@@ -198,9 +244,11 @@ export function ImportConfigSection({
 				</div>
 
 				{/* Strategy Configuration */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-8">
+				<div className="space-y-8 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Library Strategy</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Library Strategy
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -217,15 +265,18 @@ export function ImportConfigSection({
 								<option value="SYMLINK">Physical Symlinks</option>
 								<option value="STRM">STRM URL Files</option>
 							</select>
-							<p className="label text-[10px] opacity-50 break-words leading-relaxed mt-2">
-								{formData.import_strategy === "NONE" && "Files are only visible through the virtual FUSE/WebDAV mount."}
-								{formData.import_strategy === "SYMLINK" && "Creates real .mkv/.mp4 files in a target folder that point to AltMount."}
-								{formData.import_strategy === "STRM" && "Generates small .strm text files containing streaming URLs."}
+							<p className="label mt-2 break-words text-[10px] leading-relaxed opacity-50">
+								{formData.import_strategy === "NONE" &&
+									"Files are only visible through the virtual FUSE/WebDAV mount."}
+								{formData.import_strategy === "SYMLINK" &&
+									"Creates real .mkv/.mp4 files in a target folder that point to AltMount."}
+								{formData.import_strategy === "STRM" &&
+									"Generates small .strm text files containing streaming URLs."}
 							</p>
 						</fieldset>
 
 						{formData.import_strategy !== "NONE" && (
-							<fieldset className="fieldset animate-in slide-in-from-right-2">
+							<fieldset className="fieldset slide-in-from-right-2 animate-in">
 								<legend className="fieldset-legend font-semibold">
 									{formData.import_strategy === "SYMLINK" ? "Symlink Root" : "STRM Output Root"}
 								</legend>
@@ -237,7 +288,9 @@ export function ImportConfigSection({
 									placeholder="/path/to/media"
 									onChange={(e) => handleInputChange("import_dir", e.target.value)}
 								/>
-								<p className="label text-[10px] opacity-50 break-words mt-2">Absolute path for strategy output.</p>
+								<p className="label mt-2 break-words text-[10px] opacity-50">
+									Absolute path for strategy output.
+								</p>
 							</fieldset>
 						)}
 					</div>
@@ -247,7 +300,7 @@ export function ImportConfigSection({
 					<div className="space-y-6">
 						<div>
 							<h5 className="font-bold text-sm">NZB Watch Directory</h5>
-							<p className="text-[11px] text-base-content/50 break-words mt-1 leading-relaxed">
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								Monitor a specific folder for new NZB files and import them automatically.
 							</p>
 						</div>
@@ -263,44 +316,66 @@ export function ImportConfigSection({
 									placeholder="/path/to/watch"
 									onChange={(e) => handleInputChange("watch_dir", e.target.value)}
 								/>
-								<p className="label text-[10px] opacity-50 break-words mt-2">Absolute path to monitor.</p>
+								<p className="label mt-2 break-words text-[10px] opacity-50">
+									Absolute path to monitor.
+								</p>
 							</fieldset>
 
 							<fieldset className="fieldset">
-								<legend className="fieldset-legend font-semibold">Polling Interval (Seconds)</legend>
+								<legend className="fieldset-legend font-semibold">
+									Polling Interval (Seconds)
+								</legend>
 								<input
 									type="number"
 									className="input input-bordered w-full bg-base-100 font-mono text-sm"
 									value={formData.watch_interval_seconds || 10}
 									readOnly={isReadOnly}
 									min={1}
-									onChange={(e) => handleInputChange("watch_interval_seconds", Number.parseInt(e.target.value, 10) || 10)}
+									onChange={(e) =>
+										handleInputChange(
+											"watch_interval_seconds",
+											Number.parseInt(e.target.value, 10) || 10,
+										)
+									}
 								/>
-								<p className="label text-[10px] opacity-50 break-words mt-2">How often to check for new files.</p>
+								<p className="label mt-2 break-words text-[10px] opacity-50">
+									How often to check for new files.
+								</p>
 							</fieldset>
 						</div>
 					</div>
 				</div>
 
 				{/* File Extensions */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Filters</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Filters
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend font-semibold">Allowed File Extensions</legend>
-						
-						<div className="flex flex-wrap gap-2 rounded-xl border border-base-300 bg-base-100/50 p-3 min-h-[4rem] mb-4">
+
+						<div className="mb-4 flex min-h-[4rem] flex-wrap gap-2 rounded-xl border border-base-300 bg-base-100/50 p-3">
 							{formData.allowed_file_extensions.length === 0 ? (
-								<span className="text-xs opacity-40 self-center w-full text-center italic">All file types are currently allowed</span>
+								<span className="w-full self-center text-center text-xs italic opacity-40">
+									All file types are currently allowed
+								</span>
 							) : (
 								formData.allowed_file_extensions.map((ext) => (
-									<div key={ext} className="badge badge-primary gap-1 py-3 px-3 font-bold text-[10px]">
+									<div
+										key={ext}
+										className="badge badge-primary gap-1 px-3 py-3 font-bold text-[10px]"
+									>
 										{ext}
 										{!isReadOnly && (
-											<button type="button" className="hover:text-white" onClick={() => removeExtension(ext)}>
+											<button
+												type="button"
+												className="hover:text-white"
+												onClick={() => removeExtension(ext)}
+											>
 												<X className="h-3 w-3" />
 											</button>
 										)}
@@ -310,7 +385,7 @@ export function ImportConfigSection({
 						</div>
 
 						{!isReadOnly && (
-							<div className="join w-full shadow-sm mb-4">
+							<div className="join mb-4 w-full shadow-sm">
 								<input
 									type="text"
 									className="input input-bordered join-item flex-1 bg-base-100 text-sm"
@@ -319,7 +394,11 @@ export function ImportConfigSection({
 									onChange={(e) => setExtensionInput(e.target.value)}
 									onKeyDown={handleExtensionKeyDown}
 								/>
-								<button type="button" className="btn btn-primary join-item px-6" onClick={() => addExtension(extensionInput)}>
+								<button
+									type="button"
+									className="btn btn-primary join-item px-6"
+									onClick={() => addExtension(extensionInput)}
+								>
 									<Plus className="h-4 w-4" />
 								</button>
 							</div>
@@ -331,7 +410,40 @@ export function ImportConfigSection({
 								className="btn btn-xs btn-outline border-base-300 opacity-60 hover:opacity-100"
 								disabled={isReadOnly}
 								onClick={() => {
-									const videoDefaults = [ ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".m2ts", ".ts", ".vob", ".3gp", ".3g2", ".h264", ".h265", ".hevc", ".ogv", ".ogm", ".strm", ".iso", ".img", ".divx", ".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms" ];
+									const videoDefaults = [
+										".mp4",
+										".mkv",
+										".avi",
+										".mov",
+										".wmv",
+										".flv",
+										".webm",
+										".m4v",
+										".mpg",
+										".mpeg",
+										".m2ts",
+										".ts",
+										".vob",
+										".3gp",
+										".3g2",
+										".h264",
+										".h265",
+										".hevc",
+										".ogv",
+										".ogm",
+										".strm",
+										".iso",
+										".img",
+										".divx",
+										".xvid",
+										".rm",
+										".rmvb",
+										".asf",
+										".asx",
+										".wtv",
+										".mk3d",
+										".dvr-ms",
+									];
 									handleInputChange("allowed_file_extensions", videoDefaults);
 								}}
 							>
@@ -352,10 +464,10 @@ export function ImportConfigSection({
 
 			{/* Save Button */}
 			{!isReadOnly && (
-				<div className="flex justify-end pt-4 border-t border-base-200">
+				<div className="flex justify-end border-base-200 border-t pt-4">
 					<button
 						type="button"
-						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
+						className={`btn btn-primary px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating}
 					>

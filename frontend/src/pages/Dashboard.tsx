@@ -65,7 +65,7 @@ export function Dashboard() {
 			</div>
 
 			{/* System Stats Cards */}
-			<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+			<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
 				{/* Import Status (Active Work) */}
 				<ImportStatusCard />
 
@@ -91,7 +91,7 @@ export function Dashboard() {
 						<Network className="h-6 w-6" />
 						NNTP Providers
 					</h2>
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
 						{poolMetrics.providers.map((provider) => (
 							<ProviderCard key={provider.id} provider={provider} />
 						))}

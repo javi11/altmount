@@ -322,7 +322,9 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			{/* Mount Type Selector */}
 			<div className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Select Engine</h4>
+					<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						Select Engine
+					</h4>
 					<div className="h-px flex-1 bg-base-300/50" />
 				</div>
 
@@ -330,10 +332,11 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 					{mountTypeOptions.map((option) => (
 						<label
 							key={option.value}
-							className={`relative cursor-pointer rounded-2xl border-2 p-5 transition-all hover:bg-base-200/50 ${mountType === option.value
+							className={`relative cursor-pointer rounded-2xl border-2 p-5 transition-all hover:bg-base-200/50 ${
+								mountType === option.value
 									? "border-primary bg-primary/5 shadow-sm"
 									: "border-base-300 bg-base-100/50"
-								}`}
+							}`}
 						>
 							<div className="flex items-start gap-4">
 								<input
@@ -344,8 +347,14 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 									onChange={() => handleMountTypeChange(option.value)}
 								/>
 								<div className="min-w-0 flex-1">
-									<div className={`font-bold text-sm ${mountType === option.value ? 'text-primary' : 'text-base-content/80'}`}>{option.label}</div>
-									<div className="text-[11px] text-base-content/50 leading-relaxed mt-1 break-words">{option.description}</div>
+									<div
+										className={`font-bold text-sm ${mountType === option.value ? "text-primary" : "text-base-content/80"}`}
+									>
+										{option.label}
+									</div>
+									<div className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+										{option.description}
+									</div>
 								</div>
 							</div>
 						</label>
@@ -355,9 +364,11 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 
 			{/* Mount Path */}
 			{mountType !== "none" && (
-				<div className="space-y-6 animate-in fade-in slide-in-from-top-2">
+				<div className="fade-in slide-in-from-top-2 animate-in space-y-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">Attachment</h4>
+						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							Attachment
+						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
@@ -372,7 +383,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 									onChange={(e) => handleMountPathChange(e.target.value)}
 									placeholder="/mnt/remotes/altmount"
 								/>
-								<p className="label text-[10px] text-base-content/50 break-words">
+								<p className="label break-words text-[10px] text-base-content/50">
 									Path where the virtual filesystem will be attached to your system.
 									{mountType === "rclone_external" && " (Required for symlink resolution)"}
 								</p>
@@ -406,7 +417,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 				<div className="flex justify-end pt-4">
 					<button
 						type="button"
-						className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && 'btn-ghost border-base-300'}`}
+						className={`btn btn-primary btn-md px-10 shadow-lg shadow-primary/20 ${!hasChanges && "btn-ghost border-base-300"}`}
 						onClick={handleSave}
 						disabled={!hasChanges || isUpdating || !mountPath}
 					>
@@ -422,48 +433,74 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 
 			{/* Status & Control Bar */}
 			{showMountControls && (
-				<div className={`alert rounded-2xl shadow-md border-2 border-current/10 ${mountStatusAlertClass} py-4 animate-in zoom-in-95`}>
-					<div className="flex-1 flex flex-wrap items-center gap-4 min-w-0">
-						<div className="bg-base-100/30 p-2.5 rounded-xl hidden sm:block">
+				<div
+					className={`alert rounded-2xl border-2 border-current/10 shadow-md ${mountStatusAlertClass} zoom-in-95 animate-in py-4`}
+				>
+					<div className="flex min-w-0 flex-1 flex-wrap items-center gap-4">
+						<div className="hidden rounded-xl bg-base-100/30 p-2.5 sm:block">
 							<HardDrive className="h-6 w-6" />
 						</div>
 						<div className="min-w-0 flex-1">
-							<div className="font-black text-xs uppercase tracking-widest opacity-60">Mount Status</div>
-							<div className="font-bold text-lg flex items-center gap-2">
+							<div className="font-black text-xs uppercase tracking-widest opacity-60">
+								Mount Status
+							</div>
+							<div className="flex items-center gap-2 font-bold text-lg">
 								{mountStatusLabel}
-								{isMounted && <span className="flex h-2 w-2 rounded-full bg-current animate-pulse" />}
+								{isMounted && (
+									<span className="flex h-2 w-2 animate-pulse rounded-full bg-current" />
+								)}
 							</div>
 							{isMounted && (
-								<div className="text-[10px] font-mono mt-1 opacity-70 truncate">
+								<div className="mt-1 truncate font-mono text-[10px] opacity-70">
 									{mountType === "rclone" ? rcloneMountStatus?.mount_point : mountPath}
 								</div>
 							)}
 							{mountType === "fuse" && fuseStatus?.health_error && (
-								<div className="mt-1 flex items-center gap-1 text-[10px] font-bold text-error">
+								<div className="mt-1 flex items-center gap-1 font-bold text-[10px] text-error">
 									<AlertTriangle className="h-3 w-3" />
 									{fuseStatus.health_error}
 								</div>
 							)}
 						</div>
 					</div>
-					<div className="flex items-center gap-2 shrink-0">
+					<div className="flex shrink-0 items-center gap-2">
 						{isFuseError ? (
-							<button type="button" className="btn btn-error btn-sm shadow-lg shadow-error/20" onClick={handleForceStopMount} disabled={isMountLoading}>
+							<button
+								type="button"
+								className="btn btn-error btn-sm shadow-error/20 shadow-lg"
+								onClick={handleForceStopMount}
+								disabled={isMountLoading}
+							>
 								<Zap className="h-4 w-4" /> Force Kill
 							</button>
 						) : isMounted ? (
 							<div className="join shadow-lg">
-								<button type="button" className="btn btn-sm join-item bg-base-100/20 border-none hover:bg-base-100/40" onClick={handleStopMount} disabled={isMountLoading}>
+								<button
+									type="button"
+									className="btn btn-sm join-item border-none bg-base-100/20 hover:bg-base-100/40"
+									onClick={handleStopMount}
+									disabled={isMountLoading}
+								>
 									<Square className="h-3.5 w-3.5" /> Stop
 								</button>
 								{mountType === "fuse" && (
-									<button type="button" className="btn btn-sm join-item bg-error/20 border-none hover:bg-error text-error hover:text-error-content" onClick={handleForceStopMount} disabled={isMountLoading}>
+									<button
+										type="button"
+										className="btn btn-sm join-item border-none bg-error/20 text-error hover:bg-error hover:text-error-content"
+										onClick={handleForceStopMount}
+										disabled={isMountLoading}
+									>
 										<Zap className="h-3.5 w-3.5" />
 									</button>
 								)}
 							</div>
 						) : (
-							<button type="button" className="btn btn-primary btn-sm px-8 shadow-lg shadow-primary/20" onClick={handleStartMount} disabled={isMountLoading || !mountPath}>
+							<button
+								type="button"
+								className="btn btn-primary btn-sm px-8 shadow-lg shadow-primary/20"
+								onClick={handleStartMount}
+								disabled={isMountLoading || !mountPath}
+							>
 								<Play className="h-4 w-4" /> Start Mount
 							</button>
 						)}
@@ -505,7 +542,9 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 		<div className="space-y-8">
 			{/* Basic Mount Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">General RClone Flags</h5>
+				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+					General RClone Flags
+				</h5>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Allow Other Users</legend>
@@ -516,7 +555,9 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 								checked={mountFormData.allow_other}
 								onChange={(e) => handleMountInputChange("allow_other", e.target.checked)}
 							/>
-							<span className="label-text break-words text-xs">Allow other users to access mount</span>
+							<span className="label-text break-words text-xs">
+								Allow other users to access mount
+							</span>
 						</label>
 					</fieldset>
 					<fieldset className="fieldset">
@@ -528,7 +569,9 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 								checked={mountFormData.allow_non_empty}
 								onChange={(e) => handleMountInputChange("allow_non_empty", e.target.checked)}
 							/>
-							<span className="label-text break-words text-xs">Allow mounting over non-empty directories</span>
+							<span className="label-text break-words text-xs">
+								Allow mounting over non-empty directories
+							</span>
 						</label>
 					</fieldset>
 				</div>
@@ -568,7 +611,7 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 							onChange={(e) => handleMountInputChange("timeout", e.target.value)}
 							placeholder="10m"
 						/>
-						<p className="label text-[10px] break-words opacity-50">I/O timeout (e.g., 10m, 30s)</p>
+						<p className="label break-words text-[10px] opacity-50">I/O timeout (e.g., 10m, 30s)</p>
 					</fieldset>
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Log Level</legend>
@@ -616,8 +659,10 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 
 			{/* VFS Cache Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">VFS Cache Settings</h5>
-				<div className="rounded-2xl border border-base-200 bg-base-50/50 p-5 space-y-6">
+				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+					VFS Cache Settings
+				</h5>
+				<div className="space-y-6 rounded-2xl border border-base-200 bg-base-50/50 p-5">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Cache Directory</legend>
 						<input
@@ -668,7 +713,9 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 
 			{/* Performance Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">Performance Tuning</h5>
+				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+					Performance Tuning
+				</h5>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Buffer Size</legend>
@@ -742,7 +789,9 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 
 			{/* Advanced Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">Advanced Operations</h5>
+				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+					Advanced Operations
+				</h5>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Async Read</legend>
@@ -779,7 +828,9 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 								checked={mountFormData.no_mod_time}
 								onChange={(e) => handleMountInputChange("no_mod_time", e.target.checked)}
 							/>
-							<span className="label-text break-words text-xs">Don't read/write modification time</span>
+							<span className="label-text break-words text-xs">
+								Don't read/write modification time
+							</span>
 						</label>
 					</fieldset>
 					<fieldset className="fieldset">
@@ -842,7 +893,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		<div className="space-y-8">
 			{/* Kernel Cache Settings */}
 			<div className="space-y-4">
-				<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">Kernel Cache Settings</h4>
+				<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">
+					Kernel Cache Settings
+				</h4>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Attribute Timeout</legend>
@@ -858,7 +911,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								}
 								disabled={isRunning}
 							/>
-							<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">sec</span>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								sec
+							</span>
 						</div>
 					</fieldset>
 					<fieldset className="fieldset">
@@ -875,7 +930,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								}
 								disabled={isRunning}
 							/>
-							<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">sec</span>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								sec
+							</span>
 						</div>
 					</fieldset>
 					<fieldset className="fieldset">
@@ -892,7 +949,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								}
 								disabled={isRunning}
 							/>
-							<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">MB</span>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								MB
+							</span>
 						</div>
 					</fieldset>
 				</div>
@@ -916,7 +975,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								}
 								disabled={isRunning}
 							/>
-							<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">MB</span>
+							<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+								MB
+							</span>
 						</div>
 					</fieldset>
 					<fieldset className="fieldset">
@@ -945,7 +1006,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 							}
 							disabled={isRunning}
 						/>
-						<p className="label text-[10px] opacity-50 break-words mt-1">Number of parallel segment downloads during prefetch (0 = auto).</p>
+						<p className="label mt-1 break-words text-[10px] opacity-50">
+							Number of parallel segment downloads during prefetch (0 = auto).
+						</p>
 					</fieldset>
 				</div>
 			</div>
@@ -953,7 +1016,7 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 			{/* VFS Disk Cache */}
 			<div className="space-y-4">
 				<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">VFS Disk Cache</h4>
-				<div className="rounded-2xl border border-base-200 bg-base-50/50 p-5 space-y-6">
+				<div className="space-y-6 rounded-2xl border border-base-200 bg-base-50/50 p-5">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Enable Persistent Cache</legend>
 						<label className="label cursor-pointer justify-start gap-3">
@@ -964,11 +1027,13 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 								onChange={(e) => updateField({ disk_cache_enabled: e.target.checked })}
 								disabled={isRunning}
 							/>
-							<span className="label-text text-xs font-semibold">Cache file content to local disk</span>
+							<span className="label-text font-semibold text-xs">
+								Cache file content to local disk
+							</span>
 						</label>
 					</fieldset>
 					{formData.disk_cache_enabled && (
-						<div className="animate-in fade-in slide-in-from-top-2 space-y-6">
+						<div className="fade-in slide-in-from-top-2 animate-in space-y-6">
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend">Cache Storage Path</legend>
 								<input
@@ -994,7 +1059,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 											}
 											disabled={isRunning}
 										/>
-										<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">GB</span>
+										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+											GB
+										</span>
 									</div>
 								</fieldset>
 								<fieldset className="fieldset">
@@ -1011,7 +1078,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 											}
 											disabled={isRunning}
 										/>
-										<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">hrs</span>
+										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+											hrs
+										</span>
 									</div>
 								</fieldset>
 								<fieldset className="fieldset">
@@ -1028,7 +1097,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 											}
 											disabled={isRunning}
 										/>
-										<span className="btn btn-ghost border-base-300 join-item pointer-events-none text-xs">MB</span>
+										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
+											MB
+										</span>
 									</div>
 								</fieldset>
 							</div>
@@ -1206,14 +1277,24 @@ function ExternalRCloneSubSection({ config, onFormDataChange }: ExternalSubSecti
 							className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
 							onClick={() => setShowPassword(!showPassword)}
 						>
-							{showPassword ? <EyeOff className="h-4 w-4 opacity-50" /> : <Eye className="h-4 w-4 opacity-50" />}
+							{showPassword ? (
+								<EyeOff className="h-4 w-4 opacity-50" />
+							) : (
+								<Eye className="h-4 w-4 opacity-50" />
+							)}
 						</button>
 					</div>
 				</fieldset>
 
 				{testResult && (
-					<div className={`alert text-xs py-3 rounded-xl border ${testResult.success ? "alert-success bg-success/5 border-success/20" : "alert-error bg-error/5 border-error/20"}`}>
-						{testResult.success ? <Play className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+					<div
+						className={`alert rounded-xl border py-3 text-xs ${testResult.success ? "alert-success border-success/20 bg-success/5" : "alert-error border-error/20 bg-error/5"}`}
+					>
+						{testResult.success ? (
+							<Play className="h-4 w-4" />
+						) : (
+							<AlertTriangle className="h-4 w-4" />
+						)}
 						<span>{testResult.message}</span>
 					</div>
 				)}

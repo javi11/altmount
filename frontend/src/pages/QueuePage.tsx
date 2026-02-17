@@ -368,10 +368,10 @@ export function QueuePage() {
 
 				<div className="flex items-center gap-2">
 					<div className="dropdown">
-						<div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
+						<button type="button" tabIndex={0} className="btn btn-outline btn-sm gap-2">
 							<Settings className="h-3.5 w-3.5" />
 							Cleanup
-						</div>
+						</button>
 						<ul className="dropdown-content menu z-[1] mt-2 w-52 rounded-box border border-base-200 bg-base-100 p-2 shadow-lg">
 							<li>
 								<button

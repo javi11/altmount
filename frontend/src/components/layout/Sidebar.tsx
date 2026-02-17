@@ -54,8 +54,6 @@ export function Sidebar() {
 	const { data: queueStats } = useQueueStats();
 	const { data: healthStats } = useHealthStats();
 
-	// Filter navigation items based on admin status
-	// If login is not required, show all items including admin-only
 	const visibleNavigation = navigation.filter(
 		(item) => !item.adminOnly || !loginRequired || (user?.is_admin ?? false),
 	);
@@ -75,7 +73,6 @@ export function Sidebar() {
 		if (count === 0) return "";
 		switch (path) {
 			case "/queue": {
-				// Show error badge if there are failed items, otherwise warning for processing
 				if (queueStats && queueStats.total_failed > 0) {
 					return "badge-error";
 				}
@@ -89,20 +86,15 @@ export function Sidebar() {
 	};
 
 	return (
-		<aside className="min-h-full w-64 bg-base-200">
+		<aside className="min-h-full w-64 bg-base-200 md:w-72 lg:w-80">
 			<div className="p-4">
 				<div className="mb-8 flex items-center space-x-3">
-					<div className="avatar placeholder">
-						<div className="flex h-12 w-12 items-center justify-center overflow-hidden">
-							<img src="/logo.png" alt="AltMount Logo" className="h-12 w-12 object-contain" />
-						</div>
-					</div>
-					<div>
-						<h2 className="font-bold text-lg">AltMount</h2>
+					<div className="flex items-center justify-center overflow-hidden">
+						<img src="/logo.jpg" alt="AltMount Logo" className="rounded-lg object-contain" />
 					</div>
 				</div>
 
-				<nav className="space-y-2">
+				<nav className="space-y-2" aria-label="Main navigation">
 					{visibleNavigation.map((item) => {
 						const badgeCount = getBadgeCount(item.href);
 						const badgeColor = getBadgeColor(item.href, badgeCount);
@@ -117,17 +109,19 @@ export function Sidebar() {
 									}`
 								}
 							>
-								<item.icon className="h-5 w-5" />
+								<item.icon className="h-5 w-5" aria-hidden="true" />
 								<span className="flex-1">{item.name}</span>
 								{badgeCount > 0 && (
-									<div className={`badge badge-sm ${badgeColor}`}>{badgeCount}</div>
+									<span className={`badge badge-sm ${badgeColor}`}>
+										<span className="sr-only">{badgeCount} items</span>
+										{badgeCount}
+									</span>
 								)}
 							</NavLink>
 						);
 					})}
 				</nav>
 
-				{/* System info section */}
 				<div className="mt-8 border-base-300 border-t pt-6">
 					<div className="space-y-4">
 						<div className="flex items-center justify-between">
@@ -174,7 +168,6 @@ export function Sidebar() {
 					</div>
 				</div>
 
-				{/* Version and GitHub section */}
 				<div className="mt-4 border-base-300 border-t pt-4">
 					<div className="space-y-2">
 						<div className="flex items-center justify-between">
