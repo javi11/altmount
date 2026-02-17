@@ -55,6 +55,15 @@ export interface ProgressUpdate {
 	percentage: number;
 }
 
+export interface ImportHistoryItem {
+	id: number;
+	nzb_name: string;
+	file_name: string;
+	category?: string;
+	file_size: number;
+	completed_at: string;
+}
+
 export interface QueueStats {
 	total_queued: number;
 	total_processing: number;

@@ -96,7 +96,7 @@ export function QueueHistoricalStatsCard() {
 							</div>
 						</div>
 
-						{history.daily.length > 0 && (
+						{history?.daily && history.daily.length > 0 && (
 							<div className="mt-4 flex h-16 items-end gap-1 overflow-x-auto pb-1">
 								{history.daily.slice(-30).map((day: DailyStat) => {
 									const total = day.completed + day.failed;
