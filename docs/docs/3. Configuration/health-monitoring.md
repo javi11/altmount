@@ -12,7 +12,7 @@ AltMount's health monitoring system continuously watches for file corruption and
 
 Configure health monitoring through the System Configuration interface:
 
-![Health Monitoring](../../static/img/health_config.png)
+![Health Monitoring](/images/config-health.png)
 
 ```yaml
 health:
@@ -21,9 +21,13 @@ health:
   cleanup_orphaned_metadata: false # Enable bidirectional cleanup during sync
   check_interval_seconds: 5 # Worker check interval (default: 5)
   max_connections_for_health_checks: 5 # NNTP connections per check
+  max_concurrent_jobs: 1 # Concurrent health check jobs (default: 1)
   segment_sample_percentage: 5 # Percentage of segments to validate (5-100)
-  library_sync_interval_minutes: 60 # Library sync frequency (0 = disabled)
-  library_sync_concurrency: 10 # Parallel workers during sync
+  library_sync_interval_minutes: 360 # Library sync frequency (default: 6 hours, 0 = disabled)
+  library_sync_concurrency: 5 # Parallel workers during sync (default: 5)
+  resolve_repair_on_import: false # Smart replacement detection on import
+  verify_data: false # Verify downloaded data integrity
+  check_all_segments: false # Check all segments instead of sampling
 ```
 
 **Configuration Options:**
@@ -33,9 +37,39 @@ health:
 - **cleanup_orphaned_metadata**: When enabled, performs bidirectional cleanup of orphaned metadata and library files
 - **check_interval_seconds**: How often the worker checks for files needing validation (default: 5 seconds)
 - **max_connections_for_health_checks**: NNTP connections used per segment during health checks (default: 5)
+- **max_concurrent_jobs**: Maximum number of concurrent health check jobs (default: 1)
 - **segment_sample_percentage**: Percentage of file segments to check (default: 5%, use 100 for full validation)
-- **library_sync_interval_minutes**: How often to sync with library directory (default: 60 minutes, 0 to disable)
-- **library_sync_concurrency**: Number of parallel workers during library sync operations (default: 10)
+- **library_sync_interval_minutes**: How often to sync with library directory (default: 360 minutes / 6 hours, 0 to disable)
+- **library_sync_concurrency**: Number of parallel workers during library sync operations (default: 5)
+- **resolve_repair_on_import**: Enable smart replacement detection when importing files (default: false)
+- **verify_data**: Verify downloaded data integrity during health checks (default: false)
+- **check_all_segments**: Check all file segments instead of sampling (default: false)
+
+### Choosing the Right `segment_sample_percentage`
+
+The `segment_sample_percentage` setting controls the trade-off between check speed and detection accuracy:
+
+| Percentage       | Use Case                                             | Detection Confidence                               |
+| ---------------- | ---------------------------------------------------- | -------------------------------------------------- |
+| **5%** (default) | Large libraries, routine checks                      | Good for detecting widespread corruption           |
+| **10-20%**       | Balanced approach                                    | Catches most corruption with moderate resource use |
+| **50%+**         | Smaller libraries or suspected issues                | High confidence detection                          |
+| **100%**         | After provider changes, investigating specific files | Complete validation (slowest)                      |
+
+**Guidelines:**
+
+- **Start with the default (5%)** — it's effective at catching most corruption because corrupted files tend to have many missing segments, not just one or two.
+- **Increase to 20%** if you want higher confidence without a major performance hit.
+- **Use 100%** temporarily after switching providers or if you suspect widespread availability issues. You can trigger a full re-check via the API (`POST /api/health/reset-all`) and then lower the percentage back afterward.
+- When `verify_data` is enabled, the system also checks the actual content of downloaded segments (not just availability), which catches data corruption but uses more bandwidth.
+
+### Understanding Health Check Results
+
+After health checks run, you may notice changes in your library:
+
+- **Library size may change after repair**: When a corrupted file is repaired (re-downloaded via ARR), the replacement may be a different release with a slightly different file size. This is normal behavior.
+- **Files marked permanently corrupted**: After exhausting all retry and repair attempts, some files may be marked as permanently corrupted. This usually means the content is no longer available on Usenet at all. Check your provider's retention period.
+- **Health score fluctuations**: The overall health score may drop temporarily after a provider outage, then recover as files are re-checked once the provider is back online.
 
 **Health Monitoring Components:**
 
@@ -54,7 +88,7 @@ The health monitoring system operates through an intelligent multi-stage workflo
 
 The system periodically syncs with your library directory to discover and track files:
 
-- **Sync Frequency**: Configurable interval (default: every 60 minutes)
+- **Sync Frequency**: Configurable interval (default: every 360 minutes / 6 hours)
 - **Manual Triggers**: Can be triggered manually via API or disabled by setting interval to 0
 - **Discovery Process**: During each sync, the system:
   - Discovers new files added to the library
@@ -94,14 +128,14 @@ When your import strategy is set to `NONE`, the system performs a simplified met
 
 **Sync Behavior Comparison:**
 
-| Feature | Full Sync (Symlinks/STRM) | Metadata-Only (NONE) |
-|---------|---------------------------|----------------------|
-| Library Directory Scan | ✅ Yes | ❌ No |
-| Metadata Scan | ✅ Yes | ✅ Yes |
-| Import Directory Scan | ✅ Yes | ❌ No |
-| Bidirectional Cleanup | ✅ Optional | ❌ N/A |
-| Library Path Tracking | ✅ Yes | ❌ Null |
-| Performance | Moderate | Fast |
+| Feature                | Full Sync (Symlinks/STRM) | Metadata-Only (NONE) |
+| ---------------------- | ------------------------- | -------------------- |
+| Library Directory Scan | ✅ Yes                    | ❌ No                |
+| Metadata Scan          | ✅ Yes                    | ✅ Yes               |
+| Import Directory Scan  | ✅ Yes                    | ❌ No                |
+| Bidirectional Cleanup  | ✅ Optional               | ❌ N/A               |
+| Library Path Tracking  | ✅ Yes                    | ❌ Null              |
+| Performance            | Moderate                  | Fast                 |
 
 ### Health Check Scheduling
 
@@ -199,7 +233,6 @@ When unhealthy files are detected, the system automatically coordinates repairs 
 The system implements two-phase retry logic with hardcoded limits:
 
 1. **Health Check Retries**: 2 attempts
-
    - Number of validation attempts before triggering repair
    - Accounts for temporary network issues or transient failures
    - After exhaustion, file transitions to repair phase
@@ -276,7 +309,7 @@ Automatic repair is enabled by default when ARR integration is properly configur
 
 Monitor the health of your collection through the web interface:
 
-![Health Status Dashboard](../../static/img/health_monitoring.png)
+![Health Status Dashboard](/images/health-overview.png)
 _Health status overview showing collection integrity metrics_
 
 **Health Dashboard Features:**
@@ -290,13 +323,13 @@ _Health status overview showing collection integrity metrics_
 
 ### Enabling ARR Integration for Health Monitoring
 
-![Arr configuration](../../static/img/arr_config.png)
+![Arr configuration](/images/config-arrs.png)
 
 Auto-repair requires properly configured ARR integration:
 
 ```yaml
 # Root-level mount path configuration
-mount_path: "/mnt/altmount" # Must match ARR WebDAV mount path
+mount_path: "/mnt/remotes/altmount" # Must match ARR WebDAV mount path
 
 arrs:
   enabled: true # Required for auto-repair
@@ -321,8 +354,8 @@ arrs:
 
 The root-level `mount_path` must exactly match where your ARRs access the WebDAV mount:
 
-- **Root mount_path**: `/mnt/altmount` (where ARRs see WebDAV files)
-- **ARR Library Paths**: Must be under `/mnt/altmount/`
+- **Root mount_path**: `/mnt/remotes/altmount` (where ARRs see WebDAV files)
+- **ARR Library Paths**: Must be under `/mnt/remotes/altmount/`
 - **Consistency**: All ARR instances must use the same mount path
 - **Configuration Location**: `mount_path` is at root config level, not inside arrs section
 
@@ -330,10 +363,10 @@ The root-level `mount_path` must exactly match where your ARRs access the WebDAV
 
 ```yaml
 # Radarr library configuration
-Movies Library Path: /mnt/altmount/movies/
+Movies Library Path: /mnt/remotes/altmount/movies/
 
 # Sonarr library configuration
-TV Shows Library Path: /mnt/altmount/tv/
+TV Shows Library Path: /mnt/remotes/altmount/tv/
 ```
 
 ## Health Monitoring Features
@@ -379,17 +412,17 @@ curl -X POST http://localhost:8080/api/health/<id>/check-now \
 
 ### Useful API Operations
 
-| Operation | Method | Endpoint |
-|-----------|--------|----------|
-| List all health records | GET | `/api/health` |
-| Get health statistics | GET | `/api/health/stats` |
-| List corrupted files | GET | `/api/health/corrupted` |
-| Check worker status | GET | `/api/health/worker/status` |
-| Start library sync | POST | `/api/health/library-sync/start` |
-| Check sync status | GET | `/api/health/library-sync/status` |
-| Dry run sync | POST | `/api/health/library-sync/dry-run` |
-| Reset all health checks | POST | `/api/health/reset-all` |
-| Regenerate all symlinks | POST | `/api/health/regenerate-symlinks` |
+| Operation               | Method | Endpoint                           |
+| ----------------------- | ------ | ---------------------------------- |
+| List all health records | GET    | `/api/health`                      |
+| Get health statistics   | GET    | `/api/health/stats`                |
+| List corrupted files    | GET    | `/api/health/corrupted`            |
+| Check worker status     | GET    | `/api/health/worker/status`        |
+| Start library sync      | POST   | `/api/health/library-sync/start`   |
+| Check sync status       | GET    | `/api/health/library-sync/status`  |
+| Dry run sync            | POST   | `/api/health/library-sync/dry-run` |
+| Reset all health checks | POST   | `/api/health/reset-all`            |
+| Regenerate all symlinks | POST   | `/api/health/regenerate-symlinks`  |
 
 > **Note:** Resetting all health checks clears existing results and re-queues every file for verification. This is useful after a provider change or if you suspect widespread availability issues.
 

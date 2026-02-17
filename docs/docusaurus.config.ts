@@ -89,7 +89,7 @@ const config: Config = {
 						},
 						{
 							label: "Installation",
-							to: "/docs/Installation/cli",
+							to: "/docs/Installation/other-methods",
 						},
 					],
 				},

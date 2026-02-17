@@ -18,7 +18,7 @@ func TestCalculateProcessVirtualDir_FailedPath(t *testing.T) {
 					Path: "/config/altmount.db",
 				},
 				SABnzbd: config.SABnzbdConfig{
-					CompleteDir: "/mnt/altmount",
+					CompleteDir: "/mnt/remotes/altmount",
 				},
 			}
 		},
@@ -35,34 +35,34 @@ func TestCalculateProcessVirtualDir_FailedPath(t *testing.T) {
 			name:         "normal nzb in root",
 			nzbPath:      "/config/.nzbs/Movie.nzb",
 			basePath:     "movies",
-			expectedPath: "/mnt/altmount/movies",
+			expectedPath: "/mnt/remotes/altmount/movies",
 		},
 		{
 			name:         "failed nzb in root",
 			nzbPath:      "/config/.nzbs/failed/Movie.nzb",
 			basePath:     "movies",
-			expectedPath: "/mnt/altmount/movies",
+			expectedPath: "/mnt/remotes/altmount/movies",
 		},
 		{
 			name:         "failed nzb in category subfolder",
 			nzbPath:      "/config/.nzbs/failed/tv/Show.nzb",
 			basePath:     "media",
 			category:     "tv",
-			expectedPath: "/mnt/altmount/media/tv",
+			expectedPath: "/mnt/remotes/altmount/media/tv",
 		},
 		{
 			name:         "normal nzb in category subfolder",
 			nzbPath:      "/config/.nzbs/tv/Show.nzb",
 			basePath:     "media",
 			category:     "tv",
-			expectedPath: "/mnt/altmount/media/tv",
+			expectedPath: "/mnt/remotes/altmount/media/tv",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			item := &database.ImportQueueItem{
-				NzbPath:  filepath.FromSlash(tt.nzbPath),
+				NzbPath: filepath.FromSlash(tt.nzbPath),
 			}
 			if tt.category != "" {
 				item.Category = &tt.category

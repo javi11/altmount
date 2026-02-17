@@ -71,13 +71,13 @@ services:
   sonarr:
     image: ...
     volumes:
-      - altmount:/mnt/altmount
+      - altmount:/mnt/remotes/altmount
 
   ubuntu:
     image: ubuntu
     command: sleep infinity
     volumes:
-      - altmount:/mnt/altmount
+      - altmount:/mnt/remotes/altmount
     environment:
       - PUID=1000
       - PGID=1000
@@ -115,7 +115,7 @@ services:
     image: ubuntu
     command: sleep infinity
     volumes:
-      - altmount:/mnt/altmount
+      - altmount:/mnt/remotes/altmount
     environment:
       - PUID=1000 # Must match UID value from the volume in the stack creating the volume (driver_opts)
       - PGID=1000 # Must match GID value from the volume in the stack creating the volume (driver_opts)

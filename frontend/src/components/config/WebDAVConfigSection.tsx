@@ -154,11 +154,11 @@ export function WebDAVConfigSection({
 								value={formData.mount_path}
 								disabled={isReadOnly}
 								onChange={(e) => handleInputChange("mount_path", e.target.value)}
-								placeholder="/mnt/altmount"
+								placeholder="/mnt/remotes/altmount"
 							/>
 							<div className="label p-0">
 								<span className="text-[10px] text-base-content/50 break-words leading-relaxed">
-									Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual files. 
+									Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual files.
 									Required for healthy repairs.
 								</span>
 							</div>
@@ -172,7 +172,7 @@ export function WebDAVConfigSection({
 								<div className="min-w-0">
 									<h5 className="font-bold text-xs uppercase tracking-wider text-info break-words">Pro-Tip: Integrated Mounting</h5>
 									<p className="text-[11px] leading-relaxed mt-1 opacity-80 break-words">
-										Avoid manual setup! Use our built-in high-performance mount engine for automatic 
+										Avoid manual setup! Use our built-in high-performance mount engine for automatic
 										connectivity and lifecycle management.
 									</p>
 								</div>
