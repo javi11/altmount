@@ -256,7 +256,9 @@ export class APIClient {
 		if (days) searchParams.set("days", days.toString());
 
 		const query = searchParams.toString();
-		return this.request<any>(`/queue/stats/history${query ? `?${query}` : ""}`);
+		return this.request<QueueHistoricalStatsResponse>(
+			`/queue/stats/history${query ? `?${query}` : ""}`,
+		);
 	}
 
 	async clearCompletedQueue(olderThan?: string) {
@@ -750,7 +752,9 @@ export class APIClient {
 		if (limit) searchParams.set("limit", limit.toString());
 
 		const query = searchParams.toString();
-		return this.request<any[]>(`/import/history${query ? `?${query}` : ""}`);
+		return this.request<Array<Record<string, unknown>>>(
+			`/import/history${query ? `?${query}` : ""}`,
+		);
 	}
 
 	async cancelScan() {

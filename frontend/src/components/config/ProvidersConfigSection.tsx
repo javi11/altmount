@@ -257,11 +257,9 @@ export function ProvidersConfigSection({
 
 					<div className="grid gap-4">
 						{formData.map((provider, index) => (
-							<div
+							<section
 								key={provider.id}
 								draggable={!isReordering}
-								role="button"
-								tabIndex={0}
 								aria-label={`Provider ${provider.host}`}
 								onDragStart={(e) => !isReordering && handleDragStart(e, provider.id)}
 								onDragOver={(e) => !isReordering && handleDragOver(e, provider.id)}
@@ -445,7 +443,7 @@ export function ProvidersConfigSection({
 										</div>
 									</div>
 								</div>
-							</div>
+							</section>
 						))}
 					</div>
 				</div>

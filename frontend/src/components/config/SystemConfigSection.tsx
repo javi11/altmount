@@ -77,7 +77,9 @@ export function SystemConfigSection({
 			// We need a way to update profiler_enabled too.
 			// In ConfigurationPage, onUpdate for 'log' updates 'system' section which includes log.
 			// Let's assume the backend handles both if we send them.
-			await onUpdate("log", { ...formData, profiler_enabled: profilerEnabled } as any);
+			await onUpdate("log", { ...formData, profiler_enabled: profilerEnabled } as LogFormData & {
+				profiler_enabled: boolean;
+			});
 			setHasChanges(false);
 		}
 	};
