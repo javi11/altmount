@@ -27,7 +27,11 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		return fmt.Errorf("STRM directory not configured")
 	}
 
+	// Keep the original resulting path for metadata and streaming URL
+	originalResultingPath := resultingPath
+
 	// Strip SABnzbd CompleteDir prefix from resultingPath if present
+	// This prevents creating nested "complete" folders in the STRM directory
 	if cfg.SABnzbd.CompleteDir != "" {
 		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
 		if !strings.HasPrefix(completeDir, "/") {
@@ -42,20 +46,20 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 	}
 
 	// Check the metadata directory to determine if this is a file or directory
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(originalResultingPath, "/"))
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
 	if err != nil {
 		metaFile := metadataPath + ".meta"
 		if _, metaErr := os.Stat(metaFile); metaErr == nil {
-			return c.createSingleStrmFile(ctx, resultingPath, cfg.WebDAV.Port)
+			return c.createSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
 		}
 		return fmt.Errorf("failed to stat metadata path: %w", err)
 	}
 
 	if !fileInfo.IsDir() {
-		return c.createSingleStrmFile(ctx, resultingPath, cfg.WebDAV.Port)
+		return c.createSingleStrmFile(ctx, resultingPath, originalResultingPath, cfg.WebDAV.Port)
 	}
 
 	// Directory - walk through and create STRM files for all files
@@ -87,7 +91,22 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		// Remove .meta extension
 		relPath = strings.TrimSuffix(relPath, ".meta")
 
-		if err := c.createSingleStrmFile(ctx, relPath, cfg.WebDAV.Port); err != nil {
+		// Build the STRM resulting path (stripped if needed)
+		strmResultingPath := relPath
+		if cfg.SABnzbd.CompleteDir != "" {
+			completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+			if !strings.HasPrefix(completeDir, "/") {
+				completeDir = "/" + completeDir
+			}
+			if strings.HasPrefix(strmResultingPath, completeDir) {
+				strmResultingPath = strings.TrimPrefix(strmResultingPath, completeDir)
+				if !strings.HasPrefix(strmResultingPath, "/") {
+					strmResultingPath = "/" + strmResultingPath
+				}
+			}
+		}
+
+		if err := c.createSingleStrmFile(ctx, strmResultingPath, relPath, cfg.WebDAV.Port); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create STRM file",
 				"path", relPath,
 				"error", err)
@@ -114,18 +133,18 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 }
 
 // createSingleStrmFile creates a STRM file for a single file with authentication
-func (c *Coordinator) createSingleStrmFile(ctx context.Context, virtualPath string, port int) error {
+func (c *Coordinator) createSingleStrmFile(ctx context.Context, strmResultingPath, originalVirtualPath string, port int) error {
 	cfg := c.configGetter()
 
-	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(virtualPath, "/")))
+	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(strmResultingPath, "/")))
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return fmt.Errorf("failed to create STRM directory: %w", err)
 	}
 
 	// Keep original filename and add .strm extension
-	filename := filepath.Base(virtualPath) + ".strm"
-	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(virtualPath, "/")), filename)
+	filename := filepath.Base(strmResultingPath) + ".strm"
+	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(strmResultingPath, "/")), filename)
 
 	// Get first admin user's API key for authentication
 	if c.userRepo == nil {
@@ -159,8 +178,8 @@ func (c *Coordinator) createSingleStrmFile(ctx context.Context, virtualPath stri
 		host = "localhost"
 	}
 
-	// Generate streaming URL with download_key
-	encodedPath := strings.ReplaceAll(virtualPath, " ", "%20")
+	// Generate streaming URL with download_key using the ORIGINAL virtual path
+	encodedPath := strings.ReplaceAll(originalVirtualPath, " ", "%20")
 	streamURL := fmt.Sprintf("http://%s:%d/api/files/stream?path=%s&download_key=%s",
 		host, port, encodedPath, hashedKey)
 
