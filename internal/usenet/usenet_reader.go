@@ -114,13 +114,6 @@ func (b *UsenetReader) Close() error {
 	b.closeOnce.Do(func() {
 		b.cancel()
 
-		// Drain and close init channel safely
-		select {
-		case <-b.init:
-		default:
-		}
-		close(b.init)
-
 		// Unblock any pending reads waiting for data
 		if b.rg != nil {
 			b.rg.CloseSegments()
@@ -346,68 +339,67 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		if !ok {
 			return
 		}
+	case <-ctx.Done():
+		return
+	}
 
-		if b.rg.Len() == 0 {
+	if b.rg.Len() == 0 {
+		return
+	}
+
+	for ctx.Err() == nil {
+		b.mu.Lock()
+		if b.rg == nil {
+			b.mu.Unlock()
 			return
 		}
 
-		for ctx.Err() == nil {
-			b.mu.Lock()
-			if b.rg == nil {
-				b.mu.Unlock()
-				return
-			}
-
-			// Check if all segments have been scheduled
-			totalSegments := b.rg.Len()
-			if b.nextToDownload >= totalSegments {
-				b.mu.Unlock()
-				break
-			}
-
-			// Limit how far ahead we prefetch beyond the current read position
-			currentRead := b.rg.GetCurrentIndex()
-			if b.nextToDownload-currentRead >= b.maxPrefetch {
-				b.mu.Unlock()
-				// Wait briefly before re-checking
-				select {
-				case <-time.After(50 * time.Millisecond):
-					continue
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			// Schedule next segment for download
-			idx := b.nextToDownload
-			b.nextToDownload++
+		// Check if all segments have been scheduled
+		totalSegments := b.rg.Len()
+		if b.nextToDownload >= totalSegments {
 			b.mu.Unlock()
-
-			seg, err := b.rg.GetSegment(idx)
-			if err != nil || seg == nil {
-				continue
-			}
-
-			go func(segIdx int, s *segment) {
-				defer func() {
-					if p := recover(); p != nil {
-						b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
-						s.SetError(fmt.Errorf("panic in download task: %v", p))
-					}
-				}()
-
-				taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segIdx)
-				data, err := b.downloadSegmentWithRetry(taskCtx, s)
-
-				if err != nil {
-					s.SetError(err)
-				} else {
-					s.SetData(data)
-				}
-			}(idx, seg)
+			break
 		}
 
-	case <-ctx.Done():
-		return
+		// Limit how far ahead we prefetch beyond the current read position
+		currentRead := b.rg.GetCurrentIndex()
+		if b.nextToDownload-currentRead >= b.maxPrefetch {
+			b.mu.Unlock()
+			// Wait briefly before re-checking
+			select {
+			case <-time.After(50 * time.Millisecond):
+				continue
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		// Schedule next segment for download
+		idx := b.nextToDownload
+		b.nextToDownload++
+		b.mu.Unlock()
+
+		seg, err := b.rg.GetSegment(idx)
+		if err != nil || seg == nil {
+			continue
+		}
+
+		go func(segIdx int, s *segment) {
+			defer func() {
+				if p := recover(); p != nil {
+					b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
+					s.SetError(fmt.Errorf("panic in download task: %v", p))
+				}
+			}()
+
+			taskCtx := slogutil.With(ctx, "segment_id", s.Id, "segment_idx", segIdx)
+			data, err := b.downloadSegmentWithRetry(taskCtx, s)
+
+			if err != nil {
+				s.SetError(err)
+			} else {
+				s.SetData(data)
+			}
+		}(idx, seg)
 	}
 }
