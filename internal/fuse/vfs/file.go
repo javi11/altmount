@@ -18,7 +18,7 @@ var noopFetchGroup singleflight.Group
 
 var fetchBufPool = sync.Pool{
 	New: func() any {
-		buf := make([]byte, 256*1024) // 256KB default
+		buf := make([]byte, 1024*1024) // 1MB — fewer pool ops per chunk fetch
 		return &buf
 	},
 }

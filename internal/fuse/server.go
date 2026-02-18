@@ -139,14 +139,22 @@ func (s *Server) Mount(onReady func()) error {
 		entryTimeout = 1 * time.Second
 	}
 
+	maxReadAhead := s.config.MaxReadAheadMB * 1024 * 1024
+	if maxReadAhead == 0 {
+		maxReadAhead = 128 * 1024 // 128KB default (matches rclone)
+	}
+
 	opts := &fs.Options{
 		MountOptions: fuse.MountOptions{
 			AllowOther:           s.config.AllowOther,
 			Name:                 "altmount",
 			Debug:                s.config.Debug,
-			MaxReadAhead:         s.config.MaxReadAheadMB * 1024 * 1024,
+			MaxReadAhead:         maxReadAhead,
+			MaxBackground:        64,   // Allow more concurrent async I/O (default 12)
 			DisableXAttrs:        true,
 			IgnoreSecurityLabels: true,
+			DisableReadDirPlus:   true,  // Faster directory listings (skip per-entry stat)
+			DirectMount:          true,  // Bypass fusermount helper on Linux for faster mount
 			MaxWrite:             1024 * 1024, // 1MB
 		},
 		EntryTimeout:    &entryTimeout,
