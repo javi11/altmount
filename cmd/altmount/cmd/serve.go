@@ -127,15 +127,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	fs := initializeFilesystem(ctx, metadataService, repos.HealthRepo, poolManager, configManager.GetConfigGetter(), streamTracker)
 
+	// Initialize segment cache (shared between FUSE and WebDAV)
+	segcacheMgr := initializeSegmentCache(ctx, cfg)
+	if segcacheMgr != nil {
+		defer segcacheMgr.Stop()
+	}
+
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
 	authService := setupAuthService(ctx, repos.UserRepo)
 
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 
-	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker)
+	apiServer := setupAPIServer(app, repos, authService, configManager, metadataReader, metadataService, fs, poolManager, importerService, arrsService, mountService, progressBroadcaster, streamTracker, segcacheMgr)
 
-	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker)
+	webdavHandler, err := setupWebDAV(cfg, fs, authService, repos.UserRepo, configManager, streamTracker, segcacheMgr)
 	if err != nil {
 		return err
 	}

@@ -2,10 +2,12 @@ package nzbfilesystem
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"time"
 
+	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/slogutil"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
@@ -151,4 +153,39 @@ func (nfs *NzbFilesystem) Chtimes(name string, atime, mtime time.Time) error {
 // GetRemoteFile returns the underlying MetadataRemoteFile for configuration updates
 func (nfs *NzbFilesystem) GetRemoteFile() *MetadataRemoteFile {
 	return nfs.remoteFile
+}
+
+// GetSegmentEntries returns the segment layout for a virtual file so the
+// segment cache can map file offsets to Usenet message IDs.
+// Returns (nil, 0, os.ErrNotExist) if the path does not refer to a regular file.
+func (nfs *NzbFilesystem) GetSegmentEntries(_ context.Context, path string) ([]segcache.SegmentEntry, int64, error) {
+	normalized := normalizePath(path)
+
+	if !nfs.remoteFile.metadataService.FileExists(normalized) {
+		return nil, 0, os.ErrNotExist
+	}
+
+	fileMeta, err := nfs.remoteFile.metadataService.ReadFileMetadata(normalized)
+	if err != nil {
+		return nil, 0, fmt.Errorf("segcache: read metadata for %s: %w", normalized, err)
+	}
+
+	if fileMeta == nil || len(fileMeta.SegmentData) == 0 {
+		return nil, 0, fmt.Errorf("segcache: no segment data for %s", normalized)
+	}
+
+	entries := make([]segcache.SegmentEntry, 0, len(fileMeta.SegmentData))
+	var pos int64
+
+	for _, seg := range fileMeta.SegmentData {
+		usableLen := seg.EndOffset - seg.StartOffset + 1
+		entries = append(entries, segcache.SegmentEntry{
+			MessageID: seg.Id,
+			FileStart: pos,
+			FileEnd:   pos + usableLen,
+		})
+		pos += usableLen
+	}
+
+	return entries, fileMeta.FileSize, nil
 }

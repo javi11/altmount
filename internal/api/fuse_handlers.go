@@ -11,6 +11,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/fuse"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 )
 
 const (
@@ -224,7 +225,7 @@ func (s *Server) handleStartFuseMount(c *fiber.Ctx) error {
 	go func() {
 		cfg := s.configManager.GetConfig()
 		logger := slog.With("component", "fuse")
-		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker)
+		server := fuse.NewServer(req.Path, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker, s.segcacheMgr)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server
@@ -385,7 +386,7 @@ func (s *Server) AutoStartFuse() {
 
 	go func() {
 		logger := slog.With("component", "fuse")
-		server := fuse.NewServer(cfg.Fuse.MountPath, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker)
+		server := fuse.NewServer(cfg.Fuse.MountPath, s.nzbFilesystem, logger, cfg.Fuse, s.streamTracker, s.segcacheMgr)
 
 		s.fuseManager.mu.Lock()
 		s.fuseManager.server = server
@@ -418,10 +419,10 @@ func (s *Server) AutoStartFuse() {
 }
 
 // newMountFactory creates a MountFactory that uses the given dependencies to build fuse.Server instances.
-func newMountFactory(nzbfs *nzbfilesystem.NzbFilesystem, configManager ConfigManager, st *StreamTracker) MountFactory {
+func newMountFactory(nzbfs *nzbfilesystem.NzbFilesystem, configManager ConfigManager, st *StreamTracker, segcacheMgr *segcache.Manager) MountFactory {
 	return func(path string) *fuse.Server {
 		cfg := configManager.GetConfig()
 		logger := slog.With("component", "fuse")
-		return fuse.NewServer(path, nzbfs, logger, cfg.Fuse, st)
+		return fuse.NewServer(path, nzbfs, logger, cfg.Fuse, st, segcacheMgr)
 	}
 }

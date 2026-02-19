@@ -16,6 +16,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/fuse/vfs"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 )
 
 // Server manages the FUSE mount
@@ -25,7 +26,8 @@ type Server struct {
 	logger        *slog.Logger
 	server        *fuse.Server
 	config        config.FuseConfig
-	vfsm          *vfs.Manager // VFS disk cache manager (nil if disabled)
+	vfsm          *vfs.Manager          // VFS disk cache manager (nil if disabled)
+	segcacheMgr   *segcache.Manager     // Segment cache manager (nil if disabled)
 	streamTracker StreamTracker
 
 	// ValidateMount goroutine leak guard
@@ -36,13 +38,21 @@ type Server struct {
 
 // NewServer creates a new FUSE server instance.
 // Takes NzbFilesystem directly (no ContextAdapter needed).
-func NewServer(mountPoint string, nzbfs *nzbfilesystem.NzbFilesystem, logger *slog.Logger, cfg config.FuseConfig, st StreamTracker) *Server {
+func NewServer(
+	mountPoint string,
+	nzbfs *nzbfilesystem.NzbFilesystem,
+	logger *slog.Logger,
+	cfg config.FuseConfig,
+	st StreamTracker,
+	segcacheMgr *segcache.Manager,
+) *Server {
 	return &Server{
 		mountPoint:    mountPoint,
 		nzbfs:         nzbfs,
 		logger:        logger,
 		config:        cfg,
 		streamTracker: st,
+		segcacheMgr:   segcacheMgr,
 	}
 }
 
@@ -126,7 +136,7 @@ func (s *Server) Mount(onReady func()) error {
 	}
 	s.vfsm = vfsm
 
-	root := NewDir(s.nzbfs, "", s.logger, uid, gid, vfsm, s.streamTracker)
+	root := NewDir(s.nzbfs, "", s.logger, uid, gid, vfsm, s.segcacheMgr, s.streamTracker)
 
 	// Configure FUSE options
 	attrTimeout := time.Duration(s.config.AttrTimeoutSeconds) * time.Second

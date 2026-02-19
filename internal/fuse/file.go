@@ -11,6 +11,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/fuse/vfs"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/spf13/afero"
 )
@@ -45,7 +46,8 @@ var _ fs.NodeSetattrer = (*File)(nil)
 type File struct {
 	fs.Inode
 	nzbfs         *nzbfilesystem.NzbFilesystem
-	vfsm          *vfs.Manager // VFS disk cache manager (nil if disabled)
+	vfsm          *vfs.Manager      // VFS disk cache manager (nil if disabled)
+	segcacheMgr   *segcache.Manager // Segment cache manager (nil if disabled)
 	streamTracker StreamTracker
 	path          string
 	logger        *slog.Logger
@@ -92,6 +94,36 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 
 	// Suppress backend stream creation for all downstream opens
 	ctx = context.WithValue(ctx, utils.SuppressStreamTrackingKey, true)
+
+	// Segment cache mode: preferred over VFS cache when enabled.
+	// Aligns reads to Usenet segment boundaries (~750KB) for exact one-segment NNTP downloads.
+	if f.segcacheMgr != nil {
+		entries, fileSize, segErr := f.nzbfs.GetSegmentEntries(ctx, f.path)
+		if segErr == nil && len(entries) > 0 {
+			opener := &suppressStreamOpener{inner: &nzbfsFileOpener{nzbfs: f.nzbfs}}
+			segFile, openErr := f.segcacheMgr.Open(f.path, entries, fileSize, opener)
+			if openErr != nil {
+				if stream != nil {
+					f.streamTracker.Remove(stream.ID)
+				}
+				f.logger.ErrorContext(ctx, "Segment cache Open failed", "path", f.path, "error", openErr)
+				return nil, 0, syscall.EIO
+			}
+			handle := &Handle{
+				segCachedFile: segFile,
+				logger:        f.logger,
+				path:          f.path,
+				segcacheMgr:   f.segcacheMgr,
+				stream:        stream,
+				streamTracker: f.streamTracker,
+			}
+			return handle, fuse.FOPEN_KEEP_CACHE, 0
+		}
+		// Fall through to VFS or fallback if GetSegmentEntries failed.
+		if segErr != nil {
+			f.logger.WarnContext(ctx, "GetSegmentEntries failed, using fallback", "path", f.path, "error", segErr)
+		}
+	}
 
 	// VFS mode: use disk cache with ReadAt support
 	if f.vfsm != nil {

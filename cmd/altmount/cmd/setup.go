@@ -22,6 +22,7 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
@@ -252,6 +253,7 @@ func setupAPIServer(
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
 	streamTracker *api.StreamTracker,
+	segcacheMgr *segcache.Manager,
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -274,6 +276,7 @@ func setupAPIServer(
 		mountService,
 		progressBroadcaster,
 		streamTracker,
+		segcacheMgr,
 	)
 
 	apiServer.SetupRoutes(app)
@@ -288,6 +291,64 @@ func setupAPIServer(
 	return apiServer
 }
 
+// initializeSegmentCache creates and starts the segment cache manager if enabled
+func initializeSegmentCache(ctx context.Context, cfg *config.Config) *segcache.Manager {
+	if cfg.SegmentCache.Enabled == nil || !*cfg.SegmentCache.Enabled {
+		slog.InfoContext(ctx, "Segment cache disabled")
+		return nil
+	}
+
+	cachePath := cfg.SegmentCache.CachePath
+	if cachePath == "" {
+		cachePath = "/tmp/altmount-segcache"
+	}
+
+	maxSizeGB := cfg.SegmentCache.MaxSizeGB
+	if maxSizeGB <= 0 {
+		maxSizeGB = 10
+	}
+
+	expiryHours := cfg.SegmentCache.ExpiryHours
+	if expiryHours <= 0 {
+		expiryHours = 24
+	}
+
+	readAheadSegments := cfg.SegmentCache.ReadAheadSegments
+	if readAheadSegments <= 0 {
+		readAheadSegments = 3
+	}
+
+	prefetchConcurrency := cfg.SegmentCache.PrefetchConcurrency
+	if prefetchConcurrency <= 0 {
+		prefetchConcurrency = 2
+	}
+
+	mgrCfg := segcache.ManagerConfig{
+		Enabled:             true,
+		CachePath:           cachePath,
+		MaxSizeBytes:        int64(maxSizeGB) * 1024 * 1024 * 1024,
+		ExpiryDuration:      time.Duration(expiryHours) * time.Hour,
+		ReadAheadSegments:   readAheadSegments,
+		PrefetchConcurrency: prefetchConcurrency,
+	}
+
+	mgr, err := segcache.NewManager(mgrCfg, slog.Default().With("component", "segcache"))
+	if err != nil {
+		slog.WarnContext(ctx, "Failed to create segment cache manager, running without segment cache", "error", err)
+		return nil
+	}
+
+	mgr.Start(ctx)
+	slog.InfoContext(ctx, "Segment cache enabled",
+		"cache_path", cachePath,
+		"max_size_gb", maxSizeGB,
+		"expiry_hours", expiryHours,
+		"read_ahead_segments", readAheadSegments,
+		"prefetch_concurrency", prefetchConcurrency)
+
+	return mgr
+}
+
 // setupWebDAV creates and configures the WebDAV handler
 func setupWebDAV(
 	cfg *config.Config,
@@ -296,6 +357,7 @@ func setupWebDAV(
 	userRepo *database.UserRepository,
 	configManager *config.Manager,
 	streamTracker *api.StreamTracker,
+	segcacheMgr *segcache.Manager,
 ) (*webdav.Handler, error) {
 	var tokenService *token.Service
 	var webdavUserRepo *database.UserRepository
@@ -311,7 +373,7 @@ func setupWebDAV(
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
 		Prefix: "/webdav",
-	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter(), streamTracker)
+	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter(), streamTracker, segcacheMgr)
 
 	if err != nil {
 		return nil, err
