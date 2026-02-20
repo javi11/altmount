@@ -266,3 +266,14 @@ func toScanStatusResponse(scanInfo importer.ScanInfo) *ScanStatusResponse {
 		LastError:   scanInfo.LastError,
 	}
 }
+
+// handleClearImportHistory handles DELETE /api/import/history
+func (s *Server) handleClearImportHistory(c *fiber.Ctx) error {
+	if err := s.queueRepo.ClearImportHistory(c.Context()); err != nil {
+		return RespondInternalError(c, "Failed to clear import history", err.Error())
+	}
+
+	return RespondSuccess(c, fiber.Map{
+		"message": "Import history cleared successfully",
+	})
+}
