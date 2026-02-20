@@ -37,11 +37,6 @@ const navigation = [
 		icon: Folder,
 	},
 	{
-		name: "Import",
-		href: "/import",
-		icon: Upload,
-	},
-	{
 		name: "Configuration",
 		href: "/config",
 		icon: Settings,
@@ -86,7 +81,7 @@ export function Sidebar() {
 	};
 
 	return (
-		<aside className="min-h-full w-64 bg-base-200 md:w-72 lg:w-80">
+		<aside className="min-h-full w-56 bg-base-200 md:w-64 lg:w-72">
 			<div className="p-4">
 				<div className="mb-8 flex items-center space-x-3">
 					<div className="avatar placeholder">
