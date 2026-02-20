@@ -22,7 +22,9 @@ import (
 	"github.com/javi11/altmount/internal/importer"
 	"github.com/javi11/altmount/internal/metadata"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/webdav"
@@ -105,10 +107,17 @@ func initializeFilesystem(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker nzbfilesystem.StreamTracker,
+	segcacheMgr *segcache.Manager,
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
 		slog.ErrorContext(ctx, "failed to reset in progress file health", "err", err)
+	}
+
+	// Build segment store from segment cache manager (nil if disabled)
+	var segmentStore usenet.SegmentStore
+	if segcacheMgr != nil {
+		segmentStore = segcacheMgr.Cache()
 	}
 
 	// Create metadata-based remote file handler
@@ -118,6 +127,7 @@ func initializeFilesystem(
 		poolManager,
 		configGetter,
 		streamTracker,
+		segmentStore,
 	)
 
 	// Create filesystem backed by metadata
@@ -252,6 +262,7 @@ func setupAPIServer(
 	mountService *rclone.MountService,
 	progressBroadcaster *progress.ProgressBroadcaster,
 	streamTracker *api.StreamTracker,
+	segcacheMgr *segcache.Manager,
 ) *api.Server {
 	apiConfig := &api.Config{
 		Prefix: "/api",
@@ -274,6 +285,7 @@ func setupAPIServer(
 		mountService,
 		progressBroadcaster,
 		streamTracker,
+		segcacheMgr,
 	)
 
 	apiServer.SetupRoutes(app)
@@ -286,6 +298,35 @@ func setupAPIServer(
 	app.Get("/live", handleFiberHealth)
 
 	return apiServer
+}
+
+// initializeSegmentCache creates and starts the segment cache manager if enabled
+func initializeSegmentCache(ctx context.Context, cfg *config.Config) *segcache.Manager {
+	if cfg.SegmentCache.Enabled == nil || !*cfg.SegmentCache.Enabled {
+		slog.InfoContext(ctx, "Segment cache disabled")
+		return nil
+	}
+
+	mgrCfg := segcache.ManagerConfig{
+		Enabled:        true,
+		CachePath:      cfg.SegmentCache.CachePath,
+		MaxSizeBytes:   int64(cfg.SegmentCache.MaxSizeGB) * 1024 * 1024 * 1024,
+		ExpiryDuration: time.Duration(cfg.SegmentCache.ExpiryHours) * time.Hour,
+	}.WithDefaults()
+
+	mgr, err := segcache.NewManager(mgrCfg, slog.Default().With("component", "segcache"))
+	if err != nil {
+		slog.WarnContext(ctx, "Failed to create segment cache manager, running without segment cache", "error", err)
+		return nil
+	}
+
+	mgr.Start(ctx)
+	slog.InfoContext(ctx, "Segment cache enabled",
+		"cache_path", mgrCfg.CachePath,
+		"max_size_bytes", mgrCfg.MaxSizeBytes,
+		"expiry_duration", mgrCfg.ExpiryDuration)
+
+	return mgr
 }
 
 // setupWebDAV creates and configures the WebDAV handler

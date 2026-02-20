@@ -14,7 +14,7 @@ function HomepageHeader() {
     <header className={clsx('hero hero--primary', styles.heroBanner)}>
       <div className="container">
         <img
-          src="/img/hero.jpg"
+          src="/img/logo.png"
           alt="AltMount Logo"
           className={styles.heroLogo}
         />

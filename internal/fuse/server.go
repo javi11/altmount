@@ -1,7 +1,6 @@
 package fuse
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/config"
-	"github.com/javi11/altmount/internal/fuse/vfs"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 )
 
@@ -25,7 +23,6 @@ type Server struct {
 	logger        *slog.Logger
 	server        *fuse.Server
 	config        config.FuseConfig
-	vfsm          *vfs.Manager // VFS disk cache manager (nil if disabled)
 	streamTracker StreamTracker
 
 	// ValidateMount goroutine leak guard
@@ -36,7 +33,13 @@ type Server struct {
 
 // NewServer creates a new FUSE server instance.
 // Takes NzbFilesystem directly (no ContextAdapter needed).
-func NewServer(mountPoint string, nzbfs *nzbfilesystem.NzbFilesystem, logger *slog.Logger, cfg config.FuseConfig, st StreamTracker) *Server {
+func NewServer(
+	mountPoint string,
+	nzbfs *nzbfilesystem.NzbFilesystem,
+	logger *slog.Logger,
+	cfg config.FuseConfig,
+	st StreamTracker,
+) *Server {
 	return &Server{
 		mountPoint:    mountPoint,
 		nzbfs:         nzbfs,
@@ -66,67 +69,7 @@ func (s *Server) Mount(onReady func()) error {
 	uid := uint32(getIDFromEnv("PUID", 1000))
 	gid := uint32(getIDFromEnv("PGID", 1000))
 
-	// Initialize VFS disk cache if enabled
-	var vfsm *vfs.Manager
-	if s.config.DiskCacheEnabled != nil && *s.config.DiskCacheEnabled {
-		cachePath := s.config.DiskCachePath
-		if cachePath == "" {
-			cachePath = "/tmp/altmount-vfs-cache"
-		}
-
-		maxSizeGB := s.config.DiskCacheMaxSizeGB
-		if maxSizeGB <= 0 {
-			maxSizeGB = 10
-		}
-
-		expiryH := s.config.DiskCacheExpiryH
-		if expiryH <= 0 {
-			expiryH = 24
-		}
-
-		chunkSizeMB := s.config.ChunkSizeMB
-		if chunkSizeMB <= 0 {
-			chunkSizeMB = 8
-		}
-
-		readAheadChunks := s.config.ReadAheadChunks
-		if readAheadChunks <= 0 {
-			readAheadChunks = 6
-		}
-
-		prefetchConcurrency := s.config.PrefetchConcurrency
-		if prefetchConcurrency <= 0 {
-			prefetchConcurrency = 3
-		}
-
-		vfsCfg := vfs.ManagerConfig{
-			Enabled:             true,
-			CachePath:           cachePath,
-			MaxSizeBytes:        int64(maxSizeGB) * 1024 * 1024 * 1024,
-			ExpiryDuration:      time.Duration(expiryH) * time.Hour,
-			ChunkSize:           int64(chunkSizeMB) * 1024 * 1024,
-			ReadAheadChunks:     readAheadChunks,
-			PrefetchConcurrency: prefetchConcurrency,
-		}
-
-		var err error
-		vfsm, err = vfs.NewManager(vfsCfg, s.logger.With("component", "vfs"))
-		if err != nil {
-			s.logger.Warn("Failed to create VFS disk cache, running without disk cache", "error", err)
-		} else {
-			vfsm.Start(context.Background())
-			s.logger.Info("VFS disk cache enabled",
-				"cache_path", cachePath,
-				"max_size_gb", maxSizeGB,
-				"expiry_hours", expiryH,
-				"chunk_size_mb", chunkSizeMB,
-				"read_ahead_chunks", readAheadChunks,
-				"prefetch_concurrency", prefetchConcurrency)
-		}
-	}
-	s.vfsm = vfsm
-
-	root := NewDir(s.nzbfs, "", s.logger, uid, gid, vfsm, s.streamTracker)
+	root := NewDir(s.nzbfs, "", s.logger, uid, gid, s.streamTracker)
 
 	// Configure FUSE options
 	attrTimeout := time.Duration(s.config.AttrTimeoutSeconds) * time.Second
@@ -164,9 +107,6 @@ func (s *Server) Mount(onReady func()) error {
 
 	server, err := fs.Mount(s.mountPoint, root, opts)
 	if err != nil {
-		if vfsm != nil {
-			vfsm.Stop()
-		}
 		return fmt.Errorf("failed to mount FUSE filesystem: %w", err)
 	}
 
@@ -176,9 +116,6 @@ func (s *Server) Mount(onReady func()) error {
 	if err := s.server.WaitMount(); err != nil {
 		s.logger.Error("WaitMount failed, unmounting", "error", err)
 		_ = s.server.Unmount()
-		if vfsm != nil {
-			vfsm.Stop()
-		}
 		return fmt.Errorf("FUSE mount not ready: %w", err)
 	}
 
@@ -190,11 +127,6 @@ func (s *Server) Mount(onReady func()) error {
 
 	// Block until unmount
 	s.server.Wait()
-
-	// Stop VFS manager on unmount
-	if s.vfsm != nil {
-		s.vfsm.Stop()
-	}
 
 	return nil
 }

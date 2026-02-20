@@ -50,6 +50,7 @@ import type {
 	MetadataConfig,
 	ProviderConfig,
 	SABnzbdConfig,
+	SegmentCacheConfig,
 	StreamingConfig,
 	WebDAVConfig,
 } from "../types/config";
@@ -208,6 +209,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "streaming",
 					config: { streaming: data as unknown as StreamingConfig },
+				});
+			} else if (section === "segment_cache") {
+				await updateConfigSection.mutateAsync({
+					section: "segment_cache",
+					config: { segment_cache: data as unknown as SegmentCacheConfig },
 				});
 			} else if (section === "import" && config) {
 				const importData = data as unknown as ImportConfig;

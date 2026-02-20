@@ -306,7 +306,7 @@ func (uf *UsenetFile) createUsenetReader(ctx context.Context, start, end int64) 
 	}
 
 	rg := usenet.GetSegmentsInRange(ctx, start, end, loader)
-	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch, uf.poolManager, uf.name)
+	return usenet.NewUsenetReader(ctx, uf.poolManager.GetPool, rg, uf.maxPrefetch, uf.poolManager, uf.name, nil)
 }
 
 // dbSegmentLoader implements the segment loader interface for database segments

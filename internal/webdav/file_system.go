@@ -13,9 +13,9 @@ type fileSystem struct {
 	nzbFs *nzbfilesystem.NzbFilesystem
 }
 
-func nzbToWebdavFS(vfs *nzbfilesystem.NzbFilesystem) webdav.FileSystem {
+func nzbToWebdavFS(nzbFs *nzbfilesystem.NzbFilesystem) webdav.FileSystem {
 	return &fileSystem{
-		nzbFs: vfs,
+		nzbFs: nzbFs,
 	}
 }
 
@@ -24,8 +24,6 @@ func (fs *fileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) 
 }
 
 func (fs *fileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	// Context values are now passed directly through the context
-	// No need to encode them into the path string
 	return fs.nzbFs.OpenFile(ctx, name, flag, perm)
 }
 
