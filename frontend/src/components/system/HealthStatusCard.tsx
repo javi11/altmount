@@ -93,12 +93,15 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 			<div className="card-body">
 				<div className="flex items-start justify-between">
 					<div className="min-w-0 flex-1">
-						<h2 className="card-title font-medium text-base-content/70 text-sm">File Health</h2>
+						<h2 className="card-title font-medium text-base-content/70 text-sm">Library Health</h2>
 						<div className="flex items-baseline gap-2">
 							<div
 								className={`font-bold text-2xl ${metrics.corrupted > 0 ? "text-error" : "text-success"}`}
 							>
-								{metrics.corrupted > 0 ? `${metrics.corrupted} Corrupted` : "All Healthy"}
+								{metrics.corrupted > 0 ? metrics.corrupted : "100%"}
+							</div>
+							<div className="font-semibold text-base-content/40 text-sm">
+								{metrics.corrupted > 0 ? "Corrupted" : "Healthy"}
 							</div>
 						</div>
 					</div>
@@ -114,48 +117,44 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 				</div>
 
 				{/* Segmented Progress Bar */}
-				<div className="mt-3">
-					<div className="flex h-2 w-full overflow-hidden rounded-full bg-base-300">
+				<div className="mt-4">
+					<div className="flex h-1.5 w-full overflow-hidden rounded-full bg-base-300">
 						<div
 							className="h-full bg-success transition-all duration-500"
 							style={{ width: `${metrics.healthyPercent}%` }}
-							title={`Healthy: ${metrics.healthy}`}
 						/>
 						<div
 							className="h-full bg-error transition-all duration-500"
 							style={{ width: `${metrics.corruptedPercent}%` }}
-							title={`Corrupted: ${metrics.corrupted}`}
 						/>
 						<div
 							className="h-full bg-info transition-all duration-500"
 							style={{ width: `${metrics.checkingPercent}%` }}
-							title={`Checking/Repairing: ${metrics.checking + metrics.repairing}`}
 						/>
 					</div>
 
 					{/* Legend / Stats */}
-					<div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 font-bold text-[10px] uppercase tracking-wider opacity-70">
-						<div className="flex items-center gap-1.5">
-							<div className="h-2 w-2 rounded-full bg-success" />
-							<span className="truncate">{metrics.healthy} Healthy</span>
+					<div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-bold text-[9px] uppercase tracking-wider opacity-60">
+						<div className="flex items-center gap-1">
+							<div className="h-1.5 w-1.5 rounded-full bg-success" />
+							<span>{metrics.healthy} Healthy</span>
 						</div>
-						<div className="flex items-center gap-1.5">
-							<div className="h-2 w-2 rounded-full bg-error" />
-							<span className="truncate">{metrics.corrupted} Corrupted</span>
-						</div>
-						{metrics.isWorking ? (
-							<div className="col-span-2 flex animate-pulse items-center gap-1.5 text-info">
-								<Search className="h-3 w-3" />
-								<span>Worker Active: Checking {metrics.checking} files</span>
+						{metrics.corrupted > 0 && (
+							<div className="flex items-center gap-1">
+								<div className="h-1.5 w-1.5 rounded-full bg-error" />
+								<span className="text-error">{metrics.corrupted} Corrupted</span>
 							</div>
-						) : metrics.repairing > 0 ? (
-							<div className="col-span-2 flex items-center gap-1.5 text-warning">
-								<Wrench className="h-3 w-3" />
-								<span>{metrics.repairing} Repairs Triggered</span>
+						)}
+						{metrics.isWorking && (
+							<div className="flex items-center gap-1 text-info">
+								<Search className="h-1.5 w-1.5" />
+								<span className="animate-pulse">Scanning {metrics.checking}</span>
 							</div>
-						) : (
-							<div className="col-span-2 flex items-center gap-1.5 text-base-content/40">
-								<span>{metrics.total} total files monitored</span>
+						)}
+						{metrics.repairing > 0 && (
+							<div className="flex items-center gap-1 text-warning">
+								<Wrench className="h-1.5 w-1.5" />
+								<span>{metrics.repairing} Repairing</span>
 							</div>
 						)}
 					</div>

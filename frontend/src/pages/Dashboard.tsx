@@ -1,5 +1,5 @@
-import { AlertTriangle, Network } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { Network, RotateCcw } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { QueueHistoricalStatsCard } from "../components/queue/QueueHistoricalStatsCard";
 import { ActivityHub } from "../components/system/ActivityHub";
 import { HealthStatusCard } from "../components/system/HealthStatusCard";
@@ -8,26 +8,36 @@ import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
 import { ProviderCard } from "../components/system/ProviderCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { useToast } from "../contexts/ToastContext";
-import { useHealthStats, usePoolMetrics, useQueueStats } from "../hooks/useApi";
+import { useHealthStats, usePoolMetrics, useQueueStats, useResetSystemStats } from "../hooks/useApi";
 
 export function Dashboard() {
-	const { data: queueStats, error: queueError } = useQueueStats();
-	const { data: healthStats, error: healthError } = useHealthStats();
+	const { error: queueError } = useQueueStats();
+	const { error: healthError } = useHealthStats();
 	const { data: poolMetrics } = usePoolMetrics();
 	const { showToast } = useToast();
+	const resetStats = useResetSystemStats();
 	const warnedProvidersRef = useRef<Set<string>>(new Set());
 
 	const hasError = queueError || healthError;
 
-	// Memoized queue metrics computation
-	const queueMetrics = useMemo(() => {
-		if (!queueStats) return null;
-
-		return {
-			hasFailures: queueStats.total_failed > 0,
-			failedCount: queueStats.total_failed,
-		};
-	}, [queueStats]);
+	const handleResetStats = async () => {
+		if (confirm("Are you sure you want to reset all NNTP errors and import history stats?")) {
+			try {
+				await resetStats.mutateAsync();
+				showToast({
+					type: "success",
+					title: "Statistics Reset",
+					message: "System statistics and import history have been reset.",
+				});
+			} catch (error) {
+				showToast({
+					type: "error",
+					title: "Reset Failed",
+					message: error instanceof Error ? error.message : "Failed to reset statistics",
+				});
+			}
+		}
+	};
 
 	// Fire warning toast when server reports missing_warning for a provider
 	useEffect(() => {
@@ -62,58 +72,55 @@ export function Dashboard() {
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
 				<h1 className="font-bold text-3xl">Dashboard</h1>
+				<button
+					type="button"
+					className="btn btn-outline btn-sm gap-2"
+					onClick={handleResetStats}
+					disabled={resetStats.isPending}
+				>
+					{resetStats.isPending ? (
+						<span className="loading loading-spinner loading-xs" />
+					) : (
+						<RotateCcw className="h-4 w-4" />
+					)}
+					Reset Stats
+				</button>
 			</div>
 
-			{/* System Stats Cards */}
-			<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-				{/* Import Status (Active Work) */}
-				<ImportStatusCard />
-
-				{/* Health Status (Library Integrity) */}
-				<HealthStatusCard />
-
-				{/* Pool Metrics */}
-				<PoolMetricsCard />
-			</div>
-
-			{/* Detailed Status */}
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-				{/* Activity Hub (Tabs for Playback & Imports) */}
-				<ActivityHub />
-
-				<QueueHistoricalStatsCard />
-			</div>
-
-			{/* Provider Status */}
-			{poolMetrics?.providers && poolMetrics.providers.length > 0 && (
-				<div>
-					<h2 className="mb-4 flex items-center gap-2 font-semibold text-xl">
-						<Network className="h-6 w-6" />
-						NNTP Providers
-					</h2>
-					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-						{poolMetrics.providers.map((provider) => (
-							<ProviderCard key={provider.id} provider={provider} />
-						))}
-					</div>
-				</div>
-			)}
-
-			{/* Issues Alert */}
-			{queueMetrics?.hasFailures || (healthStats && healthStats.corrupted > 0) ? (
-				<div className="alert alert-warning">
-					<AlertTriangle className="h-6 w-6" />
-					<div>
-						<div className="font-bold">Attention Required</div>
-						<div className="text-sm">
-							{queueMetrics?.hasFailures && `${queueMetrics.failedCount} failed queue items. `}
-							{healthStats &&
-								healthStats.corrupted > 0 &&
-								`${healthStats.corrupted} corrupted files detected.`}
-						</div>
-					</div>
-				</div>
-			) : null}
-		</div>
-	);
-}
+			                        {/* System Stats Cards */}
+			                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+			                                {/* Import Status (Active Work) */}
+			                                <ImportStatusCard />
+			
+			                                {/* Health Status (Library Integrity) */}
+			                                <HealthStatusCard />
+			
+			                                {/* Pool Metrics */}
+			                                <PoolMetricsCard />
+			                        </div>
+			
+			                        {/* Detailed Status */}
+			                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+			                                {/* Activity Hub (Tabs for Playback & Imports) */}
+			                                <ActivityHub />
+			
+			                                <QueueHistoricalStatsCard />
+			                        </div>
+			
+			                        {/* Provider Status */}
+			                        {poolMetrics?.providers && poolMetrics.providers.length > 0 && (
+			                                <div className="space-y-4">
+			                                        <h2 className="flex items-center gap-2 font-semibold text-xl">
+			                                                <Network className="h-6 w-6" />
+			                                                NNTP Providers
+			                                        </h2>
+			                                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+			                                                {poolMetrics.providers.map((provider) => (
+			                                                        <ProviderCard key={provider.id} provider={provider} />
+			                                                ))}
+			                                        </div>
+			                                </div>
+			                        )}
+			                </div>
+			        );
+			}
