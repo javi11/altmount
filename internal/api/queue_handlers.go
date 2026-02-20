@@ -297,8 +297,8 @@ func (s *Server) handleGetQueueStats(c *fiber.Ctx) error {
 
 // handleGetQueueHistoricalStats handles GET /api/queue/stats/history
 func (s *Server) handleGetQueueHistoricalStats(c *fiber.Ctx) error {
-	// Get optional days parameter, default to 30
-	days := 30
+	// Get optional days parameter, default to 1 (24h)
+	days := 1
 	if daysStr := c.Query("days"); daysStr != "" {
 		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 {
 			days = d
