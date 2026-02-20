@@ -55,6 +55,14 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 	                                                                <BytesDisplay bytes={poolMetrics.bytes_downloaded} />
 	                                                        </span>
 	                                                </div>
+
+	                                                {/* Last 24h Downloaded */}
+	                                                <div className="flex items-center justify-between text-sm border-base-200 border-b pb-2 mb-2">
+	                                                        <span className="text-base-content/70">Last 24h</span>
+	                                                        <span className="font-bold text-primary">
+	                                                                <BytesDisplay bytes={poolMetrics.bytes_downloaded_24h} />
+	                                                        </span>
+	                                                </div>
 	
 	                                                {/* Max Speed - Show as secondary */}
 	                                                {poolMetrics.max_download_speed_bytes_per_sec > 0 && (

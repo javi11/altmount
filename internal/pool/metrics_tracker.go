@@ -321,9 +321,18 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 	if err := mt.repo.BatchUpdateSystemStats(ctx, stats); err != nil {
 		mt.logger.ErrorContext(ctx, "Failed to persist system stats", "error", err)
 	} else {
+		// Calculate delta for daily stats
 		mt.mu.Lock()
+		delta := snapshot.BytesDownloaded - mt.lastSavedBytesDownloaded
 		mt.lastSavedBytesDownloaded = snapshot.BytesDownloaded
 		mt.mu.Unlock()
+
+		// Update daily stats with the delta
+		if delta > 0 {
+			if err := mt.repo.AddBytesDownloadedToDailyStat(ctx, delta); err != nil {
+				mt.logger.ErrorContext(ctx, "Failed to update daily download volume", "error", err)
+			}
+		}
 	}
 }
 

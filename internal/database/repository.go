@@ -1016,7 +1016,7 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 // GetImportDailyStats retrieves import statistics for the specified number of days
 func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	query := `
-		SELECT day, completed_count, failed_count, updated_at
+		SELECT day, completed_count, failed_count, bytes_downloaded, updated_at
 		FROM import_daily_stats
 		WHERE day >= date('now', ?)
 		ORDER BY day ASC
@@ -1031,7 +1031,7 @@ func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*Impo
 	var stats []*ImportDailyStat
 	for rows.Next() {
 		var s ImportDailyStat
-		err := rows.Scan(&s.Day, &s.CompletedCount, &s.FailedCount, &s.UpdatedAt)
+		err := rows.Scan(&s.Day, &s.CompletedCount, &s.FailedCount, &s.BytesDownloaded, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan import daily stat: %w", err)
 		}
@@ -1039,6 +1039,24 @@ func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*Impo
 	}
 
 	return stats, rows.Err()
+}
+
+// AddBytesDownloadedToDailyStat increments the bytes_downloaded counter for the current day
+func (r *Repository) AddBytesDownloadedToDailyStat(ctx context.Context, bytes int64) error {
+	if bytes <= 0 {
+		return nil
+	}
+
+	query := `
+		INSERT INTO import_daily_stats (day, bytes_downloaded, updated_at)
+		VALUES (date('now'), ?, datetime('now'))
+		ON CONFLICT(day) DO UPDATE SET
+		bytes_downloaded = bytes_downloaded + excluded.bytes_downloaded,
+		updated_at = datetime('now')
+	`
+
+	_, err := r.db.ExecContext(ctx, query, bytes)
+	return err
 }
 
 // GetImportHistory retrieves historical import statistics for the last N days (Alias for GetImportDailyStats)
@@ -1194,7 +1212,7 @@ func (r *Repository) ClearImportHistory(ctx context.Context) error {
 // ClearImportHistorySince deletes records from the import_history and import_queue tables
 // since the specified time, and adjusts the import_daily_stats accordingly.
 func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Time) error {
-	return r.withTransaction(ctx, func(tx *sql.Tx) error {
+	return r.WithTransaction(ctx, func(txRepo *Repository) error {
 		// 1. Count completed items in history per day
 		queryHistoryCounts := `
 			SELECT date(completed_at) as day, COUNT(*) as count
@@ -1202,7 +1220,7 @@ func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Tim
 			WHERE completed_at >= ?
 			GROUP BY day
 		`
-		rows, err := tx.QueryContext(ctx, queryHistoryCounts, since)
+		rows, err := txRepo.db.QueryContext(ctx, queryHistoryCounts, since)
 		if err != nil {
 			return fmt.Errorf("failed to query history counts: %w", err)
 		}
@@ -1229,7 +1247,7 @@ func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Tim
 			WHERE status = 'failed' AND updated_at >= ?
 			GROUP BY day
 		`
-		rows, err = tx.QueryContext(ctx, queryFailedCounts, since)
+		rows, err = txRepo.db.QueryContext(ctx, queryFailedCounts, since)
 		if err != nil {
 			return fmt.Errorf("failed to query failed counts: %w", err)
 		}
@@ -1252,7 +1270,7 @@ func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Tim
 				SET completed_count = MAX(0, completed_count - ?), updated_at = datetime('now')
 				WHERE day = ?
 			`
-			if _, err := tx.ExecContext(ctx, queryUpdate, hc.count, hc.day); err != nil {
+			if _, err := txRepo.db.ExecContext(ctx, queryUpdate, hc.count, hc.day); err != nil {
 				return fmt.Errorf("failed to decrement completed daily stats: %w", err)
 			}
 		}
@@ -1264,14 +1282,14 @@ func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Tim
 				SET failed_count = MAX(0, failed_count - ?), updated_at = datetime('now')
 				WHERE day = ?
 			`
-			if _, err := tx.ExecContext(ctx, queryUpdate, fc.count, fc.day); err != nil {
+			if _, err := txRepo.db.ExecContext(ctx, queryUpdate, fc.count, fc.day); err != nil {
 				return fmt.Errorf("failed to decrement failed daily stats: %w", err)
 			}
 		}
 
 		// 5. Delete from import_history
 		queryDeleteHistory := `DELETE FROM import_history WHERE completed_at >= ?`
-		if _, err := tx.ExecContext(ctx, queryDeleteHistory, since); err != nil {
+		if _, err := txRepo.db.ExecContext(ctx, queryDeleteHistory, since); err != nil {
 			return fmt.Errorf("failed to delete from import history: %w", err)
 		}
 
@@ -1284,7 +1302,7 @@ func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Tim
 				(status = 'failed' AND updated_at >= ?)
 			  )
 		`
-		if _, err := tx.ExecContext(ctx, queryDeleteQueue, since, since); err != nil {
+		if _, err := txRepo.db.ExecContext(ctx, queryDeleteQueue, since, since); err != nil {
 			return fmt.Errorf("failed to delete from import queue: %w", err)
 		}
 

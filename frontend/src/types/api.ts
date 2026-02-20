@@ -405,6 +405,7 @@ export interface ActiveStream {
 
 export interface PoolMetrics {
 	bytes_downloaded: number;
+	bytes_downloaded_24h: number;
 	bytes_uploaded: number;
 	articles_downloaded: number;
 	articles_posted: number;

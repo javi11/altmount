@@ -828,6 +828,7 @@ type ProviderStatusResponse struct {
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
 	BytesDownloaded             int64                    `json:"bytes_downloaded"`
+	BytesDownloaded24h          int64                    `json:"bytes_downloaded_24h"`
 	BytesUploaded               int64                    `json:"bytes_uploaded"`
 	ArticlesDownloaded          int64                    `json:"articles_downloaded"`
 	ArticlesPosted              int64                    `json:"articles_posted"`

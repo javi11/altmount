@@ -474,9 +474,21 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		}
 	}
 
+	// Get last 24h stats for download volume
+	var bytesDownloaded24h int64
+	if s.queueRepo != nil {
+		dailyStats, err := s.queueRepo.GetImportDailyStats(ctx, 1)
+		if err == nil {
+			for _, ds := range dailyStats {
+				bytesDownloaded24h += ds.BytesDownloaded
+			}
+		}
+	}
+
 	// Map pool metrics to API response format
 	response := PoolMetricsResponse{
 		BytesDownloaded:             metrics.BytesDownloaded,
+		BytesDownloaded24h:          bytesDownloaded24h,
 		BytesUploaded:               metrics.BytesUploaded,
 		ArticlesDownloaded:          metrics.ArticlesDownloaded,
 		ArticlesPosted:              metrics.ArticlesPosted,
