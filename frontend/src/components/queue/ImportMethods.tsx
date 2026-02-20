@@ -1,6 +1,5 @@
 import {
 	AlertCircle,
-	Box,
 	CheckCircle2,
 	Database,
 	Download,
@@ -16,7 +15,7 @@ import {
 	UploadCloud,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FileBrowserModal } from "../files/FileBrowserModal";
 import { ErrorAlert } from "../ui/ErrorAlert";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
@@ -163,7 +162,6 @@ function EnhancedUploadSection() {
 	const [uploadTab, setUploadTab] = useState<"files" | "nzblnk">("files");
 	const uploadMutation = useUploadToQueue();
 	const uploadLinksMutation = useUploadNZBLnks();
-	const { showToast } = useToast();
 	const { data: config } = useConfig();
 
 	const categories = config?.sabnzbd?.categories ?? [];

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/pathutil"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"google.golang.org/protobuf/proto"
 )
@@ -281,6 +282,9 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 	if removeErr := os.Remove(idPath); removeErr != nil && !os.IsNotExist(removeErr) {
 		slog.DebugContext(ctx, "Failed to remove .id sidecar file", "path", idPath, "error", removeErr)
 	}
+
+	// Clean up empty parent directories in metadata path
+	pathutil.RemoveEmptyDirs(ms.rootPath, metadataDir)
 
 	// Optionally delete the source NZB file (error-tolerant)
 	if deleteSourceNzb && sourceNzbPath != "" {

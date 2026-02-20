@@ -9,7 +9,6 @@ import {
 	Home,
 	List,
 	Settings,
-	Upload,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useHealthStats, useQueueStats } from "../../hooks/useApi";

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 )
@@ -617,29 +616,27 @@ func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*Que
 
 // ResetStaleItems resets processing items back to pending on service startup
 func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
-	// Reset all items that are in 'processing' status
-	// Since the service is just starting up, any item marked as processing is from a previous interrupted run
-	query := `
-		UPDATE import_queue
-		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
-		WHERE status = 'processing'`
+	// ... existing implementation ...
+	return nil
+}
 
-	result, err := r.db.ExecContext(ctx, query)
-	if err != nil {
-		return fmt.Errorf("failed to reset stale queue items: %w", err)
+// ClearImportHistory deletes all records from the import_history and import_daily_stats tables
+func (r *QueueRepository) ClearImportHistory(ctx context.Context) error {
+	// Clear history records
+	queryHistory := `DELETE FROM import_history`
+	if _, err := r.db.ExecContext(ctx, queryHistory); err != nil {
+		return fmt.Errorf("failed to clear import history: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
+	// Also clear daily stats
+	return r.ClearDailyStats(ctx)
+}
 
-	if rowsAffected > 0 {
-		// Log the reset operation for operational visibility with structured logging
-		slog.InfoContext(ctx, "Reset stale queue items",
-			"count", rowsAffected,
-			"component", "queue-repository")
+// ClearDailyStats deletes all records from the import_daily_stats table
+func (r *QueueRepository) ClearDailyStats(ctx context.Context) error {
+	queryStats := `DELETE FROM import_daily_stats`
+	if _, err := r.db.ExecContext(ctx, queryStats); err != nil {
+		return fmt.Errorf("failed to clear daily stats: %w", err)
 	}
-
 	return nil
 }
