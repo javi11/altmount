@@ -40,6 +40,16 @@ export function Dashboard() {
 		}
 	};
 
+	const handleCustomReset = async () => {
+		const customDuration = prompt(
+			"Enter duration to reset (e.g., 12h, 2d, 1w):\nUse 'h' for hours, 'd' for days.",
+			"12h",
+		);
+		if (customDuration && customDuration.trim() !== "") {
+			await handleResetStats(customDuration.trim().toLowerCase());
+		}
+	};
+
 	// Fire warning toast when server reports missing_warning for a provider
 	useEffect(() => {
 		if (!poolMetrics?.providers) return;
@@ -96,6 +106,9 @@ export function Dashboard() {
 						</li>
 						<li>
 							<button type="button" onClick={() => handleResetStats("24h")}>Last 24 Hours</button>
+						</li>
+						<li>
+							<button type="button" onClick={handleCustomReset} className="text-info font-medium italic">Custom Range...</button>
 						</li>
 						<div className="divider my-1" />
 						<li>

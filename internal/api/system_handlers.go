@@ -225,7 +225,7 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 
 	// If duration is provided and not "all", perform granular reset
 	if durationStr != "" && durationStr != "all" {
-		duration, err := time.ParseDuration(durationStr)
+		duration, err := ParseDuration(durationStr)
 		if err != nil {
 			return RespondBadRequest(c, "Invalid duration format", err.Error())
 		}
