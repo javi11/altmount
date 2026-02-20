@@ -30,6 +30,13 @@ type MetricsTracker interface {
 	UpdateDownloadProgress(id string, bytesDownloaded int64)
 }
 
+// SegmentStore is an optional cache for decoded segment data.
+// Implementations must be safe for concurrent use.
+type SegmentStore interface {
+	Get(messageID string) ([]byte, bool)
+	Put(messageID string, data []byte) error
+}
+
 type DataCorruptionError struct {
 	UnderlyingErr error
 	BytesRead     int64
@@ -58,6 +65,7 @@ type UsenetReader struct {
 	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
 	metricsTracker MetricsTracker
 	streamID       string
+	segmentStore   SegmentStore // optional, nil = no caching
 
 	// Prefetch-based download tracking
 	nextToDownload int // Index of next segment to schedule
@@ -72,6 +80,7 @@ func NewUsenetReader(
 	maxPrefetch int,
 	metricsTracker MetricsTracker,
 	streamID string,
+	segmentStore SegmentStore,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
@@ -90,6 +99,7 @@ func NewUsenetReader(
 		poolGetter:     poolGetter,
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
+		segmentStore:   segmentStore,
 	}
 
 	ur.wg.Go(func() {
@@ -273,6 +283,19 @@ func (b *UsenetReader) GetBufferedOffset() int64 {
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
 func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment) ([]byte, error) {
+	// Cache HIT: skip NNTP entirely
+	if b.segmentStore != nil {
+		if data, ok := b.segmentStore.Get(seg.Id); ok {
+			if b.metricsTracker != nil {
+				b.metricsTracker.IncArticlesDownloaded()
+				if b.streamID != "" {
+					b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(data)))
+				}
+			}
+			return data, nil
+		}
+	}
+
 	var resultBytes []byte
 	err := retry.Do(
 		func() error {
@@ -330,6 +353,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		}),
 		retry.Context(ctx),
 	)
+
+	// Cache WRITE: tee-write after successful download (fire-and-forget)
+	if b.segmentStore != nil && resultBytes != nil && err == nil {
+		_ = b.segmentStore.Put(seg.Id, resultBytes)
+	}
+
 	return resultBytes, err
 }
 

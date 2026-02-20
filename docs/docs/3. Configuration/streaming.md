@@ -36,13 +36,12 @@ fuse:
   entry_timeout_seconds: 1
   max_cache_size_mb: 128
   max_read_ahead_mb: 128
-  disk_cache_enabled: true
-  disk_cache_path: /mnt/cache/altmount-vfs-cache
-  disk_cache_max_size_gb: 150
-  disk_cache_expiry_hours: 72
-  chunk_size_mb: 8
-  read_ahead_chunks: 6
-  prefetch_concurrency: 3
+
+segment_cache:
+  enabled: true
+  cache_path: /mnt/cache/altmount-segcache
+  max_size_gb: 150
+  expiry_hours: 72
 ```
 
 ### Parameter Reference
@@ -60,37 +59,32 @@ fuse:
 | `max_cache_size_mb`     | `128`                     | Maximum kernel-level cache size in MB                                                                |
 | `max_read_ahead_mb`     | `128`                     | Kernel-level read-ahead buffer size in MB                                                            |
 
-#### FUSE Disk Cache Options
+#### Segment Cache Options
 
-The FUSE disk cache provides a persistent on-disk caching layer with intelligent sequential-read detection and automatic prefetching. Enabling it is **strongly recommended** for media playback.
+The segment cache provides a persistent on-disk caching layer shared by both FUSE and WebDAV. Each cached entry corresponds to one decoded Usenet article (~750 KB). Enabling it is **strongly recommended** for media playback.
 
-| Parameter                 | Default                   | Description                                                              |
-| ------------------------- | ------------------------- | ------------------------------------------------------------------------ |
-| `disk_cache_enabled`      | `false`                   | Enables the disk cache — **set to `true` for streaming**                 |
-| `disk_cache_path`         | `/tmp/altmount-vfs-cache` | Directory for cached data (use a fast disk for best results)             |
-| `disk_cache_max_size_gb`  | `10`                      | Maximum disk space for the cache (adjust to your available disk)         |
-| `disk_cache_expiry_hours` | `24`                      | How long cached files are kept before eviction                           |
-| `chunk_size_mb`           | `8`                       | Chunk size for cache operations — all reads are aligned to this boundary |
-| `read_ahead_chunks`       | `6`                       | Number of chunks to prefetch ahead during sequential reads               |
-| `prefetch_concurrency`    | `3`                       | Number of parallel prefetch downloads per file                           |
+| Parameter      | Default                    | Description                                                      |
+| -------------- | -------------------------- | ---------------------------------------------------------------- |
+| `enabled`      | `false`                    | Enables the segment cache — **set to `true` for streaming**      |
+| `cache_path`   | `/tmp/altmount-segcache`   | Directory for cached data (use a fast disk for best results)     |
+| `max_size_gb`  | `10`                       | Maximum disk space for the cache (adjust to your available disk) |
+| `expiry_hours` | `24`                       | How long cached segments are kept before eviction                |
 
-### How the VFS Cache Works
+### How the Segment Cache Works
 
-When `disk_cache_enabled` is `true`, reads flow through a two-tier caching system:
+When `enabled` is `true`, reads flow through a two-tier caching system:
 
 1. **Cache hit** — Data is served directly from the local disk cache with no network round-trip.
-2. **Cache miss** — The requested chunk is fetched from the backend, written to the disk cache, and returned to the reader.
-3. **Prefetch** — When sequential access is detected (2+ sequential reads), AltMount automatically prefetches `read_ahead_chunks` chunks ahead using `prefetch_concurrency` parallel downloads.
+2. **Cache miss** — The requested segment is fetched from the backend, written to the disk cache, and returned to the reader.
 
 Cache eviction runs automatically every 5 minutes, removing expired entries and enforcing the size limit via LRU (least recently used). Files that are currently open are never evicted.
 
 ### Tips
 
-- **Enable `disk_cache_enabled`** for media playback. Without it, every read goes directly to the backend with no local caching, which will cause buffering.
-- **Use a fast disk** for `disk_cache_path`. An SSD or NVMe drive significantly improves cache read performance. Avoid placing the cache on the same slow storage you're mounting.
-- Increase `disk_cache_max_size_gb` based on your available disk space. For large libraries, `50`–`150` GB prevents frequent cache evictions during heavy usage.
-- Increase `disk_cache_expiry_hours` to `72` if you re-watch content frequently — this keeps popular files cached longer.
-- If playback still freezes, try increasing `read_ahead_chunks` (e.g., `10`–`12`) and `prefetch_concurrency` (e.g., `4`–`6`).
+- **Enable segment cache** for media playback. Without it, every read goes directly to the backend with no local caching, which will cause buffering.
+- **Use a fast disk** for `cache_path`. An SSD or NVMe drive significantly improves cache read performance. Avoid placing the cache on the same slow storage you're mounting.
+- Increase `max_size_gb` based on your available disk space. For large libraries, `50`–`150` GB prevents frequent cache evictions during heavy usage.
+- Increase `expiry_hours` to `72` if you re-watch content frequently — this keeps popular segments cached longer.
 - **`allow_other: true`** is required if media players run as a different user than the AltMount process.
 - Keep `attr_timeout_seconds` at `30` for stable libraries. Lower it (e.g., `5`) if files change frequently and you need faster metadata refresh.
 

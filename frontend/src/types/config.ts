@@ -14,6 +14,7 @@ export interface ConfigResponse {
 	health: HealthConfig;
 	rclone: RCloneConfig;
 	fuse: FuseConfig;
+	segment_cache: SegmentCacheConfig;
 	import: ImportConfig;
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
@@ -68,6 +69,14 @@ export interface MetadataBackupConfig {
 // Streaming configuration
 export interface StreamingConfig {
 	max_prefetch: number;
+}
+
+// Segment cache configuration
+export interface SegmentCacheConfig {
+	enabled: boolean | null;
+	cache_path: string;
+	max_size_gb: number;
+	expiry_hours: number;
 }
 
 // Health configuration
@@ -181,14 +190,6 @@ export interface FuseConfig {
 	entry_timeout_seconds: number;
 	max_cache_size_mb: number;
 	max_read_ahead_mb: number;
-	// VFS disk cache settings
-	disk_cache_enabled?: boolean;
-	disk_cache_path?: string;
-	disk_cache_max_size_gb?: number;
-	disk_cache_expiry_hours?: number;
-	chunk_size_mb?: number;
-	read_ahead_chunks?: number;
-	prefetch_concurrency?: number;
 }
 
 // Import strategy type
@@ -266,6 +267,7 @@ export interface ConfigUpdateRequest {
 	database?: DatabaseUpdateRequest;
 	metadata?: MetadataUpdateRequest;
 	streaming?: StreamingUpdateRequest;
+	segment_cache?: Partial<SegmentCacheConfig>;
 	health?: HealthUpdateRequest;
 	rclone?: RCloneUpdateRequest;
 	fuse?: Partial<FuseConfig>;
@@ -449,6 +451,7 @@ export type ConfigSection =
 	| "auth"
 	| "metadata"
 	| "streaming"
+	| "segment_cache"
 	| "health"
 	| "import"
 	| "providers"
@@ -799,6 +802,13 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description: "File streaming, chunking and download worker configuration",
 		icon: "Download",
 		canEdit: true,
+	},
+	segment_cache: {
+		title: "Segment Cache",
+		description: "Segment-aligned disk cache shared by FUSE and WebDAV for faster media playback",
+		icon: "HardDrive",
+		canEdit: true,
+		hidden: true,
 	},
 	health: {
 		title: "Health Monitoring",

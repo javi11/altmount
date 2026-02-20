@@ -30,10 +30,10 @@ type Handler struct {
 func NewHandler(
 	config *Config,
 	fs *nzbfilesystem.NzbFilesystem,
-	tokenService *token.Service, // Optional token service for JWT auth
+	tokenService *token.Service,     // Optional token service for JWT auth
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
-	configGetter config.ConfigGetter, // Dynamic config access
-	streamTracker *api.StreamTracker, // Optional stream tracker
+	configGetter config.ConfigGetter,  // Dynamic config access
+	streamTracker *api.StreamTracker,  // Optional stream tracker
 ) (*Handler, error) {
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)

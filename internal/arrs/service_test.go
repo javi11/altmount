@@ -30,8 +30,3 @@ func TestFindInstanceForFilePath(t *testing.T) {
 
 	assert.NotNil(t, s)
 }
-
-//go:fix inline
-func boolPtr(b bool) *bool {
-	return new(b)
-}

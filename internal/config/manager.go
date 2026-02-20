@@ -34,23 +34,34 @@ const (
 
 // Config represents the complete application configuration
 type Config struct {
-	WebDAV          WebDAVConfig     `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
-	API             APIConfig        `yaml:"api" mapstructure:"api" json:"api"`
-	Auth            AuthConfig       `yaml:"auth" mapstructure:"auth" json:"auth"`
-	Database        DatabaseConfig   `yaml:"database" mapstructure:"database" json:"database"`
-	Metadata        MetadataConfig   `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
-	Streaming       StreamingConfig  `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
-	Health          HealthConfig     `yaml:"health" mapstructure:"health" json:"health"`
-	RClone          RCloneConfig     `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
-	Import          ImportConfig     `yaml:"import" mapstructure:"import" json:"import"`
-	Log             LogConfig        `yaml:"log" mapstructure:"log" json:"log"`
-	SABnzbd         SABnzbdConfig    `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
-	Arrs            ArrsConfig       `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
-	Fuse            FuseConfig       `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
-	Providers       []ProviderConfig `yaml:"providers" mapstructure:"providers" json:"providers"`
-	MountPath       string           `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
-	MountType       MountType        `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
-	ProfilerEnabled bool             `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+	WebDAV          WebDAVConfig        `yaml:"webdav" mapstructure:"webdav" json:"webdav"`
+	API             APIConfig           `yaml:"api" mapstructure:"api" json:"api"`
+	Auth            AuthConfig          `yaml:"auth" mapstructure:"auth" json:"auth"`
+	Database        DatabaseConfig      `yaml:"database" mapstructure:"database" json:"database"`
+	Metadata        MetadataConfig      `yaml:"metadata" mapstructure:"metadata" json:"metadata"`
+	Streaming       StreamingConfig     `yaml:"streaming" mapstructure:"streaming" json:"streaming"`
+	Health          HealthConfig        `yaml:"health" mapstructure:"health" json:"health"`
+	RClone          RCloneConfig        `yaml:"rclone" mapstructure:"rclone" json:"rclone"`
+	Import          ImportConfig        `yaml:"import" mapstructure:"import" json:"import"`
+	Log             LogConfig           `yaml:"log" mapstructure:"log" json:"log"`
+	SABnzbd         SABnzbdConfig       `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
+	Arrs            ArrsConfig          `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Fuse            FuseConfig          `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
+	SegmentCache    SegmentCacheConfig  `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
+	Providers       []ProviderConfig    `yaml:"providers" mapstructure:"providers" json:"providers"`
+	MountPath       string              `yaml:"mount_path" mapstructure:"mount_path" json:"mount_path"`
+	MountType       MountType           `yaml:"mount_type" mapstructure:"mount_type" json:"mount_type"`
+	ProfilerEnabled bool                `yaml:"profiler_enabled" mapstructure:"profiler_enabled" json:"profiler_enabled" default:"false"`
+}
+
+// SegmentCacheConfig configures the segment-aligned disk cache shared by FUSE and WebDAV.
+// When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
+// Cache key: Usenet message ID. Cache unit: ~750KB decoded segment (matches one NNTP article).
+type SegmentCacheConfig struct {
+	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CachePath   string `yaml:"cache_path" mapstructure:"cache_path" json:"cache_path"`
+	MaxSizeGB   int    `yaml:"max_size_gb" mapstructure:"max_size_gb" json:"max_size_gb"`
+	ExpiryHours int    `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -71,15 +82,6 @@ type FuseConfig struct {
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
-
-	// VFS disk cache configuration
-	DiskCacheEnabled    *bool  `yaml:"disk_cache_enabled" mapstructure:"disk_cache_enabled" json:"disk_cache_enabled"`
-	DiskCachePath       string `yaml:"disk_cache_path" mapstructure:"disk_cache_path" json:"disk_cache_path"`
-	DiskCacheMaxSizeGB  int    `yaml:"disk_cache_max_size_gb" mapstructure:"disk_cache_max_size_gb" json:"disk_cache_max_size_gb"`
-	DiskCacheExpiryH    int    `yaml:"disk_cache_expiry_hours" mapstructure:"disk_cache_expiry_hours" json:"disk_cache_expiry_hours"`
-	ChunkSizeMB         int    `yaml:"chunk_size_mb" mapstructure:"chunk_size_mb" json:"chunk_size_mb"`
-	ReadAheadChunks     int    `yaml:"read_ahead_chunks" mapstructure:"read_ahead_chunks" json:"read_ahead_chunks"`
-	PrefetchConcurrency int    `yaml:"prefetch_concurrency" mapstructure:"prefetch_concurrency" json:"prefetch_concurrency"`
 }
 
 // APIConfig represents REST API configuration

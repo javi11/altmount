@@ -292,7 +292,7 @@ func TestDir_Getattr(t *testing.T) {
 	logger := slog.Default()
 
 	// Test root directory
-	root := NewDir(nil, "", logger, 1000, 1000, nil, nil)
+	root := NewDir(nil, "", logger, 1000, 1000, nil)
 	ctx := context.Background()
 	out := &fuse.AttrOut{}
 	errno := root.Getattr(ctx, nil, out)
@@ -306,7 +306,7 @@ func TestDir_Getattr(t *testing.T) {
 
 func TestDir_Statfs(t *testing.T) {
 	logger := slog.Default()
-	root := NewDir(nil, "", logger, 1000, 1000, nil, nil)
+	root := NewDir(nil, "", logger, 1000, 1000, nil)
 	ctx := context.Background()
 	out := &fuse.StatfsOut{}
 	errno := root.Statfs(ctx, out)
