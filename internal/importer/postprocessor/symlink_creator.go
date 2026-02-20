@@ -25,6 +25,9 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 		return fmt.Errorf("symlink directory not configured")
 	}
 
+	// Keep the original resulting path for metadata and actual mount path lookups
+	originalResultingPath := resultingPath
+
 	// Strip SABnzbd CompleteDir prefix from resultingPath if present
 	// This prevents creating nested "complete" folders in the symlink directory
 	if cfg.SABnzbd.CompleteDir != "" {
@@ -41,10 +44,10 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 	}
 
 	// Get the actual metadata/mount path (where the content actually lives)
-	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(resultingPath, "/"))
+	actualPath := filepath.Join(cfg.MountPath, strings.TrimPrefix(originalResultingPath, "/"))
 
 	// Check the metadata directory to determine if this is a file or directory
-	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(resultingPath, "/"))
+	metadataPath := filepath.Join(cfg.Metadata.RootPath, strings.TrimPrefix(originalResultingPath, "/"))
 	fileInfo, err := os.Stat(metadataPath)
 
 	// If stat fails, check if it's a .meta file (single file case)
@@ -91,9 +94,23 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 
 		// Build the actual file path in the mount
 		actualFilePath := filepath.Join(cfg.MountPath, strings.TrimPrefix(relPath, "/"))
-		fileResultingPath := relPath
 
-		if err := c.createSingleSymlink(actualFilePath, fileResultingPath); err != nil {
+		// Build the symlink resulting path (stripped if needed)
+		symlinkResultingPath := relPath
+		if cfg.SABnzbd.CompleteDir != "" {
+			completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+			if !strings.HasPrefix(completeDir, "/") {
+				completeDir = "/" + completeDir
+			}
+			if strings.HasPrefix(symlinkResultingPath, completeDir) {
+				symlinkResultingPath = strings.TrimPrefix(symlinkResultingPath, completeDir)
+				if !strings.HasPrefix(symlinkResultingPath, "/") {
+					symlinkResultingPath = "/" + symlinkResultingPath
+				}
+			}
+		}
+
+		if err := c.createSingleSymlink(actualFilePath, symlinkResultingPath); err != nil {
 			c.log.ErrorContext(ctx, "Failed to create symlink",
 				"path", actualFilePath,
 				"error", err)

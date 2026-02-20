@@ -1178,3 +1178,10 @@ func (r *Repository) GetSystemState(ctx context.Context, key string) (string, er
 	}
 	return value, nil
 }
+
+// ClearImportHistory deletes all records from the import_history table
+func (r *Repository) ClearImportHistory(ctx context.Context) error {
+	query := `DELETE FROM import_history`
+	_, err := r.db.ExecContext(ctx, query)
+	return err
+}
