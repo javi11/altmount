@@ -58,12 +58,10 @@ type Config struct {
 // When enabled, this cache replaces the FUSE VFS disk cache and additionally benefits WebDAV.
 // Cache key: Usenet message ID. Cache unit: ~750KB decoded segment (matches one NNTP article).
 type SegmentCacheConfig struct {
-	Enabled             *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
-	CachePath           string `yaml:"cache_path" mapstructure:"cache_path" json:"cache_path"`
-	MaxSizeGB           int    `yaml:"max_size_gb" mapstructure:"max_size_gb" json:"max_size_gb"`
-	ExpiryHours         int    `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
-	ReadAheadSegments   int    `yaml:"read_ahead_segments" mapstructure:"read_ahead_segments" json:"read_ahead_segments"`
-	PrefetchConcurrency int    `yaml:"prefetch_concurrency" mapstructure:"prefetch_concurrency" json:"prefetch_concurrency"`
+	Enabled     *bool  `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	CachePath   string `yaml:"cache_path" mapstructure:"cache_path" json:"cache_path"`
+	MaxSizeGB   int    `yaml:"max_size_gb" mapstructure:"max_size_gb" json:"max_size_gb"`
+	ExpiryHours int    `yaml:"expiry_hours" mapstructure:"expiry_hours" json:"expiry_hours"`
 }
 
 // WebDAVConfig represents WebDAV server configuration
@@ -84,15 +82,6 @@ type FuseConfig struct {
 	EntryTimeoutSeconds int    `yaml:"entry_timeout_seconds" mapstructure:"entry_timeout_seconds" json:"entry_timeout_seconds"`
 	MaxCacheSizeMB      int    `yaml:"max_cache_size_mb" mapstructure:"max_cache_size_mb" json:"max_cache_size_mb"`
 	MaxReadAheadMB      int    `yaml:"max_read_ahead_mb" mapstructure:"max_read_ahead_mb" json:"max_read_ahead_mb"`
-
-	// VFS disk cache configuration
-	DiskCacheEnabled    *bool  `yaml:"disk_cache_enabled" mapstructure:"disk_cache_enabled" json:"disk_cache_enabled"`
-	DiskCachePath       string `yaml:"disk_cache_path" mapstructure:"disk_cache_path" json:"disk_cache_path"`
-	DiskCacheMaxSizeGB  int    `yaml:"disk_cache_max_size_gb" mapstructure:"disk_cache_max_size_gb" json:"disk_cache_max_size_gb"`
-	DiskCacheExpiryH    int    `yaml:"disk_cache_expiry_hours" mapstructure:"disk_cache_expiry_hours" json:"disk_cache_expiry_hours"`
-	ChunkSizeMB         int    `yaml:"chunk_size_mb" mapstructure:"chunk_size_mb" json:"chunk_size_mb"`
-	ReadAheadChunks     int    `yaml:"read_ahead_chunks" mapstructure:"read_ahead_chunks" json:"read_ahead_chunks"`
-	PrefetchConcurrency int    `yaml:"prefetch_concurrency" mapstructure:"prefetch_concurrency" json:"prefetch_concurrency"`
 }
 
 // APIConfig represents REST API configuration

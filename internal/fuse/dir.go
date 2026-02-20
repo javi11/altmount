@@ -9,9 +9,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/javi11/altmount/internal/fuse/vfs"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 )
 
 // ensure Dir implements fs.Node* interfaces
@@ -31,8 +29,6 @@ var _ fs.NodeRmdirer = (*Dir)(nil)
 type Dir struct {
 	fs.Inode
 	nzbfs         *nzbfilesystem.NzbFilesystem
-	vfsm          *vfs.Manager      // VFS disk cache manager (nil if disabled)
-	segcacheMgr   *segcache.Manager // Segment cache manager (nil if disabled)
 	streamTracker StreamTracker
 	path          string
 	logger        *slog.Logger
@@ -47,14 +43,10 @@ func NewDir(
 	path string,
 	logger *slog.Logger,
 	uid, gid uint32,
-	vfsm *vfs.Manager,
-	segcacheMgr *segcache.Manager,
 	st StreamTracker,
 ) *Dir {
 	return &Dir{
 		nzbfs:         nzbfs,
-		vfsm:          vfsm,
-		segcacheMgr:   segcacheMgr,
 		streamTracker: st,
 		path:          path,
 		logger:        logger,
@@ -134,8 +126,6 @@ func (d *Dir) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.Ent
 
 	node := &Dir{
 		nzbfs:         d.nzbfs,
-		vfsm:          d.vfsm,
-		segcacheMgr:   d.segcacheMgr,
 		streamTracker: d.streamTracker,
 		path:          fullPath,
 		logger:        d.logger,
@@ -164,8 +154,6 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 	if info.IsDir() {
 		node := &Dir{
 			nzbfs:         d.nzbfs,
-			vfsm:          d.vfsm,
-			segcacheMgr:   d.segcacheMgr,
 			streamTracker: d.streamTracker,
 			path:          fullPath,
 			logger:        d.logger,
@@ -177,8 +165,6 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 
 	node := &File{
 		nzbfs:         d.nzbfs,
-		vfsm:          d.vfsm,
-		segcacheMgr:   d.segcacheMgr,
 		streamTracker: d.streamTracker,
 		path:          fullPath,
 		logger:        d.logger,

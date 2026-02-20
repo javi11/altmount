@@ -30,11 +30,12 @@ import (
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
-	poolManager      pool.Manager        // Pool manager for dynamic pool access
-	configGetter     config.ConfigGetter // Dynamic config access
-	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
-	aesCipher        *aes.AesCipher      // For AES encryption/decryption
-	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
+	poolManager      pool.Manager            // Pool manager for dynamic pool access
+	configGetter     config.ConfigGetter     // Dynamic config access
+	rcloneCipher     *rclone.RcloneCrypt     // For rclone encryption/decryption
+	aesCipher        *aes.AesCipher          // For AES encryption/decryption
+	streamTracker    StreamTracker           // Stream tracker for monitoring active streams
+	segmentStore     usenet.SegmentStore     // Optional segment cache (nil = disabled)
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -47,6 +48,7 @@ func NewMetadataRemoteFile(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker StreamTracker,
+	segmentStore usenet.SegmentStore,
 ) *MetadataRemoteFile {
 	// Initialize rclone cipher with global credentials for encrypted files
 	cfg := configGetter()
@@ -68,6 +70,7 @@ func NewMetadataRemoteFile(
 		rcloneCipher:     rcloneCipher,
 		aesCipher:        aesCipher,
 		streamTracker:    streamTracker,
+		segmentStore:     segmentStore,
 	}
 }
 
@@ -230,6 +233,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		streamTracker:    mrf.streamTracker,
 		streamID:         streamID,
 		segmentIndex:     segmentIndex,
+		segmentStore:     mrf.segmentStore,
 	}
 
 	return true, virtualFile, nil
@@ -680,6 +684,7 @@ type MetadataVirtualFile struct {
 	globalSalt       string
 	streamTracker    StreamTracker
 	streamID         string
+	segmentStore     usenet.SegmentStore // optional segment cache
 
 	// Reader state and position tracking
 	reader            io.ReadCloser
@@ -1249,7 +1254,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID)
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

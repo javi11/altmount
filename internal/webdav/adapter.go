@@ -14,7 +14,6 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
-	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/utils"
 	"github.com/javi11/altmount/internal/webdav/propfind"
 	"golang.org/x/net/webdav"
@@ -35,14 +34,13 @@ func NewHandler(
 	userRepo *database.UserRepository, // Optional user repository for JWT auth
 	configGetter config.ConfigGetter,  // Dynamic config access
 	streamTracker *api.StreamTracker,  // Optional stream tracker
-	segcacheMgr *segcache.Manager,    // Optional segment cache manager (nil to disable)
 ) (*Handler, error) {
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
 
 	// Create custom error handler that maps our errors to proper HTTP status codes
 	errorHandler := &customErrorHandler{
-		fileSystem: nzbToWebdavFS(fs, segcacheMgr),
+		fileSystem: nzbToWebdavFS(fs),
 	}
 
 	var finalFS webdav.FileSystem = errorHandler

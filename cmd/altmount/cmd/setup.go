@@ -24,6 +24,7 @@ import (
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/nzbfilesystem/segcache"
 	"github.com/javi11/altmount/internal/pool"
+	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
 	"github.com/javi11/altmount/internal/webdav"
@@ -106,10 +107,17 @@ func initializeFilesystem(
 	poolManager pool.Manager,
 	configGetter config.ConfigGetter,
 	streamTracker nzbfilesystem.StreamTracker,
+	segcacheMgr *segcache.Manager,
 ) *nzbfilesystem.NzbFilesystem {
 	// Reset all in-progress file health checks on start up
 	if err := healthRepo.ResetFileAllChecking(ctx); err != nil {
 		slog.ErrorContext(ctx, "failed to reset in progress file health", "err", err)
+	}
+
+	// Build segment store from segment cache manager (nil if disabled)
+	var segmentStore usenet.SegmentStore
+	if segcacheMgr != nil {
+		segmentStore = segcacheMgr.Cache()
 	}
 
 	// Create metadata-based remote file handler
@@ -119,6 +127,7 @@ func initializeFilesystem(
 		poolManager,
 		configGetter,
 		streamTracker,
+		segmentStore,
 	)
 
 	// Create filesystem backed by metadata
@@ -298,39 +307,12 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config) *segcache.M
 		return nil
 	}
 
-	cachePath := cfg.SegmentCache.CachePath
-	if cachePath == "" {
-		cachePath = "/tmp/altmount-segcache"
-	}
-
-	maxSizeGB := cfg.SegmentCache.MaxSizeGB
-	if maxSizeGB <= 0 {
-		maxSizeGB = 10
-	}
-
-	expiryHours := cfg.SegmentCache.ExpiryHours
-	if expiryHours <= 0 {
-		expiryHours = 24
-	}
-
-	readAheadSegments := cfg.SegmentCache.ReadAheadSegments
-	if readAheadSegments <= 0 {
-		readAheadSegments = 3
-	}
-
-	prefetchConcurrency := cfg.SegmentCache.PrefetchConcurrency
-	if prefetchConcurrency <= 0 {
-		prefetchConcurrency = 2
-	}
-
 	mgrCfg := segcache.ManagerConfig{
-		Enabled:             true,
-		CachePath:           cachePath,
-		MaxSizeBytes:        int64(maxSizeGB) * 1024 * 1024 * 1024,
-		ExpiryDuration:      time.Duration(expiryHours) * time.Hour,
-		ReadAheadSegments:   readAheadSegments,
-		PrefetchConcurrency: prefetchConcurrency,
-	}
+		Enabled:        true,
+		CachePath:      cfg.SegmentCache.CachePath,
+		MaxSizeBytes:   int64(cfg.SegmentCache.MaxSizeGB) * 1024 * 1024 * 1024,
+		ExpiryDuration: time.Duration(cfg.SegmentCache.ExpiryHours) * time.Hour,
+	}.WithDefaults()
 
 	mgr, err := segcache.NewManager(mgrCfg, slog.Default().With("component", "segcache"))
 	if err != nil {
@@ -340,11 +322,9 @@ func initializeSegmentCache(ctx context.Context, cfg *config.Config) *segcache.M
 
 	mgr.Start(ctx)
 	slog.InfoContext(ctx, "Segment cache enabled",
-		"cache_path", cachePath,
-		"max_size_gb", maxSizeGB,
-		"expiry_hours", expiryHours,
-		"read_ahead_segments", readAheadSegments,
-		"prefetch_concurrency", prefetchConcurrency)
+		"cache_path", mgrCfg.CachePath,
+		"max_size_bytes", mgrCfg.MaxSizeBytes,
+		"expiry_duration", mgrCfg.ExpiryDuration)
 
 	return mgr
 }
@@ -357,7 +337,6 @@ func setupWebDAV(
 	userRepo *database.UserRepository,
 	configManager *config.Manager,
 	streamTracker *api.StreamTracker,
-	segcacheMgr *segcache.Manager,
 ) (*webdav.Handler, error) {
 	var tokenService *token.Service
 	var webdavUserRepo *database.UserRepository
@@ -373,7 +352,7 @@ func setupWebDAV(
 		User:   cfg.WebDAV.User,
 		Pass:   cfg.WebDAV.Password,
 		Prefix: "/webdav",
-	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter(), streamTracker, segcacheMgr)
+	}, fs, tokenService, webdavUserRepo, configManager.GetConfigGetter(), streamTracker)
 
 	if err != nil {
 		return nil, err

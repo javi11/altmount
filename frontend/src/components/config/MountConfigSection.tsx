@@ -867,12 +867,6 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		entry_timeout_seconds: 1,
 		max_cache_size_mb: 128,
 		max_read_ahead_mb: 128,
-		disk_cache_enabled: false,
-		disk_cache_path: "/tmp/altmount-vfs-cache",
-		disk_cache_max_size_gb: 10,
-		disk_cache_expiry_hours: 24,
-		chunk_size_mb: 4,
-		read_ahead_chunks: 4,
 	});
 
 	useEffect(() => {
@@ -993,118 +987,6 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 							<span className="label-text text-xs">Allow other users to access mount</span>
 						</label>
 					</fieldset>
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Prefetch Concurrency</legend>
-						<input
-							type="number"
-							className="input input-bordered w-full bg-base-100 font-mono text-sm"
-							value={formData.prefetch_concurrency ?? 0}
-							onChange={(e) =>
-								updateField({
-									prefetch_concurrency: Number.parseInt(e.target.value, 10) || 0,
-								})
-							}
-							disabled={isRunning}
-						/>
-						<p className="label mt-1 break-words text-[10px] opacity-50">
-							Number of parallel segment downloads during prefetch (0 = auto).
-						</p>
-					</fieldset>
-				</div>
-			</div>
-
-			{/* VFS Disk Cache */}
-			<div className="space-y-4">
-				<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">VFS Disk Cache</h4>
-				<div className="space-y-6 rounded-2xl border border-base-200 bg-base-50/50 p-5">
-					<fieldset className="fieldset">
-						<legend className="fieldset-legend">Enable Persistent Cache</legend>
-						<label className="label cursor-pointer justify-start gap-3">
-							<input
-								type="checkbox"
-								className="toggle toggle-primary toggle-sm"
-								checked={formData.disk_cache_enabled ?? false}
-								onChange={(e) => updateField({ disk_cache_enabled: e.target.checked })}
-								disabled={isRunning}
-							/>
-							<span className="label-text font-semibold text-xs">
-								Cache file content to local disk
-							</span>
-						</label>
-					</fieldset>
-					{formData.disk_cache_enabled && (
-						<div className="fade-in slide-in-from-top-2 animate-in space-y-6">
-							<fieldset className="fieldset">
-								<legend className="fieldset-legend">Cache Storage Path</legend>
-								<input
-									type="text"
-									className="input input-bordered w-full bg-base-100 text-sm"
-									value={formData.disk_cache_path ?? "/tmp/altmount-vfs-cache"}
-									onChange={(e) => updateField({ disk_cache_path: e.target.value })}
-									disabled={isRunning}
-								/>
-							</fieldset>
-							<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Max Size</legend>
-									<div className="join w-full">
-										<input
-											type="number"
-											className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-											value={formData.disk_cache_max_size_gb ?? 10}
-											onChange={(e) =>
-												updateField({
-													disk_cache_max_size_gb: Number.parseInt(e.target.value, 10) || 0,
-												})
-											}
-											disabled={isRunning}
-										/>
-										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
-											GB
-										</span>
-									</div>
-								</fieldset>
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Cache Expiry</legend>
-									<div className="join w-full">
-										<input
-											type="number"
-											className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-											value={formData.disk_cache_expiry_hours ?? 24}
-											onChange={(e) =>
-												updateField({
-													disk_cache_expiry_hours: Number.parseInt(e.target.value, 10) || 0,
-												})
-											}
-											disabled={isRunning}
-										/>
-										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
-											hrs
-										</span>
-									</div>
-								</fieldset>
-								<fieldset className="fieldset">
-									<legend className="fieldset-legend">Chunk Size</legend>
-									<div className="join w-full">
-										<input
-											type="number"
-											className="input input-bordered join-item w-full bg-base-100 font-mono text-sm"
-											value={formData.chunk_size_mb ?? 4}
-											onChange={(e) =>
-												updateField({
-													chunk_size_mb: Number.parseInt(e.target.value, 10) || 0,
-												})
-											}
-											disabled={isRunning}
-										/>
-										<span className="btn btn-ghost join-item pointer-events-none border-base-300 text-xs">
-											MB
-										</span>
-									</div>
-								</fieldset>
-							</div>
-						</div>
-					)}
 				</div>
 			</div>
 

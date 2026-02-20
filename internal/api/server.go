@@ -103,7 +103,7 @@ func NewServer(
 		progressBroadcaster: progressBroadcaster,
 		streamTracker:       streamTracker,
 		segcacheMgr:         segcacheMgr,
-		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker, segcacheMgr)),
+		fuseManager:         NewFuseManager(newMountFactory(nzbFilesystem, configManager, streamTracker)),
 	}
 
 	return server

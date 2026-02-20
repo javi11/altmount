@@ -6,18 +6,39 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 )
 
 // ManagerConfig holds the full segment-cache configuration.
 type ManagerConfig struct {
-	Enabled             bool
-	CachePath           string
-	MaxSizeBytes        int64
-	ExpiryDuration      time.Duration
-	ReadAheadSegments   int // number of segments to prefetch ahead (~750KB each)
-	PrefetchConcurrency int // max parallel prefetch goroutines per file
+	Enabled        bool
+	CachePath      string
+	MaxSizeBytes   int64
+	ExpiryDuration time.Duration
+}
+
+// DefaultManagerConfig returns a ManagerConfig with sensible defaults.
+func DefaultManagerConfig() ManagerConfig {
+	return ManagerConfig{
+		Enabled:        false,
+		CachePath:      "/tmp/altmount-segcache",
+		MaxSizeBytes:   10 * 1024 * 1024 * 1024, // 10 GB
+		ExpiryDuration: 24 * time.Hour,
+	}
+}
+
+// WithDefaults returns a copy with zero values replaced by defaults.
+func (cfg ManagerConfig) WithDefaults() ManagerConfig {
+	defaults := DefaultManagerConfig()
+	if cfg.CachePath == "" {
+		cfg.CachePath = defaults.CachePath
+	}
+	if cfg.MaxSizeBytes <= 0 {
+		cfg.MaxSizeBytes = defaults.MaxSizeBytes
+	}
+	if cfg.ExpiryDuration <= 0 {
+		cfg.ExpiryDuration = defaults.ExpiryDuration
+	}
+	return cfg
 }
 
 // StatsSnapshot is a point-in-time view of cache statistics.
@@ -26,23 +47,19 @@ type StatsSnapshot struct {
 	CacheMisses int64
 	TotalSize   int64
 	ItemCount   int
-	ActiveFiles int64
 }
 
-// Manager owns a SegmentCache and manages per-file Prefetchers.
-// It also runs background goroutines for cleanup, catalog flushing, and idle-Prefetcher reaping.
+// Manager owns a SegmentCache and runs background maintenance goroutines
+// for cleanup and catalog flushing.
 type Manager struct {
-	cache       *SegmentCache
-	config      ManagerConfig
-	logger      *slog.Logger
-	prefetchers sync.Map // path → *Prefetcher
-	fetchGroups sync.Map // path → *singleflight.Group
-	activeFiles atomic.Int64
-	hits        atomic.Int64
-	misses      atomic.Int64
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
+	cache  *SegmentCache
+	config ManagerConfig
+	logger *slog.Logger
+	hits   atomic.Int64
+	misses atomic.Int64
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // NewManager creates a Manager and loads any existing on-disk catalog.
@@ -70,12 +87,10 @@ func NewManager(cfg ManagerConfig, logger *slog.Logger) (*Manager, error) {
 }
 
 // Start launches background maintenance goroutines.
-// ctx is not stored; internal goroutines use the Manager's own derived context.
 func (m *Manager) Start(_ context.Context) {
-	m.wg.Add(3)
+	m.wg.Add(2)
 	go m.cleanupLoop()
 	go m.catalogFlushLoop()
-	go m.idleMonitor()
 }
 
 // Stop shuts down background goroutines and saves the catalog.
@@ -83,62 +98,14 @@ func (m *Manager) Stop() {
 	m.cancel()
 	m.wg.Wait()
 
-	// Stop all prefetchers that are still running.
-	m.prefetchers.Range(func(_, v any) bool {
-		v.(*Prefetcher).Stop()
-		return true
-	})
-
 	if err := m.cache.SaveCatalog(); err != nil {
 		m.logger.Warn("segcache: final catalog save failed", "error", err)
 	}
 }
 
-// Open returns a SegmentCachedFile for the given path.
-// All files at the same path share a Prefetcher and singleflight.Group so that
-// concurrent handles do not duplicate NNTP downloads.
-func (m *Manager) Open(
-	path string,
-	segments []SegmentEntry,
-	fileSize int64,
-	opener FileOpener,
-) (*SegmentCachedFile, error) {
-	m.activeFiles.Add(1)
-
-	// Shared singleflight.Group ensures at most one in-flight fetch per message ID.
-	fg, _ := m.fetchGroups.LoadOrStore(path, &singleflight.Group{})
-	fetchGroup := fg.(*singleflight.Group)
-
-	readAhead := m.config.ReadAheadSegments
-	if readAhead <= 0 {
-		readAhead = 8
-	}
-
-	conc := m.config.PrefetchConcurrency
-	if conc <= 0 {
-		conc = 3
-	}
-
-	pf, _ := m.prefetchers.LoadOrStore(path, NewPrefetcher(
-		segments, m.cache, opener, path, readAhead, conc, fetchGroup, m.logger,
-	))
-	prefetcher := pf.(*Prefetcher)
-
-	return &SegmentCachedFile{
-		path:       path,
-		fileSize:   fileSize,
-		segments:   segments,
-		cache:      m.cache,
-		opener:     opener,
-		prefetcher: prefetcher,
-		fetchGroup: fetchGroup,
-		logger:     m.logger,
-	}, nil
-}
-
-// Close decrements the active-file counter. Must be called once per Open.
-func (m *Manager) Close(_ string) {
-	m.activeFiles.Add(-1)
+// Cache returns the underlying SegmentCache for use as a usenet.SegmentStore.
+func (m *Manager) Cache() *SegmentCache {
+	return m.cache
 }
 
 // GetStats returns a point-in-time snapshot of cache statistics.
@@ -148,7 +115,6 @@ func (m *Manager) GetStats() StatsSnapshot {
 		CacheMisses: m.misses.Load(),
 		TotalSize:   m.cache.TotalSize(),
 		ItemCount:   m.cache.ItemCount(),
-		ActiveFiles: m.activeFiles.Load(),
 	}
 }
 
@@ -183,31 +149,6 @@ func (m *Manager) catalogFlushLoop() {
 			if err := m.cache.SaveCatalog(); err != nil {
 				m.logger.WarnContext(m.ctx, "segcache: periodic catalog save failed", "error", err)
 			}
-		}
-	}
-}
-
-func (m *Manager) idleMonitor() {
-	defer m.wg.Done()
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-			deadline := time.Now().Add(-30 * time.Second)
-			m.prefetchers.Range(func(k, v any) bool {
-				p := v.(*Prefetcher)
-				if p.LastSeen().Before(deadline) {
-					p.Stop()
-					m.prefetchers.Delete(k)
-					m.fetchGroups.Delete(k)
-				}
-				return true
-			})
 		}
 	}
 }
