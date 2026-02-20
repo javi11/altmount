@@ -1179,9 +1179,124 @@ func (r *Repository) GetSystemState(ctx context.Context, key string) (string, er
 	return value, nil
 }
 
-// ClearImportHistory deletes all records from the import_history table
+// ClearImportHistory deletes all records from the import_history and import_daily_stats tables
 func (r *Repository) ClearImportHistory(ctx context.Context) error {
-	query := `DELETE FROM import_history`
-	_, err := r.db.ExecContext(ctx, query)
-	return err
+	// Clear history records
+	queryHistory := `DELETE FROM import_history`
+	if _, err := r.db.ExecContext(ctx, queryHistory); err != nil {
+		return fmt.Errorf("failed to clear import history: %w", err)
+	}
+
+	// Also clear daily stats
+	return r.ClearDailyStats(ctx)
+}
+
+// ClearImportHistorySince deletes records from the import_history and import_queue tables
+// since the specified time, and adjusts the import_daily_stats accordingly.
+func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Time) error {
+	return r.withTransaction(ctx, func(tx *sql.Tx) error {
+		// 1. Count completed items in history per day
+		queryHistoryCounts := `
+			SELECT date(completed_at) as day, COUNT(*) as count
+			FROM import_history
+			WHERE completed_at >= ?
+			GROUP BY day
+		`
+		rows, err := tx.QueryContext(ctx, queryHistoryCounts, since)
+		if err != nil {
+			return fmt.Errorf("failed to query history counts: %w", err)
+		}
+		defer rows.Close()
+
+		type dayCount struct {
+			day   string
+			count int
+		}
+		var historyCounts []dayCount
+		for rows.Next() {
+			var dc dayCount
+			if err := rows.Scan(&dc.day, &dc.count); err != nil {
+				return err
+			}
+			historyCounts = append(historyCounts, dc)
+		}
+		rows.Close()
+
+		// 2. Count failed items in queue per day
+		queryFailedCounts := `
+			SELECT date(updated_at) as day, COUNT(*) as count
+			FROM import_queue
+			WHERE status = 'failed' AND updated_at >= ?
+			GROUP BY day
+		`
+		rows, err = tx.QueryContext(ctx, queryFailedCounts, since)
+		if err != nil {
+			return fmt.Errorf("failed to query failed counts: %w", err)
+		}
+		defer rows.Close()
+
+		var failedCounts []dayCount
+		for rows.Next() {
+			var dc dayCount
+			if err := rows.Scan(&dc.day, &dc.count); err != nil {
+				return err
+			}
+			failedCounts = append(failedCounts, dc)
+		}
+		rows.Close()
+
+		// 3. Decrement daily stats for completed items
+		for _, hc := range historyCounts {
+			queryUpdate := `
+				UPDATE import_daily_stats 
+				SET completed_count = MAX(0, completed_count - ?), updated_at = datetime('now')
+				WHERE day = ?
+			`
+			if _, err := tx.ExecContext(ctx, queryUpdate, hc.count, hc.day); err != nil {
+				return fmt.Errorf("failed to decrement completed daily stats: %w", err)
+			}
+		}
+
+		// 4. Decrement daily stats for failed items
+		for _, fc := range failedCounts {
+			queryUpdate := `
+				UPDATE import_daily_stats 
+				SET failed_count = MAX(0, failed_count - ?), updated_at = datetime('now')
+				WHERE day = ?
+			`
+			if _, err := tx.ExecContext(ctx, queryUpdate, fc.count, fc.day); err != nil {
+				return fmt.Errorf("failed to decrement failed daily stats: %w", err)
+			}
+		}
+
+		// 5. Delete from import_history
+		queryDeleteHistory := `DELETE FROM import_history WHERE completed_at >= ?`
+		if _, err := tx.ExecContext(ctx, queryDeleteHistory, since); err != nil {
+			return fmt.Errorf("failed to delete from import history: %w", err)
+		}
+
+		// 6. Delete from import_queue (completed and failed items)
+		queryDeleteQueue := `
+			DELETE FROM import_queue 
+			WHERE status IN ('completed', 'failed') 
+			  AND (
+				(status = 'completed' AND completed_at >= ?) OR 
+				(status = 'failed' AND updated_at >= ?)
+			  )
+		`
+		if _, err := tx.ExecContext(ctx, queryDeleteQueue, since, since); err != nil {
+			return fmt.Errorf("failed to delete from import queue: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// ClearDailyStats deletes all records from the import_daily_stats table
+func (r *Repository) ClearDailyStats(ctx context.Context) error {
+	queryStats := `DELETE FROM import_daily_stats`
+	if _, err := r.db.ExecContext(ctx, queryStats); err != nil {
+		return fmt.Errorf("failed to clear daily stats: %w", err)
+	}
+	return nil
 }

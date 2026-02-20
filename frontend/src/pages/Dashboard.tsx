@@ -1,4 +1,4 @@
-import { Network, RotateCcw } from "lucide-react";
+import { ChevronDown, Network, RotateCcw } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { QueueHistoricalStatsCard } from "../components/queue/QueueHistoricalStatsCard";
 import { ActivityHub } from "../components/system/ActivityHub";
@@ -20,14 +20,15 @@ export function Dashboard() {
 
 	const hasError = queueError || healthError;
 
-	const handleResetStats = async () => {
-		if (confirm("Are you sure you want to reset all NNTP errors and import history stats?")) {
+	const handleResetStats = async (duration?: string) => {
+		const durationLabel = !duration || duration === "all" ? "all time" : `last ${duration}`;
+		if (confirm(`Are you sure you want to reset all NNTP errors and import history stats for ${durationLabel}?`)) {
 			try {
-				await resetStats.mutateAsync();
+				await resetStats.mutateAsync(duration);
 				showToast({
 					type: "success",
 					title: "Statistics Reset",
-					message: "System statistics and import history have been reset.",
+					message: `System statistics and import history for ${durationLabel} have been reset.`,
 				});
 			} catch (error) {
 				showToast({
@@ -72,19 +73,38 @@ export function Dashboard() {
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
 				<h1 className="font-bold text-3xl">Dashboard</h1>
-				<button
-					type="button"
-					className="btn btn-outline btn-sm gap-2"
-					onClick={handleResetStats}
-					disabled={resetStats.isPending}
-				>
-					{resetStats.isPending ? (
-						<span className="loading loading-spinner loading-xs" />
-					) : (
-						<RotateCcw className="h-4 w-4" />
-					)}
-					Reset Stats
-				</button>
+				<div className="dropdown dropdown-end">
+					<div
+						tabIndex={0}
+						role="button"
+						className="btn btn-outline btn-sm gap-2"
+					>
+						{resetStats.isPending ? (
+							<span className="loading loading-spinner loading-xs" />
+						) : (
+							<RotateCcw className="h-4 w-4" />
+						)}
+						Reset Stats
+						<ChevronDown className="h-3 w-3 opacity-50" />
+					</div>
+					<ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow-lg border border-base-300 mt-1">
+						<li>
+							<button type="button" onClick={() => handleResetStats("1h")}>Last 1 Hour</button>
+						</li>
+						<li>
+							<button type="button" onClick={() => handleResetStats("2h")}>Last 2 Hours</button>
+						</li>
+						<li>
+							<button type="button" onClick={() => handleResetStats("24h")}>Last 24 Hours</button>
+						</li>
+						<div className="divider my-1" />
+						<li>
+							<button type="button" onClick={() => handleResetStats("all")} className="text-error font-bold italic">
+								All Time (Full Reset)
+							</button>
+						</li>
+					</ul>
+				</div>
 			</div>
 
 			                        {/* System Stats Cards */}
