@@ -616,7 +616,23 @@ func (r *QueueRepository) withQueueTransaction(ctx context.Context, fn func(*Que
 
 // ResetStaleItems resets processing items back to pending on service startup
 func (r *QueueRepository) ResetStaleItems(ctx context.Context) error {
-	// ... existing implementation ...
+	// Reset all items that are in 'processing' status
+	// Since the service is just starting up, any item marked as processing is from a previous interrupted run
+	query := `
+		UPDATE import_queue
+		SET status = 'pending', started_at = NULL, updated_at = datetime('now')
+		WHERE status = 'processing'`
+
+	result, err := r.db.ExecContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to reset stale queue items: %w", err)
+	}
+
+	_, err = result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
 	return nil
 }
 
