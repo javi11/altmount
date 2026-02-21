@@ -7,9 +7,11 @@
 
 ## Design & UX Principles
 - **Clarity Over Complexity:** The dashboard should prioritize the most important metrics (active streams, provider health, queue status) and hide advanced configurations behind progressive disclosure.
+- **Content-First Layout:** The main content area should be maximized (target ~80% width) to ensure data-heavy tables and dashboards are readable.
 - **Visual Feedback:** Every user action (starting a scan, updating config) should provide immediate visual feedback via toasts or progress indicators.
 - **Responsiveness:** The web interface must be fully functional on both desktop and mobile devices, utilizing Tailwind's responsive utilities.
 - **Dark Mode First:** Given the target audience (Home Server Admins), the UI should prioritize a clean dark mode aesthetic while remaining accessible.
+  - **High Contrast:** Individual blocks and cards must use distinct borders and backgrounds to remain clearly separable even in near-black environments.
 
 ## Documentation Standards
 - **Markdown Primary:** All user-facing documentation should be written in Markdown and hosted via the Docusaurus site.
