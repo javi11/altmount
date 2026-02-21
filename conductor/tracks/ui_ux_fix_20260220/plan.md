@@ -36,3 +36,6 @@ Goal: Ensure consistency across all pages.
 - [x] Task: Perform a sweep of all pages (Dashboard, Queue, Health, Files, Config) to ensure layout consistency.
 - [x] Task: Verify responsive behavior on mobile and tablet views.
 - [x] Task: Conductor - User Manual Verification 'Final Polish & Verification' (Protocol in workflow.md)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 530b489
