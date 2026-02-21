@@ -147,8 +147,14 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Use(recover.New())
 
 	// Apply JWT authentication middleware globally except for public auth routes
-	// The middleware handles "login_required: false" internally via bypass logic
-	if s.authService != nil && s.userRepo != nil {
+	// Only apply if login is required (default: true)
+	cfg := s.configManager.GetConfig()
+	loginRequired := true // Default to true if not set
+	if cfg != nil && cfg.Auth.LoginRequired != nil {
+		loginRequired = *cfg.Auth.LoginRequired
+	}
+
+	if loginRequired && s.authService != nil && s.userRepo != nil {
 		tokenService := s.authService.TokenService()
 		if tokenService != nil {
 			// Define paths that should skip authentication
@@ -160,7 +166,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			}
 
 			// Apply authentication middleware with skip paths
-			api.Use(auth.RequireAuthWithSkip(tokenService, s.userRepo, s.configManager.GetConfigGetter(), skipPaths))
+			api.Use(auth.RequireAuthWithSkip(tokenService, s.userRepo, skipPaths))
 		}
 	}
 
@@ -275,11 +281,11 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/user/api-key/regenerate", s.handleRegenerateAPIKey)
 
 	// Admin endpoints - apply RequireAdmin middleware to this group
-	if s.authService != nil && s.userRepo != nil {
+	if loginRequired && s.authService != nil && s.userRepo != nil {
 		tokenService := s.authService.TokenService()
 		if tokenService != nil {
 			adminRoutes := api.Group("/admin")
-			adminRoutes.Use(auth.RequireAdmin(tokenService, s.userRepo, s.configManager.GetConfigGetter()))
+			adminRoutes.Use(auth.RequireAdmin(tokenService, s.userRepo))
 			adminRoutes.Get("/users", s.handleListUsers)
 			adminRoutes.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
 		}

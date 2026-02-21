@@ -3,6 +3,7 @@ package auth
 import (
 	"strings"
 
+	"github.com/go-pkgz/auth/v2/token"
 	"github.com/gofiber/fiber/v2"
 	"github.com/javi11/altmount/internal/database"
 )
@@ -106,4 +107,41 @@ func OptionalAPIKeyMiddleware(userRepo *database.UserRepository) fiber.Handler {
 	}
 }
 
+// CombinedAuthMiddleware combines JWT and API key authentication
+// Tries JWT first, then falls back to API key
+func CombinedAuthMiddleware(tokenService *token.Service, userRepo *database.UserRepository, requireAuth bool) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Try JWT authentication first
+		jwtMiddleware := JWTMiddleware(tokenService, userRepo)
+		if err := jwtMiddleware(c); err != nil {
+			return err
+		}
 
+		// Check if user was authenticated via JWT
+		user := GetUserFromContext(c)
+		if user != nil {
+			// User authenticated via JWT
+			return c.Next()
+		}
+
+		// Try API key authentication
+		apiKeyMiddleware := OptionalAPIKeyMiddleware(userRepo)
+		if err := apiKeyMiddleware(c); err != nil {
+			return err
+		}
+
+		// Check if authentication is required
+		if requireAuth {
+			user = GetUserFromContext(c)
+			if user == nil {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"success": false,
+					"message": "Authentication required",
+					"details": "Please provide a valid JWT token or API key",
+				})
+			}
+		}
+
+		return c.Next()
+	}
+}

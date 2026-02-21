@@ -20,10 +20,6 @@ func (m *mockConfigManager) GetConfig() *config.Config {
 	return m.cfg
 }
 
-func (m *mockConfigManager) GetConfigGetter() config.ConfigGetter {
-	return m.GetConfig
-}
-
 func (m *mockConfigManager) UpdateConfig(cfg *config.Config) error {
 	m.cfg = cfg
 	return nil

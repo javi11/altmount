@@ -19,7 +19,6 @@ import (
 // ConfigManager interface defines methods for configuration management
 type ConfigManager interface {
 	GetConfig() *config.Config
-	GetConfigGetter() config.ConfigGetter
 	UpdateConfig(config *config.Config) error
 	ValidateConfig(config *config.Config) error
 	ValidateConfigUpdate(config *config.Config) error
