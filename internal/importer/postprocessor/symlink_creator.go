@@ -43,7 +43,12 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 		}
 
 		if strings.HasPrefix(checkPath, completeDir) {
-			resultingPath = strings.TrimPrefix(checkPath, completeDir)
+			// Check for directory boundary
+			if len(checkPath) == len(completeDir) {
+				resultingPath = "/"
+			} else if checkPath[len(completeDir)] == '/' {
+				resultingPath = checkPath[len(completeDir):]
+			}
 		}
 	}
 
@@ -125,7 +130,12 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 			}
 
 			if strings.HasPrefix(checkPath, completeDir) {
-				symlinkResultingPath = strings.TrimPrefix(checkPath, completeDir)
+				// Check for directory boundary
+				if len(checkPath) == len(completeDir) {
+					symlinkResultingPath = "/"
+				} else if checkPath[len(completeDir)] == '/' {
+					symlinkResultingPath = checkPath[len(completeDir):]
+				}
 			}
 		}
 
