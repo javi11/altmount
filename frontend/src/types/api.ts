@@ -59,6 +59,7 @@ export interface ImportHistoryItem {
 	id: number;
 	nzb_name: string;
 	file_name: string;
+	virtual_path: string;
 	category?: string;
 	file_size: number;
 	completed_at: string;

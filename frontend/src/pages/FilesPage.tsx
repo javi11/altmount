@@ -1,9 +1,9 @@
-import { Film, Folder, HardDrive, History, Star, Tv, Wifi, WifiOff } from "lucide-react";
+import { Film, Folder, HardDrive, History, Tv, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
 
-type FileView = "all" | "movies" | "tv" | "recent" | "starred";
+type FileView = "all" | "movies" | "tv" | "recent";
 
 const FILE_SHORTCUTS = [
 	{ id: "all", title: "All Files", path: "/", icon: Folder },
@@ -13,7 +13,6 @@ const FILE_SHORTCUTS = [
 
 const SECONDARY_SHORTCUTS = [
 	{ id: "recent", title: "Recently Added", icon: History },
-	{ id: "starred", title: "Starred", icon: Star },
 ];
 
 export function FilesPage() {
@@ -148,9 +147,6 @@ export function FilesPage() {
 													>
 														<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
 														<span className="text-sm">{item.title}</span>
-														<span className="badge badge-ghost badge-xs ml-auto opacity-50">
-															Soon
-														</span>
 													</button>
 												</li>
 											);
@@ -173,6 +169,7 @@ export function FilesPage() {
 									connectionError={connectionError}
 									onRetryConnection={handleRetryConnection}
 									initialPath={initialPath}
+									activeView={activeView}
 								/>
 							</div>
 						</div>
