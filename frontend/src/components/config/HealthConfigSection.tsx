@@ -345,7 +345,10 @@ export function HealthConfigSection({
 								<div className="flex items-center justify-between">
 									<div className="flex items-center gap-2">
 										<h5 className="font-bold text-xs">Acceptable Missing Threshold</h5>
-										<div className="tooltip tooltip-right" data-tip="Tolerance for missing data. Files with missing segments below this percentage will be marked as healthy instead of corrupted. Useful for ignoring tiny losses in credits or non-critical parts.">
+										<div
+											className="tooltip tooltip-right"
+											data-tip="Tolerance for missing data. Files with missing segments below this percentage will be marked as healthy instead of corrupted. Useful for ignoring tiny losses in credits or non-critical parts."
+										>
 											<Info className="h-3.5 w-3.5 opacity-40" />
 										</div>
 									</div>

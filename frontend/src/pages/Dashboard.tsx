@@ -8,7 +8,12 @@ import { PoolMetricsCard } from "../components/system/PoolMetricsCard";
 import { ProviderCard } from "../components/system/ProviderCard";
 import { ErrorAlert } from "../components/ui/ErrorAlert";
 import { useToast } from "../contexts/ToastContext";
-import { useHealthStats, usePoolMetrics, useQueueStats, useResetSystemStats } from "../hooks/useApi";
+import {
+	useHealthStats,
+	usePoolMetrics,
+	useQueueStats,
+	useResetSystemStats,
+} from "../hooks/useApi";
 
 export function Dashboard() {
 	const { error: queueError } = useQueueStats();
@@ -22,7 +27,11 @@ export function Dashboard() {
 
 	const handleResetStats = async (duration?: string) => {
 		const durationLabel = !duration || duration === "all" ? "all time" : `last ${duration}`;
-		if (confirm(`Are you sure you want to reset all NNTP errors and import history stats for ${durationLabel}?`)) {
+		if (
+			confirm(
+				`Are you sure you want to reset all NNTP errors and import history stats for ${durationLabel}?`,
+			)
+		) {
 			try {
 				await resetStats.mutateAsync(duration);
 				showToast({
@@ -84,11 +93,7 @@ export function Dashboard() {
 			<div className="flex items-center justify-between">
 				<h1 className="font-bold text-3xl">Dashboard</h1>
 				<div className="dropdown dropdown-end">
-					<div
-						tabIndex={0}
-						role="button"
-						className="btn btn-outline btn-sm gap-2"
-					>
+					<div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
 						{resetStats.isPending ? (
 							<span className="loading loading-spinner loading-xs" />
 						) : (
@@ -97,21 +102,38 @@ export function Dashboard() {
 						Reset Stats
 						<ChevronDown className="h-3 w-3 opacity-50" />
 					</div>
-					                                        <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[50] w-52 p-2 shadow-lg border border-base-300 mt-1">						<li>
-							<button type="button" onClick={() => handleResetStats("1h")}>Last 1 Hour</button>
+					<ul className="dropdown-content menu z-[50] mt-1 w-52 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
+						<li>
+							<button type="button" onClick={() => handleResetStats("1h")}>
+								Last 1 Hour
+							</button>
 						</li>
 						<li>
-							<button type="button" onClick={() => handleResetStats("2h")}>Last 2 Hours</button>
+							<button type="button" onClick={() => handleResetStats("2h")}>
+								Last 2 Hours
+							</button>
 						</li>
 						<li>
-							<button type="button" onClick={() => handleResetStats("24h")}>Last 24 Hours</button>
+							<button type="button" onClick={() => handleResetStats("24h")}>
+								Last 24 Hours
+							</button>
 						</li>
 						<li>
-							<button type="button" onClick={handleCustomReset} className="text-info font-medium italic">Custom Range...</button>
+							<button
+								type="button"
+								onClick={handleCustomReset}
+								className="font-medium text-info italic"
+							>
+								Custom Range...
+							</button>
 						</li>
 						<div className="divider my-1" />
 						<li>
-							<button type="button" onClick={() => handleResetStats("all")} className="text-error font-bold italic">
+							<button
+								type="button"
+								onClick={() => handleResetStats("all")}
+								className="font-bold text-error italic"
+							>
 								All Time (Full Reset)
 							</button>
 						</li>
@@ -119,40 +141,40 @@ export function Dashboard() {
 				</div>
 			</div>
 
-			                        {/* System Stats Cards */}
-			                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-			                                {/* Import Status (Active Work) */}
-			                                <ImportStatusCard />
-			
-			                                {/* Health Status (Library Integrity) */}
-			                                <HealthStatusCard />
-			
-			                                {/* Pool Metrics */}
-			                                <PoolMetricsCard />
-			                        </div>
-			
-			                        {/* Detailed Status */}
-			                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-			                                {/* Activity Hub (Tabs for Playback & Imports) */}
-			                                <ActivityHub />
-			
-			                                <QueueHistoricalStatsCard />
-			                        </div>
-			
-			                        {/* Provider Status */}
-			                        {poolMetrics?.providers && poolMetrics.providers.length > 0 && (
-			                                <div className="space-y-4">
-			                                        <h2 className="flex items-center gap-2 font-semibold text-xl">
-			                                                <Network className="h-6 w-6" />
-			                                                NNTP Providers
-			                                        </h2>
-			                                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-			                                                {poolMetrics.providers.map((provider) => (
-			                                                        <ProviderCard key={provider.id} provider={provider} />
-			                                                ))}
-			                                        </div>
-			                                </div>
-			                        )}
-			                </div>
-			        );
-			}
+			{/* System Stats Cards */}
+			<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+				{/* Import Status (Active Work) */}
+				<ImportStatusCard />
+
+				{/* Health Status (Library Integrity) */}
+				<HealthStatusCard />
+
+				{/* Pool Metrics */}
+				<PoolMetricsCard />
+			</div>
+
+			{/* Detailed Status */}
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+				{/* Activity Hub (Tabs for Playback & Imports) */}
+				<ActivityHub />
+
+				<QueueHistoricalStatsCard />
+			</div>
+
+			{/* Provider Status */}
+			{poolMetrics?.providers && poolMetrics.providers.length > 0 && (
+				<div className="space-y-4">
+					<h2 className="flex items-center gap-2 font-semibold text-xl">
+						<Network className="h-6 w-6" />
+						NNTP Providers
+					</h2>
+					<div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+						{poolMetrics.providers.map((provider) => (
+							<ProviderCard key={provider.id} provider={provider} />
+						))}
+					</div>
+				</div>
+			)}
+		</div>
+	);
+}

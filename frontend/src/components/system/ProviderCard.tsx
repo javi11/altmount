@@ -82,7 +82,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 							</h3>
 						</div>
 						{provider.username && (
-							<p className="cursor-pointer truncate text-base-content/40 text-[10px] blur-[1px] transition-all hover:blur-none">
+							<p className="cursor-pointer truncate text-[10px] text-base-content/40 blur-[1px] transition-all hover:blur-none">
 								@{provider.username}
 							</p>
 						)}
@@ -111,7 +111,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 				<div className="mt-3 grid grid-cols-3 gap-1 border-base-200 border-t pt-3 text-center">
 					<div className="space-y-0.5">
 						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Speed</div>
-						<div className="truncate font-bold font-mono text-primary text-[10px]">
+						<div className="truncate font-bold font-mono text-[10px] text-primary">
 							{provider.current_speed_bytes_per_sec !== undefined
 								? formatSpeed(provider.current_speed_bytes_per_sec)
 								: "0 B/s"}
@@ -119,7 +119,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 					</div>
 					<div className="space-y-0.5">
 						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Ping</div>
-						<div className="font-bold font-mono text-info text-[10px]">{provider.ping_ms}ms</div>
+						<div className="font-bold font-mono text-[10px] text-info">{provider.ping_ms}ms</div>
 					</div>
 					<div className="space-y-0.5">
 						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Errors</div>
@@ -143,7 +143,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 									{provider.missing_count.toLocaleString()}
 								</span>
 								{provider.missing_rate_per_minute > 0 && (
-									<span className="ml-0.5 text-base-content/40 text-[9px]">
+									<span className="ml-0.5 text-[9px] text-base-content/40">
 										~{Math.round(provider.missing_rate_per_minute)}/min
 									</span>
 								)}
@@ -155,7 +155,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 				{/* Failure reason - only show if present */}
 				{provider.failure_reason && provider.failure_reason !== "" && (
 					<div className="mt-2">
-						<div className="alert alert-error rounded-md py-1.5 px-2">
+						<div className="alert alert-error rounded-md px-2 py-1.5">
 							<AlertTriangle className="h-3 w-3" />
 							<span className="text-[10px]">{provider.failure_reason}</span>
 						</div>

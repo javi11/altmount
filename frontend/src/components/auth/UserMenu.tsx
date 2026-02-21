@@ -37,8 +37,9 @@ export function UserMenu() {
 				<ChevronDown className="h-4 w-4 text-base-content/60" />
 			</button>
 
-			                        {/* Dropdown menu */}
-			                        <ul className="dropdown-content menu z-[50] w-64 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">				{/* User info header */}
+			{/* Dropdown menu */}
+			<ul className="dropdown-content menu z-[50] w-64 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
+				{/* User info header */}
 				<li className="menu-title px-4 py-2">
 					<div className="flex items-center gap-3">
 						<div className="flex flex-col">

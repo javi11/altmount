@@ -80,7 +80,8 @@ export function Sidebar() {
 	};
 
 	return (
-		                <aside className="min-h-full w-48 bg-base-200 md:w-56 lg:w-64">			<div className="p-4">
+		<aside className="min-h-full w-48 bg-base-200 md:w-56 lg:w-64">
+			<div className="p-4">
 				<div className="mb-8 flex items-center space-x-3">
 					<div className="avatar placeholder">
 						<div className="flex h-12 w-12 items-center justify-center overflow-hidden">

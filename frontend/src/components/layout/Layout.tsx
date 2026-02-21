@@ -11,10 +11,11 @@ export function Layout() {
 				{/* Navbar */}
 				<Navbar />
 
-				                                {/* Page content */}
-				                                <main className="flex-1 p-2 md:p-4">
-				                                        <Outlet />
-				                                </main>			</div>
+				{/* Page content */}
+				<main className="flex-1 p-2 md:p-4">
+					<Outlet />
+				</main>
+			</div>
 
 			{/* Sidebar */}
 			<div className="drawer-side">

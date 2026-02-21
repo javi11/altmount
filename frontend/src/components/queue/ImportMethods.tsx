@@ -16,9 +16,6 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { FileBrowserModal } from "../files/FileBrowserModal";
-import { ErrorAlert } from "../ui/ErrorAlert";
-import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { useToast } from "../../contexts/ToastContext";
 import {
 	useCancelNzbdavImport,
@@ -32,6 +29,9 @@ import {
 } from "../../hooks/useApi";
 import { useConfig } from "../../hooks/useConfig";
 import { ScanStatus } from "../../types/api";
+import { FileBrowserModal } from "../files/FileBrowserModal";
+import { ErrorAlert } from "../ui/ErrorAlert";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 type ImportTab = "nzbdav" | "directory" | "upload";
 
@@ -325,14 +325,7 @@ function EnhancedUploadSection() {
 				),
 			);
 		}
-	}, [
-		linkInput,
-		category,
-		uploadLinksMutation,
-		parseLinks,
-		validateNZBLink,
-		extractTitleFromLink,
-	]);
+	}, [linkInput, category, uploadLinksMutation, parseLinks, validateNZBLink, extractTitleFromLink]);
 
 	const handleDragOver = useCallback((e: React.DragEvent) => {
 		e.preventDefault();
@@ -423,7 +416,7 @@ function EnhancedUploadSection() {
 					className={`rounded-2xl border-2 border-dashed p-12 text-center transition-colors ${
 						isDragOver
 							? "border-primary bg-primary/5"
-							: "border-base-300 hover:border-base-content/20 bg-base-200/30"
+							: "border-base-300 bg-base-200/30 hover:border-base-content/20"
 					}`}
 					onDragOver={handleDragOver}
 					onDragLeave={handleDragLeave}
@@ -438,7 +431,13 @@ function EnhancedUploadSection() {
 					<p className="mb-6 text-base-content/50 text-sm">or click to browse from computer</p>
 					<label className="btn btn-primary btn-sm px-8">
 						Browse Files
-						<input type="file" multiple accept=".nzb" onChange={handleFileInput} className="hidden" />
+						<input
+							type="file"
+							multiple
+							accept=".nzb"
+							onChange={handleFileInput}
+							className="hidden"
+						/>
 					</label>
 				</div>
 			)}
