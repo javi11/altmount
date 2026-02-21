@@ -63,16 +63,14 @@ func runPasswd(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Enter new password for %s: ", username)
 	bytePassword, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
-		return fmt.Errorf("
-failed to read password: %w", err)
+		return fmt.Errorf("\nfailed to read password: %w", err)
 	}
 	fmt.Println() // Print newline after hidden input
 
 	fmt.Print("Confirm new password: ")
 	byteConfirm, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
-		return fmt.Errorf("
-failed to read confirmation: %w", err)
+		return fmt.Errorf("\nfailed to read confirmation: %w", err)
 	}
 	fmt.Println() // Print newline after hidden input
 
@@ -98,7 +96,6 @@ failed to read confirmation: %w", err)
 		return fmt.Errorf("failed to update password in database: %w", err)
 	}
 
-	fmt.Printf("Successfully updated password for user %q.
-", username)
+	fmt.Printf("Successfully updated password for user %q.\n", username)
 	return nil
 }
