@@ -37,11 +37,26 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 		if !strings.HasPrefix(completeDir, "/") {
 			completeDir = "/" + completeDir
 		}
-		if strings.HasPrefix(resultingPath, completeDir) {
-			resultingPath = strings.TrimPrefix(resultingPath, completeDir)
-			if !strings.HasPrefix(resultingPath, "/") {
-				resultingPath = "/" + resultingPath
-			}
+
+		// Ensure checkPath starts with / for reliable prefix checking
+		checkPath := resultingPath
+		if !strings.HasPrefix(checkPath, "/") {
+			checkPath = "/" + checkPath
+		}
+
+		if strings.HasPrefix(checkPath, completeDir) {
+			resultingPath = strings.TrimPrefix(checkPath, completeDir)
+		}
+	}
+
+	// Ensure the resulting path respects the category if provided
+	if item.Category != nil && *item.Category != "" {
+		category := strings.Trim(*item.Category, "/")
+		cleanPath := strings.TrimPrefix(resultingPath, "/")
+
+		// If path doesn't start with category, prepend it
+		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
+			resultingPath = filepath.Join(category, cleanPath)
 		}
 	}
 
@@ -98,11 +113,26 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 			if !strings.HasPrefix(completeDir, "/") {
 				completeDir = "/" + completeDir
 			}
-			if strings.HasPrefix(strmResultingPath, completeDir) {
-				strmResultingPath = strings.TrimPrefix(strmResultingPath, completeDir)
-				if !strings.HasPrefix(strmResultingPath, "/") {
-					strmResultingPath = "/" + strmResultingPath
-				}
+
+			// Ensure checkPath starts with / for reliable prefix checking
+			checkPath := strmResultingPath
+			if !strings.HasPrefix(checkPath, "/") {
+				checkPath = "/" + checkPath
+			}
+
+			if strings.HasPrefix(checkPath, completeDir) {
+				strmResultingPath = strings.TrimPrefix(checkPath, completeDir)
+			}
+		}
+
+		// Ensure the resulting path respects the category if provided
+		if item.Category != nil && *item.Category != "" {
+			category := strings.Trim(*item.Category, "/")
+			cleanPath := strings.TrimPrefix(strmResultingPath, "/")
+
+			// If path doesn't start with category, prepend it
+			if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
+				strmResultingPath = filepath.Join(category, cleanPath)
 			}
 		}
 

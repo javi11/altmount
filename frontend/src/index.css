@@ -105,3 +105,12 @@
 .menu li > button.active {
 	@apply bg-primary text-primary-content;
 }
+
+/* Global enhancements for block contrast */
+.card {
+	@apply border border-base-300 shadow-xl;
+}
+
+.dropdown-content {
+	@apply border border-base-300 shadow-2xl;
+}

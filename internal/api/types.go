@@ -583,7 +583,7 @@ func ToQueueStatsResponse(stats *database.QueueStats) *QueueStatsResponse {
 }
 
 // ToQueueHistoricalStatsResponse converts database.ImportDailyStat slice to QueueHistoricalStatsResponse
-func ToQueueHistoricalStatsResponse(stats []*database.ImportDailyStat) *QueueHistoricalStatsResponse {
+func ToQueueHistoricalStatsResponse(stats []*database.ImportDailyStat, hourlyStats []*database.ImportHourlyStat) *QueueHistoricalStatsResponse {
 	response := &QueueHistoricalStatsResponse{
 		Daily: make([]DailyStat, 0, len(stats)),
 	}
@@ -593,6 +593,16 @@ func ToQueueHistoricalStatsResponse(stats []*database.ImportDailyStat) *QueueHis
 	day7d := now.Add(-7 * 24 * time.Hour)
 	day30d := now.Add(-30 * 24 * time.Hour)
 	day365d := now.Add(-365 * 24 * time.Hour)
+
+	// If hourly stats provided, use them for strict rolling 24h
+	if len(hourlyStats) > 0 {
+		for _, hs := range hourlyStats {
+			if hs.Hour.After(day24h) || hs.Hour.Equal(day24h) {
+				response.Last24Hours.Completed += hs.CompletedCount
+				response.Last24Hours.Failed += hs.FailedCount
+			}
+		}
+	}
 
 	for _, s := range stats {
 		// Daily list
@@ -615,9 +625,13 @@ func ToQueueHistoricalStatsResponse(stats []*database.ImportDailyStat) *QueueHis
 			response.Last7Days.Completed += s.CompletedCount
 			response.Last7Days.Failed += s.FailedCount
 		}
-		if s.Day.After(day24h) || s.Day.Format("2006-01-02") == day24h.Format("2006-01-02") {
-			response.Last24Hours.Completed += s.CompletedCount
-			response.Last24Hours.Failed += s.FailedCount
+
+		// Fallback for 24h if no hourly stats provided
+		if len(hourlyStats) == 0 {
+			if s.Day.After(day24h) || s.Day.Format("2006-01-02") == day24h.Format("2006-01-02") {
+				response.Last24Hours.Completed += s.CompletedCount
+				response.Last24Hours.Failed += s.FailedCount
+			}
 		}
 	}
 
@@ -828,6 +842,7 @@ type ProviderStatusResponse struct {
 // PoolMetricsResponse represents NNTP pool metrics in API responses
 type PoolMetricsResponse struct {
 	BytesDownloaded             int64                    `json:"bytes_downloaded"`
+	BytesDownloaded24h          int64                    `json:"bytes_downloaded_24h"`
 	BytesUploaded               int64                    `json:"bytes_uploaded"`
 	ArticlesDownloaded          int64                    `json:"articles_downloaded"`
 	ArticlesPosted              int64                    `json:"articles_posted"`

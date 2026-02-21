@@ -1,21 +1,22 @@
 import {
 	AlertCircle,
-	Box,
 	CheckCircle2,
 	Database,
+	Download,
+	FileCode,
+	FileIcon,
 	FileText,
 	FolderInput,
 	FolderOpen,
+	Link,
 	Play,
 	Square,
 	Upload,
 	UploadCloud,
+	X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { FileBrowserModal } from "../components/files/FileBrowserModal";
-import { ErrorAlert } from "../components/ui/ErrorAlert";
-import { LoadingSpinner } from "../components/ui/LoadingSpinner";
-import { useToast } from "../contexts/ToastContext";
+import { useCallback, useEffect, useState } from "react";
+import { useToast } from "../../contexts/ToastContext";
 import {
 	useCancelNzbdavImport,
 	useCancelScan,
@@ -23,9 +24,14 @@ import {
 	useResetNzbdavImportStatus,
 	useScanStatus,
 	useStartManualScan,
+	useUploadNZBLnks,
 	useUploadToQueue,
-} from "../hooks/useApi";
-import { ScanStatus } from "../types/api";
+} from "../../hooks/useApi";
+import { useConfig } from "../../hooks/useConfig";
+import { ScanStatus } from "../../types/api";
+import { FileBrowserModal } from "../files/FileBrowserModal";
+import { ErrorAlert } from "../ui/ErrorAlert";
+import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 type ImportTab = "nzbdav" | "directory" | "upload";
 
@@ -41,104 +47,86 @@ const IMPORT_SECTIONS = {
 		icon: FolderOpen,
 	},
 	upload: {
-		title: "Upload NZBs",
-		description:
-			"Upload NZB files directly from your computer. You can select multiple files or a folder.",
+		title: "Upload",
+		description: "Upload NZB files or NZBLNKs directly from your computer.",
 		icon: UploadCloud,
 	},
 };
 
-export function ImportPage() {
+export function ImportMethods() {
 	const [activeTab, setActiveTab] = useState<ImportTab>("nzbdav");
 
 	return (
-		<div className="space-y-6">
-			{/* Header */}
-			<div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-				<div className="flex items-center space-x-3">
-					<div className="rounded-xl bg-primary/10 p-2">
-						<Box className="h-8 w-8 text-primary" />
-					</div>
-					<div>
-						<h1 className="font-bold text-3xl tracking-tight">Import</h1>
-						<p className="text-base-content/60 text-sm">
-							Import existing data from NZBDav database, scan a directory, or upload NZB files.
-						</p>
+		<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+			{/* Sidebar Navigation */}
+			<div className="lg:col-span-1">
+				<div className="card border border-base-200 bg-base-100 shadow-sm">
+					<div className="card-body p-2 sm:p-4">
+						<div>
+							<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+								Methods
+							</h3>
+							<ul className="menu menu-md gap-1 p-0">
+								{(
+									Object.entries(IMPORT_SECTIONS) as [ImportTab, typeof IMPORT_SECTIONS.nzbdav][]
+								).map(([key, section]) => {
+									const IconComponent = section.icon;
+									const isActive = activeTab === key;
+									return (
+										<li key={key}>
+											<button
+												type="button"
+												className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
+													isActive
+														? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
+														: "hover:bg-base-200"
+												}`}
+												onClick={() => setActiveTab(key)}
+											>
+												<IconComponent
+													className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`}
+												/>
+												<div className="min-w-0 flex-1 text-left">
+													<div className="text-sm">{section.title}</div>
+												</div>
+											</button>
+										</li>
+									);
+								})}
+							</ul>
+						</div>
 					</div>
 				</div>
 			</div>
 
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
-				{/* Sidebar Navigation */}
-				<div className="lg:col-span-1">
-					<div className="card border border-base-200 bg-base-100 shadow-sm">
-						<div className="card-body p-2 sm:p-4">
-							<div>
-								<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-									Import Methods
-								</h3>
-								<ul className="menu menu-md gap-1 p-0">
-									{(
-										Object.entries(IMPORT_SECTIONS) as [ImportTab, typeof IMPORT_SECTIONS.nzbdav][]
-									).map(([key, section]) => {
-										const IconComponent = section.icon;
-										const isActive = activeTab === key;
-										return (
-											<li key={key}>
-												<button
-													type="button"
-													className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-														isActive
-															? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
-															: "hover:bg-base-200"
-													}`}
-													onClick={() => setActiveTab(key)}
-												>
-													<IconComponent
-														className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`}
-													/>
-													<div className="min-w-0 flex-1 text-left">
-														<div className="text-sm">{section.title}</div>
-													</div>
-												</button>
-											</li>
-										);
-									})}
-								</ul>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				{/* Content Area */}
-				<div className="lg:col-span-3">
-					<div className="card min-h-[500px] border border-base-200 bg-base-100 shadow-sm">
-						<div className="card-body p-4 sm:p-8">
-							{/* Section Header */}
-							<div className="mb-8 border-base-200 border-b pb-6">
-								<div className="mb-2 flex items-center space-x-4">
-									<div className="rounded-xl bg-primary/10 p-3">
-										{(() => {
-											const IconComponent = IMPORT_SECTIONS[activeTab].icon;
-											return <IconComponent className="h-6 w-6 text-primary" />;
-										})()}
-									</div>
-									<div>
-										<h2 className="font-bold text-2xl tracking-tight">
-											{IMPORT_SECTIONS[activeTab].title}
-										</h2>
-										<p className="max-w-2xl text-base-content/60 text-sm">
-											{IMPORT_SECTIONS[activeTab].description}
-										</p>
-									</div>
+			{/* Content Area */}
+			<div className="lg:col-span-3">
+				<div className="card min-h-[500px] border border-base-200 bg-base-100 shadow-sm">
+					<div className="card-body p-4 sm:p-8">
+						{/* Section Header */}
+						<div className="mb-8 border-base-200 border-b pb-6">
+							<div className="mb-2 flex items-center space-x-4">
+								<div className="rounded-xl bg-primary/10 p-3">
+									{(() => {
+										const IconComponent = IMPORT_SECTIONS[activeTab].icon;
+										return <IconComponent className="h-6 w-6 text-primary" />;
+									})()}
+								</div>
+								<div>
+									<h2 className="font-bold text-2xl tracking-tight">
+										{IMPORT_SECTIONS[activeTab].title}
+									</h2>
+									<p className="max-w-2xl text-base-content/60 text-sm">
+										{IMPORT_SECTIONS[activeTab].description}
+									</p>
 								</div>
 							</div>
+						</div>
 
-							<div className="max-w-4xl">
-								{activeTab === "nzbdav" && <NzbDavImportSection />}
-								{activeTab === "directory" && <DirectoryScanSection />}
-								{activeTab === "upload" && <UploadSection />}
-							</div>
+						<div className="max-w-4xl">
+							{activeTab === "nzbdav" && <NzbDavImportSection />}
+							{activeTab === "directory" && <DirectoryScanSection />}
+							{activeTab === "upload" && <EnhancedUploadSection />}
 						</div>
 					</div>
 				</div>
@@ -147,145 +135,391 @@ export function ImportPage() {
 	);
 }
 
-function UploadSection() {
-	const [isUploading, setIsUploading] = useState(false);
-	const [progress, setProgress] = useState({ current: 0, total: 0, successes: 0, failures: 0 });
-	const fileInputRef = useRef<HTMLInputElement>(null);
-	const dirInputRef = useRef<HTMLInputElement>(null);
-	const { showToast } = useToast();
+interface UploadedFile {
+	file: File;
+	id: string;
+	status: "pending" | "uploading" | "success" | "error";
+	errorMessage?: string;
+	queueId?: string;
+	category?: string;
+}
+
+interface UploadedLink {
+	link: string;
+	id: string;
+	status: "pending" | "resolving" | "success" | "error";
+	errorMessage?: string;
+	queueId?: string;
+	title?: string;
+}
+
+function EnhancedUploadSection() {
+	const [isDragOver, setIsDragOver] = useState(false);
+	const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+	const [uploadedLinks, setUploadedLinks] = useState<UploadedLink[]>([]);
+	const [category, setCategory] = useState<string>("");
+	const [linkInput, setLinkInput] = useState<string>("");
+	const [uploadTab, setUploadTab] = useState<"files" | "nzblnk">("files");
 	const uploadMutation = useUploadToQueue();
+	const uploadLinksMutation = useUploadNZBLnks();
+	const { data: config } = useConfig();
 
-	const handleUpload = async (files: FileList | null) => {
-		if (!files || files.length === 0) return;
+	const categories = config?.sabnzbd?.categories ?? [];
 
-		const nzbFiles = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".nzb"));
+	const validateFile = useCallback((file: File): string | null => {
+		if (!file.name.toLowerCase().endsWith(".nzb")) return "Only .nzb files are allowed";
+		if (file.size > 100 * 1024 * 1024) return "File size must be less than 100MB";
+		return null;
+	}, []);
 
-		if (nzbFiles.length === 0) {
-			showToast({
-				title: "No NZB Files Found",
-				message: "Please select files with .nzb extension.",
-				type: "warning",
+	const validateNZBLink = useCallback((link: string): string | null => {
+		const trimmed = link.trim();
+		if (!trimmed) return null;
+		if (!trimmed.startsWith("nzblnk:?")) return "Link must start with 'nzblnk:?'";
+		if (!trimmed.includes("t=")) return "Missing required parameter 't' (title)";
+		if (!trimmed.includes("h=")) return "Missing required parameter 'h' (header)";
+		return null;
+	}, []);
+
+	const parseLinks = useCallback((input: string): string[] => {
+		return input
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0);
+	}, []);
+
+	const extractTitleFromLink = useCallback((link: string): string => {
+		try {
+			const queryPart = link.replace("nzblnk:?", "");
+			const params = new URLSearchParams(queryPart);
+			return params.get("t") || "Unknown";
+		} catch {
+			return "Unknown";
+		}
+	}, []);
+
+	const handleFiles = useCallback(
+		(files: File[]) => {
+			const newFiles: UploadedFile[] = files.map((file) => ({
+				file,
+				id: `${file.name}-${Date.now()}-${Math.random()}`,
+				status: "pending" as const,
+				category: category || undefined,
+			}));
+
+			const validatedFiles = newFiles.map((uploadFile) => {
+				const error = validateFile(uploadFile.file);
+				if (error) {
+					return { ...uploadFile, status: "error" as const, errorMessage: error };
+				}
+				return uploadFile;
 			});
-			return;
-		}
 
-		setIsUploading(true);
-		setProgress({ current: 0, total: nzbFiles.length, successes: 0, failures: 0 });
+			setUploadedFiles((prev) => [...prev, ...validatedFiles]);
 
-		let successes = 0;
-		let failures = 0;
+			validatedFiles.forEach(async (uploadFile) => {
+				if (uploadFile.status === "error") return;
 
-		for (let i = 0; i < nzbFiles.length; i++) {
-			const file = nzbFiles[i];
-			try {
-				await uploadMutation.mutateAsync({
-					file: file,
-					priority: 0,
-				});
-				successes++;
-			} catch (error) {
-				console.error(`Failed to upload ${file.name}:`, error);
-				failures++;
-			}
-			setProgress((prev) => ({ ...prev, current: i + 1, successes, failures }));
-		}
+				setUploadedFiles((prev) =>
+					prev.map((f) => (f.id === uploadFile.id ? { ...f, status: "uploading" as const } : f)),
+				);
 
-		setIsUploading(false);
-		showToast({
-			title: "Upload Complete",
-			message: `Successfully uploaded ${successes} files. ${failures} failed.`,
-			type: failures > 0 ? "warning" : "success",
+				try {
+					const response = await uploadMutation.mutateAsync({
+						file: uploadFile.file,
+						category: uploadFile.category,
+					});
+
+					setUploadedFiles((prev) =>
+						prev.map((f) =>
+							f.id === uploadFile.id
+								? {
+										...f,
+										status: "success" as const,
+										queueId: response.data?.id.toString(),
+									}
+								: f,
+						),
+					);
+				} catch (error) {
+					setUploadedFiles((prev) =>
+						prev.map((f) =>
+							f.id === uploadFile.id
+								? {
+										...f,
+										status: "error" as const,
+										errorMessage: error instanceof Error ? error.message : "Upload failed",
+									}
+								: f,
+						),
+					);
+				}
+			});
+		},
+		[uploadMutation, validateFile, category],
+	);
+
+	const handleLinkSubmit = useCallback(async () => {
+		const links = parseLinks(linkInput);
+		if (links.length === 0) return;
+
+		const linkEntries: UploadedLink[] = links.map((link) => {
+			const error = validateNZBLink(link);
+			return {
+				link,
+				id: `${link.slice(0, 50)}-${Date.now()}-${Math.random()}`,
+				status: error ? ("error" as const) : ("pending" as const),
+				errorMessage: error || undefined,
+				title: extractTitleFromLink(link),
+			};
 		});
 
-		if (fileInputRef.current) fileInputRef.current.value = "";
-		if (dirInputRef.current) dirInputRef.current.value = "";
+		setUploadedLinks((prev) => [...prev, ...linkEntries]);
+
+		const validLinks = linkEntries
+			.filter((entry) => entry.status === "pending")
+			.map((entry) => entry.link);
+
+		if (validLinks.length === 0) return;
+
+		setUploadedLinks((prev) =>
+			prev.map((l) =>
+				validLinks.includes(l.link) && l.status === "pending"
+					? { ...l, status: "resolving" as const }
+					: l,
+			),
+		);
+
+		try {
+			const response = await uploadLinksMutation.mutateAsync({
+				links: validLinks,
+				category: category || undefined,
+			});
+
+			setUploadedLinks((prev) =>
+				prev.map((l) => {
+					const result = response.results.find((r) => r.link === l.link);
+					if (!result) return l;
+
+					return {
+						...l,
+						status: result.success ? ("success" as const) : ("error" as const),
+						errorMessage: result.error_message,
+						queueId: result.queue_id?.toString(),
+						title: result.title || l.title,
+					};
+				}),
+			);
+
+			if (response.success_count > 0) setLinkInput("");
+		} catch (error) {
+			setUploadedLinks((prev) =>
+				prev.map((l) =>
+					validLinks.includes(l.link) && l.status === "resolving"
+						? {
+								...l,
+								status: "error" as const,
+								errorMessage: error instanceof Error ? error.message : "Resolution failed",
+							}
+						: l,
+				),
+			);
+		}
+	}, [linkInput, category, uploadLinksMutation, parseLinks, validateNZBLink, extractTitleFromLink]);
+
+	const handleDragOver = useCallback((e: React.DragEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setIsDragOver(true);
+	}, []);
+
+	const handleDragLeave = useCallback((e: React.DragEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setIsDragOver(false);
+	}, []);
+
+	const handleDrop = useCallback(
+		(e: React.DragEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			setIsDragOver(false);
+
+			const files = Array.from(e.dataTransfer.files);
+			if (files.length > 0) handleFiles(files);
+		},
+		[handleFiles],
+	);
+
+	const handleFileInput = useCallback(
+		(e: React.ChangeEvent<HTMLInputElement>) => {
+			const files = Array.from(e.target.files || []);
+			if (files.length > 0) handleFiles(files);
+			e.target.value = "";
+		},
+		[handleFiles],
+	);
+
+	const removeFile = (fileId: string) =>
+		setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
+	const removeLink = (linkId: string) =>
+		setUploadedLinks((prev) => prev.filter((l) => l.id !== linkId));
+	const clearAllFiles = () => setUploadedFiles([]);
+	const clearAllLinks = () => {
+		setUploadedLinks([]);
+		setLinkInput("");
 	};
 
 	return (
 		<div className="space-y-8">
-			<section className="space-y-6">
-				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
-						Selection
-					</h4>
-					<div className="h-px flex-1 bg-base-300" />
+			{/* Tab Selector */}
+			<div role="tablist" className="tabs tabs-boxed mb-4 max-w-sm">
+				<button
+					type="button"
+					role="tab"
+					className={`tab ${uploadTab === "files" ? "tab-active" : ""}`}
+					onClick={() => setUploadTab("files")}
+				>
+					<FileIcon className="mr-2 h-4 w-4" />
+					Files
+				</button>
+				<button
+					type="button"
+					role="tab"
+					className={`tab ${uploadTab === "nzblnk" ? "tab-active" : ""}`}
+					onClick={() => setUploadTab("nzblnk")}
+				>
+					<Link className="mr-2 h-4 w-4" />
+					NZBLNK
+				</button>
+			</div>
+
+			{/* Category Input */}
+			<fieldset className="fieldset mb-4 max-w-sm">
+				<legend className="fieldset-legend font-semibold">Category (optional)</legend>
+				<select
+					className="select select-sm w-full bg-base-200/50"
+					value={category}
+					onChange={(e) => setCategory(e.target.value)}
+				>
+					<option value="">None</option>
+					{categories.map((cat) => (
+						<option key={cat.name} value={cat.name}>
+							{cat.name}
+						</option>
+					))}
+				</select>
+			</fieldset>
+
+			{uploadTab === "files" && (
+				<div
+					className={`rounded-2xl border-2 border-dashed p-12 text-center transition-colors ${
+						isDragOver
+							? "border-primary bg-primary/5"
+							: "border-base-300 bg-base-200/30 hover:border-base-content/20"
+					}`}
+					onDragOver={handleDragOver}
+					onDragLeave={handleDragLeave}
+					onDrop={handleDrop}
+				>
+					<UploadCloud
+						className={`mx-auto mb-4 h-12 w-12 ${isDragOver ? "text-primary" : "text-base-content/30"}`}
+					/>
+					<h3 className="mb-2 font-semibold text-lg">
+						{isDragOver ? "Drop files now" : "Drag & Drop NZB Files"}
+					</h3>
+					<p className="mb-6 text-base-content/50 text-sm">or click to browse from computer</p>
+					<label className="btn btn-primary btn-sm px-8">
+						Browse Files
+						<input
+							type="file"
+							multiple
+							accept=".nzb"
+							onChange={handleFileInput}
+							className="hidden"
+						/>
+					</label>
 				</div>
+			)}
 
-				<div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-semibold">Select Files</legend>
-							<div className="flex flex-col gap-4">
-								<input
-									type="file"
-									multiple
-									accept=".nzb"
-									className="file-input file-input-primary file-input-sm w-full"
-									onChange={(e) => handleUpload(e.target.files)}
-									disabled={isUploading}
-									ref={fileInputRef}
-								/>
-								<p className="text-[10px] opacity-60">Select individual .nzb files</p>
-							</div>
-						</fieldset>
+			{uploadTab === "nzblnk" && (
+				<div className="space-y-4">
+					<textarea
+						className="textarea h-40 w-full bg-base-200/50 font-mono text-sm"
+						placeholder="Paste nzblnk:// links, one per line..."
+						value={linkInput}
+						onChange={(e) => setLinkInput(e.target.value)}
+					/>
+					<button
+						type="button"
+						className="btn btn-primary btn-sm"
+						onClick={handleLinkSubmit}
+						disabled={!linkInput.trim() || uploadLinksMutation.isPending}
+					>
+						{uploadLinksMutation.isPending ? (
+							<LoadingSpinner size="sm" />
+						) : (
+							<Download className="h-4 w-4" />
+						)}
+						Resolve & Queue
+					</button>
+				</div>
+			)}
+
+			{/* Status Lists */}
+			{(uploadedFiles.length > 0 || uploadedLinks.length > 0) && (
+				<div className="space-y-4">
+					<div className="flex items-center justify-between">
+						<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">Status</h4>
+						<button
+							type="button"
+							className="btn btn-ghost btn-xs"
+							onClick={uploadTab === "files" ? clearAllFiles : clearAllLinks}
+						>
+							Clear All
+						</button>
 					</div>
-
-					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
-						<fieldset className="fieldset">
-							<legend className="fieldset-legend font-semibold">Select Folder</legend>
-							<div className="flex flex-col gap-4">
-								<input
-									type="file"
-									// @ts-expect-error - webkitdirectory is supported
-									webkitdirectory=""
-									directory=""
-									className="file-input file-input-primary file-input-sm w-full"
-									onChange={(e) => handleUpload(e.target.files)}
-									disabled={isUploading}
-									ref={dirInputRef}
-								/>
-								<p className="text-[10px] opacity-60">Upload all .nzb files in a folder</p>
-							</div>
-						</fieldset>
+					<div className="max-h-60 space-y-2 overflow-y-auto rounded-xl border border-base-300 p-2">
+						{uploadTab === "files"
+							? uploadedFiles.map((f) => (
+									<div key={f.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
+										<FileCode className="h-4 w-4 opacity-40" />
+										<span className="flex-1 truncate text-sm">{f.file.name}</span>
+										<StatusBadge status={f.status} />
+										<button type="button" onClick={() => removeFile(f.id)}>
+											<X className="h-4 w-4 opacity-40" />
+										</button>
+									</div>
+								))
+							: uploadedLinks.map((l) => (
+									<div key={l.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
+										<Link className="h-4 w-4 opacity-40" />
+										<span className="flex-1 truncate text-sm">{l.title || l.link}</span>
+										<StatusBadge status={l.status} />
+										<button type="button" onClick={() => removeLink(l.id)}>
+											<X className="h-4 w-4 opacity-40" />
+										</button>
+									</div>
+								))}
 					</div>
 				</div>
-			</section>
-
-			{isUploading && (
-				<section className="space-y-4">
-					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
-							Upload Progress
-						</h4>
-						<div className="h-px flex-1 bg-base-300" />
-					</div>
-
-					<div className="rounded-2xl border border-primary/20 bg-primary/5 p-6 shadow-sm">
-						<div className="space-y-4">
-							<div className="flex items-center justify-between">
-								<div className="flex items-center gap-2">
-									<span className="loading loading-spinner loading-xs text-primary" />
-									<span className="font-bold text-sm">Uploading...</span>
-								</div>
-								<span className="font-mono text-xs">
-									{progress.current} / {progress.total}
-								</span>
-							</div>
-							<progress
-								className="progress progress-primary w-full"
-								value={progress.current}
-								max={progress.total}
-							/>
-							<div className="flex gap-4 font-mono text-[10px]">
-								<span className="text-success">Success: {progress.successes}</span>
-								<span className="text-error">Failed: {progress.failures}</span>
-							</div>
-						</div>
-					</div>
-				</section>
 			)}
 		</div>
 	);
+}
+
+function StatusBadge({ status }: { status: string }) {
+	switch (status) {
+		case "uploading":
+		case "resolving":
+			return <span className="loading loading-spinner loading-xs text-primary" />;
+		case "success":
+			return <CheckCircle2 className="h-4 w-4 text-success" />;
+		case "error":
+			return <AlertCircle className="h-4 w-4 text-error" />;
+		default:
+			return <div className="h-2 w-2 rounded-full bg-base-content/20" />;
+	}
 }
 
 function NzbDavImportSection() {

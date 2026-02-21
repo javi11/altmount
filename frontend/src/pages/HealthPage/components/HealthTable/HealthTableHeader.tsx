@@ -71,7 +71,7 @@ export function HealthTableHeader({
 						className="flex items-center gap-1 hover:text-primary"
 						onClick={() => onSort("priority")}
 					>
-						Priority
+						Rank
 						{sortBy === "priority" &&
 							(sortOrder === "asc" ? (
 								<ChevronUp className="h-4 w-4" />
@@ -80,30 +80,14 @@ export function HealthTableHeader({
 							))}
 					</button>
 				</th>
-				<th>Retries (H/R)</th>
 				<th>
 					<button
 						type="button"
 						className="flex items-center gap-1 hover:text-primary"
 						onClick={() => onSort("last_checked")}
 					>
-						Last Check
+						Check Times
 						{sortBy === "last_checked" &&
-							(sortOrder === "asc" ? (
-								<ChevronUp className="h-4 w-4" />
-							) : (
-								<ChevronDown className="h-4 w-4" />
-							))}
-					</button>
-				</th>
-				<th>
-					<button
-						type="button"
-						className="flex items-center gap-1 hover:text-primary"
-						onClick={() => onSort("scheduled_check_at")}
-					>
-						Next Check
-						{sortBy === "scheduled_check_at" &&
 							(sortOrder === "asc" ? (
 								<ChevronUp className="h-4 w-4" />
 							) : (
@@ -117,7 +101,7 @@ export function HealthTableHeader({
 						className="flex items-center gap-1 hover:text-primary"
 						onClick={() => onSort("created_at")}
 					>
-						Created At
+						Added
 						{sortBy === "created_at" &&
 							(sortOrder === "asc" ? (
 								<ChevronUp className="h-4 w-4" />

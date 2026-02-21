@@ -59,6 +59,7 @@ export interface ImportHistoryItem {
 	id: number;
 	nzb_name: string;
 	file_name: string;
+	virtual_path: string;
 	category?: string;
 	file_size: number;
 	completed_at: string;
@@ -405,6 +406,7 @@ export interface ActiveStream {
 
 export interface PoolMetrics {
 	bytes_downloaded: number;
+	bytes_downloaded_24h: number;
 	bytes_uploaded: number;
 	articles_downloaded: number;
 	articles_posted: number;

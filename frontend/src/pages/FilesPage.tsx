@@ -1,9 +1,9 @@
-import { Film, Folder, HardDrive, History, Star, Tv, Wifi, WifiOff } from "lucide-react";
+import { Film, Folder, HardDrive, History, Tv, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
 
-type FileView = "all" | "movies" | "tv" | "recent" | "starred";
+type FileView = "all" | "movies" | "tv" | "recent";
 
 const FILE_SHORTCUTS = [
 	{ id: "all", title: "All Files", path: "/", icon: Folder },
@@ -13,7 +13,6 @@ const FILE_SHORTCUTS = [
 
 const SECONDARY_SHORTCUTS = [
 	{ id: "recent", title: "Recently Added", icon: History },
-	{ id: "starred", title: "Starred", icon: Star },
 ];
 
 export function FilesPage() {
@@ -94,10 +93,9 @@ export function FilesPage() {
 				</div>
 			</div>
 
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
-				{/* Sidebar Navigation */}
-				<div className="lg:col-span-1">
-					<div className="card border border-base-200 bg-base-100 shadow-sm">
+			                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+			                                {/* Sidebar Navigation */}
+			                                <div className="lg:col-span-3 xl:col-span-2">					<div className="card border border-base-200 bg-base-100 shadow-sm">
 						<div className="card-body p-2 sm:p-4">
 							<div className="space-y-6">
 								<div>
@@ -149,9 +147,6 @@ export function FilesPage() {
 													>
 														<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
 														<span className="text-sm">{item.title}</span>
-														<span className="badge badge-ghost badge-xs ml-auto opacity-50">
-															Soon
-														</span>
 													</button>
 												</li>
 											);
@@ -163,9 +158,8 @@ export function FilesPage() {
 					</div>
 				</div>
 
-				{/* Main Content */}
-				<div className="lg:col-span-3">
-					<div className="card min-h-[600px] border border-base-200 bg-base-100 shadow-sm">
+				                                {/* Main Content */}
+				                                <div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] border border-base-200 bg-base-100 shadow-sm">
 						<div className="card-body p-0 sm:p-0">
 							<div className="p-4 sm:p-8">
 								<FileExplorer
@@ -175,6 +169,7 @@ export function FilesPage() {
 									connectionError={connectionError}
 									onRetryConnection={handleRetryConnection}
 									initialPath={initialPath}
+									activeView={activeView}
 								/>
 							</div>
 						</div>

@@ -5,7 +5,7 @@ import type { DailyStat } from "../../types/api";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 export function QueueHistoricalStatsCard() {
-	const [days, setDays] = useState(30);
+	const [days, setDays] = useState(1);
 	const { data: history, isLoading } = useQueueHistory(days);
 
 	const ranges = [

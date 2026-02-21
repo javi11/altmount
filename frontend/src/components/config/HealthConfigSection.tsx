@@ -339,6 +339,50 @@ export function HealthConfigSection({
 							</div>
 						)}
 
+						{/* Acceptable Missing Percentage Slider */}
+						{formData.acceptable_missing_segments_percentage !== undefined && (
+							<div className="space-y-6">
+								<div className="flex items-center justify-between">
+									<div className="flex items-center gap-2">
+										<h5 className="font-bold text-xs">Acceptable Missing Threshold</h5>
+										<div
+											className="tooltip tooltip-right"
+											data-tip="Tolerance for missing data. Files with missing segments below this percentage will be marked as healthy instead of corrupted. Useful for ignoring tiny losses in credits or non-critical parts."
+										>
+											<Info className="h-3.5 w-3.5 opacity-40" />
+										</div>
+									</div>
+									<div className="font-black font-mono text-lg text-primary">
+										{formData.acceptable_missing_segments_percentage}%
+									</div>
+								</div>
+								<div className="space-y-4">
+									<input
+										type="range"
+										min="0"
+										max="10"
+										value={formData.acceptable_missing_segments_percentage}
+										className="range range-primary range-sm"
+										step="0.1"
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleInputChange(
+												"acceptable_missing_segments_percentage",
+												Number.parseFloat(e.target.value),
+											)
+										}
+									/>
+									<div className="flex justify-between px-2 font-black text-[9px] opacity-30">
+										<span>0% (STRICT)</span>
+										<span>2.5%</span>
+										<span>5%</span>
+										<span>7.5%</span>
+										<span>10% (RELAXED)</span>
+									</div>
+								</div>
+							</div>
+						)}
+
 						<div className="grid grid-cols-1 gap-6 pb-4 sm:grid-cols-2">
 							<fieldset className="fieldset">
 								<legend className="fieldset-legend font-semibold">Parallel Processing</legend>

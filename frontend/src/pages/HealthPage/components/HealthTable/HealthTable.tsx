@@ -83,8 +83,7 @@ export function HealthTable({
 						</div>
 
 						{/* Desktop View (≥640px) - Keep Existing */}
-						<div className="hidden overflow-x-auto sm:block">
-							<table className="table-zebra table">
+						                                                <div className="hidden overflow-x-auto sm:block min-h-[450px] pb-24">							<table className="table-zebra table">
 								<HealthTableHeader
 									isAllSelected={Boolean(isAllSelected)}
 									isIndeterminate={Boolean(isIndeterminate)}

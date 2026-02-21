@@ -1,5 +1,5 @@
-import { Network, RotateCcw } from "lucide-react";
-import { usePoolMetrics, useResetSystemStats } from "../../hooks/useApi";
+import { Network } from "lucide-react";
+import { usePoolMetrics } from "../../hooks/useApi";
 import { formatSpeed } from "../../lib/utils";
 import { BytesDisplay } from "../ui/BytesDisplay";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
@@ -10,13 +10,6 @@ interface PoolMetricsCardProps {
 
 export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 	const { data: poolMetrics, isLoading, error } = usePoolMetrics();
-	const resetStats = useResetSystemStats();
-
-	const handleReset = () => {
-		if (window.confirm("Are you sure you want to reset all cumulative download statistics?")) {
-			resetStats.mutate();
-		}
-	};
 
 	if (error) {
 		return (
@@ -39,25 +32,12 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 			<div className="card-body">
 				<div className="flex items-center justify-between">
 					<div className="flex-1">
-						<div className="flex items-center gap-2">
-							<h2 className="card-title font-medium text-base-content/70 text-sm">
-								Articles Downloaded
-							</h2>
-							<button
-								type="button"
-								onClick={handleReset}
-								className={`btn btn-ghost btn-xs ${resetStats.isPending ? "loading" : ""}`}
-								title="Reset cumulative statistics"
-								disabled={resetStats.isPending}
-							>
-								{!resetStats.isPending && <RotateCcw className="h-3 w-3" />}
-							</button>
-						</div>
+						<h2 className="card-title font-medium text-base-content/70 text-sm">Download Speed</h2>
 						{isLoading ? (
 							<LoadingSpinner size="sm" />
 						) : poolMetrics ? (
 							<div className="font-bold text-2xl text-primary">
-								{poolMetrics.articles_downloaded.toLocaleString()}
+								{formatSpeed(poolMetrics.download_speed_bytes_per_sec)}
 							</div>
 						) : (
 							<div className="font-bold text-2xl text-base-content/50">--</div>
@@ -70,26 +50,24 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 					<div className="mt-4 space-y-2">
 						{/* Total Downloaded */}
 						<div className="flex items-center justify-between text-sm">
-							<span className="text-base-content/70">Downloaded</span>
+							<span className="text-base-content/70">Total Bytes</span>
 							<span className="font-medium">
 								<BytesDisplay bytes={poolMetrics.bytes_downloaded} />
 							</span>
 						</div>
 
-						{/* Download Speed */}
-						<div className="flex items-center justify-between text-sm">
-							<span className="text-base-content/70">Download Speed</span>
-							<span
-								className={`font-medium ${poolMetrics.download_speed_bytes_per_sec > 0 ? "text-success" : "text-base-content"}`}
-							>
-								{formatSpeed(poolMetrics.download_speed_bytes_per_sec)}
+						{/* Last 24h Downloaded */}
+						<div className="mb-2 flex items-center justify-between border-base-200 border-b pb-2 text-sm">
+							<span className="text-base-content/70">Last 24h</span>
+							<span className="font-bold text-primary">
+								<BytesDisplay bytes={poolMetrics.bytes_downloaded_24h} />
 							</span>
 						</div>
 
-						{/* Max Download Speed - Only show if > 0 */}
+						{/* Max Speed - Show as secondary */}
 						{poolMetrics.max_download_speed_bytes_per_sec > 0 && (
 							<div className="flex items-center justify-between text-sm">
-								<span className="text-base-content/70">Top Pool Speed</span>
+								<span className="text-base-content/70">Peak Speed</span>
 								<span className="font-medium text-success">
 									{formatSpeed(poolMetrics.max_download_speed_bytes_per_sec)}
 								</span>
@@ -99,7 +77,7 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 						{/* Upload Speed - Only show if > 0 */}
 						{poolMetrics.upload_speed_bytes_per_sec > 0 && (
 							<div className="flex items-center justify-between text-sm">
-								<span className="text-base-content/70">Upload Speed</span>
+								<span className="text-base-content/70">Upload</span>
 								<span className="font-medium text-info">
 									{formatSpeed(poolMetrics.upload_speed_bytes_per_sec)}
 								</span>
@@ -109,7 +87,7 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 						{/* Total Errors - Only show if > 0 */}
 						{poolMetrics.total_errors > 0 && (
 							<div className="flex items-center justify-between text-sm">
-								<span className="text-base-content/70">Total Errors</span>
+								<span className="text-base-content/70">Errors</span>
 								<span className="font-medium text-error">
 									{poolMetrics.total_errors.toLocaleString()}
 								</span>

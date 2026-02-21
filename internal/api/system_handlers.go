@@ -220,9 +220,38 @@ func (s *Server) handleSystemRestart(c *fiber.Ctx) error {
 
 // handleResetSystemStats handles POST /api/system/stats/reset
 func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
-	// Reset pool metrics
+	ctx := c.Context()
+	durationStr := c.Query("duration")
+
+	// If duration is provided and not "all", perform granular reset
+	if durationStr != "" && durationStr != "all" {
+		duration, err := ParseDuration(durationStr)
+		if err != nil {
+			return RespondBadRequest(c, "Invalid duration format", err.Error())
+		}
+
+		since := time.Now().Add(-duration)
+
+		if s.queueRepo != nil {
+			if err := s.queueRepo.ClearImportHistorySince(ctx, since); err != nil {
+				return c.Status(500).JSON(fiber.Map{
+					"success": false,
+					"message": "Failed to reset statistics for duration",
+					"details": err.Error(),
+				})
+			}
+		}
+
+		return c.Status(200).JSON(fiber.Map{
+			"success": true,
+			"message": fmt.Sprintf("Statistics for last %s reset successfully", durationStr),
+		})
+	}
+
+	// Full reset (Default)
+	// Reset pool metrics (NNTP errors, totals)
 	if s.poolManager != nil {
-		if err := s.poolManager.ResetMetrics(c.Context()); err != nil {
+		if err := s.poolManager.ResetMetrics(ctx); err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"success": false,
 				"message": "Failed to reset pool metrics",
@@ -231,9 +260,30 @@ func (s *Server) handleResetSystemStats(c *fiber.Ctx) error {
 		}
 	}
 
+	// Reset import history and daily stats
+	if s.queueRepo != nil {
+		if err := s.queueRepo.ClearImportHistory(ctx); err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"success": false,
+				"message": "Failed to reset import history",
+				"details": err.Error(),
+			})
+		}
+
+		// Optional: Clear completed/failed queue items too if requested
+		if c.Query("reset_queue") == "true" {
+			if _, err := s.queueRepo.ClearCompletedQueueItems(ctx); err != nil {
+				slog.ErrorContext(ctx, "Failed to clear completed queue items during reset", "error", err)
+			}
+			if _, err := s.queueRepo.ClearFailedQueueItems(ctx); err != nil {
+				slog.ErrorContext(ctx, "Failed to clear failed queue items during reset", "error", err)
+			}
+		}
+	}
+
 	return c.Status(200).JSON(fiber.Map{
 		"success": true,
-		"message": "System statistics reset successfully",
+		"message": "All system statistics reset successfully",
 	})
 }
 
@@ -424,9 +474,21 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		}
 	}
 
+	// Get last 24h stats for download volume (strict rolling 24h)
+	var bytesDownloaded24h int64
+	if s.queueRepo != nil {
+		hourlyStats, err := s.queueRepo.GetImportHourlyStats(c.Context(), 24)
+		if err == nil {
+			for _, hs := range hourlyStats {
+				bytesDownloaded24h += hs.BytesDownloaded
+			}
+		}
+	}
+
 	// Map pool metrics to API response format
 	response := PoolMetricsResponse{
 		BytesDownloaded:             metrics.BytesDownloaded,
+		BytesDownloaded24h:          bytesDownloaded24h,
 		BytesUploaded:               metrics.BytesUploaded,
 		ArticlesDownloaded:          metrics.ArticlesDownloaded,
 		ArticlesPosted:              metrics.ArticlesPosted,

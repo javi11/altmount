@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/metadata"
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
+	"github.com/javi11/altmount/internal/pathutil"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/usenet"
 	"github.com/javi11/altmount/internal/utils"
@@ -270,12 +271,41 @@ func (mrf *MetadataRemoteFile) RemoveFile(ctx context.Context, fileName string) 
 		return false, nil
 	}
 
+	// Try to find the physical path from health record for cleanup
+	var physicalPath string
+	if mrf.healthRepository != nil {
+		if health, err := mrf.healthRepository.GetFileHealth(ctx, normalizedName); err == nil && health != nil {
+			if health.LibraryPath != nil && *health.LibraryPath != "" {
+				physicalPath = *health.LibraryPath
+			}
+		}
+	}
+
 	// Check if we should delete the source NZB file
 	cfg := mrf.configGetter()
 	deleteSourceNzb := cfg.Metadata.DeleteSourceNzbOnRemoval != nil && *cfg.Metadata.DeleteSourceNzbOnRemoval
 
 	// Use MetadataService's file delete operation with optional NZB deletion
-	return true, mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)
+	err := mrf.metadataService.DeleteFileMetadataWithSourceNzb(ctx, normalizedName, deleteSourceNzb)
+	if err != nil {
+		return true, err
+	}
+
+	// Clean up empty physical directories if we found a physical path
+	if physicalPath != "" {
+		var rootPath string
+		if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+			rootPath = *cfg.Health.LibraryDir
+		} else {
+			rootPath = cfg.MountPath
+		}
+
+		if rootPath != "" {
+			pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(physicalPath))
+		}
+	}
+
+	return true, nil
 }
 
 // RenameFile renames a virtual file or directory in the metadata

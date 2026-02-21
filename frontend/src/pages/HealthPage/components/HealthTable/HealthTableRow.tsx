@@ -128,57 +128,53 @@ export function HealthTableRow({
 				)}
 			</td>
 			<td>
-				<button
-					type="button"
-					className="cursor-pointer transition-transform hover:scale-110"
-					onClick={() => onSetPriority(item.id, getNextPriority(item.priority))}
-					title="Click to cycle priority"
-					tabIndex={0}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" || e.key === " ") {
-							onSetPriority(item.id, getNextPriority(item.priority));
-						}
-					}}
-				>
-					{item.priority === HealthPriority.Next ? (
-						<div className="badge badge-warning badge-sm">Next</div>
-					) : item.priority === HealthPriority.High ? (
-						<div className="badge badge-error badge-sm">High</div>
-					) : (
-						<div className="badge badge-ghost badge-sm">Normal</div>
-					)}
-				</button>
-			</td>
-			<td>
 				<div className="flex flex-col gap-1">
-					<span
-						className={`badge badge-sm ${item.retry_count > 0 ? "badge-warning" : "badge-ghost"}`}
-						title="Health check retries"
-					>
-						H: {item.retry_count}/{item.max_retries}
-					</span>
-					{(item.status === "repair_triggered" || item.repair_retry_count > 0) && (
-						<span
-							className={`badge badge-sm ${item.repair_retry_count > 0 ? "badge-info" : "badge-ghost"}`}
-							title="Repair retries"
+					<div className="flex items-center gap-1">
+						<button
+							type="button"
+							className="cursor-pointer transition-transform hover:scale-110"
+							onClick={() => onSetPriority(item.id, getNextPriority(item.priority))}
+							title="Click to cycle priority"
 						>
-							R: {item.repair_retry_count}/{item.max_repair_retries}
+							{item.priority === HealthPriority.Next ? (
+								<div className="badge badge-warning badge-xs">Next</div>
+							) : item.priority === HealthPriority.High ? (
+								<div className="badge badge-error badge-xs">High</div>
+							) : (
+								<div className="badge badge-ghost badge-xs">Normal</div>
+							)}
+						</button>
+					</div>
+					<div className="flex gap-1">
+						<span
+							className={`badge badge-xs ${item.retry_count > 0 ? "badge-warning" : "badge-ghost"}`}
+							title="Health check retries"
+						>
+							H:{item.retry_count}
 						</span>
-					)}
+						{(item.status === "repair_triggered" || item.repair_retry_count > 0) && (
+							<span
+								className={`badge badge-xs ${item.repair_retry_count > 0 ? "badge-info" : "badge-ghost"}`}
+								title="Repair retries"
+							>
+								R:{item.repair_retry_count}
+							</span>
+						)}
+					</div>
 				</div>
 			</td>
 			<td>
-				<span className="text-base-content/70 text-sm">
-					{item.last_checked ? formatRelativeTime(item.last_checked) : "Never"}
-				</span>
+				<div className="flex flex-col text-xs">
+					<span className="text-base-content/70" title="Last Checked">
+						L: {item.last_checked ? formatRelativeTime(item.last_checked) : "Never"}
+					</span>
+					<span className="text-base-content/50" title="Next Check">
+						N: {item.scheduled_check_at ? formatFutureTime(item.scheduled_check_at) : "None"}
+					</span>
+				</div>
 			</td>
 			<td>
-				<span className="text-base-content/70 text-sm">
-					{item.scheduled_check_at ? formatFutureTime(item.scheduled_check_at) : "Not scheduled"}
-				</span>
-			</td>
-			<td>
-				<span className="text-base-content/70 text-sm">{formatRelativeTime(item.created_at)}</span>
+				<span className="text-base-content/70 text-xs">{formatRelativeTime(item.created_at)}</span>
 			</td>
 			<td>
 				<HealthItemActionsMenu
