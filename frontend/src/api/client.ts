@@ -687,8 +687,12 @@ export class APIClient {
 		return this.request<SystemBrowseResponse>(`/system/browse${query ? `?${query}` : ""}`);
 	}
 
-	async resetSystemStats() {
-		return this.request<{ message: string }>("/system/stats/reset", {
+	async resetSystemStats(duration?: string) {
+		const searchParams = new URLSearchParams();
+		if (duration) searchParams.set("duration", duration);
+
+		const query = searchParams.toString();
+		return this.request<{ message: string }>(`/system/stats/reset${query ? `?${query}` : ""}`, {
 			method: "POST",
 		});
 	}

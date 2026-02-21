@@ -60,6 +60,35 @@ func CheckDirectoryWritable(path string) error {
 	return nil
 }
 
+// RemoveEmptyDirs recursively removes empty parent directories starting from 'path'
+// up towards 'root' (exclusive). It stops if it encounters a non-empty directory
+// or reaches the root.
+func RemoveEmptyDirs(root, path string) {
+	if root == "" || path == "" {
+		return
+	}
+
+	// Clean paths for consistent comparison
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+
+	// If path is root or not under root, stop
+	if path == root || !strings.HasPrefix(path, root) {
+		return
+	}
+
+	// Try to remove the directory
+	err := os.Remove(path)
+	if err != nil {
+		// Directory is likely not empty or we lack permissions
+		return
+	}
+
+	// Successfully removed, try the parent
+	parent := filepath.Dir(path)
+	RemoveEmptyDirs(root, parent)
+}
+
 // JoinAbsPath safely joins a base path with another path (which could be absolute or relative).
 // If the second path is absolute and starts with the base path, it returns the second path as is.
 // Otherwise, it joins them normally.

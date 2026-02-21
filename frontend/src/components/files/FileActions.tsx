@@ -28,7 +28,9 @@ export function FileActions({
 	isDeleting = false,
 	isExportingNZB = false,
 }: FileActionsProps) {
-	const filePath = `${currentPath}/${file.basename}`.replace(/\/+/g, "/");
+	const filePath = currentPath
+		? `${currentPath}/${file.basename}`.replace(/\/+/g, "/")
+		: file.filename;
 	const { confirmDelete } = useConfirm();
 
 	const handleDownload = () => {

@@ -1,5 +1,4 @@
-import { formatDistanceToNowStrict } from "date-fns";
-import { AlertTriangle, CheckCircle, Network, Timer, XCircle, Zap } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { formatSpeed } from "../../lib/utils";
 import type { ProviderStatus } from "../../types/api";
 
@@ -23,27 +22,23 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 			case "active":
 				return {
 					color: "badge-success",
-					icon: <CheckCircle className="h-3 w-3" />,
 					text: "Active",
 				};
 			case "failed":
 			case "failing":
 				return {
 					color: "badge-error",
-					icon: <XCircle className="h-3 w-3" />,
 					text: "Failed",
 				};
 			case "pending":
 			case "connecting":
 				return {
 					color: "badge-warning",
-					icon: <AlertTriangle className="h-3 w-3" />,
 					text: "Pending",
 				};
 			default:
 				return {
 					color: "badge-ghost",
-					icon: <Network className="h-3 w-3" />,
 					text: state,
 				};
 		}
@@ -60,14 +55,14 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 
 	return (
 		<article
-			className={`card bg-base-100 shadow-lg transition-shadow focus-within:ring-2 focus-within:ring-primary ${className || ""}`}
+			className={`card bg-base-100 shadow-sm transition-shadow ${className || ""}`}
 			aria-labelledby={`provider-${provider.host}`}
 		>
-			<div className="card-body">
+			<div className="card-body p-4">
 				{/* Header with host and state badge */}
 				<div className="flex items-start justify-between">
 					<div className="min-w-0 flex-1">
-						<div className="flex items-center gap-2">
+						<div className="flex items-center gap-1.5">
 							<div
 								className={`h-2 w-2 shrink-0 rounded-full ${
 									provider.state.toLowerCase() === "active"
@@ -81,65 +76,55 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 							/>
 							<h3
 								id={`provider-${provider.host}`}
-								className="card-title truncate font-medium text-base"
+								className="card-title truncate font-medium text-sm"
 							>
 								{provider.host}
 							</h3>
 						</div>
 						{provider.username && (
-							<p className="cursor-pointer truncate text-base-content/60 text-sm blur-sm transition-all hover:blur-none">
+							<p className="cursor-pointer truncate text-[10px] text-base-content/40 blur-[1px] transition-all hover:blur-none">
 								@{provider.username}
 							</p>
 						)}
 					</div>
-					<div className={`badge ${stateBadge.color} gap-1`}>
-						{stateBadge.icon}
+					<div className={`badge ${stateBadge.color} badge-xs font-bold uppercase`}>
 						{stateBadge.text}
 					</div>
 				</div>
 
 				{/* Connection usage */}
-				<div className="mt-3 space-y-2">
-					<div className="flex items-center justify-between text-sm">
-						<span className="text-base-content/70">Connections</span>
-						<span className="font-medium">
+				<div className="mt-2 space-y-1">
+					<div className="flex items-center justify-between text-[10px]">
+						<span className="text-base-content/50 uppercase tracking-tight">Pool Usage</span>
+						<span className="font-mono font-semibold">
 							{provider.used_connections} / {provider.max_connections}
 						</span>
 					</div>
 					<progress
-						className={`progress w-full ${getProgressColor()}`}
+						className={`progress h-1 w-full ${getProgressColor()}`}
 						value={provider.used_connections}
 						max={provider.max_connections}
 					/>
 				</div>
 
 				{/* Performance Stats */}
-				<div className="mt-4 grid grid-cols-3 gap-2 border-base-200 border-t pt-4 text-center">
-					<div className="space-y-1">
-						<div className="flex items-center justify-center gap-1 text-[9px] text-base-content/50 uppercase tracking-wider">
-							<Zap className="h-2.5 w-2.5" />
-							<span>Speed</span>
-						</div>
-						<div className="truncate font-bold font-mono text-primary text-xs">
+				<div className="mt-3 grid grid-cols-3 gap-1 border-base-200 border-t pt-3 text-center">
+					<div className="space-y-0.5">
+						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Speed</div>
+						<div className="truncate font-bold font-mono text-[10px] text-primary">
 							{provider.current_speed_bytes_per_sec !== undefined
 								? formatSpeed(provider.current_speed_bytes_per_sec)
 								: "0 B/s"}
 						</div>
 					</div>
-					<div className="space-y-1">
-						<div className="flex items-center justify-center gap-1 text-[9px] text-base-content/50 uppercase tracking-wider">
-							<Timer className="h-2.5 w-2.5" />
-							<span>Ping</span>
-						</div>
-						<div className="font-bold font-mono text-info text-xs">{provider.ping_ms}ms</div>
+					<div className="space-y-0.5">
+						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Ping</div>
+						<div className="font-bold font-mono text-[10px] text-info">{provider.ping_ms}ms</div>
 					</div>
-					<div className="space-y-1">
-						<div className="flex items-center justify-center gap-1 text-[9px] text-base-content/50 uppercase tracking-wider">
-							<AlertTriangle className="h-2.5 w-2.5" />
-							<span>Errors</span>
-						</div>
+					<div className="space-y-0.5">
+						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Errors</div>
 						<div
-							className={`font-bold font-mono text-xs ${provider.error_count > 0 ? "text-error" : "text-base-content/30"}`}
+							className={`font-bold font-mono text-[10px] ${provider.error_count > 0 ? "text-error" : "text-base-content/20"}`}
 						>
 							{provider.error_count}
 						</div>
@@ -148,46 +133,21 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 
 				{/* Missing Articles */}
 				{provider.missing_count > 0 && (
-					<div className="mt-2 space-y-1 border-base-200 border-t pt-2">
-						<div className="flex items-center justify-between text-sm">
-							<span className="text-base-content/70">Missing Articles</span>
+					<div className="mt-2 border-base-200 border-t pt-2">
+						<div className="flex items-center justify-between text-[10px]">
+							<span className="text-base-content/50">Missing</span>
 							<div className="text-right">
 								<span
-									className={`font-medium ${provider.missing_warning ? "text-error" : "text-warning"}`}
+									className={`font-mono font-semibold ${provider.missing_warning ? "text-error" : "text-warning"}`}
 								>
 									{provider.missing_count.toLocaleString()}
 								</span>
 								{provider.missing_rate_per_minute > 0 && (
-									<span className="ml-1 text-base-content/60 text-xs">
+									<span className="ml-0.5 text-[9px] text-base-content/40">
 										~{Math.round(provider.missing_rate_per_minute)}/min
 									</span>
 								)}
 							</div>
-						</div>
-						{provider.missing_warning && (
-							<div className="alert alert-warning py-2">
-								<AlertTriangle className="h-4 w-4" />
-								<span className="text-sm">Consider using a backup provider</span>
-							</div>
-						)}
-					</div>
-				)}
-
-				{/* Speed Test Info */}
-				{provider.last_speed_test_mbps > 0 && (
-					<div className="mt-2 flex items-center justify-between text-xs">
-						<span className="text-base-content/60">Last Speed Test:</span>
-						<div className="text-right">
-							<span className="font-medium text-success">
-								{provider.last_speed_test_mbps.toFixed(2)} MB/s
-							</span>
-							{provider.last_speed_test_time && (
-								<div className="text-base-content/50">
-									{formatDistanceToNowStrict(new Date(provider.last_speed_test_time), {
-										addSuffix: true,
-									})}
-								</div>
-							)}
 						</div>
 					</div>
 				)}
@@ -195,9 +155,9 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 				{/* Failure reason - only show if present */}
 				{provider.failure_reason && provider.failure_reason !== "" && (
 					<div className="mt-2">
-						<div className="alert alert-warning py-2">
-							<AlertTriangle className="h-4 w-4" />
-							<span className="text-sm">{provider.failure_reason}</span>
+						<div className="alert alert-error rounded-md px-2 py-1.5">
+							<AlertTriangle className="h-3 w-3" />
+							<span className="text-[10px]">{provider.failure_reason}</span>
 						</div>
 					</div>
 				)}

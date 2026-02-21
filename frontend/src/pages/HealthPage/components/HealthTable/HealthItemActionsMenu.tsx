@@ -29,7 +29,7 @@ export function HealthItemActionsMenu({
 			<button tabIndex={0} type="button" className="btn btn-ghost btn-sm">
 				<MoreHorizontal className="h-4 w-4" />
 			</button>
-			<ul className="dropdown-content menu w-48 rounded-box bg-base-100 shadow-lg">
+			<ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
 				{item.status === "checking" ? (
 					<li>
 						<button

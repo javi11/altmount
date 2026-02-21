@@ -35,6 +35,7 @@ frontend/package.json.md5
 # Keep essential frontend files for Docker build
 !frontend/src/
 !frontend/build/
+!frontend/dist/
 !frontend/embed.go
 !frontend/package.json
 !frontend/bun.lock*

@@ -1016,7 +1016,7 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 // GetImportDailyStats retrieves import statistics for the specified number of days
 func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*ImportDailyStat, error) {
 	query := `
-		SELECT day, completed_count, failed_count, updated_at
+		SELECT day, completed_count, failed_count, bytes_downloaded, updated_at
 		FROM import_daily_stats
 		WHERE day >= date('now', ?)
 		ORDER BY day ASC
@@ -1031,7 +1031,7 @@ func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*Impo
 	var stats []*ImportDailyStat
 	for rows.Next() {
 		var s ImportDailyStat
-		err := rows.Scan(&s.Day, &s.CompletedCount, &s.FailedCount, &s.UpdatedAt)
+		err := rows.Scan(&s.Day, &s.CompletedCount, &s.FailedCount, &s.BytesDownloaded, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan import daily stat: %w", err)
 		}
@@ -1040,6 +1040,99 @@ func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*Impo
 
 	return stats, rows.Err()
 }
+
+// GetImportHourlyStats retrieves import statistics for the specified number of hours
+func (r *Repository) GetImportHourlyStats(ctx context.Context, hours int) ([]*ImportHourlyStat, error) {
+	query := `
+		SELECT hour, completed_count, failed_count, bytes_downloaded, updated_at
+		FROM import_hourly_stats
+		WHERE hour >= datetime('now', ?)
+		ORDER BY hour ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf("-%d hours", hours))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get import hourly stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []*ImportHourlyStat
+	for rows.Next() {
+		var s ImportHourlyStat
+		err := rows.Scan(&s.Hour, &s.CompletedCount, &s.FailedCount, &s.BytesDownloaded, &s.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan import hourly stat: %w", err)
+		}
+		stats = append(stats, &s)
+	}
+
+	return stats, rows.Err()
+}
+
+// AddBytesDownloadedToDailyStat increments the bytes_downloaded counter for the current day
+func (r *Repository) AddBytesDownloadedToDailyStat(ctx context.Context, bytes int64) error {
+	if bytes <= 0 {
+		return nil
+	}
+
+	// Also add to hourly stat for rolling 24h calculation
+	_ = r.AddBytesDownloadedToHourlyStat(ctx, bytes)
+
+	query := `
+		INSERT INTO import_daily_stats (day, bytes_downloaded, updated_at)
+		VALUES (date('now'), ?, datetime('now'))
+		ON CONFLICT(day) DO UPDATE SET
+		bytes_downloaded = bytes_downloaded + excluded.bytes_downloaded,
+		updated_at = datetime('now')
+	`
+
+	_, err := r.db.ExecContext(ctx, query, bytes)
+	return err
+}
+
+// AddBytesDownloadedToHourlyStat increments the bytes_downloaded counter for the current hour
+func (r *Repository) AddBytesDownloadedToHourlyStat(ctx context.Context, bytes int64) error {
+	if bytes <= 0 {
+		return nil
+	}
+
+	// Calculate start of current hour: YYYY-MM-DD HH:00:00
+	currentHour := time.Now().UTC().Truncate(time.Hour)
+
+	query := `
+		INSERT INTO import_hourly_stats (hour, bytes_downloaded, updated_at)
+		VALUES (?, ?, datetime('now'))
+		ON CONFLICT(hour) DO UPDATE SET
+		bytes_downloaded = bytes_downloaded + excluded.bytes_downloaded,
+		updated_at = datetime('now')
+	`
+
+	_, err := r.db.ExecContext(ctx, query, currentHour, bytes)
+	return err
+}
+
+// IncrementHourlyStat increments the completed or failed count for the current hour
+func (r *Repository) IncrementHourlyStat(ctx context.Context, statType string) error {
+	column := "completed_count"
+	if statType == "failed" {
+		column = "failed_count"
+	}
+
+	// Calculate start of current hour
+	currentHour := time.Now().UTC().Truncate(time.Hour)
+
+	query := fmt.Sprintf(`
+		INSERT INTO import_hourly_stats (hour, %s, updated_at)
+		VALUES (?, 1, datetime('now'))
+		ON CONFLICT(hour) DO UPDATE SET
+		%s = %s + 1,
+		updated_at = datetime('now')
+	`, column, column, column)
+
+	_, err := r.db.ExecContext(ctx, query, currentHour)
+	return err
+}
+
 
 // GetImportHistory retrieves historical import statistics for the last N days (Alias for GetImportDailyStats)
 func (r *Repository) GetImportHistory(ctx context.Context, days int) ([]*ImportDailyStat, error) {
@@ -1179,9 +1272,135 @@ func (r *Repository) GetSystemState(ctx context.Context, key string) (string, er
 	return value, nil
 }
 
-// ClearImportHistory deletes all records from the import_history table
+// ClearImportHistory deletes all records from the import_history and import_daily_stats tables
 func (r *Repository) ClearImportHistory(ctx context.Context) error {
-	query := `DELETE FROM import_history`
-	_, err := r.db.ExecContext(ctx, query)
-	return err
+	// Clear history records
+	queryHistory := `DELETE FROM import_history`
+	if _, err := r.db.ExecContext(ctx, queryHistory); err != nil {
+		return fmt.Errorf("failed to clear import history: %w", err)
+	}
+
+	// Also clear daily stats
+	return r.ClearDailyStats(ctx)
 }
+
+// ClearImportHistorySince deletes records from the import_history and import_queue tables
+// since the specified time, and adjusts the import_daily_stats accordingly.
+func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Time) error {
+	return r.WithTransaction(ctx, func(txRepo *Repository) error {
+		// 1. Count completed items in history per day
+		queryHistoryCounts := `
+			SELECT date(completed_at) as day, COUNT(*) as count
+			FROM import_history
+			WHERE completed_at >= ?
+			GROUP BY day
+		`
+		rows, err := txRepo.db.QueryContext(ctx, queryHistoryCounts, since)
+		if err != nil {
+			return fmt.Errorf("failed to query history counts: %w", err)
+		}
+		defer rows.Close()
+
+		type dayCount struct {
+			day   string
+			count int
+		}
+		var historyCounts []dayCount
+		for rows.Next() {
+			var dc dayCount
+			if err := rows.Scan(&dc.day, &dc.count); err != nil {
+				return err
+			}
+			historyCounts = append(historyCounts, dc)
+		}
+		rows.Close()
+
+		// 2. Count failed items in queue per day
+		queryFailedCounts := `
+			SELECT date(updated_at) as day, COUNT(*) as count
+			FROM import_queue
+			WHERE status = 'failed' AND updated_at >= ?
+			GROUP BY day
+		`
+		rows, err = txRepo.db.QueryContext(ctx, queryFailedCounts, since)
+		if err != nil {
+			return fmt.Errorf("failed to query failed counts: %w", err)
+		}
+		defer rows.Close()
+
+		var failedCounts []dayCount
+		for rows.Next() {
+			var dc dayCount
+			if err := rows.Scan(&dc.day, &dc.count); err != nil {
+				return err
+			}
+			failedCounts = append(failedCounts, dc)
+		}
+		rows.Close()
+
+		// 3. Decrement daily stats for completed items
+		for _, hc := range historyCounts {
+			queryUpdate := `
+				UPDATE import_daily_stats 
+				SET completed_count = MAX(0, completed_count - ?), updated_at = datetime('now')
+				WHERE day = ?
+			`
+			if _, err := txRepo.db.ExecContext(ctx, queryUpdate, hc.count, hc.day); err != nil {
+				return fmt.Errorf("failed to decrement completed daily stats: %w", err)
+			}
+		}
+
+		// 4. Decrement daily stats for failed items
+		for _, fc := range failedCounts {
+			queryUpdate := `
+				UPDATE import_daily_stats 
+				SET failed_count = MAX(0, failed_count - ?), updated_at = datetime('now')
+				WHERE day = ?
+			`
+			if _, err := txRepo.db.ExecContext(ctx, queryUpdate, fc.count, fc.day); err != nil {
+				return fmt.Errorf("failed to decrement failed daily stats: %w", err)
+			}
+		}
+
+		// 5. Delete from import_history
+		queryDeleteHistory := `DELETE FROM import_history WHERE completed_at >= ?`
+		if _, err := txRepo.db.ExecContext(ctx, queryDeleteHistory, since); err != nil {
+			return fmt.Errorf("failed to delete from import history: %w", err)
+		}
+
+		// 6. Delete from import_queue (completed and failed items)
+		queryDeleteQueue := `
+			DELETE FROM import_queue 
+			WHERE status IN ('completed', 'failed') 
+			  AND (
+				(status = 'completed' AND completed_at >= ?) OR 
+				(status = 'failed' AND updated_at >= ?)
+			  )
+		`
+		if _, err := txRepo.db.ExecContext(ctx, queryDeleteQueue, since, since); err != nil {
+			return fmt.Errorf("failed to delete from import queue: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// ClearDailyStats deletes all records from the import_daily_stats and import_hourly_stats tables
+func (r *Repository) ClearDailyStats(ctx context.Context) error {
+	queryDaily := `DELETE FROM import_daily_stats`
+	if _, err := r.db.ExecContext(ctx, queryDaily); err != nil {
+		return fmt.Errorf("failed to clear daily stats: %w", err)
+	}
+
+	return r.ClearHourlyStats(ctx)
+}
+
+// ClearHourlyStats deletes all records from the import_hourly_stats table
+func (r *Repository) ClearHourlyStats(ctx context.Context) error {
+	queryHourly := `DELETE FROM import_hourly_stats`
+	if _, err := r.db.ExecContext(ctx, queryHourly); err != nil {
+		return fmt.Errorf("failed to clear hourly stats: %w", err)
+	}
+	return nil
+}
+

@@ -229,6 +229,7 @@ type HealthConfig struct {
 	ResolveRepairOnImport         *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
 	VerifyData                    *bool   `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
 	CheckAllSegments              *bool   `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	AcceptableMissingSegmentsPercentage float64 `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -1213,6 +1214,7 @@ func DefaultConfig(configDir ...string) *Config {
 			SegmentSamplePercentage:       5,                      // Default: 5% segment sampling
 			LibrarySyncIntervalMinutes:    360,                    // Default: sync every 6 hours
 			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
+			AcceptableMissingSegmentsPercentage: 0,                // Default: no missing segments allowed
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:               &sabnzbdEnabled,

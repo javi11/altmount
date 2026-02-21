@@ -83,19 +83,19 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 			const totalItems =
 				queueStats.total_processing + queueStats.total_completed + queueStats.total_failed;
 			const completedAndFailed = queueStats.total_completed + queueStats.total_failed;
-			const percent = totalItems > 0 ? Math.round((completedAndFailed / totalItems) * 100) : 0;
 
 			const progressParts: string[] = [];
 			if (queueStats.total_queued > 0) progressParts.push(`${queueStats.total_queued} pending`);
 			if (queueStats.total_failed > 0) progressParts.push(`${queueStats.total_failed} failed`);
 
 			return {
-				title: "Import Status",
+				title: "Import Queue",
 				icon: <Download className="h-8 w-8 text-base-content/20" />,
-				progress: percent,
-				detail: progressParts.length > 0 ? progressParts.join(", ") : "Queue is empty",
-				status: `${completedAndFailed} / ${totalItems}`,
+				progress: 0,
+				detail: progressParts.length > 0 ? progressParts.join(", ") : "All tasks complete",
+				status: totalItems > 0 ? `${completedAndFailed} / ${totalItems}` : "Idle",
 				color: "progress-primary",
+				isIdle: totalItems === 0 || completedAndFailed === totalItems,
 			};
 		}
 
@@ -124,7 +124,7 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 	return (
 		<div className={`card bg-base-100 shadow-lg ${className || ""}`}>
 			<div className="card-body">
-				<div className="flex items-center justify-between">
+				<div className="flex items-start justify-between">
 					<div className="min-w-0 flex-1">
 						<h2 className="card-title truncate font-medium text-base-content/70 text-sm">
 							{activeImport.title}
@@ -136,16 +136,26 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 					<div className="shrink-0">{activeImport.icon}</div>
 				</div>
 
-				<div className="mt-2">
-					<div className="mb-1 flex justify-between font-bold text-[10px] uppercase tracking-wider opacity-60">
-						<span className="mr-2 truncate">{activeImport.detail}</span>
-						<span>{activeImport.progress}%</span>
-					</div>
-					<progress
-						className={`progress ${activeImport.color} h-2 w-full`}
-						value={activeImport.progress}
-						max="100"
-					/>
+				<div className="mt-4">
+					{!activeImport.isIdle && (
+						<>
+							<div className="mb-1 flex justify-between font-bold text-[10px] uppercase tracking-wider opacity-60">
+								<span className="mr-2 truncate">{activeImport.detail}</span>
+								{activeImport.progress > 0 && <span>{activeImport.progress}%</span>}
+							</div>
+							<progress
+								className={`progress ${activeImport.color} h-1.5 w-full`}
+								value={activeImport.progress > 0 ? activeImport.progress : undefined}
+								max="100"
+							/>
+						</>
+					)}
+					{activeImport.isIdle && (
+						<div className="flex items-center gap-1.5 font-bold text-[10px] text-base-content/30 uppercase tracking-widest">
+							<div className="h-1.5 w-1.5 rounded-full bg-base-content/20" />
+							{activeImport.detail}
+						</div>
+					)}
 				</div>
 			</div>
 		</div>

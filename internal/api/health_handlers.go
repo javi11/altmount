@@ -602,6 +602,24 @@ func (s *Server) cleanupHealthRecords(ctx context.Context, olderThan time.Time, 
 				fileErrors = append(fileErrors, fmt.Sprintf("%s: %v", item.FilePath, deleteErr))
 			} else {
 				deletedFileCount++
+
+				// Clean up empty parent directories
+				var rootPath string
+				if item.LibraryPath != nil && *item.LibraryPath != "" {
+					// Use library directory as root if available
+					if cfg.Health.LibraryDir != nil && *cfg.Health.LibraryDir != "" {
+						rootPath = *cfg.Health.LibraryDir
+					} else {
+						// Fallback to the directory containing the file if root not known
+						rootPath = filepath.Dir(filepath.Dir(pathToDelete))
+					}
+				} else {
+					rootPath = mountPath
+				}
+
+				if rootPath != "" {
+					pathutil.RemoveEmptyDirs(rootPath, filepath.Dir(pathToDelete))
+				}
 			}
 		}
 

@@ -668,10 +668,9 @@ export function HealthPage() {
 				</div>
 			</div>
 
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
-				{/* Sidebar Navigation */}
-				<div className="lg:col-span-1">
-					<div className="space-y-6">
+			                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+			                                {/* Sidebar Navigation */}
+			                                <div className="lg:col-span-3 xl:col-span-2">					<div className="space-y-6">
 						<div className="card border border-base-200 bg-base-100 shadow-sm">
 							<div className="card-body p-2 sm:p-4">
 								<div>
@@ -726,9 +725,8 @@ export function HealthPage() {
 					</div>
 				</div>
 
-				{/* Content Area */}
-				<div className="lg:col-span-3">
-					<div className="space-y-6">
+				                                {/* Content Area */}
+				                                <div className="lg:col-span-9 xl:col-span-10">					<div className="space-y-6">
 						{/* Section Description Card */}
 						<div className="card border border-base-200 bg-base-100 shadow-sm">
 							<div className="card-body p-4 sm:p-6">

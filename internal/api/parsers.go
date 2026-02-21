@@ -51,6 +51,30 @@ func ParseTimeParam(r *http.Request, param string) (*time.Time, error) {
 	return nil, &ValidationError{Message: "Invalid time format for parameter: " + param}
 }
 
+// ParseDuration parses a duration string, supporting 'd' for days
+func ParseDuration(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+
+	// Handle simple days or weeks format (e.g., "1d", "7d", "1w")
+	if len(s) > 1 {
+		unit := s[len(s)-1]
+		valStr := s[:len(s)-1]
+		val, err := strconv.Atoi(valStr)
+		if err == nil {
+			if unit == 'd' {
+				return time.Duration(val) * 24 * time.Hour, nil
+			}
+			if unit == 'w' {
+				return time.Duration(val) * 7 * 24 * time.Hour, nil
+			}
+		}
+	}
+
+	return time.ParseDuration(s)
+}
+
 // ValidationError represents a validation error
 type ValidationError struct {
 	Message string

@@ -145,10 +145,20 @@ type SystemStat struct {
 
 // ImportDailyStat represents historical import statistics for a specific day
 type ImportDailyStat struct {
-	Day            time.Time `db:"day"`
-	CompletedCount int       `db:"completed_count"`
-	FailedCount    int       `db:"failed_count"`
-	UpdatedAt      time.Time `db:"updated_at"`
+	Day             time.Time `db:"day"`
+	CompletedCount  int       `db:"completed_count"`
+	FailedCount     int       `db:"failed_count"`
+	BytesDownloaded int64     `db:"bytes_downloaded"`
+	UpdatedAt       time.Time `db:"updated_at"`
+}
+
+// ImportHourlyStat represents historical import statistics for a specific hour
+type ImportHourlyStat struct {
+	Hour            time.Time `db:"hour"`
+	CompletedCount  int       `db:"completed_count"`
+	FailedCount     int       `db:"failed_count"`
+	BytesDownloaded int64     `db:"bytes_downloaded"`
+	UpdatedAt       time.Time `db:"updated_at"`
 }
 
 // ImportHistory represents a persistent record of a single imported file

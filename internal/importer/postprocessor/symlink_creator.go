@@ -35,11 +35,26 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 		if !strings.HasPrefix(completeDir, "/") {
 			completeDir = "/" + completeDir
 		}
-		if strings.HasPrefix(resultingPath, completeDir) {
-			resultingPath = strings.TrimPrefix(resultingPath, completeDir)
-			if !strings.HasPrefix(resultingPath, "/") {
-				resultingPath = "/" + resultingPath
-			}
+
+		// Ensure checkPath starts with / for reliable prefix checking
+		checkPath := resultingPath
+		if !strings.HasPrefix(checkPath, "/") {
+			checkPath = "/" + checkPath
+		}
+
+		if strings.HasPrefix(checkPath, completeDir) {
+			resultingPath = strings.TrimPrefix(checkPath, completeDir)
+		}
+	}
+
+	// Ensure the resulting path respects the category if provided
+	if item.Category != nil && *item.Category != "" {
+		category := strings.Trim(*item.Category, "/")
+		cleanPath := strings.TrimPrefix(resultingPath, "/")
+
+		// If path doesn't start with category, prepend it
+		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
+			resultingPath = filepath.Join(category, cleanPath)
 		}
 	}
 
@@ -102,11 +117,26 @@ func (c *Coordinator) CreateSymlinks(ctx context.Context, item *database.ImportQ
 			if !strings.HasPrefix(completeDir, "/") {
 				completeDir = "/" + completeDir
 			}
-			if strings.HasPrefix(symlinkResultingPath, completeDir) {
-				symlinkResultingPath = strings.TrimPrefix(symlinkResultingPath, completeDir)
-				if !strings.HasPrefix(symlinkResultingPath, "/") {
-					symlinkResultingPath = "/" + symlinkResultingPath
-				}
+
+			// Ensure checkPath starts with / for reliable prefix checking
+			checkPath := symlinkResultingPath
+			if !strings.HasPrefix(checkPath, "/") {
+				checkPath = "/" + checkPath
+			}
+
+			if strings.HasPrefix(checkPath, completeDir) {
+				symlinkResultingPath = strings.TrimPrefix(checkPath, completeDir)
+			}
+		}
+
+		// Ensure the resulting path respects the category if provided
+		if item.Category != nil && *item.Category != "" {
+			category := strings.Trim(*item.Category, "/")
+			cleanPath := strings.TrimPrefix(symlinkResultingPath, "/")
+
+			// If path doesn't start with category, prepend it
+			if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
+				symlinkResultingPath = filepath.Join(category, cleanPath)
 			}
 		}
 
