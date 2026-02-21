@@ -307,7 +307,6 @@ func TestSegmentRangeClear_ContinuesOnAllSegments(t *testing.T) {
 
 	sr := &segmentRange{
 		segments: segments,
-		current:  0,
 	}
 
 	_ = sr.Clear()
@@ -340,7 +339,6 @@ func TestSegmentRangeClear_AllSegmentsReleased(t *testing.T) {
 
 	sr := &segmentRange{
 		segments: segments,
-		current:  0,
 	}
 
 	err := sr.Clear()

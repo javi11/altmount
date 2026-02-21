@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -51,24 +52,37 @@ func (e *DataCorruptionError) Unwrap() error {
 	return e.UnderlyingErr
 }
 
+// bufPool reuses download buffers to reduce GC pressure.
+// Pre-sized for typical Usenet segments (~750KB decoded).
+var bufPool = sync.Pool{
+	New: func() any {
+		return bytes.NewBuffer(make([]byte, 0, 750*1024))
+	},
+}
+
 type UsenetReader struct {
-	log            *slog.Logger
-	wg             sync.WaitGroup
-	ctx            context.Context // Reader's context for cancellation
-	cancel         context.CancelFunc
-	rg             *segmentRange
-	maxPrefetch    int // Maximum segments prefetched ahead of current read position
-	init           chan any
-	initDownload   sync.Once
-	closeOnce      sync.Once
-	totalBytesRead int64
-	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
+	log          *slog.Logger
+	wg           sync.WaitGroup
+	ctx          context.Context // Reader's context for cancellation
+	cancel       context.CancelFunc
+	rg           *segmentRange
+	maxPrefetch  int // Maximum segments prefetched ahead of current read position
+	init         chan any
+	initDownload sync.Once
+	closeOnce    sync.Once
+	poolGetter   func() (*nntppool.Client, error) // Dynamic pool getter
 	metricsTracker MetricsTracker
 	streamID       string
 	segmentStore   SegmentStore // optional, nil = no caching
 
-	// Prefetch-based download tracking
-	nextToDownload int // Index of next segment to schedule
+	// Prefetch-based download tracking (atomic: written by downloadManager, read from multiple goroutines)
+	nextToDownload  atomic.Int64
+	totalBytesRead  atomic.Int64
+
+	// segmentConsumed is signaled (non-blocking, capacity 1) whenever the reader
+	// consumes a segment via Next(), allowing downloadManager to immediately
+	// schedule the next download instead of waiting for the 50ms poll timer.
+	segmentConsumed chan struct{}
 
 	mu sync.Mutex
 }
@@ -90,16 +104,17 @@ func NewUsenetReader(
 	}
 
 	ur := &UsenetReader{
-		log:            log,
-		ctx:            ctx,
-		cancel:         cancel,
-		rg:             rg,
-		init:           make(chan any, 1),
-		maxPrefetch:    maxPrefetch,
-		poolGetter:     poolGetter,
-		metricsTracker: metricsTracker,
-		streamID:       streamID,
-		segmentStore:   segmentStore,
+		log:             log,
+		ctx:             ctx,
+		cancel:          cancel,
+		rg:              rg,
+		init:            make(chan any, 1),
+		maxPrefetch:     maxPrefetch,
+		poolGetter:      poolGetter,
+		metricsTracker:  metricsTracker,
+		streamID:        streamID,
+		segmentStore:    segmentStore,
+		segmentConsumed: make(chan struct{}, 1),
 	}
 
 	ur.wg.Go(func() {
@@ -183,21 +198,12 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 
 	s, err := rg.Get()
 	if err != nil {
-		b.mu.Lock()
-		totalRead := b.totalBytesRead
-		b.mu.Unlock()
+		totalRead := b.totalBytesRead.Load()
 
 		if b.isArticleNotFoundError(err) {
-			if totalRead > 0 {
-				return 0, &DataCorruptionError{
-					UnderlyingErr: err,
-					BytesRead:     totalRead,
-				}
-			} else {
-				return 0, &DataCorruptionError{
-					UnderlyingErr: err,
-					BytesRead:     0,
-				}
+			return 0, &DataCorruptionError{
+				UnderlyingErr: err,
+				BytesRead:     totalRead,
 			}
 		}
 		return 0, io.EOF
@@ -208,20 +214,15 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 		nn, err := s.GetReaderContext(b.ctx).Read(p[n:])
 		n += nn
 
-		b.mu.Lock()
-		b.totalBytesRead += int64(nn)
-		totalRead := b.totalBytesRead
-		b.mu.Unlock()
+		totalRead := b.totalBytesRead.Add(int64(nn))
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				// Segment fully read — move to next segment
-				b.mu.Lock()
-				rg := b.rg
-				b.mu.Unlock()
-
-				if rg == nil {
-					return n, io.ErrClosedPipe
+				// Segment fully read — signal download manager to schedule the next
+				// segment immediately rather than waiting for the polling interval.
+				select {
+				case b.segmentConsumed <- struct{}{}:
+				default:
 				}
 
 				s, err = rg.Next()
@@ -263,18 +264,20 @@ func (b *UsenetReader) isArticleNotFoundError(err error) bool {
 
 func (b *UsenetReader) GetBufferedOffset() int64 {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	rg := b.rg
+	b.mu.Unlock()
 
-	if b.rg == nil {
+	if rg == nil {
 		return 0
 	}
 
-	if b.nextToDownload == 0 {
+	nextToDownload := int(b.nextToDownload.Load())
+	if nextToDownload == 0 {
 		return 0
 	}
 
-	idx := b.nextToDownload - 1
-	s, err := b.rg.GetSegment(idx)
+	idx := nextToDownload - 1
+	s, err := rg.GetSegment(idx)
 	if err != nil || s == nil {
 		return 0
 	}
@@ -307,9 +310,14 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return err
 			}
 
-			buf := bytes.NewBuffer(make([]byte, 0, seg.SegmentSize))
+			// Reuse buffer from pool to reduce GC pressure.
+			buf := bufPool.Get().(*bytes.Buffer)
+			buf.Reset()
+
 			result, err := cp.BodyStream(attemptCtx, seg.Id, buf)
 			if err != nil {
+				bufPool.Put(buf)
+
 				if errors.Is(err, context.DeadlineExceeded) {
 					b.log.DebugContext(ctx, "Segment download attempt timed out after 30s", "segment_id", seg.Id)
 				}
@@ -329,7 +337,10 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				return err
 			}
 
-			resultBytes = buf.Bytes()
+			// Copy decoded data out before returning buffer to pool.
+			resultBytes = make([]byte, buf.Len())
+			copy(resultBytes, buf.Bytes())
+			bufPool.Put(buf)
 
 			if b.metricsTracker != nil {
 				b.metricsTracker.IncArticlesDownloaded()
@@ -372,46 +383,50 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		return
 	}
 
-	if b.rg.Len() == 0 {
+	// Cache the rg reference once. Safe because this goroutine is tracked in b.wg,
+	// and rg.Clear() is only called after wg.Wait() completes in Close().
+	b.mu.Lock()
+	rg := b.rg
+	b.mu.Unlock()
+
+	if rg == nil || rg.Len() == 0 {
 		return
 	}
 
-	for ctx.Err() == nil {
-		b.mu.Lock()
-		if b.rg == nil {
-			b.mu.Unlock()
-			return
-		}
+	// Cache total segment count — fixed after segmentRange is built.
+	totalSegments := rg.Len()
 
-		// Check if all segments have been scheduled
-		totalSegments := b.rg.Len()
-		if b.nextToDownload >= totalSegments {
-			b.mu.Unlock()
+	for ctx.Err() == nil {
+		nextToDownload := int(b.nextToDownload.Load())
+
+		// All segments have been scheduled — exit the loop.
+		if nextToDownload >= totalSegments {
 			break
 		}
 
-		// Limit how far ahead we prefetch beyond the current read position
-		currentRead := b.rg.GetCurrentIndex()
-		if b.nextToDownload-currentRead >= b.maxPrefetch {
-			b.mu.Unlock()
-			// Wait briefly before re-checking
+		// GetCurrentIndex is now lock-free (atomic read).
+		// Limit how far ahead we prefetch beyond the current read position.
+		currentRead := rg.GetCurrentIndex()
+		if nextToDownload-currentRead >= b.maxPrefetch {
+			// Block until the reader consumes a segment (immediate wake-up)
+			// or the fallback 1s timeout fires (in case the signal was missed).
 			select {
-			case <-time.After(50 * time.Millisecond):
-				continue
+			case <-b.segmentConsumed:
+			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
 				return
 			}
-		}
-
-		// Schedule next segment for download
-		idx := b.nextToDownload
-		b.nextToDownload++
-		b.mu.Unlock()
-
-		seg, err := b.rg.GetSegment(idx)
-		if err != nil || seg == nil {
 			continue
 		}
+
+		seg, err := rg.GetSegment(nextToDownload)
+		if err != nil || seg == nil {
+			b.nextToDownload.Add(1)
+			continue
+		}
+
+		idx := nextToDownload
+		b.nextToDownload.Add(1)
 
 		go func(segIdx int, s *segment) {
 			defer func() {

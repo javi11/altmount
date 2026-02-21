@@ -84,7 +84,10 @@ func (s *Server) Mount(onReady func()) error {
 
 	maxReadAhead := s.config.MaxReadAheadMB * 1024 * 1024
 	if maxReadAhead == 0 {
-		maxReadAhead = 128 * 1024 // 128KB default (matches rclone)
+		// 4MB default: Usenet segments are typically ~750KB decoded, so a 4MB
+		// readahead window lets the kernel pipeline multiple segment-sized reads,
+		// keeping the prefetch queue saturated without excessive memory use.
+		maxReadAhead = 4 * 1024 * 1024
 	}
 
 	opts := &fs.Options{

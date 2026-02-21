@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 )
 
 type Segment struct {
@@ -24,7 +25,7 @@ type segmentRange struct {
 	start    int64
 	end      int64
 	segments []*segment
-	current  int
+	current  atomic.Int64 // Current segment index; updated atomically so GetCurrentIndex is lock-free
 	ctx      context.Context
 	mu       sync.RWMutex
 }
@@ -33,11 +34,10 @@ func (r *segmentRange) HasSegments() bool {
 	return len(r.segments) > 0
 }
 
-// GetCurrentIndex returns the current segment index being read
+// GetCurrentIndex returns the current segment index being read.
+// Lock-free: reads the atomic counter directly.
 func (r *segmentRange) GetCurrentIndex() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.current
+	return int(r.current.Load())
 }
 
 func (r *segmentRange) Len() int {
@@ -47,14 +47,15 @@ func (r *segmentRange) Len() int {
 }
 
 func (r *segmentRange) Get() (*segment, error) {
+	current := int(r.current.Load())
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if r.current >= len(r.segments) {
+	if current >= len(r.segments) {
 		return nil, ErrSegmentLimit
 	}
 
-	return r.segments[r.current], nil
+	return r.segments[current], nil
 }
 
 func (r *segmentRange) GetSegment(index int) (*segment, error) {
@@ -70,17 +71,18 @@ func (r *segmentRange) GetSegment(index int) (*segment, error) {
 
 func (r *segmentRange) Next() (*segment, error) {
 	r.mu.Lock()
-	if r.current >= len(r.segments) {
+	current := int(r.current.Load())
+	if current >= len(r.segments) {
 		r.mu.Unlock()
 		return nil, ErrSegmentLimit
 	}
 
 	// Release data from consumed segment to allow GC
-	r.segments[r.current].Release()
-	r.segments[r.current] = nil
-
-	r.current += 1
+	r.segments[current].Release()
+	r.segments[current] = nil
 	r.mu.Unlock()
+
+	r.current.Add(1)
 
 	return r.Get()
 }
