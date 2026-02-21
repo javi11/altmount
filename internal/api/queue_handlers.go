@@ -310,12 +310,18 @@ func (s *Server) handleGetQueueHistoricalStats(c *fiber.Ctx) error {
 		days = 365
 	}
 
-	stats, err := s.queueRepo.GetImportDailyStats(c.Context(), days)
+	dailyStats, err := s.queueRepo.GetImportDailyStats(c.Context(), days)
 	if err != nil {
 		return RespondInternalError(c, "Failed to retrieve queue historical statistics", err.Error())
 	}
 
-	response := ToQueueHistoricalStatsResponse(stats)
+	// For 24h view, we want more granular hourly stats for strict rolling window
+	var hourlyStats []*database.ImportHourlyStat
+	if days == 1 {
+		hourlyStats, _ = s.queueRepo.GetImportHourlyStats(c.Context(), 24)
+	}
+
+	response := ToQueueHistoricalStatsResponse(dailyStats, hourlyStats)
 	return RespondSuccess(c, response)
 }
 

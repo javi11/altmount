@@ -377,10 +377,9 @@ export function ConfigurationPage() {
 				</div>
 			)}
 
-			<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
-				{/* Modern Sidebar (Stacks on mobile, exactly like Import) */}
-				<div className="lg:col-span-1">
-					<div className="card sticky top-24 border border-base-200 bg-base-100/50 shadow-sm backdrop-blur-md">
+			                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+			                                {/* Modern Sidebar (Stacks on mobile, exactly like Import) */}
+			                                <div className="lg:col-span-3 xl:col-span-2">					<div className="card sticky top-24 border border-base-200 bg-base-100/50 shadow-sm backdrop-blur-md">
 						<div className="card-body p-2 sm:p-4">
 							{SECTION_GROUPS.map((group) => (
 								<div key={group.title} className="mb-4 last:mb-0">
@@ -422,9 +421,8 @@ export function ConfigurationPage() {
 					</div>
 				</div>
 
-				{/* Modern Content Card */}
-				<div className="lg:col-span-3">
-					<div className="card min-h-[600px] overflow-hidden rounded-2xl border border-base-200 bg-base-100 shadow-sm">
+				                                {/* Modern Content Card */}
+				                                <div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] overflow-hidden rounded-2xl border border-base-200 bg-base-100 shadow-sm">
 						<div className="card-body p-4 sm:p-10">
 							{/* Modern Section Header */}
 							<div className="mb-10 border-base-200 border-b pb-8">

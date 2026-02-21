@@ -474,13 +474,13 @@ func (s *Server) handleGetPoolMetrics(c *fiber.Ctx) error {
 		}
 	}
 
-	// Get last 24h stats for download volume
+	// Get last 24h stats for download volume (strict rolling 24h)
 	var bytesDownloaded24h int64
 	if s.queueRepo != nil {
-		dailyStats, err := s.queueRepo.GetImportDailyStats(c.Context(), 1)
+		hourlyStats, err := s.queueRepo.GetImportHourlyStats(c.Context(), 24)
 		if err == nil {
-			for _, ds := range dailyStats {
-				bytesDownloaded24h += ds.BytesDownloaded
+			for _, hs := range hourlyStats {
+				bytesDownloaded24h += hs.BytesDownloaded
 			}
 		}
 	}

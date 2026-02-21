@@ -1041,11 +1041,42 @@ func (r *Repository) GetImportDailyStats(ctx context.Context, days int) ([]*Impo
 	return stats, rows.Err()
 }
 
+// GetImportHourlyStats retrieves import statistics for the specified number of hours
+func (r *Repository) GetImportHourlyStats(ctx context.Context, hours int) ([]*ImportHourlyStat, error) {
+	query := `
+		SELECT hour, completed_count, failed_count, bytes_downloaded, updated_at
+		FROM import_hourly_stats
+		WHERE hour >= datetime('now', ?)
+		ORDER BY hour ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, fmt.Sprintf("-%d hours", hours))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get import hourly stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []*ImportHourlyStat
+	for rows.Next() {
+		var s ImportHourlyStat
+		err := rows.Scan(&s.Hour, &s.CompletedCount, &s.FailedCount, &s.BytesDownloaded, &s.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan import hourly stat: %w", err)
+		}
+		stats = append(stats, &s)
+	}
+
+	return stats, rows.Err()
+}
+
 // AddBytesDownloadedToDailyStat increments the bytes_downloaded counter for the current day
 func (r *Repository) AddBytesDownloadedToDailyStat(ctx context.Context, bytes int64) error {
 	if bytes <= 0 {
 		return nil
 	}
+
+	// Also add to hourly stat for rolling 24h calculation
+	_ = r.AddBytesDownloadedToHourlyStat(ctx, bytes)
 
 	query := `
 		INSERT INTO import_daily_stats (day, bytes_downloaded, updated_at)
@@ -1058,6 +1089,50 @@ func (r *Repository) AddBytesDownloadedToDailyStat(ctx context.Context, bytes in
 	_, err := r.db.ExecContext(ctx, query, bytes)
 	return err
 }
+
+// AddBytesDownloadedToHourlyStat increments the bytes_downloaded counter for the current hour
+func (r *Repository) AddBytesDownloadedToHourlyStat(ctx context.Context, bytes int64) error {
+	if bytes <= 0 {
+		return nil
+	}
+
+	// Calculate start of current hour: YYYY-MM-DD HH:00:00
+	currentHour := time.Now().UTC().Truncate(time.Hour)
+
+	query := `
+		INSERT INTO import_hourly_stats (hour, bytes_downloaded, updated_at)
+		VALUES (?, ?, datetime('now'))
+		ON CONFLICT(hour) DO UPDATE SET
+		bytes_downloaded = bytes_downloaded + excluded.bytes_downloaded,
+		updated_at = datetime('now')
+	`
+
+	_, err := r.db.ExecContext(ctx, query, currentHour, bytes)
+	return err
+}
+
+// IncrementHourlyStat increments the completed or failed count for the current hour
+func (r *Repository) IncrementHourlyStat(ctx context.Context, statType string) error {
+	column := "completed_count"
+	if statType == "failed" {
+		column = "failed_count"
+	}
+
+	// Calculate start of current hour
+	currentHour := time.Now().UTC().Truncate(time.Hour)
+
+	query := fmt.Sprintf(`
+		INSERT INTO import_hourly_stats (hour, %s, updated_at)
+		VALUES (?, 1, datetime('now'))
+		ON CONFLICT(hour) DO UPDATE SET
+		%s = %s + 1,
+		updated_at = datetime('now')
+	`, column, column, column)
+
+	_, err := r.db.ExecContext(ctx, query, currentHour)
+	return err
+}
+
 
 // GetImportHistory retrieves historical import statistics for the last N days (Alias for GetImportDailyStats)
 func (r *Repository) GetImportHistory(ctx context.Context, days int) ([]*ImportDailyStat, error) {
@@ -1310,11 +1385,22 @@ func (r *Repository) ClearImportHistorySince(ctx context.Context, since time.Tim
 	})
 }
 
-// ClearDailyStats deletes all records from the import_daily_stats table
+// ClearDailyStats deletes all records from the import_daily_stats and import_hourly_stats tables
 func (r *Repository) ClearDailyStats(ctx context.Context) error {
-	queryStats := `DELETE FROM import_daily_stats`
-	if _, err := r.db.ExecContext(ctx, queryStats); err != nil {
+	queryDaily := `DELETE FROM import_daily_stats`
+	if _, err := r.db.ExecContext(ctx, queryDaily); err != nil {
 		return fmt.Errorf("failed to clear daily stats: %w", err)
+	}
+
+	return r.ClearHourlyStats(ctx)
+}
+
+// ClearHourlyStats deletes all records from the import_hourly_stats table
+func (r *Repository) ClearHourlyStats(ctx context.Context) error {
+	queryHourly := `DELETE FROM import_hourly_stats`
+	if _, err := r.db.ExecContext(ctx, queryHourly); err != nil {
+		return fmt.Errorf("failed to clear hourly stats: %w", err)
 	}
 	return nil
 }
+

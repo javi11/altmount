@@ -659,8 +659,7 @@ export function QueuePage() {
 											</div>
 
 											{/* Desktop View (≥640px) - Keep Existing */}
-											<div className="hidden overflow-x-auto sm:block">
-												<table className="table-zebra table-sm sm:table-md table">
+											                                                                                        <div className="hidden overflow-x-auto sm:block min-h-[450px] pb-24">												<table className="table-zebra table-sm sm:table-md table">
 													<thead className="bg-base-200/50">
 														<tr>
 															<th className="w-12 text-center">
