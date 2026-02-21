@@ -20,10 +20,9 @@ function App() {
 			<ToastProvider>
 				<ModalProvider>
 					<AuthProvider>
-						<BrowserRouter>
-							<div className="min-h-screen bg-base-100">
-								<Routes>
-									{/* Protected routes */}
+						                                                                                                <BrowserRouter>
+						                                                                                                        <div className="min-h-screen bg-base-100">
+						                                                                                                                <Routes>									{/* Protected routes */}
 									<Route
 										path="/"
 										element={

@@ -97,8 +97,7 @@ export function Dashboard() {
 						Reset Stats
 						<ChevronDown className="h-3 w-3 opacity-50" />
 					</div>
-					<ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow-lg border border-base-300 mt-1">
-						<li>
+					                                        <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-box z-[50] w-52 p-2 shadow-lg border border-base-300 mt-1">						<li>
 							<button type="button" onClick={() => handleResetStats("1h")}>Last 1 Hour</button>
 						</li>
 						<li>

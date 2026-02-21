@@ -776,11 +776,10 @@ export function QueuePage() {
 																	<td>
 																		<div className="flex flex-col gap-1">
 																			{item.status === QueueStatus.FAILED && item.error_message ? (
-																				<div
-																					className="tooltip tooltip-left"
-																					data-tip={truncateText(item.error_message, 200)}
-																				>
-																					<div className="flex items-center gap-1">
+																				                                                                                                                                          <div
+																				                                                                                                                                          className="tooltip tooltip-top"
+																				                                                                                                                                          data-tip={truncateText(item.error_message, 200)}
+																				                                                                                                                                          >																					<div className="flex items-center gap-1">
 																						<StatusBadge status={item.status} />
 																						<AlertCircle className="h-3 w-3 text-error" />
 																					</div>
@@ -824,8 +823,7 @@ export function QueuePage() {
 																			>
 																				<MoreVertical className="h-4 w-4" />
 																			</button>
-																			<ul className="dropdown-content menu z-[10] w-48 rounded-box border border-base-200 bg-base-100 p-2 shadow-xl">
-																				{(item.status === QueueStatus.PENDING ||
+																			                                                                                                                                          <ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">																				{(item.status === QueueStatus.PENDING ||
 																					item.status === QueueStatus.FAILED ||
 																					item.status === QueueStatus.COMPLETED) && (
 																					<li>
