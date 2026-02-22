@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/pathutil"
 )
 
@@ -654,7 +655,9 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	for _, item := range completed {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
-		slot := ToSABnzbdHistorySlot(item, start+index, itemBasePath)
+		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
+		
+		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
 		slog.DebugContext(c.Context(), "Reporting completed item to SABnzbd API",
 			"name", slot.Name,
 			"path", slot.Path,
@@ -666,7 +669,9 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 	for _, item := range failed {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
-		slot := ToSABnzbdHistorySlot(item, start+index, itemBasePath)
+		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
+		
+		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
 		index++
@@ -1041,6 +1046,80 @@ func (s *Server) calculateItemBasePath() string {
 
 	// Return base path with category folder
 	return basePath
+}
+
+// calculateHistoryStoragePath calculates the final storage path to report to SABnzbd history for Sonarr/Radarr.
+func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, basePath string) string {
+	if s.configManager == nil || item.StoragePath == nil || *item.StoragePath == "" {
+		return basePath
+	}
+
+	cfg := s.configManager.GetConfig()
+	storagePath := *item.StoragePath
+	
+	// If the strategy is None, we just return the full absolute path to the directory on the mount
+	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
+		fullStoragePath := storagePath
+		if !strings.HasPrefix(storagePath, basePath) {
+			fullStoragePath = filepath.Join(basePath, strings.TrimPrefix(storagePath, "/"))
+		}
+		
+		fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
+		if utils.HasPopularExtension(fullStoragePath) {
+			return filepath.Dir(fullStoragePath)
+		}
+		return fullStoragePath
+	}
+
+	// For explicit import strategies (symlink, hardlink, copy, move), the post-processor 
+	// handles stripping the complete_dir and placing it into {ImportDir}/{Category}.
+	// We need to mirror that exact output path here.
+	
+	// Start with the raw relative StoragePath
+	resultingPath := storagePath
+	if strings.HasPrefix(storagePath, cfg.MountPath) {
+		resultingPath = strings.TrimPrefix(storagePath, cfg.MountPath)
+	}
+
+	// Strip SABnzbd CompleteDir prefix from resultingPath if present
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+
+		checkPath := resultingPath
+		if !strings.HasPrefix(checkPath, "/") {
+			checkPath = "/" + checkPath
+		}
+
+		if strings.HasPrefix(checkPath, completeDir) {
+			if len(checkPath) == len(completeDir) {
+				resultingPath = "/"
+			} else if checkPath[len(completeDir)] == '/' {
+				resultingPath = checkPath[len(completeDir):]
+			}
+		}
+	}
+
+	// Ensure the resulting path respects the category if provided
+	if item.Category != nil && *item.Category != "" {
+		category := strings.Trim(*item.Category, "/")
+		cleanPath := strings.TrimPrefix(resultingPath, "/")
+
+		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
+			resultingPath = filepath.Join(category, cleanPath)
+		}
+	}
+
+	fullStoragePath := filepath.Join(basePath, strings.TrimPrefix(resultingPath, "/"))
+	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
+	
+	if utils.HasPopularExtension(fullStoragePath) {
+		return filepath.Dir(fullStoragePath)
+	}
+	
+	return fullStoragePath
 }
 
 // normalizeURL normalizes a URL for comparison by removing trailing slashes

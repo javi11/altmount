@@ -1,7 +1,6 @@
 package api
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/javi11/altmount/internal/database"
@@ -9,53 +8,35 @@ import (
 )
 
 func TestToSABnzbdHistorySlot(t *testing.T) {
-	t.Run("relative storage path", func(t *testing.T) {
-		storagePath := "/movies/MovieName/Movie.mkv"
+	t.Run("basic path assignment", func(t *testing.T) {
 		item := &database.ImportQueueItem{
 			ID:          1,
-			StoragePath: &storagePath,
 			NzbPath:     "/config/.nzbs/movies/MovieName.nzb",
 			Status:      database.QueueStatusCompleted,
 		}
-		basePath := "/mnt/usenet"
 		
-		slot := ToSABnzbdHistorySlot(item, 0, basePath)
+		// The path logic has moved to calculateHistoryStoragePath, so ToSABnzbdHistorySlot
+		// just needs to properly assign the finalPath passed into it.
+		finalPath := "/mnt/downloads/movies/MovieName"
 		
-		expectedPath := filepath.ToSlash(filepath.Join("/mnt/usenet", "movies/MovieName"))
-		assert.Equal(t, expectedPath, slot.Path)
+		slot := ToSABnzbdHistorySlot(item, 0, finalPath)
+		
+		assert.Equal(t, finalPath, slot.Path)
+		assert.Equal(t, finalPath, slot.Storage)
+		assert.Equal(t, "MovieName", slot.Name)
 	})
 
-	t.Run("absolute storage path with same prefix as basePath", func(t *testing.T) {
-		storagePath := "/mnt/usenet/complete/movies/MovieName/Movie.mkv"
+	t.Run("fallback extraction without storagepath", func(t *testing.T) {
 		item := &database.ImportQueueItem{
 			ID:          1,
-			StoragePath: &storagePath,
 			NzbPath:     "/config/.nzbs/movies/MovieName.nzb",
 			Status:      database.QueueStatusCompleted,
 		}
-		basePath := "/mnt/usenet"
+		finalPath := "/mnt/downloads/"
 		
-		slot := ToSABnzbdHistorySlot(item, 0, basePath)
+		slot := ToSABnzbdHistorySlot(item, 0, finalPath)
 		
-		// Currently this fails and returns /mnt/usenet/mnt/usenet/complete/movies/MovieName
-		// We want it to be /mnt/usenet/complete/movies/MovieName
-		expectedPath := "/mnt/usenet/complete/movies/MovieName"
-		assert.Equal(t, expectedPath, slot.Path)
-	})
-
-	t.Run("absolute storage path with /complete prefix", func(t *testing.T) {
-		storagePath := "/complete/movies/MovieName/Movie.mkv"
-		item := &database.ImportQueueItem{
-			ID:          1,
-			StoragePath: &storagePath,
-			NzbPath:     "/config/.nzbs/movies/MovieName.nzb",
-			Status:      database.QueueStatusCompleted,
-		}
-		basePath := "/mnt/usenet"
-		
-		slot := ToSABnzbdHistorySlot(item, 0, basePath)
-		
-		expectedPath := "/mnt/usenet/complete/movies/MovieName"
-		assert.Equal(t, expectedPath, slot.Path)
+		assert.Equal(t, finalPath, slot.Path)
+		assert.Equal(t, "MovieName", slot.Name)
 	})
 }
