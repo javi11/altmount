@@ -46,7 +46,7 @@ export function PathDisplay({
 			{isTextTruncated && (
 				<button
 					type="button"
-					className="btn btn-ghost btn-xs"
+					className="btn btn-ghost btn-sm"
 					onClick={handleCopy}
 					aria-label={`Copy ${showFileName ? "file path" : "path"} to clipboard`}
 					title={copied ? "Copied!" : "Copy to clipboard"}

@@ -1188,7 +1188,7 @@ export function RCloneConfigSection({
 										/>
 										<button
 											type="button"
-											className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
+											className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
 											onClick={() => setShowRCPassword(!showRCPassword)}
 										>
 											{showRCPassword ? (

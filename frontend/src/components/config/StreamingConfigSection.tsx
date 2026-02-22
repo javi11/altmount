@@ -83,7 +83,7 @@ export function StreamingConfigSection({
 							<span className="font-black font-mono text-primary text-xl">
 								{streamingData.max_prefetch}
 							</span>
-							<span className="font-bold text-[10px] uppercase opacity-40">segments</span>
+							<span className="font-bold text-base-content/60 text-xs uppercase">segments</span>
 						</div>
 					</div>
 
@@ -100,7 +100,7 @@ export function StreamingConfigSection({
 								handleStreamingChange("max_prefetch", Number.parseInt(e.target.value, 10))
 							}
 						/>
-						<div className="flex justify-between px-2 font-black text-[10px] opacity-30">
+						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
 							<span>1</span>
 							<span>20</span>
 							<span>40</span>
@@ -184,7 +184,7 @@ export function StreamingConfigSection({
 							<span className="font-black font-mono text-primary text-xl">
 								{cacheData.max_size_gb}
 							</span>
-							<span className="font-bold text-[10px] uppercase opacity-40">GB</span>
+							<span className="font-bold text-base-content/60 text-xs uppercase">GB</span>
 						</div>
 					</div>
 
@@ -201,7 +201,7 @@ export function StreamingConfigSection({
 								handleCacheChange("max_size_gb", Number.parseInt(e.target.value, 10))
 							}
 						/>
-						<div className="flex justify-between px-2 font-black text-[10px] opacity-30">
+						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
 							<span>1</span>
 							<span>50</span>
 							<span>100</span>
@@ -215,16 +215,16 @@ export function StreamingConfigSection({
 				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
-							<h4 className="font-bold text-base-content text-sm">Cache Expiry</h4>
+							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm">Cache Expiry</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								How long cached segments are kept before automatic eviction.
 							</p>
 						</div>
-						<div className="flex shrink-0 items-center gap-3">
+						<div className="mt-1 flex shrink-0 items-center justify-start gap-3 sm:mt-0 sm:justify-end">
 							<span className="font-black font-mono text-primary text-xl">
 								{cacheData.expiry_hours}
 							</span>
-							<span className="font-bold text-[10px] uppercase opacity-40">hours</span>
+							<span className="font-bold text-base-content/60 text-xs uppercase">hours</span>
 						</div>
 					</div>
 
@@ -241,7 +241,7 @@ export function StreamingConfigSection({
 								handleCacheChange("expiry_hours", Number.parseInt(e.target.value, 10))
 							}
 						/>
-						<div className="flex justify-between px-2 font-black text-[10px] opacity-30">
+						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
 							<span>1h</span>
 							<span>24h</span>
 							<span>72h</span>

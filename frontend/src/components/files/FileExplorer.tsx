@@ -211,7 +211,7 @@ export function FileExplorer({
 						<AlertTriangle className="h-5 w-5 text-error" />
 						<h2 className="font-bold text-xl tracking-tight">Navigation Error</h2>
 					</div>
-					<button type="button" className="btn btn-outline btn-xs px-4" onClick={() => refetch()}>
+					<button type="button" className="btn btn-outline btn-sm px-4" onClick={() => refetch()}>
 						<RefreshCw className="h-3 w-3" />
 						Reload
 					</button>
@@ -229,7 +229,7 @@ export function FileExplorer({
 					<div className="flex-1 overflow-hidden">
 						{!isRecentView ? (
 							<>
-								<div className="flex items-center gap-2 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+								<div className="flex items-center gap-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									<FolderTree className="h-3 w-3" />
 									<span>Current Location</span>
 								</div>
@@ -238,7 +238,7 @@ export function FileExplorer({
 								</div>
 							</>
 						) : (
-							<div className="flex items-center gap-2 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							<div className="flex items-center gap-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 								<History className="h-3 w-3" />
 								<span>Recently Added Files</span>
 							</div>
@@ -248,7 +248,7 @@ export function FileExplorer({
 					<div className="flex shrink-0 items-center gap-2">
 						<button
 							type="button"
-							className="btn btn-ghost btn-sm gap-2 opacity-60 hover:opacity-100"
+							className="btn btn-ghost btn-sm gap-2 text-base-content/80 hover:opacity-100"
 							onClick={() => refetch()}
 							disabled={isLoading}
 						>
@@ -262,7 +262,7 @@ export function FileExplorer({
 			{/* Search & Filters Section */}
 			<section className="space-y-4">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+					<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
 						Search & Filters
 					</h4>
 					<div className="h-px flex-1 bg-base-300" />
@@ -302,7 +302,7 @@ export function FileExplorer({
 								/>
 								<div className="flex flex-col">
 									<span className="label-text font-semibold text-xs">Corrupted Files</span>
-									<span className="label-text-alt text-[9px] opacity-60">Show items with errors</span>
+									<span className="label-text-alt text-base-content/80 text-xs">Show items with errors</span>
 								</div>
 							</label>
 						</div>
@@ -326,7 +326,7 @@ export function FileExplorer({
 			{/* File List Section */}
 			<section className="space-y-4">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+					<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
 						Contents
 					</h4>
 					<div className="h-px flex-1 bg-base-300" />
@@ -351,7 +351,7 @@ export function FileExplorer({
 							<LoadingSpinner />
 						</div>
 					) : (isRecentView || directory) ? (
-						searchTerm && filteredFiles.length === 0 && (isRecentView ? historyFiles.length > 0 : directory!.files.length > 0) ? (
+						searchTerm && filteredFiles.length === 0 && (isRecentView ? historyFiles.length > 0 : (directory?.files?.length ?? 0) > 0) ? (
 							<div className="flex flex-col items-center justify-center py-20">
 								<Search className="mb-4 h-12 w-12 text-base-content/20" />
 								<h3 className="font-bold text-base-content/60 text-lg">No Results Found</h3>

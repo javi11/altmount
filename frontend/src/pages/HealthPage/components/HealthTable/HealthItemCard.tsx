@@ -180,7 +180,7 @@ export function HealthItemCard({
 				{/* Expandable Details */}
 				<button
 					type="button"
-					className="btn btn-ghost btn-xs w-full justify-between"
+					className="btn btn-ghost btn-sm w-full justify-between"
 					onClick={() => setIsExpanded(!isExpanded)}
 				>
 					<span className="text-xs">Full Details</span>

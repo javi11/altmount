@@ -74,15 +74,15 @@ export function MetadataConfigSection({
 				{/* Storage Path */}
 				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
-						<HardDrive className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<HardDrive className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Primary Storage
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend font-semibold">Metadata Root Directory</legend>
+						<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">Metadata Root Directory</legend>
 						<div className="flex flex-col gap-3">
 							<input
 								type="text"
@@ -93,7 +93,7 @@ export function MetadataConfigSection({
 								placeholder="/path/to/metadata"
 								required
 							/>
-							<p className="label break-words text-[10px] text-base-content/50 leading-relaxed">
+							<p className="label break-words text-base-content/50 text-xs leading-relaxed">
 								Path where .meta files (pointers to Usenet articles) will be saved. (Required)
 							</p>
 						</div>
@@ -103,8 +103,8 @@ export function MetadataConfigSection({
 				{/* Backup Options */}
 				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
-						<History className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<History className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Mirroring
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -183,8 +183,8 @@ export function MetadataConfigSection({
 				{/* Retention Logic */}
 				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
-						<Trash2 className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<Trash2 className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Source Cleanup
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -205,7 +205,7 @@ export function MetadataConfigSection({
 								<span className="label-text block break-words font-bold text-xs">
 									Purge Source NZB
 								</span>
-								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
+								<span className="mt-0.5 block break-words text-base-content/50 text-xs leading-relaxed">
 									Delete original NZB file when metadata is manually removed from AltMount.
 								</span>
 							</div>
@@ -223,7 +223,7 @@ export function MetadataConfigSection({
 								<span className="label-text block break-words font-bold text-xs">
 									Clean Failed NZBs
 								</span>
-								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
+								<span className="mt-0.5 block break-words text-base-content/50 text-xs leading-relaxed">
 									Permanently delete NZBs that fail processing instead of moving to 'failed' folder.
 								</span>
 							</div>
@@ -246,7 +246,7 @@ export function MetadataConfigSection({
 										Dangerous
 									</div>
 								</div>
-								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
+								<span className="mt-0.5 block break-words text-base-content/50 text-xs leading-relaxed">
 									Delete original NZB immediately after metadata generation. Cannot re-scan without
 									re-upload.
 								</span>
@@ -259,7 +259,7 @@ export function MetadataConfigSection({
 				<div className="space-y-6 rounded-2xl border border-warning/20 bg-warning/5 p-6">
 					<div className="flex items-center gap-2 text-warning">
 						<ShieldAlert className="h-4 w-4" />
-						<h4 className="font-bold text-[10px] uppercase tracking-widest">Maintenance Utility</h4>
+						<h4 className="font-bold text-xs uppercase tracking-widest">Maintenance Utility</h4>
 					</div>
 
 					<div className="space-y-4">

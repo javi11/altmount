@@ -82,7 +82,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 							</h3>
 						</div>
 						{provider.username && (
-							<p className="cursor-pointer truncate text-[10px] text-base-content/40 blur-[1px] transition-all hover:blur-none">
+							<p className="cursor-pointer truncate text-base-content/40 text-xs blur-[1px] transition-all hover:blur-none">
 								@{provider.username}
 							</p>
 						)}
@@ -94,7 +94,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 
 				{/* Connection usage */}
 				<div className="mt-2 space-y-1">
-					<div className="flex items-center justify-between text-[10px]">
+					<div className="flex items-center justify-between text-xs">
 						<span className="text-base-content/50 uppercase tracking-tight">Pool Usage</span>
 						<span className="font-mono font-semibold">
 							{provider.used_connections} / {provider.max_connections}
@@ -111,7 +111,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 				<div className="mt-3 grid grid-cols-3 gap-1 border-base-200 border-t pt-3 text-center">
 					<div className="space-y-0.5">
 						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Speed</div>
-						<div className="truncate font-bold font-mono text-[10px] text-primary">
+						<div className="truncate font-bold font-mono text-primary text-xs">
 							{provider.current_speed_bytes_per_sec !== undefined
 								? formatSpeed(provider.current_speed_bytes_per_sec)
 								: "0 B/s"}
@@ -119,12 +119,12 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 					</div>
 					<div className="space-y-0.5">
 						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Ping</div>
-						<div className="font-bold font-mono text-[10px] text-info">{provider.ping_ms}ms</div>
+						<div className="font-bold font-mono text-info text-xs">{provider.ping_ms}ms</div>
 					</div>
 					<div className="space-y-0.5">
 						<div className="text-[8px] text-base-content/40 uppercase tracking-widest">Errors</div>
 						<div
-							className={`font-bold font-mono text-[10px] ${provider.error_count > 0 ? "text-error" : "text-base-content/20"}`}
+							className={`font-bold font-mono text-xs ${provider.error_count > 0 ? "text-error" : "text-base-content/20"}`}
 						>
 							{provider.error_count}
 						</div>
@@ -134,7 +134,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 				{/* Missing Articles */}
 				{provider.missing_count > 0 && (
 					<div className="mt-2 border-base-200 border-t pt-2">
-						<div className="flex items-center justify-between text-[10px]">
+						<div className="flex items-center justify-between text-xs">
 							<span className="text-base-content/50">Missing</span>
 							<div className="text-right">
 								<span
@@ -143,7 +143,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 									{provider.missing_count.toLocaleString()}
 								</span>
 								{provider.missing_rate_per_minute > 0 && (
-									<span className="ml-0.5 text-[9px] text-base-content/40">
+									<span className="ml-0.5 text-base-content/40 text-xs">
 										~{Math.round(provider.missing_rate_per_minute)}/min
 									</span>
 								)}
@@ -157,7 +157,7 @@ export function ProviderCard({ provider, className }: ProviderCardProps) {
 					<div className="mt-2">
 						<div className="alert alert-error rounded-md px-2 py-1.5">
 							<AlertTriangle className="h-3 w-3" />
-							<span className="text-[10px]">{provider.failure_reason}</span>
+							<span className="text-xs">{provider.failure_reason}</span>
 						</div>
 					</div>
 				)}

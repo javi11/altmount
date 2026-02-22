@@ -236,8 +236,8 @@ export function ProvidersConfigSection({
 			{formData.length === 0 ? (
 				<div className="rounded-2xl border-2 border-base-300 border-dashed bg-base-200/30 py-16 text-center">
 					<Wifi className="mx-auto mb-4 h-12 w-12 text-base-content/20" />
-					<h4 className="font-bold text-lg opacity-60">No Providers Configured</h4>
-					<p className="mb-6 text-sm opacity-40">Add a Usenet provider to enable downloading.</p>
+					<h4 className="font-bold text-base-content/80 text-lg">No Providers Configured</h4>
+					<p className="mb-6 text-base-content/60 text-sm">Add a Usenet provider to enable downloading.</p>
 					<button type="button" className="btn btn-primary px-8" onClick={handleCreate}>
 						Add First Provider
 					</button>
@@ -248,7 +248,7 @@ export function ProvidersConfigSection({
 						<div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-base-300/40 backdrop-blur-[2px]">
 							<div className="flex flex-col items-center gap-3">
 								<LoadingSpinner size="lg" />
-								<p className="font-black text-[10px] text-primary uppercase tracking-widest">
+								<p className="font-black text-primary text-xs uppercase tracking-widest">
 									Reordering...
 								</p>
 							</div>
@@ -267,14 +267,14 @@ export function ProvidersConfigSection({
 								onDrop={(e) => !isReordering && handleDrop(e, provider.id)}
 								onDragEnd={!isReordering ? handleDragEnd : undefined}
 								className={`group relative overflow-hidden rounded-2xl border-2 bg-base-100/50 transition-all duration-300 hover:shadow-md ${
-									isReordering ? "cursor-not-allowed opacity-60" : "cursor-move"
+									isReordering ? "cursor-not-allowed text-base-content/80" : "cursor-move"
 								} ${
 									provider.enabled
 										? provider.is_backup_provider
 											? "border-warning/20"
 											: "border-success/20"
 										: "border-base-300"
-								} ${draggedProvider === provider.id ? "scale-95 opacity-50 ring-2 ring-primary" : ""} ${
+								} ${draggedProvider === provider.id ? "scale-95 text-base-content/70 ring-2 ring-primary" : ""} ${
 									dragOverProvider === provider.id
 										? "translate-y-1 border-primary border-dashed bg-primary/5"
 										: ""
@@ -288,12 +288,12 @@ export function ProvidersConfigSection({
 								<div className="p-5 pl-7">
 									<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 										<div className="flex min-w-0 items-center gap-4">
-											<div className="rounded-lg bg-base-200/50 p-2 opacity-40 transition-opacity group-hover:opacity-100">
+											<div className="rounded-lg bg-base-200/50 p-2 text-base-content/60 transition-opacity group-hover:opacity-100">
 												<GripVertical className="h-4 w-4" />
 											</div>
 											<div className="min-w-0 flex-1">
 												<div className="flex items-center gap-2">
-													<span className="font-black font-mono text-[10px] opacity-30">
+													<span className="font-black font-mono text-base-content/50 text-xs">
 														#{index + 1}
 													</span>
 													<h4 className="break-all font-bold text-base text-base-content tracking-tight">
@@ -304,7 +304,7 @@ export function ProvidersConfigSection({
 													<div
 														className={`h-2 w-2 rounded-full ${provider.enabled ? "bg-success shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-base-300"}`}
 													/>
-													<span className="truncate font-bold text-[10px] uppercase tracking-wider opacity-50">
+													<span className="truncate font-bold text-base-content/70 text-xs uppercase tracking-wider">
 														{provider.port} • {provider.username}
 													</span>
 												</div>
@@ -313,7 +313,7 @@ export function ProvidersConfigSection({
 
 										<div className="flex flex-wrap items-center gap-2">
 											{provider.is_backup_provider && (
-												<div className="badge badge-warning badge-sm px-3 py-2 font-black text-[9px] uppercase tracking-widest shadow-sm">
+												<div className="badge badge-warning badge-sm px-3 py-2 font-black text-xs uppercase tracking-widest shadow-sm">
 													Backup
 												</div>
 											)}
@@ -321,7 +321,7 @@ export function ProvidersConfigSection({
 											<div className="join rounded-xl bg-base-200/50 p-0.5">
 												<button
 													type="button"
-													className={`btn btn-xs sm:btn-sm join-item border-none ${
+													className={`btn btn-sm sm:btn-sm join-item border-none ${
 														provider.enabled
 															? "bg-warning/10 text-warning hover:bg-warning/20"
 															: "bg-success/10 text-success hover:bg-success/20"
@@ -336,7 +336,7 @@ export function ProvidersConfigSection({
 												</button>
 												<button
 													type="button"
-													className="btn btn-xs sm:btn-sm join-item border-none bg-info/10 text-info hover:bg-info/20"
+													className="btn btn-sm sm:btn-sm join-item border-none bg-info/10 text-info hover:bg-info/20"
 													onClick={() => handleSpeedTest(provider)}
 													disabled={testingSpeedProviderId === provider.id || !provider.enabled}
 												>
@@ -348,14 +348,14 @@ export function ProvidersConfigSection({
 												</button>
 												<button
 													type="button"
-													className="btn btn-xs sm:btn-sm join-item border-none bg-base-content/5 text-base-content hover:bg-base-content/10"
+													className="btn btn-sm sm:btn-sm join-item border-none bg-base-content/5 text-base-content hover:bg-base-content/10"
 													onClick={() => handleEdit(provider)}
 												>
 													<Edit className="h-3.5 w-3.5" />
 												</button>
 												<button
 													type="button"
-													className="btn btn-xs sm:btn-sm join-item border-none bg-error/10 text-error hover:bg-error/20"
+													className="btn btn-sm sm:btn-sm join-item border-none bg-error/10 text-error hover:bg-error/20"
 													onClick={() => handleDelete(provider.id)}
 													disabled={deletingProviderId === provider.id}
 												>
@@ -372,7 +372,7 @@ export function ProvidersConfigSection({
 									{/* Quick Details Grid */}
 									<div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 rounded-xl bg-base-200/30 p-4 text-[11px] md:grid-cols-5">
 										<div className="min-w-0">
-											<span className="mb-1 block font-black text-[9px] uppercase tracking-widest opacity-30">
+											<span className="mb-1 block font-black text-base-content/50 text-xs uppercase tracking-widest">
 												Max Conn
 											</span>
 											<div className="flex items-center gap-2">
@@ -393,7 +393,7 @@ export function ProvidersConfigSection({
 											</div>
 										</div>
 										<div className="min-w-0">
-											<span className="mb-1 block font-black text-[9px] uppercase tracking-widest opacity-30">
+											<span className="mb-1 block font-black text-base-content/50 text-xs uppercase tracking-widest">
 												Pipeline
 											</span>
 											<div className="flex items-center gap-2">
@@ -414,7 +414,7 @@ export function ProvidersConfigSection({
 											</div>
 										</div>
 										<div className="min-w-0">
-											<span className="mb-1 block font-black text-[9px] uppercase tracking-widest opacity-30">
+											<span className="mb-1 block font-black text-base-content/50 text-xs uppercase tracking-widest">
 												Role
 											</span>
 											<div
@@ -424,7 +424,7 @@ export function ProvidersConfigSection({
 											</div>
 										</div>
 										<div className="min-w-0">
-											<span className="mb-1 block font-black text-[9px] uppercase tracking-widest opacity-30">
+											<span className="mb-1 block font-black text-base-content/50 text-xs uppercase tracking-widest">
 												Latency
 											</span>
 											<div className="flex h-6 items-center font-bold font-mono">
@@ -432,7 +432,7 @@ export function ProvidersConfigSection({
 											</div>
 										</div>
 										<div className="col-span-2 min-w-0 md:col-span-1">
-											<span className="mb-1 block font-black text-[9px] uppercase tracking-widest opacity-30">
+											<span className="mb-1 block font-black text-base-content/50 text-xs uppercase tracking-widest">
 												Last Speed
 											</span>
 											<div className="flex h-6 items-center truncate font-bold font-mono">

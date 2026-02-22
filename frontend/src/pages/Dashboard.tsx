@@ -100,7 +100,7 @@ export function Dashboard() {
 							<RotateCcw className="h-4 w-4" />
 						)}
 						Reset Stats
-						<ChevronDown className="h-3 w-3 opacity-50" />
+						<ChevronDown className="h-3 w-3 text-base-content/70" />
 					</div>
 					<ul className="dropdown-content menu z-[50] mt-1 w-52 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
 						<li>
