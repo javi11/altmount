@@ -76,7 +76,7 @@ export function LibraryScanStatus({
 
 	if (variant === "sidebar") {
 		return (
-			<div className="card border border-base-200 bg-base-100 shadow-sm">
+			<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 				<div className="card-body p-4">
 					<div className="mb-3 flex items-center justify-between">
 						<h3 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -316,7 +316,7 @@ export function LibraryScanStatus({
 						{!status.is_running && (
 							<div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
 								{status.last_sync_result && (
-									<div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
+									<div className="rounded-xl border-2 border-base-300/80 bg-base-200/60 p-4">
 										<div className="mb-3 flex items-center gap-2 font-bold text-base-content/60 text-xs uppercase tracking-widest">
 											<Search className="h-3 w-3" />
 											Last Scan Results
@@ -350,7 +350,7 @@ export function LibraryScanStatus({
 									</div>
 								)}
 
-								<div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
+								<div className="rounded-xl border-2 border-base-300/80 bg-base-200/60 p-4">
 									<div className="mb-3 flex items-center gap-2 font-bold text-base-content/60 text-xs uppercase tracking-widest">
 										<Clock className="h-3 w-3" />
 										Next Scheduled Scan

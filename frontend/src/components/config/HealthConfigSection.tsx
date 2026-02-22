@@ -104,7 +104,7 @@ export function HealthConfigSection({
 
 			<div className="space-y-8">
 				{/* Enable Health Toggle */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Master Engine</h4>
@@ -162,7 +162,7 @@ export function HealthConfigSection({
 				</div>
 
 				{/* Directory Configuration */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend whitespace-normal break-words font-semibold md:whitespace-nowrap">
 							Library Parent Directory
@@ -176,10 +176,10 @@ export function HealthConfigSection({
 								placeholder="/media/library"
 								onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
 							/>
-							<p className="label break-words text-base-content/50 text-xs leading-relaxed">
+							<div className="mt-2 whitespace-normal text-base-content/50 text-xs leading-relaxed">
 								Path where your permanent media folders (/movies, /tv) are located. Required for
 								mapping virtual files to physical ARR library paths.
-							</p>
+							</div>
 						</div>
 					</fieldset>
 
@@ -247,7 +247,7 @@ export function HealthConfigSection({
 				</div>
 
 				{/* Advanced Performance & Logic */}
-				<div className="collapse-arrow collapse rounded-2xl border border-base-300 bg-base-200/30">
+				<div className="collapse-arrow collapse rounded-2xl border-2 border-base-300/80 bg-base-200/60">
 					<input type="checkbox" />
 					<div className="collapse-title font-bold text-base-content/80 text-sm uppercase tracking-widest">
 						Performance & Deep Validation
