@@ -72,7 +72,7 @@ export function WebDAVConfigSection({
 
 			<div className="space-y-8">
 				{/* Network Configuration */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<Globe className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -116,7 +116,7 @@ export function WebDAVConfigSection({
 				</div>
 
 				{/* Credentials Section */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<Key className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -150,7 +150,7 @@ export function WebDAVConfigSection({
 				</div>
 
 				{/* Mount Path Integration */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<Server className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -170,9 +170,11 @@ export function WebDAVConfigSection({
 								onChange={(e) => handleInputChange("mount_path", e.target.value)}
 								placeholder="/mnt/remotes/altmount"
 							/>
-							<div className="mt-2 whitespace-normal text-base-content/50 text-xs leading-relaxed">
-								Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual
-								files. Required for healthy repairs.
+							<div className="label p-0">
+								<span className="break-words text-base-content/50 text-xs leading-relaxed">
+									Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual
+									files. Required for healthy repairs.
+								</span>
 							</div>
 						</div>
 					</fieldset>

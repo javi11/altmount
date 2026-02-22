@@ -671,7 +671,7 @@ export function HealthPage() {
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
 				{/* Sidebar Navigation */}
 				<div className="lg:col-span-3 xl:col-span-2">					<div className="space-y-6">
-					<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+					<div className="card border border-base-200 bg-base-100 shadow-sm">
 						<div className="card-body p-2 sm:p-4">
 							<div>
 								<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -727,7 +727,7 @@ export function HealthPage() {
 				{/* Content Area */}
 				<div className="lg:col-span-9 xl:col-span-10">					<div className="space-y-6">
 					{/* Section Description Card */}
-					<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+					<div className="card border border-base-200 bg-base-100 shadow-sm">
 						<div className="card-body p-4 sm:p-6">
 							<div className="flex items-center space-x-4">
 								<div className="rounded-xl bg-primary/10 p-3">
@@ -752,7 +752,7 @@ export function HealthPage() {
 						<div className="space-y-6">
 							<HealthStatsCards stats={stats} />
 
-							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+							<div className="card border border-base-200 bg-base-100 shadow-sm">
 								<div className="card-body p-4 sm:p-8">
 									<HealthFilters
 										searchTerm={searchTerm}
@@ -825,7 +825,7 @@ export function HealthPage() {
 							/>
 						</div>
 					) : (
-						<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+						<div className="card border border-base-200 bg-base-100 shadow-sm">
 							<div className="card-body p-4 sm:p-8">
 								<ProviderHealth />
 							</div>

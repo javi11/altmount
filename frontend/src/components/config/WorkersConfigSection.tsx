@@ -81,7 +81,7 @@ export function ImportConfigSection({
 
 			<div className="space-y-8">
 				{/* Worker Core Configuration */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Concurrency
@@ -176,7 +176,7 @@ export function ImportConfigSection({
 				</div>
 
 				{/* Validation Slider */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Validation
@@ -231,10 +231,10 @@ export function ImportConfigSection({
 								onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
 							/>
 							<div className="min-w-0 flex-1">
-								<span className="block whitespace-normal break-words font-bold text-xs">
+								<span className="label-text block whitespace-normal break-words font-bold text-xs">
 									Lenient Import (Instant)
 								</span>
-								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+								<span className="mt-0.5 block break-words text-base-content/50 text-xs leading-relaxed">
 									Bypass validation entirely for immediate exposure in the library. Recommended only
 									for high-completion providers.
 								</span>
@@ -244,7 +244,7 @@ export function ImportConfigSection({
 				</div>
 
 				{/* Strategy Configuration */}
-				<div className="space-y-8 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="space-y-8 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Library Strategy
@@ -347,7 +347,7 @@ export function ImportConfigSection({
 				</div>
 
 				{/* File Extensions */}
-				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
 					<div className="flex items-center gap-2">
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Filters
