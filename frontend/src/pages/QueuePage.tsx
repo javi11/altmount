@@ -485,7 +485,7 @@ export function QueuePage() {
 					{/* Sidebar Navigation */}
 					<div className="lg:col-span-1">
 						<div className="space-y-6">
-							<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-2 sm:p-4">
 									<div>
 										<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -545,7 +545,7 @@ export function QueuePage() {
 							</div>
 
 							{/* Search Mini-Card */}
-							<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-4">
 									<h3 className="mb-3 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 										Search
@@ -631,7 +631,7 @@ export function QueuePage() {
 							)}
 
 							{/* Queue Table Card */}
-							<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-0">
 									{isLoading ? (
 										<div className="p-12">

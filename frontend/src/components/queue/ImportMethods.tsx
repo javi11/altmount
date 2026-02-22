@@ -60,7 +60,7 @@ export function ImportMethods() {
 		<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
 			{/* Sidebar Navigation */}
 			<div className="lg:col-span-1">
-				<div className="card border border-base-200 bg-base-100 shadow-sm">
+				<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 					<div className="card-body p-2 sm:p-4">
 						<div>
 							<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -101,7 +101,7 @@ export function ImportMethods() {
 
 			{/* Content Area */}
 			<div className="lg:col-span-3">
-				<div className="card min-h-[500px] border border-base-200 bg-base-100 shadow-sm">
+				<div className="card min-h-[500px] border-2 border-base-300/50 bg-base-100 shadow-md">
 					<div className="card-body p-4 sm:p-8">
 						{/* Section Header */}
 						<div className="mb-8 border-base-200 border-b pb-6">
@@ -821,7 +821,7 @@ function NzbDavImportSection() {
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
-						<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							{inputMethod === "server" ? (
 								<fieldset className="fieldset min-w-0">
 									<legend className="fieldset-legend font-semibold text-xs">

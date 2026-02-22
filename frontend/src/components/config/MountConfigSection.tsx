@@ -372,7 +372,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+					<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-semibold">Local Mount Path</legend>
 							<div className="flex flex-col gap-3">

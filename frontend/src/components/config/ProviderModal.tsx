@@ -282,7 +282,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					</div>
 
 					{/* Security Settings */}
-					<div className="space-y-4 rounded-2xl border border-base-300 bg-base-200/30 p-5">
+					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
 						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 							Options & Security
 						</h4>

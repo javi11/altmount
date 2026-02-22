@@ -421,7 +421,7 @@ export function ConfigurationPage() {
 				</div>
 
 				{/* Modern Content Card */}
-				<div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] overflow-hidden rounded-2xl border border-base-200 bg-base-100 shadow-sm">
+				<div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] overflow-hidden rounded-2xl border-2 border-base-300/50 bg-base-100 shadow-md">
 					<div className="card-body p-4 sm:p-10">
 						{/* Modern Section Header */}
 						<div className="mb-10 border-base-200 border-b pb-8">

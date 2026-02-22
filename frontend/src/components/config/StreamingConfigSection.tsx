@@ -71,7 +71,7 @@ export function StreamingConfigSection({
 
 			<div className="space-y-8">
 				{/* Prefetch Slider */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
 							<h4 className="font-bold text-base-content text-sm">Segment Prefetch</h4>
@@ -136,7 +136,7 @@ export function StreamingConfigSection({
 
 			<div className="space-y-8">
 				{/* Enabled toggle */}
-				<div className="flex items-center justify-between rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="flex items-center justify-between rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Enable Segment Cache</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
@@ -153,7 +153,7 @@ export function StreamingConfigSection({
 				</div>
 
 				{/* Cache Path */}
-				<div className="space-y-3 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-3 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="min-w-0">
 						<h4 className="font-bold text-base-content text-sm">Cache Path</h4>
 						<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
@@ -172,7 +172,7 @@ export function StreamingConfigSection({
 				</div>
 
 				{/* Max Size slider */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
 							<h4 className="font-bold text-base-content text-sm">Maximum Cache Size</h4>
@@ -212,7 +212,7 @@ export function StreamingConfigSection({
 				</div>
 
 				{/* Expiry slider */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
 							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm">Cache Expiry</h4>
@@ -243,9 +243,9 @@ export function StreamingConfigSection({
 						/>
 						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
 							<span>1h</span>
-							<span>24h</span>
-							<span>72h</span>
-							<span>120h</span>
+							<span>42h</span>
+							<span>84h</span>
+							<span>126h</span>
 							<span>168h</span>
 						</div>
 					</div>

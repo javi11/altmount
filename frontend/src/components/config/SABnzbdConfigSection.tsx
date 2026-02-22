@@ -180,7 +180,7 @@ export function SABnzbdConfigSection({
 
 			<div className="space-y-8">
 				{/* Enable Toggle */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">
@@ -203,7 +203,7 @@ export function SABnzbdConfigSection({
 				{formData.enabled && (
 					<>
 						{/* Basic Paths */}
-						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							<div className="flex items-center gap-2">
 								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									Base Config
@@ -247,7 +247,7 @@ export function SABnzbdConfigSection({
 						</div>
 
 						{/* External Fallback */}
-						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							<div className="flex items-center gap-2">
 								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									Failover Engine
@@ -315,7 +315,7 @@ export function SABnzbdConfigSection({
 						</div>
 
 						{/* Categories */}
-						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							<div className="flex items-center justify-between gap-4">
 								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									Category Mapping

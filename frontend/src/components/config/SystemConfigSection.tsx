@@ -127,7 +127,7 @@ export function SystemConfigSection({
 
 			<div className="space-y-8">
 				{/* Logging Configuration */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Terminal className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -210,7 +210,7 @@ export function SystemConfigSection({
 				</div>
 
 				{/* Performance Profiler */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<Terminal className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
@@ -238,7 +238,7 @@ export function SystemConfigSection({
 				</div>
 
 				{/* Security Section */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
 						<ShieldCheck className="h-4 w-4 text-base-content/60" />
 						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">

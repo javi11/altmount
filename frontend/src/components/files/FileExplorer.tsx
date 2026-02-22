@@ -332,7 +332,7 @@ export function FileExplorer({
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
-				<div className="min-h-[300px] rounded-2xl border border-base-300 bg-base-200/30 p-2 sm:p-6">
+				<div className="min-h-[300px] rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-2 sm:p-6">
 					{searchTerm && (isRecentView ? historyFiles : directory) && (
 						<div className="mb-6 flex items-center gap-2 px-2 text-base-content/60 text-xs">
 							<Info className="h-3 w-3" />
