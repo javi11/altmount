@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/pathutil"
 )
 
@@ -1049,11 +1050,12 @@ func (s *Server) calculateItemBasePath() string {
 
 // calculateHistoryStoragePath calculates the final storage path to report to SABnzbd history for Sonarr/Radarr.
 func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, basePath string) string {
-	if s.configManager == nil {
+	if s.configManager == nil || item.StoragePath == nil || *item.StoragePath == "" {
 		return basePath
 	}
 
 	cfg := s.configManager.GetConfig()
+	storagePath := *item.StoragePath
 	
 	// Determine category folder
 	category := config.DefaultCategoryName
@@ -1061,7 +1063,13 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 		category = *item.Category
 	}
 	
-	// If the strategy is None, we return {MountPath}/{CompleteDir}/{Category}
+	// Get the raw relative path by stripping the mount path
+	resultingPath := storagePath
+	if strings.HasPrefix(storagePath, cfg.MountPath) {
+		resultingPath = strings.TrimPrefix(storagePath, cfg.MountPath)
+	}
+
+	// For Strategy None, it relies on complete_dir, but we also want the relative job folder path. 
 	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
 		pathComponents := []string{cfg.MountPath}
 		
@@ -1070,20 +1078,80 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 		}
 		
 		// The virtual file system places files directly inside the category folder
-		// under the complete directory
-		pathComponents = append(pathComponents, category)
+		// under the complete directory. The file itself might be in a job folder.
 		
-		return filepath.ToSlash(filepath.Clean(filepath.Join(pathComponents...)))
+		// Ensure category is respected 
+		cleanPath := strings.TrimPrefix(resultingPath, "/")
+		if cfg.SABnzbd.CompleteDir != "" {
+			cleanCompleteDir := strings.TrimPrefix(cfg.SABnzbd.CompleteDir, "/")
+			if strings.HasPrefix(cleanPath, cleanCompleteDir+"/") {
+				cleanPath = strings.TrimPrefix(cleanPath, cleanCompleteDir+"/")
+			} else if cleanPath == cleanCompleteDir {
+				cleanPath = ""
+			}
+		}
+
+		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
+			pathComponents = append(pathComponents, category)
+		}
+		
+		fullPath := filepath.Join(append(pathComponents, cleanPath)...)
+		fullPath = filepath.ToSlash(filepath.Clean(fullPath))
+		
+		// We only want to report the directory, not the actual file
+		// Since some files might not have popular extensions or might be folders,
+		// we check if it is explicitly a file based on PopularExtensions.
+		if utils.HasPopularExtension(fullPath) {
+			return filepath.Dir(fullPath)
+		}
+		return fullPath
 	}
 
 	// For explicit import strategies (symlink, hardlink, copy, move, strm), 
-	// the post-processor places it into {ImportDir}/{Category}.
-	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		return filepath.ToSlash(filepath.Clean(filepath.Join(*cfg.Import.ImportDir, category)))
+	// the post-processor strips complete_dir and places it into {ImportDir}/{Category}/{RelativeJobFolder}.
+	
+	// Strip SABnzbd CompleteDir prefix from resultingPath if present
+	if cfg.SABnzbd.CompleteDir != "" {
+		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
+		if !strings.HasPrefix(completeDir, "/") {
+			completeDir = "/" + completeDir
+		}
+
+		checkPath := resultingPath
+		if !strings.HasPrefix(checkPath, "/") {
+			checkPath = "/" + checkPath
+		}
+
+		if strings.HasPrefix(checkPath, completeDir) {
+			if len(checkPath) == len(completeDir) {
+				resultingPath = "/"
+			} else if checkPath[len(completeDir)] == '/' {
+				resultingPath = checkPath[len(completeDir):]
+			}
+		}
+	}
+
+	// Ensure the resulting path respects the category
+	cleanPath := strings.TrimPrefix(resultingPath, "/")
+	if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
+		resultingPath = filepath.Join(category, cleanPath)
 	}
 	
-	// Fallback if import_dir is somehow not set (should not happen in practice with these strategies)
-	return filepath.ToSlash(filepath.Clean(filepath.Join(cfg.MountPath, category)))
+	// Determine the base path for these strategies
+	stratBasePath := cfg.MountPath
+	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		stratBasePath = *cfg.Import.ImportDir
+	}
+
+	fullStoragePath := filepath.Join(stratBasePath, strings.TrimPrefix(resultingPath, "/"))
+	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
+	
+	// Return the directory, not the file
+	if utils.HasPopularExtension(fullStoragePath) {
+		return filepath.Dir(fullStoragePath)
+	}
+	
+	return fullStoragePath
 }
 
 // normalizeURL normalizes a URL for comparison by removing trailing slashes
