@@ -13,8 +13,7 @@ import (
 	"github.com/javi11/altmount/internal/fuse/backend"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 
-	// Register backends via init()
-	_ "github.com/javi11/altmount/internal/fuse/backend/cgofuse"
+	// Register backends via init() (cgofuse registered in register_cgofuse.go, gated by build tags)
 	_ "github.com/javi11/altmount/internal/fuse/backend/hanwen"
 )
 
