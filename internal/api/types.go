@@ -365,6 +365,7 @@ type ImportHistoryResponse struct {
 	FileName    string    `json:"file_name"`
 	FileSize    int64     `json:"file_size"`
 	VirtualPath string    `json:"virtual_path"`
+	LibraryPath *string   `json:"library_path,omitempty"`
 	Category    *string   `json:"category"`
 	CompletedAt time.Time `json:"completed_at"`
 }
@@ -663,6 +664,7 @@ func ToImportHistoryResponse(h *database.ImportHistory) *ImportHistoryResponse {
 		FileName:    h.FileName,
 		FileSize:    h.FileSize,
 		VirtualPath: h.VirtualPath,
+		LibraryPath: h.LibraryPath,
 		Category:    h.Category,
 		CompletedAt: h.CompletedAt,
 	}

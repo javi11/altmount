@@ -67,6 +67,7 @@ export function FileExplorer({
 			lastmod: item.completed_at,
 			size: item.file_size,
 			type: "file" as const,
+			library_path: item.library_path,
 		}));
 	}, [history]);
 

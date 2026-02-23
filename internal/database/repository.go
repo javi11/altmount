@@ -985,11 +985,12 @@ func (r *Repository) AddImportHistory(ctx context.Context, history *ImportHistor
 // ListImportHistory retrieves import history items with optional filtering and pagination
 func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, search string, category string) ([]*ImportHistory, error) {
 	query := `
-		SELECT id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, completed_at
-		FROM import_history
-		WHERE (? = '' OR nzb_name LIKE ? OR file_name LIKE ? OR virtual_path LIKE ?)
-		  AND (? = '' OR category = ?)
-		ORDER BY completed_at DESC
+		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE (? = '' OR h.nzb_name LIKE ? OR h.file_name LIKE ? OR h.virtual_path LIKE ?)
+		  AND (? = '' OR h.category = ?)
+		ORDER BY h.completed_at DESC
 		LIMIT ? OFFSET ?
 	`
 
@@ -1003,7 +1004,7 @@ func (r *Repository) ListImportHistory(ctx context.Context, limit, offset int, s
 	var history []*ImportHistory
 	for rows.Next() {
 		var h ImportHistory
-		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.Category, &h.CompletedAt)
+		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan import history: %w", err)
 		}
@@ -1142,13 +1143,14 @@ func (r *Repository) GetImportHistory(ctx context.Context, days int) ([]*ImportD
 // GetImportHistoryItem retrieves a specific import history item by ID
 func (r *Repository) GetImportHistoryItem(ctx context.Context, id int64) (*ImportHistory, error) {
 	query := `
-		SELECT id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, completed_at
-		FROM import_history
-		WHERE id = ?
+		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		WHERE h.id = ?
 	`
 
 	var h ImportHistory
-	err := r.db.QueryRowContext(ctx, query, id).Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.Category, &h.CompletedAt)
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil

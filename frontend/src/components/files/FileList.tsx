@@ -218,15 +218,14 @@ export function FileList({
 						style={{
 							transform: `translateY(${virtualScrolling.offsetY}px)`,
 						}}
-						className={`grid gap-4 ${
-							itemsPerRow === 1
+						className={`grid gap-4 ${itemsPerRow === 1
 								? "grid-cols-1"
 								: itemsPerRow === 2
 									? "grid-cols-2"
 									: itemsPerRow === 3
 										? "grid-cols-3"
 										: "grid-cols-4"
-						}`}
+							}`}
 					>
 						{visibleFiles.map((file) => (
 							<FileCard
@@ -300,16 +299,28 @@ function FileCard({
 						aria-label={`${file.type === "directory" ? "Open folder" : "Open file"} ${file.basename}`}
 					>
 						{getFileIcon(file)}
-						<div className="min-w-0 flex-1">
+						<div className="min-w-0 flex-1 text-left">
 							<h3
-								className={`truncate font-medium ${
-									file.type === "directory"
+								className={`truncate font-medium ${file.type === "directory"
 										? "text-primary hover:text-primary-focus"
 										: "text-base-content"
-								}`}
+									}`}
+								title={file.basename}
 							>
 								{file.basename}
 							</h3>
+							{file.type === "file" && (
+								<div className="mt-1 flex flex-col text-xs text-base-content/50">
+									<span className="truncate" title={`Virtual Path: ${file.filename}`}>
+										{file.filename}
+									</span>
+									{file.library_path && (
+										<span className="truncate mt-0.5 text-base-content/70" title={`Library Path: ${file.library_path}`}>
+											↳ {file.library_path}
+										</span>
+									)}
+								</div>
+							)}
 						</div>
 					</button>
 					<FileActions
