@@ -1,38 +1,45 @@
 package fuse
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
 	"sync/atomic"
 	"time"
 
-	"github.com/hanwen/go-fuse/v2/fs"
-	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/javi11/altmount/internal/config"
+	"github.com/javi11/altmount/internal/fuse/backend"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
+
+	// Register backends via init()
+	_ "github.com/javi11/altmount/internal/fuse/backend/cgofuse"
+	_ "github.com/javi11/altmount/internal/fuse/backend/hanwen"
 )
 
-// Server manages the FUSE mount
+// StreamTracker is the subset of stream tracking needed by the FUSE layer.
+// *api.StreamTracker satisfies this interface.
+type StreamTracker = backend.StreamTracker
+
+// Server manages the FUSE mount, delegating to a pluggable backend.
 type Server struct {
 	mountPoint    string
 	nzbfs         *nzbfilesystem.NzbFilesystem
 	logger        *slog.Logger
-	server        *fuse.Server
 	config        config.FuseConfig
 	streamTracker StreamTracker
+	backendType   backend.Type
+
+	be backend.Backend
 
 	// ValidateMount goroutine leak guard
 	validating   atomic.Int32
 	lastHealthy  atomic.Bool
-	lastHealthTS atomic.Int64 // unix nano timestamp of last validation
+	lastHealthTS atomic.Int64
 }
 
 // NewServer creates a new FUSE server instance.
-// Takes NzbFilesystem directly (no ContextAdapter needed).
 func NewServer(
 	mountPoint string,
 	nzbfs *nzbfilesystem.NzbFilesystem,
@@ -40,16 +47,30 @@ func NewServer(
 	cfg config.FuseConfig,
 	st StreamTracker,
 ) *Server {
+	bt := resolveBackendType(cfg.Backend)
+
 	return &Server{
 		mountPoint:    mountPoint,
 		nzbfs:         nzbfs,
 		logger:        logger,
 		config:        cfg,
 		streamTracker: st,
+		backendType:   bt,
 	}
 }
 
-// getIDFromEnv parses a numeric ID from an environment variable with a default fallback
+// resolveBackendType determines the backend type from config, env var, or platform default.
+func resolveBackendType(cfgBackend string) backend.Type {
+	if cfgBackend != "" {
+		return backend.Type(cfgBackend)
+	}
+	if env := os.Getenv("ALTMOUNT_FUSE_BACKEND"); env != "" {
+		return backend.Type(env)
+	}
+	return backend.DefaultType()
+}
+
+// getIDFromEnv parses a numeric ID from an environment variable with a default fallback.
 func getIDFromEnv(key string, defaultID int) int {
 	if val := os.Getenv(key); val != "" {
 		if id, err := strconv.Atoi(val); err == nil {
@@ -60,126 +81,54 @@ func getIDFromEnv(key string, defaultID int) int {
 }
 
 // Mount mounts the filesystem and starts serving.
-// The onReady callback is called after the kernel mount is confirmed live (via WaitMount).
+// The onReady callback is called after the kernel mount is confirmed live.
 // This method blocks until the filesystem is unmounted.
 func (s *Server) Mount(onReady func()) error {
-	// Try to cleanup stale mount first
-	s.CleanupMount()
-
 	uid := uint32(getIDFromEnv("PUID", 1000))
 	gid := uint32(getIDFromEnv("PGID", 1000))
 
-	root := NewDir(s.nzbfs, "", s.logger, uid, gid, s.streamTracker)
-
-	// Configure FUSE options
-	attrTimeout := time.Duration(s.config.AttrTimeoutSeconds) * time.Second
-	entryTimeout := time.Duration(s.config.EntryTimeoutSeconds) * time.Second
-
-	if attrTimeout == 0 {
-		attrTimeout = 30 * time.Second
-	}
-	if entryTimeout == 0 {
-		entryTimeout = 1 * time.Second
+	cfg := backend.Config{
+		MountPoint:    s.mountPoint,
+		NzbFs:         s.nzbfs,
+		FuseConfig:    s.config,
+		StreamTracker: s.streamTracker,
+		UID:           uid,
+		GID:           gid,
 	}
 
-	maxReadAhead := s.config.MaxReadAheadMB * 1024 * 1024
-	if maxReadAhead == 0 {
-		maxReadAhead = 128 * 1024 // 128KB default (matches rclone)
-	}
-
-	opts := &fs.Options{
-		MountOptions: fuse.MountOptions{
-			AllowOther:           s.config.AllowOther,
-			Name:                 "altmount",
-			Debug:                s.config.Debug,
-			MaxReadAhead:         maxReadAhead,
-			MaxBackground:        64,   // Allow more concurrent async I/O (default 12)
-			DisableXAttrs:        true,
-			IgnoreSecurityLabels: true,
-			DisableReadDirPlus:   true,  // Faster directory listings (skip per-entry stat)
-			DirectMount:          true,  // Bypass fusermount helper on Linux for faster mount
-			MaxWrite:             1024 * 1024, // 1MB
-		},
-		EntryTimeout:    &entryTimeout,
-		AttrTimeout:     &attrTimeout,
-		NegativeTimeout: &entryTimeout,
-	}
-
-	server, err := fs.Mount(s.mountPoint, root, opts)
+	be, err := backend.Create(s.backendType, cfg)
 	if err != nil {
-		return fmt.Errorf("failed to mount FUSE filesystem: %w", err)
+		return fmt.Errorf("failed to create FUSE backend %q: %w", s.backendType, err)
 	}
 
-	s.server = server
+	s.be = be
+	s.logger.Info("Using FUSE backend", "type", be.Type(), "mountpoint", s.mountPoint)
 
-	// Wait until the kernel mount is actually ready before declaring success
-	if err := s.server.WaitMount(); err != nil {
-		s.logger.Error("WaitMount failed, unmounting", "error", err)
-		_ = s.server.Unmount()
-		return fmt.Errorf("FUSE mount not ready: %w", err)
-	}
-
-	s.logger.Info("FUSE filesystem mounted and ready", "mountpoint", s.mountPoint)
-
-	if onReady != nil {
-		onReady()
-	}
-
-	// Block until unmount
-	s.server.Wait()
-
-	return nil
+	return be.Mount(context.Background(), onReady)
 }
 
-// Unmount gracefully unmounts the filesystem, falling back to force unmount
+// Unmount gracefully unmounts the filesystem, falling back to force unmount.
 func (s *Server) Unmount() error {
 	s.logger.Info("Unmounting FUSE filesystem", "mountpoint", s.mountPoint)
 
-	if s.server != nil {
-		err := s.server.Unmount()
-		if err == nil {
-			return nil
-		}
-		s.logger.Warn("Standard unmount failed, attempting force unmount", "error", err)
+	if s.be != nil {
+		return s.be.Unmount()
 	}
-
-	return s.ForceUnmount()
+	return nil
 }
 
-// ForceUnmount attempts to lazy/force unmount the mountpoint using platform-specific commands
+// ForceUnmount attempts to lazy/force unmount the mountpoint using platform-specific commands.
 func (s *Server) ForceUnmount() error {
-	var methods [][]string
-
-	if runtime.GOOS == "darwin" {
-		methods = [][]string{
-			{"umount", "-f", s.mountPoint},
-			{"diskutil", "unmount", "force", s.mountPoint},
-			{"umount", s.mountPoint},
-		}
-	} else {
-		methods = [][]string{
-			{"fusermount", "-uz", s.mountPoint},
-			{"umount", s.mountPoint},
-			{"umount", "-l", s.mountPoint},
-			{"fusermount3", "-uz", s.mountPoint},
-		}
+	if s.be != nil {
+		return s.be.ForceUnmount()
 	}
-
-	for _, method := range methods {
-		if err := exec.Command(method[0], method[1:]...).Run(); err == nil {
-			s.logger.Info("Successfully force unmounted", "command", method, "path", s.mountPoint)
-			return nil
-		}
-	}
-
-	return fmt.Errorf("all force unmount attempts failed for %s", s.mountPoint)
+	return nil
 }
 
 // ValidateMount checks if the mount point is responsive by stat-ing the directory with a timeout.
 // Uses an atomic guard to prevent multiple concurrent os.Stat goroutines (which leak when the
 // mount is stuck). If a validation is already in-flight, returns the last cached result.
 func (s *Server) ValidateMount() (bool, error) {
-	// If another goroutine is already validating, return cached result
 	if !s.validating.CompareAndSwap(0, 1) {
 		healthy := s.lastHealthy.Load()
 		if !healthy {
@@ -210,14 +159,29 @@ func (s *Server) ValidateMount() (bool, error) {
 		s.lastHealthTS.Store(time.Now().UnixNano())
 		return true, nil
 	case <-time.After(5 * time.Second):
-		// Goroutine is leaked but guarded — only one can be in-flight at a time
 		s.lastHealthy.Store(false)
 		s.lastHealthTS.Store(time.Now().UnixNano())
 		return false, fmt.Errorf("mount point not responding (stat timed out after 5s)")
 	}
 }
 
-// CleanupMount checks for and cleans up stale mounts at the mountpoint
+// CleanupMount checks for and cleans up stale mounts at the mountpoint.
 func (s *Server) CleanupMount() {
 	_ = s.ForceUnmount()
+}
+
+// RefreshDirectory invalidates the kernel cache for a named directory entry.
+// Only works with backends that implement backend.Refresher (e.g. hanwen).
+func (s *Server) RefreshDirectory(name string) {
+	if r, ok := s.be.(backend.Refresher); ok {
+		r.RefreshDirectory(name)
+	}
+}
+
+// BackendType returns the active backend type.
+func (s *Server) BackendType() backend.Type {
+	if s.be != nil {
+		return s.be.Type()
+	}
+	return s.backendType
 }

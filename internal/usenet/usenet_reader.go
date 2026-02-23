@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -65,11 +66,14 @@ type UsenetReader struct {
 	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
 	metricsTracker MetricsTracker
 	streamID       string
-	segmentStore   SegmentStore  // optional, nil = no caching
-	wakeDownloader chan struct{} // Signals downloadManager when reader advances
+	segmentStore SegmentStore // optional, nil = no caching
+	cond         *sync.Cond  // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
 	nextToDownload int // Index of next segment to schedule
+
+	// Tracing counters (atomic, no lock needed)
+	inFlight atomic.Int32 // goroutines actively downloading right now
 
 	mu sync.Mutex
 }
@@ -101,8 +105,9 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
-		wakeDownloader: make(chan struct{}, 1),
 	}
+
+	ur.cond = sync.NewCond(&ur.mu)
 
 	ur.wg.Go(func() {
 		ur.downloadManager(ctx)
@@ -125,6 +130,9 @@ func (b *UsenetReader) Start() {
 func (b *UsenetReader) Close() error {
 	b.closeOnce.Do(func() {
 		b.cancel()
+
+		// Unblock downloadManager if it's waiting on the cond
+		b.cond.Broadcast()
 
 		// Unblock any pending reads waiting for data
 		if b.rg != nil {
@@ -229,10 +237,7 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 				s, err = rg.Next()
 				if err == nil {
 					// Wake download manager — room for more prefetch
-					select {
-					case b.wakeDownloader <- struct{}{}:
-					default:
-					}
+					b.cond.Signal()
 				}
 
 				if err != nil {
@@ -295,6 +300,10 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 	// Cache HIT: skip NNTP entirely
 	if b.segmentStore != nil {
 		if data, ok := b.segmentStore.Get(seg.Id); ok {
+			b.log.DebugContext(ctx, "segment cache hit",
+				"segment_id", seg.Id,
+				"size_bytes", len(data),
+			)
 			if b.metricsTracker != nil {
 				b.metricsTracker.IncArticlesDownloaded()
 				if b.streamID != "" {
@@ -305,22 +314,44 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		}
 	}
 
+	// Fix B: hoist pool getter outside retry loop — pool errors are not retriable
+	// per-download-attempt; if the pool is unavailable we fail fast.
+	poolGetStart := time.Now()
+	cp, poolErr := b.poolGetter()
+	poolGetDur := time.Since(poolGetStart)
+	if poolErr != nil {
+		b.log.DebugContext(ctx, "pool get failed",
+			"segment_id", seg.Id,
+			"pool_get_dur", poolGetDur,
+			"error", poolErr,
+		)
+		return nil, poolErr
+	}
+	if poolGetDur > 100*time.Millisecond {
+		b.log.DebugContext(ctx, "slow pool get",
+			"segment_id", seg.Id,
+			"pool_get_dur", poolGetDur,
+		)
+	}
+
+	segStart := time.Now()
 	var resultBytes []byte
 	err := retry.Do(
 		func() error {
-			attemptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			// Fix C: reduce per-attempt timeout 30s → 15s to free stuck connections faster
+			attemptCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 
-			cp, err := b.poolGetter()
-			if err != nil {
-				return err
-			}
-
 			buf := bytes.NewBuffer(make([]byte, 0, seg.SegmentSize))
+			fetchStart := time.Now()
 			result, err := cp.BodyStream(attemptCtx, seg.Id, buf)
+			fetchDur := time.Since(fetchStart)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
-					b.log.DebugContext(ctx, "Segment download attempt timed out after 30s", "segment_id", seg.Id)
+					b.log.DebugContext(ctx, "segment download timed out after 15s",
+						"segment_id", seg.Id,
+						"fetch_dur", fetchDur,
+					)
 				}
 
 				var bytesWritten int64
@@ -339,6 +370,19 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 			}
 
 			resultBytes = buf.Bytes()
+			sizeMB := float64(len(resultBytes)) / (1024 * 1024)
+			speedMBps := 0.0
+			if fetchDur > 0 {
+				speedMBps = sizeMB / fetchDur.Seconds()
+			}
+			b.log.DebugContext(ctx, "segment downloaded",
+				"segment_id", seg.Id,
+				"size_bytes", len(resultBytes),
+				"pool_get_dur", poolGetDur,
+				"fetch_dur", fetchDur,
+				"speed_mbps", fmt.Sprintf("%.1f", speedMBps),
+				"in_flight", b.inFlight.Load(),
+			)
 
 			if b.metricsTracker != nil {
 				b.metricsTracker.IncArticlesDownloaded()
@@ -350,20 +394,44 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 
 			return nil
 		},
-		retry.Attempts(10),
-		retry.Delay(50*time.Millisecond),
-		retry.MaxDelay(2*time.Second),
-		retry.DelayType(retry.BackOffDelay),
+		// Fix A: differentiated retry strategy
+		// - ErrArticleNotFound: never retry (article is permanently gone)
+		// - DeadlineExceeded (timeout): retry immediately, no backoff — a fresh
+		//   nntppool connection is available immediately via round-robin
+		// - Other errors: reduced attempts with fixed short delay
+		retry.Attempts(5),
+		retry.Delay(20*time.Millisecond),
+		retry.DelayType(func(n uint, err error, config *retry.Config) time.Duration {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 0 // retry timeouts immediately
+			}
+			return retry.FixedDelay(n, err, config)
+		}),
+		retry.RetryIf(func(err error) bool {
+			if errors.Is(err, nntppool.ErrArticleNotFound) {
+				return false // permanent failure — do not retry
+			}
+			return true
+		}),
 		retry.OnRetry(func(n uint, err error) {
 			if !errors.Is(err, context.Canceled) && ctx.Err() == nil {
-				b.log.DebugContext(ctx, "Error downloading segment, retrying",
+				b.log.DebugContext(ctx, "segment download retry",
 					"attempt", n+1,
 					"segment_id", seg.Id,
-					"error", err)
+					"error", err,
+					"elapsed", time.Since(segStart),
+				)
 			}
 		}),
 		retry.Context(ctx),
 	)
+
+	if err == nil {
+		b.log.DebugContext(ctx, "segment total download time",
+			"segment_id", seg.Id,
+			"total_dur", time.Since(segStart),
+		)
+	}
 
 	// Cache WRITE: tee-write after successful download (fire-and-forget)
 	if b.segmentStore != nil && resultBytes != nil && err == nil {
@@ -387,6 +455,13 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		return
 	}
 
+	totalSegments := b.rg.Len()
+	b.log.DebugContext(ctx, "downloadManager started",
+		"stream_id", b.streamID,
+		"total_segments", totalSegments,
+		"max_prefetch", b.maxPrefetch,
+	)
+
 	for ctx.Err() == nil {
 		b.mu.Lock()
 		if b.rg == nil {
@@ -395,7 +470,6 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		}
 
 		// Check if all segments have been scheduled
-		totalSegments := b.rg.Len()
 		if b.nextToDownload >= totalSegments {
 			b.mu.Unlock()
 			break
@@ -403,15 +477,31 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 
 		// Limit how far ahead we prefetch beyond the current read position
 		currentRead := b.rg.GetCurrentIndex()
-		if b.nextToDownload-currentRead >= b.maxPrefetch {
+		ahead := b.nextToDownload - currentRead
+		if ahead >= b.maxPrefetch {
+			stallStart := time.Now()
+			b.log.DebugContext(ctx, "downloadManager stalled: prefetch window full",
+				"stream_id", b.streamID,
+				"next_to_download", b.nextToDownload,
+				"current_read_idx", currentRead,
+				"ahead", ahead,
+				"max_prefetch", b.maxPrefetch,
+				"in_flight", b.inFlight.Load(),
+			)
+			// Wait for reader to advance before re-checking.
+			// b.mu is already held; cond.Wait atomically unlocks, sleeps, re-locks.
+			b.cond.Wait()
+			stallDur := time.Since(stallStart)
 			b.mu.Unlock()
-			// Wait for reader to advance before re-checking
-			select {
-			case <-b.wakeDownloader:
-				continue
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				return
 			}
+			b.log.DebugContext(ctx, "downloadManager resumed after reader advance",
+				"stream_id", b.streamID,
+				"stall_dur", stallDur,
+				"in_flight", b.inFlight.Load(),
+			)
+			continue
 		}
 
 		// Schedule next segment for download
@@ -419,12 +509,27 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		b.nextToDownload++
 		b.mu.Unlock()
 
+		// Periodically log prefetch window health
+		if idx%10 == 0 {
+			b.log.DebugContext(ctx, "prefetch window state",
+				"stream_id", b.streamID,
+				"scheduling_idx", idx,
+				"current_read_idx", currentRead,
+				"ahead", ahead,
+				"in_flight", b.inFlight.Load(),
+				"total_segments", totalSegments,
+			)
+		}
+
 		seg, err := b.rg.GetSegment(idx)
 		if err != nil || seg == nil {
 			continue
 		}
 
+		b.inFlight.Add(1)
 		go func(segIdx int, s *segment) {
+			defer b.inFlight.Add(-1)
+			defer b.cond.Signal()
 			defer func() {
 				if p := recover(); p != nil {
 					b.log.ErrorContext(ctx, "Panic in download task:", "panic", p)
@@ -442,4 +547,9 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 			}
 		}(idx, seg)
 	}
+
+	b.log.DebugContext(ctx, "downloadManager finished scheduling all segments",
+		"stream_id", b.streamID,
+		"total_segments", totalSegments,
+	)
 }

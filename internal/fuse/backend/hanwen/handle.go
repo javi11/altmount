@@ -1,4 +1,4 @@
-package fuse
+package hanwen
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/javi11/altmount/internal/fuse/backend"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/spf13/afero"
 )
@@ -18,22 +19,42 @@ import (
 // ensure Handle implements fs.FileReleaser
 var _ fs.FileReleaser = (*Handle)(nil)
 
-// Handle wraps an afero.File with Seek+Read access.
-// Uses atomic closed state to prevent double-close.
+// Handle wraps an afero.File for Seek+Read-based reads.
+// Uses mutex-protected Seek+Read to preserve the persistent reader's
+// prefetch state in UsenetReader (ReadAt creates a new reader per call).
 type Handle struct {
 	file          afero.File
 	closed        atomic.Bool
 	logger        *slog.Logger
 	path          string
-	stream        *nzbfilesystem.ActiveStream // FUSE-level stream for progress tracking
-	streamTracker StreamTracker               // For UpdateProgress/Remove (nil if no tracker)
+	stream        *nzbfilesystem.ActiveStream
+	streamTracker backend.StreamTracker
 
 	// Seek+Read serialization
 	mu       sync.Mutex
 	position int64
 }
 
-// Read handles a read request using Seek+Read.
+// NewHandle creates a new Handle for Seek+Read based access.
+func NewHandle(
+	file afero.File,
+	logger *slog.Logger,
+	path string,
+	stream *nzbfilesystem.ActiveStream,
+	st backend.StreamTracker,
+) *Handle {
+	return &Handle{
+		file:          file,
+		logger:        logger,
+		path:          path,
+		stream:        stream,
+		streamTracker: st,
+	}
+}
+
+// Read handles a read request using mutex-protected Seek+Read.
+// This keeps the persistent UsenetReader alive across reads, allowing
+// the downloadManager prefetch pipeline to stay effective.
 func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if h.closed.Load() {
 		return nil, syscall.EIO
@@ -42,23 +63,25 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Only seek if position changed (skip for sequential reads)
+	// Skip seek if already at the correct position (sequential read optimization)
 	if off != h.position {
-		_, err := h.file.Seek(off, io.SeekStart)
-		if err != nil {
+		if _, err := h.file.Seek(off, io.SeekStart); err != nil {
 			h.logger.ErrorContext(ctx, "Seek failed", "path", h.path, "offset", off, "error", err)
 			return nil, syscall.EIO
 		}
-		h.position = off
 	}
 
 	n, err := h.file.Read(dest)
-	if n > 0 && h.stream != nil {
-		h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
-		atomic.StoreInt64(&h.stream.CurrentOffset, off+int64(n))
+
+	if n > 0 {
+		h.position = off + int64(n)
+		if h.stream != nil {
+			h.streamTracker.UpdateProgress(h.stream.ID, int64(n))
+			atomic.StoreInt64(&h.stream.CurrentOffset, h.position)
+		}
 	}
+
 	if err != nil && err != io.EOF {
-		// Context cancellation is expected (user stopped playback/closed file)
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			h.logger.DebugContext(ctx, "Read canceled", "path", h.path, "offset", off)
 			return nil, syscall.EINTR
@@ -68,17 +91,25 @@ func (h *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRes
 		return nil, syscall.EIO
 	}
 
-	h.position += int64(n)
 	return fuse.ReadResultData(dest[:n]), 0
+}
+
+// Flush is a no-op (read-only filesystem).
+func (h *Handle) Flush(ctx context.Context) syscall.Errno {
+	return 0
+}
+
+// Fsync is a no-op (read-only filesystem).
+func (h *Handle) Fsync(ctx context.Context, flags uint32) syscall.Errno {
+	return 0
 }
 
 // Release closes the file when the handle is released.
 func (h *Handle) Release(ctx context.Context) syscall.Errno {
 	if !h.closed.CompareAndSwap(false, true) {
-		return 0 // Already closed
+		return 0
 	}
 
-	// Remove the FUSE-level stream before closing the underlying file
 	if h.stream != nil && h.streamTracker != nil {
 		h.streamTracker.Remove(h.stream.ID)
 		h.stream = nil

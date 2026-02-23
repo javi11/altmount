@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
+	"time"
 )
 
 type Segment struct {
@@ -244,9 +246,17 @@ func (s *segment) GetReaderContext(ctx context.Context) io.Reader {
 	s.mx.Unlock()
 
 	// Wait for data or context cancellation
+	waitStart := time.Now()
 	select {
 	case <-s.dataReady:
 		// Data (or error) is ready
+		waitDur := time.Since(waitStart)
+		if waitDur > 50*time.Millisecond {
+			slog.Default().DebugContext(ctx, "reader stalled waiting for segment data",
+				"segment_id", s.Id,
+				"wait_dur", waitDur,
+			)
+		}
 	case <-ctx.Done():
 		return &errorReader{err: ctx.Err()}
 	}
