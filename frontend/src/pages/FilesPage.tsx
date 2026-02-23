@@ -1,4 +1,4 @@
-import { Film, Folder, HardDrive, History, Tv, Wifi, WifiOff } from "lucide-react";
+import { Book, Film, Folder, Gamepad2, HardDrive, History, Music, Tv, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
@@ -40,7 +40,10 @@ export function FilesPage() {
 				let icon = Folder;
 				const lowerName = cat.name.toLowerCase();
 				if (lowerName.includes("movie") || lowerName.includes("film")) icon = Film;
-				else if (lowerName.includes("tv") || lowerName.includes("show")) icon = Tv;
+				else if (lowerName.includes("tv") || lowerName.includes("show") || lowerName.includes("anime")) icon = Tv;
+				else if (lowerName.includes("music") || lowerName.includes("audio")) icon = Music;
+				else if (lowerName.includes("book")) icon = Book;
+				else if (lowerName.includes("game")) icon = Gamepad2;
 
 				let catPath = `${completeDir}/${cat.name}`;
 				catPath = catPath.replace(/\/\//g, "/");
