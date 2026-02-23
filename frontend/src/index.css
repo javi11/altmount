@@ -2,102 +2,39 @@
 /** biome-ignore-all lint/correctness/noUnknownProperty: wrong lint */
 @import "tailwindcss";
 
-/* Use DaisyUI built-in themes: retro (light) and forest (dark) */
+/* DaisyUI themes: retro (default light), forest (default dark), plus user-selectable options */
 @plugin "daisyui" {
 	themes:
 		retro --default,
-		forest --prefersdark,
-		cupcake, /* Keep for rollback */
+		business --prefersdark,
+		light,
+		cupcake,
 		bumblebee,
 		emerald,
 		corporate,
+		garden,
+		lofi,
+		pastel,
+		fantasy,
+		wireframe,
+		cmyk,
+		autumn,
+		lemonade,
+		winter,
+		nord,
+		caramellatte,
+		dark,
 		dim,
-		dracula;
+		dracula,
+		synthwave,
+		halloween,
+		luxury,
+		night,
+		coffee,
+		business,
+		sunset,
+		abyss;
 }
-
-/* Custom Sand/Beige Theme - Disabled (using built-in themes instead) */
-/*
-@plugin "daisyui/theme" {
-	name: "sage";
-	default: true;
-	color-scheme: light;
-
-	--color-primary: oklch(76% 0.08 50);
-	--color-primary-content: oklch(98% 0.01 50);
-	--color-primary-focus: oklch(68% 0.09 50);
-
-	--color-secondary: oklch(63% 0.13 28);
-	--color-secondary-content: oklch(98% 0.01 28);
-	--color-secondary-focus: oklch(58% 0.14 28);
-
-	--color-success: oklch(68% 0.12 138);
-	--color-success-content: oklch(98% 0.01 138);
-
-	--color-warning: oklch(75% 0.14 75);
-	--color-warning-content: oklch(20% 0.01 75);
-
-	--color-error: oklch(55% 0.14 25);
-	--color-error-content: oklch(98% 0.01 25);
-
-	--color-info: oklch(63% 0.09 220);
-	--color-info-content: oklch(98% 0.01 220);
-
-	--color-base-100: oklch(98% 0.01 50);
-	--color-base-200: oklch(94% 0.01 50);
-	--color-base-300: oklch(87% 0.02 50);
-	--color-base-content: oklch(22% 0.01 50);
-
-	--rounded-box: 0.5rem;
-	--rounded-btn: 0.375rem;
-	--rounded-badge: 1rem;
-	--animation-btn: 0.25s;
-	--animation-input: 0.2s;
-	--btn-focus-scale: 0.98;
-	--border-btn: 1px;
-	--tab-border: 1px;
-	--tab-radius: 0.5rem;
-}
-
-@plugin "daisyui/theme" {
-	name: "sage-dark";
-	color-scheme: dark;
-
-	--color-primary: oklch(78% 0.10 50);
-	--color-primary-content: oklch(20% 0.02 50);
-	--color-primary-focus: oklch(72% 0.11 50);
-
-	--color-secondary: oklch(68% 0.14 28);
-	--color-secondary-content: oklch(18% 0.02 28);
-	--color-secondary-focus: oklch(62% 0.15 28);
-
-	--color-success: oklch(72% 0.13 138);
-	--color-success-content: oklch(18% 0.02 138);
-
-	--color-warning: oklch(78% 0.15 75);
-	--color-warning-content: oklch(18% 0.02 75);
-
-	--color-error: oklch(62% 0.16 25);
-	--color-error-content: oklch(98% 0.01 25);
-
-	--color-info: oklch(68% 0.11 220);
-	--color-info-content: oklch(18% 0.02 220);
-
-	--color-base-100: oklch(18% 0.02 50);
-	--color-base-200: oklch(22% 0.02 50);
-	--color-base-300: oklch(28% 0.03 50);
-	--color-base-content: oklch(92% 0.01 50);
-
-	--rounded-box: 0.5rem;
-	--rounded-btn: 0.375rem;
-	--rounded-badge: 1rem;
-	--animation-btn: 0.25s;
-	--animation-input: 0.2s;
-	--btn-focus-scale: 0.98;
-	--border-btn: 1px;
-	--tab-border: 1px;
-	--tab-radius: 0.5rem;
-}
-*/
 
 @plugin "@tailwindcss/typography";
 

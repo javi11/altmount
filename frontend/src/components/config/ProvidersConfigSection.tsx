@@ -237,7 +237,9 @@ export function ProvidersConfigSection({
 				<div className="rounded-2xl border-2 border-base-300 border-dashed bg-base-200/30 py-16 text-center">
 					<Wifi className="mx-auto mb-4 h-12 w-12 text-base-content/20" />
 					<h4 className="font-bold text-base-content/80 text-lg">No Providers Configured</h4>
-					<p className="mb-6 text-base-content/60 text-sm">Add a Usenet provider to enable downloading.</p>
+					<p className="mb-6 text-base-content/60 text-sm">
+						Add a Usenet provider to enable downloading.
+					</p>
 					<button type="button" className="btn btn-primary px-8" onClick={handleCreate}>
 						Add First Provider
 					</button>
