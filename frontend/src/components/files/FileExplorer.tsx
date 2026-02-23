@@ -18,7 +18,7 @@ interface FileExplorerProps {
 	connectionError: Error | null;
 	onRetryConnection: () => void;
 	initialPath?: string;
-	activeView?: "all" | "movies" | "tv" | "recent";
+	activeView?: string;
 }
 
 export function FileExplorer({

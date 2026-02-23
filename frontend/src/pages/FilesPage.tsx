@@ -1,26 +1,65 @@
 import { Film, Folder, HardDrive, History, Tv, Wifi, WifiOff } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
 
-type FileView = "all" | "movies" | "tv" | "recent";
+import { useConfig } from "../hooks/useConfig";
 
-const FILE_SHORTCUTS = [
-	{ id: "all", title: "All Files", path: "/", icon: Folder },
-	{ id: "movies", title: "Movies", path: "/movies", icon: Film },
-	{ id: "tv", title: "TV Shows", path: "/tv", icon: Tv },
-];
+type FileView = string;
+
 
 const SECONDARY_SHORTCUTS = [
 	{ id: "recent", title: "Recently Added", icon: History },
 ];
 
 export function FilesPage() {
+	const { data: config } = useConfig();
 	const { isConnected, hasConnectionFailed, connect, isConnecting, connectionError } =
 		useWebDAVConnection();
 
 	const [activeView, setActiveView] = useState<FileView>("all");
 	const [initialPath, setInitialPath] = useState("/");
+
+	const fileShortcuts = useMemo(() => {
+		const shortcuts = [
+			{ id: "all", title: "All Files", path: "/", icon: Folder },
+		];
+
+		if (config?.sabnzbd?.categories) {
+			let completeDir = config.sabnzbd.complete_dir || "";
+			if (completeDir && !completeDir.startsWith("/")) {
+				completeDir = "/" + completeDir;
+			}
+			if (completeDir.endsWith("/")) {
+				completeDir = completeDir.slice(0, -1);
+			}
+
+			config.sabnzbd.categories.forEach((cat) => {
+				if (cat.name.toLowerCase() === "default") return;
+
+				let icon = Folder;
+				const lowerName = cat.name.toLowerCase();
+				if (lowerName.includes("movie") || lowerName.includes("film")) icon = Film;
+				else if (lowerName.includes("tv") || lowerName.includes("show")) icon = Tv;
+
+				let catPath = `${completeDir}/${cat.name}`;
+				catPath = catPath.replace(/\/\//g, "/");
+
+				shortcuts.push({
+					id: cat.name,
+					title: cat.name.charAt(0).toUpperCase() + cat.name.slice(1),
+					path: catPath,
+					icon: icon,
+				});
+			});
+		} else {
+			// Fallback while loading
+			shortcuts.push({ id: "movies", title: "Movies", path: "/movies", icon: Film });
+			shortcuts.push({ id: "tv", title: "TV Shows", path: "/tv", icon: Tv });
+		}
+
+		return shortcuts;
+	}, [config]);
 
 	// Track connection attempts to prevent rapid retries
 	const connectionAttempted = useRef(false);
@@ -103,7 +142,7 @@ export function FilesPage() {
 									Library
 								</h3>
 								<ul className="menu menu-md gap-1 p-0">
-									{FILE_SHORTCUTS.map((item) => {
+									{fileShortcuts.map((item) => {
 										const Icon = item.icon;
 										const isActive = activeView === item.id;
 										return (
@@ -111,8 +150,8 @@ export function FilesPage() {
 												<button
 													type="button"
 													className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${isActive
-															? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
-															: "hover:bg-base-200"
+														? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
+														: "hover:bg-base-200"
 														}`}
 													onClick={() => handleViewChange(item.id as FileView, item.path)}
 												>
@@ -138,8 +177,8 @@ export function FilesPage() {
 												<button
 													type="button"
 													className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${isActive
-															? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
-															: "hover:bg-base-200"
+														? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
+														: "hover:bg-base-200"
 														}`}
 													onClick={() => handleViewChange(item.id as FileView)}
 												>
