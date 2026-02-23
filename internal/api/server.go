@@ -134,12 +134,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	app.Use("/sabnzbd", s.handleSABnzbd)
 
 	api := app.Group(s.config.Prefix)
-	// Import do not need user authentication
+
+	// Public endpoints (authentication handled inside or not required)
 	api.Post("/import/file", s.handleManualImportFile)
-	api.Post("/import/nzbdav", s.handleImportNzbdav)
-	api.Post("/import/nzbdav/reset", s.handleResetNzbdavImportStatus)
-	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
-	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
 
 	// Apply global middleware
@@ -169,6 +166,12 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			api.Use(auth.RequireAuthWithSkip(tokenService, s.userRepo, skipPaths))
 		}
 	}
+
+	// NZBDav Imports (now protected by JWT auth)
+	api.Post("/import/nzbdav", s.handleImportNzbdav)
+	api.Post("/import/nzbdav/reset", s.handleResetNzbdavImportStatus)
+	api.Get("/import/nzbdav/status", s.handleGetNzbdavImportStatus)
+	api.Delete("/import/nzbdav", s.handleCancelNzbdavImport)
 
 	// Queue endpoints
 	api.Get("/queue", s.handleListQueue)
