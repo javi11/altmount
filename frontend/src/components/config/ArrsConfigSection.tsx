@@ -374,7 +374,9 @@ export function ArrsConfigSection({
 
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">Cleanup Grace Period</legend>
+										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
+											Cleanup Grace Period
+										</legend>
 										<div className="join w-full">
 											<input
 												type="number"

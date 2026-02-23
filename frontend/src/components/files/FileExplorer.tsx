@@ -1,7 +1,17 @@
-import { AlertTriangle, FolderTree, History, Info, RefreshCw, Search, Wifi, WifiOff, X } from "lucide-react";
+import {
+	AlertTriangle,
+	FolderTree,
+	History,
+	Info,
+	RefreshCw,
+	Search,
+	Wifi,
+	WifiOff,
+	X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useFilePreview } from "../../hooks/useFilePreview";
 import { useImportHistory } from "../../hooks/useApi";
+import { useFilePreview } from "../../hooks/useFilePreview";
 import { useWebDAVDirectory, useWebDAVFileOperations } from "../../hooks/useWebDAV";
 import type { WebDAVFile } from "../../types/webdav";
 import { ErrorAlert } from "../ui/ErrorAlert";
@@ -134,7 +144,9 @@ export function FileExplorer({
 
 	const handleFileInfo = (path: string) => {
 		const file = filteredFiles.find((f) => {
-			const filePath = isRecentView ? f.filename : `${currentPath}/${f.basename}`.replace(/\/+/g, "/");
+			const filePath = isRecentView
+				? f.filename
+				: `${currentPath}/${f.basename}`.replace(/\/+/g, "/");
 			return filePath === path;
 		});
 
@@ -303,7 +315,9 @@ export function FileExplorer({
 								/>
 								<div className="flex flex-col">
 									<span className="label-text font-semibold text-xs">Corrupted Files</span>
-									<span className="label-text-alt text-base-content/80 text-xs">Show items with errors</span>
+									<span className="label-text-alt text-base-content/80 text-xs">
+										Show items with errors
+									</span>
 								</div>
 							</label>
 						</div>
@@ -351,8 +365,10 @@ export function FileExplorer({
 						<div className="flex h-64 items-center justify-center">
 							<LoadingSpinner />
 						</div>
-					) : (isRecentView || directory) ? (
-						searchTerm && filteredFiles.length === 0 && (isRecentView ? historyFiles.length > 0 : (directory?.files?.length ?? 0) > 0) ? (
+					) : isRecentView || directory ? (
+						searchTerm &&
+						filteredFiles.length === 0 &&
+						(isRecentView ? historyFiles.length > 0 : (directory?.files?.length ?? 0) > 0) ? (
 							<div className="flex flex-col items-center justify-center py-20">
 								<Search className="mb-4 h-12 w-12 text-base-content/20" />
 								<h3 className="font-bold text-base-content/60 text-lg">No Results Found</h3>

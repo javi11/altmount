@@ -160,7 +160,9 @@ export function WebDAVConfigSection({
 					</div>
 
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend whitespace-normal break-words font-semibold md:whitespace-nowrap">WebDAV Mount Path</legend>
+						<legend className="fieldset-legend whitespace-normal break-words font-semibold md:whitespace-nowrap">
+							WebDAV Mount Path
+						</legend>
 						<div className="flex flex-col gap-3">
 							<input
 								type="text"

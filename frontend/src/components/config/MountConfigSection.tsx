@@ -611,7 +611,9 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 							onChange={(e) => handleMountInputChange("timeout", e.target.value)}
 							placeholder="10m"
 						/>
-						<p className="label break-words text-base-content/70 text-xs">I/O timeout (e.g., 10m, 30s)</p>
+						<p className="label break-words text-base-content/70 text-xs">
+							I/O timeout (e.g., 10m, 30s)
+						</p>
 					</fieldset>
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Log Level</legend>
@@ -953,7 +955,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 
 			{/* Streaming Cache */}
 			<div className="space-y-4">
-				<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">Streaming Engine</h4>
+				<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
+					Streaming Engine
+				</h4>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Max Cache Size (per file)</legend>
@@ -992,7 +996,9 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 
 			{/* Debug */}
 			<div className="space-y-4">
-				<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">Diagnostics</h4>
+				<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
+					Diagnostics
+				</h4>
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Debug Logging</legend>
 					<label className="label cursor-pointer justify-start gap-3">
@@ -1096,7 +1102,9 @@ function ExternalRCloneSubSection({ config, onFormDataChange }: ExternalSubSecti
 	return (
 		<div className="space-y-6">
 			<h3 className="font-bold text-lg">External RC Connection</h3>
-			<p className="text-base-content/80 text-sm">Connect to an existing external RClone RC server.</p>
+			<p className="text-base-content/80 text-sm">
+				Connect to an existing external RClone RC server.
+			</p>
 
 			<div className="grid grid-cols-1 gap-6 rounded-2xl border border-base-200 bg-base-50/50 p-6">
 				<fieldset className="fieldset">
