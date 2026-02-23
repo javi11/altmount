@@ -1,4 +1,4 @@
-package fuse
+package hanwen
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/javi11/altmount/internal/fuse/backend"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 )
 
@@ -25,11 +26,10 @@ var _ fs.NodeUnlinker = (*Dir)(nil)
 var _ fs.NodeRmdirer = (*Dir)(nil)
 
 // Dir represents a directory in the FUSE filesystem.
-// Talks directly to NzbFilesystem with FUSE context propagation.
 type Dir struct {
 	fs.Inode
 	nzbfs         *nzbfilesystem.NzbFilesystem
-	streamTracker StreamTracker
+	streamTracker backend.StreamTracker
 	path          string
 	logger        *slog.Logger
 	isRootDir     bool
@@ -37,13 +37,13 @@ type Dir struct {
 	gid           uint32
 }
 
-// NewDir creates a new root directory node for the FUSE filesystem.
+// NewDir creates a new directory node for the FUSE filesystem.
 func NewDir(
 	nzbfs *nzbfilesystem.NzbFilesystem,
 	path string,
 	logger *slog.Logger,
 	uid, gid uint32,
-	st StreamTracker,
+	st backend.StreamTracker,
 ) *Dir {
 	return &Dir{
 		nzbfs:         nzbfs,
@@ -57,9 +57,7 @@ func NewDir(
 }
 
 // OnAdd is called when the node is added to the inode tree.
-func (d *Dir) OnAdd(ctx context.Context) {
-	// No-op
-}
+func (d *Dir) OnAdd(ctx context.Context) {}
 
 // Getattr implements fs.NodeGetattrer.
 func (d *Dir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
@@ -92,8 +90,6 @@ func (d *Dir) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.SetAttrIn, 
 
 // Statfs implements fs.NodeStatfser.
 func (d *Dir) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	// Provide dummy values so 'df' works correctly.
-	// We report a 1PB filesystem.
 	const totalSize = 1024 * 1024 * 1024 * 1024 * 1024 // 1PB
 	const blockSize = 4096
 
@@ -233,7 +229,6 @@ func mapError(err error, logger *slog.Logger, ctx context.Context, msg string, a
 
 // Readdir implements fs.NodeReaddirer.
 func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
-	// Open directory via NzbFilesystem with FUSE context
 	f, err := d.nzbfs.Open(ctx, d.path)
 	if err != nil {
 		d.logger.ErrorContext(ctx, "Readdir open failed", "path", d.path, "error", err)
@@ -260,8 +255,25 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		entries = append(entries, fuse.DirEntry{
 			Name: info.Name(),
 			Mode: mode,
+			Ino:  hashPath(filepath.Join(d.path, info.Name())),
 		})
 	}
 
 	return fs.NewListDirStream(entries), 0
+}
+
+// Refresh invalidates the kernel directory cache for this directory,
+// causing the kernel to re-read entries on next access.
+func (d *Dir) Refresh() {
+	for name, child := range d.Children() {
+		_ = d.NotifyEntry(name)
+		if childDir, ok := child.Operations().(*Dir); ok {
+			childDir.Refresh()
+		}
+	}
+}
+
+// RefreshChild invalidates a specific child entry in the kernel cache.
+func (d *Dir) RefreshChild(name string) {
+	_ = d.NotifyEntry(name)
 }
