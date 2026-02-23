@@ -60,10 +60,10 @@ export function ImportMethods() {
 		<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
 			{/* Sidebar Navigation */}
 			<div className="lg:col-span-1">
-				<div className="card border border-base-200 bg-base-100 shadow-sm">
+				<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 					<div className="card-body p-2 sm:p-4">
 						<div>
-							<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 								Methods
 							</h3>
 							<ul className="menu menu-md gap-1 p-0">
@@ -101,7 +101,7 @@ export function ImportMethods() {
 
 			{/* Content Area */}
 			<div className="lg:col-span-3">
-				<div className="card min-h-[500px] border border-base-200 bg-base-100 shadow-sm">
+				<div className="card min-h-[500px] border-2 border-base-300/50 bg-base-100 shadow-md">
 					<div className="card-body p-4 sm:p-8">
 						{/* Section Header */}
 						<div className="mb-8 border-base-200 border-b pb-6">
@@ -470,10 +470,10 @@ function EnhancedUploadSection() {
 			{(uploadedFiles.length > 0 || uploadedLinks.length > 0) && (
 				<div className="space-y-4">
 					<div className="flex items-center justify-between">
-						<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">Status</h4>
+						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">Status</h4>
 						<button
 							type="button"
-							className="btn btn-ghost btn-xs"
+							className="btn btn-ghost btn-sm"
 							onClick={uploadTab === "files" ? clearAllFiles : clearAllLinks}
 						>
 							Clear All
@@ -483,21 +483,21 @@ function EnhancedUploadSection() {
 						{uploadTab === "files"
 							? uploadedFiles.map((f) => (
 									<div key={f.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
-										<FileCode className="h-4 w-4 opacity-40" />
+										<FileCode className="h-4 w-4 text-base-content/60" />
 										<span className="flex-1 truncate text-sm">{f.file.name}</span>
 										<StatusBadge status={f.status} />
 										<button type="button" onClick={() => removeFile(f.id)}>
-											<X className="h-4 w-4 opacity-40" />
+											<X className="h-4 w-4 text-base-content/60" />
 										</button>
 									</div>
 								))
 							: uploadedLinks.map((l) => (
 									<div key={l.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
-										<Link className="h-4 w-4 opacity-40" />
+										<Link className="h-4 w-4 text-base-content/60" />
 										<span className="flex-1 truncate text-sm">{l.title || l.link}</span>
 										<StatusBadge status={l.status} />
 										<button type="button" onClick={() => removeLink(l.id)}>
-											<X className="h-4 w-4 opacity-40" />
+											<X className="h-4 w-4 text-base-content/60" />
 										</button>
 									</div>
 								))}
@@ -638,7 +638,7 @@ function NzbDavImportSection() {
 			{isRunning || isCanceling || isCompleted || hasResults ? (
 				<section className="space-y-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+						<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
 							Status
 						</h4>
 						<div className="h-px flex-1 bg-base-300" />
@@ -678,7 +678,7 @@ function NzbDavImportSection() {
 								{isRunning && !isCanceling && (
 									<button
 										type="button"
-										className="btn btn-outline btn-error btn-xs px-4"
+										className="btn btn-outline btn-error btn-sm px-4"
 										onClick={handleCancel}
 										disabled={cancelImport.isPending}
 									>
@@ -688,7 +688,7 @@ function NzbDavImportSection() {
 								{!isRunning && !isCanceling && (
 									<button
 										type="button"
-										className="btn btn-primary btn-xs px-6"
+										className="btn btn-primary btn-sm px-6"
 										onClick={handleReset}
 										disabled={resetImport.isPending}
 									>
@@ -700,7 +700,7 @@ function NzbDavImportSection() {
 
 						{/* Progress */}
 						<div className="mb-8 space-y-2">
-							<div className="flex justify-between font-bold font-mono text-[10px] opacity-60">
+							<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
 								<span>PROGRESS</span>
 								<span>{Math.round(progressPercent)}%</span>
 							</div>
@@ -715,13 +715,13 @@ function NzbDavImportSection() {
 						{/* Stats Grid */}
 						<div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
 							<div className="rounded-xl bg-base-100 p-4 text-center shadow-sm">
-								<span className="block font-bold text-[9px] text-base-content/40 uppercase tracking-wider">
+								<span className="block font-bold text-base-content/40 text-xs uppercase tracking-wider">
 									Total
 								</span>
 								<span className="font-bold font-mono text-2xl">{importStatus?.total || 0}</span>
 							</div>
 							<div className="rounded-xl border-success/20 border-b-2 bg-base-100 p-4 text-center shadow-sm">
-								<span className="block font-bold text-[9px] text-success/60 uppercase tracking-wider">
+								<span className="block font-bold text-success/60 text-xs uppercase tracking-wider">
 									Added
 								</span>
 								<span className="font-bold font-mono text-2xl text-success">
@@ -729,7 +729,7 @@ function NzbDavImportSection() {
 								</span>
 							</div>
 							<div className="rounded-xl border-warning/20 border-b-2 bg-base-100 p-4 text-center shadow-sm">
-								<span className="block font-bold text-[9px] text-warning/60 uppercase tracking-wider">
+								<span className="block font-bold text-warning/60 text-xs uppercase tracking-wider">
 									Skipped
 								</span>
 								<span className="font-bold font-mono text-2xl text-warning">
@@ -737,7 +737,7 @@ function NzbDavImportSection() {
 								</span>
 							</div>
 							<div className="rounded-xl border-error/20 border-b-2 bg-base-100 p-4 text-center shadow-sm">
-								<span className="block font-bold text-[9px] text-error/60 uppercase tracking-wider">
+								<span className="block font-bold text-error/60 text-xs uppercase tracking-wider">
 									Failed
 								</span>
 								<span className="font-bold font-mono text-2xl text-error">
@@ -758,7 +758,7 @@ function NzbDavImportSection() {
 				<form onSubmit={handleSubmit} className="space-y-8">
 					<section className="space-y-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+							<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
 								Parameters
 							</h4>
 							<div className="h-px flex-1 bg-base-300" />
@@ -780,13 +780,13 @@ function NzbDavImportSection() {
 										required
 									/>
 								</div>
-								<p className="label text-[10px] opacity-60">
+								<p className="label text-base-content/80 text-xs">
 									This will create /movies and /tv subdirectories under this name.
 								</p>
 							</fieldset>
 
 							<div className="flex flex-col justify-center space-y-3">
-								<div className="label mb-1 font-semibold text-xs opacity-60">Input Method</div>
+								<div className="label mb-1 font-semibold text-base-content/80 text-xs">Input Method</div>
 								<div className="flex gap-4">
 									<label className="label cursor-pointer gap-2">
 										<input
@@ -815,13 +815,13 @@ function NzbDavImportSection() {
 
 					<section className="space-y-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+							<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
 								Source Selection
 							</h4>
 							<div className="h-px flex-1 bg-base-300" />
 						</div>
 
-						<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							{inputMethod === "server" ? (
 								<fieldset className="fieldset min-w-0">
 									<legend className="fieldset-legend font-semibold text-xs">
@@ -946,7 +946,7 @@ function DirectoryScanSection() {
 		<div className="space-y-8">
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+					<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
 						Configuration
 					</h4>
 					<div className="h-px flex-1 bg-base-300" />
@@ -973,7 +973,7 @@ function DirectoryScanSection() {
 								Browse
 							</button>
 						</div>
-						{validationError && <p className="label text-[10px] text-error">{validationError}</p>}
+						{validationError && <p className="label text-error text-xs">{validationError}</p>}
 					</fieldset>
 
 					<div className="flex items-end gap-2">
@@ -1003,7 +1003,7 @@ function DirectoryScanSection() {
 
 			<section className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 text-xs uppercase tracking-widest">
+					<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
 						Status
 					</h4>
 					<div className="h-px flex-1 bg-base-300" />
@@ -1045,7 +1045,7 @@ function DirectoryScanSection() {
 					{(isScanning || isCanceling || (scanStatus?.files_found || 0) > 0) && (
 						<div className="space-y-6">
 							<div className="space-y-2">
-								<div className="flex justify-between font-bold font-mono text-[10px] opacity-60">
+								<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
 									<span>PROGRESS</span>
 									<span>{Math.round(getProgressPercentage())}%</span>
 								</div>
@@ -1059,7 +1059,7 @@ function DirectoryScanSection() {
 
 							{isScanning && scanStatus?.current_file && (
 								<div className="rounded-lg bg-base-100 p-3">
-									<div className="flex items-center gap-2 font-bold text-[9px] text-base-content/40 uppercase tracking-widest">
+									<div className="flex items-center gap-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 										<FileText className="h-3 w-3" />
 										<span>Current</span>
 									</div>

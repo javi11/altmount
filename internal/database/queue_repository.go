@@ -403,9 +403,10 @@ func (r *QueueRepository) AddImportHistory(ctx context.Context, history *ImportH
 // ListImportHistory retrieves the last N successful imports from the persistent history
 func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*ImportHistory, error) {
 	query := `
-		SELECT id, nzb_id, nzb_name, file_name, file_size, virtual_path, category, completed_at
-		FROM import_history
-		ORDER BY completed_at DESC
+		SELECT h.id, h.nzb_id, h.nzb_name, h.file_name, h.file_size, h.virtual_path, f.library_path, h.category, h.completed_at
+		FROM import_history h
+		LEFT JOIN file_health f ON h.virtual_path = f.file_path
+		ORDER BY h.completed_at DESC
 		LIMIT ?
 	`
 	rows, err := r.db.QueryContext(ctx, query, limit)
@@ -417,7 +418,7 @@ func (r *QueueRepository) ListImportHistory(ctx context.Context, limit int) ([]*
 	var history []*ImportHistory
 	for rows.Next() {
 		var h ImportHistory
-		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.Category, &h.CompletedAt)
+		err := rows.Scan(&h.ID, &h.NzbID, &h.NzbName, &h.FileName, &h.FileSize, &h.VirtualPath, &h.LibraryPath, &h.Category, &h.CompletedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan import history: %w", err)
 		}

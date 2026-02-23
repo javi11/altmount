@@ -148,17 +148,17 @@ export function ActivityHub() {
 														{stream.file_path.split("/").pop()}
 													</div>
 													<div className="mt-1 flex items-center gap-2">
-														<span className="font-bold text-[10px] text-success">STREAMING</span>
-														<span className="text-[10px] text-base-content/40">•</span>
-														<span className="text-[10px] text-base-content/60">
+														<span className="font-bold text-success text-xs">STREAMING</span>
+														<span className="text-base-content/40 text-xs">•</span>
+														<span className="text-base-content/60 text-xs">
 															{formatBytes(stream.total_size)}
 														</span>
 													</div>
 												</div>
 												<div className="shrink-0 text-right">
 													<div className="flex flex-col items-end">
-														<div className="flex items-center gap-1 font-bold text-[10px] text-info">
-															<span className="text-[8px] opacity-60">IN:</span>
+														<div className="flex items-center gap-1 font-bold text-info text-xs">
+															<span className="text-[8px] text-base-content/80">IN:</span>
 															{formatSpeed(stream.download_speed)}
 															{stream.download_speed > 0 && stream.download_speed < 1024 * 1024 && (
 																<div className="badge badge-warning badge-xs h-3 px-1 text-[8px]">
@@ -167,12 +167,12 @@ export function ActivityHub() {
 															)}
 														</div>
 														<div className="flex items-center gap-1 font-bold font-mono text-primary text-xs">
-															<span className="text-[8px] text-success opacity-60">OUT:</span>
+															<span className="text-[8px] text-base-content/80 text-success">OUT:</span>
 															{formatSpeed(stream.bytes_per_second)}
 														</div>
 													</div>
 													{stream.eta > 0 && (
-														<div className="font-mono text-[10px] text-base-content/40">
+														<div className="font-mono text-base-content/40 text-xs">
 															{formatDuration(stream.eta)} left
 														</div>
 													)}
@@ -180,7 +180,7 @@ export function ActivityHub() {
 											</div>
 
 											<div className="mt-1 space-y-1">
-												<div className="flex items-center justify-between px-0.5 text-[10px]">
+												<div className="flex items-center justify-between px-0.5 text-xs">
 													<div className="flex items-center gap-2">
 														<span className="font-medium text-primary">{progress}%</span>
 														<span className="text-base-content/40">•</span>
@@ -252,15 +252,15 @@ export function ActivityHub() {
 														{item.target_path || item.nzb_path.split("/").pop()}
 													</div>
 													<div className="mt-1 flex items-center gap-2">
-														<span className="font-bold text-[10px] text-secondary">IMPORTING</span>
-														<span className="text-[10px] text-base-content/40">•</span>
-														<span className="text-[10px] text-base-content/60">
+														<span className="font-bold text-secondary text-xs">IMPORTING</span>
+														<span className="text-base-content/40 text-xs">•</span>
+														<span className="text-base-content/60 text-xs">
 															Worker #{item.id % 10}
 														</span>
 														{item.file_size && (
 															<>
-																<span className="text-[10px] text-base-content/40">•</span>
-																<span className="text-[10px] text-base-content/60">
+																<span className="text-base-content/40 text-xs">•</span>
+																<span className="text-base-content/60 text-xs">
 																	{formatBytes(item.file_size)}
 																</span>
 															</>
@@ -269,7 +269,7 @@ export function ActivityHub() {
 												</div>
 												<div className="shrink-0 text-right">
 													<div className="font-bold text-secondary text-sm">{progress}%</div>
-													<div className="text-[10px] text-base-content/40">
+													<div className="text-base-content/40 text-xs">
 														Attempt {item.retry_count + 1}
 													</div>
 												</div>
@@ -313,12 +313,12 @@ export function ActivityHub() {
 												<span className="truncate font-medium" title={item.file_name}>
 													{item.file_name}
 												</span>
-												<span className="truncate text-[10px] text-base-content/50">
+												<span className="truncate text-base-content/50 text-xs">
 													{item.category || "No Category"} • {formatBytes(item.file_size)}
 												</span>
 											</div>
 										</div>
-										<span className="shrink-0 whitespace-nowrap text-[10px] text-base-content/40">
+										<span className="shrink-0 whitespace-nowrap text-base-content/40 text-xs">
 											{formatRelativeTime(item.completed_at)}
 										</span>
 									</div>

@@ -169,6 +169,7 @@ type ImportHistory struct {
 	FileName     string    `db:"file_name"`
 	FileSize     int64     `db:"file_size"`
 	VirtualPath  string    `db:"virtual_path"`
+	LibraryPath  *string   `db:"library_path"` // Added to show final location from file_health
 	Category     *string   `db:"category"`
 	CompletedAt  time.Time `db:"completed_at"`
 }

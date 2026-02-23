@@ -3,12 +3,12 @@ export interface APIResponse<T = unknown> {
 	success: boolean;
 	data?: T;
 	error?:
-		| string
-		| {
-				code: string;
-				message: string;
-				details: string;
-		  };
+	| string
+	| {
+		code: string;
+		message: string;
+		details: string;
+	};
 	meta?: APIMeta;
 }
 
@@ -60,6 +60,7 @@ export interface ImportHistoryItem {
 	nzb_name: string;
 	file_name: string;
 	virtual_path: string;
+	library_path?: string;
 	category?: string;
 	file_size: number;
 	completed_at: string;

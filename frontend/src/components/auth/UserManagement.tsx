@@ -102,7 +102,7 @@ export function UserManagement() {
 											type="button"
 											onClick={() => toggleAdminStatus(user.id, user.is_admin)}
 											disabled={updatingUserId === user.id}
-											className={`btn btn-xs ${
+											className={`btn btn-sm ${
 												user.is_admin ? "btn-error btn-outline" : "btn-success btn-outline"
 											} ${updatingUserId === user.id ? "loading" : ""}`}
 										>

@@ -74,7 +74,7 @@ export function ActiveStreamsCard() {
 											</div>
 
 											{/* User / Client Info */}
-											<div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-base-content/60">
+											<div className="mt-1.5 flex flex-wrap items-center gap-2 text-base-content/60 text-xs">
 												{(stream.user_name || stream.client_ip) && (
 													<div className="flex items-center gap-1 rounded bg-base-300/50 px-1.5 py-0.5">
 														{stream.user_name ? (
@@ -110,7 +110,7 @@ export function ActiveStreamsCard() {
 												)}
 											</div>
 
-											<div className="mt-1.5 flex items-center gap-2 text-[10px]">
+											<div className="mt-1.5 flex items-center gap-2 text-xs">
 												{stream.bytes_per_second > 0 ? (
 													<span className="animate-pulse font-bold text-success">STREAMING</span>
 												) : (
@@ -125,7 +125,7 @@ export function ActiveStreamsCard() {
 									</div>
 
 									<div className="space-y-1">
-										<div className="flex items-center justify-between px-0.5 text-[10px]">
+										<div className="flex items-center justify-between px-0.5 text-xs">
 											<div className="flex items-center gap-2">
 												<span className="font-medium text-primary">{progress}%</span>
 												<span className="text-base-content/40">•</span>
@@ -141,7 +141,7 @@ export function ActiveStreamsCard() {
 												<div className="flex items-center gap-2">
 													{/* Download (Input) Speed */}
 													<div className="flex items-center gap-1 text-info">
-														<span className="text-[8px] opacity-60">IN:</span>
+														<span className="text-[8px] text-base-content/80">IN:</span>
 														<span className="whitespace-nowrap font-bold">
 															{formatBytes(stream.download_speed)}/s
 														</span>
@@ -156,7 +156,7 @@ export function ActiveStreamsCard() {
 
 													{/* Playback (Output) Speed */}
 													<div className="flex items-center gap-1 text-success">
-														<span className="text-[8px] opacity-60">OUT:</span>
+														<span className="text-[8px] text-base-content/80">OUT:</span>
 														<span className="whitespace-nowrap font-bold">
 															{formatBytes(stream.bytes_per_second)}/s
 														</span>
@@ -165,7 +165,7 @@ export function ActiveStreamsCard() {
 
 												{/* ETA */}
 												{stream.eta > 0 && (
-													<span className="whitespace-nowrap text-[9px] opacity-60">
+													<span className="whitespace-nowrap text-base-content/80 text-xs">
 														ETA: {formatDuration(stream.eta)}
 													</span>
 												)}
@@ -190,7 +190,7 @@ export function ActiveStreamsCard() {
 											/>
 										</div>
 
-										<div className="flex justify-end font-mono text-[9px] text-base-content/40">
+										<div className="flex justify-end font-mono text-base-content/40 text-xs">
 											Avg: {formatBytes(stream.speed_avg)}/s
 										</div>
 									</div>

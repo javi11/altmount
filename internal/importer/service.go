@@ -681,7 +681,10 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 
 				cleanBase := filepath.ToSlash(*basePath)
 				// Avoid duplication if basePath already starts with relDir (common with Watcher or manual imports)
-				if *basePath != "" && (cleanBase == cleanRel || strings.HasPrefix(cleanBase, cleanRel+"/")) {
+				// We only apply this reconstruction if basePath is empty or root, otherwise we trust basePath
+				if cleanBase != "" && cleanBase != "/" && cleanBase != "." {
+					virtualDir = *basePath
+				} else if *basePath != "" && (cleanBase == cleanRel || strings.HasPrefix(cleanBase, cleanRel+"/")) {
 					virtualDir = *basePath
 				} else {
 					virtualDir = filepath.Join(*basePath, cleanRel)
@@ -749,7 +752,23 @@ func (s *Service) calculateProcessVirtualDir(item *database.ImportQueueItem, bas
 			completeDir = "/" + completeDir
 		}
 
-		if !strings.HasPrefix(virtualDir, completeDir) {
+		// Normalize virtualDir for comparison
+		vDir := filepath.ToSlash(virtualDir)
+		if !strings.HasPrefix(vDir, "/") {
+			vDir = "/" + vDir
+		}
+
+		// Check if virtualDir already starts with completeDir at a directory boundary
+		hasPrefix := false
+		if completeDir == "/" {
+			hasPrefix = true
+		} else if strings.HasPrefix(vDir, completeDir) {
+			if len(vDir) == len(completeDir) || vDir[len(completeDir)] == '/' {
+				hasPrefix = true
+			}
+		}
+
+		if !hasPrefix {
 			virtualDir = filepath.Join(completeDir, virtualDir)
 			virtualDir = filepath.ToSlash(virtualDir)
 		}

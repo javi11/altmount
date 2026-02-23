@@ -81,9 +81,9 @@ export function ImportConfigSection({
 
 			<div className="space-y-8">
 				{/* Worker Core Configuration */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Concurrency
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -106,7 +106,7 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-[10px] opacity-50">
+							<p className="label break-words text-base-content/70 text-xs">
 								Concurrent NZB processing threads.
 							</p>
 						</fieldset>
@@ -126,7 +126,7 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-[10px] opacity-50">
+							<p className="label break-words text-base-content/70 text-xs">
 								Socket limit per active worker.
 							</p>
 						</fieldset>
@@ -148,7 +148,7 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-[10px] opacity-50">
+							<p className="label break-words text-base-content/70 text-xs">
 								Segments prefetched ahead for archive analysis.
 							</p>
 						</fieldset>
@@ -168,7 +168,7 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<p className="label break-words text-[10px] opacity-50">
+							<p className="label break-words text-base-content/70 text-xs">
 								Usenet socket read timeout.
 							</p>
 						</fieldset>
@@ -176,9 +176,9 @@ export function ImportConfigSection({
 				</div>
 
 				{/* Validation Slider */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Validation
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -213,14 +213,14 @@ export function ImportConfigSection({
 									)
 								}
 							/>
-							<div className="flex justify-between px-2 font-black text-[9px] uppercase tracking-tighter opacity-30">
+							<div className="flex justify-between px-2 font-black text-base-content/50 text-xs uppercase tracking-tighter">
 								<span>Fast (1%)</span>
 								<span>Balanced</span>
 								<span>Deep (100%)</span>
 							</div>
 						</div>
 
-						<div className="divider opacity-50" />
+						<div className="divider text-base-content/70" />
 
 						<label className="label cursor-pointer items-start justify-start gap-4">
 							<input
@@ -231,10 +231,10 @@ export function ImportConfigSection({
 								onChange={(e) => handleInputChange("skip_health_check", e.target.checked)}
 							/>
 							<div className="min-w-0 flex-1">
-								<span className="label-text block break-words font-bold text-xs">
+								<span className="block whitespace-normal break-words font-bold text-xs">
 									Lenient Import (Instant)
 								</span>
-								<span className="mt-0.5 block break-words text-[10px] text-base-content/50 leading-relaxed">
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
 									Bypass validation entirely for immediate exposure in the library. Recommended only
 									for high-completion providers.
 								</span>
@@ -244,9 +244,9 @@ export function ImportConfigSection({
 				</div>
 
 				{/* Strategy Configuration */}
-				<div className="space-y-8 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-8 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Library Strategy
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -265,7 +265,7 @@ export function ImportConfigSection({
 								<option value="SYMLINK">Physical Symlinks</option>
 								<option value="STRM">STRM URL Files</option>
 							</select>
-							<p className="label mt-2 break-words text-[10px] leading-relaxed opacity-50">
+							<p className="label mt-2 break-words text-base-content/70 text-xs leading-relaxed">
 								{formData.import_strategy === "NONE" &&
 									"Files are only visible through the virtual FUSE/WebDAV mount."}
 								{formData.import_strategy === "SYMLINK" &&
@@ -288,14 +288,14 @@ export function ImportConfigSection({
 									placeholder="/path/to/media"
 									onChange={(e) => handleInputChange("import_dir", e.target.value)}
 								/>
-								<p className="label mt-2 break-words text-[10px] opacity-50">
+								<p className="label mt-2 break-words text-base-content/70 text-xs">
 									Absolute path for strategy output.
 								</p>
 							</fieldset>
 						)}
 					</div>
 
-					<div className="divider opacity-50" />
+					<div className="divider text-base-content/70" />
 
 					<div className="space-y-6">
 						<div>
@@ -316,7 +316,7 @@ export function ImportConfigSection({
 									placeholder="/path/to/watch"
 									onChange={(e) => handleInputChange("watch_dir", e.target.value)}
 								/>
-								<p className="label mt-2 break-words text-[10px] opacity-50">
+								<p className="label mt-2 break-words text-base-content/70 text-xs">
 									Absolute path to monitor.
 								</p>
 							</fieldset>
@@ -338,7 +338,7 @@ export function ImportConfigSection({
 										)
 									}
 								/>
-								<p className="label mt-2 break-words text-[10px] opacity-50">
+								<p className="label mt-2 break-words text-base-content/70 text-xs">
 									How often to check for new files.
 								</p>
 							</fieldset>
@@ -347,9 +347,9 @@ export function ImportConfigSection({
 				</div>
 
 				{/* File Extensions */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Filters
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -360,14 +360,14 @@ export function ImportConfigSection({
 
 						<div className="mb-4 flex min-h-[4rem] flex-wrap gap-2 rounded-xl border border-base-300 bg-base-100/50 p-3">
 							{formData.allowed_file_extensions.length === 0 ? (
-								<span className="w-full self-center text-center text-xs italic opacity-40">
+								<span className="w-full self-center text-center text-base-content/60 text-xs italic">
 									All file types are currently allowed
 								</span>
 							) : (
 								formData.allowed_file_extensions.map((ext) => (
 									<div
 										key={ext}
-										className="badge badge-primary gap-1 px-3 py-3 font-bold text-[10px]"
+										className="badge badge-primary gap-1 px-3 py-3 font-bold text-xs"
 									>
 										{ext}
 										{!isReadOnly && (
@@ -407,7 +407,7 @@ export function ImportConfigSection({
 						<div className="flex flex-wrap gap-2">
 							<button
 								type="button"
-								className="btn btn-xs btn-outline border-base-300 opacity-60 hover:opacity-100"
+								className="btn btn-sm btn-outline border-base-300 text-base-content/80 hover:opacity-100"
 								disabled={isReadOnly}
 								onClick={() => {
 									const videoDefaults = [
@@ -451,7 +451,7 @@ export function ImportConfigSection({
 							</button>
 							<button
 								type="button"
-								className="btn btn-xs btn-outline border-base-300 opacity-60 hover:opacity-100"
+								className="btn btn-sm btn-outline border-base-300 text-base-content/80 hover:opacity-100"
 								disabled={isReadOnly}
 								onClick={() => handleInputChange("allowed_file_extensions", [])}
 							>

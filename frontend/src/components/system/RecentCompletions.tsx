@@ -26,7 +26,7 @@ export function RecentCompletions() {
 									{item.file_name}
 								</span>
 							</div>
-							<span className="whitespace-nowrap text-[10px] text-base-content/40">
+							<span className="whitespace-nowrap text-base-content/40 text-xs">
 								{formatRelativeTime(item.completed_at)}
 							</span>
 						</div>

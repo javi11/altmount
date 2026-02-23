@@ -242,7 +242,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								min={1}
 								max={100}
 							/>
-							<p className="label mt-1 text-[10px] opacity-50">
+							<p className="label mt-1 text-base-content/70 text-xs">
 								Requests per connection. Default is 10.
 							</p>
 						</fieldset>
@@ -276,14 +276,14 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								required={mode === "create"}
 							/>
 							{mode === "edit" && (
-								<p className="label text-[10px] opacity-50">Leave empty to keep current.</p>
+								<p className="label text-base-content/70 text-xs">Leave empty to keep current.</p>
 							)}
 						</fieldset>
 					</div>
 
 					{/* Security Settings */}
-					<div className="space-y-4 rounded-2xl border border-base-300 bg-base-200/30 p-5">
-						<h4 className="font-bold text-[10px] uppercase tracking-widest opacity-40">
+					<div className="space-y-4 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-5">
+						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 							Options & Security
 						</h4>
 
@@ -298,7 +298,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								/>
 								<div className="min-w-0 flex-1">
 									<span className="label-text font-bold text-xs">Use SSL/TLS</span>
-									<span className="block text-[10px] opacity-50">
+									<span className="block text-base-content/70 text-xs">
 										Highly recommended for privacy.
 									</span>
 								</div>
@@ -320,7 +320,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 										<span className="label-text font-bold text-xs">
 											Insecure (Skip Verification)
 										</span>
-										<span className="block text-[10px] opacity-50">
+										<span className="block text-base-content/70 text-xs">
 											Only use for self-signed certs.
 										</span>
 									</div>
@@ -340,7 +340,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 								/>
 								<div className="min-w-0 flex-1">
 									<span className="label-text font-bold text-xs">Backup Only</span>
-									<span className="block text-[10px] opacity-50">
+									<span className="block text-base-content/70 text-xs">
 										Only use when primary providers fail.
 									</span>
 								</div>
@@ -364,12 +364,12 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 					{/* Connection Test */}
 					<div className="space-y-4 border-base-300/50 border-t pt-4">
 						<div className="flex items-center justify-between">
-							<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">
+							<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 								Connectivity Check
 							</h4>
 							<button
 								type="button"
-								className="btn btn-xs btn-outline px-4"
+								className="btn btn-sm btn-outline px-4"
 								onClick={handleTestConnection}
 								disabled={!isFormValid || isTestingConnection}
 							>
@@ -396,7 +396,7 @@ export function ProviderModal({ mode, provider, onSuccess, onCancel }: ProviderM
 									<AlertTriangle className="h-4 w-4" />
 								)}
 								<div>
-									<div className="font-black text-[10px] uppercase tracking-widest">
+									<div className="font-black text-xs uppercase tracking-widest">
 										{connectionTestResult.success
 											? `Success${connectionTestResult.rttMs !== undefined ? ` • ${connectionTestResult.rttMs}ms` : ""}`
 											: "Failed"}

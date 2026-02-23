@@ -139,7 +139,7 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 				<div className="mt-4">
 					{!activeImport.isIdle && (
 						<>
-							<div className="mb-1 flex justify-between font-bold text-[10px] uppercase tracking-wider opacity-60">
+							<div className="mb-1 flex justify-between font-bold text-base-content/80 text-xs uppercase tracking-wider">
 								<span className="mr-2 truncate">{activeImport.detail}</span>
 								{activeImport.progress > 0 && <span>{activeImport.progress}%</span>}
 							</div>
@@ -151,7 +151,7 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 						</>
 					)}
 					{activeImport.isIdle && (
-						<div className="flex items-center gap-1.5 font-bold text-[10px] text-base-content/30 uppercase tracking-widest">
+						<div className="flex items-center gap-1.5 font-bold text-base-content/30 text-xs uppercase tracking-widest">
 							<div className="h-1.5 w-1.5 rounded-full bg-base-content/20" />
 							{activeImport.detail}
 						</div>

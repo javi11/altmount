@@ -77,7 +77,7 @@ export function UserMenu() {
 						type="button"
 						onClick={handleLogout}
 						disabled={isLoading}
-						className="flex items-center gap-3 py-2 text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
+						className="flex items-center gap-3 py-2 text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:text-base-content/70"
 					>
 						<LogOut className="h-4 w-4" />
 						<span>{isLoading ? "Logging out..." : "Logout"}</span>

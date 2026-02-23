@@ -134,7 +134,7 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 					</div>
 
 					{/* Legend / Stats */}
-					<div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-bold text-[9px] uppercase tracking-wider opacity-60">
+					<div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-bold text-base-content/80 text-xs uppercase tracking-wider">
 						<div className="flex items-center gap-1">
 							<div className="h-1.5 w-1.5 rounded-full bg-success" />
 							<span>{metrics.healthy} Healthy</span>

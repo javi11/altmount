@@ -1,4 +1,5 @@
-import { Menu } from "lucide-react";
+import { Menu, Settings } from "lucide-react";
+import { Link } from "react-router-dom";
 import { UserMenu } from "../auth/UserMenu";
 
 export function Navbar() {
@@ -22,12 +23,17 @@ export function Navbar() {
 
 			<div className="navbar-center lg:hidden">
 				<div className="flex items-center gap-2">
+					<img src="/logo.png" alt="AltMount Logo" className="h-7 w-7 object-contain" />
 					<h1 className="font-bold text-base-content text-lg">AltMount</h1>
 				</div>
 			</div>
 
 			<div className="navbar-end">
 				<div className="flex items-center gap-2">
+					{/* Mobile Quick Config Link */}
+					<Link to="/config" className="btn btn-ghost btn-circle lg:hidden" aria-label="Configuration">
+						<Settings className="h-5 w-5 text-base-content/80" />
+					</Link>
 					{/* User Menu */}
 					<UserMenu />
 				</div>

@@ -104,7 +104,7 @@ export function HealthConfigSection({
 
 			<div className="space-y-8">
 				{/* Enable Health Toggle */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Master Engine</h4>
@@ -126,13 +126,13 @@ export function HealthConfigSection({
 							<div className="rounded-xl border border-primary/10 bg-primary/5 p-4">
 								<div className="mb-3 flex items-center gap-2">
 									<Info className="h-4 w-4 shrink-0 text-primary" />
-									<span className="break-words font-black text-[10px] text-primary uppercase tracking-widest">
+									<span className="break-words font-black text-primary text-xs uppercase tracking-widest">
 										Workflow Overview
 									</span>
 								</div>
 								<ul className="space-y-3">
 									<li className="flex gap-3 text-xs leading-relaxed">
-										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-[10px]">
+										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-xs">
 											1
 										</span>
 										<span className="min-w-0 flex-1 break-words">
@@ -140,7 +140,7 @@ export function HealthConfigSection({
 										</span>
 									</li>
 									<li className="flex gap-3 text-xs leading-relaxed">
-										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-[10px]">
+										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-xs">
 											2
 										</span>
 										<span className="min-w-0 flex-1 break-words">
@@ -148,7 +148,7 @@ export function HealthConfigSection({
 										</span>
 									</li>
 									<li className="flex gap-3 text-xs leading-relaxed">
-										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-[10px]">
+										<span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/20 font-black text-xs">
 											3
 										</span>
 										<span className="min-w-0 flex-1 break-words font-bold">
@@ -162,9 +162,9 @@ export function HealthConfigSection({
 				</div>
 
 				{/* Directory Configuration */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend break-words font-semibold">
+						<legend className="fieldset-legend whitespace-normal break-words font-semibold md:whitespace-nowrap">
 							Library Parent Directory
 						</legend>
 						<div className="flex flex-col gap-3">
@@ -176,14 +176,14 @@ export function HealthConfigSection({
 								placeholder="/media/library"
 								onChange={(e) => handleInputChange("library_dir", e.target.value || undefined)}
 							/>
-							<p className="label break-words text-[10px] text-base-content/50 leading-relaxed">
+							<div className="mt-2 whitespace-normal text-base-content/50 text-xs leading-relaxed">
 								Path where your permanent media folders (/movies, /tv) are located. Required for
 								mapping virtual files to physical ARR library paths.
-							</p>
+							</div>
 						</div>
 					</fieldset>
 
-					<div className="divider opacity-50" />
+					<div className="divider text-base-content/70" />
 
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
@@ -204,7 +204,7 @@ export function HealthConfigSection({
 					<div className="flex justify-start">
 						<button
 							type="button"
-							className="btn btn-ghost btn-xs border-base-300 bg-base-100 hover:bg-base-200"
+							className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200"
 							onClick={handleDryRun}
 							disabled={!formData.library_dir?.trim() || dryRunLoading || isReadOnly}
 						>
@@ -218,7 +218,7 @@ export function HealthConfigSection({
 							className={`alert zoom-in-95 animate-in rounded-xl border p-4 ${dryRunResult.would_cleanup ? "border-warning/20 bg-warning/5" : "border-info/20 bg-info/5"}`}
 						>
 							<div className="w-full space-y-3">
-								<h5 className="flex items-center gap-2 font-black text-[10px] uppercase tracking-widest opacity-60">
+								<h5 className="flex items-center gap-2 font-black text-base-content/80 text-xs uppercase tracking-widest">
 									<TestTube className="h-3 w-3" /> Potential Cleanup Results
 								</h5>
 								<div className="grid grid-cols-3 gap-2 text-center">
@@ -226,19 +226,19 @@ export function HealthConfigSection({
 										<div className="font-bold font-mono text-lg">
 											{dryRunResult.orphaned_metadata_count}
 										</div>
-										<div className="font-black text-[8px] uppercase opacity-50">Metadata</div>
+										<div className="font-black text-[8px] text-base-content/70 uppercase">Metadata</div>
 									</div>
 									<div className="rounded-lg border border-base-300/50 bg-base-100 p-2">
 										<div className="font-bold font-mono text-lg">
 											{dryRunResult.orphaned_library_files}
 										</div>
-										<div className="font-black text-[8px] uppercase opacity-50">Links</div>
+										<div className="font-black text-[8px] text-base-content/70 uppercase">Links</div>
 									</div>
 									<div className="rounded-lg border border-base-300/50 bg-base-100 p-2">
 										<div className="font-bold font-mono text-lg">
 											{dryRunResult.database_records_to_clean}
 										</div>
-										<div className="font-black text-[8px] uppercase opacity-50">Records</div>
+										<div className="font-black text-[8px] text-base-content/70 uppercase">Records</div>
 									</div>
 								</div>
 							</div>
@@ -247,9 +247,9 @@ export function HealthConfigSection({
 				</div>
 
 				{/* Advanced Performance & Logic */}
-				<div className="collapse-arrow collapse rounded-2xl border border-base-300 bg-base-200/30">
+				<div className="collapse-arrow collapse rounded-2xl border-2 border-base-300/80 bg-base-200/60">
 					<input type="checkbox" />
-					<div className="collapse-title font-bold text-sm uppercase tracking-widest opacity-60">
+					<div className="collapse-title font-bold text-base-content/80 text-sm uppercase tracking-widest">
 						Performance & Deep Validation
 					</div>
 					<div className="collapse-content space-y-8">
@@ -270,7 +270,7 @@ export function HealthConfigSection({
 										<span className="label-text break-words font-medium text-xs">
 											Verify Every Segment (100%)
 										</span>
-										<p className="label mt-1 break-words text-[10px] leading-relaxed opacity-50">
+										<p className="label mt-1 break-words text-base-content/70 text-xs leading-relaxed">
 											Thorough but very slow for large libraries.
 										</p>
 									</div>
@@ -294,7 +294,7 @@ export function HealthConfigSection({
 											<span className="label-text break-words font-medium text-xs">
 												Hybrid Data Verification
 											</span>
-											<p className="label mt-1 break-words text-[10px] leading-relaxed opacity-50">
+											<p className="label mt-1 break-words text-base-content/70 text-xs leading-relaxed">
 												Reads 1 byte from each checked segment to confirm Usenet data exists.
 											</p>
 										</div>
@@ -328,7 +328,7 @@ export function HealthConfigSection({
 											)
 										}
 									/>
-									<div className="flex justify-between px-2 font-black text-[9px] opacity-30">
+									<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
 										<span>1% (FAST)</span>
 										<span>25%</span>
 										<span>50%</span>
@@ -349,7 +349,7 @@ export function HealthConfigSection({
 											className="tooltip tooltip-right"
 											data-tip="Tolerance for missing data. Files with missing segments below this percentage will be marked as healthy instead of corrupted. Useful for ignoring tiny losses in credits or non-critical parts."
 										>
-											<Info className="h-3.5 w-3.5 opacity-40" />
+											<Info className="h-3.5 w-3.5 text-base-content/60" />
 										</div>
 									</div>
 									<div className="font-black font-mono text-lg text-primary">
@@ -372,7 +372,7 @@ export function HealthConfigSection({
 											)
 										}
 									/>
-									<div className="flex justify-between px-2 font-black text-[9px] opacity-30">
+									<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
 										<span>0% (STRICT)</span>
 										<span>2.5%</span>
 										<span>5%</span>
@@ -400,7 +400,7 @@ export function HealthConfigSection({
 										)
 									}
 								/>
-								<p className="label break-words text-[10px] opacity-50">
+								<p className="label break-words text-base-content/70 text-xs">
 									Max files processed at once.
 								</p>
 							</fieldset>
@@ -420,7 +420,7 @@ export function HealthConfigSection({
 										)
 									}
 								/>
-								<p className="label break-words text-[10px] opacity-50">
+								<p className="label break-words text-base-content/70 text-xs">
 									How often to scan your library for new files.
 								</p>
 							</fieldset>
@@ -444,7 +444,7 @@ export function HealthConfigSection({
 										)
 									}
 								/>
-								<p className="label break-words text-[10px] opacity-50">
+								<p className="label break-words text-base-content/70 text-xs">
 									Idle time between background health check cycles.
 								</p>
 							</fieldset>
@@ -463,7 +463,7 @@ export function HealthConfigSection({
 										)
 									}
 								/>
-								<p className="label break-words text-[10px] opacity-50">
+								<p className="label break-words text-base-content/70 text-xs">
 									Max parallel file scans during sync (0 = auto).
 								</p>
 							</fieldset>

@@ -6,6 +6,7 @@ export interface WebDAVFile {
 	type: "file" | "directory";
 	etag?: string | null;
 	mime?: string;
+	library_path?: string;
 }
 
 export interface WebDAVDirectory {

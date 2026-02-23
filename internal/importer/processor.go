@@ -109,8 +109,12 @@ func (proc *Processor) isCategoryFolder(path string) bool {
 		}
 
 		// Check match with complete_dir prefix (e.g. complete/tv)
-		if completeDir != "" && normalizedPath == strings.Trim(completeDir+"/"+name, "/") {
-			return true
+		// We must ensure it's at a directory boundary
+		if completeDir != "" {
+			prefix := strings.Trim(completeDir+"/"+name, "/")
+			if normalizedPath == prefix {
+				return true
+			}
 		}
 
 		return false

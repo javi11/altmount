@@ -311,16 +311,16 @@ export function ConfigurationPage() {
 			{/* Header */}
 			<div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
 				<div className="flex items-center space-x-3">
-					<div className="rounded-xl bg-primary/10 p-2 shadow-inner">
+					<div className="shrink-0 rounded-xl bg-primary/10 p-2 shadow-inner">
 						<Settings className="h-8 w-8 text-primary" />
 					</div>
-					<div>
-						<h1 className="font-bold text-3xl tracking-tight">Configuration</h1>
-						<p className="text-base-content/60 text-sm">System settings and preferences.</p>
+					<div className="min-w-0">
+						<h1 className="truncate font-bold text-2xl tracking-tight sm:text-3xl">Configuration</h1>
+						<p className="text-base-content/60 text-xs sm:text-sm">System settings and preferences.</p>
 					</div>
 				</div>
 
-				<div className="flex items-center gap-2">
+				<div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
 					{hasUnsavedChanges && (
 						<div className="badge badge-warning badge-sm animate-pulse gap-1 py-3 font-bold">
 							<AlertTriangle className="h-3 w-3" /> UNSAVED
@@ -377,174 +377,173 @@ export function ConfigurationPage() {
 				</div>
 			)}
 
-			                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-			                                {/* Modern Sidebar (Stacks on mobile, exactly like Import) */}
-			                                <div className="lg:col-span-3 xl:col-span-2">					<div className="card sticky top-24 border border-base-200 bg-base-100/50 shadow-sm backdrop-blur-md">
-						<div className="card-body p-2 sm:p-4">
-							{SECTION_GROUPS.map((group) => (
-								<div key={group.title} className="mb-4 last:mb-0">
-									<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-										{group.title}
-									</h3>
-									<ul className="menu menu-md gap-1 p-0">
-										{group.sections.map((key) => {
-											const s = CONFIG_SECTIONS[key as ConfigSection | "system"];
-											if (s.hidden) return null;
-											const Icon = getIconComponent(s.icon);
-											const isActive = activeSection === key;
-											return (
-												<li key={key}>
-													<button
-														type="button"
-														className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all ${
-															isActive
-																? "scale-[1.02] bg-primary font-bold text-primary-content shadow-lg shadow-primary/20"
-																: "text-base-content/70 hover:bg-base-200"
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+				{/* Modern Sidebar (Stacks on mobile, exactly like Import) */}
+				<div className="lg:col-span-3 xl:col-span-2">					<div className="card sticky top-24 border border-base-200 bg-base-100/50 shadow-sm backdrop-blur-md">
+					<div className="card-body p-2 sm:p-4">
+						{SECTION_GROUPS.map((group) => (
+							<div key={group.title} className="mb-4 last:mb-0">
+								<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
+									{group.title}
+								</h3>
+								<ul className="menu menu-md gap-1 p-0">
+									{group.sections.map((key) => {
+										const s = CONFIG_SECTIONS[key as ConfigSection | "system"];
+										if (s.hidden) return null;
+										const Icon = getIconComponent(s.icon);
+										const isActive = activeSection === key;
+										return (
+											<li key={key}>
+												<button
+													type="button"
+													className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all ${isActive
+															? "scale-[1.02] bg-primary font-bold text-primary-content shadow-lg shadow-primary/20"
+															: "text-base-content/70 hover:bg-base-200"
 														}`}
-														onClick={() => navigate(`/config/${key}`)}
-													>
-														<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/40"}`} />
-														<div className="min-w-0 flex-1 text-left">
-															<div className="text-sm">{s.title}</div>
-														</div>
-														{!s.canEdit && (
-															<span className="badge badge-ghost badge-xs opacity-50">🔒</span>
-														)}
-													</button>
-												</li>
-											);
-										})}
-									</ul>
-								</div>
-							))}
-						</div>
+													onClick={() => navigate(`/config/${key}`)}
+												>
+													<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/40"}`} />
+													<div className="min-w-0 flex-1 text-left">
+														<div className="text-sm">{s.title}</div>
+													</div>
+													{!s.canEdit && (
+														<span className="badge badge-ghost badge-xs text-base-content/70">🔒</span>
+													)}
+												</button>
+											</li>
+										);
+									})}
+								</ul>
+							</div>
+						))}
 					</div>
 				</div>
+				</div>
 
-				                                {/* Modern Content Card */}
-				                                <div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] overflow-hidden rounded-2xl border border-base-200 bg-base-100 shadow-sm">
-						<div className="card-body p-4 sm:p-10">
-							{/* Modern Section Header */}
-							<div className="mb-10 border-base-200 border-b pb-8">
-								<div className="mb-2 flex items-start space-x-5 sm:items-center">
-									<div className="shrink-0 rounded-2xl bg-primary/10 p-4 shadow-inner">
-										{(() => {
-											const Icon = getIconComponent(CONFIG_SECTIONS[activeSection].icon);
-											return <Icon className="h-8 w-8 text-primary" />;
-										})()}
-									</div>
-									<div className="min-w-0 flex-1">
-										<h2 className="break-words font-bold text-3xl text-base-content tracking-tight">
-											{CONFIG_SECTIONS[activeSection].title}
-										</h2>
-										<p className="mt-1 max-w-2xl break-words text-base-content/60 text-sm leading-relaxed">
-											{CONFIG_SECTIONS[activeSection].description}
-										</p>
-									</div>
+				{/* Modern Content Card */}
+				<div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] overflow-hidden rounded-2xl border-2 border-base-300/50 bg-base-100 shadow-md">
+					<div className="card-body p-4 sm:p-10">
+						{/* Modern Section Header */}
+						<div className="mb-10 border-base-200 border-b pb-8">
+							<div className="mb-2 flex items-start space-x-5 sm:items-center">
+								<div className="shrink-0 rounded-2xl bg-primary/10 p-4 shadow-inner">
+									{(() => {
+										const Icon = getIconComponent(CONFIG_SECTIONS[activeSection].icon);
+										return <Icon className="h-8 w-8 text-primary" />;
+									})()}
+								</div>
+								<div className="min-w-0 flex-1">
+									<h2 className="break-words font-bold text-3xl text-base-content tracking-tight">
+										{CONFIG_SECTIONS[activeSection].title}
+									</h2>
+									<p className="mt-1 max-w-2xl break-words text-base-content/60 text-sm leading-relaxed">
+										{CONFIG_SECTIONS[activeSection].description}
+									</p>
 								</div>
 							</div>
+						</div>
 
-							<div className="mx-auto w-full max-w-4xl">
-								{activeSection === "webdav" && (
-									<WebDAVConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "auth" && (
-									<AuthConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "import" && (
-									<ImportConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "metadata" && (
-									<MetadataConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "streaming" && (
-									<StreamingConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "system" && (
-									<SystemConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										onRefresh={async () => {
-											await refetch();
-										}}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "providers" && (
-									<ProvidersConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "mount" && (
-									<MountConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "sabnzbd" && (
-									<SABnzbdConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "arrs" && (
-									<ArrsConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{activeSection === "health" && (
-									<HealthConfigSection
-										config={config}
-										onUpdate={handleConfigUpdate}
-										isUpdating={updateConfigSection.isPending}
-									/>
-								)}
-								{![
-									"webdav",
-									"auth",
-									"import",
-									"metadata",
-									"streaming",
-									"system",
-									"providers",
-									"mount",
-									"sabnzbd",
-									"arrs",
-									"health",
-								].includes(activeSection) && (
+						<div className="mx-auto w-full max-w-4xl">
+							{activeSection === "webdav" && (
+								<WebDAVConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "auth" && (
+								<AuthConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "import" && (
+								<ImportConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "metadata" && (
+								<MetadataConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "streaming" && (
+								<StreamingConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "system" && (
+								<SystemConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									onRefresh={async () => {
+										await refetch();
+									}}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "providers" && (
+								<ProvidersConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "mount" && (
+								<MountConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "sabnzbd" && (
+								<SABnzbdConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "arrs" && (
+								<ArrsConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{activeSection === "health" && (
+								<HealthConfigSection
+									config={config}
+									onUpdate={handleConfigUpdate}
+									isUpdating={updateConfigSection.isPending}
+								/>
+							)}
+							{![
+								"webdav",
+								"auth",
+								"import",
+								"metadata",
+								"streaming",
+								"system",
+								"providers",
+								"mount",
+								"sabnzbd",
+								"arrs",
+								"health",
+							].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}
 									/>
 								)}
-							</div>
 						</div>
 					</div>
+				</div>
 				</div>
 			</div>
 		</div>
