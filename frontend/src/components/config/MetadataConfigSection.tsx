@@ -82,7 +82,9 @@ export function MetadataConfigSection({
 					</div>
 
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">Metadata Root Directory</legend>
+						<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
+							Metadata Root Directory
+						</legend>
 						<div className="flex flex-col gap-3">
 							<input
 								type="text"

@@ -100,13 +100,13 @@ export function QueueItemCard({
 							{(item.status === QueueStatus.PENDING ||
 								item.status === QueueStatus.FAILED ||
 								item.status === QueueStatus.COMPLETED) && (
-									<li>
-										<button type="button" onClick={() => onRetry(item.id)} disabled={isRetryPending}>
-											<PlayCircle className="h-4 w-4 text-primary" />
-											{item.status === QueueStatus.PENDING ? "Start Now" : "Retry Task"}
-										</button>
-									</li>
-								)}
+								<li>
+									<button type="button" onClick={() => onRetry(item.id)} disabled={isRetryPending}>
+										<PlayCircle className="h-4 w-4 text-primary" />
+										{item.status === QueueStatus.PENDING ? "Start Now" : "Retry Task"}
+									</button>
+								</li>
+							)}
 							{item.status === QueueStatus.PROCESSING && (
 								<li>
 									<button

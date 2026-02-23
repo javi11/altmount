@@ -167,7 +167,9 @@ export function ActivityHub() {
 															)}
 														</div>
 														<div className="flex items-center gap-1 font-bold font-mono text-primary text-xs">
-															<span className="text-[8px] text-base-content/80 text-success">OUT:</span>
+															<span className="text-[8px] text-base-content/80 text-success">
+																OUT:
+															</span>
 															{formatSpeed(stream.bytes_per_second)}
 														</div>
 													</div>

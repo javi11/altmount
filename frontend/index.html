@@ -16,14 +16,14 @@
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
         // Apply theme: saved preference > system preference > default (retro)
-        const theme = savedTheme || (prefersDark ? 'forest' : 'retro');
+        const theme = savedTheme || (prefersDark ? 'business' : 'retro');
         document.documentElement.setAttribute('data-theme', theme);
 
         // Listen for system theme changes
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
           if (!localStorage.getItem('theme')) {
             // Only auto-switch if user hasn't set a manual preference
-            document.documentElement.setAttribute('data-theme', e.matches ? 'forest' : 'retro');
+            document.documentElement.setAttribute('data-theme', e.matches ? 'business' : 'retro');
           }
         });
       })();
