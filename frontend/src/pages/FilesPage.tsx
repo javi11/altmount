@@ -26,12 +26,32 @@ export function FilesPage() {
 		];
 
 		if (config?.sabnzbd?.categories) {
-			let completeDir = config.sabnzbd.complete_dir || "";
-			if (completeDir && !completeDir.startsWith("/")) {
-				completeDir = "/" + completeDir;
+			const strategy = config.import?.import_strategy || "NONE";
+			let basePath = "";
+
+			if (strategy === "NONE") {
+				// With strategy NONE, Arrs move the files to {mount_path}/{category}
+				// By default, WebDAV serves from mount_path, so the relative path is just /
+				basePath = "/";
+			} else if (config.import?.import_dir && config.mount_path) {
+				// With SYMLINK/STRM strategies, files are in import_dir
+				// Attempt to create a relative path if import_dir is inside mount_path
+				if (config.import.import_dir.startsWith(config.mount_path)) {
+					basePath = config.import.import_dir.substring(config.mount_path.length);
+				} else {
+					// Fallback if import_dir is outside the webdav mount
+					basePath = "/";
+				}
+			} else {
+				basePath = "/";
 			}
-			if (completeDir.endsWith("/")) {
-				completeDir = completeDir.slice(0, -1);
+
+			// Ensure valid base path slashes
+			if (basePath && !basePath.startsWith("/")) {
+				basePath = "/" + basePath;
+			}
+			if (basePath && basePath.endsWith("/") && basePath !== "/") {
+				basePath = basePath.slice(0, -1);
 			}
 
 			config.sabnzbd.categories.forEach((cat) => {
@@ -45,7 +65,7 @@ export function FilesPage() {
 				else if (lowerName.includes("book") || lowerName.includes("audiobook")) icon = Book;
 				else if (lowerName.includes("game")) icon = Gamepad2;
 
-				let catPath = `${completeDir}/${cat.name}`;
+				let catPath = basePath === "/" ? `/${cat.name}` : `${basePath}/${cat.name}`;
 				catPath = catPath.replace(/\/\//g, "/");
 
 				shortcuts.push({
