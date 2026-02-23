@@ -65,7 +65,8 @@ type UsenetReader struct {
 	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
 	metricsTracker MetricsTracker
 	streamID       string
-	segmentStore   SegmentStore // optional, nil = no caching
+	segmentStore   SegmentStore  // optional, nil = no caching
+	wakeDownloader chan struct{} // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
 	nextToDownload int // Index of next segment to schedule
@@ -100,6 +101,7 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
+		wakeDownloader: make(chan struct{}, 1),
 	}
 
 	ur.wg.Go(func() {
@@ -225,6 +227,13 @@ func (b *UsenetReader) Read(p []byte) (int, error) {
 				}
 
 				s, err = rg.Next()
+				if err == nil {
+					// Wake download manager — room for more prefetch
+					select {
+					case b.wakeDownloader <- struct{}{}:
+					default:
+					}
+				}
 
 				if err != nil {
 					if n > 0 {
@@ -346,10 +355,12 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		retry.MaxDelay(2*time.Second),
 		retry.DelayType(retry.BackOffDelay),
 		retry.OnRetry(func(n uint, err error) {
-			b.log.DebugContext(ctx, "Pool unavailable or timeout, retrying segment download",
-				"attempt", n+1,
-				"segment_id", seg.Id,
-				"error", err)
+			if !errors.Is(err, context.Canceled) && ctx.Err() == nil {
+				b.log.DebugContext(ctx, "Error downloading segment, retrying",
+					"attempt", n+1,
+					"segment_id", seg.Id,
+					"error", err)
+			}
 		}),
 		retry.Context(ctx),
 	)
@@ -394,9 +405,9 @@ func (b *UsenetReader) downloadManager(ctx context.Context) {
 		currentRead := b.rg.GetCurrentIndex()
 		if b.nextToDownload-currentRead >= b.maxPrefetch {
 			b.mu.Unlock()
-			// Wait briefly before re-checking
+			// Wait for reader to advance before re-checking
 			select {
-			case <-time.After(50 * time.Millisecond):
+			case <-b.wakeDownloader:
 				continue
 			case <-ctx.Done():
 				return
