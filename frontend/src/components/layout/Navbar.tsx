@@ -31,7 +31,11 @@ export function Navbar() {
 			<div className="navbar-end">
 				<div className="flex items-center gap-2">
 					{/* Mobile Quick Config Link */}
-					<Link to="/config" className="btn btn-ghost btn-circle lg:hidden" aria-label="Configuration">
+					<Link
+						to="/config"
+						className="btn btn-ghost btn-circle lg:hidden"
+						aria-label="Configuration"
+					>
 						<Settings className="h-5 w-5 text-base-content/80" />
 					</Link>
 					{/* User Menu */}

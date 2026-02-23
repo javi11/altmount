@@ -1,10 +1,107 @@
-import { Copy, RefreshCw, Save, ShieldCheck, Terminal } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+	Check,
+	Copy,
+	Monitor,
+	Palette,
+	RefreshCw,
+	Save,
+	ShieldCheck,
+	Terminal,
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ModalContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useRegenerateAPIKey } from "../../hooks/useAuth";
 import type { ConfigResponse, LogFormData } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+
+const LIGHT_THEMES = [
+	"retro",
+	"light",
+	"cupcake",
+	"bumblebee",
+	"emerald",
+	"corporate",
+	"garden",
+	"lofi",
+	"pastel",
+	"fantasy",
+	"wireframe",
+	"cmyk",
+	"autumn",
+	"lemonade",
+	"winter",
+	"nord",
+	"caramellatte",
+] as const;
+
+const DARK_THEMES = [
+	"forest",
+	"dark",
+	"dim",
+	"dracula",
+	"synthwave",
+	"halloween",
+	"luxury",
+	"night",
+	"coffee",
+	"business",
+	"sunset",
+	"abyss",
+] as const;
+
+type ThemeId = (typeof LIGHT_THEMES)[number] | (typeof DARK_THEMES)[number];
+
+function getActiveTheme(): ThemeId | "system" {
+	const saved = localStorage.getItem("theme");
+	if (!saved) return "system";
+	return saved as ThemeId;
+}
+
+function applyTheme(theme: ThemeId | "system") {
+	if (theme === "system") {
+		localStorage.removeItem("theme");
+		const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+		document.documentElement.setAttribute("data-theme", prefersDark ? "business" : "retro");
+	} else {
+		localStorage.setItem("theme", theme);
+		document.documentElement.setAttribute("data-theme", theme);
+	}
+}
+
+function ThemeSwatch({
+	theme,
+	isActive,
+	onClick,
+}: {
+	theme: ThemeId;
+	isActive: boolean;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border-2 transition-all ${
+				isActive
+					? "border-primary ring-2 ring-primary/30"
+					: "border-base-300 hover:border-primary/50"
+			}`}
+			data-theme={theme}
+			onClick={onClick}
+		>
+			<div className="flex h-8 w-full">
+				<div className="flex-1 bg-primary" />
+				<div className="flex-1 bg-secondary" />
+				<div className="flex-1 bg-accent" />
+				<div className="flex-1 bg-neutral" />
+			</div>
+			<div className="flex w-full items-center justify-between bg-base-100 px-2 py-1.5">
+				<span className="truncate text-[10px] text-base-content">{theme}</span>
+				{isActive && <Check className="h-3 w-3 shrink-0 text-primary" />}
+			</div>
+		</button>
+	);
+}
 
 interface SystemConfigSectionProps {
 	config: ConfigResponse;
@@ -116,6 +213,13 @@ export function SystemConfigSection({
 		}
 	};
 
+	const [activeTheme, setActiveTheme] = useState<ThemeId | "system">(getActiveTheme);
+
+	const handleThemeChange = useCallback((theme: ThemeId | "system") => {
+		setActiveTheme(theme);
+		applyTheme(theme);
+	}, []);
+
 	return (
 		<div className="space-y-10">
 			<div>
@@ -126,6 +230,71 @@ export function SystemConfigSection({
 			</div>
 
 			<div className="space-y-8">
+				{/* Appearance */}
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex items-center gap-2">
+						<Palette className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
+							Appearance
+						</h4>
+						<div className="h-px flex-1 bg-base-300/50" />
+					</div>
+
+					{/* System default */}
+					<button
+						type="button"
+						className={`flex w-full items-center gap-3 rounded-lg border-2 p-3 text-left transition-all ${
+							activeTheme === "system"
+								? "border-primary bg-primary/5 ring-2 ring-primary/30"
+								: "border-base-300 hover:border-primary/50"
+						}`}
+						onClick={() => handleThemeChange("system")}
+					>
+						<Monitor className="h-5 w-5 shrink-0 text-base-content/60" />
+						<div className="min-w-0 flex-1">
+							<span className="font-semibold text-sm">System Default</span>
+							<p className="text-[11px] text-base-content/50">
+								Follows your operating system&apos;s light/dark preference
+							</p>
+						</div>
+						{activeTheme === "system" && <Check className="h-4 w-4 shrink-0 text-primary" />}
+					</button>
+
+					{/* Light themes */}
+					<div>
+						<p className="mb-2 font-semibold text-base-content/40 text-xs uppercase tracking-wider">
+							Light
+						</p>
+						<div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+							{LIGHT_THEMES.map((theme) => (
+								<ThemeSwatch
+									key={theme}
+									theme={theme}
+									isActive={activeTheme === theme}
+									onClick={() => handleThemeChange(theme)}
+								/>
+							))}
+						</div>
+					</div>
+
+					{/* Dark themes */}
+					<div>
+						<p className="mb-2 font-semibold text-base-content/40 text-xs uppercase tracking-wider">
+							Dark
+						</p>
+						<div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+							{DARK_THEMES.map((theme) => (
+								<ThemeSwatch
+									key={theme}
+									theme={theme}
+									isActive={activeTheme === theme}
+									onClick={() => handleThemeChange(theme)}
+								/>
+							))}
+						</div>
+					</div>
+				</div>
+
 				{/* Logging Configuration */}
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">

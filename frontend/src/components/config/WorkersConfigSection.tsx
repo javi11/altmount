@@ -365,10 +365,7 @@ export function ImportConfigSection({
 								</span>
 							) : (
 								formData.allowed_file_extensions.map((ext) => (
-									<div
-										key={ext}
-										className="badge badge-primary gap-1 px-3 py-3 font-bold text-xs"
-									>
+									<div key={ext} className="badge badge-primary gap-1 px-3 py-3 font-bold text-xs">
 										{ext}
 										{!isReadOnly && (
 											<button

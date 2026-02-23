@@ -470,7 +470,9 @@ function EnhancedUploadSection() {
 			{(uploadedFiles.length > 0 || uploadedLinks.length > 0) && (
 				<div className="space-y-4">
 					<div className="flex items-center justify-between">
-						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">Status</h4>
+						<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
+							Status
+						</h4>
 						<button
 							type="button"
 							className="btn btn-ghost btn-sm"
@@ -786,7 +788,9 @@ function NzbDavImportSection() {
 							</fieldset>
 
 							<div className="flex flex-col justify-center space-y-3">
-								<div className="label mb-1 font-semibold text-base-content/80 text-xs">Input Method</div>
+								<div className="label mb-1 font-semibold text-base-content/80 text-xs">
+									Input Method
+								</div>
 								<div className="flex gap-4">
 									<label className="label cursor-pointer gap-2">
 										<input
