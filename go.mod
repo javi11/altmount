@@ -16,7 +16,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/google/uuid v1.6.0
 	github.com/hanwen/go-fuse/v2 v2.9.0
-	github.com/javi11/nntppool/v4 v4.3.0
+	github.com/javi11/nntppool/v4 v4.4.1
 	github.com/javi11/nxg v0.1.0
 	github.com/javi11/nzbparser v0.5.4
 	github.com/javi11/rardecode/v2 v2.1.2-0.20260213142800-2b1c601a8d62
@@ -32,9 +32,11 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.20.0
 	github.com/stretchr/testify v1.11.1
+	github.com/winfsp/cgofuse v1.6.0
 	golang.org/x/crypto v0.46.0
 	golang.org/x/net v0.48.0
 	golang.org/x/sync v0.19.0
+	golang.org/x/term v0.38.0
 	golang.org/x/text v0.32.0
 	golift.io/starr v1.2.0
 	google.golang.org/protobuf v1.36.8
@@ -269,7 +271,6 @@ require (
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/telemetry v0.0.0-20251203150158-8fff8a5912fc // indirect
-	golang.org/x/term v0.38.0 // indirect
 	golang.org/x/tools v0.40.0 // indirect
 	golang.org/x/vuln v1.1.4 // indirect
 	honnef.co/go/tools v0.6.1 // indirect
