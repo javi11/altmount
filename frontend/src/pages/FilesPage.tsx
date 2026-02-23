@@ -1,4 +1,4 @@
-import { Book, Film, Folder, Gamepad2, HardDrive, History, Music, Tv, Wifi, WifiOff } from "lucide-react";
+import { Book, Film, Folder, Gamepad2, HardDrive, Music, Tv, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
@@ -8,9 +8,7 @@ import { useConfig } from "../hooks/useConfig";
 type FileView = string;
 
 
-const SECONDARY_SHORTCUTS = [
-	{ id: "recent", title: "Recently Added", icon: History },
-];
+const SECONDARY_SHORTCUTS: { id: string; title: string; icon: any }[] = [];
 
 export function FilesPage() {
 	const { data: config } = useConfig();

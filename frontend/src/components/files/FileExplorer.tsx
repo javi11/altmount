@@ -1,7 +1,6 @@
-import { AlertTriangle, FolderTree, History, Info, RefreshCw, Search, Wifi, WifiOff, X } from "lucide-react";
+import { AlertTriangle, FolderTree, Info, RefreshCw, Search, Wifi, WifiOff, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useFilePreview } from "../../hooks/useFilePreview";
-import { useImportHistory } from "../../hooks/useApi";
 import { useWebDAVDirectory, useWebDAVFileOperations } from "../../hooks/useWebDAV";
 import type { WebDAVFile } from "../../types/webdav";
 import { ErrorAlert } from "../ui/ErrorAlert";
@@ -28,7 +27,6 @@ export function FileExplorer({
 	connectionError,
 	onRetryConnection,
 	initialPath = "/",
-	activeView = "all",
 }: FileExplorerProps) {
 	const [currentPath, setCurrentPath] = useState(initialPath);
 	const [searchTerm, setSearchTerm] = useState("");
@@ -41,35 +39,10 @@ export function FileExplorer({
 
 	const {
 		data: directory,
-		isLoading: isWebDAVLoading,
-		error: webdavError,
-		refetch: refetchWebDAV,
+		isLoading,
+		error,
+		refetch,
 	} = useWebDAVDirectory(currentPath, isConnected, hasConnectionFailed, showCorrupted);
-
-	const {
-		data: history,
-		isLoading: isHistoryLoading,
-		error: historyError,
-		refetch: refetchHistory,
-	} = useImportHistory(100);
-
-	const isRecentView = activeView === "recent";
-	const isLoading = isRecentView ? isHistoryLoading : isWebDAVLoading;
-	const error = isRecentView ? historyError : webdavError;
-	const refetch = isRecentView ? refetchHistory : refetchWebDAV;
-
-	// Convert history items to WebDAV-like file objects
-	const historyFiles = useMemo<WebDAVFile[]>(() => {
-		if (!history) return [];
-		return history.map((item) => ({
-			filename: item.virtual_path,
-			basename: item.file_name,
-			lastmod: item.completed_at,
-			size: item.file_size,
-			type: "file" as const,
-			library_path: item.library_path,
-		}));
-	}, [history]);
 
 	const {
 		downloadFile,
@@ -91,13 +64,13 @@ export function FileExplorer({
 
 	// Filter files based on search term
 	const filteredFiles = useMemo(() => {
-		const files = isRecentView ? historyFiles : directory?.files || [];
+		const files = directory?.files || [];
 		if (!searchTerm.trim()) {
 			return files;
 		}
 
 		return files.filter((file) => file.basename.toLowerCase().includes(searchTerm.toLowerCase()));
-	}, [isRecentView, historyFiles, directory?.files, searchTerm]);
+	}, [directory?.files, searchTerm]);
 
 	// File info modal state
 	const [fileInfoModal, setFileInfoModal] = useState<{
@@ -109,9 +82,6 @@ export function FileExplorer({
 	});
 
 	const handleNavigate = (path: string) => {
-		if (isRecentView) {
-			return;
-		}
 		setCurrentPath(path);
 		setSearchTerm(""); // Clear search when navigating
 	};
@@ -134,7 +104,7 @@ export function FileExplorer({
 
 	const handleFileInfo = (path: string) => {
 		const file = filteredFiles.find((f) => {
-			const filePath = isRecentView ? f.filename : `${currentPath}/${f.basename}`.replace(/\/+/g, "/");
+			const filePath = `${currentPath}/${f.basename}`.replace(/\/+/g, "/");
 			return filePath === path;
 		});
 
@@ -156,9 +126,7 @@ export function FileExplorer({
 
 	const handleRetryFileInfo = () => {
 		if (fileInfoModal.file) {
-			const filePath = isRecentView
-				? fileInfoModal.file.filename
-				: `${currentPath}/${fileInfoModal.file.basename}`.replace(/\/+/g, "/");
+			const filePath = `${currentPath}/${fileInfoModal.file.basename}`.replace(/\/+/g, "/");
 			getFileMetadata(filePath);
 		}
 	};
@@ -228,22 +196,13 @@ export function FileExplorer({
 			<section className="space-y-4">
 				<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex-1 overflow-hidden">
-						{!isRecentView ? (
-							<>
-								<div className="flex items-center gap-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
-									<FolderTree className="h-3 w-3" />
-									<span>Current Location</span>
-								</div>
-								<div className="scrollbar-hide mt-2 overflow-x-auto rounded-lg bg-base-200/50 p-2">
-									<BreadcrumbNav path={currentPath} onNavigate={handleNavigate} />
-								</div>
-							</>
-						) : (
-							<div className="flex items-center gap-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
-								<History className="h-3 w-3" />
-								<span>Recently Added Files</span>
-							</div>
-						)}
+						<div className="flex items-center gap-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
+							<FolderTree className="h-3 w-3" />
+							<span>Current Location</span>
+						</div>
+						<div className="scrollbar-hide mt-2 overflow-x-auto rounded-lg bg-base-200/50 p-2">
+							<BreadcrumbNav path={currentPath} onNavigate={handleNavigate} />
+						</div>
 					</div>
 
 					<div className="flex shrink-0 items-center gap-2">
@@ -263,7 +222,7 @@ export function FileExplorer({
 			{/* Search & Filters Section */}
 			<section className="space-y-4">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
+					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 						Search & Filters
 					</h4>
 					<div className="h-px flex-1 bg-base-300" />
@@ -292,22 +251,20 @@ export function FileExplorer({
 						)}
 					</div>
 
-					{!isRecentView && (
-						<div className="flex items-center justify-end">
-							<label className="label cursor-pointer gap-3 p-0">
-								<input
-									type="checkbox"
-									className="checkbox checkbox-sm checkbox-primary"
-									checked={showCorrupted}
-									onChange={(e) => setShowCorrupted(e.target.checked)}
-								/>
-								<div className="flex flex-col">
-									<span className="label-text font-semibold text-xs">Corrupted Files</span>
-									<span className="label-text-alt text-base-content/80 text-xs">Show items with errors</span>
-								</div>
-							</label>
-						</div>
-					)}
+					<div className="flex items-center justify-end">
+						<label className="label cursor-pointer gap-3 p-0">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-sm checkbox-primary"
+								checked={showCorrupted}
+								onChange={(e) => setShowCorrupted(e.target.checked)}
+							/>
+							<div className="flex flex-col">
+								<span className="label-text font-semibold text-xs">Corrupted Files</span>
+								<span className="label-text-alt text-base-content/80 text-xs">Show items with errors</span>
+							</div>
+						</label>
+					</div>
 				</div>
 			</section>
 
@@ -327,14 +284,14 @@ export function FileExplorer({
 			{/* File List Section */}
 			<section className="space-y-4">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-base-content/40 text-xs text-xs uppercase tracking-widest">
+					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 						Contents
 					</h4>
 					<div className="h-px flex-1 bg-base-300" />
 				</div>
 
 				<div className="min-h-[300px] rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-2 sm:p-6">
-					{searchTerm && (isRecentView ? historyFiles : directory) && (
+					{searchTerm && directory && (
 						<div className="mb-6 flex items-center gap-2 px-2 text-base-content/60 text-xs">
 							<Info className="h-3 w-3" />
 							{filteredFiles.length === 0 ? (
@@ -351,8 +308,8 @@ export function FileExplorer({
 						<div className="flex h-64 items-center justify-center">
 							<LoadingSpinner />
 						</div>
-					) : (isRecentView || directory) ? (
-						searchTerm && filteredFiles.length === 0 && (isRecentView ? historyFiles.length > 0 : (directory?.files?.length ?? 0) > 0) ? (
+					) : directory ? (
+						searchTerm && filteredFiles.length === 0 && (directory?.files?.length ?? 0) > 0 ? (
 							<div className="flex flex-col items-center justify-center py-20">
 								<Search className="mb-4 h-12 w-12 text-base-content/20" />
 								<h3 className="font-bold text-base-content/60 text-lg">No Results Found</h3>
@@ -368,7 +325,7 @@ export function FileExplorer({
 						) : (
 							<FileList
 								files={filteredFiles}
-								currentPath={isRecentView ? "" : currentPath}
+								currentPath={currentPath}
 								onNavigate={handleNavigate}
 								onDownload={handleDownload}
 								onDelete={handleDelete}

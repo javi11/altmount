@@ -53,16 +53,49 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 				continue
 			}
 
-			exists := false
+			var existing *radarr.NotificationOutput
 			for _, n := range notifications {
 				if n.Name == webhookName {
-					exists = true
-					// potentially update if needed, but for now just skip
+					existing = n
 					break
 				}
 			}
 
-			if !exists {
+			if existing != nil {
+				// Check if update is needed
+				currentURL := ""
+				for _, f := range existing.Fields {
+					if f.Name == "url" {
+						currentURL = f.Value.(string)
+						break
+					}
+				}
+
+				if currentURL != webhookURL {
+					slog.InfoContext(ctx, "Updating Radarr webhook API key/URL", "instance", instance.Name)
+					notif := &radarr.NotificationInput{
+						ID:                          existing.ID,
+						Name:                        webhookName,
+						Implementation:              "Webhook",
+						ConfigContract:              "WebhookSettings",
+						OnGrab:                      false,
+						OnDownload:                  true,
+						OnUpgrade:                   true,
+						OnRename:                    true,
+						OnMovieDelete:               true,
+						OnMovieFileDelete:           true,
+						OnMovieFileDeleteForUpgrade: true,
+						Fields: []*starr.FieldInput{
+							{Name: "url", Value: webhookURL},
+							{Name: "method", Value: "1"}, // 1 = POST
+						},
+					}
+					_, err := client.UpdateNotificationContext(ctx, notif)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Radarr webhook", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
 				notif := &radarr.NotificationInput{
 					Name:                        webhookName,
 					Implementation:              "Webhook",
@@ -100,15 +133,49 @@ func (m *Manager) EnsureWebhookRegistration(ctx context.Context, altmountURL str
 				continue
 			}
 
-			exists := false
+			var existing *sonarr.NotificationOutput
 			for _, n := range notifications {
 				if n.Name == webhookName {
-					exists = true
+					existing = n
 					break
 				}
 			}
 
-			if !exists {
+			if existing != nil {
+				// Check if update is needed
+				currentURL := ""
+				for _, f := range existing.Fields {
+					if f.Name == "url" {
+						currentURL = f.Value.(string)
+						break
+					}
+				}
+
+				if currentURL != webhookURL {
+					slog.InfoContext(ctx, "Updating Sonarr webhook API key/URL", "instance", instance.Name)
+					notif := &sonarr.NotificationInput{
+						ID:                            existing.ID,
+						Name:                          webhookName,
+						Implementation:                "Webhook",
+						ConfigContract:                "WebhookSettings",
+						OnGrab:                        false,
+						OnDownload:                    true,
+						OnUpgrade:                     true,
+						OnRename:                      true,
+						OnSeriesDelete:                true,
+						OnEpisodeFileDelete:           true,
+						OnEpisodeFileDeleteForUpgrade: true,
+						Fields: []*starr.FieldInput{
+							{Name: "url", Value: webhookURL},
+							{Name: "method", Value: "1"}, // 1 = POST
+						},
+					}
+					_, err := client.UpdateNotificationContext(ctx, notif)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Sonarr webhook", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
 				notif := &sonarr.NotificationInput{
 					Name:                          webhookName,
 					Implementation:                "Webhook",
@@ -169,15 +236,58 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 				continue
 			}
 
-			exists := false
+			var existing *radarr.DownloadClientOutput
 			for _, c := range clients {
 				if c.Name == clientName {
-					exists = true
+					existing = c
 					break
 				}
 			}
 
-			if !exists {
+			if existing != nil {
+				// Update if API key or Host changed
+				currentKey := ""
+				currentHost := ""
+				for _, f := range existing.Fields {
+					if f.Name == "apiKey" {
+						currentKey = f.Value.(string)
+					}
+					if f.Name == "host" {
+						currentHost = f.Value.(string)
+					}
+				}
+
+				if currentKey != apiKey || currentHost != altmountHost {
+					slog.InfoContext(ctx, "Updating Radarr download client API key/Host", "instance", instance.Name)
+					category := instance.Category
+					if category == "" {
+						category = "movies"
+					}
+					dc := &radarr.DownloadClientInput{
+						ID:                       existing.ID,
+						Name:                     clientName,
+						Implementation:           "SABnzbd",
+						ConfigContract:           "SABnzbdSettings",
+						Enable:                   true,
+						RemoveCompletedDownloads: true,
+						RemoveFailedDownloads:    true,
+						Priority:                 1,
+						Protocol:                 "Usenet",
+						Fields: []*starr.FieldInput{
+							{Name: "host", Value: altmountHost},
+							{Name: "port", Value: altmountPort},
+							{Name: "urlBase", Value: urlBase},
+							{Name: "apiKey", Value: apiKey},
+							{Name: "movieCategory", Value: category},
+							{Name: "useSsl", Value: false},
+						},
+					}
+					_, err := client.UpdateDownloadClientContext(ctx, dc, true)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Radarr download client", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
 				category := instance.Category
 				if category == "" {
 					category = "movies"
@@ -221,15 +331,58 @@ func (m *Manager) EnsureDownloadClientRegistration(ctx context.Context, altmount
 				continue
 			}
 
-			exists := false
+			var existing *sonarr.DownloadClientOutput
 			for _, c := range clients {
 				if c.Name == clientName {
-					exists = true
+					existing = c
 					break
 				}
 			}
 
-			if !exists {
+			if existing != nil {
+				// Update if API key or Host changed
+				currentKey := ""
+				currentHost := ""
+				for _, f := range existing.Fields {
+					if f.Name == "apiKey" {
+						currentKey = f.Value.(string)
+					}
+					if f.Name == "host" {
+						currentHost = f.Value.(string)
+					}
+				}
+
+				if currentKey != apiKey || currentHost != altmountHost {
+					slog.InfoContext(ctx, "Updating Sonarr download client API key/Host", "instance", instance.Name)
+					category := instance.Category
+					if category == "" {
+						category = "tv"
+					}
+					dc := &sonarr.DownloadClientInput{
+						ID:                       existing.ID,
+						Name:                     clientName,
+						Implementation:           "SABnzbd",
+						ConfigContract:           "SABnzbdSettings",
+						Enable:                   true,
+						RemoveCompletedDownloads: true,
+						RemoveFailedDownloads:    true,
+						Priority:                 1,
+						Protocol:                 "Usenet",
+						Fields: []*starr.FieldInput{
+							{Name: "host", Value: altmountHost},
+							{Name: "port", Value: altmountPort},
+							{Name: "urlBase", Value: urlBase},
+							{Name: "apiKey", Value: apiKey},
+							{Name: "tvCategory", Value: category},
+							{Name: "useSsl", Value: false},
+						},
+					}
+					_, err := client.UpdateDownloadClientContext(ctx, dc, true)
+					if err != nil {
+						slog.ErrorContext(ctx, "Failed to update Sonarr download client", "instance", instance.Name, "error", err)
+					}
+				}
+			} else {
 				category := instance.Category
 				if category == "" {
 					category = "tv"
