@@ -1,26 +1,88 @@
-import { Film, Folder, HardDrive, History, Tv, Wifi, WifiOff } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Book, Film, Folder, Gamepad2, HardDrive, History, Music, Tv, Wifi, WifiOff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileExplorer } from "../components/files/FileExplorer";
 import { useWebDAVConnection } from "../hooks/useWebDAV";
 
-type FileView = "all" | "movies" | "tv" | "recent";
+import { useConfig } from "../hooks/useConfig";
 
-const FILE_SHORTCUTS = [
-	{ id: "all", title: "All Files", path: "/", icon: Folder },
-	{ id: "movies", title: "Movies", path: "/movies", icon: Film },
-	{ id: "tv", title: "TV Shows", path: "/tv", icon: Tv },
-];
+type FileView = string;
+
 
 const SECONDARY_SHORTCUTS = [
 	{ id: "recent", title: "Recently Added", icon: History },
 ];
 
 export function FilesPage() {
+	const { data: config } = useConfig();
 	const { isConnected, hasConnectionFailed, connect, isConnecting, connectionError } =
 		useWebDAVConnection();
 
 	const [activeView, setActiveView] = useState<FileView>("all");
 	const [initialPath, setInitialPath] = useState("/");
+
+	const fileShortcuts = useMemo(() => {
+		const shortcuts = [
+			{ id: "all", title: "All Files", path: "/", icon: Folder },
+		];
+
+		if (config?.sabnzbd?.categories) {
+			const strategy = config.import?.import_strategy || "NONE";
+			let basePath = "";
+
+			if (strategy === "NONE") {
+				// With strategy NONE, Arrs move the files to {mount_path}/{category}
+				// By default, WebDAV serves from mount_path, so the relative path is just /
+				basePath = "/";
+			} else if (config.import?.import_dir && config.mount_path) {
+				// With SYMLINK/STRM strategies, files are in import_dir
+				// Attempt to create a relative path if import_dir is inside mount_path
+				if (config.import.import_dir.startsWith(config.mount_path)) {
+					basePath = config.import.import_dir.substring(config.mount_path.length);
+				} else {
+					// Fallback if import_dir is outside the webdav mount
+					basePath = "/";
+				}
+			} else {
+				basePath = "/";
+			}
+
+			// Ensure valid base path slashes
+			if (basePath && !basePath.startsWith("/")) {
+				basePath = "/" + basePath;
+			}
+			if (basePath && basePath.endsWith("/") && basePath !== "/") {
+				basePath = basePath.slice(0, -1);
+			}
+
+			config.sabnzbd.categories.forEach((cat) => {
+				if (cat.name.toLowerCase() === "default") return;
+
+				let icon = Folder;
+				const lowerName = cat.name.toLowerCase();
+				if (lowerName.includes("movie") || lowerName.includes("film")) icon = Film;
+				else if (lowerName.includes("tv") || lowerName.includes("show") || lowerName.includes("anime")) icon = Tv;
+				else if (lowerName.includes("music") || lowerName.includes("audio") && !lowerName.includes("audiobook")) icon = Music;
+				else if (lowerName.includes("book") || lowerName.includes("audiobook")) icon = Book;
+				else if (lowerName.includes("game")) icon = Gamepad2;
+
+				let catPath = basePath === "/" ? `/${cat.name}` : `${basePath}/${cat.name}`;
+				catPath = catPath.replace(/\/\//g, "/");
+
+				shortcuts.push({
+					id: cat.name,
+					title: cat.name.charAt(0).toUpperCase() + cat.name.slice(1),
+					path: catPath,
+					icon: icon,
+				});
+			});
+		} else {
+			// Fallback while loading
+			shortcuts.push({ id: "movies", title: "Movies", path: "/movies", icon: Film });
+			shortcuts.push({ id: "tv", title: "TV Shows", path: "/tv", icon: Tv });
+		}
+
+		return shortcuts;
+	}, [config]);
 
 	// Track connection attempts to prevent rapid retries
 	const connectionAttempted = useRef(false);
@@ -93,87 +155,85 @@ export function FilesPage() {
 				</div>
 			</div>
 
-			                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-			                                {/* Sidebar Navigation */}
-			                                <div className="lg:col-span-3 xl:col-span-2">					<div className="card border border-base-200 bg-base-100 shadow-sm">
-						<div className="card-body p-2 sm:p-4">
-							<div className="space-y-6">
-								<div>
-									<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-										Library
-									</h3>
-									<ul className="menu menu-md gap-1 p-0">
-										{FILE_SHORTCUTS.map((item) => {
-											const Icon = item.icon;
-											const isActive = activeView === item.id;
-											return (
-												<li key={item.id}>
-													<button
-														type="button"
-														className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-															isActive
-																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
-																: "hover:bg-base-200"
+			<div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+				{/* Sidebar Navigation */}
+				<div className="lg:col-span-3 xl:col-span-2">					<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
+					<div className="card-body p-2 sm:p-4">
+						<div className="space-y-6">
+							<div>
+								<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
+									Library
+								</h3>
+								<ul className="menu menu-md gap-1 p-0">
+									{fileShortcuts.map((item) => {
+										const Icon = item.icon;
+										const isActive = activeView === item.id;
+										return (
+											<li key={item.id}>
+												<button
+													type="button"
+													className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${isActive
+														? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
+														: "hover:bg-base-200"
 														}`}
-														onClick={() => handleViewChange(item.id as FileView, item.path)}
-													>
-														<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
-														<span className="text-sm">{item.title}</span>
-													</button>
-												</li>
-											);
-										})}
-									</ul>
-								</div>
+													onClick={() => handleViewChange(item.id as FileView, item.path)}
+												>
+													<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
+													<span className="text-sm">{item.title}</span>
+												</button>
+											</li>
+										);
+									})}
+								</ul>
+							</div>
 
-								<div>
-									<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
-										Filters
-									</h3>
-									<ul className="menu menu-md gap-1 p-0">
-										{SECONDARY_SHORTCUTS.map((item) => {
-											const Icon = item.icon;
-											const isActive = activeView === item.id;
-											return (
-												<li key={item.id}>
-													<button
-														type="button"
-														className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-															isActive
-																? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
-																: "hover:bg-base-200"
+							<div>
+								<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
+									Filters
+								</h3>
+								<ul className="menu menu-md gap-1 p-0">
+									{SECONDARY_SHORTCUTS.map((item) => {
+										const Icon = item.icon;
+										const isActive = activeView === item.id;
+										return (
+											<li key={item.id}>
+												<button
+													type="button"
+													className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${isActive
+														? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
+														: "hover:bg-base-200"
 														}`}
-														onClick={() => handleViewChange(item.id as FileView)}
-													>
-														<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
-														<span className="text-sm">{item.title}</span>
-													</button>
-												</li>
-											);
-										})}
-									</ul>
-								</div>
+													onClick={() => handleViewChange(item.id as FileView)}
+												>
+													<Icon className={`h-5 w-5 ${isActive ? "" : "text-base-content/60"}`} />
+													<span className="text-sm">{item.title}</span>
+												</button>
+											</li>
+										);
+									})}
+								</ul>
 							</div>
 						</div>
 					</div>
 				</div>
+				</div>
 
-				                                {/* Main Content */}
-				                                <div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] border border-base-200 bg-base-100 shadow-sm">
-						<div className="card-body p-0 sm:p-0">
-							<div className="p-4 sm:p-8">
-								<FileExplorer
-									isConnected={isConnected}
-									hasConnectionFailed={hasConnectionFailed}
-									isConnecting={isConnecting}
-									connectionError={connectionError}
-									onRetryConnection={handleRetryConnection}
-									initialPath={initialPath}
-									activeView={activeView}
-								/>
-							</div>
+				{/* Main Content */}
+				<div className="lg:col-span-9 xl:col-span-10">					<div className="card min-h-[600px] border-2 border-base-300/50 bg-base-100 shadow-md">
+					<div className="card-body p-0 sm:p-0">
+						<div className="p-4 sm:p-8">
+							<FileExplorer
+								isConnected={isConnected}
+								hasConnectionFailed={hasConnectionFailed}
+								isConnecting={isConnecting}
+								connectionError={connectionError}
+								onRetryConnection={handleRetryConnection}
+								initialPath={initialPath}
+								activeView={activeView}
+							/>
 						</div>
 					</div>
+				</div>
 				</div>
 			</div>
 		</div>

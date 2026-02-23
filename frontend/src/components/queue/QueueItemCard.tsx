@@ -44,7 +44,7 @@ export function QueueItemCard({
 	const [isExpanded, setIsExpanded] = useState(false);
 
 	return (
-		<div className="card border border-base-200 bg-base-100 shadow-sm">
+		<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 			<div className="card-body space-y-3 p-4">
 				{/* Header Row: Checkbox + Filename + Actions */}
 				<div className="flex items-start gap-3">
@@ -59,9 +59,9 @@ export function QueueItemCard({
 
 					<div className="min-w-0 flex-1">
 						<div className="flex items-center gap-2">
-							<FileCode className="h-4 w-4 shrink-0 opacity-40" />
-							<div className="truncate font-bold text-sm">
-								<PathDisplay path={item.nzb_path} maxLength={40} showFileName />
+							<FileCode className="mt-0.5 h-4 w-4 shrink-0 text-base-content/60" />
+							<div className="break-words font-bold text-sm leading-tight">
+								<PathDisplay path={item.nzb_path} maxLength={80} showFileName />
 							</div>
 						</div>
 
@@ -100,13 +100,13 @@ export function QueueItemCard({
 							{(item.status === QueueStatus.PENDING ||
 								item.status === QueueStatus.FAILED ||
 								item.status === QueueStatus.COMPLETED) && (
-								<li>
-									<button type="button" onClick={() => onRetry(item.id)} disabled={isRetryPending}>
-										<PlayCircle className="h-4 w-4 text-primary" />
-										{item.status === QueueStatus.PENDING ? "Start Now" : "Retry Task"}
-									</button>
-								</li>
-							)}
+									<li>
+										<button type="button" onClick={() => onRetry(item.id)} disabled={isRetryPending}>
+											<PlayCircle className="h-4 w-4 text-primary" />
+											{item.status === QueueStatus.PENDING ? "Start Now" : "Retry Task"}
+										</button>
+									</li>
+								)}
 							{item.status === QueueStatus.PROCESSING && (
 								<li>
 									<button
@@ -126,7 +126,7 @@ export function QueueItemCard({
 									Download NZB
 								</button>
 							</li>
-							<div className="divider my-1 opacity-50" />
+							<div className="divider my-1 text-base-content/70" />
 							{item.status !== QueueStatus.PROCESSING && (
 								<li>
 									<button
@@ -175,7 +175,7 @@ export function QueueItemCard({
 					<>
 						<button
 							type="button"
-							className="btn btn-ghost btn-xs w-full justify-between"
+							className="btn btn-ghost btn-sm w-full justify-between"
 							onClick={() => setIsExpanded(!isExpanded)}
 						>
 							<span className="text-xs">Details</span>

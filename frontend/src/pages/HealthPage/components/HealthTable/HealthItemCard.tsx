@@ -86,7 +86,7 @@ export function HealthItemCard({
 	}
 
 	return (
-		<div className="card border border-base-200 bg-base-100 shadow-sm">
+		<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 			<div className="card-body space-y-3 p-4">
 				{/* Header Row: Checkbox + File Info + Actions */}
 				<div className="flex items-start gap-3">
@@ -180,7 +180,7 @@ export function HealthItemCard({
 				{/* Expandable Details */}
 				<button
 					type="button"
-					className="btn btn-ghost btn-xs w-full justify-between"
+					className="btn btn-ghost btn-sm w-full justify-between"
 					onClick={() => setIsExpanded(!isExpanded)}
 				>
 					<span className="text-xs">Full Details</span>

@@ -12,7 +12,7 @@ export function Layout() {
 				<Navbar />
 
 				{/* Page content */}
-				<main className="flex-1 p-2 md:p-4">
+				<main className="flex-1 p-3 md:p-4">
 					<Outlet />
 				</main>
 			</div>

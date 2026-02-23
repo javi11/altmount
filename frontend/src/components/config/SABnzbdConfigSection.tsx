@@ -180,7 +180,7 @@ export function SABnzbdConfigSection({
 
 			<div className="space-y-8">
 				{/* Enable Toggle */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">
@@ -203,9 +203,9 @@ export function SABnzbdConfigSection({
 				{formData.enabled && (
 					<>
 						{/* Basic Paths */}
-						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							<div className="flex items-center gap-2">
-								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									Base Config
 								</h4>
 								<div className="h-px flex-1 bg-base-300/50" />
@@ -224,7 +224,7 @@ export function SABnzbdConfigSection({
 										placeholder="/"
 										onChange={(e) => updateFormData({ complete_dir: e.target.value })}
 									/>
-									<p className="label break-words text-[10px] opacity-50">
+									<p className="label break-words text-base-content/70 text-xs">
 										Relative to your mount point.
 									</p>
 								</fieldset>
@@ -239,7 +239,7 @@ export function SABnzbdConfigSection({
 										placeholder="http://altmount:8080/sabnzbd"
 										disabled={isReadOnly}
 									/>
-									<p className="label break-words text-[10px] opacity-50">
+									<p className="label break-words text-base-content/70 text-xs">
 										The URL ARR instances use to reach this API.
 									</p>
 								</fieldset>
@@ -247,9 +247,9 @@ export function SABnzbdConfigSection({
 						</div>
 
 						{/* External Fallback */}
-						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							<div className="flex items-center gap-2">
-								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									Failover Engine
 								</h4>
 								<div className="h-px flex-1 bg-base-300/50" />
@@ -299,13 +299,13 @@ export function SABnzbdConfigSection({
 											/>
 											<button
 												type="button"
-												className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
+												className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
 												onClick={() => setShowApiKey(!showApiKey)}
 											>
 												{showApiKey ? (
-													<EyeOff className="h-4 w-4 opacity-50" />
+													<EyeOff className="h-4 w-4 text-base-content/70" />
 												) : (
-													<Eye className="h-4 w-4 opacity-50" />
+													<Eye className="h-4 w-4 text-base-content/70" />
 												)}
 											</button>
 										</div>
@@ -315,15 +315,15 @@ export function SABnzbdConfigSection({
 						</div>
 
 						{/* Categories */}
-						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+						<div className="fade-in slide-in-from-top-6 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 							<div className="flex items-center justify-between gap-4">
-								<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+								<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 									Category Mapping
 								</h4>
 								{!isReadOnly && (
 									<button
 										type="button"
-										className="btn btn-xs btn-primary px-4 shadow-sm"
+										className="btn btn-sm btn-primary px-4 shadow-sm"
 										onClick={() => setShowAddCategory(true)}
 									>
 										<Plus className="h-3 w-3" /> Add
@@ -342,14 +342,14 @@ export function SABnzbdConfigSection({
 												className={`group relative rounded-xl border p-4 transition-all ${isDefault ? "border-primary/20 bg-primary/5" : "border-base-300 bg-base-100/50 hover:bg-base-100"}`}
 											>
 												{isDefault && (
-													<span className="absolute top-2 right-3 font-black text-[8px] text-primary uppercase tracking-widest opacity-60">
+													<span className="absolute top-2 right-3 font-black text-[8px] text-base-content/80 text-primary uppercase tracking-widest">
 														System Core
 													</span>
 												)}
 
 												<div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
 													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
 															Label
 														</legend>
 														<input
@@ -361,7 +361,7 @@ export function SABnzbdConfigSection({
 														/>
 													</fieldset>
 													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
 															Order
 														</legend>
 														<input
@@ -377,7 +377,7 @@ export function SABnzbdConfigSection({
 														/>
 													</fieldset>
 													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
 															Priority
 														</legend>
 														<select
@@ -396,7 +396,7 @@ export function SABnzbdConfigSection({
 														</select>
 													</fieldset>
 													<fieldset className="fieldset">
-														<legend className="fieldset-legend font-black text-[9px] uppercase opacity-40">
+														<legend className="fieldset-legend font-black text-base-content/60 text-xs uppercase">
 															Dir Mapping
 														</legend>
 														<div className="flex items-center gap-2">
@@ -411,7 +411,7 @@ export function SABnzbdConfigSection({
 															{!isReadOnly && !isDefault && (
 																<button
 																	type="button"
-																	className="btn btn-square btn-ghost btn-xs text-error opacity-0 transition-opacity group-hover:opacity-100"
+																	className="btn btn-square btn-ghost btn-sm text-error opacity-0 transition-opacity group-hover:opacity-100"
 																	onClick={() => handleRemoveCategory(idx)}
 																>
 																	<Trash2 className="h-3.5 w-3.5" />
@@ -473,7 +473,7 @@ export function SABnzbdConfigSection({
 									<div className="flex justify-end gap-2">
 										<button
 											type="button"
-											className="btn btn-ghost btn-xs"
+											className="btn btn-ghost btn-sm"
 											onClick={() => {
 												setShowAddCategory(false);
 												setNewCategory(DEFAULT_NEW_CATEGORY);
@@ -483,7 +483,7 @@ export function SABnzbdConfigSection({
 										</button>
 										<button
 											type="button"
-											className="btn btn-primary btn-xs px-4"
+											className="btn btn-primary btn-sm px-4"
 											onClick={handleAddCategory}
 											disabled={!newCategory.name.trim()}
 										>
@@ -554,7 +554,7 @@ export function SABnzbdConfigSection({
 
 						{testResults && (
 							<div className="rounded-xl border border-base-300 bg-base-200/50 p-4">
-								<div className="mb-3 font-black text-[10px] uppercase tracking-widest opacity-40">
+								<div className="mb-3 font-black text-base-content/60 text-xs uppercase tracking-widest">
 									Connectivity Health
 								</div>
 								<div className="space-y-2">

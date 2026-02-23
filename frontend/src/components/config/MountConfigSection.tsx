@@ -322,7 +322,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			{/* Mount Type Selector */}
 			<div className="space-y-6">
 				<div className="flex items-center gap-2">
-					<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+					<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 						Select Engine
 					</h4>
 					<div className="h-px flex-1 bg-base-300/50" />
@@ -366,13 +366,13 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 			{mountType !== "none" && (
 				<div className="fade-in slide-in-from-top-2 animate-in space-y-6">
 					<div className="flex items-center gap-2">
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Attachment
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
-					<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+					<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 						<fieldset className="fieldset">
 							<legend className="fieldset-legend font-semibold">Local Mount Path</legend>
 							<div className="flex flex-col gap-3">
@@ -383,7 +383,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 									onChange={(e) => handleMountPathChange(e.target.value)}
 									placeholder="/mnt/remotes/altmount"
 								/>
-								<p className="label break-words text-[10px] text-base-content/50">
+								<p className="label break-words text-base-content/50 text-xs">
 									Path where the virtual filesystem will be attached to your system.
 									{mountType === "rclone_external" && " (Required for symlink resolution)"}
 								</p>
@@ -441,7 +441,7 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 							<HardDrive className="h-6 w-6" />
 						</div>
 						<div className="min-w-0 flex-1">
-							<div className="font-black text-xs uppercase tracking-widest opacity-60">
+							<div className="font-black text-base-content/80 text-xs uppercase tracking-widest">
 								Mount Status
 							</div>
 							<div className="flex items-center gap-2 font-bold text-lg">
@@ -451,12 +451,12 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 								)}
 							</div>
 							{isMounted && (
-								<div className="mt-1 truncate font-mono text-[10px] opacity-70">
+								<div className="mt-1 truncate font-mono text-xs opacity-70">
 									{mountType === "rclone" ? rcloneMountStatus?.mount_point : mountPath}
 								</div>
 							)}
 							{mountType === "fuse" && fuseStatus?.health_error && (
-								<div className="mt-1 flex items-center gap-1 font-bold text-[10px] text-error">
+								<div className="mt-1 flex items-center gap-1 font-bold text-error text-xs">
 									<AlertTriangle className="h-3 w-3" />
 									{fuseStatus.health_error}
 								</div>
@@ -542,7 +542,7 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 		<div className="space-y-8">
 			{/* Basic Mount Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+				<h5 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 					General RClone Flags
 				</h5>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -611,7 +611,7 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 							onChange={(e) => handleMountInputChange("timeout", e.target.value)}
 							placeholder="10m"
 						/>
-						<p className="label break-words text-[10px] opacity-50">I/O timeout (e.g., 10m, 30s)</p>
+						<p className="label break-words text-base-content/70 text-xs">I/O timeout (e.g., 10m, 30s)</p>
 					</fieldset>
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Log Level</legend>
@@ -659,7 +659,7 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 
 			{/* VFS Cache Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+				<h5 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 					VFS Cache Settings
 				</h5>
 				<div className="space-y-6 rounded-2xl border border-base-200 bg-base-50/50 p-5">
@@ -713,7 +713,7 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 
 			{/* Performance Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+				<h5 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 					Performance Tuning
 				</h5>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -789,7 +789,7 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 
 			{/* Advanced Settings */}
 			<div className="space-y-4">
-				<h5 className="font-bold text-xs uppercase tracking-widest opacity-40">
+				<h5 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 					Advanced Operations
 				</h5>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -887,7 +887,7 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 		<div className="space-y-8">
 			{/* Kernel Cache Settings */}
 			<div className="space-y-4">
-				<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">
+				<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">
 					Kernel Cache Settings
 				</h4>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -953,7 +953,7 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 
 			{/* Streaming Cache */}
 			<div className="space-y-4">
-				<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">Streaming Engine</h4>
+				<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">Streaming Engine</h4>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Max Cache Size (per file)</legend>
@@ -992,7 +992,7 @@ function FuseMountSubSection({ config, isRunning, onFormDataChange }: FuseSubSec
 
 			{/* Debug */}
 			<div className="space-y-4">
-				<h4 className="font-bold text-xs uppercase tracking-widest opacity-40">Diagnostics</h4>
+				<h4 className="font-bold text-base-content/60 text-xs uppercase tracking-widest">Diagnostics</h4>
 				<fieldset className="fieldset">
 					<legend className="fieldset-legend">Debug Logging</legend>
 					<label className="label cursor-pointer justify-start gap-3">
@@ -1096,7 +1096,7 @@ function ExternalRCloneSubSection({ config, onFormDataChange }: ExternalSubSecti
 	return (
 		<div className="space-y-6">
 			<h3 className="font-bold text-lg">External RC Connection</h3>
-			<p className="text-sm opacity-60">Connect to an existing external RClone RC server.</p>
+			<p className="text-base-content/80 text-sm">Connect to an existing external RClone RC server.</p>
 
 			<div className="grid grid-cols-1 gap-6 rounded-2xl border border-base-200 bg-base-50/50 p-6">
 				<fieldset className="fieldset">
@@ -1156,13 +1156,13 @@ function ExternalRCloneSubSection({ config, onFormDataChange }: ExternalSubSecti
 						/>
 						<button
 							type="button"
-							className="-translate-y-1/2 btn btn-ghost btn-xs absolute top-1/2 right-2"
+							className="-translate-y-1/2 btn btn-ghost btn-sm absolute top-1/2 right-2"
 							onClick={() => setShowPassword(!showPassword)}
 						>
 							{showPassword ? (
-								<EyeOff className="h-4 w-4 opacity-50" />
+								<EyeOff className="h-4 w-4 text-base-content/70" />
 							) : (
-								<Eye className="h-4 w-4 opacity-50" />
+								<Eye className="h-4 w-4 text-base-content/70" />
 							)}
 						</button>
 					</div>

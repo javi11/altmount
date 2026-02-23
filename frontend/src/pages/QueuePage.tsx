@@ -428,8 +428,8 @@ export function QueuePage() {
 											<Trash2 className="h-4 w-4" /> Clear Failed
 										</button>
 									</li>
-									<div className="divider my-1 opacity-50" />
-									<li className="menu-title px-4 py-2 font-bold text-[9px] text-base-content/40 uppercase tracking-widest">
+									<div className="divider my-1 text-base-content/70" />
+									<li className="menu-title px-4 py-2 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 										Testing
 									</li>
 									<li>
@@ -459,7 +459,7 @@ export function QueuePage() {
 									className={`btn btn-outline btn-sm join-item ${autoRefreshEnabled ? "btn-primary" : ""}`}
 									onClick={toggleAutoRefresh}
 								>
-									<Clock className={`h-3.5 w-3.5 ${autoRefreshEnabled ? "" : "opacity-50"}`} />
+									<Clock className={`h-3.5 w-3.5 ${autoRefreshEnabled ? "" : "text-base-content/70"}`} />
 									{autoRefreshEnabled ? `${countdown}s` : "Off"}
 								</button>
 
@@ -485,10 +485,10 @@ export function QueuePage() {
 					{/* Sidebar Navigation */}
 					<div className="lg:col-span-1">
 						<div className="space-y-6">
-							<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-2 sm:p-4">
 									<div>
-										<h3 className="mb-2 px-4 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+										<h3 className="mb-2 px-4 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 											Filters
 										</h3>
 										<ul className="menu menu-md gap-1 p-0">
@@ -530,7 +530,7 @@ export function QueuePage() {
 															</div>
 															{count !== undefined && (
 																<span
-																	className={`badge badge-xs px-2 py-2 font-bold font-mono ${isActive ? "badge-secondary" : "badge-ghost opacity-60"}`}
+																	className={`badge badge-xs px-2 py-2 font-bold font-mono ${isActive ? "badge-secondary" : "badge-ghost text-base-content/80"}`}
 																>
 																	{count}
 																</span>
@@ -545,13 +545,13 @@ export function QueuePage() {
 							</div>
 
 							{/* Search Mini-Card */}
-							<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-4">
-									<h3 className="mb-3 font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+									<h3 className="mb-3 font-bold text-base-content/40 text-xs uppercase tracking-widest">
 										Search
 									</h3>
 									<div className="relative">
-										<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-3.5 w-3.5 opacity-40" />
+										<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-3.5 w-3.5 text-base-content/60" />
 										<input
 											type="text"
 											placeholder="Find item..."
@@ -585,7 +585,7 @@ export function QueuePage() {
 													</span>
 													<button
 														type="button"
-														className="btn btn-link btn-xs ml-2 no-underline opacity-60 hover:opacity-100"
+														className="btn btn-link btn-sm ml-2 text-base-content/80 no-underline hover:opacity-100"
 														onClick={() => setSelectedItems(new Set())}
 													>
 														Clear Selection
@@ -595,7 +595,7 @@ export function QueuePage() {
 											<div className="flex flex-wrap items-center gap-2">
 												<button
 													type="button"
-													className="btn btn-primary btn-xs px-4"
+													className="btn btn-primary btn-sm px-4"
 													onClick={handleBulkRestart}
 													disabled={restartBulk.isPending}
 												>
@@ -608,7 +608,7 @@ export function QueuePage() {
 												</button>
 												<button
 													type="button"
-													className="btn btn-outline btn-warning btn-xs px-4"
+													className="btn btn-outline btn-warning btn-sm px-4"
 													onClick={handleBulkCancel}
 													disabled={cancelBulk.isPending}
 												>
@@ -617,7 +617,7 @@ export function QueuePage() {
 												</button>
 												<button
 													type="button"
-													className="btn btn-outline btn-error btn-xs px-4"
+													className="btn btn-outline btn-error btn-sm px-4"
 													onClick={handleBulkDelete}
 													disabled={deleteBulk.isPending}
 												>
@@ -631,7 +631,7 @@ export function QueuePage() {
 							)}
 
 							{/* Queue Table Card */}
-							<div className="card border border-base-200 bg-base-100 shadow-sm">
+							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-0">
 									{isLoading ? (
 										<div className="p-12">
@@ -659,13 +659,13 @@ export function QueuePage() {
 											</div>
 
 											{/* Desktop View (≥640px) - Keep Existing */}
-											                                                                                        <div className="hidden overflow-x-auto sm:block min-h-[450px] pb-24">												<table className="table-zebra table-sm sm:table-md table">
+											                                                                                        <div className="hidden min-h-[450px] overflow-x-auto pb-24 sm:block">												<table className="table-zebra table-sm sm:table-md table">
 													<thead className="bg-base-200/50">
 														<tr>
 															<th className="w-12 text-center">
 																<input
 																	type="checkbox"
-																	className="checkbox checkbox-xs"
+																	className="checkbox checkbox-sm"
 																	checked={isAllSelected}
 																	ref={(input) => {
 																		if (input) input.indeterminate = Boolean(isIndeterminate);
@@ -676,7 +676,7 @@ export function QueuePage() {
 															<th>
 																<button
 																	type="button"
-																	className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
+																	className="flex items-center gap-1 font-bold text-base-content/80 text-xs uppercase tracking-widest hover:text-primary"
 																	onClick={() => handleSort("nzb_path")}
 																>
 																	NZB File
@@ -688,19 +688,19 @@ export function QueuePage() {
 																		))}
 																</button>
 															</th>
-															<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
 																Category
 															</th>
-															<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
 																Size
 															</th>
-															<th className="font-bold text-[10px] uppercase tracking-widest opacity-60">
+															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
 																Status
 															</th>
 															<th>
 																<button
 																	type="button"
-																	className="flex items-center gap-1 font-bold text-[10px] uppercase tracking-widest opacity-60 hover:text-primary"
+																	className="flex items-center gap-1 font-bold text-base-content/80 text-xs uppercase tracking-widest hover:text-primary"
 																	onClick={() => handleSort("updated_at")}
 																>
 																	Updated
@@ -724,7 +724,7 @@ export function QueuePage() {
 																<td className="text-center">
 																	<input
 																		type="checkbox"
-																		className="checkbox checkbox-xs"
+																		className="checkbox checkbox-sm"
 																		checked={selectedItems.has(item.id)}
 																		onChange={(e) => handleSelectItem(item.id, e.target.checked)}
 																	/>
@@ -732,7 +732,7 @@ export function QueuePage() {
 																<td>
 																	<div className="flex min-w-0 flex-col">
 																		<div className="flex items-center gap-2">
-																			<FileCode className="h-3.5 w-3.5 shrink-0 opacity-40" />
+																			<FileCode className="h-3.5 w-3.5 shrink-0 text-base-content/60" />
 																			<div className="truncate font-bold text-sm">
 																				<PathDisplay
 																					path={item.nzb_path}
@@ -741,7 +741,7 @@ export function QueuePage() {
 																				/>
 																			</div>
 																		</div>
-																		<div className="mt-1 truncate pl-5.5 text-[10px] text-base-content/40">
+																		<div className="mt-1 truncate pl-5.5 text-base-content/40 text-xs">
 																			{item.target_path ? (
 																				<span className="flex items-center gap-1">
 																					<Box className="h-2.5 w-2.5" />
@@ -759,7 +759,7 @@ export function QueuePage() {
 																			{item.category}
 																		</span>
 																	) : (
-																		<span className="opacity-30">—</span>
+																		<span className="text-base-content/50">—</span>
 																	)}
 																</td>
 																<td>
@@ -768,7 +768,7 @@ export function QueuePage() {
 																			{formatBytes(item.file_size)}
 																		</span>
 																	) : (
-																		<span className="opacity-30">—</span>
+																		<span className="text-base-content/50">—</span>
 																	)}
 																</td>
 																<td>
@@ -786,7 +786,7 @@ export function QueuePage() {
 																		) : item.status === QueueStatus.PROCESSING &&
 																			item.percentage != null ? (
 																			<div className="flex w-24 flex-col gap-1">
-																				<div className="flex justify-between font-bold font-mono text-[9px] opacity-60">
+																				<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
 																					<span>PROGRESS</span>
 																					<span>{item.percentage}%</span>
 																				</div>
@@ -807,7 +807,7 @@ export function QueuePage() {
 																			{formatRelativeTime(item.updated_at)}
 																		</span>
 																		{item.retry_count > 0 && (
-																			<span className="mt-0.5 font-bold text-[9px] text-warning uppercase tracking-tighter">
+																			<span className="mt-0.5 font-bold text-warning text-xs uppercase tracking-tighter">
 																				{item.retry_count} Retries
 																			</span>
 																		)}
@@ -818,7 +818,7 @@ export function QueuePage() {
 																		<button
 																			tabIndex={0}
 																			type="button"
-																			className="btn btn-ghost btn-xs btn-square"
+																			className="btn btn-ghost btn-sm btn-square"
 																		>
 																			<MoreVertical className="h-4 w-4" />
 																		</button>
@@ -861,7 +861,7 @@ export function QueuePage() {
 																					Download NZB
 																				</button>
 																			</li>
-																			<div className="divider my-1 opacity-50" />
+																			<div className="divider my-1 text-base-content/70" />
 																			{item.status !== QueueStatus.PROCESSING && (
 																				<li>
 																					<button

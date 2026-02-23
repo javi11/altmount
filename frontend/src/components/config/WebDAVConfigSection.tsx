@@ -72,10 +72,10 @@ export function WebDAVConfigSection({
 
 			<div className="space-y-8">
 				{/* Network Configuration */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<Globe className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<Globe className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Network Access
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -92,7 +92,7 @@ export function WebDAVConfigSection({
 								onChange={(e) => handleInputChange("host", e.target.value)}
 								placeholder="localhost"
 							/>
-							<p className="label mt-2 break-words text-[10px] opacity-50">
+							<p className="label mt-2 break-words text-base-content/70 text-xs">
 								Required for .strm file generation.
 							</p>
 						</fieldset>
@@ -108,7 +108,7 @@ export function WebDAVConfigSection({
 									handleInputChange("port", Number.parseInt(e.target.value, 10) || 0)
 								}
 							/>
-							<p className="label mt-2 break-words text-[10px] opacity-50">
+							<p className="label mt-2 break-words text-base-content/70 text-xs">
 								TCP port for server binding.
 							</p>
 						</fieldset>
@@ -116,10 +116,10 @@ export function WebDAVConfigSection({
 				</div>
 
 				{/* Credentials Section */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<Key className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<Key className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Security
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -150,17 +150,17 @@ export function WebDAVConfigSection({
 				</div>
 
 				{/* Mount Path Integration */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<Server className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<Server className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							System Integration
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
 					</div>
 
 					<fieldset className="fieldset">
-						<legend className="fieldset-legend break-words font-semibold">WebDAV Mount Path</legend>
+						<legend className="fieldset-legend whitespace-normal break-words font-semibold md:whitespace-nowrap">WebDAV Mount Path</legend>
 						<div className="flex flex-col gap-3">
 							<input
 								type="text"
@@ -170,11 +170,9 @@ export function WebDAVConfigSection({
 								onChange={(e) => handleInputChange("mount_path", e.target.value)}
 								placeholder="/mnt/remotes/altmount"
 							/>
-							<div className="label p-0">
-								<span className="break-words text-[10px] text-base-content/50 leading-relaxed">
-									Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual
-									files. Required for healthy repairs.
-								</span>
+							<div className="mt-2 whitespace-normal text-base-content/50 text-xs leading-relaxed">
+								Path where WebDAV is mounted. This is used to resolve ARR paths back to virtual
+								files. Required for healthy repairs.
 							</div>
 						</div>
 					</fieldset>
@@ -192,7 +190,7 @@ export function WebDAVConfigSection({
 										connectivity and lifecycle management.
 									</p>
 								</div>
-								<Link to="/config/mount" className="btn btn-info btn-xs h-8 px-4 shadow-sm">
+								<Link to="/config/mount" className="btn btn-info btn-sm h-8 px-4 shadow-sm">
 									Configure Auto-Mount
 								</Link>
 							</div>

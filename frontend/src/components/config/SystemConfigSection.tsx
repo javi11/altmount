@@ -127,10 +127,10 @@ export function SystemConfigSection({
 
 			<div className="space-y-8">
 				{/* Logging Configuration */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<Terminal className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<Terminal className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Diagnostics
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -150,7 +150,7 @@ export function SystemConfigSection({
 								<option value="warn">Warning (Alerts)</option>
 								<option value="error">Error (Critical)</option>
 							</select>
-							<p className="label mt-2 break-words text-[10px] opacity-50">
+							<p className="label mt-2 break-words text-base-content/70 text-xs">
 								Determines how much information is stored in logs.
 							</p>
 						</fieldset>
@@ -210,10 +210,10 @@ export function SystemConfigSection({
 				</div>
 
 				{/* Performance Profiler */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<Terminal className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<Terminal className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Performance
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -238,10 +238,10 @@ export function SystemConfigSection({
 				</div>
 
 				{/* Security Section */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<ShieldCheck className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<ShieldCheck className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Access Identity
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />
@@ -277,7 +277,7 @@ export function SystemConfigSection({
 							<div className="flex justify-start">
 								<button
 									type="button"
-									className="btn btn-ghost btn-xs border-base-300 bg-base-100 hover:bg-base-200"
+									className="btn btn-ghost btn-sm border-base-300 bg-base-100 hover:bg-base-200"
 									onClick={handleRegenerateAPIKey}
 									disabled={regenerateAPIKey.isPending}
 								>

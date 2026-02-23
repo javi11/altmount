@@ -76,10 +76,10 @@ export function LibraryScanStatus({
 
 	if (variant === "sidebar") {
 		return (
-			<div className="card border border-base-200 bg-base-100 shadow-sm">
+			<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 				<div className="card-body p-4">
 					<div className="mb-3 flex items-center justify-between">
-						<h3 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<h3 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Library Sync
 						</h3>
 						{status?.is_running && (
@@ -88,7 +88,7 @@ export function LibraryScanStatus({
 					</div>
 
 					{isLoading ? (
-						<div className="flex items-center gap-2 text-xs opacity-60">
+						<div className="flex items-center gap-2 text-base-content/80 text-xs">
 							<Loader2 className="h-3 w-3 animate-spin" />
 							<span>Loading...</span>
 						</div>
@@ -98,7 +98,7 @@ export function LibraryScanStatus({
 								<AlertTriangle className="h-3 w-3" />
 								<span className="font-medium">Failed to load</span>
 							</div>
-							<button type="button" className="btn btn-ghost btn-xs w-full" onClick={onRetry}>
+							<button type="button" className="btn btn-ghost btn-sm w-full" onClick={onRetry}>
 								Retry
 							</button>
 						</div>
@@ -120,7 +120,7 @@ export function LibraryScanStatus({
 									{status?.is_running ? (
 										<button
 											type="button"
-											className="btn btn-ghost btn-xs text-error"
+											className="btn btn-ghost btn-sm text-error"
 											onClick={onCancel}
 											disabled={isCancelPending}
 										>
@@ -129,7 +129,7 @@ export function LibraryScanStatus({
 									) : (
 										<button
 											type="button"
-											className="btn btn-ghost btn-xs text-primary"
+											className="btn btn-ghost btn-sm text-primary"
 											onClick={onStart}
 											disabled={isStartPending}
 										>
@@ -141,7 +141,7 @@ export function LibraryScanStatus({
 
 							{status?.is_running && status.progress && (
 								<div className="space-y-1.5">
-									<div className="flex justify-between font-bold font-mono text-[9px] opacity-60">
+									<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
 										<span>PROGRESS</span>
 										<span>
 											{status.progress.total_files > 0
@@ -157,7 +157,7 @@ export function LibraryScanStatus({
 										value={status.progress.processed_files}
 										max={status.progress.total_files}
 									/>
-									<div className="text-[9px] opacity-50">
+									<div className="text-base-content/70 text-xs">
 										{status.progress.processed_files} / {status.progress.total_files} items
 									</div>
 								</div>
@@ -166,8 +166,8 @@ export function LibraryScanStatus({
 							{!status?.is_running && (
 								<div className="space-y-3">
 									{status?.last_sync_result && (
-										<div className="rounded-lg bg-base-200/50 p-2 text-[10px]">
-											<div className="mb-1 font-bold uppercase opacity-40">LAST SCAN</div>
+										<div className="rounded-lg bg-base-200/50 p-2 text-xs">
+											<div className="mb-1 font-bold text-base-content/60 uppercase">LAST SCAN</div>
 											<div className="flex flex-wrap gap-x-3 gap-y-1">
 												<span>
 													Added: <strong>{status.last_sync_result.files_added}</strong>
@@ -180,13 +180,13 @@ export function LibraryScanStatus({
 													<strong>{(status.last_sync_result.duration / 1e9).toFixed(1)}s</strong>
 												</span>
 											</div>
-											<div className="mt-1 opacity-60">
+											<div className="mt-1 text-base-content/80">
 												{formatRelativeTime(new Date(status.last_sync_result.completed_at))}
 											</div>
 										</div>
 									)}
 
-									<div className="flex items-center gap-2 px-1 text-[9px] opacity-50">
+									<div className="flex items-center gap-2 px-1 text-base-content/70 text-xs">
 										<Clock className="h-3 w-3" />
 										{nextSyncTime ? (
 											<span>Next: {formatFutureTime(nextSyncTime)}</span>
@@ -206,7 +206,7 @@ export function LibraryScanStatus({
 	return (
 		<div className="card border border-base-200 bg-base-100 shadow-lg">
 			<div className="card-body">
-				<h3 className="card-title font-bold text-sm uppercase tracking-widest opacity-60">
+				<h3 className="card-title font-bold text-base-content/80 text-sm uppercase tracking-widest">
 					Library Scan Status
 				</h3>
 
@@ -284,7 +284,7 @@ export function LibraryScanStatus({
 						{/* Progress Bar */}
 						{status.is_running && status.progress && (
 							<div className="mt-6 space-y-3">
-								<div className="flex justify-between font-bold font-mono text-[10px] opacity-60">
+								<div className="flex justify-between font-bold font-mono text-base-content/80 text-xs">
 									<span>
 										SCANNING: {status.progress.processed_files} / {status.progress.total_files}{" "}
 										ITEMS
@@ -304,7 +304,7 @@ export function LibraryScanStatus({
 									max={status.progress.total_files}
 								/>
 								{status.progress.start_time && (
-									<div className="flex items-center gap-1.5 text-[10px] opacity-50">
+									<div className="flex items-center gap-1.5 text-base-content/70 text-xs">
 										<Clock className="h-3 w-3" />
 										Elapsed: {formatRelativeTime(new Date(status.progress.start_time))}
 									</div>
@@ -316,32 +316,32 @@ export function LibraryScanStatus({
 						{!status.is_running && (
 							<div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
 								{status.last_sync_result && (
-									<div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
-										<div className="mb-3 flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest opacity-40">
+									<div className="rounded-xl border-2 border-base-300/80 bg-base-200/60 p-4">
+										<div className="mb-3 flex items-center gap-2 font-bold text-base-content/60 text-xs uppercase tracking-widest">
 											<Search className="h-3 w-3" />
 											Last Scan Results
 										</div>
 										<div className="grid grid-cols-2 gap-x-2 gap-y-3 text-xs">
 											<div className="flex flex-col">
-												<span className="font-bold text-[9px] uppercase opacity-50">Added</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">Added</span>
 												<span className="font-mono text-lg">
 													{status.last_sync_result.files_added}
 												</span>
 											</div>
 											<div className="flex flex-col">
-												<span className="font-bold text-[9px] uppercase opacity-50">Deleted</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">Deleted</span>
 												<span className="font-mono text-lg">
 													{status.last_sync_result.files_deleted}
 												</span>
 											</div>
 											<div className="flex flex-col">
-												<span className="font-bold text-[9px] uppercase opacity-50">Duration</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">Duration</span>
 												<span className="font-mono">
 													{(status.last_sync_result.duration / 1e9).toFixed(2)}s
 												</span>
 											</div>
 											<div className="flex flex-col">
-												<span className="font-bold text-[9px] uppercase opacity-50">Completed</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">Completed</span>
 												<span className="font-mono">
 													{formatRelativeTime(new Date(status.last_sync_result.completed_at))}
 												</span>
@@ -350,8 +350,8 @@ export function LibraryScanStatus({
 									</div>
 								)}
 
-								<div className="rounded-xl border border-base-300 bg-base-200/30 p-4">
-									<div className="mb-3 flex items-center gap-2 font-bold text-[10px] uppercase tracking-widest opacity-40">
+								<div className="rounded-xl border-2 border-base-300/80 bg-base-200/60 p-4">
+									<div className="mb-3 flex items-center gap-2 font-bold text-base-content/60 text-xs uppercase tracking-widest">
 										<Clock className="h-3 w-3" />
 										Next Scheduled Scan
 									</div>
@@ -360,12 +360,12 @@ export function LibraryScanStatus({
 											<div className="font-semibold text-primary text-sm">
 												{formatFutureTime(nextSyncTime)}
 											</div>
-											<div className="font-mono text-[10px] opacity-50">
+											<div className="font-mono text-base-content/70 text-xs">
 												{nextSyncTime.toLocaleString()}
 											</div>
 										</div>
 									) : (
-										<div className="py-2 text-xs italic opacity-50">
+										<div className="py-2 text-base-content/70 text-xs italic">
 											{syncIntervalMinutes === 0
 												? "Automatic sync disabled (interval set to 0)"
 												: "Automatic sync not configured"}

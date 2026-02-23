@@ -87,7 +87,7 @@ export function ArrsInstanceCard({
 				<div className="flex items-center justify-between gap-4">
 					<div className="min-w-0">
 						<div className="flex items-center gap-2">
-							<span className="font-black text-[10px] uppercase tracking-tighter opacity-30">
+							<span className="font-black text-base-content/50 text-xs uppercase tracking-tighter">
 								{type}
 							</span>
 							<h4 className="break-all font-bold text-base tracking-tight">
@@ -97,7 +97,7 @@ export function ArrsInstanceCard({
 					</div>
 					<button
 						type="button"
-						className="btn btn-ghost btn-xs text-error opacity-0 transition-opacity group-hover:opacity-100"
+						className="btn btn-ghost btn-sm text-error opacity-0 transition-opacity group-hover:opacity-100"
 						onClick={onRemove}
 						disabled={isReadOnly}
 					>
@@ -108,7 +108,7 @@ export function ArrsInstanceCard({
 				<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend flex items-center gap-2 font-semibold">
-							<Globe className="h-3 w-3 opacity-40" /> URL
+							<Globe className="h-3 w-3 text-base-content/60" /> URL
 						</legend>
 						<input
 							type="url"
@@ -122,7 +122,7 @@ export function ArrsInstanceCard({
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend flex items-center gap-2 font-semibold">
-							<Key className="h-3 w-3 opacity-40" /> API Key
+							<Key className="h-3 w-3 text-base-content/60" /> API Key
 						</legend>
 						<div className="join w-full shadow-sm">
 							<input
@@ -140,9 +140,9 @@ export function ArrsInstanceCard({
 								disabled={isReadOnly}
 							>
 								{isApiKeyVisible ? (
-									<EyeOff className="h-3.5 w-3.5 opacity-50" />
+									<EyeOff className="h-3.5 w-3.5 text-base-content/70" />
 								) : (
-									<Eye className="h-3.5 w-3.5 opacity-50" />
+									<Eye className="h-3.5 w-3.5 text-base-content/70" />
 								)}
 							</button>
 						</div>
@@ -150,7 +150,7 @@ export function ArrsInstanceCard({
 
 					<fieldset className="fieldset">
 						<legend className="fieldset-legend flex items-center gap-2 font-semibold">
-							<Tag className="h-3 w-3 opacity-40" /> Category
+							<Tag className="h-3 w-3 text-base-content/60" /> Category
 						</legend>
 						<select
 							className="select select-sm select-bordered w-full bg-base-100 font-bold text-xs"
@@ -171,7 +171,7 @@ export function ArrsInstanceCard({
 						<label className="label cursor-pointer justify-start gap-3">
 							<input
 								type="checkbox"
-								className="checkbox checkbox-xs checkbox-primary"
+								className="checkbox checkbox-sm checkbox-primary"
 								checked={instance.enabled}
 								onChange={(e) => handleInstanceChange("enabled", e.target.checked)}
 								disabled={isReadOnly}
@@ -186,7 +186,7 @@ export function ArrsInstanceCard({
 					<div className="flex-1">
 						{testResult.type && (
 							<div
-								className={`fade-in slide-in-from-left-2 flex animate-in items-center gap-2 font-black text-[10px] uppercase tracking-widest ${testResult.type === "success" ? "text-success" : "text-error"}`}
+								className={`fade-in slide-in-from-left-2 flex animate-in items-center gap-2 font-black text-xs uppercase tracking-widest ${testResult.type === "success" ? "text-success" : "text-error"}`}
 							>
 								<Activity className="h-3 w-3" /> {testResult.message}
 							</div>
@@ -194,7 +194,7 @@ export function ArrsInstanceCard({
 					</div>
 					<button
 						type="button"
-						className={`btn btn-xs px-4 shadow-sm ${
+						className={`btn btn-sm px-4 shadow-sm ${
 							isTestingConnection
 								? "btn-disabled"
 								: testResult.type === "success"

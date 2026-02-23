@@ -54,10 +54,10 @@ export function AuthConfigSection({
 
 			<div className="space-y-8">
 				{/* Login Required Toggle */}
-				<div className="space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
-						<ShieldCheck className="h-4 w-4 opacity-40" />
-						<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+						<ShieldCheck className="h-4 w-4 text-base-content/60" />
+						<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 							Authentication
 						</h4>
 						<div className="h-px flex-1 bg-base-300/50" />

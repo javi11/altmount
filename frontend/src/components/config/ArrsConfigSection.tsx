@@ -239,7 +239,7 @@ export function ArrsConfigSection({
 
 			<div className="space-y-8">
 				{/* Enable/Disable Arrs */}
-				<div className="rounded-2xl border border-base-300 bg-base-200/30 p-6">
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0 flex-1">
 							<h4 className="break-words font-bold text-base-content text-sm">Service Engine</h4>
@@ -259,9 +259,9 @@ export function ArrsConfigSection({
 
 				{/* Webhooks Auto-Registration */}
 				{formData.enabled && (
-					<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+					<div className="fade-in slide-in-from-top-2 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 								Automation
 							</h4>
 							<div className="h-px flex-1 bg-base-300/50" />
@@ -305,7 +305,7 @@ export function ArrsConfigSection({
 							</div>
 
 							{hasChanges && (
-								<p className="font-bold text-[10px] text-warning">
+								<p className="font-bold text-warning text-xs">
 									Save changes before configuring webhooks.
 								</p>
 							)}
@@ -321,9 +321,9 @@ export function ArrsConfigSection({
 
 				{/* Queue Cleanup Settings */}
 				{formData.enabled && (
-					<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border border-base-300 bg-base-200/30 p-6">
+					<div className="fade-in slide-in-from-top-4 animate-in space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 						<div className="flex items-center gap-2">
-							<h4 className="font-bold text-[10px] text-base-content/40 uppercase tracking-widest">
+							<h4 className="font-bold text-base-content/40 text-xs uppercase tracking-widest">
 								Maintenance
 							</h4>
 							<div className="h-px flex-1 bg-base-300/50" />
@@ -374,7 +374,7 @@ export function ArrsConfigSection({
 
 								<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">Cleanup Grace Period</legend>
+										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">Cleanup Grace Period</legend>
 										<div className="join w-full">
 											<input
 												type="number"
@@ -393,38 +393,38 @@ export function ArrsConfigSection({
 												min
 											</span>
 										</div>
-										<p className="label mt-1 break-words text-[10px] opacity-50">
+										<div className="mt-2 whitespace-normal text-base-content/70 text-xs">
 											Wait time before considering a failed item "stuck" and eligible for cleanup.
-										</p>
+										</div>
 									</fieldset>
 
 									<fieldset className="fieldset">
-										<legend className="fieldset-legend font-semibold">
+										<legend className="fieldset-legend whitespace-normal font-semibold md:whitespace-nowrap">
 											Import Failure Cleanup
 										</legend>
 										<label className="label h-12 cursor-pointer items-center justify-start gap-4">
 											<input
 												type="checkbox"
-												className="toggle toggle-primary toggle-sm"
+												className="toggle toggle-primary toggle-sm shrink-0"
 												checked={formData.cleanup_automatic_import_failure ?? false}
 												onChange={(e) =>
 													handleFormChange("cleanup_automatic_import_failure", e.target.checked)
 												}
 												disabled={isReadOnly}
 											/>
-											<span className="label-text break-words font-bold text-xs">
+											<span className="whitespace-normal break-words font-bold text-xs">
 												Purge Automatic Failures
 											</span>
 										</label>
-										<p className="label mt-1 break-words text-[10px] opacity-50">
+										<div className="mt-1 whitespace-normal text-base-content/70 text-xs">
 											Automatically remove items from queue that failed with "Automatic Import"
 											errors.
-										</p>
+										</div>
 									</fieldset>
 								</div>
 
 								<div className="space-y-4">
-									<h5 className="font-bold text-[10px] uppercase opacity-40">
+									<h5 className="font-bold text-base-content/60 text-xs uppercase">
 										Allowlist (Ignore Errors)
 									</h5>
 									<div className="custom-scrollbar max-h-48 space-y-2 overflow-y-auto pr-2">
@@ -436,13 +436,13 @@ export function ArrsConfigSection({
 												<div className="flex min-w-0 flex-1 items-center gap-3">
 													<input
 														type="checkbox"
-														className="checkbox checkbox-xs checkbox-primary"
+														className="checkbox checkbox-sm checkbox-primary"
 														checked={msg.enabled}
 														onChange={() => handleToggleIgnoreMessage(index)}
 														disabled={isReadOnly}
 													/>
 													<span
-														className={`truncate font-mono text-[10px] ${!msg.enabled ? "line-through opacity-30" : ""}`}
+														className={`truncate font-mono text-xs ${!msg.enabled ? "text-base-content/50 line-through" : ""}`}
 														title={msg.message}
 													>
 														{msg.message}
@@ -450,7 +450,7 @@ export function ArrsConfigSection({
 												</div>
 												<button
 													type="button"
-													className="btn btn-ghost btn-xs text-error hover:bg-error/10"
+													className="btn btn-ghost btn-sm text-error hover:bg-error/10"
 													onClick={() => handleRemoveIgnoreMessage(index)}
 													disabled={isReadOnly}
 												>
@@ -497,7 +497,7 @@ export function ArrsConfigSection({
 								</h4>
 								<button
 									type="button"
-									className="btn btn-xs btn-primary px-4"
+									className="btn btn-sm btn-primary px-4"
 									onClick={() => {
 										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "radarr" });
 										setShowAddInstance(true);
@@ -512,7 +512,7 @@ export function ArrsConfigSection({
 									renderInstance(instance, "radarr", index),
 								)}
 								{formData.radarr_instances.length === 0 && (
-									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-xs opacity-40">
+									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-base-content/60 text-xs">
 										No Radarr configured
 									</div>
 								)}
@@ -527,7 +527,7 @@ export function ArrsConfigSection({
 								</h4>
 								<button
 									type="button"
-									className="btn btn-xs btn-primary px-4"
+									className="btn btn-sm btn-primary px-4"
 									onClick={() => {
 										setNewInstance({ ...DEFAULT_NEW_INSTANCE, type: "sonarr", category: "tv" });
 										setShowAddInstance(true);
@@ -542,7 +542,7 @@ export function ArrsConfigSection({
 									renderInstance(instance, "sonarr", index),
 								)}
 								{formData.sonarr_instances.length === 0 && (
-									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-xs opacity-40">
+									<div className="rounded-2xl border-2 border-base-300 border-dashed p-8 text-center font-bold text-base-content/60 text-xs">
 										No Sonarr configured
 									</div>
 								)}
