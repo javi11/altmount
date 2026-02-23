@@ -8,7 +8,7 @@ import (
 	"github.com/javi11/altmount/internal/config"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 func init() {
@@ -61,14 +61,14 @@ func runPasswd(cmd *cobra.Command, args []string) error {
 
 	// 5. Interactive Password Prompt
 	fmt.Printf("Enter new password for %s: ", username)
-	bytePassword, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return fmt.Errorf("\nfailed to read password: %w", err)
 	}
 	fmt.Println() // Print newline after hidden input
 
 	fmt.Print("Confirm new password: ")
-	byteConfirm, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+	byteConfirm, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return fmt.Errorf("\nfailed to read confirmation: %w", err)
 	}
