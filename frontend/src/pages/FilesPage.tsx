@@ -41,8 +41,8 @@ export function FilesPage() {
 				const lowerName = cat.name.toLowerCase();
 				if (lowerName.includes("movie") || lowerName.includes("film")) icon = Film;
 				else if (lowerName.includes("tv") || lowerName.includes("show") || lowerName.includes("anime")) icon = Tv;
-				else if (lowerName.includes("music") || lowerName.includes("audio")) icon = Music;
-				else if (lowerName.includes("book")) icon = Book;
+				else if (lowerName.includes("music") || lowerName.includes("audio") && !lowerName.includes("audiobook")) icon = Music;
+				else if (lowerName.includes("book") || lowerName.includes("audiobook")) icon = Book;
 				else if (lowerName.includes("game")) icon = Gamepad2;
 
 				let catPath = `${completeDir}/${cat.name}`;
