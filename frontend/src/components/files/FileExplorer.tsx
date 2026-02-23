@@ -67,10 +67,10 @@ export function FileExplorer({
 	const historyFiles = useMemo(() => {
 		if (!history) return [];
 		return history.map((item) => ({
-			basename: item.relative_path || item.nzb_path.split("/").pop() || "unknown",
-			filename: item.storage_path || "",
-			size: 0,
-			lastmod: item.created_at,
+			basename: item.virtual_path || item.nzb_name || "unknown",
+			filename: item.library_path || "",
+			size: item.file_size || 0,
+			lastmod: item.completed_at,
 			type: "file",
 			mime: "application/octet-stream",
 			etag: "",
