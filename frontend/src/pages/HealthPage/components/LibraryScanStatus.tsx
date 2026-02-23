@@ -323,25 +323,33 @@ export function LibraryScanStatus({
 										</div>
 										<div className="grid grid-cols-2 gap-x-2 gap-y-3 text-xs">
 											<div className="flex flex-col">
-												<span className="font-bold text-base-content/70 text-xs uppercase">Added</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">
+													Added
+												</span>
 												<span className="font-mono text-lg">
 													{status.last_sync_result.files_added}
 												</span>
 											</div>
 											<div className="flex flex-col">
-												<span className="font-bold text-base-content/70 text-xs uppercase">Deleted</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">
+													Deleted
+												</span>
 												<span className="font-mono text-lg">
 													{status.last_sync_result.files_deleted}
 												</span>
 											</div>
 											<div className="flex flex-col">
-												<span className="font-bold text-base-content/70 text-xs uppercase">Duration</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">
+													Duration
+												</span>
 												<span className="font-mono">
 													{(status.last_sync_result.duration / 1e9).toFixed(2)}s
 												</span>
 											</div>
 											<div className="flex flex-col">
-												<span className="font-bold text-base-content/70 text-xs uppercase">Completed</span>
+												<span className="font-bold text-base-content/70 text-xs uppercase">
+													Completed
+												</span>
 												<span className="font-mono">
 													{formatRelativeTime(new Date(status.last_sync_result.completed_at))}
 												</span>

@@ -226,19 +226,25 @@ export function HealthConfigSection({
 										<div className="font-bold font-mono text-lg">
 											{dryRunResult.orphaned_metadata_count}
 										</div>
-										<div className="font-black text-[8px] text-base-content/70 uppercase">Metadata</div>
+										<div className="font-black text-[8px] text-base-content/70 uppercase">
+											Metadata
+										</div>
 									</div>
 									<div className="rounded-lg border border-base-300/50 bg-base-100 p-2">
 										<div className="font-bold font-mono text-lg">
 											{dryRunResult.orphaned_library_files}
 										</div>
-										<div className="font-black text-[8px] text-base-content/70 uppercase">Links</div>
+										<div className="font-black text-[8px] text-base-content/70 uppercase">
+											Links
+										</div>
 									</div>
 									<div className="rounded-lg border border-base-300/50 bg-base-100 p-2">
 										<div className="font-bold font-mono text-lg">
 											{dryRunResult.database_records_to_clean}
 										</div>
-										<div className="font-black text-[8px] text-base-content/70 uppercase">Records</div>
+										<div className="font-black text-[8px] text-base-content/70 uppercase">
+											Records
+										</div>
 									</div>
 								</div>
 							</div>

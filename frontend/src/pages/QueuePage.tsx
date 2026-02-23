@@ -459,7 +459,9 @@ export function QueuePage() {
 									className={`btn btn-outline btn-sm join-item ${autoRefreshEnabled ? "btn-primary" : ""}`}
 									onClick={toggleAutoRefresh}
 								>
-									<Clock className={`h-3.5 w-3.5 ${autoRefreshEnabled ? "" : "text-base-content/70"}`} />
+									<Clock
+										className={`h-3.5 w-3.5 ${autoRefreshEnabled ? "" : "text-base-content/70"}`}
+									/>
 									{autoRefreshEnabled ? `${countdown}s` : "Off"}
 								</button>
 
@@ -659,7 +661,9 @@ export function QueuePage() {
 											</div>
 
 											{/* Desktop View (≥640px) - Keep Existing */}
-											                                                                                        <div className="hidden min-h-[450px] overflow-x-auto pb-24 sm:block">												<table className="table-zebra table-sm sm:table-md table">
+											<div className="hidden min-h-[450px] overflow-x-auto pb-24 sm:block">
+												{" "}
+												<table className="table-zebra table-sm sm:table-md table">
 													<thead className="bg-base-200/50">
 														<tr>
 															<th className="w-12 text-center">

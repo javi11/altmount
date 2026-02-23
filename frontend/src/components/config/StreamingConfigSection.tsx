@@ -215,7 +215,9 @@ export function StreamingConfigSection({
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="min-w-0">
-							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm">Cache Expiry</h4>
+							<h4 className="overflow-visible whitespace-normal font-bold text-base-content text-sm">
+								Cache Expiry
+							</h4>
 							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
 								How long cached segments are kept before automatic eviction.
 							</p>
