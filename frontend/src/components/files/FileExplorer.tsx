@@ -58,7 +58,11 @@ export function FileExplorer({
 		refetch: refetchDirectory,
 	} = useWebDAVDirectory(currentPath, isConnected, hasConnectionFailed, showCorrupted);
 
-	const { data: history, isLoading: isHistoryLoading, refetch: refetchHistory } = useImportHistory(50);
+	const {
+		data: history,
+		isLoading: isHistoryLoading,
+		refetch: refetchHistory,
+	} = useImportHistory(50);
 
 	const isLoading = isRecentView ? isHistoryLoading : isDirectoryLoading;
 	const error = isRecentView ? null : directoryError;
@@ -97,7 +101,7 @@ export function FileExplorer({
 
 	// Filter files based on search term
 	const filteredFiles = useMemo(() => {
-		const files = isRecentView ? historyFiles : (directory?.files || []);
+		const files = isRecentView ? historyFiles : directory?.files || [];
 		if (!searchTerm.trim()) {
 			return files;
 		}

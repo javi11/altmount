@@ -96,7 +96,7 @@ build-cli: build-frontend
 	CGO_ENABLED=1 $(GO) build \
 		-trimpath \
 		-tags=cli \
-		-ldflags="-s -w -X 'main.Version=$$VERSION' -X 'main.GitCommit=$$COMMIT' -X 'main.Timestamp=$$TIMESTAMP'" \
+		-ldflags="-s -w -X 'github.com/javi11/altmount/internal/version.Version=$$VERSION' -X 'github.com/javi11/altmount/internal/version.GitCommit=$$COMMIT' -X 'github.com/javi11/altmount/internal/version.Timestamp=$$TIMESTAMP'" \
 		-o altmount \
 		./cmd/altmount/main.go
 

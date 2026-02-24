@@ -39,6 +39,7 @@ import type {
 	ProviderTestResponse,
 	ProviderUpdateRequest,
 } from "../types/config";
+import type { UpdateChannel, UpdateStatusResponse } from "../types/update";
 
 export class APIError extends Error {
 	public status: number;
@@ -885,6 +886,11 @@ export class APIClient {
 			method: "POST",
 			body: JSON.stringify({}),
 		});
+	}
+
+	// Update endpoints
+	async checkUpdateStatus(channel: UpdateChannel): Promise<UpdateStatusResponse> {
+		return this.request<UpdateStatusResponse>(`/system/update/status?channel=${channel}`);
 	}
 }
 

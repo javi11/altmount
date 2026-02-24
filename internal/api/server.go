@@ -19,6 +19,7 @@ import (
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
 	"github.com/javi11/altmount/internal/rclone"
+	"github.com/javi11/altmount/internal/version"
 	"github.com/javi11/altmount/pkg/rclonecli"
 )
 
@@ -241,6 +242,9 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/system/cleanup", s.handleSystemCleanup)
 	api.Post("/system/restart", s.handleSystemRestart)
 
+	// Update endpoints
+	api.Get("/system/update/status", s.handleGetUpdateStatus)
+
 	api.Get("/config", s.handleGetConfig)
 	api.Put("/config", s.handleUpdateConfig)
 	api.Patch("/config/:section", s.handlePatchConfigSection)
@@ -341,6 +345,8 @@ func (s *Server) handleGetActiveStreams(c *fiber.Ctx) error {
 func (s *Server) getSystemInfo() SystemInfoResponse {
 	uptime := time.Since(s.startTime)
 	return SystemInfoResponse{
+		Version:   version.Version,
+		GitCommit: version.GitCommit,
 		StartTime: s.startTime,
 		Uptime:    uptime.String(),
 		GoVersion: runtime.Version(),
