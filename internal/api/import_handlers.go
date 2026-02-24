@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -148,6 +149,15 @@ func (s *Server) handleManualImportFile(c *fiber.Ctx) error {
 		return c.Status(422).JSON(fiber.Map{
 			"success": false,
 			"message": "File path is required",
+		})
+	}
+
+	// Sanitize and validate the path to prevent path traversal
+	req.FilePath = filepath.Clean(req.FilePath)
+	if !filepath.IsAbs(req.FilePath) {
+		return c.Status(422).JSON(fiber.Map{
+			"success": false,
+			"message": "File path must be absolute",
 		})
 	}
 

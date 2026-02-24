@@ -87,8 +87,9 @@ type FuseConfig struct {
 
 // APIConfig represents REST API configuration
 type APIConfig struct {
-	Prefix      string `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
-	KeyOverride string `yaml:"key_override" mapstructure:"key_override" json:"key_override,omitempty"`
+	Prefix         string   `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
+	KeyOverride    string   `yaml:"key_override" mapstructure:"key_override" json:"key_override,omitempty"`
+	AllowedOrigins []string `yaml:"allowed_origins" mapstructure:"allowed_origins" json:"allowed_origins,omitempty"`
 }
 
 // AuthConfig represents authentication configuration

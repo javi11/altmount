@@ -775,17 +775,18 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 		return 0, nil
 	}
 
-	// Build placeholders for the IN clause
+	// Build placeholders for the IN clause; prepend the status value as first arg
 	placeholders := make([]string, len(filePaths))
-	args := make([]any, len(filePaths))
+	args := make([]any, 0, len(filePaths)+1)
+	args = append(args, string(HealthStatusPending))
 	for i, path := range filePaths {
 		placeholders[i] = "?"
-		args[i] = path
+		args = append(args, path)
 	}
 
 	query := fmt.Sprintf(`
 		UPDATE file_health
-		SET status = '%s',
+		SET status = ?,
 		    retry_count = 0,
 		    repair_retry_count = 0,
 		    last_error = NULL,
@@ -793,7 +794,7 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 		    updated_at = datetime('now'),
 			scheduled_check_at = datetime('now')
 		WHERE file_path IN (%s)
-	`, HealthStatusPending, strings.Join(placeholders, ","))
+	`, strings.Join(placeholders, ","))
 
 	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
