@@ -24,8 +24,8 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 			errors.username = "Username must be at least 3 characters long";
 		}
 
-		if (!formData.password || formData.password.length < 8) {
-			errors.password = "Password must be at least 8 characters long";
+		if (!formData.password || formData.password.length < 12) {
+			errors.password = "Password must be at least 12 characters long";
 		}
 
 		if (formData.password !== formData.confirmPassword) {
@@ -150,7 +150,7 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
 						validationErrors.password ? "border-red-300" : "border-gray-300"
 					}`}
-					placeholder="Choose a secure password (min 8 characters)"
+					placeholder="Choose a secure password (min 12 characters)"
 				/>
 				{validationErrors.password && (
 					<p className="mt-1 text-red-600 text-sm">{validationErrors.password}</p>

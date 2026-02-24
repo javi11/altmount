@@ -436,7 +436,9 @@ func (s *Server) handleUploadToQueue(c *fiber.Ctx) error {
 	}
 
 	// Save the uploaded file to temporary location
-	tempFile := filepath.Join(uploadDir, file.Filename)
+	// Use filepath.Base to strip any path components from the filename
+	safeFilename := filepath.Base(file.Filename)
+	tempFile := filepath.Join(uploadDir, safeFilename)
 	if err := c.SaveFile(file, tempFile); err != nil {
 		return RespondInternalError(c, "Failed to save file", err.Error())
 	}

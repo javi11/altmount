@@ -528,6 +528,15 @@ func (s *Server) handleSystemBrowse(c *fiber.Ctx) error {
 		}
 	}
 
+	// Sanitize and validate the path to prevent path traversal
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return c.Status(400).JSON(fiber.Map{
+			"success": false,
+			"message": "Path must be absolute",
+		})
+	}
+
 	// Read directory
 	entries, err := os.ReadDir(path)
 	if err != nil {
