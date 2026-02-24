@@ -656,7 +656,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
 		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
-		
+
 		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
 		slog.DebugContext(c.Context(), "Reporting completed item to SABnzbd API",
 			"name", slot.Name,
@@ -670,7 +670,7 @@ func (s *Server) handleSABnzbdHistory(c *fiber.Ctx) error {
 		// Calculate category-specific base path for this item
 		itemBasePath := s.calculateItemBasePath()
 		finalPath := s.calculateHistoryStoragePath(item, itemBasePath)
-		
+
 		slot := ToSABnzbdHistorySlot(item, start+index, finalPath)
 		slots = append(slots, slot)
 		totalBytes += slot.Bytes
@@ -1056,36 +1056,36 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 
 	cfg := s.configManager.GetConfig()
 	storagePath := *item.StoragePath
-	
+
 	// Determine category folder
 	category := config.DefaultCategoryName
 	if item.Category != nil && *item.Category != "" {
 		category = *item.Category
 	}
-	
+
 	// Get the raw relative path by stripping the mount path
 	resultingPath := storagePath
-	if strings.HasPrefix(storagePath, cfg.MountPath) {
-		resultingPath = strings.TrimPrefix(storagePath, cfg.MountPath)
+	if after, ok := strings.CutPrefix(storagePath, cfg.MountPath); ok {
+		resultingPath = after
 	}
 
-	// For Strategy None, it relies on complete_dir, but we also want the relative job folder path. 
+	// For Strategy None, it relies on complete_dir, but we also want the relative job folder path.
 	if cfg.Import.ImportStrategy == config.ImportStrategyNone {
 		pathComponents := []string{cfg.MountPath}
-		
+
 		if cfg.SABnzbd.CompleteDir != "" {
 			pathComponents = append(pathComponents, strings.TrimPrefix(cfg.SABnzbd.CompleteDir, "/"))
 		}
-		
+
 		// The virtual file system places files directly inside the category folder
 		// under the complete directory. The file itself might be in a job folder.
-		
-		// Ensure category is respected 
+
+		// Ensure category is respected
 		cleanPath := strings.TrimPrefix(resultingPath, "/")
 		if cfg.SABnzbd.CompleteDir != "" {
 			cleanCompleteDir := strings.TrimPrefix(cfg.SABnzbd.CompleteDir, "/")
-			if strings.HasPrefix(cleanPath, cleanCompleteDir+"/") {
-				cleanPath = strings.TrimPrefix(cleanPath, cleanCompleteDir+"/")
+			if after, ok := strings.CutPrefix(cleanPath, cleanCompleteDir+"/"); ok {
+				cleanPath = after
 			} else if cleanPath == cleanCompleteDir {
 				cleanPath = ""
 			}
@@ -1094,10 +1094,10 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 		if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
 			pathComponents = append(pathComponents, category)
 		}
-		
+
 		fullPath := filepath.Join(append(pathComponents, cleanPath)...)
 		fullPath = filepath.ToSlash(filepath.Clean(fullPath))
-		
+
 		// We only want to report the directory, not the actual file
 		// Since some files might not have popular extensions or might be folders,
 		// we check if it is explicitly a file based on PopularExtensions.
@@ -1107,9 +1107,9 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 		return fullPath
 	}
 
-	// For explicit import strategies (symlink, hardlink, copy, move, strm), 
+	// For explicit import strategies (symlink, hardlink, copy, move, strm),
 	// the post-processor strips complete_dir and places it into {ImportDir}/{Category}/{RelativeJobFolder}.
-	
+
 	// Strip SABnzbd CompleteDir prefix from resultingPath if present
 	if cfg.SABnzbd.CompleteDir != "" {
 		completeDir := filepath.ToSlash(cfg.SABnzbd.CompleteDir)
@@ -1136,7 +1136,7 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 	if !strings.HasPrefix(cleanPath, category+"/") && cleanPath != category {
 		resultingPath = filepath.Join(category, cleanPath)
 	}
-	
+
 	// Determine the base path for these strategies
 	stratBasePath := cfg.MountPath
 	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
@@ -1145,12 +1145,12 @@ func (s *Server) calculateHistoryStoragePath(item *database.ImportQueueItem, bas
 
 	fullStoragePath := filepath.Join(stratBasePath, strings.TrimPrefix(resultingPath, "/"))
 	fullStoragePath = filepath.ToSlash(filepath.Clean(fullStoragePath))
-	
+
 	// Return the directory, not the file
 	if utils.HasPopularExtension(fullStoragePath) {
 		return filepath.Dir(fullStoragePath)
 	}
-	
+
 	return fullStoragePath
 }
 
