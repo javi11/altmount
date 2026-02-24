@@ -215,9 +215,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		}
 	}
 
-	// Build segment offset index for O(1) lookup
-	segmentIndex := buildSegmentIndex(fileMeta.SegmentData)
-
 	// Create a metadata-based virtual file handle
 	virtualFile := &MetadataVirtualFile{
 		name:             name,
@@ -232,9 +229,8 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		globalPassword:   mrf.getGlobalPassword(),
 		globalSalt:       mrf.getGlobalSalt(),
 		streamTracker:    mrf.streamTracker,
-		streamID:         streamID,
-		segmentIndex:     segmentIndex,
-		segmentStore:     mrf.segmentStore,
+		streamID:     streamID,
+		segmentStore: mrf.segmentStore,
 	}
 
 	return true, virtualFile, nil
@@ -715,6 +711,7 @@ type MetadataVirtualFile struct {
 	streamTracker    StreamTracker
 	streamID         string
 	segmentStore     usenet.SegmentStore // optional segment cache
+	segmentIndexOnce sync.Once           // guards lazy init of segmentIndex
 
 	// Reader state and position tracking
 	reader            io.ReadCloser
@@ -1243,25 +1240,25 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		return nil, ErrNoNzbData
 	}
 
+	// Build segment offset index lazily on first read (thread-safe via sync.Once)
+	mvf.segmentIndexOnce.Do(func() {
+		mvf.segmentIndex = buildSegmentIndex(mvf.fileMeta.SegmentData)
+	})
+
 	loader := newMetadataSegmentLoader(mvf.fileMeta.SegmentData)
 
-	// Use segment index for O(log n) lookup of starting segment instead of O(n) linear scan
-	startSegIdx := 0
-	startFilePos := int64(0)
-	if mvf.segmentIndex != nil && start > 0 {
-		startSegIdx = mvf.segmentIndex.findSegmentForOffset(start)
-		if startSegIdx >= 0 {
-			startFilePos = mvf.segmentIndex.getOffsetForSegment(startSegIdx)
-		}
-		// If startSegIdx < 0 (offset beyond all segments), keep defaults (0, 0)
-		// to let GetSegmentsInRangeFromIndex iterate from beginning -
-		// it will correctly handle finding no segments in range
-	}
+	// segmentIndex is always non-nil here (built by segmentIndexOnce.Do above).
+	// Use O(log n) binary search to find segment boundaries, then create a lazy
+	// range with O(1) initialization. Corrupt metadata (index returning -1) results
+	// in an empty range caught by HasSegments() below.
+	startSegIdx := mvf.segmentIndex.findSegmentForOffset(start)
+	startFilePos := mvf.segmentIndex.getOffsetForSegment(startSegIdx)
+	endSegIdx := mvf.segmentIndex.findSegmentForOffset(end)
+	endFilePos := mvf.segmentIndex.getOffsetForSegment(endSegIdx)
 
-	rg := usenet.GetSegmentsInRangeFromIndex(ctx, start, end, loader, startSegIdx, startFilePos)
+	rg := usenet.NewLazySegmentRange(ctx, start, end, loader, startSegIdx, startFilePos, endSegIdx, endFilePos)
 
 	if !rg.HasSegments() {
-		// Calculate available bytes for debugging
 		var availableBytes int64
 		for _, seg := range mvf.fileMeta.SegmentData {
 			availableBytes += seg.SegmentSize
