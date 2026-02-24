@@ -14,6 +14,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { useRegenerateAPIKey } from "../../hooks/useAuth";
 import type { ConfigResponse, LogFormData } from "../../types/config";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
+import { UpdateSection } from "./UpdateSection";
 
 const LIGHT_THEMES = [
 	"retro",
@@ -230,6 +231,9 @@ export function SystemConfigSection({
 			</div>
 
 			<div className="space-y-8">
+				{/* Updates */}
+				<UpdateSection />
+
 				{/* Appearance */}
 				<div className="space-y-6 rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
 					<div className="flex items-center gap-2">
