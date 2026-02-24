@@ -211,6 +211,15 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		return // No rclone client configured
 	}
 
+	// Only notify for rclone-based mounts; FUSE and none don't use rclone VFS
+	cfg := hc.configGetter()
+	switch cfg.MountType {
+	case config.MountTypeRClone, config.MountTypeRCloneExternal:
+		// continue
+	default:
+		return
+	}
+
 	// Only notify on significant status changes (healthy <-> corrupted)
 	switch event.Type {
 	case EventTypeFileHealthy, EventTypeFileCorrupted:
@@ -229,7 +238,6 @@ func (hc *HealthChecker) notifyRcloneVFS(filePath string, event HealthEvent) {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		cfg := hc.configGetter()
 		vfsName := cfg.RClone.VFSName
 		if vfsName == "" {
 			vfsName = config.MountProvider

@@ -44,8 +44,8 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 			checkPath = "/" + checkPath
 		}
 
-		if strings.HasPrefix(checkPath, completeDir) {
-			resultingPath = strings.TrimPrefix(checkPath, completeDir)
+		if after, ok := strings.CutPrefix(checkPath, completeDir); ok {
+			resultingPath = after
 		}
 	}
 
@@ -120,8 +120,8 @@ func (c *Coordinator) CreateStrmFiles(ctx context.Context, item *database.Import
 				checkPath = "/" + checkPath
 			}
 
-			if strings.HasPrefix(checkPath, completeDir) {
-				strmResultingPath = strings.TrimPrefix(checkPath, completeDir)
+			if after, ok := strings.CutPrefix(checkPath, completeDir); ok {
+				strmResultingPath = after
 			}
 		}
 

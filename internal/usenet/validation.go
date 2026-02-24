@@ -283,16 +283,14 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 	totalSegments := len(segments)
 
 	// Calculate target number of segments based on percentage
-	targetSamples := max(
+	targetSamples := min(
 		// Enforce minimum of 5 segments for statistical validity
-		(totalSegments*samplePercentage)/100, 5)
+		// Optimization: Cap the number of samples for very large files to prevent
+		// excessive network I/O. 50 random samples + 5 fixed samples is plenty
+		// for a reliable health check even on 100GB+ files.
+		max(
 
-	// Optimization: Cap the number of samples for very large files to prevent
-	// excessive network I/O. 50 random samples + 5 fixed samples is plenty
-	// for a reliable health check even on 100GB+ files.
-	if targetSamples > 55 {
-		targetSamples = 55
-	}
+			(totalSegments*samplePercentage)/100, 5), 55)
 
 	// If target samples equals or exceeds total segments, validate all
 	if targetSamples >= totalSegments {
@@ -303,7 +301,7 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 
 	// 1. First 3 segments (DMCA/takedown detection)
 	firstCount := min(3, totalSegments)
-	for i := 0; i < firstCount; i++ {
+	for i := range firstCount {
 		toValidate = append(toValidate, segments[i])
 	}
 
@@ -331,7 +329,7 @@ func selectSegmentsForValidation(segments []*metapb.SegmentData, samplePercentag
 		if randomSamples > 0 {
 			// Random sampling without replacement from middle section
 			perm := randPerm(middleRange)
-			for i := 0; i < randomSamples; i++ {
+			for i := range randomSamples {
 				toValidate = append(toValidate, segments[middleStart+perm[i]])
 			}
 		}
