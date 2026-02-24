@@ -17,6 +17,14 @@ func (c *Coordinator) NotifyVFS(ctx context.Context, resultingPath string, async
 		return
 	}
 
+	// Only notify for rclone-based mounts; FUSE and none don't use rclone VFS
+	switch c.configGetter().MountType {
+	case config.MountTypeRClone, config.MountTypeRCloneExternal:
+		// continue
+	default:
+		return
+	}
+
 	refreshFunc := func(path string) {
 		refreshCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
@@ -71,6 +79,14 @@ func (c *Coordinator) NotifyVFS(ctx context.Context, resultingPath string, async
 // RefreshMountPathIfNeeded refreshes the mount path cache if required
 func (c *Coordinator) RefreshMountPathIfNeeded(ctx context.Context, resultingPath string, itemID int64) {
 	if c.rcloneClient == nil {
+		return
+	}
+
+	// Only notify for rclone-based mounts; FUSE and none don't use rclone VFS
+	switch c.configGetter().MountType {
+	case config.MountTypeRClone, config.MountTypeRCloneExternal:
+		// continue
+	default:
 		return
 	}
 
