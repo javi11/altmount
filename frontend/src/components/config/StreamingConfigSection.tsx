@@ -192,7 +192,7 @@ export function StreamingConfigSection({
 						<input
 							type="range"
 							min="1"
-							max="200"
+							max="1000"
 							value={cacheData.max_size_gb}
 							step="1"
 							className="range range-primary range-sm w-full [&::-webkit-slider-runnable-track]:rounded-full"
@@ -203,10 +203,10 @@ export function StreamingConfigSection({
 						/>
 						<div className="flex justify-between px-2 font-black text-base-content/50 text-xs">
 							<span>1</span>
-							<span>50</span>
-							<span>100</span>
-							<span>150</span>
-							<span>200</span>
+							<span>250</span>
+							<span>500</span>
+							<span>750</span>
+							<span>1000</span>
 						</div>
 					</div>
 				</div>
