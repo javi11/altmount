@@ -12,7 +12,6 @@ services:
     volumes:
       - ./config:/config
       - /mnt:/mnt:rshared
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # Optional: required for one-click auto-update
     ports:
       - "8080:8080"
     restart: unless-stopped
