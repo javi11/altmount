@@ -892,6 +892,13 @@ export class APIClient {
 	async checkUpdateStatus(channel: UpdateChannel): Promise<UpdateStatusResponse> {
 		return this.request<UpdateStatusResponse>(`/system/update/status?channel=${channel}`);
 	}
+
+	async applyUpdate(channel: UpdateChannel): Promise<{ message: string }> {
+		return this.request<{ message: string }>("/system/update/apply", {
+			method: "POST",
+			body: JSON.stringify({ channel }),
+		});
+	}
 }
 
 // Export a default instance

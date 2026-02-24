@@ -7,4 +7,5 @@ export interface UpdateStatusResponse {
 	latest_version?: string;
 	update_available: boolean;
 	release_url?: string;
+	docker_available?: boolean;
 }
