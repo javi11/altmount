@@ -935,6 +935,11 @@ func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadC
 		return nil, ErrNoUsenetPool
 	}
 
+	// Nested sources take priority — each source has its own segments and AES credentials
+	if len(mvf.fileMeta.NestedSources) > 0 {
+		return mvf.createNestedReader(start, end)
+	}
+
 	if len(mvf.fileMeta.SegmentData) == 0 {
 		return nil, ErrNoNzbData
 	}
@@ -1182,7 +1187,14 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	mvf.currentRangeEnd = end
 
 	// Create reader for the calculated range using metadata segments
-	if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
+	if len(mvf.fileMeta.NestedSources) > 0 {
+		// Nested RAR: use multi-source reader
+		reader, err := mvf.createNestedReader(start, end)
+		if err != nil {
+			return fmt.Errorf("failed to create nested reader: %w", err)
+		}
+		mvf.reader = reader
+	} else if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
 		// Wrap the usenet reader with encryption
 		decryptedReader, err := mvf.wrapWithEncryption(start, end)
 		if err != nil {
@@ -1282,6 +1294,150 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 	}
 
 	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+}
+
+// createNestedReader creates a reader for files backed by nested RAR sources.
+// It maps the requested byte range [start, end] across multiple NestedSegmentSources,
+// creating readers for each relevant source and concatenating them.
+func (mvf *MetadataVirtualFile) createNestedReader(start, end int64) (io.ReadCloser, error) {
+	sources := mvf.fileMeta.NestedSources
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no nested sources available")
+	}
+
+	// Calculate which sources contain the requested byte range.
+	// Sources are concatenated: source 0 covers [0, InnerLength0),
+	// source 1 covers [InnerLength0, InnerLength0+InnerLength1), etc.
+	var readers []io.Reader
+	var closers []io.Closer
+	var sourceOffset int64
+
+	for _, src := range sources {
+		srcEnd := sourceOffset + src.InnerLength - 1
+
+		// Skip sources before our range
+		if srcEnd < start {
+			sourceOffset += src.InnerLength
+			continue
+		}
+
+		// Stop if we've passed our range
+		if sourceOffset > end {
+			break
+		}
+
+		// Calculate local offsets within this source
+		localStart := int64(0)
+		if start > sourceOffset {
+			localStart = start - sourceOffset
+		}
+		localEnd := src.InnerLength - 1
+		if end < srcEnd {
+			localEnd = end - sourceOffset
+		}
+
+		readLen := localEnd - localStart + 1
+		if readLen <= 0 {
+			sourceOffset += src.InnerLength
+			continue
+		}
+
+		reader, err := mvf.createNestedSourceReader(src, localStart, readLen)
+		if err != nil {
+			// Close any already-opened readers
+			for _, c := range closers {
+				c.Close()
+			}
+			return nil, fmt.Errorf("failed to create nested source reader: %w", err)
+		}
+
+		readers = append(readers, reader)
+		closers = append(closers, reader)
+		sourceOffset += src.InnerLength
+	}
+
+	if len(readers) == 0 {
+		return nil, fmt.Errorf("no nested sources cover range [%d, %d]", start, end)
+	}
+
+	combined := io.MultiReader(readers...)
+	return &multiCloser{Reader: combined, closers: closers}, nil
+}
+
+// createNestedSourceReader creates a reader for a single NestedSegmentSource,
+// starting at innerStart within the decrypted inner volume and reading readLen bytes.
+func (mvf *MetadataVirtualFile) createNestedSourceReader(
+	src *metapb.NestedSegmentSource,
+	innerStart int64,
+	readLen int64,
+) (io.ReadCloser, error) {
+	absoluteStart := src.InnerOffset + innerStart
+
+	if len(src.AesKey) > 0 {
+		// Encrypted source: decrypt with AES-CBC then read at inner offset
+		if mvf.aesCipher == nil {
+			return nil, ErrNoCipherConfig
+		}
+
+		rh := &utils.RangeHeader{
+			Start: absoluteStart,
+			End:   absoluteStart + readLen - 1,
+		}
+
+		return mvf.aesCipher.Open(
+			mvf.ctx,
+			rh,
+			src.InnerVolumeSize,
+			src.AesKey,
+			src.AesIv,
+			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
+				return mvf.createUsenetReaderFromSegments(ctx, src.Segments, s, e)
+			},
+		)
+	}
+
+	// Unencrypted source: read directly from segments at inner offset
+	return mvf.createUsenetReaderFromSegments(mvf.ctx, src.Segments, absoluteStart, absoluteStart+readLen-1)
+}
+
+// createUsenetReaderFromSegments creates a usenet reader from a specific set of segments
+// (used for nested source reading where segments differ from the main file metadata).
+func (mvf *MetadataVirtualFile) createUsenetReaderFromSegments(ctx context.Context, segments []*metapb.SegmentData, start, end int64) (io.ReadCloser, error) {
+	if len(segments) == 0 {
+		return nil, ErrNoNzbData
+	}
+
+	loader := newMetadataSegmentLoader(segments)
+	idx := buildSegmentIndex(segments)
+
+	startSegIdx := idx.findSegmentForOffset(start)
+	startFilePos := idx.getOffsetForSegment(startSegIdx)
+	endSegIdx := idx.findSegmentForOffset(end)
+	endFilePos := idx.getOffsetForSegment(endSegIdx)
+
+	rg := usenet.NewLazySegmentRange(ctx, start, end, loader, startSegIdx, startFilePos, endSegIdx, endFilePos)
+
+	if !rg.HasSegments() {
+		return nil, fmt.Errorf("no segments cover range [%d, %d]", start, end)
+	}
+
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+}
+
+// multiCloser wraps an io.Reader and closes multiple underlying closers.
+type multiCloser struct {
+	io.Reader
+	closers []io.Closer
+}
+
+func (mc *multiCloser) Close() error {
+	var firstErr error
+	for _, c := range mc.closers {
+		if err := c.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

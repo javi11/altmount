@@ -26,6 +26,32 @@ var (
 	ErrNoFilesProcessed = errors.New("no files were successfully processed (all files failed validation)")
 )
 
+// getContentSegmentCount returns the total number of segments for a Content,
+// counting NestedSources segments for encrypted nested RAR content.
+func getContentSegmentCount(content Content) int {
+	if len(content.NestedSources) > 0 {
+		total := 0
+		for _, ns := range content.NestedSources {
+			total += len(ns.Segments)
+		}
+		return total
+	}
+	return len(content.Segments)
+}
+
+// getContentSegments returns all segments for a Content,
+// collecting from NestedSources for encrypted nested RAR content.
+func getContentSegments(content Content) []*metapb.SegmentData {
+	if len(content.NestedSources) > 0 {
+		var all []*metapb.SegmentData
+		for _, ns := range content.NestedSources {
+			all = append(all, ns.Segments...)
+		}
+		return all
+	}
+	return content.Segments
+}
+
 // calculateSegmentsToValidate calculates the actual number of segments that will be validated
 // based on the validation mode (full or sampling) and sample percentage.
 // This mirrors the logic in usenet.ValidateSegmentAvailability which uses selectSegmentsForValidation.
@@ -36,7 +62,7 @@ func calculateSegmentsToValidate(sevenZipContents []Content, samplePercentage in
 			continue
 		}
 
-		segmentCount := len(content.Segments)
+		segmentCount := getContentSegmentCount(content)
 		if samplePercentage == 100 {
 			// Full validation mode: all segments will be validated
 			total += segmentCount
@@ -214,19 +240,37 @@ func ProcessArchive(
 				)
 			}
 
-			// Determine encryption type for validation
-			encryption := metapb.Encryption_NONE
-			if len(sevenZipContent.AesKey) > 0 {
-				encryption = metapb.Encryption_AES
+			// Get the segments to validate — for nested content, collect from all sources
+			validationSegments := getContentSegments(sevenZipContent)
+
+			// Compute validation size: for nested content with NestedSources, sum segment coverage
+			var validationSize int64
+			if len(sevenZipContent.NestedSources) > 0 {
+				for _, ns := range sevenZipContent.NestedSources {
+					sourceSize := int64(0)
+					for _, seg := range ns.Segments {
+						sourceSize += seg.EndOffset - seg.StartOffset + 1
+					}
+					validationSize += sourceSize
+				}
+			} else {
+				validationSize = sevenZipContent.Size
+				// For AES-encrypted files, the data in the archive is padded to 16-byte blocks
+				if len(sevenZipContent.AesKey) > 0 {
+					const aesBlockSize = 16
+					if validationSize%aesBlockSize != 0 {
+						validationSize = validationSize + (aesBlockSize - (validationSize % aesBlockSize))
+					}
+				}
 			}
 
 			// Validate segments with real-time progress updates
 			if err := validation.ValidateSegmentsForFile(
 				ctx,
 				baseFilename,
-				sevenZipContent.Size,
-				sevenZipContent.Segments,
-				encryption,
+				validationSize,
+				validationSegments,
+				metapb.Encryption_NONE,
 				poolManager,
 				maxValidationGoroutines,
 				segmentSamplePercentage,
@@ -240,7 +284,7 @@ func ProcessArchive(
 		}
 
 		// Calculate and track segments validated for this file (for next file's offset)
-		segmentCount := len(sevenZipContent.Segments)
+		segmentCount := getContentSegmentCount(sevenZipContent)
 		var fileSegmentsValidated int
 		if segmentSamplePercentage == 100 {
 			fileSegmentsValidated = segmentCount
