@@ -40,8 +40,7 @@ export function ProvidersConfigSection({
 	const [formData, setFormData] = useState<ProviderConfig[]>(config.providers);
 	const [hasChanges, setHasChanges] = useState(false);
 
-	const { deleteProvider, reorderProviders, testProviderSpeed } = useProviders();
-	const isReordering = reorderProviders.isPending;
+	const { deleteProvider, testProviderSpeed } = useProviders();
 	const { confirmDelete } = useConfirm();
 	const { showToast } = useToast();
 
@@ -178,35 +177,20 @@ export function ProvidersConfigSection({
 		}
 	};
 
-	const handleDrop = async (e: React.DragEvent, targetProviderId: string) => {
+	const handleDrop = (e: React.DragEvent, targetProviderId: string) => {
 		e.preventDefault();
 		const draggedProviderId = e.dataTransfer.getData("text/plain");
 		setDraggedProvider(null);
 		setDragOverProvider(null);
 		if (!draggedProviderId || draggedProviderId === targetProviderId) return;
-		const draggedIndex = config.providers.findIndex((p) => p.id === draggedProviderId);
-		const targetIndex = config.providers.findIndex((p) => p.id === targetProviderId);
+		const draggedIndex = formData.findIndex((p) => p.id === draggedProviderId);
+		const targetIndex = formData.findIndex((p) => p.id === targetProviderId);
 		if (draggedIndex === -1 || targetIndex === -1) return;
 		const reorderedProviders = [...formData];
 		const [draggedProviderObj] = reorderedProviders.splice(draggedIndex, 1);
 		reorderedProviders.splice(targetIndex, 0, draggedProviderObj);
-
-		// Update local state immediately for visual responsiveness
 		setFormData(reorderedProviders);
 		setHasChanges(JSON.stringify(reorderedProviders) !== JSON.stringify(config.providers));
-
-		try {
-			await reorderProviders.mutateAsync({
-				provider_ids: reorderedProviders.map((p) => p.id),
-			});
-		} catch (error) {
-			console.error("Failed to reorder providers:", error);
-			showToast({
-				type: "error",
-				title: "Reorder Failed",
-				message: "Failed to reorder providers. Please try again.",
-			});
-		}
 	};
 
 	const handleDragEnd = () => {
@@ -246,31 +230,18 @@ export function ProvidersConfigSection({
 				</div>
 			) : (
 				<div className="relative">
-					{isReordering && (
-						<div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-base-300/40 backdrop-blur-[2px]">
-							<div className="flex flex-col items-center gap-3">
-								<LoadingSpinner size="lg" />
-								<p className="font-black text-primary text-xs uppercase tracking-widest">
-									Reordering...
-								</p>
-							</div>
-						</div>
-					)}
-
 					<div className="grid gap-4">
 						{formData.map((provider, index) => (
 							<section
 								key={provider.id}
-								draggable={!isReordering}
+								draggable
 								aria-label={`Provider ${provider.host}`}
-								onDragStart={(e) => !isReordering && handleDragStart(e, provider.id)}
-								onDragOver={(e) => !isReordering && handleDragOver(e, provider.id)}
-								onDragLeave={!isReordering ? handleDragLeave : undefined}
-								onDrop={(e) => !isReordering && handleDrop(e, provider.id)}
-								onDragEnd={!isReordering ? handleDragEnd : undefined}
-								className={`group relative overflow-hidden rounded-2xl border-2 bg-base-100/50 transition-all duration-300 hover:shadow-md ${
-									isReordering ? "cursor-not-allowed text-base-content/80" : "cursor-move"
-								} ${
+								onDragStart={(e) => handleDragStart(e, provider.id)}
+								onDragOver={(e) => handleDragOver(e, provider.id)}
+								onDragLeave={handleDragLeave}
+								onDrop={(e) => handleDrop(e, provider.id)}
+								onDragEnd={handleDragEnd}
+								className={`group relative overflow-hidden rounded-2xl border-2 bg-base-100/50 transition-all duration-300 hover:shadow-md cursor-move ${
 									provider.enabled
 										? provider.is_backup_provider
 											? "border-warning/20"
