@@ -20,7 +20,11 @@ export function UpdateSection() {
 	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
-	const { data: updateStatus, isLoading: isChecking, refetch } = useUpdateStatus(channel, checkEnabled);
+	const {
+		data: updateStatus,
+		isLoading: isChecking,
+		refetch,
+	} = useUpdateStatus(channel, checkEnabled);
 
 	const applyUpdate = useApplyUpdate();
 
@@ -70,19 +74,25 @@ export function UpdateSection() {
 			{updateStatus && (
 				<div className="flex flex-wrap gap-3">
 					<div className="rounded-lg border border-base-300 bg-base-100 px-3 py-2">
-						<span className="text-[10px] text-base-content/50 uppercase tracking-wider">Current</span>
-						<p className="font-mono text-sm font-semibold">{updateStatus.current_version}</p>
+						<span className="text-[10px] text-base-content/50 uppercase tracking-wider">
+							Current
+						</span>
+						<p className="font-mono font-semibold text-sm">{updateStatus.current_version}</p>
 					</div>
 					{updateStatus.git_commit && updateStatus.git_commit !== "unknown" && (
 						<div className="rounded-lg border border-base-300 bg-base-100 px-3 py-2">
-							<span className="text-[10px] text-base-content/50 uppercase tracking-wider">Commit</span>
+							<span className="text-[10px] text-base-content/50 uppercase tracking-wider">
+								Commit
+							</span>
 							<p className="font-mono text-sm">{updateStatus.git_commit}</p>
 						</div>
 					)}
 					{updateStatus.latest_version && (
 						<div className="rounded-lg border border-base-300 bg-base-100 px-3 py-2">
-							<span className="text-[10px] text-base-content/50 uppercase tracking-wider">Latest</span>
-							<p className="font-mono text-sm font-semibold">{updateStatus.latest_version}</p>
+							<span className="text-[10px] text-base-content/50 uppercase tracking-wider">
+								Latest
+							</span>
+							<p className="font-mono font-semibold text-sm">{updateStatus.latest_version}</p>
 						</div>
 					)}
 				</div>
@@ -96,7 +106,10 @@ export function UpdateSection() {
 						<button
 							type="button"
 							className={`btn btn-sm join-item ${channel === "latest" ? "btn-primary" : "btn-ghost border-base-300"}`}
-							onClick={() => { setChannel("latest"); setCheckEnabled(false); }}
+							onClick={() => {
+								setChannel("latest");
+								setCheckEnabled(false);
+							}}
 						>
 							<CheckCircle className="h-3 w-3" />
 							Latest (stable)
@@ -104,7 +117,10 @@ export function UpdateSection() {
 						<button
 							type="button"
 							className={`btn btn-sm join-item ${channel === "dev" ? "btn-primary" : "btn-ghost border-base-300"}`}
-							onClick={() => { setChannel("dev"); setCheckEnabled(false); }}
+							onClick={() => {
+								setChannel("dev");
+								setCheckEnabled(false);
+							}}
 						>
 							<Zap className="h-3 w-3" />
 							Dev (rolling)
@@ -135,7 +151,11 @@ export function UpdateSection() {
 							onClick={handleApplyUpdate}
 							disabled={applyUpdate.isPending || dockerUnavailable}
 						>
-							{applyUpdate.isPending ? <LoadingSpinner size="sm" /> : <ArrowUpCircle className="h-3 w-3" />}
+							{applyUpdate.isPending ? (
+								<LoadingSpinner size="sm" />
+							) : (
+								<ArrowUpCircle className="h-3 w-3" />
+							)}
 							Update Now
 						</button>
 					)}

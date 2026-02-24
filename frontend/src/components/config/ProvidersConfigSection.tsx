@@ -241,7 +241,7 @@ export function ProvidersConfigSection({
 								onDragLeave={handleDragLeave}
 								onDrop={(e) => handleDrop(e, provider.id)}
 								onDragEnd={handleDragEnd}
-								className={`group relative overflow-hidden rounded-2xl border-2 bg-base-100/50 transition-all duration-300 hover:shadow-md cursor-move ${
+								className={`group relative cursor-move overflow-hidden rounded-2xl border-2 bg-base-100/50 transition-all duration-300 hover:shadow-md ${
 									provider.enabled
 										? provider.is_backup_provider
 											? "border-warning/20"

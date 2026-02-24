@@ -501,18 +501,6 @@ type UpdateStatusResponse struct {
 	LatestVersion   string        `json:"latest_version,omitempty"`
 	UpdateAvailable bool          `json:"update_available"`
 	ReleaseURL      string        `json:"release_url,omitempty"`
-	DockerAvailable bool          `json:"docker_available"`
-}
-
-// UpdateApplyRequest represents a request to apply an update.
-type UpdateApplyRequest struct {
-	Channel UpdateChannel `json:"channel"`
-}
-
-// UpdateApplyResponse represents the response from applying an update.
-type UpdateApplyResponse struct {
-	Status  string `json:"status"` // "pulling", "restarting", "error"
-	Message string `json:"message"`
 }
 
 // SystemHealthResponse represents system health check result
