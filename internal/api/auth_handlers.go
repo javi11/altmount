@@ -107,8 +107,8 @@ func (s *Server) handleRegister(c *fiber.Ctx) error {
 	}
 
 	// Validate password (basic validation)
-	if len(req.Password) < 8 {
-		return RespondValidationError(c, "Password must be at least 8 characters", "")
+	if len(req.Password) < 12 {
+		return RespondValidationError(c, "Password must be at least 12 characters", "")
 	}
 
 	// Create user
@@ -396,32 +396,10 @@ func sameSiteToString(sameSite http.SameSite) string {
 	}
 }
 
-// mergeAuthConfig merges env config with service config
-func mergeAuthConfig(serviceCfg, envCfg *auth.Config) *auth.Config {
-	merged := *serviceCfg
-
-	if envCfg.CookieDomain != "" {
-		merged.CookieDomain = envCfg.CookieDomain
-	}
-	if envCfg.CookieSecure {
-		merged.CookieSecure = envCfg.CookieSecure
-	}
-	if envCfg.CookieSameSite != http.SameSiteDefaultMode {
-		merged.CookieSameSite = envCfg.CookieSameSite
-	}
-	if envCfg.TokenDuration != 0 {
-		merged.TokenDuration = envCfg.TokenDuration
-	}
-
-	return &merged
-}
 
 // setJWTCookie sets the JWT cookie using Fiber's native cookie handling (merged config)
 func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
-	serviceCfg := s.authService.GetConfig()
-	envCfg := auth.LoadConfigFromEnv()
-
-	cfg := mergeAuthConfig(serviceCfg, envCfg)
+	cfg := s.authService.GetConfig()
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT", // Default JWT cookie name
@@ -440,10 +418,7 @@ func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 
 // clearJWTCookie clears the JWT cookie using Fiber's native cookie handling (merged config)
 func (s *Server) clearJWTCookie(c *fiber.Ctx) {
-	serviceCfg := s.authService.GetConfig()
-	envCfg := auth.LoadConfigFromEnv()
-
-	cfg := mergeAuthConfig(serviceCfg, envCfg)
+	cfg := s.authService.GetConfig()
 
 	cookie := &fiber.Cookie{
 		Name:     "JWT",

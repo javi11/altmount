@@ -47,7 +47,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		TokenDuration:     24 * time.Hour,       // 24 hours
 		CookieDomain:      "",                   // Empty string allows browser to use current domain
-		CookieSecure:      false,                // true for production
+		CookieSecure:      true,                 // Set to false via COOKIE_SECURE=false for local HTTP dev
 		CookieSameSite:    http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
 		DirectAuthEnabled: true,
 		Issuer:            "altmount",
@@ -55,42 +55,51 @@ func DefaultConfig() *Config {
 	}
 }
 
-// LoadConfigFromEnv loads configuration from environment variables
-func LoadConfigFromEnv() *Config {
+// LoadConfigFromEnv loads configuration from environment variables.
+// Returns an error if JWT_SECRET is not set, as a missing secret is a security risk.
+func LoadConfigFromEnv() (*Config, error) {
 	config := DefaultConfig()
 
-	if secret := os.Getenv("JWT_SECRET"); secret != "" {
-		config.JWTSecret = secret
-	} else {
-		config.JWTSecret = "default-dev-secret-change-in-production"
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return nil, fmt.Errorf("JWT_SECRET environment variable must be set")
 	}
+	config.JWTSecret = secret
 
 	if domain := os.Getenv("COOKIE_DOMAIN"); domain != "" {
 		config.CookieDomain = domain
 	}
 
-	if secure := os.Getenv("COOKIE_SECURE"); secure == "true" {
-		config.CookieSecure = true
+	if secure := os.Getenv("COOKIE_SECURE"); secure == "false" {
+		config.CookieSecure = false
 	}
 
 	if salt := os.Getenv("DIRECT_AUTH_SALT"); salt != "" {
 		config.DirectAuthSalt = salt
 	} else {
 		// Generate a random salt for direct authentication
-		config.DirectAuthSalt = generateRandomSalt()
+		salt, err := generateRandomSalt()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate random salt: %w", err)
+		}
+		config.DirectAuthSalt = salt
 	}
 
 	if directAuth := os.Getenv("DIRECT_AUTH_ENABLED"); directAuth == "false" {
 		config.DirectAuthEnabled = false
 	}
 
-	return config
+	return config, nil
 }
 
 // NewService creates a new authentication service
 func NewService(config *Config, userRepo *database.UserRepository) (*Service, error) {
 	if config == nil {
-		config = LoadConfigFromEnv()
+		var err error
+		config, err = LoadConfigFromEnv()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Create auth service options
@@ -426,11 +435,11 @@ func (d *directCredChecker) Check(user, password string) (bool, error) {
 	return true, nil
 }
 
-// generateRandomSalt generates a random salt for authentication
-func generateRandomSalt() string {
+// generateRandomSalt generates a cryptographically random salt for authentication
+func generateRandomSalt() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
-		return "default-salt-change-in-production"
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
 	}
-	return hex.EncodeToString(bytes)
+	return hex.EncodeToString(bytes), nil
 }

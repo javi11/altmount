@@ -62,7 +62,7 @@ func (u *AuthUpdater) UpdateAuth(username, password string) error {
 	}
 
 	ctx := context.Background()
-	u.logger.InfoContext(ctx, "Updating WebDAV authentication credentials", "username", username)
+	u.logger.InfoContext(ctx, "Updating WebDAV authentication credentials")
 	u.credentials.UpdateCredentials(username, password)
 	u.logger.InfoContext(ctx, "WebDAV authentication credentials updated successfully")
 

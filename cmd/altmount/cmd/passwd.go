@@ -81,8 +81,8 @@ func runPasswd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("passwords do not match")
 	}
 
-	if len(password) < 8 {
-		return fmt.Errorf("password must be at least 8 characters long")
+	if len(password) < 12 {
+		return fmt.Errorf("password must be at least 12 characters long")
 	}
 
 	// 6. Hash Password

@@ -217,8 +217,9 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 
 // setupAuthService creates and initializes the authentication service
 func setupAuthService(ctx context.Context, userRepo *database.UserRepository) *auth.Service {
-	authConfig := auth.LoadConfigFromEnv()
-	if authConfig == nil {
+	authConfig, err := auth.LoadConfigFromEnv()
+	if err != nil {
+		slog.WarnContext(ctx, "Failed to load auth configuration", "err", err)
 		return nil
 	}
 
