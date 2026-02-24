@@ -5,9 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"sync"
-	"time"
 )
 
 type Segment struct {
@@ -29,6 +27,12 @@ type segmentRange struct {
 	current  int
 	ctx      context.Context
 	mu       sync.RWMutex
+
+	// Lazy creation support (nil loader = eager/pre-populated mode)
+	loader       SegmentLoader
+	startSegIdx  int   // Loader index of first segment in range
+	startFilePos int64 // File offset at start of first segment's usable data
+	endFilePos   int64 // File offset at start of last segment's usable data
 }
 
 func (r *segmentRange) HasSegments() bool {
@@ -50,24 +54,86 @@ func (r *segmentRange) Len() int {
 
 func (r *segmentRange) Get() (*segment, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	idx := r.current
+	r.mu.RUnlock()
 
-	if r.current >= len(r.segments) {
-		return nil, ErrSegmentLimit
-	}
-
-	return r.segments[r.current], nil
+	return r.GetSegment(idx)
 }
 
 func (r *segmentRange) GetSegment(index int) (*segment, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	if index < 0 || index >= len(r.segments) {
+		r.mu.RUnlock()
+		return nil, ErrSegmentLimit
+	}
+	seg := r.segments[index]
+	r.mu.RUnlock()
+
+	if seg != nil {
+		return seg, nil
+	}
+
+	// No loader means eager mode — a nil slot is a real nil.
+	if r.loader == nil {
 		return nil, ErrSegmentLimit
 	}
 
-	return r.segments[index], nil
+	// Upgrade to write lock for lazy creation.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Double-check after acquiring write lock.
+	if r.segments[index] != nil {
+		return r.segments[index], nil
+	}
+
+	seg = r.createSegmentLocked(index)
+	if seg == nil {
+		return nil, ErrSegmentLimit
+	}
+	r.segments[index] = seg
+	return seg, nil
+}
+
+// createSegmentLocked creates a segment on demand for the given range-local index.
+// Caller must hold r.mu in write mode. Returns nil if the loader has no segment at this index.
+func (r *segmentRange) createSegmentLocked(index int) *segment {
+	loaderIdx := r.startSegIdx + index
+	src, groups, ok := r.loader.GetSegment(loaderIdx)
+	if !ok {
+		return nil
+	}
+
+	usableLen := src.End - src.Start + 1
+	if usableLen <= 0 {
+		return nil
+	}
+
+	readStart := src.Start
+	readEnd := src.End
+
+	totalSegs := len(r.segments)
+
+	// Trim first segment if request starts partway through it
+	if index == 0 && r.start > r.startFilePos {
+		delta := r.start - r.startFilePos
+		readStart = src.Start + delta
+	}
+
+	// Trim last segment if request ends before the segment's usable data ends
+	if index == totalSegs-1 {
+		segFileEnd := r.endFilePos + usableLen - 1
+		if r.end < segFileEnd {
+			delta := segFileEnd - r.end
+			readEnd = src.End - delta
+		}
+	}
+
+	if readStart > readEnd {
+		return nil
+	}
+
+	return newSegment(src.Id, readStart, readEnd, src.Size, groups)
 }
 
 func (r *segmentRange) Next() (*segment, error) {
@@ -246,17 +312,8 @@ func (s *segment) GetReaderContext(ctx context.Context) io.Reader {
 	s.mx.Unlock()
 
 	// Wait for data or context cancellation
-	waitStart := time.Now()
 	select {
 	case <-s.dataReady:
-		// Data (or error) is ready
-		waitDur := time.Since(waitStart)
-		if waitDur > 50*time.Millisecond {
-			slog.Default().DebugContext(ctx, "reader stalled waiting for segment data",
-				"segment_id", s.Id,
-				"wait_dur", waitDur,
-			)
-		}
 	case <-ctx.Done():
 		return &errorReader{err: ctx.Err()}
 	}
