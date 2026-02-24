@@ -62,10 +62,15 @@ COPY ./frontend/embed_docker.go ./frontend/embed_docker.go
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Build web binary with enhanced cache mount for native architecture
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIMESTAMP=unknown
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/tmp/go-build-cache,sharing=locked \
     CGO_ENABLED=1 GOOS=linux \
-    go build -a -ldflags '-linkmode external -extldflags "-static"' -o altmount cmd/altmount/main.go
+    go build -a \
+    -ldflags "-linkmode external -extldflags \"-static\" -X 'github.com/javi11/altmount/internal/version.Version=${VERSION}' -X 'github.com/javi11/altmount/internal/version.GitCommit=${COMMIT}' -X 'github.com/javi11/altmount/internal/version.Timestamp=${BUILD_TIMESTAMP}'" \
+    -o altmount cmd/altmount/main.go
 
 # Final stage - use custom base image with pre-installed packages
 ARG TARGETARCH
@@ -89,10 +94,12 @@ COPY --from=backend-builder /app/altmount /app/altmount
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Install required packages for runtime (mime-support already in custom-base)
+# docker.io provides docker CLI for the auto-update feature (requires /var/run/docker.sock mount)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         wget \
-        ca-certificates && \
+        ca-certificates \
+        docker.io && \
     rm -rf /var/lib/apt/lists/*
 
 # Install rclone and FUSE support for internal mount functionality

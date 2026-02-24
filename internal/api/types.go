@@ -477,9 +477,42 @@ type SystemStatsResponse struct {
 // SystemInfoResponse represents system information
 type SystemInfoResponse struct {
 	Version   string    `json:"version,omitempty"`
+	GitCommit string    `json:"git_commit,omitempty"`
 	StartTime time.Time `json:"start_time"`
 	Uptime    string    `json:"uptime"`
 	GoVersion string    `json:"go_version,omitempty"`
+}
+
+// Update API Types
+
+// UpdateChannel represents the Docker image channel for updates.
+type UpdateChannel string
+
+const (
+	UpdateChannelLatest UpdateChannel = "latest"
+	UpdateChannelDev    UpdateChannel = "dev"
+)
+
+// UpdateStatusResponse represents the current update status.
+type UpdateStatusResponse struct {
+	CurrentVersion  string        `json:"current_version"`
+	GitCommit       string        `json:"git_commit,omitempty"`
+	Channel         UpdateChannel `json:"channel"`
+	LatestVersion   string        `json:"latest_version,omitempty"`
+	UpdateAvailable bool          `json:"update_available"`
+	ReleaseURL      string        `json:"release_url,omitempty"`
+	DockerAvailable bool          `json:"docker_available"`
+}
+
+// UpdateApplyRequest represents a request to apply an update.
+type UpdateApplyRequest struct {
+	Channel UpdateChannel `json:"channel"`
+}
+
+// UpdateApplyResponse represents the response from applying an update.
+type UpdateApplyResponse struct {
+	Status  string `json:"status"` // "pulling", "restarting", "error"
+	Message string `json:"message"`
 }
 
 // SystemHealthResponse represents system health check result
