@@ -76,11 +76,10 @@ export function ImportMethods() {
 										<li key={key}>
 											<button
 												type="button"
-												className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${
-													isActive
+												className={`flex items-center gap-3 rounded-lg px-4 py-3 transition-all ${isActive
 														? "bg-primary font-semibold text-primary-content shadow-md shadow-primary/20"
 														: "hover:bg-base-200"
-												}`}
+													}`}
 												onClick={() => setActiveTab(key)}
 											>
 												<IconComponent
@@ -234,10 +233,10 @@ function EnhancedUploadSection() {
 						prev.map((f) =>
 							f.id === uploadFile.id
 								? {
-										...f,
-										status: "success" as const,
-										queueId: response.data?.id.toString(),
-									}
+									...f,
+									status: "success" as const,
+									queueId: response.data?.id.toString(),
+								}
 								: f,
 						),
 					);
@@ -246,10 +245,10 @@ function EnhancedUploadSection() {
 						prev.map((f) =>
 							f.id === uploadFile.id
 								? {
-										...f,
-										status: "error" as const,
-										errorMessage: error instanceof Error ? error.message : "Upload failed",
-									}
+									...f,
+									status: "error" as const,
+									errorMessage: error instanceof Error ? error.message : "Upload failed",
+								}
 								: f,
 						),
 					);
@@ -317,10 +316,10 @@ function EnhancedUploadSection() {
 				prev.map((l) =>
 					validLinks.includes(l.link) && l.status === "resolving"
 						? {
-								...l,
-								status: "error" as const,
-								errorMessage: error instanceof Error ? error.message : "Resolution failed",
-							}
+							...l,
+							status: "error" as const,
+							errorMessage: error instanceof Error ? error.message : "Resolution failed",
+						}
 						: l,
 				),
 			);
@@ -412,12 +411,12 @@ function EnhancedUploadSection() {
 			</fieldset>
 
 			{uploadTab === "files" && (
-				<div
-					className={`rounded-2xl border-2 border-dashed p-12 text-center transition-colors ${
-						isDragOver
+				<section
+					aria-label="File drop zone"
+					className={`rounded-2xl border-2 border-dashed p-12 text-center transition-colors ${isDragOver
 							? "border-primary bg-primary/5"
 							: "border-base-300 bg-base-200/30 hover:border-base-content/20"
-					}`}
+						}`}
 					onDragOver={handleDragOver}
 					onDragLeave={handleDragLeave}
 					onDrop={handleDrop}
@@ -439,7 +438,7 @@ function EnhancedUploadSection() {
 							className="hidden"
 						/>
 					</label>
-				</div>
+				</section>
 			)}
 
 			{uploadTab === "nzblnk" && (
@@ -484,25 +483,25 @@ function EnhancedUploadSection() {
 					<div className="max-h-60 space-y-2 overflow-y-auto rounded-xl border border-base-300 p-2">
 						{uploadTab === "files"
 							? uploadedFiles.map((f) => (
-									<div key={f.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
-										<FileCode className="h-4 w-4 text-base-content/60" />
-										<span className="flex-1 truncate text-sm">{f.file.name}</span>
-										<StatusBadge status={f.status} />
-										<button type="button" onClick={() => removeFile(f.id)}>
-											<X className="h-4 w-4 text-base-content/60" />
-										</button>
-									</div>
-								))
+								<div key={f.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
+									<FileCode className="h-4 w-4 text-base-content/60" />
+									<span className="flex-1 truncate text-sm">{f.file.name}</span>
+									<StatusBadge status={f.status} />
+									<button type="button" onClick={() => removeFile(f.id)}>
+										<X className="h-4 w-4 text-base-content/60" />
+									</button>
+								</div>
+							))
 							: uploadedLinks.map((l) => (
-									<div key={l.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
-										<Link className="h-4 w-4 text-base-content/60" />
-										<span className="flex-1 truncate text-sm">{l.title || l.link}</span>
-										<StatusBadge status={l.status} />
-										<button type="button" onClick={() => removeLink(l.id)}>
-											<X className="h-4 w-4 text-base-content/60" />
-										</button>
-									</div>
-								))}
+								<div key={l.id} className="flex items-center gap-3 rounded-lg bg-base-200/50 p-2">
+									<Link className="h-4 w-4 text-base-content/60" />
+									<span className="flex-1 truncate text-sm">{l.title || l.link}</span>
+									<StatusBadge status={l.status} />
+									<button type="button" onClick={() => removeLink(l.id)}>
+										<X className="h-4 w-4 text-base-content/60" />
+									</button>
+								</div>
+							))}
 					</div>
 				</div>
 			)}

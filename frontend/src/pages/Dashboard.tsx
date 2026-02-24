@@ -93,7 +93,7 @@ export function Dashboard() {
 			<div className="flex items-center justify-between">
 				<h1 className="font-bold text-3xl">Dashboard</h1>
 				<div className="dropdown dropdown-end">
-					<div tabIndex={0} role="button" className="btn btn-outline btn-sm gap-2">
+					<button type="button" className="btn btn-outline btn-sm gap-2">
 						{resetStats.isPending ? (
 							<span className="loading loading-spinner loading-xs" />
 						) : (
@@ -101,7 +101,7 @@ export function Dashboard() {
 						)}
 						Reset Stats
 						<ChevronDown className="h-3 w-3 text-base-content/70" />
-					</div>
+					</button>
 					<ul className="dropdown-content menu z-[50] mt-1 w-52 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
 						<li>
 							<button type="button" onClick={() => handleResetStats("1h")}>
