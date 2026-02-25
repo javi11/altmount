@@ -767,17 +767,6 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 		pathForRescan = pathutil.JoinAbsPath(hw.configGetter().MountPath, filePath)
 	}
 
-	// Move the metadata file to corrupted folder locally so FUSE/WebDAV stops showing it.
-	// This ensures Sonarr/Radarr actually see the file as missing during their scan.
-	// We need the relative path for metadata move.
-	relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
-	relativePath = strings.TrimPrefix(relativePath, "/")
-
-	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
-	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
-		slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with ARR trigger", "error", moveErr)
-	}
-
 	// Step 4: Trigger targeted rescan and search through the ARR service
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
 	if err != nil {
@@ -845,6 +834,16 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 	slog.InfoContext(ctx, "Successfully triggered ARR rescan for file repair",
 		"file_path", filePath,
 		"path_for_rescan", pathForRescan)
+
+	// Now that ARR has confirmed the repair request, move the metadata file to the corrupted
+	// folder so FUSE/WebDAV stops showing it. We do this AFTER ARR accepts the repair so the
+	// file stays visible if ARR cannot find a replacement.
+	relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
+	relativePath = strings.TrimPrefix(relativePath, "/")
+	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
+	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
+		slog.WarnContext(ctx, "Failed to move corrupted metadata file, proceeding with repair trigger status", "error", moveErr)
+	}
 
 	// Update status to repair_triggered
 	if err := hw.healthRepo.SetRepairTriggered(ctx, filePath, errorMsg, errorDetails); err != nil {
