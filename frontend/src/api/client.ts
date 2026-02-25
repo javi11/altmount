@@ -2,6 +2,7 @@ import type {
 	ActiveStream,
 	APIResponse,
 	AuthResponse,
+	ChangeUserPasswordRequest,
 	FileHealth,
 	FileMetadata,
 	FuseStatus,
@@ -584,6 +585,13 @@ export class APIClient {
 
 	async updateUserAdmin(userId: string, data: UserAdminUpdateRequest) {
 		return this.request<AuthResponse>(`/users/${userId}/admin`, {
+			method: "PUT",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async changeUserPassword(userId: string, data: ChangeUserPasswordRequest) {
+		return this.request<AuthResponse>(`/users/${userId}/password`, {
 			method: "PUT",
 			body: JSON.stringify(data),
 		});

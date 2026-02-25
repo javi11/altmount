@@ -311,6 +311,10 @@ export interface UserAdminUpdateRequest {
 	is_admin: boolean;
 }
 
+export interface ChangeUserPasswordRequest {
+	new_password: string;
+}
+
 export interface ManualImportRequest {
 	file_path: string;
 	relative_path?: string;
