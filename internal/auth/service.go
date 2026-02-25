@@ -223,14 +223,9 @@ func (s *Service) CreateOrUpdateUser(ctx context.Context, claims token.Claims) (
 		}
 		slog.InfoContext(ctx, "Created new user", "user_id", userID, "is_admin", user.IsAdmin)
 	} else {
-		// Update existing user
-		user.ID = existingUser.ID
-		user.IsAdmin = existingUser.IsAdmin // Preserve admin status
-		err = s.userRepo.UpdateUser(ctx, user)
-		if err != nil {
-			return nil, err
-		}
-		slog.InfoContext(ctx, "Updated existing user", "user_id", userID)
+		// Use existing user as-is
+		user = existingUser
+		slog.InfoContext(ctx, "Found existing user", "user_id", userID)
 	}
 
 	// Update last login
