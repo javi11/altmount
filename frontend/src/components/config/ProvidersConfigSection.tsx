@@ -292,52 +292,60 @@ export function ProvidersConfigSection({
 											)}
 
 											<div className="join rounded-xl bg-base-200/50 p-0.5">
-												<button
-													type="button"
-													className={`btn btn-sm sm:btn-sm join-item border-none ${
-														provider.enabled
-															? "bg-warning/10 text-warning hover:bg-warning/20"
-															: "bg-success/10 text-success hover:bg-success/20"
-													}`}
-													onClick={() => handleToggleEnabled(provider)}
-												>
-													{provider.enabled ? (
-														<PowerOff className="h-3.5 w-3.5" />
-													) : (
-														<Power className="h-3.5 w-3.5" />
-													)}
-												</button>
-												<button
-													type="button"
-													className="btn btn-sm sm:btn-sm join-item border-none bg-info/10 text-info hover:bg-info/20"
-													onClick={() => handleSpeedTest(provider)}
-													disabled={testingSpeedProviderId === provider.id || !provider.enabled}
-												>
-													{testingSpeedProviderId === provider.id ? (
-														<span className="loading loading-spinner loading-xs" />
-													) : (
-														<Gauge className="h-3.5 w-3.5" />
-													)}
-												</button>
-												<button
-													type="button"
-													className="btn btn-sm sm:btn-sm join-item border-none bg-base-content/5 text-base-content hover:bg-base-content/10"
-													onClick={() => handleEdit(provider)}
-												>
-													<Edit className="h-3.5 w-3.5" />
-												</button>
-												<button
-													type="button"
-													className="btn btn-sm sm:btn-sm join-item border-none bg-error/10 text-error hover:bg-error/20"
-													onClick={() => handleDelete(provider.id)}
-													disabled={deletingProviderId === provider.id}
-												>
-													{deletingProviderId === provider.id ? (
-														<span className="loading loading-spinner loading-xs" />
-													) : (
-														<Trash2 className="h-3.5 w-3.5" />
-													)}
-												</button>
+												<div className="tooltip" data-tip="Enable/Disable provider">
+													<button
+														type="button"
+														className={`btn btn-sm sm:btn-sm join-item border-none ${
+															provider.enabled
+																? "bg-warning/10 text-warning hover:bg-warning/20"
+																: "bg-success/10 text-success hover:bg-success/20"
+														}`}
+														onClick={() => handleToggleEnabled(provider)}
+													>
+														{provider.enabled ? (
+															<PowerOff className="h-3.5 w-3.5" />
+														) : (
+															<Power className="h-3.5 w-3.5" />
+														)}
+													</button>
+												</div>
+												<div className="tooltip" data-tip="Run speed test">
+													<button
+														type="button"
+														className="btn btn-sm sm:btn-sm join-item border-none bg-info/10 text-info hover:bg-info/20"
+														onClick={() => handleSpeedTest(provider)}
+														disabled={testingSpeedProviderId === provider.id || !provider.enabled}
+													>
+														{testingSpeedProviderId === provider.id ? (
+															<span className="loading loading-spinner loading-xs" />
+														) : (
+															<Gauge className="h-3.5 w-3.5" />
+														)}
+													</button>
+												</div>
+												<div className="tooltip" data-tip="Edit provider">
+													<button
+														type="button"
+														className="btn btn-sm sm:btn-sm join-item border-none bg-base-content/5 text-base-content hover:bg-base-content/10"
+														onClick={() => handleEdit(provider)}
+													>
+														<Edit className="h-3.5 w-3.5" />
+													</button>
+												</div>
+												<div className="tooltip" data-tip="Remove provider">
+													<button
+														type="button"
+														className="btn btn-sm sm:btn-sm join-item border-none bg-error/10 text-error hover:bg-error/20"
+														onClick={() => handleDelete(provider.id)}
+														disabled={deletingProviderId === provider.id}
+													>
+														{deletingProviderId === provider.id ? (
+															<span className="loading loading-spinner loading-xs" />
+														) : (
+															<Trash2 className="h-3.5 w-3.5" />
+														)}
+													</button>
+												</div>
 											</div>
 										</div>
 									</div>

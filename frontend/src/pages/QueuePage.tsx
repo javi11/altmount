@@ -483,9 +483,9 @@ export function QueuePage() {
 			{view === "import" ? (
 				<ImportMethods />
 			) : (
-				<div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+				<div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
 					{/* Sidebar Navigation */}
-					<div className="lg:col-span-1">
+					<div className="lg:col-span-3 xl:col-span-2">
 						<div className="space-y-6">
 							<div className="card border-2 border-base-300/50 bg-base-100 shadow-md">
 								<div className="card-body p-2 sm:p-4">
@@ -570,7 +570,7 @@ export function QueuePage() {
 					</div>
 
 					{/* Content Area */}
-					<div className="lg:col-span-3">
+					<div className="lg:col-span-9 xl:col-span-10">
 						<div className="space-y-6">
 							{/* Bulk Actions Toolbar */}
 							{selectedItems.size > 0 && (
