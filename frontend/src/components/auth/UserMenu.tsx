@@ -2,7 +2,7 @@ import { ChevronDown, LogOut, User, Users } from "lucide-react";
 import { useAuth, useIsAdmin } from "../../hooks/useAuth";
 
 export function UserMenu() {
-	const { user, logout, isLoading } = useAuth();
+	const { user, logout, isLoading, loginRequired } = useAuth();
 	const isAdmin = useIsAdmin();
 
 	if (!user) {
@@ -69,21 +69,25 @@ export function UserMenu() {
 					</li>
 				)}
 
-				<div className="divider my-1" />
+				{loginRequired !== false && (
+					<>
+						<div className="divider my-1" />
 
-				{/* Logout */}
-				<li>
-					<button
-						type="button"
-						onClick={handleLogout}
-						disabled={isLoading}
-						className="flex items-center gap-3 py-2 text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:text-base-content/70"
-					>
-						<LogOut className="h-4 w-4" />
-						<span>{isLoading ? "Logging out..." : "Logout"}</span>
-						{isLoading && <span className="loading loading-spinner loading-xs ml-auto" />}
-					</button>
-				</li>
+						{/* Logout */}
+						<li>
+							<button
+								type="button"
+								onClick={handleLogout}
+								disabled={isLoading}
+								className="flex items-center gap-3 py-2 text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:text-base-content/70"
+							>
+								<LogOut className="h-4 w-4" />
+								<span>{isLoading ? "Logging out..." : "Logout"}</span>
+								{isLoading && <span className="loading loading-spinner loading-xs ml-auto" />}
+							</button>
+						</li>
+					</>
+				)}
 			</ul>
 		</div>
 	);
