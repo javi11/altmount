@@ -253,92 +253,6 @@ func (x *Par2FileReference) GetSegmentData() []*SegmentData {
 	return nil
 }
 
-// NestedSegmentSource represents one inner RAR volume's contribution to a nested file.
-// Used when a file is inside an inner RAR that is itself inside an outer RAR.
-type NestedSegmentSource struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Segments        []*SegmentData         `protobuf:"bytes,1,rep,name=segments,proto3" json:"segments,omitempty"`                                         // Outer RAR segments covering this inner volume
-	AesKey          []byte                 `protobuf:"bytes,2,opt,name=aes_key,json=aesKey,proto3" json:"aes_key,omitempty"`                               // Outer AES key (empty if unencrypted)
-	AesIv           []byte                 `protobuf:"bytes,3,opt,name=aes_iv,json=aesIv,proto3" json:"aes_iv,omitempty"`                                  // Outer AES IV
-	InnerOffset     int64                  `protobuf:"varint,4,opt,name=inner_offset,json=innerOffset,proto3" json:"inner_offset,omitempty"`               // Offset within decrypted inner volume where file data starts
-	InnerLength     int64                  `protobuf:"varint,5,opt,name=inner_length,json=innerLength,proto3" json:"inner_length,omitempty"`               // Bytes of target file in this source
-	InnerVolumeSize int64                  `protobuf:"varint,6,opt,name=inner_volume_size,json=innerVolumeSize,proto3" json:"inner_volume_size,omitempty"` // Total decrypted size of inner volume (for AES cipher)
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
-}
-
-func (x *NestedSegmentSource) Reset() {
-	*x = NestedSegmentSource{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *NestedSegmentSource) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*NestedSegmentSource) ProtoMessage() {}
-
-func (x *NestedSegmentSource) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use NestedSegmentSource.ProtoReflect.Descriptor instead.
-func (*NestedSegmentSource) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *NestedSegmentSource) GetSegments() []*SegmentData {
-	if x != nil {
-		return x.Segments
-	}
-	return nil
-}
-
-func (x *NestedSegmentSource) GetAesKey() []byte {
-	if x != nil {
-		return x.AesKey
-	}
-	return nil
-}
-
-func (x *NestedSegmentSource) GetAesIv() []byte {
-	if x != nil {
-		return x.AesIv
-	}
-	return nil
-}
-
-func (x *NestedSegmentSource) GetInnerOffset() int64 {
-	if x != nil {
-		return x.InnerOffset
-	}
-	return 0
-}
-
-func (x *NestedSegmentSource) GetInnerLength() int64 {
-	if x != nil {
-		return x.InnerLength
-	}
-	return 0
-}
-
-func (x *NestedSegmentSource) GetInnerVolumeSize() int64 {
-	if x != nil {
-		return x.InnerVolumeSize
-	}
-	return 0
-}
-
 // FileMetadata represents a single virtual file in the filesystem
 // The filename comes from the actual metadata filename on disk
 type FileMetadata struct {
@@ -357,14 +271,13 @@ type FileMetadata struct {
 	ReleaseDate   int64                  `protobuf:"varint,12,opt,name=release_date,json=releaseDate,proto3" json:"release_date,omitempty"`       // Unix timestamp of the original Usenet post release date
 	Par2Files     []*Par2FileReference   `protobuf:"bytes,13,rep,name=par2_files,json=par2Files,proto3" json:"par2_files,omitempty"`              // Associated PAR2 repair files
 	NzbdavId      string                 `protobuf:"bytes,14,opt,name=nzbdav_id,json=nzbdavId,proto3" json:"nzbdav_id,omitempty"`                 // ID to maintain compatibility with nzbdav
-	NestedSources []*NestedSegmentSource `protobuf:"bytes,15,rep,name=nested_sources,json=nestedSources,proto3" json:"nested_sources,omitempty"`  // Nested RAR sources (when file is inside inner RAR within outer RAR)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileMetadata) Reset() {
 	*x = FileMetadata{}
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -376,7 +289,7 @@ func (x *FileMetadata) String() string {
 func (*FileMetadata) ProtoMessage() {}
 
 func (x *FileMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[3]
+	mi := &file_internal_metadata_proto_metadata_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -389,7 +302,7 @@ func (x *FileMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileMetadata.ProtoReflect.Descriptor instead.
 func (*FileMetadata) Descriptor() ([]byte, []int) {
-	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{3}
+	return file_internal_metadata_proto_metadata_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *FileMetadata) GetFileSize() int64 {
@@ -490,13 +403,6 @@ func (x *FileMetadata) GetNzbdavId() string {
 	return ""
 }
 
-func (x *FileMetadata) GetNestedSources() []*NestedSegmentSource {
-	if x != nil {
-		return x.NestedSources
-	}
-	return nil
-}
-
 var File_internal_metadata_proto_metadata_proto protoreflect.FileDescriptor
 
 const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
@@ -511,14 +417,7 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\x11Par2FileReference\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x1b\n" +
 	"\tfile_size\x18\x02 \x01(\x03R\bfileSize\x128\n" +
-	"\fsegment_data\x18\x03 \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\"\xea\x01\n" +
-	"\x13NestedSegmentSource\x121\n" +
-	"\bsegments\x18\x01 \x03(\v2\x15.metadata.SegmentDataR\bsegments\x12\x17\n" +
-	"\aaes_key\x18\x02 \x01(\fR\x06aesKey\x12\x15\n" +
-	"\x06aes_iv\x18\x03 \x01(\fR\x05aesIv\x12!\n" +
-	"\finner_offset\x18\x04 \x01(\x03R\vinnerOffset\x12!\n" +
-	"\finner_length\x18\x05 \x01(\x03R\vinnerLength\x12*\n" +
-	"\x11inner_volume_size\x18\x06 \x01(\x03R\x0finnerVolumeSize\"\xd3\x04\n" +
+	"\fsegment_data\x18\x03 \x03(\v2\x15.metadata.SegmentDataR\vsegmentData\"\x8d\x04\n" +
 	"\fFileMetadata\x12\x1b\n" +
 	"\tfile_size\x18\x01 \x01(\x03R\bfileSize\x12&\n" +
 	"\x0fsource_nzb_path\x18\x02 \x01(\tR\rsourceNzbPath\x12,\n" +
@@ -539,8 +438,7 @@ const file_internal_metadata_proto_metadata_proto_rawDesc = "" +
 	"\frelease_date\x18\f \x01(\x03R\vreleaseDate\x12:\n" +
 	"\n" +
 	"par2_files\x18\r \x03(\v2\x1b.metadata.Par2FileReferenceR\tpar2Files\x12\x1b\n" +
-	"\tnzbdav_id\x18\x0e \x01(\tR\bnzbdavId\x12D\n" +
-	"\x0enested_sources\x18\x0f \x03(\v2\x1d.metadata.NestedSegmentSourceR\rnestedSources*8\n" +
+	"\tnzbdav_id\x18\x0e \x01(\tR\bnzbdavId*8\n" +
 	"\n" +
 	"Encryption\x12\b\n" +
 	"\x04NONE\x10\x00\x12\n" +
@@ -567,28 +465,25 @@ func file_internal_metadata_proto_metadata_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_metadata_proto_metadata_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_internal_metadata_proto_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_internal_metadata_proto_metadata_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_internal_metadata_proto_metadata_proto_goTypes = []any{
-	(Encryption)(0),             // 0: metadata.Encryption
-	(FileStatus)(0),             // 1: metadata.FileStatus
-	(*SegmentData)(nil),         // 2: metadata.SegmentData
-	(*Par2FileReference)(nil),   // 3: metadata.Par2FileReference
-	(*NestedSegmentSource)(nil), // 4: metadata.NestedSegmentSource
-	(*FileMetadata)(nil),        // 5: metadata.FileMetadata
+	(Encryption)(0),           // 0: metadata.Encryption
+	(FileStatus)(0),           // 1: metadata.FileStatus
+	(*SegmentData)(nil),       // 2: metadata.SegmentData
+	(*Par2FileReference)(nil), // 3: metadata.Par2FileReference
+	(*FileMetadata)(nil),      // 4: metadata.FileMetadata
 }
 var file_internal_metadata_proto_metadata_proto_depIdxs = []int32{
 	2, // 0: metadata.Par2FileReference.segment_data:type_name -> metadata.SegmentData
-	2, // 1: metadata.NestedSegmentSource.segments:type_name -> metadata.SegmentData
-	1, // 2: metadata.FileMetadata.status:type_name -> metadata.FileStatus
-	0, // 3: metadata.FileMetadata.encryption:type_name -> metadata.Encryption
-	2, // 4: metadata.FileMetadata.segment_data:type_name -> metadata.SegmentData
-	3, // 5: metadata.FileMetadata.par2_files:type_name -> metadata.Par2FileReference
-	4, // 6: metadata.FileMetadata.nested_sources:type_name -> metadata.NestedSegmentSource
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	1, // 1: metadata.FileMetadata.status:type_name -> metadata.FileStatus
+	0, // 2: metadata.FileMetadata.encryption:type_name -> metadata.Encryption
+	2, // 3: metadata.FileMetadata.segment_data:type_name -> metadata.SegmentData
+	3, // 4: metadata.FileMetadata.par2_files:type_name -> metadata.Par2FileReference
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_internal_metadata_proto_metadata_proto_init() }
@@ -602,7 +497,7 @@ func file_internal_metadata_proto_metadata_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_metadata_proto_metadata_proto_rawDesc), len(file_internal_metadata_proto_metadata_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   4,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

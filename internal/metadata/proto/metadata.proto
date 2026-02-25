@@ -33,17 +33,6 @@ message Par2FileReference {
   repeated SegmentData segment_data = 3;  // Usenet segments containing PAR2 data
 }
 
-// NestedSegmentSource represents one inner RAR volume's contribution to a nested file.
-// Used when a file is inside an inner RAR that is itself inside an outer RAR.
-message NestedSegmentSource {
-  repeated SegmentData segments = 1;    // Outer RAR segments covering this inner volume
-  bytes aes_key = 2;                     // Outer AES key (empty if unencrypted)
-  bytes aes_iv = 3;                      // Outer AES IV
-  int64 inner_offset = 4;               // Offset within decrypted inner volume where file data starts
-  int64 inner_length = 5;               // Bytes of target file in this source
-  int64 inner_volume_size = 6;          // Total decrypted size of inner volume (for AES cipher)
-}
-
 // FileMetadata represents a single virtual file in the filesystem
 // The filename comes from the actual metadata filename on disk
 message FileMetadata {
@@ -61,6 +50,5 @@ message FileMetadata {
   int64 release_date = 12;      // Unix timestamp of the original Usenet post release date
   repeated Par2FileReference par2_files = 13;  // Associated PAR2 repair files
   string nzbdav_id = 14; // ID to maintain compatibility with nzbdav
-  repeated NestedSegmentSource nested_sources = 15; // Nested RAR sources (when file is inside inner RAR within outer RAR)
 }
   
