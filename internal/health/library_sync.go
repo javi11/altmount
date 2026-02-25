@@ -598,14 +598,36 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	// Find files to add (in filesystem but not in database)
 	// Collect results via channel to avoid large slice allocations and lock contention
 	filesToAddChan := make(chan database.AutomaticHealthCheckRecord, 100)
-	var filesToAdd []database.AutomaticHealthCheckRecord
+	var totalAdded int
 	
-	// Start a goroutine to collect results from the channel
+	// Start a goroutine to process results from the channel in batches to save RAM
 	done := make(chan struct{})
 	go func() {
-		for record := range filesToAddChan {
-			filesToAdd = append(filesToAdd, record)
+		const batchSize = 1000
+		batch := make([]database.AutomaticHealthCheckRecord, 0, batchSize)
+		
+		flushBatch := func() {
+			if len(batch) == 0 {
+				return
+			}
+			if !dryRun {
+				if err := lsw.healthRepo.BatchAddAutomaticHealthChecks(ctx, batch); err != nil {
+					slog.ErrorContext(ctx, "Failed to batch add automatic health checks",
+						"count", len(batch),
+						"error", err)
+				}
+			}
+			totalAdded += len(batch)
+			batch = batch[:0]
 		}
+
+		for record := range filesToAddChan {
+			batch = append(batch, record)
+			if len(batch) >= batchSize {
+				flushBatch()
+			}
+		}
+		flushBatch()
 		close(done)
 	}()
 
@@ -708,7 +730,10 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 			}
 
 			if lsw.progress != nil {
-				lsw.progress.ProcessedFiles.Add(1)
+				current := lsw.progress.ProcessedFiles.Add(1)
+				if current%1000 == 0 {
+					slog.InfoContext(ctx, "Processing metadata progress", "count", current)
+				}
 			}
 		})
 	}
@@ -817,8 +842,9 @@ func (lsw *LibrarySyncWorker) SyncLibrary(ctx context.Context, dryRun bool) *Dry
 	}
 	filesToDelete := lsw.findFilesToDelete(ctx, dbRecords, metaFileSet, effectiveFilesInUse)
 
-	// Perform batch operations
-	dbCounts := lsw.syncDatabaseRecords(ctx, filesToAdd, filesToDelete, dryRun)
+	// Perform batch operations for deletions (additions were already streamed)
+	dbCounts := lsw.syncDatabaseRecords(ctx, nil, filesToDelete, dryRun)
+	dbCounts.added = totalAdded
 
 	// Return dry run results or record sync results
 	if dryRun {
@@ -855,7 +881,8 @@ func (lsw *LibrarySyncWorker) getAllMetadataFiles(ctx context.Context) ([]string
 	rootPath := cfg.Metadata.RootPath
 
 	var metaFiles []string
-	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	count := 0
+	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -868,13 +895,17 @@ func (lsw *LibrarySyncWorker) getAllMetadataFiles(ctx context.Context) ([]string
 		}
 
 		// Skip the corrupted_metadata directory
-		if info.IsDir() && info.Name() == "corrupted_metadata" {
+		if d.IsDir() && d.Name() == "corrupted_metadata" {
 			return filepath.SkipDir
 		}
 
 		// Only include .meta files
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".meta") {
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".meta") {
 			metaFiles = append(metaFiles, path)
+			count++
+			if count%1000 == 0 {
+				slog.InfoContext(ctx, "Scanning metadata files progress", "count", count)
+			}
 		}
 
 		return nil
@@ -884,6 +915,7 @@ func (lsw *LibrarySyncWorker) getAllMetadataFiles(ctx context.Context) ([]string
 		return nil, err
 	}
 
+	slog.InfoContext(ctx, "Finished scanning metadata files", "total", count)
 	return metaFiles, nil
 }
 
@@ -1003,6 +1035,7 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 
 	libraryDir := *cfg.Health.LibraryDir
 	mountDir := cfg.MountPath
+	cleanMountDir := filepath.Clean(mountDir)
 
 	result := &UsedFiles{
 		Symlinks:  make(map[string]string),
@@ -1010,6 +1043,7 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 	}
 
 	symlinkUpdates := 0
+	count := 0
 	shouldUpdateSymlinks := oldMountPath != "" && newMountPath != "" && oldMountPath != newMountPath
 	oldMountPathClean := filepath.Clean(oldMountPath)
 	newMountPathClean := filepath.Clean(newMountPath)
@@ -1043,7 +1077,6 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 
 			// Clean the paths for comparison
 			cleanTarget := filepath.Clean(target)
-			cleanMountDir := filepath.Clean(mountDir)
 
 			// Update symlink if it points to the old mount path
 			if shouldUpdateSymlinks && strings.HasPrefix(cleanTarget, oldMountPathClean) {
@@ -1061,6 +1094,7 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 			if strings.HasPrefix(cleanTarget, cleanMountDir) {
 				// Store mapping of mount target path -> library symlink path
 				result.Symlinks[cleanTarget] = path
+				count++
 			}
 		} else if !d.IsDir() {
 			// Check if it's a .strm file
@@ -1099,16 +1133,21 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 
 				// Store mapping of virtual path -> library .strm file path
 				result.StrmFiles[virtualPath] = path
+				count++
 			} else if cfg.Import.ImportStrategy == config.ImportStrategyNone {
 				// For NONE strategy, also count regular files if they are in the mount directory
 				cleanPath := filepath.Clean(path)
-				cleanMountDir := filepath.Clean(mountDir)
 
 				if strings.HasPrefix(cleanPath, cleanMountDir) {
 					// In NONE strategy, the library file IS the mount file
 					result.Symlinks[cleanPath] = path
+					count++
 				}
 			}
+		}
+
+		if count > 0 && count%1000 == 0 {
+			slog.InfoContext(ctx, "Scanning library files progress", "count", count)
 		}
 
 		return nil
@@ -1119,6 +1158,7 @@ func (lsw *LibrarySyncWorker) getAllLibraryFiles(ctx context.Context, oldMountPa
 		return nil, 0, err
 	}
 
+	slog.InfoContext(ctx, "Finished scanning library files", "total", count)
 	return result, symlinkUpdates, nil
 }
 
