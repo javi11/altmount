@@ -77,6 +77,9 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
+				if (response.status === 401) {
+					window.dispatchEvent(new CustomEvent("api:unauthorized"));
+				}
 				const errorData = await response.json();
 				const errorMessage =
 					(typeof errorData.error === "object" ? errorData.error?.message : errorData.error) ||
@@ -129,6 +132,9 @@ export class APIClient {
 			const response = await fetch(url, config);
 
 			if (!response.ok) {
+				if (response.status === 401) {
+					window.dispatchEvent(new CustomEvent("api:unauthorized"));
+				}
 				// Try to parse error response
 				try {
 					const errorData = await response.json();

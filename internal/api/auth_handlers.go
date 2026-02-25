@@ -162,6 +162,14 @@ func (s *Server) handleGetAuthConfig(c *fiber.Ctx) error {
 func (s *Server) handleAuthUser(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
 	if user == nil {
+		if s.isAdminOrLoginDisabled(nil) {
+			return RespondSuccess(c, UserResponse{
+				ID:       "anonymous",
+				Name:     "Admin",
+				Provider: "none",
+				IsAdmin:  true,
+			})
+		}
 		return RespondUnauthorized(c, "Not authenticated", "")
 	}
 

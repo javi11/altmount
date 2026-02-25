@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useReducer } from "react";
+import { createContext, useContext, useEffect, useReducer, useRef } from "react";
 import { apiClient } from "../api/client";
 import type { User } from "../types/api";
 
@@ -118,6 +118,24 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
 	const [state, dispatch] = useReducer(authReducer, initialState);
 
+	// Auto-logout when any API call returns 401 (e.g. expired JWT)
+	const stateRef = useRef(state);
+	useEffect(() => {
+		stateRef.current = state;
+	}, [state]);
+
+	useEffect(() => {
+		const handleUnauthorized = () => {
+			const { isAuthenticated, loginRequired } = stateRef.current;
+			if (isAuthenticated && loginRequired !== false) {
+				dispatch({ type: "AUTH_LOGOUT" });
+			}
+		};
+
+		window.addEventListener("api:unauthorized", handleUnauthorized);
+		return () => window.removeEventListener("api:unauthorized", handleUnauthorized);
+	}, []);
+
 	// Check for existing authentication on mount
 	useEffect(() => {
 		const checkAuth = async () => {
@@ -196,6 +214,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
 	// Logout function
 	const logout = async () => {
+		// When login is not required, there is nothing to log out from
+		if (state.loginRequired === false) {
+			return;
+		}
 		try {
 			dispatch({ type: "AUTH_START" });
 			await apiClient.logout();
