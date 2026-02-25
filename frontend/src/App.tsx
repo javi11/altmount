@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { ProtectedRoute, UserManagement } from "./components/auth";
+import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { Layout } from "./components/layout/Layout";
 import { ToastContainer } from "./components/ui/ToastContainer";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -38,14 +38,6 @@ function App() {
 										<Route path="files" element={<FilesPage />} />
 
 										{/* Admin-only routes */}
-										<Route
-											path="admin"
-											element={
-												<ProtectedRoute requireAdmin>
-													<UserManagement />
-												</ProtectedRoute>
-											}
-										/>
 										<Route
 											path="config"
 											element={

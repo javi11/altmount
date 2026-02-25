@@ -96,31 +96,6 @@ func (r *UserRepository) CreateUser(ctx context.Context, user *User) error {
 	return nil
 }
 
-// UpdateUser updates an existing user's information
-func (r *UserRepository) UpdateUser(ctx context.Context, user *User) error {
-	query := `
-		UPDATE users
-		SET email = ?, name = ?, avatar_url = ?, updated_at = datetime('now')
-		WHERE user_id = ?
-	`
-
-	result, err := r.db.ExecContext(ctx, query, user.Email, user.Name, user.AvatarURL, user.UserID)
-	if err != nil {
-		return fmt.Errorf("failed to update user: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("user not found: %s", user.UserID)
-	}
-
-	return nil
-}
-
 // UpdateLastLogin updates the user's last login timestamp
 func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID string) error {
 	query := `
@@ -146,68 +121,6 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID string) err
 	return nil
 }
 
-// SetAdminStatus updates a user's admin status
-func (r *UserRepository) SetAdminStatus(ctx context.Context, userID string, isAdmin bool) error {
-	query := `
-		UPDATE users
-		SET is_admin = ?, updated_at = datetime('now')
-		WHERE user_id = ?
-	`
-
-	result, err := r.db.ExecContext(ctx, query, isAdmin, userID)
-	if err != nil {
-		return fmt.Errorf("failed to set admin status: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("user not found: %s", userID)
-	}
-
-	return nil
-}
-
-// ListUsers returns a list of all users with pagination
-func (r *UserRepository) ListUsers(ctx context.Context, limit, offset int) ([]*User, error) {
-	query := `
-		SELECT id, user_id, email, name, avatar_url, provider, provider_id,
-		       password_hash, api_key, is_admin, created_at, updated_at, last_login
-		FROM users
-		ORDER BY created_at DESC
-		LIMIT ? OFFSET ?
-	`
-
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list users: %w", err)
-	}
-	defer rows.Close()
-
-	var users []*User
-	for rows.Next() {
-		var user User
-		err := rows.Scan(
-			&user.ID, &user.UserID, &user.Email, &user.Name, &user.AvatarURL,
-			&user.Provider, &user.ProviderID, &user.PasswordHash, &user.APIKey, &user.IsAdmin,
-			&user.CreatedAt, &user.UpdatedAt, &user.LastLogin,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan user: %w", err)
-		}
-		users = append(users, &user)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate users: %w", err)
-	}
-
-	return users, nil
-}
-
 // GetUserCount returns the total number of users
 func (r *UserRepository) GetUserCount(ctx context.Context) (int, error) {
 	query := `SELECT COUNT(*) FROM users`
@@ -219,27 +132,6 @@ func (r *UserRepository) GetUserCount(ctx context.Context) (int, error) {
 	}
 
 	return count, nil
-}
-
-// DeleteUser deletes a user by their user ID
-func (r *UserRepository) DeleteUser(ctx context.Context, userID string) error {
-	query := `DELETE FROM users WHERE user_id = ?`
-
-	result, err := r.db.ExecContext(ctx, query, userID)
-	if err != nil {
-		return fmt.Errorf("failed to delete user: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("user not found: %s", userID)
-	}
-
-	return nil
 }
 
 // GetUserByEmail retrieves a user by their email address for direct authentication

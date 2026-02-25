@@ -104,7 +104,7 @@ func (s *Service) GetFirstAdminAPIKey(ctx context.Context) string {
 	if s.userRepo == nil {
 		return ""
 	}
-	users, err := s.userRepo.ListUsers(ctx, 100, 0)
+	users, err := s.userRepo.GetAllUsers(ctx)
 
 	// If no users exist and auth is disabled, bootstrap a default admin
 	if (err == nil && len(users) == 0) || (err != nil && strings.Contains(err.Error(), "no such table")) {

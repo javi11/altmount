@@ -234,87 +234,37 @@ func (s *Server) isAdminOrLoginDisabled(user *database.User) bool {
 	return false
 }
 
-// handleListUsers returns a list of users (admin only)
-func (s *Server) handleListUsers(c *fiber.Ctx) error {
+// handleChangeOwnPassword allows the authenticated user to change their own password
+func (s *Server) handleChangeOwnPassword(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
-	if !s.isAdminOrLoginDisabled(user) {
-		return RespondForbidden(c, "Admin privileges required", "")
+	if user == nil {
+		return RespondUnauthorized(c, "Not authenticated", "")
 	}
 
-	pagination := ParsePaginationFiber(c)
-	users, err := s.userRepo.ListUsers(c.Context(), pagination.Limit, pagination.Offset)
-	if err != nil {
-		return RespondInternalError(c, "Failed to list users", err.Error())
-	}
-
-	// Convert to response format
-	var userResponses []*UserResponse
-	for _, user := range users {
-		userResponses = append(userResponses, s.mapUserToResponse(user))
-	}
-
-	return RespondSuccess(c, userResponses)
-}
-
-// handleUpdateUserAdmin updates a user's admin status (admin only)
-func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
-	user := auth.GetUserFromContext(c)
-	if !s.isAdminOrLoginDisabled(user) {
-		return RespondForbidden(c, "Admin privileges required", "")
-	}
-
-	userID := c.Params("user_id")
-	if userID == "" {
-		return RespondBadRequest(c, "User ID is required", "")
-	}
-
-	// Parse request body
 	var req struct {
-		IsAdmin bool `json:"is_admin"`
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return RespondBadRequest(c, "Invalid request body", err.Error())
 	}
-
-	// Update admin status
-	err := s.userRepo.SetAdminStatus(c.Context(), userID, req.IsAdmin)
-	if err != nil {
-		return RespondInternalError(c, "Failed to update user admin status", err.Error())
-	}
-
-	response := AuthResponse{
-		Message: "User admin status updated successfully",
-	}
-	return RespondSuccess(c, response)
-}
-
-// handleAdminChangeUserPassword allows an admin to set a new password for any direct-auth user
-func (s *Server) handleAdminChangeUserPassword(c *fiber.Ctx) error {
-	user := auth.GetUserFromContext(c)
-	if !s.isAdminOrLoginDisabled(user) {
-		return RespondForbidden(c, "Admin privileges required", "")
-	}
-
-	userID := c.Params("user_id")
-	if userID == "" {
-		return RespondBadRequest(c, "User ID is required", "")
-	}
-
-	var req struct {
-		NewPassword string `json:"new_password"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return RespondBadRequest(c, "Invalid request body", err.Error())
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		return RespondBadRequest(c, "Current password and new password are required", "")
 	}
 	if len(req.NewPassword) < 12 {
 		return RespondValidationError(c, "Password must be at least 12 characters", "")
+	}
+
+	// Verify current password
+	if _, err := s.authService.AuthenticateUser(c.Context(), user.UserID, req.CurrentPassword); err != nil {
+		return RespondUnauthorized(c, "Current password is incorrect", "")
 	}
 
 	hash, err := s.authService.HashPassword(req.NewPassword)
 	if err != nil {
 		return RespondInternalError(c, "Failed to hash password", err.Error())
 	}
-	if err := s.userRepo.UpdatePassword(c.Context(), userID, hash); err != nil {
+	if err := s.userRepo.UpdatePassword(c.Context(), user.UserID, hash); err != nil {
 		return RespondInternalError(c, "Failed to update password", err.Error())
 	}
 	return RespondMessage(c, "Password updated successfully")
@@ -325,18 +275,7 @@ func (s *Server) handleRegenerateAPIKey(c *fiber.Ctx) error {
 	// Try to get user from context (auth enabled case)
 	user := auth.GetUserFromContext(c)
 
-	// If no user in context, try to get first user (auth disabled case)
-	if user == nil && s.userRepo != nil {
-		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
-		if err != nil {
-			return RespondInternalError(c, "Failed to retrieve user list", err.Error())
-		}
-		if len(users) > 0 {
-			user = users[0]
-		}
-	}
-
-	// If still no user, and authentication is disabled, let's create a default admin user
+	// If no user in context, and authentication is disabled, let's create a default admin user
 	if user == nil && s.userRepo != nil {
 		cfg := s.configManager.GetConfig()
 		loginRequired := true

@@ -2,7 +2,7 @@ import type {
 	ActiveStream,
 	APIResponse,
 	AuthResponse,
-	ChangeUserPasswordRequest,
+	ChangeOwnPasswordRequest,
 	FileHealth,
 	FileMetadata,
 	FuseStatus,
@@ -25,7 +25,6 @@ import type {
 	SystemBrowseResponse,
 	UploadNZBLnkResponse,
 	User,
-	UserAdminUpdateRequest,
 } from "../types/api";
 import type {
 	ConfigResponse,
@@ -580,24 +579,8 @@ export class APIClient {
 		});
 	}
 
-	async getUsers(params?: { limit?: number; offset?: number }) {
-		const searchParams = new URLSearchParams();
-		if (params?.limit) searchParams.set("limit", params.limit.toString());
-		if (params?.offset) searchParams.set("offset", params.offset.toString());
-
-		const query = searchParams.toString();
-		return this.request<User[]>(`/users${query ? `?${query}` : ""}`);
-	}
-
-	async updateUserAdmin(userId: string, data: UserAdminUpdateRequest) {
-		return this.request<AuthResponse>(`/users/${userId}/admin`, {
-			method: "PUT",
-			body: JSON.stringify(data),
-		});
-	}
-
-	async changeUserPassword(userId: string, data: ChangeUserPasswordRequest) {
-		return this.request<AuthResponse>(`/users/${userId}/password`, {
+	async changeOwnPassword(data: ChangeOwnPasswordRequest) {
+		return this.request<AuthResponse>("/user/password", {
 			method: "PUT",
 			body: JSON.stringify(data),
 		});
