@@ -214,10 +214,22 @@ func (s *Server) handleAuthRefresh(c *fiber.Ctx) error {
 	return RespondSuccess(c, response)
 }
 
+// isAdminOrLoginDisabled returns true if the user is an admin or login is disabled
+func (s *Server) isAdminOrLoginDisabled(user *database.User) bool {
+	if user != nil && user.IsAdmin {
+		return true
+	}
+	cfg := s.configManager.GetConfig()
+	if cfg != nil && cfg.Auth.LoginRequired != nil && !*cfg.Auth.LoginRequired {
+		return true
+	}
+	return false
+}
+
 // handleListUsers returns a list of users (admin only)
 func (s *Server) handleListUsers(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
-	if user == nil || !user.IsAdmin {
+	if !s.isAdminOrLoginDisabled(user) {
 		return RespondForbidden(c, "Admin privileges required", "")
 	}
 
@@ -239,7 +251,7 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 // handleUpdateUserAdmin updates a user's admin status (admin only)
 func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 	user := auth.GetUserFromContext(c)
-	if user == nil || !user.IsAdmin {
+	if !s.isAdminOrLoginDisabled(user) {
 		return RespondForbidden(c, "Admin privileges required", "")
 	}
 
@@ -266,6 +278,38 @@ func (s *Server) handleUpdateUserAdmin(c *fiber.Ctx) error {
 		Message: "User admin status updated successfully",
 	}
 	return RespondSuccess(c, response)
+}
+
+// handleAdminChangeUserPassword allows an admin to set a new password for any direct-auth user
+func (s *Server) handleAdminChangeUserPassword(c *fiber.Ctx) error {
+	user := auth.GetUserFromContext(c)
+	if !s.isAdminOrLoginDisabled(user) {
+		return RespondForbidden(c, "Admin privileges required", "")
+	}
+
+	userID := c.Params("user_id")
+	if userID == "" {
+		return RespondBadRequest(c, "User ID is required", "")
+	}
+
+	var req struct {
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+	if len(req.NewPassword) < 12 {
+		return RespondValidationError(c, "Password must be at least 12 characters", "")
+	}
+
+	hash, err := s.authService.HashPassword(req.NewPassword)
+	if err != nil {
+		return RespondInternalError(c, "Failed to hash password", err.Error())
+	}
+	if err := s.userRepo.UpdatePassword(c.Context(), userID, hash); err != nil {
+		return RespondInternalError(c, "Failed to update password", err.Error())
+	}
+	return RespondMessage(c, "Password updated successfully")
 }
 
 // handleRegenerateAPIKey regenerates API key for the authenticated user

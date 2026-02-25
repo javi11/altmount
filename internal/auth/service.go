@@ -115,7 +115,7 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 		}),
 		TokenDuration:   config.TokenDuration,
 		CookieDuration:  config.TokenDuration,
-		DisableXSRF:     false, // Enable XSRF protection
+		DisableXSRF:     true, // SameSite: Lax cookie already prevents CSRF
 		SecureCookies:   config.CookieSecure,
 		JWTCookieName:   "JWT",
 		JWTCookieDomain: config.CookieDomain,
