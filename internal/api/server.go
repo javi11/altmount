@@ -333,12 +333,14 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 			adminRoutes.Use(auth.RequireAdmin(tokenService, s.userRepo))
 			adminRoutes.Get("/users", s.handleListUsers)
 			adminRoutes.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
+			adminRoutes.Put("/users/:user_id/password", s.handleAdminChangeUserPassword)
 		}
 	}
 
 	// Legacy admin endpoints (kept for backward compatibility, admin check inside handlers)
 	api.Get("/users", s.handleListUsers)
 	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
+	api.Put("/users/:user_id/password", s.handleAdminChangeUserPassword)
 }
 
 // Shutdown shuts down the API server and its managed resources
