@@ -298,7 +298,7 @@ export function ActivityHub() {
 					)}
 
 					{activeTab === "history" && (
-						<div className="space-y-3">
+						<div className="max-h-64 space-y-3 overflow-y-auto">
 							{historyLoading ? (
 								<div className="flex justify-center py-10">
 									<LoadingSpinner />

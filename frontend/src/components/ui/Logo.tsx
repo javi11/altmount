@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 interface LogoProps {
 	width?: number;
 	height?: number;
@@ -11,8 +13,8 @@ export function Logo({ width, height, className }: LogoProps) {
 		: `flex items-center justify-center overflow-hidden ${width ? `w-${width}` : "w-12"} ${height ? `h-${height}` : "h-12"}`;
 
 	return (
-		<div className={containerClass}>
+		<Link to="/" className={`cursor-pointer ${containerClass}`}>
 			<img src="/logo.png" alt="AltMount Logo" className="object-contain" />
-		</div>
+		</Link>
 	);
 }
