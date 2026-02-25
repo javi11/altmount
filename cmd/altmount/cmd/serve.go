@@ -135,7 +135,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// 6. Setup web services
 	app, debugMode := createFiberApp(ctx, cfg)
-	authService := setupAuthService(ctx, repos.UserRepo)
+	loginRequired := cfg.Auth.LoginRequired != nil && *cfg.Auth.LoginRequired
+	authService, err := setupAuthService(ctx, repos.UserRepo, loginRequired)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to initialize authentication service", "err", err)
+		return err
+	}
 
 	streamTracker.StartCleanup(ctx) // Periodic cleanup of stale streams
 

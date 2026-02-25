@@ -14,8 +14,8 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 	// Show loading spinner while checking authentication or loading config
 	if (isLoading || loginRequired === null) {
 		return (
-			<div className="flex min-h-screen items-center justify-center">
-				<div className="h-12 w-12 animate-spin rounded-full border-blue-600 border-b-2" />
+			<div className="flex min-h-screen items-center justify-center bg-base-100">
+				<div className="loading loading-spinner loading-lg" />
 			</div>
 		);
 	}
@@ -34,12 +34,14 @@ export function ProtectedRoute({ children, requireAdmin = false }: ProtectedRout
 	// Show unauthorized message if admin required but user is not admin
 	if (requireAdmin && !isAdmin) {
 		return (
-			<div className="flex min-h-screen items-center justify-center bg-gray-50">
+			<div className="flex min-h-screen items-center justify-center bg-base-100">
 				<div className="w-full max-w-md space-y-4 text-center">
 					<div className="text-6xl">🚫</div>
-					<h2 className="font-bold text-2xl text-gray-900">Access Denied</h2>
-					<p>You need administrator privileges to access this page.</p>
-					<p className="text-sm">
+					<h2 className="font-bold text-2xl text-base-content">Access Denied</h2>
+					<p className="text-base-content/70">
+						You need administrator privileges to access this page.
+					</p>
+					<p className="text-base-content/70 text-sm">
 						Current user: {user?.name} ({user?.provider})
 					</p>
 				</div>
