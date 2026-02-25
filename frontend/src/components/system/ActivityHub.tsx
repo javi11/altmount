@@ -1,5 +1,5 @@
 import { CheckCircle2, Download, FileVideo, History, Play } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useActiveStreams, useImportHistory, useQueue } from "../../hooks/useApi";
 import { useProgressStream } from "../../hooks/useProgressStream";
 import { formatBytes, formatDuration, formatRelativeTime, formatSpeed } from "../../lib/utils";
@@ -8,7 +8,17 @@ import { LoadingSpinner } from "../ui/LoadingSpinner";
 
 export function ActivityHub() {
 	const [activeTab, setActiveTab] = useState<"playback" | "imports" | "history">("playback");
-	const { data: allStreams, isLoading: streamsLoading } = useActiveStreams();
+	const {
+		data: allStreams,
+		isLoading: streamsLoading,
+		refetch: refetchStreams,
+	} = useActiveStreams();
+
+	useEffect(() => {
+		if (activeTab === "playback") {
+			refetchStreams();
+		}
+	}, [activeTab, refetchStreams]);
 	const { data: queueResponse, isLoading: queueLoading } = useQueue({
 		status: "processing",
 		limit: 10,
