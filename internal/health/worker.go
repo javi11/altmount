@@ -100,6 +100,12 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 	if hw.running {
 		return fmt.Errorf("health worker already running")
 	}
+
+	if !hw.configGetter().GetHealthEnabled() {
+		slog.WarnContext(ctx, "Health worker is disabled via configuration, not starting")
+		return nil
+	}
+
 	hw.running = true
 	hw.status = WorkerStatusStarting
 	hw.updateStats(func(s *WorkerStats) {
@@ -110,6 +116,12 @@ func (hw *HealthWorker) Start(ctx context.Context) error {
 	// Initialize health system - reset any files stuck in 'checking' status
 	if err := hw.healthRepo.ResetFileAllChecking(ctx); err != nil {
 		slog.ErrorContext(ctx, "Failed to reset checking files during initialization", "error", err)
+		// Don't fail startup for this - just log and continue
+	}
+
+	// Reset pending files that exhausted retries so they can be rechecked
+	if err := hw.healthRepo.ResetStalePendingFiles(ctx); err != nil {
+		slog.ErrorContext(ctx, "Failed to reset stale pending files during initialization", "error", err)
 		// Don't fail startup for this - just log and continue
 	}
 
