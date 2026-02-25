@@ -324,23 +324,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/user/refresh", s.handleAuthRefresh)
 	api.Post("/user/logout", s.handleAuthLogout)
 	api.Post("/user/api-key/regenerate", s.handleRegenerateAPIKey)
-
-	// Admin endpoints - apply RequireAdmin middleware to this group
-	if loginRequired && s.authService != nil && s.userRepo != nil {
-		tokenService := s.authService.TokenService()
-		if tokenService != nil {
-			adminRoutes := api.Group("/admin")
-			adminRoutes.Use(auth.RequireAdmin(tokenService, s.userRepo))
-			adminRoutes.Get("/users", s.handleListUsers)
-			adminRoutes.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
-			adminRoutes.Put("/users/:user_id/password", s.handleAdminChangeUserPassword)
-		}
-	}
-
-	// Legacy admin endpoints (kept for backward compatibility, admin check inside handlers)
-	api.Get("/users", s.handleListUsers)
-	api.Put("/users/:user_id/admin", s.handleUpdateUserAdmin)
-	api.Put("/users/:user_id/password", s.handleAdminChangeUserPassword)
+	api.Put("/user/password", s.handleChangeOwnPassword)
 }
 
 // Shutdown shuts down the API server and its managed resources

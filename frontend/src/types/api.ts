@@ -307,11 +307,8 @@ export interface LoginRequest {
 	provider: string;
 }
 
-export interface UserAdminUpdateRequest {
-	is_admin: boolean;
-}
-
-export interface ChangeUserPasswordRequest {
+export interface ChangeOwnPasswordRequest {
+	current_password: string;
 	new_password: string;
 }
 

@@ -829,7 +829,7 @@ func (s *Server) getAPIKeyForConfig(c *fiber.Ctx) string {
 
 	// If no authenticated user and arrs service didn't return one, try manual DB check
 	if s.userRepo != nil {
-		users, err := s.userRepo.ListUsers(c.Context(), 1, 0)
+		users, err := s.userRepo.GetAllUsers(c.Context())
 		if err == nil && len(users) > 0 && users[0].APIKey != nil {
 			return *users[0].APIKey
 		}
