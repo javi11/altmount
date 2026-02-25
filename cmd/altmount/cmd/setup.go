@@ -215,28 +215,31 @@ func setupRepositories(ctx context.Context, db *database.DB) *repositorySet {
 	}
 }
 
-// setupAuthService creates and initializes the authentication service
-func setupAuthService(ctx context.Context, userRepo *database.UserRepository) *auth.Service {
+// setupAuthService creates and initializes the authentication service.
+// When loginRequired is true, JWT_SECRET must be set or an error is returned.
+// When loginRequired is false, a missing JWT_SECRET is logged as a warning and nil is returned.
+func setupAuthService(ctx context.Context, userRepo *database.UserRepository, loginRequired bool) (*auth.Service, error) {
 	authConfig, err := auth.LoadConfigFromEnv()
 	if err != nil {
-		slog.WarnContext(ctx, "Failed to load auth configuration", "err", err)
-		return nil
+		if loginRequired {
+			return nil, fmt.Errorf("failed to load auth configuration: %w", err)
+		}
+		slog.WarnContext(ctx, "Auth configuration not loaded (login is disabled)", "err", err)
+		return nil, nil
 	}
 
 	authService, err := auth.NewService(authConfig, userRepo)
 	if err != nil {
-		slog.WarnContext(ctx, "Failed to create authentication service", "err", err)
-		return nil
+		return nil, fmt.Errorf("failed to create authentication service: %w", err)
 	}
 
 	// Setup OAuth providers
 	if err := authService.SetupProviders(authConfig); err != nil {
-		slog.WarnContext(ctx, "Failed to setup OAuth providers", "err", err)
-		return nil
+		return nil, fmt.Errorf("failed to setup auth providers: %w", err)
 	}
 
 	slog.InfoContext(ctx, "Authentication service initialized")
-	return authService
+	return authService, nil
 }
 
 // setupStreamHandler creates the HTTP stream handler for file streaming

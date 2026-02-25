@@ -46,21 +46,21 @@ export function LoginPage() {
 
 	if (isLoading) {
 		return (
-			<div className="flex min-h-screen items-center justify-center bg-gray-50">
+			<div className="flex min-h-screen items-center justify-center bg-base-200">
 				<span className="loading loading-spinner loading-lg text-primary" />
 			</div>
 		);
 	}
 
 	return (
-		<div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+		<div className="flex min-h-screen items-center justify-center bg-base-200 px-4 py-12 sm:px-6 lg:px-8">
 			<div className="flex w-full max-w-md flex-col items-center justify-center space-y-8">
 				<Logo width={48} height={48} />
 				<div className="text-center">
-					<h2 className="mt-6 font-extrabold text-3xl text-gray-900">
+					<h2 className="mt-6 font-extrabold text-3xl text-base-content">
 						{showRegister ? "Create Admin Account" : "Sign in to Altmount"}
 					</h2>
-					<p className="mt-2 text-sm">
+					<p className="mt-2 text-base-content/70 text-sm">
 						{hasConnectionError
 							? "Cannot connect to server - please check your connection"
 							: showRegister
@@ -71,69 +71,75 @@ export function LoginPage() {
 					</p>
 				</div>
 
-				{!hasConnectionError && (userCount === 0 || showRegister) ? (
-					// Registration form (only for first user)
-					<div>
-						<RegisterForm
-							onSuccess={() => {
-								// After successful registration, user will be logged in automatically
-								// The auth context will handle the redirect
-							}}
-						/>
+				<div className="card w-full bg-base-100 shadow-xl">
+					<div className="card-body">
+						{!hasConnectionError && (userCount === 0 || showRegister) ? (
+							// Registration form (only for first user)
+							<div>
+								<RegisterForm
+									onSuccess={() => {
+										// After successful registration, user will be logged in automatically
+										// The auth context will handle the redirect
+									}}
+								/>
 
-						{userCount > 0 && (
-							<div className="mt-4 text-center">
-								<button
-									type="button"
-									onClick={() => setShowRegister(false)}
-									className="text-blue-600 text-sm hover:text-blue-500"
-								>
-									Already have an account? Sign in
-								</button>
+								{userCount > 0 && (
+									<div className="mt-4 text-center">
+										<button
+											type="button"
+											onClick={() => setShowRegister(false)}
+											className="text-primary text-sm hover:text-primary/70"
+										>
+											Already have an account? Sign in
+										</button>
+									</div>
+								)}
+							</div>
+						) : (
+							// Login form (for existing users)
+							<div>
+								<DirectLoginForm
+									onSuccess={() => {
+										// After successful login, user will be redirected automatically
+										// The auth context will handle the redirect
+									}}
+								/>
+
+								{registrationEnabled && (
+									<div className="mt-4 text-center">
+										<button
+											type="button"
+											onClick={() => setShowRegister(true)}
+											className="text-primary text-sm hover:text-primary/70"
+										>
+											Need to create an account? Register
+										</button>
+									</div>
+								)}
 							</div>
 						)}
 					</div>
-				) : (
-					// Login form (for existing users)
-					<div>
-						<DirectLoginForm
-							onSuccess={() => {
-								// After successful login, user will be redirected automatically
-								// The auth context will handle the redirect
-							}}
-						/>
-
-						{registrationEnabled && (
-							<div className="mt-4 text-center">
-								<button
-									type="button"
-									onClick={() => setShowRegister(true)}
-									className="text-blue-600 text-sm hover:text-blue-500"
-								>
-									Need to create an account? Register
-								</button>
-							</div>
-						)}
-					</div>
-				)}
+				</div>
 
 				<div className="text-center text-xs">
 					{hasConnectionError ? (
 						<div className="space-y-2">
-							<p className="text-red-600">Connection to server failed.</p>
+							<p className="text-error">Connection to server failed.</p>
 							<button
 								type="button"
 								onClick={() => window.location.reload()}
-								className="text-blue-600 hover:text-blue-500"
+								className="text-primary hover:text-primary/70"
 							>
 								Retry connection
 							</button>
 						</div>
 					) : (
 						<>
-							<p>By signing in, you agree to use this application responsibly.</p>
+							<p className="text-base-content/70">
+								By signing in, you agree to use this application responsibly.
+							</p>
 							{userCount === 0 && (
-								<p className="mt-1 text-blue-600">
+								<p className="mt-1 text-primary">
 									The first user will automatically receive administrator privileges.
 								</p>
 							)}
