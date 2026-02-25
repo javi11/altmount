@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -733,6 +734,25 @@ func (r *HealthRepository) ResetFileAllChecking(ctx context.Context) error {
 		return fmt.Errorf("failed to reset all file statuses: %w", err)
 	}
 
+	return nil
+}
+
+// ResetStalePendingFiles resets pending files that have exhausted retries back to retry_count=0
+// so they can be re-checked in the next health cycle. Called during worker startup.
+func (r *HealthRepository) ResetStalePendingFiles(ctx context.Context) error {
+	query := `UPDATE file_health
+	          SET retry_count = 0,
+	              updated_at = datetime('now'),
+	              scheduled_check_at = datetime('now')
+	          WHERE status = ? AND retry_count >= max_retries`
+	result, err := r.db.ExecContext(ctx, query, HealthStatusPending)
+	if err != nil {
+		return fmt.Errorf("failed to reset stale pending files: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		slog.InfoContext(ctx, "Reset stale pending files", "count", rows)
+	}
 	return nil
 }
 
