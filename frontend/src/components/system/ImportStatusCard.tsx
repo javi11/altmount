@@ -12,9 +12,14 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 	const { data: scanStatus } = useScanStatus(5000);
 	const { data: nzbDavStatus } = useNzbdavImportStatus(5000);
 	const { data: queueStats } = useQueueStats();
-	const { data: processingQueue } = useQueue({ status: "processing", limit: 5 });
+	const { data: processingQueue } = useQueue({
+		status: "processing",
+		limit: 5,
+		refetchInterval: 5000,
+	});
 
 	const hasProcessingItems = (processingQueue?.data?.length || 0) > 0;
+	// Poll processing queue regularly so the display clears automatically when jobs finish
 	const { progress: liveProgress } = useProgressStream({ enabled: hasProcessingItems });
 
 	const activeImport = useMemo(() => {
@@ -83,19 +88,24 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 			const totalItems =
 				queueStats.total_processing + queueStats.total_completed + queueStats.total_failed;
 			const completedAndFailed = queueStats.total_completed + queueStats.total_failed;
+			const hasFailed = queueStats.total_failed > 0;
+			const hasPending = queueStats.total_queued > 0;
 
-			const progressParts: string[] = [];
-			if (queueStats.total_queued > 0) progressParts.push(`${queueStats.total_queued} pending`);
-			if (queueStats.total_failed > 0) progressParts.push(`${queueStats.total_failed} failed`);
+			const statusLabel = totalItems > 0 ? `${completedAndFailed} / ${totalItems}` : "Idle";
+
+			const detailParts: string[] = [];
+			if (hasPending) detailParts.push(`${queueStats.total_queued} pending`);
+			if (hasFailed) detailParts.push(`${queueStats.total_failed} failed`);
 
 			return {
 				title: "Import Queue",
 				icon: <Download className="h-8 w-8 text-base-content/20" />,
-				progress: 0,
-				detail: progressParts.length > 0 ? progressParts.join(", ") : "All tasks complete",
-				status: totalItems > 0 ? `${completedAndFailed} / ${totalItems}` : "Idle",
-				color: "progress-primary",
-				isIdle: totalItems === 0 || completedAndFailed === totalItems,
+				progress: totalItems > 0 ? Math.round((completedAndFailed / totalItems) * 100) : 0,
+				detail: detailParts.length > 0 ? detailParts.join(", ") : "All tasks complete",
+				status: statusLabel,
+				color: hasFailed ? "progress-error" : "progress-primary",
+				isIdle: totalItems === 0,
+				hasFailed,
 			};
 		}
 
@@ -130,7 +140,11 @@ export function ImportStatusCard({ className }: ImportStatusCardProps) {
 							{activeImport.title}
 						</h2>
 						<div className="flex items-baseline gap-2">
-							<div className="font-bold text-2xl">{activeImport.status}</div>
+							<div
+								className={`font-bold text-2xl ${(activeImport as { hasFailed?: boolean }).hasFailed ? "text-error" : ""}`}
+							>
+								{activeImport.status}
+							</div>
 						</div>
 					</div>
 					<div className="shrink-0">{activeImport.icon}</div>

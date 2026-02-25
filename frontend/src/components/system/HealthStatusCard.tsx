@@ -98,10 +98,18 @@ export function HealthStatusCard({ className }: HealthStatusCardProps) {
 							<div
 								className={`font-bold text-2xl ${metrics.corrupted > 0 ? "text-error" : "text-success"}`}
 							>
-								{metrics.corrupted > 0 ? metrics.corrupted : "100%"}
+								{metrics.corrupted > 0
+									? metrics.corrupted
+									: metrics.pending > 0 || metrics.checking > 0
+										? `${metrics.healthyPercent}%`
+										: "100%"}
 							</div>
 							<div className="font-semibold text-base-content/40 text-sm">
-								{metrics.corrupted > 0 ? "Corrupted" : "Healthy"}
+								{metrics.corrupted > 0
+									? "Corrupted"
+									: metrics.pending > 0
+										? `(${metrics.pending} unverified)`
+										: "Healthy"}
 							</div>
 						</div>
 					</div>
