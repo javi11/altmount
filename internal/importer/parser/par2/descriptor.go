@@ -12,26 +12,6 @@ import (
 	"github.com/javi11/nzbparser"
 )
 
-// nzbSegmentLoader adapts []nzbparser.NzbSegment into usenet.SegmentLoader.
-// Each raw NZB segment maps with Start=0, End=Bytes-1 (all data is usable).
-type nzbSegmentLoader struct {
-	segs   nzbparser.NzbSegments
-	groups []string
-}
-
-func (l nzbSegmentLoader) GetSegment(index int) (usenet.Segment, []string, bool) {
-	if index < 0 || index >= len(l.segs) {
-		return usenet.Segment{}, nil, false
-	}
-	seg := l.segs[index]
-	return usenet.Segment{
-		Id:    seg.ID,
-		Start: 0,
-		End:   int64(seg.Bytes) - 1,
-		Size:  int64(seg.Bytes),
-	}, l.groups, true
-}
-
 // FirstSegmentData holds cached data from the first segment of an NZB file
 // This is passed from the parser to avoid redundant fetches
 type FirstSegmentData struct {
@@ -110,23 +90,21 @@ func readFileDescriptors(
 		return descriptors, fmt.Errorf("PAR2 file has no segments")
 	}
 
+	cp, err := poolManager.GetPool()
+	if err != nil {
+		return descriptors, fmt.Errorf("failed to get connection pool: %w", err)
+	}
+
 	// Create context with timeout (30 seconds per segment should be enough)
 	// For multi-segment files, this gives adequate time
 	ctx, cancel := context.WithTimeout(ctx, time.Second*30*time.Duration(len(par2File.Segments)))
 	defer cancel()
 
-	// Build segment loader and compute total size
-	loader := nzbSegmentLoader{segs: par2File.Segments, groups: par2File.Groups}
-	var totalSize int64
-	for _, seg := range par2File.Segments {
-		totalSize += int64(seg.Bytes)
-	}
-
-	// Create UsenetReader (provides retry, prefetch, and metrics for free)
-	rg := usenet.GetSegmentsInRange(ctx, 0, totalSize-1, loader)
-	r, err := usenet.NewUsenetReader(ctx, poolManager.GetPool, rg, 5, poolManager, "", nil)
+	// Create sequential reader that will read ALL segments of the PAR2 file
+	// This is critical because FileDesc packets can be in any segment, not just the first
+	r, err := usenet.NewSequentialReader(ctx, par2File.Segments, nil, cp, poolManager)
 	if err != nil {
-		return descriptors, fmt.Errorf("failed to create usenet reader: %w", err)
+		return descriptors, fmt.Errorf("failed to create sequential reader: %w", err)
 	}
 	defer r.Close()
 
