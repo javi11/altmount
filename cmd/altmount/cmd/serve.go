@@ -152,7 +152,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create stream handler for file streaming
-	streamHandler := setupStreamHandler(fs, repos.UserRepo, streamTracker)
+	streamHandler := setupStreamHandler(fs, repos.UserRepo, streamTracker, configManager)
 
 	// Setup SPA routes
 	setupSPARoutes(app)

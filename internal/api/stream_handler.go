@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
+	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
@@ -24,6 +25,7 @@ type StreamHandler struct {
 	nzbFilesystem *nzbfilesystem.NzbFilesystem
 	userRepo      *database.UserRepository
 	streamTracker *StreamTracker
+	configGetter  config.ConfigGetter
 }
 
 // MonitoredFile wraps an afero.File to track read progress and support cancellation
@@ -61,18 +63,27 @@ func (m *MonitoredFile) Close() error {
 }
 
 // NewStreamHandler creates a new stream handler with the provided filesystem and user repository
-func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker) *StreamHandler {
+func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker, configGetter config.ConfigGetter) *StreamHandler {
 	return &StreamHandler{
 		nzbFilesystem: fs,
 		userRepo:      userRepo,
 		streamTracker: streamTracker,
+		configGetter:  configGetter,
 	}
 }
 
-// authenticate validates the download_key parameter against user API keys
-// Returns the user and true if the download_key matches a hashed API key from any user
+// authenticate validates the download_key parameter against user API keys.
+// When login is not required, authentication is skipped and an anonymous user is returned.
+// Returns the user and true if the download_key matches a hashed API key from any user.
 func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	ctx := r.Context()
+
+	// When auth is disabled, allow all stream requests without a download_key
+	if h.configGetter != nil {
+		if cfg := h.configGetter(); cfg != nil && cfg.Auth.LoginRequired != nil && !*cfg.Auth.LoginRequired {
+			return &database.User{UserID: "anonymous"}, true
+		}
+	}
 
 	// Extract download_key from query parameter
 	downloadKey := r.URL.Query().Get("download_key")
@@ -159,10 +170,12 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userName string
-	if user.Name != nil && *user.Name != "" {
-		userName = *user.Name
-	} else {
-		userName = user.UserID
+	if user != nil {
+		if user.Name != nil && *user.Name != "" {
+			userName = *user.Name
+		} else {
+			userName = user.UserID
+		}
 	}
 
 	// Set stream source and username for tracking
