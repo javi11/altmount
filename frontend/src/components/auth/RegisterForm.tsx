@@ -1,4 +1,4 @@
-import { User } from "lucide-react";
+import { AlertCircle, User } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
@@ -75,27 +75,19 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 	};
 
 	return (
-		<form onSubmit={handleSubmit} className="space-y-6">
-			<div className="rounded-md border border-blue-200 bg-blue-50 p-4">
-				<div className="flex">
-					<div className="flex-shrink-0">
-						<User />
-					</div>
-					<div className="ml-3">
-						<h3 className="font-medium text-blue-800 text-sm">First User Registration</h3>
-						<div className="mt-2 text-blue-700 text-sm">
-							<p>
-								You're registering as the first user and will be granted administrator privileges.
-							</p>
-						</div>
+		<form onSubmit={handleSubmit} className="space-y-4">
+			<div role="alert" className="alert alert-info">
+				<User className="h-5 w-5" aria-hidden="true" />
+				<div>
+					<div className="font-medium text-sm">First User Registration</div>
+					<div className="text-sm">
+						You're registering as the first user and will be granted administrator privileges.
 					</div>
 				</div>
 			</div>
 
-			<div>
-				<label htmlFor="username" className="block font-medium text-gray-700 text-sm">
-					Username *
-				</label>
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">Username *</legend>
 				<input
 					id="username"
 					name="username"
@@ -104,20 +96,16 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					required
 					value={formData.username}
 					onChange={handleChange}
-					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
-						validationErrors.username ? "border-red-300" : "border-gray-300"
-					}`}
+					className={`input w-full ${validationErrors.username ? "input-error" : ""}`}
 					placeholder="Choose a username (min 3 characters)"
 				/>
 				{validationErrors.username && (
-					<p className="mt-1 text-red-600 text-sm">{validationErrors.username}</p>
+					<p className="text-error text-sm">{validationErrors.username}</p>
 				)}
-			</div>
+			</fieldset>
 
-			<div>
-				<label htmlFor="email" className="block font-medium text-gray-700 text-sm">
-					Email (optional)
-				</label>
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">Email (optional)</legend>
 				<input
 					id="email"
 					name="email"
@@ -125,20 +113,14 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					autoComplete="email"
 					value={formData.email}
 					onChange={handleChange}
-					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
-						validationErrors.email ? "border-red-300" : "border-gray-300"
-					}`}
+					className={`input w-full ${validationErrors.email ? "input-error" : ""}`}
 					placeholder="Enter your email address"
 				/>
-				{validationErrors.email && (
-					<p className="mt-1 text-red-600 text-sm">{validationErrors.email}</p>
-				)}
-			</div>
+				{validationErrors.email && <p className="text-error text-sm">{validationErrors.email}</p>}
+			</fieldset>
 
-			<div>
-				<label htmlFor="password" className="block font-medium text-gray-700 text-sm">
-					Password *
-				</label>
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">Password *</legend>
 				<input
 					id="password"
 					name="password"
@@ -147,20 +129,16 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					required
 					value={formData.password}
 					onChange={handleChange}
-					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
-						validationErrors.password ? "border-red-300" : "border-gray-300"
-					}`}
+					className={`input w-full ${validationErrors.password ? "input-error" : ""}`}
 					placeholder="Choose a secure password (min 12 characters)"
 				/>
 				{validationErrors.password && (
-					<p className="mt-1 text-red-600 text-sm">{validationErrors.password}</p>
+					<p className="text-error text-sm">{validationErrors.password}</p>
 				)}
-			</div>
+			</fieldset>
 
-			<div>
-				<label htmlFor="confirmPassword" className="block font-medium text-gray-700 text-sm">
-					Confirm Password *
-				</label>
+			<fieldset className="fieldset">
+				<legend className="fieldset-legend">Confirm Password *</legend>
 				<input
 					id="confirmPassword"
 					name="confirmPassword"
@@ -169,63 +147,34 @@ export function RegisterForm({ onSuccess }: RegisterFormProps) {
 					required
 					value={formData.confirmPassword}
 					onChange={handleChange}
-					className={`mt-1 block w-full rounded-md border px-3 py-2 placeholder-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 ${
-						validationErrors.confirmPassword ? "border-red-300" : "border-gray-300"
-					}`}
+					className={`input w-full ${validationErrors.confirmPassword ? "input-error" : ""}`}
 					placeholder="Confirm your password"
 				/>
 				{validationErrors.confirmPassword && (
-					<p className="mt-1 text-red-600 text-sm">{validationErrors.confirmPassword}</p>
+					<p className="text-error text-sm">{validationErrors.confirmPassword}</p>
 				)}
-			</div>
+			</fieldset>
 
 			{error && (
-				<div className="rounded-md bg-red-50 p-4">
-					<div className="flex">
-						<div className="flex-shrink-0">
-							<svg
-								className="h-5 w-5 text-red-400"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-								aria-hidden="true"
-							>
-								<path
-									fillRule="evenodd"
-									d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-									clipRule="evenodd"
-								/>
-							</svg>
-						</div>
-						<div className="ml-3">
-							<h3 className="font-medium text-red-800 text-sm">Registration Failed</h3>
-							<div className="mt-2 text-red-700 text-sm">
-								<p>{error}</p>
-							</div>
-						</div>
+				<div role="alert" className="alert alert-error">
+					<AlertCircle className="h-5 w-5" aria-hidden="true" />
+					<div>
+						<div className="font-medium">Registration Failed</div>
+						<div className="text-sm">{error}</div>
 					</div>
 				</div>
 			)}
 
-			<div>
-				<button
-					type="submit"
-					disabled={isLoading}
-					className={`flex w-full justify-center rounded-md border border-transparent px-4 py-2 font-medium text-sm text-white shadow-sm ${
-						isLoading
-							? "cursor-not-allowed bg-gray-400"
-							: "bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-					}`}
-				>
-					{isLoading ? (
-						<div className="flex items-center">
-							<div className="mr-2 h-4 w-4 animate-spin rounded-full border-white border-b-2" />
-							Creating account...
-						</div>
-					) : (
-						"Create Admin Account"
-					)}
-				</button>
-			</div>
+			<button type="submit" disabled={isLoading} className="btn btn-success w-full">
+				{isLoading ? (
+					<>
+						<span className="loading loading-spinner loading-sm" />
+						Creating account...
+					</>
+				) : (
+					"Create Admin Account"
+				)}
+			</button>
 		</form>
 	);
 }
