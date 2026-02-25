@@ -133,7 +133,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	opts := []rardecode.Option{rardecode.FileSystem(ufs), rardecode.SkipCheck}
 	if password != "" {
 		opts = append(opts, rardecode.Password(password))
-		rh.log.InfoContext(ctx, "Using password to unlock RAR archive")
+		rh.log.DebugContext(ctx, "Using password to unlock RAR archive", "archive", mainRarFile)
 	}
 
 	if len(normalizedFiles) > 1 {
@@ -151,7 +151,7 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
 	if err != nil {
 		// Check if error indicates incomplete RAR archive with missing volume segments
-		return nil, errors.NewNonRetryableError("failed to create archive iterator", err)
+		return nil, errors.NewNonRetryableError(fmt.Sprintf("failed to iterate RAR archive %q", mainRarFile), err)
 	}
 
 	if len(aggregatedFiles) == 0 {
