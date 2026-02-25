@@ -125,3 +125,11 @@ func (c *Config) GetFuseMountPath() string {
 	}
 	return c.MountPath
 }
+
+// GetHealthEnabled returns whether health checking is enabled (defaults to true)
+func (c *Config) GetHealthEnabled() bool {
+	if c.Health.Enabled == nil {
+		return true
+	}
+	return *c.Health.Enabled
+}
