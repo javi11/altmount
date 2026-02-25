@@ -2,11 +2,14 @@ package api
 
 import (
 	"context"
+	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/auth"
@@ -140,13 +143,32 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
 
-	// Apply global middleware
-	api.Use(cors.New())
+	cfg := s.configManager.GetConfig()
+
+	// Apply global middleware — derive allowed CORS origins from COOKIE_DOMAIN env var,
+	// explicit api.allowed_origins config, or fall back to wildcard.
+	corsOrigins := "*"
+
+	if cookieDomain := os.Getenv("COOKIE_DOMAIN"); cookieDomain != "" {
+		// Allow both http and https on the configured domain
+		corsOrigins = "http://" + cookieDomain + ",https://" + cookieDomain
+	}
+
+	if cfg != nil && len(cfg.API.AllowedOrigins) > 0 {
+		// Explicit config overrides the env-derived value
+		corsOrigins = strings.Join(cfg.API.AllowedOrigins, ",")
+	}
+
+	api.Use(cors.New(cors.Config{
+		AllowOrigins:     corsOrigins,
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		AllowCredentials: true,
+	}))
 	api.Use(recover.New())
 
 	// Apply JWT authentication middleware globally except for public auth routes
 	// Only apply if login is required (default: true)
-	cfg := s.configManager.GetConfig()
 	loginRequired := true // Default to true if not set
 	if cfg != nil && cfg.Auth.LoginRequired != nil {
 		loginRequired = *cfg.Auth.LoginRequired
@@ -275,9 +297,25 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/arrs/download-client/register", s.handleRegisterArrsDownloadClients)
 	api.Post("/arrs/download-client/test", s.handleTestArrsDownloadClients)
 
-	// Direct authentication endpoints (converted to native Fiber)
-	api.Post("/auth/login", s.handleDirectLogin)
-	api.Post("/auth/register", s.handleRegister)
+	// Direct authentication endpoints — rate-limited to prevent brute-force attacks
+	authLimiter := limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"success": false,
+				"error": fiber.Map{
+					"code":    "TOO_MANY_REQUESTS",
+					"message": "Too many login attempts. Please wait a minute before trying again.",
+				},
+			})
+		},
+	})
+	api.Post("/auth/login", authLimiter, s.handleDirectLogin)
+	api.Post("/auth/register", authLimiter, s.handleRegister)
 	api.Get("/auth/registration-status", s.handleCheckRegistration)
 	api.Get("/auth/config", s.handleGetAuthConfig)
 
