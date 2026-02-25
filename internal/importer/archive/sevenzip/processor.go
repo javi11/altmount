@@ -160,13 +160,13 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	if password != "" {
 		reader, err = sevenzip.OpenReaderWithPassword(mainSevenZipFile, password, aferoFS)
 		if err != nil {
-			return nil, errors.NewNonRetryableError("failed to open password-protected 7zip archive", err)
+			return nil, errors.NewNonRetryableError(fmt.Sprintf("failed to open password-protected 7zip archive %q", mainSevenZipFile), err)
 		}
-		sz.log.InfoContext(ctx, "Using password to unlock 7zip archive")
+		sz.log.DebugContext(ctx, "Using password to unlock 7zip archive", "archive", mainSevenZipFile)
 	} else {
 		reader, err = sevenzip.OpenReader(mainSevenZipFile, aferoFS)
 		if err != nil {
-			return nil, errors.NewNonRetryableError("failed to open 7zip archive", err)
+			return nil, errors.NewNonRetryableError(fmt.Sprintf("failed to open 7zip archive %q", mainSevenZipFile), err)
 		}
 	}
 	defer reader.Close()
@@ -174,7 +174,7 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// List files with their offsets
 	fileInfos, err := reader.ListFilesWithOffsets()
 	if err != nil {
-		return nil, errors.NewNonRetryableError("failed to list files in 7zip archive", err)
+		return nil, errors.NewNonRetryableError(fmt.Sprintf("failed to list files in 7zip archive %q", mainSevenZipFile), err)
 	}
 
 	if len(fileInfos) == 0 {

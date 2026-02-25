@@ -60,6 +60,27 @@ func calculateSegmentsToValidate(rarContents []Content, samplePercentage int) in
 	return total
 }
 
+// newErrNoAllowedFiles builds a descriptive error showing which extensions were found
+// vs which are allowed, making it actionable when imports fail silently.
+func newErrNoAllowedFiles(rarContents []Content, allowedExtensions []string) error {
+	extSet := make(map[string]struct{})
+	for _, c := range rarContents {
+		if c.IsDirectory {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(c.Filename))
+		if ext == "" {
+			ext = "(no extension)"
+		}
+		extSet[ext] = struct{}{}
+	}
+	found := make([]string, 0, len(extSet))
+	for ext := range extSet {
+		found = append(found, ext)
+	}
+	return fmt.Errorf("archive contains no files with allowed extensions (found: %v, allowed: %v)", found, allowedExtensions)
+}
+
 // hasAllowedFiles checks if any files within RAR archive contents match allowed extensions
 // If allowedExtensions is empty, all file types are allowed
 func hasAllowedFiles(rarContents []Content, allowedExtensions []string) bool {
@@ -115,8 +136,9 @@ func ProcessArchive(
 
 	// Validate file extensions before processing
 	if !hasAllowedFiles(rarContents, allowedFileExtensions) {
-		slog.WarnContext(ctx, "RAR archive contains no files with allowed extensions", "allowed_extensions", allowedFileExtensions)
-		return ErrNoAllowedFiles
+		err := newErrNoAllowedFiles(rarContents, allowedFileExtensions)
+		slog.WarnContext(ctx, "RAR archive contains no files with allowed extensions", "error", err)
+		return err
 	}
 
 	// Calculate total segments to validate for accurate progress tracking
