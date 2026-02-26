@@ -134,6 +134,9 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		}
 		if cfg.RClone.VFSCacheMaxSize != "" {
 			vfsOpt["CacheMaxSize"] = cfg.RClone.VFSCacheMaxSize
+			// Ensure the reported total disk space matches the configured cache size
+			// so media servers see accurate available space
+			vfsOpt["DiskSpaceTotalSize"] = cfg.RClone.VFSCacheMaxSize
 		}
 		if cfg.RClone.VFSCachePollInterval != "" {
 			vfsOpt["CachePollInterval"] = cfg.RClone.VFSCachePollInterval
