@@ -176,30 +176,6 @@ func (c *Coordinator) createSingleStrmFile(ctx context.Context, strmResultingPat
 	filename := filepath.Base(strmResultingPath) + ".strm"
 	strmPath := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(strmResultingPath, "/")), filename)
 
-	// Determine host to use
-	host := cfg.WebDAV.Host
-	if host == "" {
-		host = "localhost"
-	}
-
-	encodedPath := strings.ReplaceAll(originalVirtualPath, " ", "%20")
-
-	// When login is not required, generate URL without download_key
-	loginRequired := cfg.Auth.LoginRequired == nil || *cfg.Auth.LoginRequired
-	if !loginRequired {
-		streamURL := fmt.Sprintf("http://%s:%d/api/files/stream?path=%s",
-			host, port, encodedPath)
-
-		// Check if STRM file already exists with the same content
-		if existingContent, err := os.ReadFile(strmPath); err == nil {
-			if string(existingContent) == streamURL {
-				return nil // File exists with correct content
-			}
-		}
-
-		return os.WriteFile(strmPath, []byte(streamURL), 0644)
-	}
-
 	// Get first admin user's API key for authentication
 	if c.userRepo == nil {
 		return fmt.Errorf("user repository not available for STRM generation")
@@ -226,7 +202,14 @@ func (c *Coordinator) createSingleStrmFile(ctx context.Context, strmResultingPat
 	// Hash the API key with SHA256
 	hashedKey := hashAPIKey(adminAPIKey)
 
+	// Determine host to use
+	host := cfg.WebDAV.Host
+	if host == "" {
+		host = "localhost"
+	}
+
 	// Generate streaming URL with download_key using the ORIGINAL virtual path
+	encodedPath := strings.ReplaceAll(originalVirtualPath, " ", "%20")
 	streamURL := fmt.Sprintf("http://%s:%d/api/files/stream?path=%s&download_key=%s",
 		host, port, encodedPath, hashedKey)
 
