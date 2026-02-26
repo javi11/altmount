@@ -831,17 +831,11 @@ func (sz *sevenZipProcessor) detectAndProcessNestedRars(ctx context.Context, out
 
 		innerFiles, err := sz.processNestedRarContent(ctx, innerRarContents)
 		if err != nil {
-			sz.log.WarnContext(ctx, "Failed to process nested RAR in 7zip, keeping original",
-				"base", base, "error", err)
-			result = append(result, innerRarContents...)
-			continue
+			return nil, fmt.Errorf("failed to process nested RAR %q inside 7zip: %w", base, err)
 		}
 
 		if len(innerFiles) == 0 {
-			sz.log.WarnContext(ctx, "Nested RAR in 7zip contained no files, keeping original",
-				"base", base)
-			result = append(result, innerRarContents...)
-			continue
+			return nil, fmt.Errorf("nested RAR %q inside 7zip contained no extractable files", base)
 		}
 
 		result = append(result, innerFiles...)
