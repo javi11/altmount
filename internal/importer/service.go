@@ -816,12 +816,19 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	newFilename := sanitizeFilename(filename)
 	newPath := filepath.Join(nzbDir, newFilename)
 
-	// Replace strategy: remove existing file if it exists
+	// If a file with the same name already exists, append a numeric counter suffix
+	// (e.g. movie.nzb → movie_1.nzb) to avoid silently overwriting a different item.
 	if _, err := os.Stat(newPath); err == nil {
-		s.log.DebugContext(ctx, "Replacing existing persistent NZB", "path", newPath)
-		if err := os.Remove(newPath); err != nil {
-			return fmt.Errorf("failed to remove existing NZB for replace: %w", err)
+		ext := filepath.Ext(newFilename)
+		base := strings.TrimSuffix(newFilename, ext)
+		for i := 1; ; i++ {
+			candidate := filepath.Join(nzbDir, fmt.Sprintf("%s_%d%s", base, i, ext))
+			if _, statErr := os.Stat(candidate); os.IsNotExist(statErr) {
+				newPath = candidate
+				break
+			}
 		}
+		s.log.DebugContext(ctx, "NZB name collision, using alternate path", "path", newPath)
 	}
 
 	s.log.DebugContext(ctx, "Moving NZB to persistent storage", "old_path", item.NzbPath, "new_path", newPath)
