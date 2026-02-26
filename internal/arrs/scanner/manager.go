@@ -625,21 +625,22 @@ func (m *Manager) triggerSonarrRescanByPath(ctx context.Context, client *sonarr.
 		return fmt.Errorf("no episodes found for file: %s: %w", filePath, model.ErrPathMatchFailed)
 	}
 
-	// Trigger targeted episode search for all episodes in this file
+	// Trigger SeriesSearch for the whole series so Sonarr v4 can handle quality
+	// upgrades automatically for all episodes, not only the replaced file (#241).
 	searchCmd := &sonarr.CommandRequest{
-		Name:       "EpisodeSearch",
-		EpisodeIDs: episodeIDs,
+		Name:     "SeriesSearch",
+		SeriesID: targetSeries.ID,
 	}
 
 	response, err := client.SendCommandContext(ctx, searchCmd)
 	if err != nil {
-		return fmt.Errorf("failed to trigger Sonarr episode search: %w", err)
+		return fmt.Errorf("failed to trigger Sonarr series search: %w", err)
 	}
 
-	slog.InfoContext(ctx, "Successfully triggered Sonarr targeted episode search for re-download",
+	slog.InfoContext(ctx, "Successfully triggered Sonarr series search for re-download",
 		"instance", instanceName,
 		"series_title", targetSeries.Title,
-		"episode_ids", episodeIDs,
+		"series_id", targetSeries.ID,
 		"command_id", response.ID)
 
 	return nil
