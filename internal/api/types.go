@@ -2,6 +2,7 @@ package api
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -563,9 +564,10 @@ func ToQueueItemResponse(item *database.ImportQueueItem) *QueueItemResponse {
 	// Remove ID prefix (e.g. "123_filename")
 	parts := strings.SplitN(targetPath, "_", 2)
 	if len(parts) == 2 {
-		// Check if first part is numeric (the ID)
-		// We don't need strict validation, just heuristic
-		targetPath = parts[1]
+		// Only strip prefix if first part is actually numeric (the queue ID)
+		if _, err := strconv.Atoi(parts[0]); err == nil {
+			targetPath = parts[1]
+		}
 	}
 
 	// Transform error message for better user understanding
