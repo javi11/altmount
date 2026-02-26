@@ -65,19 +65,20 @@ func (pr *PacketReader) ReadFileDescriptor(header *PacketHeader) (*FileDescripto
 
 	desc := &FileDescriptor{}
 
-	// Read fixed fields (56 bytes total)
-	if err := binary.Read(pr.r, binary.LittleEndian, &desc.FileID); err != nil {
-		return nil, fmt.Errorf("failed to read FileID: %w", err)
+	// Read all fixed fields (56 bytes total) in one call
+	var body struct {
+		FileID  [16]byte
+		FileMD5 [16]byte
+		Hash16k [16]byte
+		Length  uint64
 	}
-	if err := binary.Read(pr.r, binary.LittleEndian, &desc.FileMD5); err != nil {
-		return nil, fmt.Errorf("failed to read FileMD5: %w", err)
+	if err := binary.Read(pr.r, binary.LittleEndian, &body); err != nil {
+		return nil, fmt.Errorf("failed to read file descriptor body: %w", err)
 	}
-	if err := binary.Read(pr.r, binary.LittleEndian, &desc.Hash16k); err != nil {
-		return nil, fmt.Errorf("failed to read Hash16k: %w", err)
-	}
-	if err := binary.Read(pr.r, binary.LittleEndian, &desc.Length); err != nil {
-		return nil, fmt.Errorf("failed to read Length: %w", err)
-	}
+	desc.FileID = body.FileID
+	desc.FileMD5 = body.FileMD5
+	desc.Hash16k = body.Hash16k
+	desc.Length = body.Length
 
 	// Read filename (remaining bytes, null-terminated, 4-byte aligned)
 	filenameLength := bodyLength - 56
