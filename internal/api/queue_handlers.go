@@ -859,6 +859,53 @@ func (s *Server) handleAddTestQueueItem(c *fiber.Ctx) error {
 	return RespondCreated(c, response)
 }
 
+// handleUpdateQueueItemPriority handles PATCH /api/queue/{id}/priority
+func (s *Server) handleUpdateQueueItemPriority(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	if idStr == "" {
+		return RespondBadRequest(c, "Queue item ID is required", "")
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return RespondBadRequest(c, "Invalid queue item ID", "ID must be a valid integer")
+	}
+
+	var req struct {
+		Priority int `json:"priority"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+
+	// Validate priority: 1=high, 2=normal, 3=low
+	if req.Priority < 1 || req.Priority > 3 {
+		return RespondValidationError(c, "Invalid priority value", "Valid values: 1 (high), 2 (normal), 3 (low)")
+	}
+
+	item, err := s.queueRepo.GetQueueItem(c.Context(), id)
+	if err != nil {
+		return RespondInternalError(c, "Failed to check queue item", err.Error())
+	}
+	if item == nil {
+		return RespondNotFound(c, "Queue item", "")
+	}
+	if item.Status == database.QueueStatusProcessing {
+		return RespondConflict(c, "Cannot change priority of item currently being processed", "")
+	}
+
+	if err := s.queueRepo.UpdateQueueItemPriority(c.Context(), id, database.QueuePriority(req.Priority)); err != nil {
+		return RespondInternalError(c, "Failed to update priority", err.Error())
+	}
+
+	updated, err := s.queueRepo.GetQueueItem(c.Context(), id)
+	if err != nil {
+		return RespondInternalError(c, "Failed to retrieve updated queue item", err.Error())
+	}
+
+	return RespondSuccess(c, ToQueueItemResponse(updated))
+}
+
 // handleDownloadNZB handles GET /api/queue/{id}/download
 func (s *Server) handleDownloadNZB(c *fiber.Ctx) error {
 	// Extract ID from path parameter
