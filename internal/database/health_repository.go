@@ -1082,11 +1082,11 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 type UpdateType int
 
 const (
-	UpdateTypeHealthy      UpdateType = 1
-	UpdateTypeRetry        UpdateType = 2
-	UpdateTypeRepairRetry  UpdateType = 3 // Re-check of already-triggered repair; increments repair_retry_count
-	UpdateTypeCorrupted    UpdateType = 4
-	UpdateTypeRepairTrigger UpdateType = 5 // First-time trigger; does NOT increment repair_retry_count
+	UpdateTypeHealthy       UpdateType = 1
+	UpdateTypeRetry         UpdateType = 2
+	UpdateTypeRepairRetry   UpdateType = 3 // re-check of an already-triggered repair; increments repair_retry_count
+	UpdateTypeCorrupted     UpdateType = 4
+	UpdateTypeRepairTrigger UpdateType = 5 // first-time trigger; does not increment repair_retry_count
 )
 
 // HealthStatusUpdate represents a single update request for batch processing

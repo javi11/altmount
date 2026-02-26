@@ -371,7 +371,6 @@ func (hw *HealthWorker) PerformBackgroundCheck(ctx context.Context, filePath str
 }
 
 // prepareUpdateForResult decides what DB update and side effects are needed based on the check result.
-// It returns a pointer to the update so that the sideEffect can mutate it before the bulk DB write.
 func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database.FileHealth, event HealthEvent) (*database.HealthStatusUpdate, func() error) {
 	update := &database.HealthStatusUpdate{
 		FilePath: fh.FilePath,
@@ -379,7 +378,6 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 	var sideEffect func() error
 
-	// Bug #4 fix: handle EventTypeFileRemoved explicitly — the record was already deleted by CheckFile.
 	if event.Type == EventTypeFileRemoved {
 		update.Skip = true
 		sideEffect = func() error {
@@ -420,8 +418,6 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 
 	switch fh.Status {
 	case database.HealthStatusRepairTriggered:
-		// This branch is reached when a repair-notification re-check fails (shouldn't normally happen
-		// because repair notification files now use prepareRepairNotificationUpdate, but kept as safety net).
 		if fh.RepairRetryCount >= fh.MaxRepairRetries-1 {
 			update.Type = database.UpdateTypeCorrupted
 			update.Status = database.HealthStatusCorrupted
@@ -443,30 +439,21 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	default:
 		// Regular health check phase
 		if fh.RetryCount >= fh.MaxRetries-1 {
-			// Bug #2 fix: use UpdateTypeRepairTrigger (does NOT increment repair_retry_count) for the
-			// first-time transition from pending → repair_triggered.
-			update.Type = database.UpdateTypeRepairTrigger
+				update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
-
-			// Bug #1 fix: the sideEffect captures the update pointer so it can override the status
-			// (e.g. to corrupted) before the bulk write, instead of writing to the DB directly.
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Health check retries exhausted, triggering repair", "file_path", fh.FilePath)
 				outcome, err := hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
 				switch outcome {
 				case repairOutcomeDeleted:
-					// Health record already deleted; skip the bulk update for this file.
 					update.Skip = true
 				case repairOutcomeCorrupted:
-					// ARR failed — mark corrupted so the operator can investigate.
 					update.Type = database.UpdateTypeCorrupted
 					update.Status = database.HealthStatusCorrupted
 					if err != nil {
 						errMsg := err.Error()
 						update.ErrorMessage = &errMsg
 					}
-				case repairOutcomeTriggered:
-					// Keep update as repair_triggered (UpdateTypeRepairTrigger, no count increment).
 				}
 				return nil
 			}
@@ -493,9 +480,8 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 }
 
 // prepareRepairNotificationUpdate builds the update and side effect for a file already in
-// repair_triggered state. Unlike prepareUpdateForResult it does NOT call CheckFile — the
-// metadata has already been moved to the corrupted folder and should not be read from the
-// original path. It re-triggers ARR directly.
+// repair_triggered state. It re-triggers ARR directly without calling CheckFile, since the
+// metadata has already been moved to the corrupted folder.
 func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh *database.FileHealth) (*database.HealthStatusUpdate, func() error) {
 	update := &database.HealthStatusUpdate{
 		FilePath: fh.FilePath,
@@ -584,17 +570,13 @@ func (hw *HealthWorker) performDirectCheck(ctx context.Context, filePath string)
 	default:
 	}
 
-	// Prepare result for update (returns pointer so the sideEffect can mutate the status).
 	updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
-
-	// Execute side effects before the bulk write so any status override is captured.
 	if sideEffect != nil {
 		if err := sideEffect(); err != nil {
 			slog.ErrorContext(ctx, "Side effect failed in direct check", "file_path", filePath, "error", err)
 		}
 	}
 
-	// Perform database update (skip if the record was already deleted by the side effect).
 	if !updatePtr.Skip {
 		if err := hw.healthRepo.UpdateHealthStatusBulk(ctx, []database.HealthStatusUpdate{*updatePtr}); err != nil {
 			return fmt.Errorf("failed to update health status: %w", err)
@@ -694,12 +676,7 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 			opts := CheckOptions{}
 			event := hw.healthChecker.CheckFile(ctx, fh.FilePath, opts)
 
-			// Prepare result for batch update (returns a pointer so the sideEffect can mutate it).
 			updatePtr, sideEffect := hw.prepareUpdateForResult(ctx, fh, event)
-
-			// Bug #1 fix: run the sideEffect BEFORE adding to results — the sideEffect may
-			// change updatePtr.Status (e.g. repairOutcomeCorrupted) and we must capture the
-			// final value, not the pre-prepared one.
 			if sideEffect != nil {
 				if err := sideEffect(); err != nil {
 					slog.ErrorContext(ctx, "Failed to execute side effect for health result", "file_path", fh.FilePath, "error", err)
@@ -727,10 +704,6 @@ func (hw *HealthWorker) runHealthCheckCycle(ctx context.Context) error {
 		})
 	}
 
-	// Bug #3 fix: repair notification files must NOT go through CheckFile — the metadata has
-	// already been moved to the corrupted_metadata folder, so ReadFileMetadata on the original
-	// path would return nil and silently delete the health record. Instead, re-trigger ARR
-	// directly using prepareRepairNotificationUpdate.
 	for _, fileHealth := range repairFiles {
 		fh := fileHealth // Capture for closure
 		wg.Go(func() {
