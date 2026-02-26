@@ -1007,14 +1007,18 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 
 	// Delegate fallback handling to post-processor
 	if err := s.postProcessor.HandleFailure(ctx, item, processingErr); err == nil {
-		// Fallback succeeded - mark item as fallback instead of failed
-		if err := s.database.Repository.UpdateQueueItemStatus(ctx, item.ID, database.QueueStatusFallback, nil); err != nil {
-			s.log.ErrorContext(ctx, "Failed to mark item as fallback", "queue_id", item.ID, "error", err)
+		// Fallback succeeded - remove item from queue since ownership transfers to external SABnzbd
+		if err := s.database.Repository.RemoveFromQueue(ctx, item.ID); err != nil {
+			s.log.ErrorContext(ctx, "Failed to remove fallback item from queue", "queue_id", item.ID, "error", err)
 		} else {
-			s.log.DebugContext(ctx, "Item marked as fallback after successful SABnzbd transfer",
+			s.log.InfoContext(ctx, "Item removed from queue after successful SABnzbd fallback transfer",
 				"queue_id", item.ID,
 				"file", item.NzbPath,
 				"fallback_host", s.configGetter().SABnzbd.FallbackHost)
+		}
+		// Remove the local NZB file since ownership transfers to the external SABnzbd instance
+		if rmErr := os.Remove(item.NzbPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			s.log.WarnContext(ctx, "Failed to remove NZB file after fallback transfer", "file", item.NzbPath, "error", rmErr)
 		}
 	} else if IsNonRetryable(err) && strings.Contains(err.Error(), "SABnzbd fallback not configured") {
 		s.log.DebugContext(ctx, "SABnzbd fallback skipped (not configured)",
