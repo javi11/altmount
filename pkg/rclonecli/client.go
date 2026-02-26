@@ -168,6 +168,9 @@ func (m *Manager) performMount(ctx context.Context, provider, mountPath, webdavU
 		}
 	}
 
+	if cfg.RClone.Links {
+		vfsOpt["Links"] = true
+	}
 	mountArgs["vfsOpt"] = vfsOpt
 	mountArgs["mountOpt"] = mountOpt
 	// Make the mount request
