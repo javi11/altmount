@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/javi11/altmount/internal/encryption"
 	"github.com/javi11/altmount/internal/encryption/rclone"
 	"github.com/javi11/altmount/internal/errors"
@@ -677,19 +679,30 @@ func (p *Parser) normalizeSegmentSizesWithYenc(ctx context.Context, segments []n
 		return nil
 	}
 
-	// Fetch PartSize from second segment (this represents the "standard" segment size)
-	secondPartHeaders, err := p.fetchYencHeaders(ctx, segments[1], nil)
-	if err != nil {
-		return fmt.Errorf("failed to fetch second segment yEnc part size: %w", err)
+	// Fetch PartSize from second and last segments concurrently
+	lastSegmentIndex := len(segments) - 1
+	var secondPartHeaders, lastPartHeaders nntppool.YEncMeta
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		h, err := p.fetchYencHeaders(gctx, segments[1], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch second segment yEnc part size: %w", err)
+		}
+		secondPartHeaders = h
+		return nil
+	})
+	g.Go(func() error {
+		h, err := p.fetchYencHeaders(gctx, segments[lastSegmentIndex], nil)
+		if err != nil {
+			return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
+		}
+		lastPartHeaders = h
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	standardPartSize := int64(secondPartHeaders.PartSize)
-
-	// Fetch PartSize from last segment
-	lastSegmentIndex := len(segments) - 1
-	lastPartHeaders, err := p.fetchYencHeaders(ctx, segments[lastSegmentIndex], nil)
-	if err != nil {
-		return fmt.Errorf("failed to fetch last segment yEnc part size: %w", err)
-	}
 
 	// Apply the sizes:
 	// - First segment: use its actual size
