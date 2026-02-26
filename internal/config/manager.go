@@ -1191,7 +1191,7 @@ func DefaultConfig(configDir ...string) *Config {
 				".xvid", ".rm", ".rmvb", ".asf", ".asx", ".wtv", ".mk3d", ".dvr-ms",
 			},
 			MaxImportConnections:    5,                  // Default: 5 concurrent NNTP connections for validation and archive processing
-			MaxDownloadPrefetch:     3,                  // Default: 3 segments prefetched ahead for archive analysis
+			MaxDownloadPrefetch:     10,                 // Default: 10 segments prefetched ahead for archive analysis
 			SegmentSamplePercentage: 1,                  // Default: 1% segment sampling
 			ReadTimeoutSeconds:      300,                // Default: 5 minutes read timeout
 			ImportStrategy:          ImportStrategyNone, // Default: no import strategy (direct import)
