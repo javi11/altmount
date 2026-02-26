@@ -512,26 +512,19 @@ func (proc *Processor) processRarArchive(
 		}
 	}
 
-	// Analyze and process RAR archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
 
-		// Create progress tracker for 50-80% range (archive analysis)
-		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
-
-		// Get release date from first archive file
-		var releaseDate int64
-		if len(archiveFiles) > 0 {
-			releaseDate = archiveFiles[0].ReleaseDate.Unix()
+		// Lazy tracker allocation: nil *progress.Tracker is safe (nil-receiver guard).
+		var archiveProgressTracker, validationProgressTracker *progress.Tracker
+		if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
+			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 50, 80)
+			validationProgressTracker = proc.broadcaster.CreateTracker(queueID, 80, 95)
 		}
 
-		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
-		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-
-		// Determine sample percentage based on skipHealthCheck
+		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 		samplePercentage := proc.segmentSamplePercentage
 
-		// Process archive with unified aggregator
 		err := rar.ProcessArchive(
 			ctx,
 			nzbFolder,
@@ -552,10 +545,9 @@ func (proc *Processor) processRarArchive(
 		)
 		if err != nil {
 			return nzbFolder, err
-		} // Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
+		}
 	}
 
-	// Record history
 	if proc.recorder != nil {
 		nzbID := int64(queueID)
 		var totalSize int64
@@ -624,26 +616,18 @@ func (proc *Processor) processSevenZipArchive(
 		}
 	}
 
-	// Analyze and process 7zip archive
 	if len(archiveFiles) > 0 {
 		proc.updateProgress(queueID, 50)
 
-		// Create progress tracker for 50-80% range (archive analysis)
-		archiveProgressTracker := proc.broadcaster.CreateTracker(queueID, 50, 80)
-
-		// Get release date from first archive file
-		var releaseDate int64
-		if len(archiveFiles) > 0 {
-			releaseDate = archiveFiles[0].ReleaseDate.Unix()
+		var archiveProgressTracker, validationProgressTracker *progress.Tracker
+		if proc.broadcaster != nil && proc.broadcaster.HasSubscribers() {
+			archiveProgressTracker = proc.broadcaster.CreateTracker(queueID, 50, 80)
+			validationProgressTracker = proc.broadcaster.CreateTracker(queueID, 80, 95)
 		}
 
-		// Create progress tracker for 80-95% range (validation only, metadata handled separately)
-		validationProgressTracker := proc.broadcaster.CreateTracker(queueID, 80, 95)
-
-		// Determine sample percentage based on skipHealthCheck
+		releaseDate := archiveFiles[0].ReleaseDate.Unix()
 		samplePercentage := proc.segmentSamplePercentage
 
-		// Process archive with unified aggregator
 		err := sevenzip.ProcessArchive(
 			ctx,
 			nzbFolder,
@@ -664,10 +648,9 @@ func (proc *Processor) processSevenZipArchive(
 		)
 		if err != nil {
 			return nzbFolder, err
-		} // Archive analysis complete, validation and finalization will happen in aggregator (80-100%)
+		}
 	}
 
-	// Record history
 	if proc.recorder != nil {
 		nzbID := int64(queueID)
 		var totalSize int64

@@ -167,6 +167,9 @@ type Service struct {
 	// Cancellation tracking for processing items
 	cancelFuncs map[int64]context.CancelFunc
 	cancelMu    sync.RWMutex
+
+	// categoryPathCache memoizes buildCategoryPath results; cleared on config reload.
+	categoryPathCache sync.Map
 }
 
 // NewService creates a new NZB import service with manual scanning and queue processing capabilities
@@ -869,19 +872,30 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	return nil
 }
 
-// buildCategoryPath resolves a category name to its configured directory path.
-// Returns the category's Dir if configured, otherwise falls back to the category name.
-// buildCategoryPath builds the directory path for a category.
-// For Default category, returns its configured Dir (defaults to "complete").
+// invalidateCategoryCache clears memoized category paths. Call on config reload.
+func (s *Service) invalidateCategoryCache() {
+	s.categoryPathCache.Clear()
+}
+
+// buildCategoryPath resolves a category name to its configured directory path (memoized).
 func (s *Service) buildCategoryPath(category string) string {
-	// Empty category uses Default category
 	if category == "" {
 		category = config.DefaultCategoryName
 	}
 
+	if cached, ok := s.categoryPathCache.Load(category); ok {
+		return cached.(string)
+	}
+
+	result := s.resolveCategoryPath(category)
+	s.categoryPathCache.Store(category, result)
+	return result
+}
+
+// resolveCategoryPath performs the actual category-to-directory resolution.
+func (s *Service) resolveCategoryPath(category string) string {
 	cfg := s.configGetter()
 	if cfg == nil || len(cfg.SABnzbd.Categories) == 0 {
-		// No config, use default dir for Default category
 		if strings.EqualFold(category, config.DefaultCategoryName) {
 			return config.DefaultCategoryDir
 		}
@@ -893,7 +907,6 @@ func (s *Service) buildCategoryPath(category string) string {
 			if cat.Dir != "" {
 				return cat.Dir
 			}
-			// For Default category with empty Dir, return default dir
 			if strings.EqualFold(category, config.DefaultCategoryName) {
 				return config.DefaultCategoryDir
 			}

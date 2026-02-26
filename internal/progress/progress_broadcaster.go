@@ -18,13 +18,9 @@ type ProgressUpdate struct {
 
 // ProgressBroadcaster manages progress tracking for queue items
 type ProgressBroadcaster struct {
-	// Map of queue item ID to current progress percentage
-	progress map[int]int
-	// Mutex for thread-safe access
-	mu sync.RWMutex
-	// Logger
-	log *slog.Logger
-	// SSE subscribers
+	progress    map[int]int
+	mu          sync.RWMutex
+	log         *slog.Logger
 	subscribers map[string]chan ProgressUpdate
 	subMu       sync.RWMutex
 }
@@ -81,9 +77,7 @@ func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 	for subID, ch := range pb.subscribers {
 		select {
 		case ch <- update:
-			// Successfully sent update
 		default:
-			// Channel full, skip this subscriber to avoid blocking
 			pb.log.WarnContext(context.Background(), "subscriber channel full, skipping update", "subscriber_id", subID, "queue_id", queueID)
 		}
 	}
@@ -125,10 +119,7 @@ func (pb *ProgressBroadcaster) Subscribe() (string, <-chan ProgressUpdate) {
 	pb.subMu.Lock()
 	defer pb.subMu.Unlock()
 
-	// Generate unique subscriber ID
 	subID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
-
-	// Create buffered channel to prevent slow consumers from blocking
 	ch := make(chan ProgressUpdate, 10)
 	pb.subscribers[subID] = ch
 
@@ -144,4 +135,11 @@ func (pb *ProgressBroadcaster) Unsubscribe(subID string) {
 		close(ch)
 		delete(pb.subscribers, subID)
 	}
+}
+
+// HasSubscribers reports whether at least one SSE client is connected.
+func (pb *ProgressBroadcaster) HasSubscribers() bool {
+	pb.subMu.RLock()
+	defer pb.subMu.RUnlock()
+	return len(pb.subscribers) > 0
 }

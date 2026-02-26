@@ -29,9 +29,13 @@ func NewTracker(broadcaster Broadcaster, queueID, minPercent, maxPercent int) *T
 	}
 }
 
-// Update reports progress within the configured percentage range
+// Update reports progress within the configured percentage range.
+// Safe to call on a nil receiver (no-op).
 func (pt *Tracker) Update(current, total int) {
-	if total > 0 && pt.broadcaster != nil {
+	if pt == nil || pt.broadcaster == nil {
+		return
+	}
+	if total > 0 {
 		rangeSize := pt.maxPercent - pt.minPercent
 		percentage := pt.minPercent + (current * rangeSize / total)
 		pt.broadcaster.UpdateProgress(pt.queueID, percentage)
