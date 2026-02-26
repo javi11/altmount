@@ -125,6 +125,7 @@ type ImportAPIResponse struct {
 	SkipHealthCheck                bool                  `json:"skip_health_check"`
 	WatchDir                       *string               `json:"watch_dir,omitempty"`
 	WatchIntervalSeconds           *int                  `json:"watch_interval_seconds,omitempty"`
+	AllowNestedRarExtraction       *bool                 `json:"allow_nested_rar_extraction,omitempty"`
 }
 
 // SABnzbdAPIResponse sanitizes SABnzbd config for API responses
@@ -268,6 +269,7 @@ func ToImportAPIResponse(importConfig config.ImportConfig) ImportAPIResponse {
 		SkipHealthCheck:                importConfig.SkipHealthCheck != nil && *importConfig.SkipHealthCheck,
 		WatchDir:                       importConfig.WatchDir,
 		WatchIntervalSeconds:           importConfig.WatchIntervalSeconds,
+		AllowNestedRarExtraction:       importConfig.AllowNestedRarExtraction,
 	}
 }
 
