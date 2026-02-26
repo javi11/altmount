@@ -603,6 +603,22 @@ function RCloneMountSubSection({ config, onFormDataChange }: RCloneSubSectionPro
 				</div>
 				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<fieldset className="fieldset">
+						<legend className="fieldset-legend">Enable Symlinks (--links)</legend>
+						<label className="label cursor-pointer justify-start gap-3">
+							<input
+								type="checkbox"
+								className="checkbox checkbox-primary checkbox-sm"
+								checked={mountFormData.links}
+								onChange={(e) => handleMountInputChange("links", e.target.checked)}
+							/>
+							<span className="label-text break-words text-xs">
+								Translate symlinks using .rclonelink files
+							</span>
+						</label>
+					</fieldset>
+				</div>
+				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+					<fieldset className="fieldset">
 						<legend className="fieldset-legend">Timeout</legend>
 						<input
 							type="text"
@@ -1239,5 +1255,6 @@ function buildRCloneMountFormData(config: ConfigResponse): RCloneMountFormData {
 		async_read: config.rclone.async_read ?? true,
 		vfs_fast_fingerprint: config.rclone.vfs_fast_fingerprint || false,
 		use_mmap: config.rclone.use_mmap || false,
+		links: config.rclone.links || false,
 	};
 }

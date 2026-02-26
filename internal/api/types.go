@@ -59,6 +59,7 @@ type RCloneAPIResponse struct {
 	// Mount-Specific Settings
 	AllowOther    bool   `json:"allow_other"`
 	AllowNonEmpty bool   `json:"allow_non_empty"`
+	Links         bool   `json:"links"`
 	ReadOnly      bool   `json:"read_only"`
 	Timeout       string `json:"timeout"`
 	Syslog        bool   `json:"syslog"`
@@ -187,6 +188,7 @@ func ToConfigAPIResponse(cfg *config.Config, apiKey string) *ConfigAPIResponse {
 		// Mount-Specific Settings
 		AllowOther:    cfg.RClone.AllowOther,
 		AllowNonEmpty: cfg.RClone.AllowNonEmpty,
+		Links:         cfg.RClone.Links,
 		ReadOnly:      cfg.RClone.ReadOnly,
 		Timeout:       cfg.RClone.Timeout,
 		Syslog:        cfg.RClone.Syslog,
