@@ -21,21 +21,23 @@ import (
 
 // rarProcessor handles RAR archive analysis and content extraction
 type rarProcessor struct {
-	log                  *slog.Logger
-	poolManager          pool.Manager
-	maxConcurrentVolumes int
-	maxPrefetch          int
-	readTimeout          time.Duration
+	log                      *slog.Logger
+	poolManager              pool.Manager
+	maxConcurrentVolumes     int
+	maxPrefetch              int
+	readTimeout              time.Duration
+	allowNestedRarExtraction bool
 }
 
 // NewProcessor creates a new RAR processor
-func NewProcessor(poolManager pool.Manager, maxConcurrentVolumes int, maxPrefetch int, readTimeout time.Duration) Processor {
+func NewProcessor(poolManager pool.Manager, maxConcurrentVolumes int, maxPrefetch int, readTimeout time.Duration, allowNestedRarExtraction bool) Processor {
 	return &rarProcessor{
-		log:                  slog.Default().With("component", "rar-processor"),
-		poolManager:          poolManager,
-		maxConcurrentVolumes: maxConcurrentVolumes,
-		maxPrefetch:          maxPrefetch,
-		readTimeout:          readTimeout,
+		log:                      slog.Default().With("component", "rar-processor"),
+		poolManager:              poolManager,
+		maxConcurrentVolumes:     maxConcurrentVolumes,
+		maxPrefetch:              maxPrefetch,
+		readTimeout:              readTimeout,
+		allowNestedRarExtraction: allowNestedRarExtraction,
 	}
 }
 
@@ -193,9 +195,11 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	}
 
 	// Check for nested RAR archives and process them
-	Contents, err = rh.detectAndProcessNestedRars(ctx, Contents)
-	if err != nil {
-		return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
+	if rh.allowNestedRarExtraction {
+		Contents, err = rh.detectAndProcessNestedRars(ctx, Contents)
+		if err != nil {
+			return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
+		}
 	}
 
 	return Contents, nil

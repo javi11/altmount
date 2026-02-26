@@ -29,7 +29,6 @@ go.work.sum
 
 # Editor/IDE
 # .idea/
-.vscode/
 example/
 
 ./altmount

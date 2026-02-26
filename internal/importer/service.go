@@ -189,9 +189,13 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	if readTimeout == 0 {
 		readTimeout = 5 * time.Minute
 	}
+	allowNestedRarExtraction := true
+	if currentConfig.Import.AllowNestedRarExtraction != nil {
+		allowNestedRarExtraction = *currentConfig.Import.AllowNestedRarExtraction
+	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
