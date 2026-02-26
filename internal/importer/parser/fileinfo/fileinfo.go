@@ -8,6 +8,13 @@ import (
 	"github.com/javi11/altmount/internal/importer/parser/par2"
 )
 
+var (
+	obfMD5Pattern     = regexp.MustCompile(`^[a-f0-9]{32}$`)
+	obfLongHexPattern = regexp.MustCompile(`^[a-f0-9.]{40,}$`)
+	obfHexPattern     = regexp.MustCompile(`[a-f0-9]{30}`)
+	obfAbcXyzPattern  = regexp.MustCompile(`^abc\.xyz`)
+)
+
 // GetFileInfos extracts file information from NZB files with first segment data
 // Similar to C# GetFileInfosStep.GetFileInfos
 func GetFileInfos(
@@ -158,19 +165,19 @@ func isProbablyObfuscated(filename string) bool {
 
 	// 32 hex digits (MD5-like hash)
 	// Example: b082fa0beaa644d3aa01045d5b8d0b36.mkv
-	if matched, _ := regexp.MatchString(`^[a-f0-9]{32}$`, baseFilename); matched {
+	if obfMD5Pattern.MatchString(baseFilename) {
 		return true
 	}
 
 	// 40+ lowercase hex digits and/or dots
 	// Example: 0675e29e9abfd2.f7d069dab0b853283cc1b069a25f82.6547
-	if matched, _ := regexp.MatchString(`^[a-f0-9.]{40,}$`, baseFilename); matched {
+	if obfLongHexPattern.MatchString(baseFilename) {
 		return true
 	}
 
 	// 30+ hex digits with 2+ sets of square brackets
 	// Example: [BlaBla] something 5937bc5e32146e.bef89a622e4a23f07b0d3757ad5e8a.a02b264e [More]
-	if matched, _ := regexp.MatchString(`[a-f0-9]{30}`, baseFilename); matched {
+	if obfHexPattern.MatchString(baseFilename) {
 		bracketCount := strings.Count(baseFilename, "[")
 		if bracketCount >= 2 {
 			return true
@@ -179,7 +186,7 @@ func isProbablyObfuscated(filename string) bool {
 
 	// Starts with 'abc.xyz' (common obfuscation pattern)
 	// Example: abc.xyz.a4c567edbcbf27.BLA
-	if matched, _ := regexp.MatchString(`^abc\.xyz`, baseFilename); matched {
+	if obfAbcXyzPattern.MatchString(baseFilename) {
 		return true
 	}
 
