@@ -27,17 +27,27 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 		);
 	}
 
+	const activeConnections =
+		poolMetrics?.providers?.reduce((sum, p) => sum + p.used_connections, 0) ?? 0;
+	const maxConnections =
+		poolMetrics?.providers?.reduce((sum, p) => sum + p.max_connections, 0) ?? 0;
+
 	return (
 		<div className={`card bg-base-100 shadow-lg ${className || ""}`}>
 			<div className="card-body">
 				<div className="flex items-center justify-between">
 					<div className="flex-1">
-						<h2 className="card-title font-medium text-base-content/70 text-sm">Download Speed</h2>
+						<h2 className="card-title font-medium text-base-content/70 text-sm">Connections</h2>
 						{isLoading ? (
 							<LoadingSpinner size="sm" />
 						) : poolMetrics ? (
 							<div className="font-bold text-2xl text-primary">
-								{formatSpeed(poolMetrics.download_speed_bytes_per_sec)}
+								{activeConnections}
+								{maxConnections > 0 && (
+									<span className="ml-1 font-normal text-base text-base-content/40">
+										/ {maxConnections}
+									</span>
+								)}
 							</div>
 						) : (
 							<div className="font-bold text-2xl text-base-content/50">--</div>
@@ -48,6 +58,14 @@ export function PoolMetricsCard({ className }: PoolMetricsCardProps) {
 
 				{poolMetrics && (
 					<div className="mt-4 space-y-2">
+						{/* Download Speed */}
+						<div className="flex items-center justify-between text-sm">
+							<span className="text-base-content/70">Download Speed</span>
+							<span className="font-medium text-primary">
+								{formatSpeed(poolMetrics.download_speed_bytes_per_sec)}
+							</span>
+						</div>
+
 						{/* Total Downloaded */}
 						<div className="flex items-center justify-between text-sm">
 							<span className="text-base-content/70">Total Bytes</span>
