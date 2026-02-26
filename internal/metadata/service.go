@@ -660,6 +660,9 @@ func (ms *MetadataService) MoveToCorrupted(ctx context.Context, virtualPath stri
 		_ = os.Rename(idPath, targetPath+".id")
 	}
 
+	// Evict cache entry so subsequent reads return nil instead of stale data.
+	ms.cache.Delete(metadataPath)
+
 	slog.InfoContext(ctx, "Moved corrupted metadata to safety folder preserving structure",
 		"original", metadataPath,
 		"target", targetPath)
