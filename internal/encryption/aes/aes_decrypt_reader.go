@@ -95,6 +95,13 @@ func (r *aesDecryptReader) Read(p []byte) (int, error) {
 
 	totalRead := 0
 
+	// Respect requestEnd for output limiting: if the caller requested a sub-range,
+	// stop at requestEnd+1 rather than at the full decrypted file size.
+	effectiveSize := r.size
+	if r.requestEnd >= 0 && r.requestEnd+1 < r.size {
+		effectiveSize = r.requestEnd + 1
+	}
+
 	for totalRead < len(p) {
 		// First, drain any buffered data
 		if r.bufferPos < r.bufferLen {
@@ -108,8 +115,8 @@ func (r *aesDecryptReader) Read(p []byte) (int, error) {
 		// Need to read more data
 		// Read in multiples of AES block size
 		readSize := len(r.buffer)
-		if r.offset+int64(readSize) > r.size {
-			readSize = int(r.size - r.offset)
+		if r.offset+int64(readSize) > effectiveSize {
+			readSize = int(effectiveSize - r.offset)
 			// Round up to block size
 			if readSize%aes.BlockSize != 0 {
 				readSize += aes.BlockSize - (readSize % aes.BlockSize)
@@ -148,8 +155,8 @@ func (r *aesDecryptReader) Read(p []byte) (int, error) {
 
 			// Calculate how much decrypted data is actually part of the file
 			decryptedLen := n
-			if r.offset+int64(n) > r.size {
-				decryptedLen = int(r.size - r.offset)
+			if r.offset+int64(n) > effectiveSize {
+				decryptedLen = int(effectiveSize - r.offset)
 			}
 
 			// Copy to buffer

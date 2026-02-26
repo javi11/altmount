@@ -744,16 +744,17 @@ func ToHealthStatsResponse(stats map[database.HealthStatus]int) *HealthStatsResp
 
 // FileMetadataResponse represents file metadata information in API responses
 type FileMetadataResponse struct {
-	FileSize          int64                 `json:"file_size"`
-	SourceNzbPath     string                `json:"source_nzb_path"`
-	Status            string                `json:"status"`
-	SegmentCount      int                   `json:"segment_count"`
-	AvailableSegments *int                  `json:"available_segments"`
-	Encryption        string                `json:"encryption"`
-	CreatedAt         string                `json:"created_at"`
-	ModifiedAt        string                `json:"modified_at"`
-	PasswordProtected bool                  `json:"password_protected"`
-	Segments          []SegmentInfoResponse `json:"segments"`
+	FileSize          int64                  `json:"file_size"`
+	SourceNzbPath     string                 `json:"source_nzb_path"`
+	Status            string                 `json:"status"`
+	SegmentCount      int                    `json:"segment_count"`
+	AvailableSegments *int                   `json:"available_segments"`
+	Encryption        string                 `json:"encryption"`
+	CreatedAt         string                 `json:"created_at"`
+	ModifiedAt        string                 `json:"modified_at"`
+	PasswordProtected bool                   `json:"password_protected"`
+	Segments          []SegmentInfoResponse  `json:"segments"`
+	NestedSources     []NestedSourceResponse `json:"nested_sources,omitempty"`
 }
 
 // SegmentInfoResponse represents segment information in API responses
@@ -763,6 +764,24 @@ type SegmentInfoResponse struct {
 	EndOffset   int64  `json:"end_offset"`
 	MessageID   string `json:"message_id"`
 	Available   bool   `json:"available"`
+}
+
+// NestedSegmentResponse represents one segment within a nested source volume
+type NestedSegmentResponse struct {
+	SegmentSize int64  `json:"segment_size"`
+	StartOffset int64  `json:"start_offset"`
+	EndOffset   int64  `json:"end_offset"`
+	MessageID   string `json:"message_id"`
+}
+
+// NestedSourceResponse represents one inner-RAR volume in a nested archive
+type NestedSourceResponse struct {
+	VolumeIndex     int                     `json:"volume_index"`
+	InnerLength     int64                   `json:"inner_length"`
+	InnerVolumeSize int64                   `json:"inner_volume_size"`
+	Encrypted       bool                    `json:"encrypted"`
+	SegmentCount    int                     `json:"segment_count"`
+	Segments        []NestedSegmentResponse `json:"segments"`
 }
 
 // Provider Management API Types

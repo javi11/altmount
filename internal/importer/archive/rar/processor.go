@@ -59,11 +59,23 @@ func (rh *rarProcessor) CreateFileMetadataFromRarContent(
 		NzbdavId:      nzbdavId,
 	}
 
-	// Set AES encryption if keys are present
+	// Set AES encryption if keys are present (single-layer encrypted RAR)
 	if len(Content.AesKey) > 0 {
 		meta.Encryption = metapb.Encryption_AES
 		meta.AesKey = Content.AesKey
 		meta.AesIv = Content.AesIV
+	}
+
+	// Populate nested sources for encrypted nested RAR files
+	for _, ns := range Content.NestedSources {
+		meta.NestedSources = append(meta.NestedSources, &metapb.NestedSegmentSource{
+			Segments:        ns.Segments,
+			AesKey:          ns.AesKey,
+			AesIv:           ns.AesIV,
+			InnerOffset:     ns.InnerOffset,
+			InnerLength:     ns.InnerLength,
+			InnerVolumeSize: ns.InnerVolumeSize,
+		})
 	}
 
 	return meta
@@ -178,6 +190,12 @@ func (rh *rarProcessor) AnalyzeRarContentFromNzb(ctx context.Context, rarFiles [
 	Contents, err := rh.convertAggregatedFilesToRarContent(ctx, aggregatedFiles, normalizedFiles)
 	if err != nil {
 		return nil, errors.NewNonRetryableError("failed to convert iterator results to RarContent", err)
+	}
+
+	// Check for nested RAR archives and process them
+	Contents, err = rh.detectAndProcessNestedRars(ctx, Contents)
+	if err != nil {
+		return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
 	}
 
 	return Contents, nil
@@ -493,6 +511,263 @@ func patchMissingSegment(segments []*metapb.SegmentData, expectedSize, coveredSi
 	return patchedSegments, newCovered, nil
 }
 
+// isRarArchiveFile checks if a filename looks like a RAR archive file
+// (single volume or any part of a multi-volume set).
+func isRarArchiveFile(filename string) bool {
+	lower := strings.ToLower(filename)
+	if strings.HasSuffix(lower, ".rar") {
+		return true
+	}
+	if rPattern.MatchString(lower) {
+		return true
+	}
+	return false
+}
+
+// detectAndProcessNestedRars checks if any outer RAR Contents are themselves RAR archives.
+// If so, it analyzes the inner RARs and replaces them with their extracted contents.
+// Non-RAR contents are passed through unchanged.
+func (rh *rarProcessor) detectAndProcessNestedRars(ctx context.Context, outerContents []Content) ([]Content, error) {
+	// Separate outer contents into RAR archives and non-RAR files
+	var nonRarContents []Content
+	rarContentsByBase := make(map[string][]Content) // base name → RAR volume contents
+
+	for _, c := range outerContents {
+		if c.IsDirectory || !isRarArchiveFile(c.Filename) {
+			nonRarContents = append(nonRarContents, c)
+			continue
+		}
+		base, _ := rh.parseRarFilename(c.Filename)
+		rarContentsByBase[base] = append(rarContentsByBase[base], c)
+	}
+
+	if len(rarContentsByBase) == 0 {
+		return outerContents, nil
+	}
+
+	rh.log.InfoContext(ctx, "Detected nested RAR archives",
+		"rar_groups", len(rarContentsByBase),
+		"non_rar_files", len(nonRarContents))
+
+	var result []Content
+	result = append(result, nonRarContents...)
+
+	for base, innerRarContents := range rarContentsByBase {
+		// Sort by part number for correct volume order
+		slices.SortFunc(innerRarContents, func(a, b Content) int {
+			_, partA := rh.parseRarFilename(a.Filename)
+			_, partB := rh.parseRarFilename(b.Filename)
+			return partA - partB
+		})
+
+		innerFiles, err := rh.processNestedRarContent(ctx, innerRarContents)
+		if err != nil {
+			rh.log.WarnContext(ctx, "Failed to process nested RAR, keeping original",
+				"base", base, "error", err)
+			result = append(result, innerRarContents...)
+			continue
+		}
+
+		if len(innerFiles) == 0 {
+			rh.log.WarnContext(ctx, "Nested RAR contained no files, keeping original",
+				"base", base)
+			result = append(result, innerRarContents...)
+			continue
+		}
+
+		result = append(result, innerFiles...)
+	}
+
+	return result, nil
+}
+
+// processNestedRarContent analyzes inner RAR volumes and maps their files back
+// to outer RAR segments. For unencrypted outer RARs, it flattens segments directly.
+// For encrypted outer RARs, it creates NestedSource entries.
+func (rh *rarProcessor) processNestedRarContent(ctx context.Context, innerRarContents []Content) ([]Content, error) {
+	// Determine if outer RAR is encrypted (check first volume)
+	outerEncrypted := len(innerRarContents[0].AesKey) > 0
+
+	// Build DecryptingFileEntry for each inner RAR volume
+	entries := make([]filesystem.DecryptingFileEntry, 0, len(innerRarContents))
+	for _, c := range innerRarContents {
+		decryptedSize := c.PackedSize
+		if outerEncrypted {
+			// PackedSize is the size of the encrypted data in the outer RAR.
+			// The decrypted size is the actual file size (stored uncompressed inside).
+			decryptedSize = c.Size
+		}
+
+		entries = append(entries, filesystem.DecryptingFileEntry{
+			Filename:      c.Filename,
+			Segments:      c.Segments,
+			DecryptedSize: decryptedSize,
+			AesKey:        c.AesKey,
+			AesIV:         c.AesIV,
+		})
+	}
+
+	// Create filesystem for reading inner RAR volumes
+	dfs := filesystem.NewDecryptingFileSystem(ctx, rh.poolManager, entries, rh.maxPrefetch, rh.readTimeout)
+
+	// Find the first inner RAR part
+	fileNames := make([]string, len(innerRarContents))
+	for i, c := range innerRarContents {
+		fileNames[i] = c.Filename
+	}
+
+	mainRarFile, err := rh.getFirstRarPart(fileNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find first inner RAR part: %w", err)
+	}
+
+	rh.log.InfoContext(ctx, "Analyzing inner RAR archive",
+		"main_file", mainRarFile,
+		"volumes", len(innerRarContents),
+		"outer_encrypted", outerEncrypted)
+
+	// Analyze inner RAR (no password — inner RAR is unencrypted)
+	opts := []rardecode.Option{rardecode.FileSystem(dfs), rardecode.SkipCheck}
+	if len(innerRarContents) > 1 {
+		opts = append(opts, rardecode.ParallelRead(true), rardecode.MaxConcurrentVolumes(rh.maxConcurrentVolumes))
+	}
+
+	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze inner RAR: %w", err)
+	}
+
+	if len(aggregatedFiles) == 0 {
+		return nil, nil
+	}
+
+	// Validate inner files are stored (uncompressed)
+	if err := rh.checkForCompressedFiles(aggregatedFiles); err != nil {
+		return nil, err
+	}
+
+	// Build index of inner RAR volumes by filename for quick lookup
+	innerVolumeIndex := make(map[string]*Content, len(innerRarContents))
+	for i := range innerRarContents {
+		c := &innerRarContents[i]
+		innerVolumeIndex[c.Filename] = c
+		innerVolumeIndex[filepath.Base(c.Filename)] = c
+	}
+
+	// Map inner files to outer segments
+	var result []Content
+	for _, af := range aggregatedFiles {
+		normalizedName := strings.ReplaceAll(af.Name, "\\", "/")
+
+		if outerEncrypted {
+			content, err := rh.mapNestedFileEncrypted(ctx, af, normalizedName, innerVolumeIndex)
+			if err != nil {
+				rh.log.WarnContext(ctx, "Failed to map nested file (encrypted)", "file", af.Name, "error", err)
+				continue
+			}
+			result = append(result, content)
+		} else {
+			content, err := rh.mapNestedFileFlat(ctx, af, normalizedName, innerVolumeIndex)
+			if err != nil {
+				rh.log.WarnContext(ctx, "Failed to map nested file (flat)", "file", af.Name, "error", err)
+				continue
+			}
+			result = append(result, content)
+		}
+	}
+
+	return result, nil
+}
+
+// mapNestedFileFlat maps an inner file to flattened outer segments (unencrypted outer RAR).
+// Combined offset = outer segment slicing at inner file's data offset within the inner volume.
+func (rh *rarProcessor) mapNestedFileFlat(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex map[string]*Content) (Content, error) {
+	rc := Content{
+		InternalPath: normalizedName,
+		Filename:     filepath.Base(normalizedName),
+		Size:         af.TotalUnpackedSize,
+		PackedSize:   af.TotalPackedSize,
+	}
+
+	var fileSegments []*metapb.SegmentData
+
+	for _, part := range af.Parts {
+		if part.PackedSize <= 0 {
+			continue
+		}
+
+		outerContent := innerVolumeIndex[part.Path]
+		if outerContent == nil {
+			outerContent = innerVolumeIndex[filepath.Base(part.Path)]
+		}
+		if outerContent == nil {
+			rh.log.WarnContext(ctx, "Inner RAR volume not found", "part_path", part.Path, "file", af.Name)
+			continue
+		}
+
+		// Slice outer segments at the inner file's data offset
+		sliced, covered, err := slicePartSegments(outerContent.Segments, part.DataOffset, part.PackedSize)
+		if err != nil {
+			rh.log.ErrorContext(ctx, "Failed slicing nested part segments", "error", err, "part_path", part.Path, "file", af.Name)
+			continue
+		}
+
+		sliced, covered, err = patchMissingSegment(sliced, part.PackedSize, covered)
+		if err != nil {
+			return Content{}, errors.NewNonRetryableError(
+				fmt.Sprintf("incomplete nested NZB data for %s (part %s): %v", af.Name, filepath.Base(part.Path), err), nil)
+		}
+
+		_ = covered
+		fileSegments = append(fileSegments, sliced...)
+	}
+
+	rc.Segments = fileSegments
+	return rc, nil
+}
+
+// mapNestedFileEncrypted maps an inner file to NestedSource entries (encrypted outer RAR).
+// Each inner volume part becomes a separate NestedSource with its own AES credentials.
+func (rh *rarProcessor) mapNestedFileEncrypted(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex map[string]*Content) (Content, error) {
+	rc := Content{
+		InternalPath: normalizedName,
+		Filename:     filepath.Base(normalizedName),
+		Size:         af.TotalUnpackedSize,
+		PackedSize:   af.TotalPackedSize,
+	}
+
+	for _, part := range af.Parts {
+		if part.PackedSize <= 0 {
+			continue
+		}
+
+		outerContent := innerVolumeIndex[part.Path]
+		if outerContent == nil {
+			outerContent = innerVolumeIndex[filepath.Base(part.Path)]
+		}
+		if outerContent == nil {
+			rh.log.WarnContext(ctx, "Inner RAR volume not found for encrypted nesting", "part_path", part.Path, "file", af.Name)
+			continue
+		}
+
+		// For encrypted outer, the outer segments cover the entire inner volume.
+		// We need the full outer segments + the AES credentials to decrypt,
+		// then read at the inner offset.
+		ns := NestedSource{
+			Segments:        outerContent.Segments,
+			AesKey:          outerContent.AesKey,
+			AesIV:           outerContent.AesIV,
+			InnerOffset:     part.DataOffset,
+			InnerLength:     part.PackedSize,
+			InnerVolumeSize: outerContent.Size, // Decrypted size of the inner volume
+		}
+
+		rc.NestedSources = append(rc.NestedSources, ns)
+	}
+
+	return rc, nil
+}
+
 // slicePartSegments returns the slice of segment ranges (cloned and trimmed) covering
 // [dataOffset, dataOffset+length-1] within a part file represented by ordered segments.
 // Assumes each segment's Start/End offsets are relative to the segment itself starting at 0
@@ -517,8 +792,8 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 		if segSize <= 0 {
 			continue
 		}
-		segAbsStart := absPos + seg.StartOffset // usually absPos
-		segAbsEnd := absPos + seg.EndOffset
+		segAbsStart := absPos
+		segAbsEnd := absPos + segSize - 1
 
 		// If segment ends before target range starts, skip
 		if segAbsEnd < targetStart {

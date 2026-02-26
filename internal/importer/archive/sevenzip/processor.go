@@ -1,7 +1,6 @@
 package sevenzip
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -9,6 +8,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -20,9 +20,9 @@ import (
 	metapb "github.com/javi11/altmount/internal/metadata/proto"
 	"github.com/javi11/altmount/internal/pool"
 	"github.com/javi11/altmount/internal/progress"
+	"github.com/javi11/rardecode/v2"
 	"github.com/javi11/sevenzip"
 	"golang.org/x/text/encoding/unicode"
-	"golang.org/x/text/transform"
 )
 
 // sevenZipProcessor handles 7zip archive analysis and content extraction
@@ -49,6 +49,13 @@ var (
 	sevenZipPartPattern = regexp.MustCompile(`^(.+)\.7z\.(\d+)$`)
 	// Pattern for extracting just the number from .7z.001
 	sevenZipPartNumberPattern = regexp.MustCompile(`\.7z\.(\d+)$`)
+)
+
+// Pre-compiled regex patterns for nested RAR detection (duplicated from rar package since unexported)
+var (
+	rarPartPattern    = regexp.MustCompile(`^(.+)\.part(\d+)\.rar$`)
+	rarRPattern       = regexp.MustCompile(`^(.+)\.r(\d+)$`)
+	rarNumericPattern = regexp.MustCompile(`^(.+)\.(\d+)$`)
 )
 
 // CreateFileMetadataFromSevenZipContent creates FileMetadata from SevenZipContent for the metadata system
@@ -78,33 +85,48 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 		meta.AesIv = content.AesIV
 	}
 
+	// Populate nested sources for encrypted nested RAR files
+	for _, ns := range content.NestedSources {
+		meta.NestedSources = append(meta.NestedSources, &metapb.NestedSegmentSource{
+			Segments:        ns.Segments,
+			AesKey:          ns.AesKey,
+			AesIv:           ns.AesIV,
+			InnerOffset:     ns.InnerOffset,
+			InnerLength:     ns.InnerLength,
+			InnerVolumeSize: ns.InnerVolumeSize,
+		})
+	}
+
 	return meta
 }
 
 // deriveAESKey derives the AES encryption key from a password using the 7-zip algorithm
 func (sz *sevenZipProcessor) deriveAESKey(password string, fileInfo sevenzip.FileInfo) ([]byte, error) {
-	// Build the input for hashing: salt + password (UTF-16LE)
-	b := bytes.NewBuffer(fileInfo.AESSalt)
-
-	// Convert password to UTF-16LE
+	// Encode password as UTF-16LE (per 7zip AES-256 KDF spec)
 	utf16le := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
-	t := transform.NewWriter(b, utf16le.NewEncoder())
-	if _, err := t.Write([]byte(password)); err != nil {
+	pwBytes, err := utf16le.NewEncoder().Bytes([]byte(password))
+	if err != nil {
 		return nil, fmt.Errorf("failed to encode password: %w", err)
 	}
 
-	// Calculate the key using SHA-256
+	salt := fileInfo.AESSalt
 	key := make([]byte, sha256.Size)
 
 	if fileInfo.KDFIterations == 0 {
-		// Special case: no hashing, use data directly (padded/truncated to 32 bytes)
-		copy(key, b.Bytes())
+		// Special case: no hashing, copy (password || salt) padded to 32 bytes
+		copy(key, pwBytes)
+		if len(pwBytes) < len(key) {
+			copy(key[len(pwBytes):], salt)
+		}
 	} else {
-		// Apply SHA-256 hash in rounds
+		// 7zip KDF: each round feeds password_utf16le || salt || uint64_le(i) to SHA-256
 		h := sha256.New()
+		var counter [8]byte
 		for i := uint64(0); i < uint64(fileInfo.KDFIterations); i++ {
-			h.Write(b.Bytes())
-			binary.Write(h, binary.LittleEndian, i)
+			h.Write(pwBytes)
+			h.Write(salt)
+			binary.LittleEndian.PutUint64(counter[:], i)
+			h.Write(counter[:])
 		}
 		copy(key, h.Sum(nil))
 	}
@@ -202,6 +224,12 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	// Verify we have valid files after filtering
 	if len(contents) == 0 {
 		return nil, errors.NewNonRetryableError("no valid files found in 7zip archive after filtering. Only uncompressed files are supported", nil)
+	}
+
+	// Check for nested RAR archives and process them
+	contents, err = sz.detectAndProcessNestedRars(ctx, contents)
+	if err != nil {
+		return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
 	}
 
 	return contents, nil
@@ -608,4 +636,406 @@ func extractSevenZipPartNumber(fileName string) int {
 	}
 
 	return 999999 // Unknown format goes last
+}
+
+// --- Nested RAR detection and processing ---
+
+// isRarArchiveFile checks if a filename looks like a RAR archive file
+// (single volume or any part of a multi-volume set).
+func isRarArchiveFile(filename string) bool {
+	lower := strings.ToLower(filename)
+	if strings.HasSuffix(lower, ".rar") {
+		return true
+	}
+	if rarRPattern.MatchString(lower) {
+		return true
+	}
+	return false
+}
+
+// parseRarFilename extracts base name and part number from RAR filename.
+func parseRarFilename(filename string) (base string, part int) {
+	lowerFilename := strings.ToLower(filename)
+
+	// Pattern 1: filename.part###.rar (e.g., movie.part001.rar)
+	if matches := rarPartPattern.FindStringSubmatch(filename); len(matches) > 2 {
+		base = matches[1]
+		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
+			if partNum > 0 {
+				part = partNum - 1
+			}
+			return base, part
+		}
+	}
+
+	// Pattern 2: filename.rar (first part)
+	if strings.HasSuffix(lowerFilename, ".rar") {
+		base = strings.TrimSuffix(filename, filepath.Ext(filename))
+		return base, 0
+	}
+
+	// Pattern 3: filename.r## or filename.r### (e.g., movie.r00)
+	if matches := rarRPattern.FindStringSubmatch(filename); len(matches) > 2 {
+		base = matches[1]
+		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
+			return base, partNum
+		}
+	}
+
+	// Pattern 4: filename.### (numeric extensions like .001, .002)
+	if matches := rarNumericPattern.FindStringSubmatch(filename); len(matches) > 2 {
+		base = matches[1]
+		if partNum := archive.ParseInt(matches[2]); partNum >= 0 {
+			if partNum > 0 {
+				part = partNum - 1
+			}
+			return base, part
+		}
+	}
+
+	return filename, 999999
+}
+
+// getRarFilePriority returns the priority for different RAR file types.
+// Lower number = higher priority.
+func getRarFilePriority(filename string) int {
+	lowerName := strings.ToLower(filename)
+
+	if strings.HasSuffix(lowerName, ".rar") && !strings.Contains(lowerName, ".part") {
+		return 1
+	}
+	if strings.Contains(lowerName, ".part") && strings.HasSuffix(lowerName, ".rar") {
+		return 2
+	}
+	if strings.Contains(lowerName, ".r0") {
+		return 3
+	}
+	if len(lowerName) > 4 && lowerName[len(lowerName)-4:len(lowerName)-3] == "." {
+		return 4
+	}
+	return 5
+}
+
+// getFirstRarPart finds the filename of the first part of a nested RAR archive.
+func (sz *sevenZipProcessor) getFirstRarPart(rarFileNames []string) (string, error) {
+	if len(rarFileNames) == 0 {
+		return "", errors.NewNonRetryableError("no RAR files provided", nil)
+	}
+
+	if len(rarFileNames) == 1 {
+		return rarFileNames[0], nil
+	}
+
+	type candidateFile struct {
+		filename string
+		baseName string
+		priority int
+	}
+
+	var candidates []candidateFile
+
+	for _, filename := range rarFileNames {
+		base, part := parseRarFilename(filename)
+		if part != 0 {
+			continue
+		}
+		priority := getRarFilePriority(filename)
+		candidates = append(candidates, candidateFile{
+			filename: filename,
+			baseName: base,
+			priority: priority,
+		})
+	}
+
+	if len(candidates) == 0 {
+		return "", errors.NewNonRetryableError("no valid first RAR part found in archive", nil)
+	}
+
+	best := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if candidate.priority < best.priority ||
+			(candidate.priority == best.priority && candidate.filename < best.filename) {
+			best = candidate
+		}
+	}
+
+	return best.filename, nil
+}
+
+// patchMissingSegment duplicates the last segment to fill a small gap in coverage.
+func patchMissingSegment(segments []*metapb.SegmentData, expectedSize, coveredSize int64) ([]*metapb.SegmentData, int64, error) {
+	shortfall := expectedSize - coveredSize
+	if shortfall <= 0 {
+		return segments, coveredSize, nil
+	}
+
+	const maxSingleSegmentSize = 800000 // ~800KB, typical segment is ~768KB
+
+	if shortfall > maxSingleSegmentSize {
+		return nil, 0, errors.NewNonRetryableError(
+			fmt.Sprintf("missing %d bytes exceeds single segment threshold (%d bytes), cannot auto-patch", shortfall, maxSingleSegmentSize), nil)
+	}
+
+	if len(segments) == 0 {
+		return nil, 0, errors.NewNonRetryableError("no segments available to duplicate for patching", nil)
+	}
+
+	lastSeg := segments[len(segments)-1]
+	patchSeg := &metapb.SegmentData{
+		Id:          lastSeg.Id,
+		StartOffset: lastSeg.StartOffset,
+		EndOffset:   lastSeg.StartOffset + shortfall - 1,
+		SegmentSize: lastSeg.SegmentSize,
+	}
+
+	patchedSegments := append(segments, patchSeg)
+	newCovered := coveredSize + shortfall
+
+	return patchedSegments, newCovered, nil
+}
+
+// detectAndProcessNestedRars checks if any outer 7zip Contents are themselves RAR archives.
+// If so, it analyzes the inner RARs and replaces them with their extracted contents.
+// Non-RAR contents are passed through unchanged.
+func (sz *sevenZipProcessor) detectAndProcessNestedRars(ctx context.Context, outerContents []Content) ([]Content, error) {
+	var nonRarContents []Content
+	rarContentsByBase := make(map[string][]Content)
+
+	for _, c := range outerContents {
+		if c.IsDirectory || !isRarArchiveFile(c.Filename) {
+			nonRarContents = append(nonRarContents, c)
+			continue
+		}
+		base, _ := parseRarFilename(c.Filename)
+		rarContentsByBase[base] = append(rarContentsByBase[base], c)
+	}
+
+	if len(rarContentsByBase) == 0 {
+		return outerContents, nil
+	}
+
+	sz.log.InfoContext(ctx, "Detected nested RAR archives inside 7zip",
+		"rar_groups", len(rarContentsByBase),
+		"non_rar_files", len(nonRarContents))
+
+	var result []Content
+	result = append(result, nonRarContents...)
+
+	for base, innerRarContents := range rarContentsByBase {
+		// Sort by part number for correct volume order
+		slices.SortFunc(innerRarContents, func(a, b Content) int {
+			_, partA := parseRarFilename(a.Filename)
+			_, partB := parseRarFilename(b.Filename)
+			return partA - partB
+		})
+
+		innerFiles, err := sz.processNestedRarContent(ctx, innerRarContents)
+		if err != nil {
+			sz.log.WarnContext(ctx, "Failed to process nested RAR in 7zip, keeping original",
+				"base", base, "error", err)
+			result = append(result, innerRarContents...)
+			continue
+		}
+
+		if len(innerFiles) == 0 {
+			sz.log.WarnContext(ctx, "Nested RAR in 7zip contained no files, keeping original",
+				"base", base)
+			result = append(result, innerRarContents...)
+			continue
+		}
+
+		result = append(result, innerFiles...)
+	}
+
+	return result, nil
+}
+
+// processNestedRarContent analyzes inner RAR volumes and maps their files back
+// to outer 7zip segments. For unencrypted outer 7zips, it flattens segments directly.
+// For encrypted outer 7zips, it creates NestedSource entries.
+func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerRarContents []Content) ([]Content, error) {
+	// Determine if outer 7zip is encrypted (check first volume)
+	outerEncrypted := len(innerRarContents[0].AesKey) > 0
+
+	// Build DecryptingFileEntry for each inner RAR volume
+	entries := make([]filesystem.DecryptingFileEntry, 0, len(innerRarContents))
+	for _, c := range innerRarContents {
+		decryptedSize := c.PackedSize
+		if outerEncrypted || decryptedSize == 0 {
+			decryptedSize = c.Size
+		}
+
+		entries = append(entries, filesystem.DecryptingFileEntry{
+			Filename:      c.Filename,
+			Segments:      c.Segments,
+			DecryptedSize: decryptedSize,
+			AesKey:        c.AesKey,
+			AesIV:         c.AesIV,
+		})
+	}
+
+	// Create filesystem for reading inner RAR volumes
+	dfs := filesystem.NewDecryptingFileSystem(ctx, sz.poolManager, entries, sz.maxPrefetch, sz.readTimeout)
+
+	// Find the first inner RAR part
+	fileNames := make([]string, len(innerRarContents))
+	for i, c := range innerRarContents {
+		fileNames[i] = c.Filename
+	}
+
+	mainRarFile, err := sz.getFirstRarPart(fileNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find first inner RAR part: %w", err)
+	}
+
+	sz.log.InfoContext(ctx, "Analyzing inner RAR archive from 7zip",
+		"main_file", mainRarFile,
+		"volumes", len(innerRarContents),
+		"outer_encrypted", outerEncrypted)
+
+	// Analyze inner RAR (no password — inner RAR is unencrypted)
+	opts := []rardecode.Option{rardecode.FileSystem(dfs), rardecode.SkipCheck}
+	if len(innerRarContents) > 1 {
+		opts = append(opts, rardecode.ParallelRead(true))
+	}
+
+	aggregatedFiles, err := rardecode.ListArchiveInfo(mainRarFile, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze inner RAR: %w", err)
+	}
+
+	if len(aggregatedFiles) == 0 {
+		return nil, nil
+	}
+
+	// Validate inner files are stored (uncompressed)
+	for _, file := range aggregatedFiles {
+		if file.Compressed {
+			compressionInfo := ""
+			if file.CompressionMethod != "" {
+				compressionInfo = fmt.Sprintf(" (uses %s compression)", file.CompressionMethod)
+			}
+			return nil, errors.NewNonRetryableError(
+				fmt.Sprintf("compressed files are not supported in nested RAR: %s%s", file.Name, compressionInfo),
+				nil,
+			)
+		}
+	}
+
+	// Build index of inner RAR volumes by filename for quick lookup
+	innerVolumeIndex := make(map[string]*Content, len(innerRarContents))
+	for i := range innerRarContents {
+		c := &innerRarContents[i]
+		innerVolumeIndex[c.Filename] = c
+		innerVolumeIndex[filepath.Base(c.Filename)] = c
+	}
+
+	// Map inner files to outer segments
+	var result []Content
+	for _, af := range aggregatedFiles {
+		normalizedName := strings.ReplaceAll(af.Name, "\\", "/")
+
+		if outerEncrypted {
+			content, err := sz.mapNestedFileEncrypted(ctx, af, normalizedName, innerVolumeIndex)
+			if err != nil {
+				sz.log.WarnContext(ctx, "Failed to map nested file (encrypted)", "file", af.Name, "error", err)
+				continue
+			}
+			result = append(result, content)
+		} else {
+			content, err := sz.mapNestedFileFlat(ctx, af, normalizedName, innerVolumeIndex)
+			if err != nil {
+				sz.log.WarnContext(ctx, "Failed to map nested file (flat)", "file", af.Name, "error", err)
+				continue
+			}
+			result = append(result, content)
+		}
+	}
+
+	return result, nil
+}
+
+// mapNestedFileFlat maps an inner file to flattened outer segments (unencrypted outer 7zip).
+func (sz *sevenZipProcessor) mapNestedFileFlat(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex map[string]*Content) (Content, error) {
+	rc := Content{
+		InternalPath: normalizedName,
+		Filename:     filepath.Base(normalizedName),
+		Size:         af.TotalUnpackedSize,
+		PackedSize:   af.TotalPackedSize,
+	}
+
+	var fileSegments []*metapb.SegmentData
+
+	for _, part := range af.Parts {
+		if part.PackedSize <= 0 {
+			continue
+		}
+
+		outerContent := innerVolumeIndex[part.Path]
+		if outerContent == nil {
+			outerContent = innerVolumeIndex[filepath.Base(part.Path)]
+		}
+		if outerContent == nil {
+			sz.log.WarnContext(ctx, "Inner RAR volume not found", "part_path", part.Path, "file", af.Name)
+			continue
+		}
+
+		// Slice outer segments at the inner file's data offset
+		sliced, covered, err := sliceSegmentsForRange(outerContent.Segments, part.DataOffset, part.PackedSize)
+		if err != nil {
+			sz.log.ErrorContext(ctx, "Failed slicing nested part segments", "error", err, "part_path", part.Path, "file", af.Name)
+			continue
+		}
+
+		sliced, covered, err = patchMissingSegment(sliced, part.PackedSize, covered)
+		if err != nil {
+			return Content{}, errors.NewNonRetryableError(
+				fmt.Sprintf("incomplete nested NZB data for %s (part %s): %v", af.Name, filepath.Base(part.Path), err), nil)
+		}
+
+		_ = covered
+		fileSegments = append(fileSegments, sliced...)
+	}
+
+	rc.Segments = fileSegments
+	return rc, nil
+}
+
+// mapNestedFileEncrypted maps an inner file to NestedSource entries (encrypted outer 7zip).
+// Each inner volume part becomes a separate NestedSource with its own AES credentials.
+func (sz *sevenZipProcessor) mapNestedFileEncrypted(ctx context.Context, af rardecode.ArchiveFileInfo, normalizedName string, innerVolumeIndex map[string]*Content) (Content, error) {
+	rc := Content{
+		InternalPath: normalizedName,
+		Filename:     filepath.Base(normalizedName),
+		Size:         af.TotalUnpackedSize,
+		PackedSize:   af.TotalPackedSize,
+	}
+
+	for _, part := range af.Parts {
+		if part.PackedSize <= 0 {
+			continue
+		}
+
+		outerContent := innerVolumeIndex[part.Path]
+		if outerContent == nil {
+			outerContent = innerVolumeIndex[filepath.Base(part.Path)]
+		}
+		if outerContent == nil {
+			sz.log.WarnContext(ctx, "Inner RAR volume not found for encrypted nesting", "part_path", part.Path, "file", af.Name)
+			continue
+		}
+
+		ns := NestedSource{
+			Segments:        outerContent.Segments,
+			AesKey:          outerContent.AesKey,
+			AesIV:           outerContent.AesIV,
+			InnerOffset:     part.DataOffset,
+			InnerLength:     part.PackedSize,
+			InnerVolumeSize: outerContent.Size,
+		}
+
+		rc.NestedSources = append(rc.NestedSources, ns)
+	}
+
+	return rc, nil
 }
