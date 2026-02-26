@@ -84,7 +84,9 @@ func (hc *HealthChecker) CheckFile(ctx context.Context, filePath string, opts ..
 	}
 	if fileMeta == nil {
 		// File not found - remove from health database
-		_ = hc.healthRepo.DeleteHealthRecord(ctx, filePath)
+		if err := hc.healthRepo.DeleteHealthRecord(ctx, filePath); err != nil {
+			slog.ErrorContext(ctx, "Failed to delete health record for removed file", "file_path", filePath, "error", err)
+		}
 
 		return HealthEvent{
 			Type:      EventTypeFileRemoved,
