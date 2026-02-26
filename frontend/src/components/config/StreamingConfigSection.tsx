@@ -132,6 +132,10 @@ export function StreamingConfigSection({
 				<p className="text-base-content/50 text-sm">
 					Cache decoded Usenet segments on disk so repeated reads avoid network round-trips.
 				</p>
+				<p className="mt-1 text-base-content/60 text-sm">
+					The segment cache applies regardless of the mount option chosen. It is recommended to
+					disable it if rclone VFS cache is also enabled.
+				</p>
 			</div>
 
 			<div className="space-y-8">
