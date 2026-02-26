@@ -179,6 +179,7 @@ export interface RCloneConfig {
 	async_read: boolean;
 	vfs_fast_fingerprint: boolean;
 	use_mmap: boolean;
+	links: boolean;
 }
 
 // Fuse configuration
@@ -382,6 +383,7 @@ export interface RCloneUpdateRequest {
 	async_read?: boolean;
 	vfs_fast_fingerprint?: boolean;
 	use_mmap?: boolean;
+	links?: boolean;
 }
 
 // Import update request
@@ -546,6 +548,7 @@ export interface RCloneFormData {
 	async_read: boolean;
 	vfs_fast_fingerprint: boolean;
 	use_mmap: boolean;
+	links: boolean;
 }
 
 export interface RCloneRCFormData {
@@ -597,6 +600,7 @@ export interface RCloneMountFormData {
 	async_read: boolean;
 	vfs_fast_fingerprint: boolean;
 	use_mmap: boolean;
+	links: boolean;
 }
 
 export interface MountStatus {

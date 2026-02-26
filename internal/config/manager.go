@@ -180,6 +180,7 @@ type RCloneConfig struct {
 	AsyncRead          bool `yaml:"async_read" mapstructure:"async_read" json:"async_read"`
 	VFSFastFingerprint bool `yaml:"vfs_fast_fingerprint" mapstructure:"vfs_fast_fingerprint" json:"vfs_fast_fingerprint"`
 	UseMmap            bool `yaml:"use_mmap" mapstructure:"use_mmap" json:"use_mmap"`
+	Links              bool `yaml:"links" mapstructure:"links" json:"links"`
 }
 
 // ImportStrategy represents the import strategy type

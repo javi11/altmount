@@ -78,6 +78,7 @@ export function RCloneConfigSection({
 		async_read: config.rclone.async_read || true,
 		vfs_fast_fingerprint: config.rclone.vfs_fast_fingerprint || false,
 		use_mmap: config.rclone.use_mmap || false,
+		links: config.rclone.links || false,
 	});
 
 	// Separate state for mount path since it's a root-level config
@@ -152,6 +153,7 @@ export function RCloneConfigSection({
 			async_read: config.rclone.async_read || true,
 			vfs_fast_fingerprint: config.rclone.vfs_fast_fingerprint || false,
 			use_mmap: config.rclone.use_mmap || false,
+		links: config.rclone.links || false,
 		};
 		setMountFormData(newMountFormData);
 		setHasMountChanges(false);
