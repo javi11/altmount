@@ -56,7 +56,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		strmParser:              parser.NewStrmParser(),
 		metadataService:         metadataService,
 		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, maxDownloadPrefetch, readTimeout, allowNestedRarExtraction),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, sevenZipPrefetch(maxDownloadPrefetch), readTimeout, allowNestedRarExtraction),
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxDownloadPrefetch, readTimeout, allowNestedRarExtraction),
 		poolManager:             poolManager,
 		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,
@@ -71,18 +71,6 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		rarPartPattern:  regexp.MustCompile(`(?i)^(.+)\.part(\d+)\.rar$`), // filename.part001.rar
 		rarPartPattern2: regexp.MustCompile(`(?i)^(.+)\.r(\d+)$`),         // filename.r00
 	}
-}
-
-// sevenZipPrefetch returns the prefetch count to use for 7z archive analysis.
-// 7z archives benefit from higher prefetch because the TOC is at the end of the
-// archive and content streams are read sequentially, meaning more parallel segment
-// downloads saturate available NNTP connections (#101).
-func sevenZipPrefetch(base int) int {
-	n := base * 3
-	if n < 10 {
-		n = 10
-	}
-	return n
 }
 
 // getCleanNzbName removes the queue ID prefix from the NZB filename if present
