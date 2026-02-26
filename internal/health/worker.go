@@ -439,22 +439,12 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 	default:
 		// Regular health check phase
 		if fh.RetryCount >= fh.MaxRetries-1 {
-				update.Type = database.UpdateTypeRepairTrigger
+			update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Health check retries exhausted, triggering repair", "file_path", fh.FilePath)
 				outcome, err := hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
-				switch outcome {
-				case repairOutcomeDeleted:
-					update.Skip = true
-				case repairOutcomeCorrupted:
-					update.Type = database.UpdateTypeCorrupted
-					update.Status = database.HealthStatusCorrupted
-					if err != nil {
-						errMsg := err.Error()
-						update.ErrorMessage = &errMsg
-					}
-				}
+				applyRepairOutcome(update, outcome, err)
 				return nil
 			}
 		} else {
@@ -506,19 +496,7 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 
 	sideEffect := func() error {
 		outcome, err := hw.retriggerFileRepair(ctx, fh)
-		switch outcome {
-		case repairOutcomeDeleted:
-			update.Skip = true
-		case repairOutcomeCorrupted:
-			update.Type = database.UpdateTypeCorrupted
-			update.Status = database.HealthStatusCorrupted
-			if err != nil {
-				errMsg := err.Error()
-				update.ErrorMessage = &errMsg
-			}
-		case repairOutcomeTriggered:
-			// Keep as repair_triggered with incremented repair_retry_count.
-		}
+		applyRepairOutcome(update, outcome, err)
 		return nil
 	}
 
@@ -801,6 +779,55 @@ const (
 	repairOutcomeDeleted                        // Health record and/or metadata were deleted (zombie)
 )
 
+// applyRepairOutcome maps a repairOutcome to the corresponding fields on the HealthStatusUpdate.
+func applyRepairOutcome(update *database.HealthStatusUpdate, outcome repairOutcome, err error) {
+	switch outcome {
+	case repairOutcomeDeleted:
+		update.Skip = true
+	case repairOutcomeCorrupted:
+		update.Type = database.UpdateTypeCorrupted
+		update.Status = database.HealthStatusCorrupted
+		if err != nil {
+			errMsg := err.Error()
+			update.ErrorMessage = &errMsg
+		}
+	}
+}
+
+// resolvePathForRescan determines the absolute path that ARR should rescan for a given file.
+// It checks LibraryPath first, then ImportDir, and falls back to MountPath.
+func (hw *HealthWorker) resolvePathForRescan(item *database.FileHealth) string {
+	if item.LibraryPath != nil && *item.LibraryPath != "" {
+		return *item.LibraryPath
+	}
+	cfg := hw.configGetter()
+	if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
+		return pathutil.JoinAbsPath(*cfg.Import.ImportDir, item.FilePath)
+	}
+	return pathutil.JoinAbsPath(cfg.MountPath, item.FilePath)
+}
+
+// cleanupZombieRecord deletes the health record and associated metadata for a file that is
+// no longer tracked by ARR (zombie or orphan). Errors are logged but not returned because
+// cleanup is best-effort.
+func (hw *HealthWorker) cleanupZombieRecord(ctx context.Context, filePath string) {
+	if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
+		slog.ErrorContext(ctx, "Failed to delete health record during cleanup", "file_path", filePath, "error", delErr)
+	}
+
+	cfg := hw.configGetter()
+	relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
+	relativePath = strings.TrimPrefix(relativePath, "/")
+
+	deleteSourceNzb := false
+	if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
+		deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
+	}
+	if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
+		slog.ErrorContext(ctx, "Failed to delete metadata during cleanup", "file_path", filePath, "error", delMetaErr)
+	}
+}
+
 // triggerFileRepair handles the business logic for triggering repair of a corrupted file.
 // It contacts ARR APIs and moves metadata, but does NOT write health status to the DB directly.
 // Callers must apply the returned outcome to the HealthStatusUpdate before the bulk DB write.
@@ -828,61 +855,14 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	slog.InfoContext(ctx, "Triggering file repair using direct ARR API approach", "file_path", filePath)
 
-	cfg := hw.configGetter()
-
-	var pathForRescan string
-
-	if item.LibraryPath != nil && *item.LibraryPath != "" {
-		pathForRescan = *item.LibraryPath
-	} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, filePath)
-	} else {
-		pathForRescan = pathutil.JoinAbsPath(hw.configGetter().MountPath, filePath)
-	}
+	pathForRescan := hw.resolvePathForRescan(item)
 
 	err := hw.arrsService.TriggerFileRescan(ctx, pathForRescan, filePath)
 	if err != nil {
-		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) {
-			slog.WarnContext(ctx, "File is a zombie (already satisfied by another file in ARR), removing from AltMount",
-				"file_path", filePath)
-
-			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
-				slog.ErrorContext(ctx, "Failed to delete zombie health record", "error", delErr)
-			}
-
-			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
-			relativePath = strings.TrimPrefix(relativePath, "/")
-
-			deleteSourceNzb := false
-			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
-				deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
-			}
-			if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
-				slog.ErrorContext(ctx, "Failed to delete zombie metadata file", "error", delMetaErr)
-			}
-
-			return repairOutcomeDeleted, nil
-		}
-
-		if errors.Is(err, arrs.ErrPathMatchFailed) {
-			slog.WarnContext(ctx, "File not found in ARR (likely upgraded/deleted), removing orphan from AltMount",
-				"file_path", filePath)
-
-			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
-				slog.ErrorContext(ctx, "Failed to delete orphaned health record", "error", delErr)
-			}
-
-			relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
-			relativePath = strings.TrimPrefix(relativePath, "/")
-
-			deleteSourceNzb := false
-			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
-				deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
-			}
-			if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
-				slog.ErrorContext(ctx, "Failed to delete orphaned metadata file", "error", delMetaErr)
-			}
-
+		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
+			slog.WarnContext(ctx, "File no longer tracked by ARR, removing from AltMount",
+				"file_path", filePath, "arr_error", err)
+			hw.cleanupZombieRecord(ctx, filePath)
 			return repairOutcomeDeleted, nil
 		}
 
@@ -890,8 +870,6 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 			"file_path", filePath,
 			"path_for_rescan", pathForRescan,
 			"error", err)
-
-		// Return corrupted outcome — the caller will apply this via the bulk update.
 		return repairOutcomeCorrupted, err
 	}
 
@@ -902,7 +880,8 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 
 	// Move the metadata file to the corrupted folder so FUSE/WebDAV stops showing it.
 	// We do this AFTER ARR accepts the repair so the file stays visible if ARR cannot find a replacement.
-	relativePath := strings.TrimPrefix(filePath, hw.configGetter().MountPath)
+	cfg := hw.configGetter()
+	relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
 	relativePath = strings.TrimPrefix(relativePath, "/")
 	slog.InfoContext(ctx, "Moving metadata file for corrupted item to safety folder to trigger replacement", "file_path", filePath)
 	if moveErr := hw.metadataService.MoveToCorrupted(ctx, relativePath); moveErr != nil {
@@ -917,16 +896,7 @@ func (hw *HealthWorker) triggerFileRepair(ctx context.Context, item *database.Fi
 // Callers must apply the returned outcome to the HealthStatusUpdate before the bulk DB write.
 func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.FileHealth) (repairOutcome, error) {
 	filePath := item.FilePath
-	cfg := hw.configGetter()
-
-	var pathForRescan string
-	if item.LibraryPath != nil && *item.LibraryPath != "" {
-		pathForRescan = *item.LibraryPath
-	} else if cfg.Import.ImportDir != nil && *cfg.Import.ImportDir != "" {
-		pathForRescan = pathutil.JoinAbsPath(*cfg.Import.ImportDir, filePath)
-	} else {
-		pathForRescan = pathutil.JoinAbsPath(cfg.MountPath, filePath)
-	}
+	pathForRescan := hw.resolvePathForRescan(item)
 
 	slog.InfoContext(ctx, "Re-triggering ARR rescan for file in repair", "file_path", filePath, "path_for_rescan", pathForRescan)
 
@@ -934,20 +904,7 @@ func (hw *HealthWorker) retriggerFileRepair(ctx context.Context, item *database.
 	if err != nil {
 		if errors.Is(err, arrs.ErrEpisodeAlreadySatisfied) || errors.Is(err, arrs.ErrPathMatchFailed) {
 			slog.WarnContext(ctx, "File no longer tracked by ARR during re-trigger, removing from AltMount", "file_path", filePath)
-
-			if delErr := hw.healthRepo.DeleteHealthRecord(ctx, filePath); delErr != nil {
-				slog.ErrorContext(ctx, "Failed to delete health record during re-trigger cleanup", "error", delErr)
-			}
-
-			relativePath := strings.TrimPrefix(filePath, cfg.MountPath)
-			relativePath = strings.TrimPrefix(relativePath, "/")
-			deleteSourceNzb := false
-			if cfg.Metadata.DeleteSourceNzbOnRemoval != nil {
-				deleteSourceNzb = *cfg.Metadata.DeleteSourceNzbOnRemoval
-			}
-			if delMetaErr := hw.metadataService.DeleteFileMetadataWithSourceNzb(ctx, relativePath, deleteSourceNzb); delMetaErr != nil {
-				slog.ErrorContext(ctx, "Failed to delete metadata during re-trigger cleanup", "error", delMetaErr)
-			}
+			hw.cleanupZombieRecord(ctx, filePath)
 			return repairOutcomeDeleted, nil
 		}
 

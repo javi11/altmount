@@ -62,7 +62,6 @@ type repairTestEnv struct {
 	healthChecker   *HealthChecker
 	mockARRs        *mockARRsService
 	hw              *HealthWorker
-	cfg             *config.Config
 }
 
 func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEnv {
@@ -137,7 +136,6 @@ func newRepairTestEnv(t *testing.T, tempDir string, arrsErr error) *repairTestEn
 		healthChecker:   healthChecker,
 		mockARRs:        mockARRs,
 		hw:              hw,
-		cfg:             cfg,
 	}
 }
 
