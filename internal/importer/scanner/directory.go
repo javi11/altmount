@@ -18,10 +18,14 @@ type QueueAdder interface {
 	IsFileProcessed(filePath string, scanRoot string) bool
 }
 
+// defaultMaxScanDepth prevents runaway traversal of deep or cyclically-linked trees.
+const defaultMaxScanDepth = 10
+
 // DirectoryScanner handles manual directory scanning for NZB/STRM files
 type DirectoryScanner struct {
-	queueAdder QueueAdder
-	log        *slog.Logger
+	queueAdder   QueueAdder
+	log          *slog.Logger
+	maxScanDepth int // maximum directory depth relative to the scan root (0 = unlimited)
 
 	// State management
 	mu         sync.RWMutex
@@ -32,10 +36,16 @@ type DirectoryScanner struct {
 // NewDirectoryScanner creates a new directory scanner
 func NewDirectoryScanner(queueAdder QueueAdder) *DirectoryScanner {
 	return &DirectoryScanner{
-		queueAdder: queueAdder,
-		log:        slog.Default().With("component", "directory-scanner"),
-		info:       ScanInfo{Status: ScanStatusIdle},
+		queueAdder:   queueAdder,
+		log:          slog.Default().With("component", "directory-scanner"),
+		info:         ScanInfo{Status: ScanStatusIdle},
+		maxScanDepth: defaultMaxScanDepth,
 	}
+}
+
+// SetMaxScanDepth configures the maximum directory depth (0 = unlimited).
+func (d *DirectoryScanner) SetMaxScanDepth(depth int) {
+	d.maxScanDepth = depth
 }
 
 // Start starts a manual scan of the specified directory
@@ -144,40 +154,46 @@ func (d *DirectoryScanner) performScan(ctx context.Context, scanPath string) {
 			return nil // Continue walking
 		}
 
-		// Skip directories
 		if entry.IsDir() {
+			if d.maxScanDepth > 0 && path != scanPath {
+				rel, relErr := filepath.Rel(scanPath, path)
+				if relErr == nil {
+					depth := strings.Count(filepath.ToSlash(rel), "/") + 1
+					if depth > d.maxScanDepth {
+						d.log.DebugContext(ctx, "Skipping directory: exceeds max scan depth",
+							"path", path,
+							"depth", depth,
+							"max_depth", d.maxScanDepth)
+						return filepath.SkipDir
+					}
+				}
+			}
 			return nil
 		}
 
-		// Update current file being processed
 		d.mu.Lock()
 		d.info.CurrentFile = path
 		d.info.FilesFound++
 		d.mu.Unlock()
 
-		// Check if it's an NZB or STRM file
 		ext := strings.ToLower(path)
 		if !strings.HasSuffix(ext, ".nzb") && !strings.HasSuffix(ext, ".strm") {
 			return nil
 		}
 
-		// Check if already in queue
 		if d.queueAdder.IsFileInQueue(ctx, path) {
 			return nil
 		}
 
-		// Check if already processed (metadata exists)
 		if d.queueAdder.IsFileProcessed(path, scanPath) {
 			d.log.DebugContext(ctx, "Skipping file - already processed", "file", path)
 			return nil
 		}
 
-		// Add to queue
 		if err := d.queueAdder.AddToQueue(ctx, path, &scanPath); err != nil {
 			d.log.ErrorContext(ctx, "Failed to add file to queue during scan", "file", path, "error", err)
 		}
 
-		// Update files added counter
 		d.mu.Lock()
 		d.info.FilesAdded++
 		d.mu.Unlock()

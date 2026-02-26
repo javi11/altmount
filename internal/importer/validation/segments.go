@@ -17,6 +17,10 @@ import (
 // the Usenet connection pool, and that their total size matches the expected file size (accounting
 // for encryption overhead).
 //
+// The function uses a single combined pass for structural validation + size accumulation + segment
+// selection, then validates only the selected subset via the network. This avoids iterating the
+// full segment list twice (once here and once inside ValidateSegmentAvailability).
+//
 // The optional progressTracker is passed through to segment availability validation for real-time
 // progress updates during concurrent validation.
 func ValidateSegmentsForFile(
@@ -35,24 +39,21 @@ func ValidateSegmentsForFile(
 		return fmt.Errorf("no segments provided for file %s", filename)
 	}
 
-	// First, verify that the connection pool is available
 	usenetPool, err := poolManager.GetPool()
 	if err != nil {
 		return fmt.Errorf("cannot write metadata for %s: usenet connection pool unavailable: %w", filename, err)
 	}
-
 	if usenetPool == nil {
 		return fmt.Errorf("cannot write metadata for %s: usenet connection pool is nil", filename)
 	}
 
-	// First loop: Calculate total size from ALL segments
-	totalSegmentSize := int64(0)
+	// Single pass: structural validation + size accumulation.
+	var totalSegmentSize int64
 	for i, segment := range segments {
 		if segment == nil {
 			return fmt.Errorf("segment %d is nil for file %s", i, filename)
 		}
 
-		// Validate segment has valid offsets
 		if segment.StartOffset < 0 || segment.EndOffset < 0 {
 			return fmt.Errorf("invalid offsets (start=%d, end=%d) in segment %d for file %s",
 				segment.StartOffset, segment.EndOffset, i, filename)
@@ -63,13 +64,11 @@ func ValidateSegmentsForFile(
 				segment.StartOffset, segment.EndOffset, i, filename)
 		}
 
-		// Calculate segment size
 		segSize := segment.EndOffset - segment.StartOffset + 1
 		if segSize <= 0 {
 			return fmt.Errorf("non-positive size %d in segment %d for file %s", segSize, i, filename)
 		}
 
-		// Validate segment has a valid Usenet message ID
 		if segment.Id == "" {
 			return fmt.Errorf("empty message ID in segment %d for file %s (cannot retrieve data)", i, filename)
 		}
@@ -77,12 +76,11 @@ func ValidateSegmentsForFile(
 		totalSegmentSize += segSize
 	}
 
-	// Validate segment availability using shared validation logic
-	if err := usenet.ValidateSegmentAvailability(ctx, segments, poolManager, maxGoroutines, samplePercentage, progressTracker, timeout, false); err != nil {
+	selected := usenet.SelectSegmentsForValidation(segments, samplePercentage)
+	if err := usenet.ValidateSegmentList(ctx, selected, poolManager, maxGoroutines, progressTracker, timeout, false); err != nil {
 		return err
 	}
 
-	// For encrypted files, convert decrypted size to encrypted size for comparison
 	expectedSize := fileSize
 	switch encryption {
 	case metapb.Encryption_RCLONE:
