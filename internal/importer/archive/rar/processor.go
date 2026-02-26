@@ -562,17 +562,11 @@ func (rh *rarProcessor) detectAndProcessNestedRars(ctx context.Context, outerCon
 
 		innerFiles, err := rh.processNestedRarContent(ctx, innerRarContents)
 		if err != nil {
-			rh.log.WarnContext(ctx, "Failed to process nested RAR, keeping original",
-				"base", base, "error", err)
-			result = append(result, innerRarContents...)
-			continue
+			return nil, fmt.Errorf("failed to process nested RAR %q: %w", base, err)
 		}
 
 		if len(innerFiles) == 0 {
-			rh.log.WarnContext(ctx, "Nested RAR contained no files, keeping original",
-				"base", base)
-			result = append(result, innerRarContents...)
-			continue
+			return nil, fmt.Errorf("nested RAR %q contained no extractable files", base)
 		}
 
 		result = append(result, innerFiles...)
