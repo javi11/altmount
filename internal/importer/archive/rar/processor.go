@@ -500,8 +500,8 @@ func patchMissingSegment(segments []*metapb.SegmentData, expectedSize, coveredSi
 	lastSeg := segments[len(segments)-1]
 	patchSeg := &metapb.SegmentData{
 		Id:          lastSeg.Id,
-		StartOffset: lastSeg.StartOffset,
-		EndOffset:   lastSeg.StartOffset + shortfall - 1,
+		StartOffset: lastSeg.EndOffset + 1,
+		EndOffset:   lastSeg.EndOffset + shortfall,
 		SegmentSize: lastSeg.SegmentSize,
 	}
 
@@ -792,8 +792,8 @@ func slicePartSegments(segments []*metapb.SegmentData, dataOffset int64, length 
 		if segSize <= 0 {
 			continue
 		}
-		segAbsStart := absPos + seg.StartOffset // usually absPos
-		segAbsEnd := absPos + seg.EndOffset
+		segAbsStart := absPos
+		segAbsEnd := absPos + segSize - 1
 
 		// If segment ends before target range starts, skip
 		if segAbsEnd < targetStart {

@@ -330,8 +330,8 @@ func TestReadAtNoSegments(t *testing.T) {
 	buf := make([]byte, 100)
 	_, err := mvf.ReadAt(buf, 0)
 
-	if err != ErrNoNzbData {
-		t.Errorf("ReadAt() error = %v, want ErrNoNzbData", err)
+	if err != ErrMissmatchedSegments {
+		t.Errorf("ReadAt() error = %v, want ErrMissmatchedSegments", err)
 	}
 }
 

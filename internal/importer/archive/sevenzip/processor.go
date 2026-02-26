@@ -1,7 +1,6 @@
 package sevenzip
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -24,7 +23,6 @@ import (
 	"github.com/javi11/rardecode/v2"
 	"github.com/javi11/sevenzip"
 	"golang.org/x/text/encoding/unicode"
-	"golang.org/x/text/transform"
 )
 
 // sevenZipProcessor handles 7zip archive analysis and content extraction
@@ -104,28 +102,31 @@ func (sz *sevenZipProcessor) CreateFileMetadataFromSevenZipContent(
 
 // deriveAESKey derives the AES encryption key from a password using the 7-zip algorithm
 func (sz *sevenZipProcessor) deriveAESKey(password string, fileInfo sevenzip.FileInfo) ([]byte, error) {
-	// Build the input for hashing: salt + password (UTF-16LE)
-	b := bytes.NewBuffer(fileInfo.AESSalt)
-
-	// Convert password to UTF-16LE
+	// Encode password as UTF-16LE (per 7zip AES-256 KDF spec)
 	utf16le := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
-	t := transform.NewWriter(b, utf16le.NewEncoder())
-	if _, err := t.Write([]byte(password)); err != nil {
+	pwBytes, err := utf16le.NewEncoder().Bytes([]byte(password))
+	if err != nil {
 		return nil, fmt.Errorf("failed to encode password: %w", err)
 	}
 
-	// Calculate the key using SHA-256
+	salt := fileInfo.AESSalt
 	key := make([]byte, sha256.Size)
 
 	if fileInfo.KDFIterations == 0 {
-		// Special case: no hashing, use data directly (padded/truncated to 32 bytes)
-		copy(key, b.Bytes())
+		// Special case: no hashing, copy (password || salt) padded to 32 bytes
+		copy(key, pwBytes)
+		if len(pwBytes) < len(key) {
+			copy(key[len(pwBytes):], salt)
+		}
 	} else {
-		// Apply SHA-256 hash in rounds
+		// 7zip KDF: each round feeds password_utf16le || salt || uint64_le(i) to SHA-256
 		h := sha256.New()
+		var counter [8]byte
 		for i := uint64(0); i < uint64(fileInfo.KDFIterations); i++ {
-			h.Write(b.Bytes())
-			binary.Write(h, binary.LittleEndian, i)
+			h.Write(pwBytes)
+			h.Write(salt)
+			binary.LittleEndian.PutUint64(counter[:], i)
+			h.Write(counter[:])
 		}
 		copy(key, h.Sum(nil))
 	}
