@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/javi11/altmount/internal/pathutil"
@@ -16,9 +17,19 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// metaCacheEntry holds the raw proto bytes and the nzbdav ID sidecar content.
+type metaCacheEntry struct {
+	data     []byte
+	nzbdavID string
+}
+
 // MetadataService provides low-level read/write operations for metadata files
 type MetadataService struct {
 	rootPath string
+	// cache stores raw proto bytes + sidecar nzbdavID keyed by absolute metadataPath.
+	// This avoids re-reading .meta files on every WebDAV directory listing, which
+	// is critical for large libraries with tens of thousands of files (#21/#94).
+	cache sync.Map
 }
 
 // NewMetadataService creates a new metadata service
@@ -76,6 +87,9 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 		return fmt.Errorf("failed to write metadata file: %w", err)
 	}
 
+	// Update cache with the freshly written bytes.
+	ms.cache.Store(metadataPath, metaCacheEntry{data: data, nzbdavID: nzbdavId})
+
 	// Handle ID sidecar file
 	idPath := metadataPath + ".id"
 	if nzbdavId != "" {
@@ -93,14 +107,27 @@ func (ms *MetadataService) WriteFileMetadata(virtualPath string, metadata *metap
 	return nil
 }
 
-// ReadFileMetadata reads file metadata from disk
+// ReadFileMetadata reads file metadata from the cache when available, or falls back to disk.
 func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMetadata, error) {
 	// Create metadata file path
 	filename := filepath.Base(virtualPath)
 	metadataDir := filepath.Join(ms.rootPath, filepath.Dir(virtualPath))
 	metadataPath := filepath.Join(metadataDir, filename+".meta")
 
-	// Read file
+	// Check cache first to avoid disk I/O on repeated directory listings.
+	if v, ok := ms.cache.Load(metadataPath); ok {
+		entry := v.(metaCacheEntry)
+		m := &metapb.FileMetadata{}
+		if err := proto.Unmarshal(entry.data, m); err != nil {
+			// Cache entry is corrupt – evict and fall through to disk read.
+			ms.cache.Delete(metadataPath)
+		} else {
+			m.NzbdavId = entry.nzbdavID
+			return m, nil
+		}
+	}
+
+	// Read file from disk
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -116,10 +143,15 @@ func (ms *MetadataService) ReadFileMetadata(virtualPath string) (*metapb.FileMet
 	}
 
 	// Read ID from sidecar file (compatibility mode)
+	var nzbdavID string
 	idPath := metadataPath + ".id"
 	if idData, err := os.ReadFile(idPath); err == nil {
-		metadata.NzbdavId = string(idData)
+		nzbdavID = string(idData)
+		metadata.NzbdavId = nzbdavID
 	}
+
+	// Populate cache so subsequent listings skip disk I/O.
+	ms.cache.Store(metadataPath, metaCacheEntry{data: data, nzbdavID: nzbdavID})
 
 	return metadata, nil
 }
@@ -271,6 +303,9 @@ func (ms *MetadataService) DeleteFileMetadataWithSourceNzb(ctx context.Context, 
 		}
 	}
 
+	// Evict from cache before deleting the file.
+	ms.cache.Delete(metadataPath)
+
 	// Delete the metadata file
 	err := os.Remove(metadataPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -356,6 +391,11 @@ func (ms *MetadataService) RenameFileMetadata(oldVirtualPath, newVirtualPath str
 				slog.Warn("Failed to rename .id sidecar file", "old", oldIDPath, "new", newIDPath, "error", err)
 			}
 		}
+	}
+
+	// Move cache entry from old path to new path.
+	if v, ok := ms.cache.LoadAndDelete(oldMetaPath); ok {
+		ms.cache.Store(newMetaPath, v)
 	}
 
 	return nil
