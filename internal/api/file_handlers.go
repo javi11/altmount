@@ -78,6 +78,7 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 
 	// Convert nested sources
 	var nestedSources []NestedSourceResponse
+	nestedSegmentCount := 0
 	for i, ns := range metadata.NestedSources {
 		segs := make([]NestedSegmentResponse, len(ns.Segments))
 		for j, seg := range ns.Segments {
@@ -88,6 +89,7 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 				MessageID:   seg.Id,
 			}
 		}
+		nestedSegmentCount += len(ns.Segments)
 		nestedSources = append(nestedSources, NestedSourceResponse{
 			VolumeIndex:     i,
 			InnerLength:     ns.InnerLength,
@@ -99,10 +101,7 @@ func (s *Server) convertToFileMetadataResponse(metadata *metapb.FileMetadata) *F
 	}
 
 	// Total segment count includes nested source segments
-	segmentCount := len(metadata.SegmentData)
-	for _, ns := range metadata.NestedSources {
-		segmentCount += len(ns.Segments)
-	}
+	segmentCount := len(metadata.SegmentData) + nestedSegmentCount
 
 	// Convert timestamps
 	createdAt := time.Unix(metadata.CreatedAt, 0).Format(time.RFC3339)

@@ -861,10 +861,7 @@ func (sz *sevenZipProcessor) processNestedRarContent(ctx context.Context, innerR
 	entries := make([]filesystem.DecryptingFileEntry, 0, len(innerRarContents))
 	for _, c := range innerRarContents {
 		decryptedSize := c.PackedSize
-		if decryptedSize == 0 {
-			decryptedSize = c.Size
-		}
-		if outerEncrypted {
+		if outerEncrypted || decryptedSize == 0 {
 			decryptedSize = c.Size
 		}
 

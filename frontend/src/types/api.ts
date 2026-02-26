@@ -275,7 +275,7 @@ export interface NestedSourceInfo {
 export interface FileMetadata {
 	file_size: number;
 	source_nzb_path: string;
-	status: "corrupted" | "unspecified";
+	status: "healthy" | "corrupted" | "unspecified";
 	segment_count: number;
 	available_segments?: number;
 	encryption: "none" | "rclone";
