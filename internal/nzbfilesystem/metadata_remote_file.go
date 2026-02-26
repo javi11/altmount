@@ -1468,22 +1468,6 @@ func (r *lazyNestedMultiReader) Close() error {
 	return nil
 }
 
-// multiCloser wraps an io.Reader and closes multiple underlying closers.
-type multiCloser struct {
-	io.Reader
-	closers []io.Closer
-}
-
-func (mc *multiCloser) Close() error {
-	var firstErr error
-	for _, c := range mc.closers {
-		if err := c.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
-}
-
 // wrapWithEncryption wraps a usenet reader with encryption using metadata
 func (mvf *MetadataVirtualFile) wrapWithEncryption(start, end int64) (io.ReadCloser, error) {
 	if mvf.fileMeta.Encryption == metapb.Encryption_NONE {
