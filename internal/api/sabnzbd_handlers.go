@@ -20,6 +20,7 @@ import (
 	"github.com/javi11/altmount/internal/arrs"
 	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
+	"github.com/javi11/altmount/internal/httpclient"
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/pathutil"
 )
@@ -370,8 +371,14 @@ func (s *Server) handleSABnzbdAddUrl(c *fiber.Ctx) error {
 		return s.writeSABnzbdErrorFiber(c, "URL parameter 'name' required")
 	}
 
-	// Download NZB file from URL
-	resp, err := http.Get(nzbUrl)
+	// Download NZB file from URL using a proper HTTP client with a User-Agent header.
+	// Some indexers (e.g. NZBHydra2) return 403 on redirect if User-Agent is missing.
+	req, err := http.NewRequestWithContext(c.Context(), http.MethodGet, nzbUrl, nil)
+	if err != nil {
+		return s.writeSABnzbdErrorFiber(c, "Failed to build NZB download request")
+	}
+	req.Header.Set("User-Agent", "altmount")
+	resp, err := httpclient.NewLong().Do(req)
 	if err != nil {
 		return s.writeSABnzbdErrorFiber(c, "Failed to download NZB from URL")
 	}
