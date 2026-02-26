@@ -237,7 +237,17 @@ func (proc *Processor) ProcessNzbFile(ctx context.Context, filePath, relativePat
 		return "", err
 	}
 
-	// Step 4: Process based on file type
+	// Step 4: For NZB-based imports, ensure at least one NNTP provider is configured.
+	// STRM files are served via HTTP and don't require an NNTP pool.
+	if parsed.Type != parser.NzbTypeStrm {
+		if !proc.poolManager.HasPool() {
+			proc.log.WarnContext(ctx, "No NNTP providers configured, deferring item processing",
+				"file_path", filePath, "queue_id", queueID)
+			return "", fmt.Errorf("no NNTP providers configured - item will be retried when providers are added")
+		}
+	}
+
+	// Step 5: Process based on file type
 	var result string
 	switch parsed.Type {
 	case parser.NzbTypeSingleFile:
