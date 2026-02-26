@@ -50,13 +50,13 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
 		metadataService:         metadataService,
-		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, maxDownloadPrefetch, readTimeout),
-		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxDownloadPrefetch, readTimeout),
+		rarProcessor:            rar.NewProcessor(poolManager, maxImportConnections, maxDownloadPrefetch, readTimeout, allowNestedRarExtraction),
+		sevenZipProcessor:       sevenzip.NewProcessor(poolManager, maxDownloadPrefetch, readTimeout, allowNestedRarExtraction),
 		poolManager:             poolManager,
 		configGetter:            configGetter,
 		maxImportConnections:    maxImportConnections,

@@ -27,19 +27,21 @@ import (
 
 // sevenZipProcessor handles 7zip archive analysis and content extraction
 type sevenZipProcessor struct {
-	log         *slog.Logger
-	poolManager pool.Manager
-	maxPrefetch int
-	readTimeout time.Duration
+	log                      *slog.Logger
+	poolManager              pool.Manager
+	maxPrefetch              int
+	readTimeout              time.Duration
+	allowNestedRarExtraction bool
 }
 
 // NewProcessor creates a new 7zip processor
-func NewProcessor(poolManager pool.Manager, maxPrefetch int, readTimeout time.Duration) Processor {
+func NewProcessor(poolManager pool.Manager, maxPrefetch int, readTimeout time.Duration, allowNestedRarExtraction bool) Processor {
 	return &sevenZipProcessor{
-		log:         slog.Default().With("component", "7z-processor"),
-		poolManager: poolManager,
-		maxPrefetch: maxPrefetch,
-		readTimeout: readTimeout,
+		log:                      slog.Default().With("component", "7z-processor"),
+		poolManager:              poolManager,
+		maxPrefetch:              maxPrefetch,
+		readTimeout:              readTimeout,
+		allowNestedRarExtraction: allowNestedRarExtraction,
 	}
 }
 
@@ -227,9 +229,11 @@ func (sz *sevenZipProcessor) AnalyzeSevenZipContentFromNzb(ctx context.Context, 
 	}
 
 	// Check for nested RAR archives and process them
-	contents, err = sz.detectAndProcessNestedRars(ctx, contents)
-	if err != nil {
-		return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
+	if sz.allowNestedRarExtraction {
+		contents, err = sz.detectAndProcessNestedRars(ctx, contents)
+		if err != nil {
+			return nil, errors.NewNonRetryableError("failed to process nested RAR archives", err)
+		}
 	}
 
 	return contents, nil
