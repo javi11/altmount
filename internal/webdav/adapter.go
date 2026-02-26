@@ -61,25 +61,13 @@ func NewHandler(
 
 	// Create the main handler with authentication
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if login is required from dynamic config
-		loginRequired := true
-		if configGetter != nil {
-			if cfg := configGetter(); cfg != nil && cfg.Auth.LoginRequired != nil {
-				loginRequired = *cfg.Auth.LoginRequired
-			}
-		}
-
 		// Fallback to basic authentication if JWT failed
 		username, password, hasBasicAuth := r.BasicAuth()
 
 		var authenticated bool
 		var effectiveUser string
 
-		// When login is not required, skip authentication entirely
-		if !loginRequired {
-			authenticated = true
-			effectiveUser = "anonymous"
-		} else if !hasBasicAuth {
+		if !hasBasicAuth {
 			// Try JWT token authentication first (if services are available)
 			if tokenService != nil && userRepo != nil {
 				claims, _, err := tokenService.Get(r)

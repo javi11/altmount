@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/javi11/altmount/internal/config"
 	"github.com/javi11/altmount/internal/database"
 	"github.com/javi11/altmount/internal/nzbfilesystem"
 	"github.com/javi11/altmount/internal/utils"
@@ -25,7 +24,6 @@ type StreamHandler struct {
 	nzbFilesystem *nzbfilesystem.NzbFilesystem
 	userRepo      *database.UserRepository
 	streamTracker *StreamTracker
-	configGetter  config.ConfigGetter
 }
 
 // MonitoredFile wraps an afero.File to track read progress and support cancellation
@@ -63,12 +61,11 @@ func (m *MonitoredFile) Close() error {
 }
 
 // NewStreamHandler creates a new stream handler with the provided filesystem and user repository
-func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker, configGetter config.ConfigGetter) *StreamHandler {
+func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRepository, streamTracker *StreamTracker) *StreamHandler {
 	return &StreamHandler{
 		nzbFilesystem: fs,
 		userRepo:      userRepo,
 		streamTracker: streamTracker,
-		configGetter:  configGetter,
 	}
 }
 
@@ -77,13 +74,6 @@ func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRe
 // Returns the user and true if the download_key matches a hashed API key from any user.
 func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	ctx := r.Context()
-
-	// When auth is disabled, allow all stream requests without a download_key
-	if h.configGetter != nil {
-		if cfg := h.configGetter(); cfg != nil && cfg.Auth.LoginRequired != nil && !*cfg.Auth.LoginRequired {
-			return &database.User{UserID: "anonymous"}, true
-		}
-	}
 
 	// Extract download_key from query parameter
 	downloadKey := r.URL.Query().Get("download_key")

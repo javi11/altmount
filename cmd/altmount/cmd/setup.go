@@ -247,9 +247,8 @@ func setupStreamHandler(
 	nzbFilesystem *nzbfilesystem.NzbFilesystem,
 	userRepo *database.UserRepository,
 	streamTracker *api.StreamTracker,
-	configManager *config.Manager,
 ) *api.StreamHandler {
-	return api.NewStreamHandler(nzbFilesystem, userRepo, streamTracker, configManager.GetConfigGetter())
+	return api.NewStreamHandler(nzbFilesystem, userRepo, streamTracker)
 }
 
 // setupAPIServer creates and configures the API server
