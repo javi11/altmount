@@ -210,6 +210,7 @@ export interface ImportConfig {
 	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
+	allow_nested_rar_extraction?: boolean;
 }
 
 // Log configuration
@@ -393,6 +394,7 @@ export interface ImportUpdateRequest {
 	skip_health_check?: boolean;
 	watch_dir?: string | null;
 	watch_interval_seconds?: number | null;
+	allow_nested_rar_extraction?: boolean;
 }
 
 // Log update request

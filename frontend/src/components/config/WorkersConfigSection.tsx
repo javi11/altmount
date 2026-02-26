@@ -240,6 +240,27 @@ export function ImportConfigSection({
 								</span>
 							</div>
 						</label>
+
+						<div className="divider text-base-content/70" />
+
+						<label className="label cursor-pointer items-start justify-start gap-4">
+							<input
+								type="checkbox"
+								className="toggle toggle-primary toggle-sm mt-1 shrink-0"
+								checked={formData.allow_nested_rar_extraction ?? true}
+								disabled={isReadOnly}
+								onChange={(e) => handleInputChange("allow_nested_rar_extraction", e.target.checked)}
+							/>
+							<div className="min-w-0 flex-1">
+								<span className="block whitespace-normal break-words font-bold text-xs">
+									Nested RAR Extraction
+								</span>
+								<span className="mt-1 block whitespace-normal break-words text-base-content/50 text-xs leading-relaxed">
+									Extract nested RAR archives found inside other RAR or 7zip archives. Disable if
+									nested extraction causes issues with your files.
+								</span>
+							</div>
+						</label>
 					</div>
 				</div>
 
