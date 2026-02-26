@@ -182,7 +182,7 @@ func (c *Coordinator) createSingleSymlink(actualPath, resultingPath string) erro
 
 	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(resultingPath, "/")))
 
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0775); err != nil {
 		return fmt.Errorf("failed to create symlink category directory: %w", err)
 	}
 

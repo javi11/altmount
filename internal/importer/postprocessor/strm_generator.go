@@ -168,7 +168,7 @@ func (c *Coordinator) createSingleStrmFile(ctx context.Context, strmResultingPat
 
 	baseDir := filepath.Join(*cfg.Import.ImportDir, filepath.Dir(strings.TrimPrefix(strmResultingPath, "/")))
 
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0775); err != nil {
 		return fmt.Errorf("failed to create STRM directory: %w", err)
 	}
 
