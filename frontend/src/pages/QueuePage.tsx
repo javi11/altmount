@@ -1,6 +1,8 @@
 import {
 	Activity,
 	AlertCircle,
+	ArrowDown,
+	ArrowUp,
 	Box,
 	CheckCircle2,
 	ChevronDown,
@@ -42,6 +44,7 @@ import {
 	useQueueStats,
 	useRestartBulkQueueItems,
 	useRetryQueueItem,
+	useUpdateQueueItemPriority,
 } from "../hooks/useApi";
 import { useProgressStream } from "../hooks/useProgressStream";
 import { formatBytes, formatRelativeTime, truncateText } from "../lib/utils";
@@ -118,6 +121,7 @@ export function QueuePage() {
 	const retryItem = useRetryQueueItem();
 	const cancelItem = useCancelQueueItem();
 	const cancelBulk = useBulkCancelQueueItems();
+	const updatePriority = useUpdateQueueItemPriority();
 	const clearCompleted = useClearCompletedQueue();
 	const clearFailed = useClearFailedQueue();
 	const clearPending = useClearPendingQueue();
@@ -169,6 +173,10 @@ export function QueuePage() {
 		} catch (error) {
 			console.error("Failed to download NZB:", error);
 		}
+	};
+
+	const handleSetPriority = async (id: number, priority: 1 | 2 | 3) => {
+		await updatePriority.mutateAsync({ id, priority });
 	};
 
 	const handleClearCompleted = async () => {
@@ -701,6 +709,9 @@ export function QueuePage() {
 															<th className="font-bold text-base-content/80 text-xs uppercase tracking-widest">
 																Status
 															</th>
+															<th className="w-24 font-bold text-base-content/80 text-xs uppercase tracking-widest">
+																Priority
+															</th>
 															<th>
 																<button
 																	type="button"
@@ -804,6 +815,60 @@ export function QueuePage() {
 																			<StatusBadge status={item.status} />
 																		)}
 																	</div>
+																</td>
+																<td>
+																	{item.status !== QueueStatus.PROCESSING &&
+																	item.status !== QueueStatus.COMPLETED ? (
+																		<div className="flex items-center gap-1">
+																			<span
+																				className={`badge badge-xs px-2 py-2 font-bold font-mono ${
+																					item.priority === 1
+																						? "badge-error"
+																						: item.priority === 3
+																							? "badge-ghost text-base-content/50"
+																							: "badge-outline"
+																				}`}
+																			>
+																				{item.priority === 1
+																					? "High"
+																					: item.priority === 3
+																						? "Low"
+																						: "Normal"}
+																			</span>
+																			<div className="flex flex-col">
+																				<button
+																					type="button"
+																					className="btn btn-ghost btn-xs p-0"
+																					disabled={item.priority <= 1 || updatePriority.isPending}
+																					onClick={() =>
+																						handleSetPriority(
+																							item.id,
+																							(item.priority - 1) as 1 | 2 | 3,
+																						)
+																					}
+																					aria-label="Increase priority"
+																				>
+																					<ArrowUp className="h-3 w-3" aria-hidden="true" />
+																				</button>
+																				<button
+																					type="button"
+																					className="btn btn-ghost btn-xs p-0"
+																					disabled={item.priority >= 3 || updatePriority.isPending}
+																					onClick={() =>
+																						handleSetPriority(
+																							item.id,
+																							(item.priority + 1) as 1 | 2 | 3,
+																						)
+																					}
+																					aria-label="Decrease priority"
+																				>
+																					<ArrowDown className="h-3 w-3" aria-hidden="true" />
+																				</button>
+																			</div>
+																		</div>
+																	) : (
+																		<span className="text-base-content/30">—</span>
+																	)}
 																</td>
 																<td>
 																	<div className="flex flex-col">

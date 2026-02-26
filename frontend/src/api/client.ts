@@ -243,6 +243,13 @@ export class APIClient {
 		});
 	}
 
+	async updateQueueItemPriority(id: number, priority: 1 | 2 | 3) {
+		return this.request<QueueItem>(`/queue/${id}/priority`, {
+			method: "PATCH",
+			body: JSON.stringify({ priority }),
+		});
+	}
+
 	async cancelBulkQueueItems(ids: number[]) {
 		return this.request<{
 			cancelled_count: number;
