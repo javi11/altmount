@@ -1015,9 +1015,9 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	defer stmtRetry.Close()
 
 	stmtRepair, err := tx.PrepareContext(ctx, `
-		UPDATE file_health 
-		SET repair_retry_count = repair_retry_count + 1, last_error = ?, 
-		    error_details = ?, status = 'repair_triggered', 
+		UPDATE file_health
+		SET repair_retry_count = repair_retry_count + 1, last_error = ?,
+		    error_details = ?, status = 'repair_triggered',
 		    updated_at = datetime('now'), last_checked = datetime('now'),
 			scheduled_check_at = datetime('now', '+1 hour')
 		WHERE file_path = ?
@@ -1026,6 +1026,19 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		return fmt.Errorf("failed to prepare repair statement: %w", err)
 	}
 	defer stmtRepair.Close()
+
+	// stmtRepairTrigger is for the first-time repair trigger — does NOT increment repair_retry_count.
+	stmtRepairTrigger, err := tx.PrepareContext(ctx, `
+		UPDATE file_health
+		SET last_error = ?, error_details = ?, status = 'repair_triggered',
+		    updated_at = datetime('now'), last_checked = datetime('now'),
+		    scheduled_check_at = datetime('now', '+1 hour')
+		WHERE file_path = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare repair trigger statement: %w", err)
+	}
+	defer stmtRepairTrigger.Close()
 
 	stmtCorrupted, err := tx.PrepareContext(ctx, `
 		UPDATE file_health 
@@ -1040,15 +1053,20 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 	defer stmtCorrupted.Close()
 
 	for _, update := range updates {
+		if update.Skip {
+			continue
+		}
 		filePath := update.FilePath
-		switch update.Status {
-		case HealthStatusHealthy:
+		switch update.Type {
+		case UpdateTypeHealthy:
 			_, err = stmtHealthy.ExecContext(ctx, update.ScheduledCheckAt, filePath)
-		case HealthStatusPending:
+		case UpdateTypeRetry:
 			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
-		case HealthStatusRepairTriggered:
+		case UpdateTypeRepairTrigger:
+			_, err = stmtRepairTrigger.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
+		case UpdateTypeRepairRetry:
 			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
-		case HealthStatusCorrupted:
+		case UpdateTypeCorrupted:
 			_, err = stmtCorrupted.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
 		}
 
@@ -1064,10 +1082,11 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 type UpdateType int
 
 const (
-	UpdateTypeHealthy     UpdateType = 1
-	UpdateTypeRetry       UpdateType = 2
-	UpdateTypeRepairRetry UpdateType = 3
-	UpdateTypeCorrupted   UpdateType = 4
+	UpdateTypeHealthy       UpdateType = 1
+	UpdateTypeRetry         UpdateType = 2
+	UpdateTypeRepairRetry   UpdateType = 3 // re-check of an already-triggered repair; increments repair_retry_count
+	UpdateTypeCorrupted     UpdateType = 4
+	UpdateTypeRepairTrigger UpdateType = 5 // first-time trigger; does not increment repair_retry_count
 )
 
 // HealthStatusUpdate represents a single update request for batch processing
@@ -1078,6 +1097,7 @@ type HealthStatusUpdate struct {
 	ErrorMessage     *string
 	ErrorDetails     *string
 	ScheduledCheckAt time.Time
+	Skip             bool // if true, skip this record in the bulk update (e.g. record already deleted)
 }
 
 // BackfillRecord represents a record used for metadata backfilling

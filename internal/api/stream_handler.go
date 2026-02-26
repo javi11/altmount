@@ -69,8 +69,9 @@ func NewStreamHandler(fs *nzbfilesystem.NzbFilesystem, userRepo *database.UserRe
 	}
 }
 
-// authenticate validates the download_key parameter against user API keys
-// Returns the user and true if the download_key matches a hashed API key from any user
+// authenticate validates the download_key parameter against user API keys.
+// When login is not required, authentication is skipped and an anonymous user is returned.
+// Returns the user and true if the download_key matches a hashed API key from any user.
 func (h *StreamHandler) authenticate(r *http.Request) (*database.User, bool) {
 	ctx := r.Context()
 
@@ -159,10 +160,12 @@ func (h *StreamHandler) serveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userName string
-	if user.Name != nil && *user.Name != "" {
-		userName = *user.Name
-	} else {
-		userName = user.UserID
+	if user != nil {
+		if user.Name != nil && *user.Name != "" {
+			userName = *user.Name
+		} else {
+			userName = user.UserID
+		}
 	}
 
 	// Set stream source and username for tracking
