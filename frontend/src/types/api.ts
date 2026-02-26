@@ -256,10 +256,26 @@ export interface SegmentInfo {
 	available: boolean;
 }
 
+export interface NestedSegmentInfo {
+	message_id: string;
+	segment_size: number;
+	start_offset: number;
+	end_offset: number;
+}
+
+export interface NestedSourceInfo {
+	volume_index: number;
+	inner_length: number;
+	inner_volume_size: number;
+	encrypted: boolean;
+	segment_count: number;
+	segments: NestedSegmentInfo[];
+}
+
 export interface FileMetadata {
 	file_size: number;
 	source_nzb_path: string;
-	status: "corrupted" | "unspecified";
+	status: "healthy" | "corrupted" | "unspecified";
 	segment_count: number;
 	available_segments?: number;
 	encryption: "none" | "rclone";
@@ -267,6 +283,7 @@ export interface FileMetadata {
 	modified_at: string;
 	password_protected: boolean;
 	segments: SegmentInfo[];
+	nested_sources?: NestedSourceInfo[];
 }
 
 // Filter and pagination types

@@ -1,10 +1,15 @@
 import { formatDistanceToNow } from "date-fns";
-import { Clock, Database, FileText, HardDrive, Info, Lock, Shield, X } from "lucide-react";
+import { Archive, Clock, Database, FileText, HardDrive, Info, Lock, Shield, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "../../contexts/ToastContext";
 import { useAddHealthCheck } from "../../hooks/useApi";
 import { isNil } from "../../lib/utils";
-import type { FileMetadata, SegmentInfo } from "../../types/api";
+import type {
+	FileMetadata,
+	NestedSegmentInfo,
+	NestedSourceInfo,
+	SegmentInfo,
+} from "../../types/api";
 import type { WebDAVFile } from "../../types/webdav";
 import { formatFileSize } from "../../utils/fileUtils";
 import { HealthBadge } from "../ui/StatusBadge";
@@ -20,7 +25,7 @@ interface FileInfoModalProps {
 	onRetry: () => void;
 }
 
-type TabType = "overview" | "segments" | "source";
+type TabType = "overview" | "segments" | "nested-sources" | "source";
 
 export function FileInfoModal({
 	isOpen,
@@ -277,6 +282,16 @@ export function FileInfoModal({
 									<span className="text-warning">Password Required</span>
 								</div>
 							)}
+							{metadata.nested_sources && metadata.nested_sources.length > 0 && (
+								<div className="flex justify-between">
+									<span className="text-base-content/70">Nested Archive:</span>
+									<span className="flex items-center gap-1">
+										<Archive className="h-3 w-3" />
+										{metadata.nested_sources.length} volume
+										{metadata.nested_sources.length !== 1 ? "s" : ""}
+									</span>
+								</div>
+							)}
 						</div>
 					</div>
 
@@ -408,6 +423,111 @@ export function FileInfoModal({
 		);
 	};
 
+	const renderNestedSourcesTab = () => {
+		if (isLoading) {
+			return (
+				<div className="py-8 text-center">
+					<div className="loading loading-spinner loading-lg" />
+					<p className="mt-4 text-base-content/70">Loading nested source information...</p>
+				</div>
+			);
+		}
+
+		if (!metadata || !metadata.nested_sources || metadata.nested_sources.length === 0) {
+			return (
+				<div className="py-8 text-center">
+					<Archive className="mx-auto mb-4 h-16 w-16 text-base-content/30" />
+					<h3 className="font-semibold text-base-content/70 text-lg">No Nested Sources</h3>
+					<p className="text-base-content/50">This file has no nested archive sources.</p>
+				</div>
+			);
+		}
+
+		return (
+			<div className="space-y-4">
+				{/* Summary stats */}
+				<div className="stats w-full shadow">
+					<div className="stat">
+						<div className="stat-title">Inner Volumes</div>
+						<div className="stat-value text-primary">{metadata.nested_sources.length}</div>
+					</div>
+					<div className="stat">
+						<div className="stat-title">Total Segments</div>
+						<div className="stat-value text-secondary">
+							{metadata.nested_sources.reduce((acc, ns) => acc + ns.segment_count, 0)}
+						</div>
+					</div>
+				</div>
+
+				{/* Per-volume cards */}
+				{metadata.nested_sources.map((ns: NestedSourceInfo) => (
+					<div key={ns.volume_index} className="card bg-base-200">
+						<div className="card-body p-4">
+							<div className="mb-3 flex items-center justify-between">
+								<h4 className="flex items-center gap-2 font-semibold">
+									<Archive className="h-4 w-4" />
+									Volume {ns.volume_index + 1}
+								</h4>
+								<div className="flex items-center gap-2">
+									{ns.encrypted ? (
+										<span className="badge badge-warning badge-sm gap-1">
+											<Lock className="h-3 w-3" />
+											Encrypted
+										</span>
+									) : (
+										<span className="badge badge-success badge-sm">Unencrypted</span>
+									)}
+								</div>
+							</div>
+							<div className="mb-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+								<div>
+									<div className="text-base-content/70">Inner Length</div>
+									<div className="font-mono">{formatFileSize(ns.inner_length)}</div>
+								</div>
+								<div>
+									<div className="text-base-content/70">Volume Size</div>
+									<div className="font-mono">{formatFileSize(ns.inner_volume_size)}</div>
+								</div>
+								<div>
+									<div className="text-base-content/70">Segments</div>
+									<div>{ns.segment_count}</div>
+								</div>
+							</div>
+							{ns.segments.length > 0 && (
+								<div className="overflow-x-auto">
+									<table className="table-xs table w-full">
+										<thead>
+											<tr>
+												<th>#</th>
+												<th>Message ID</th>
+												<th>Size</th>
+												<th>Offset Range</th>
+											</tr>
+										</thead>
+										<tbody>
+											{ns.segments.map((seg: NestedSegmentInfo, idx: number) => (
+												<tr key={seg.message_id || idx}>
+													<td>{idx + 1}</td>
+													<td>
+														<code className="text-xs">{seg.message_id}</code>
+													</td>
+													<td>{formatFileSize(seg.segment_size)}</td>
+													<td className="font-mono text-xs">
+														{seg.start_offset.toLocaleString()} - {seg.end_offset.toLocaleString()}
+													</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</div>
+							)}
+						</div>
+					</div>
+				))}
+			</div>
+		);
+	};
+
 	const renderSourceTab = () => {
 		if (isLoading) {
 			return (
@@ -496,6 +616,8 @@ export function FileInfoModal({
 				return renderOverviewTab();
 			case "segments":
 				return renderSegmentsTab();
+			case "nested-sources":
+				return renderNestedSourcesTab();
 			case "source":
 				return renderSourceTab();
 			default:
@@ -543,6 +665,15 @@ export function FileInfoModal({
 					>
 						Segments
 					</button>
+					{metadata?.nested_sources && metadata.nested_sources.length > 0 && (
+						<button
+							type="button"
+							className={`tab tab-bordered ${activeTab === "nested-sources" ? "tab-active" : ""}`}
+							onClick={() => setActiveTab("nested-sources")}
+						>
+							Nested Sources
+						</button>
+					)}
 					<button
 						type="button"
 						className={`tab tab-bordered ${activeTab === "source" ? "tab-active" : ""}`}

@@ -31,12 +31,12 @@ import (
 type MetadataRemoteFile struct {
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
-	poolManager      pool.Manager            // Pool manager for dynamic pool access
-	configGetter     config.ConfigGetter     // Dynamic config access
-	rcloneCipher     *rclone.RcloneCrypt     // For rclone encryption/decryption
-	aesCipher        *aes.AesCipher          // For AES encryption/decryption
-	streamTracker    StreamTracker           // Stream tracker for monitoring active streams
-	segmentStore     usenet.SegmentStore     // Optional segment cache (nil = disabled)
+	poolManager      pool.Manager        // Pool manager for dynamic pool access
+	configGetter     config.ConfigGetter // Dynamic config access
+	rcloneCipher     *rclone.RcloneCrypt // For rclone encryption/decryption
+	aesCipher        *aes.AesCipher      // For AES encryption/decryption
+	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
+	segmentStore     usenet.SegmentStore // Optional segment cache (nil = disabled)
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -166,7 +166,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	if fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
 		return false, nil, &CorruptedFileError{
 			TotalExpected: fileMeta.FileSize,
-			UnderlyingErr: ErrNoNzbData,
+			UnderlyingErr: ErrMissmatchedSegments,
 		}
 	}
 
@@ -229,8 +229,8 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		globalPassword:   mrf.getGlobalPassword(),
 		globalSalt:       mrf.getGlobalSalt(),
 		streamTracker:    mrf.streamTracker,
-		streamID:     streamID,
-		segmentStore: mrf.segmentStore,
+		streamID:         streamID,
+		segmentStore:     mrf.segmentStore,
 	}
 
 	return true, virtualFile, nil
@@ -935,8 +935,13 @@ func (mvf *MetadataVirtualFile) createReaderAtOffset(start, end int64) (io.ReadC
 		return nil, ErrNoUsenetPool
 	}
 
+	// Nested sources take priority — each source has its own segments and AES credentials
+	if len(mvf.fileMeta.NestedSources) > 0 {
+		return mvf.createNestedReader(start, end)
+	}
+
 	if len(mvf.fileMeta.SegmentData) == 0 {
-		return nil, ErrNoNzbData
+		return nil, ErrMissmatchedSegments
 	}
 
 	// Create reader based on encryption type
@@ -1182,7 +1187,14 @@ func (mvf *MetadataVirtualFile) ensureReader() error {
 	mvf.currentRangeEnd = end
 
 	// Create reader for the calculated range using metadata segments
-	if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
+	if len(mvf.fileMeta.NestedSources) > 0 {
+		// Nested RAR: use multi-source reader
+		reader, err := mvf.createNestedReader(start, end)
+		if err != nil {
+			return fmt.Errorf("failed to create nested reader: %w", err)
+		}
+		mvf.reader = reader
+	} else if mvf.fileMeta.Encryption != metapb.Encryption_NONE {
 		// Wrap the usenet reader with encryption
 		decryptedReader, err := mvf.wrapWithEncryption(start, end)
 		if err != nil {
@@ -1237,7 +1249,7 @@ func (mvf *MetadataVirtualFile) getRequestRange() (start, end int64) {
 // createUsenetReader creates a new usenet reader for the specified range using metadata segments
 func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, end int64) (io.ReadCloser, error) {
 	if len(mvf.fileMeta.SegmentData) == 0 {
-		return nil, ErrNoNzbData
+		return nil, ErrMissmatchedSegments
 	}
 
 	// Build segment offset index lazily on first read (thread-safe via sync.Once)
@@ -1272,16 +1284,188 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		)
 
 		mvf.updateFileHealthOnError(&usenet.DataCorruptionError{
-			UnderlyingErr: ErrNoNzbData,
+			UnderlyingErr: ErrMissmatchedSegments,
 		}, true)
 
 		return nil, &CorruptedFileError{
 			TotalExpected: mvf.fileMeta.FileSize,
-			UnderlyingErr: ErrNoNzbData,
+			UnderlyingErr: ErrMissmatchedSegments,
 		}
 	}
 
 	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+}
+
+// createNestedReader creates a reader for files backed by nested RAR sources.
+// It maps the requested byte range [start, end] across multiple NestedSegmentSources,
+// building a lazy reader that opens each inner-volume reader only when needed.
+// This avoids opening all inner volumes simultaneously, which would cause all their
+// segments to be prefetched concurrently and spike memory usage.
+func (mvf *MetadataVirtualFile) createNestedReader(start, end int64) (io.ReadCloser, error) {
+	sources := mvf.fileMeta.NestedSources
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no nested sources available")
+	}
+
+	// Calculate which sources contain the requested byte range.
+	// Sources are concatenated: source 0 covers [0, InnerLength0),
+	// source 1 covers [InnerLength0, InnerLength0+InnerLength1), etc.
+	var specs []nestedSourceSpec
+	var sourceOffset int64
+
+	for _, src := range sources {
+		srcEnd := sourceOffset + src.InnerLength - 1
+
+		// Skip sources before our range
+		if srcEnd < start {
+			sourceOffset += src.InnerLength
+			continue
+		}
+
+		// Stop if we've passed our range
+		if sourceOffset > end {
+			break
+		}
+
+		// Calculate local offsets within this source
+		localStart := int64(0)
+		if start > sourceOffset {
+			localStart = start - sourceOffset
+		}
+		localEnd := src.InnerLength - 1
+		if end < srcEnd {
+			localEnd = end - sourceOffset
+		}
+
+		readLen := localEnd - localStart + 1
+		if readLen <= 0 {
+			sourceOffset += src.InnerLength
+			continue
+		}
+
+		specs = append(specs, nestedSourceSpec{src: src, localStart: localStart, readLen: readLen})
+		sourceOffset += src.InnerLength
+	}
+
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("no nested sources cover range [%d, %d]", start, end)
+	}
+
+	return &lazyNestedMultiReader{mvf: mvf, specs: specs}, nil
+}
+
+// createNestedSourceReader creates a reader for a single NestedSegmentSource,
+// starting at innerStart within the decrypted inner volume and reading readLen bytes.
+func (mvf *MetadataVirtualFile) createNestedSourceReader(
+	src *metapb.NestedSegmentSource,
+	innerStart int64,
+	readLen int64,
+) (io.ReadCloser, error) {
+	absoluteStart := src.InnerOffset + innerStart
+
+	if len(src.AesKey) > 0 {
+		// Encrypted source: decrypt with AES-CBC then read at inner offset
+		if mvf.aesCipher == nil {
+			return nil, ErrNoCipherConfig
+		}
+
+		rh := &utils.RangeHeader{
+			Start: absoluteStart,
+			End:   absoluteStart + readLen - 1,
+		}
+
+		return mvf.aesCipher.Open(
+			mvf.ctx,
+			rh,
+			src.InnerVolumeSize,
+			src.AesKey,
+			src.AesIv,
+			func(ctx context.Context, s, e int64) (io.ReadCloser, error) {
+				return mvf.createUsenetReaderFromSegments(ctx, src.Segments, s, e)
+			},
+		)
+	}
+
+	// Unencrypted source: read directly from segments at inner offset
+	return mvf.createUsenetReaderFromSegments(mvf.ctx, src.Segments, absoluteStart, absoluteStart+readLen-1)
+}
+
+// createUsenetReaderFromSegments creates a usenet reader from a specific set of segments
+// (used for nested source reading where segments differ from the main file metadata).
+func (mvf *MetadataVirtualFile) createUsenetReaderFromSegments(ctx context.Context, segments []*metapb.SegmentData, start, end int64) (io.ReadCloser, error) {
+	if len(segments) == 0 {
+		return nil, ErrMissmatchedSegments
+	}
+
+	loader := newMetadataSegmentLoader(segments)
+	idx := buildSegmentIndex(segments)
+
+	startSegIdx := idx.findSegmentForOffset(start)
+	startFilePos := idx.getOffsetForSegment(startSegIdx)
+	endSegIdx := idx.findSegmentForOffset(end)
+	endFilePos := idx.getOffsetForSegment(endSegIdx)
+
+	rg := usenet.NewLazySegmentRange(ctx, start, end, loader, startSegIdx, startFilePos, endSegIdx, endFilePos)
+
+	if !rg.HasSegments() {
+		return nil, fmt.Errorf("no segments cover range [%d, %d]", start, end)
+	}
+
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
+}
+
+// nestedSourceSpec holds the parameters needed to lazily open one inner-volume reader.
+type nestedSourceSpec struct {
+	src        *metapb.NestedSegmentSource
+	localStart int64
+	readLen    int64
+}
+
+// lazyNestedMultiReader opens inner-volume readers one at a time, only when needed.
+// This prevents all inner volumes from being opened simultaneously, which would cause
+// all their segments to be prefetched concurrently and spike memory usage.
+type lazyNestedMultiReader struct {
+	mvf     *MetadataVirtualFile
+	specs   []nestedSourceSpec
+	idx     int
+	current io.ReadCloser
+}
+
+func (r *lazyNestedMultiReader) Read(p []byte) (int, error) {
+	for {
+		if r.current == nil {
+			if r.idx >= len(r.specs) {
+				return 0, io.EOF
+			}
+			spec := r.specs[r.idx]
+			rc, err := r.mvf.createNestedSourceReader(spec.src, spec.localStart, spec.readLen)
+			if err != nil {
+				return 0, err
+			}
+			r.current = rc
+			r.idx++
+		}
+
+		n, err := r.current.Read(p)
+		if err == io.EOF {
+			r.current.Close()
+			r.current = nil
+			if n > 0 {
+				return n, nil
+			}
+			continue
+		}
+		return n, err
+	}
+}
+
+func (r *lazyNestedMultiReader) Close() error {
+	if r.current != nil {
+		err := r.current.Close()
+		r.current = nil
+		return err
+	}
+	return nil
 }
 
 // wrapWithEncryption wraps a usenet reader with encryption using metadata

@@ -61,7 +61,7 @@ var (
 	ErrCannotReadDirectory  = errors.New("cannot read from directory")
 	ErrNegativeOffset       = errors.New("negative offset")
 	ErrVirtualFileNotInit   = errors.New("virtual file not initialized")
-	ErrNoNzbData            = errors.New("no NZB data available for file")
+	ErrMissmatchedSegments  = errors.New("missmatched segments for file size")
 	ErrNoUsenetPool         = errors.New("usenet connection pool not configured")
 	ErrNoCipherConfig       = errors.New("no cipher configured for encryption")
 	ErrNoEncryptionParams   = errors.New("no NZB data available for encryption parameters")
