@@ -73,14 +73,14 @@ export function FileExplorer({
 		return history.map((item) => {
 			const virtualPath = item.virtual_path || "";
 			const fileName = item.file_name || "";
-			
+
 			// For folder imports, VirtualPath usually ends with FileName (the release folder)
 			// For single file imports, VirtualPath is the parent folder
 			let fullVirtualPath = virtualPath;
 			if (fileName && !virtualPath.endsWith(fileName)) {
 				fullVirtualPath = `${virtualPath}/${fileName}`.replace(/\/+/g, "/");
 			}
-			
+
 			if (!fullVirtualPath && item.nzb_name) {
 				fullVirtualPath = item.nzb_name;
 			}

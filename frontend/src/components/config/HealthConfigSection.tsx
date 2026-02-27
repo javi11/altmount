@@ -213,7 +213,7 @@ export function HealthConfigSection({
 										}
 										min="1"
 									/>
-									<p className="label break-words text-base-content/50 text-[10px]">
+									<p className="label break-words text-[10px] text-base-content/50">
 										Wait time before the first repair re-notification.
 									</p>
 								</fieldset>
@@ -233,7 +233,7 @@ export function HealthConfigSection({
 										}
 										min="1"
 									/>
-									<p className="label break-words text-base-content/50 text-[10px]">
+									<p className="label break-words text-[10px] text-base-content/50">
 										Maximum delay between repair attempts.
 									</p>
 								</fieldset>
