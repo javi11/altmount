@@ -54,7 +54,8 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 	query := `
 		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
-		       error_details, created_at, updated_at, release_date, priority
+		       error_details, created_at, updated_at, release_date, priority,
+			   streaming_failure_count, is_masked
 		FROM file_health
 		WHERE file_path = ?
 	`
@@ -66,6 +67,7 @@ func (r *HealthRepository) GetFileHealth(ctx context.Context, filePath string) (
 		&health.RepairRetryCount, &health.MaxRepairRetries,
 		&health.SourceNzbPath, &health.ErrorDetails,
 		&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
+		&health.StreamingFailureCount, &health.IsMasked,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -82,7 +84,8 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 	query := `
 		SELECT id, file_path, library_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
-		       error_details, created_at, updated_at, release_date, priority
+		       error_details, created_at, updated_at, release_date, priority,
+			   streaming_failure_count, is_masked
 		FROM file_health
 		WHERE id = ?
 	`
@@ -94,6 +97,7 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 		&health.RepairRetryCount, &health.MaxRepairRetries,
 		&health.SourceNzbPath, &health.ErrorDetails,
 		&health.CreatedAt, &health.UpdatedAt, &health.ReleaseDate, &health.Priority,
+		&health.StreamingFailureCount, &health.IsMasked,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -105,13 +109,53 @@ func (r *HealthRepository) GetFileHealthByID(ctx context.Context, id int64) (*Fi
 	return &health, nil
 }
 
+// IncrementStreamingFailureCount increments the streaming failure count and masks the file if threshold reached
+func (r *HealthRepository) IncrementStreamingFailureCount(ctx context.Context, filePath string, threshold int) (bool, error) {
+	filePath = strings.TrimPrefix(filePath, "/")
+	query := `
+		UPDATE file_health
+		SET streaming_failure_count = streaming_failure_count + 1,
+		    is_masked = CASE WHEN streaming_failure_count + 1 >= ? THEN TRUE ELSE is_masked END,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+		RETURNING is_masked
+	`
+
+	var isMasked bool
+	err := r.db.QueryRowContext(ctx, query, threshold, filePath).Scan(&isMasked)
+	if err != nil {
+		return false, fmt.Errorf("failed to increment streaming failure count: %w", err)
+	}
+
+	return isMasked, nil
+}
+
+// UnmaskFile removes the mask from a file and resets the failure count
+func (r *HealthRepository) UnmaskFile(ctx context.Context, filePath string) error {
+	filePath = strings.TrimPrefix(filePath, "/")
+	query := `
+		UPDATE file_health
+		SET is_masked = FALSE,
+		    streaming_failure_count = 0,
+		    updated_at = datetime('now')
+		WHERE file_path = ?
+	`
+
+	_, err := r.db.ExecContext(ctx, query, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to unmask file: %w", err)
+	}
+
+	return nil
+}
+
 // GetUnhealthyFiles returns files that need health checks (excluding repair_triggered files)
 func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]*FileHealth, error) {
 	query := `
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, release_date, scheduled_check_at,
-			   library_path, priority
+			   library_path, priority, streaming_failure_count, is_masked
 		FROM file_health
 		WHERE scheduled_check_at IS NOT NULL
 		  AND scheduled_check_at <= datetime('now')
@@ -139,6 +183,8 @@ func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int) ([]
 			&health.ScheduledCheckAt,
 			&health.LibraryPath,
 			&health.Priority,
+			&health.StreamingFailureCount,
+			&health.IsMasked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file health: %w", err)
@@ -604,7 +650,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 		SELECT id, file_path, status, last_checked, last_error, retry_count, max_retries,
 		       repair_retry_count, max_repair_retries, source_nzb_path,
 		       error_details, created_at, updated_at, scheduled_check_at,
-			   library_path
+			   library_path, streaming_failure_count, is_masked
 		FROM file_health
 		WHERE (? IS NULL OR status = ?)
 		  AND (? IS NULL OR created_at >= ?)
@@ -649,7 +695,7 @@ func (r *HealthRepository) ListHealthItems(ctx context.Context, statusFilter *He
 			&health.RepairRetryCount, &health.MaxRepairRetries,
 			&health.SourceNzbPath, &health.ErrorDetails,
 			&health.CreatedAt, &health.UpdatedAt, &health.ScheduledCheckAt,
-			&health.LibraryPath,
+			&health.LibraryPath, &health.StreamingFailureCount, &health.IsMasked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan health item: %w", err)
@@ -1019,7 +1065,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		SET repair_retry_count = repair_retry_count + 1, last_error = ?,
 		    error_details = ?, status = 'repair_triggered',
 		    updated_at = datetime('now'), last_checked = datetime('now'),
-			scheduled_check_at = datetime('now', '+1 hour')
+			scheduled_check_at = ?
 		WHERE file_path = ?
 	`)
 	if err != nil {
@@ -1032,7 +1078,7 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		UPDATE file_health
 		SET last_error = ?, error_details = ?, status = 'repair_triggered',
 		    updated_at = datetime('now'), last_checked = datetime('now'),
-		    scheduled_check_at = datetime('now', '+1 hour')
+		    scheduled_check_at = ?
 		WHERE file_path = ?
 	`)
 	if err != nil {
@@ -1063,9 +1109,9 @@ func (r *HealthRepository) UpdateHealthStatusBulk(ctx context.Context, updates [
 		case UpdateTypeRetry:
 			_, err = stmtRetry.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
 		case UpdateTypeRepairTrigger:
-			_, err = stmtRepairTrigger.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
+			_, err = stmtRepairTrigger.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
 		case UpdateTypeRepairRetry:
-			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
+			_, err = stmtRepair.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, update.ScheduledCheckAt, filePath)
 		case UpdateTypeCorrupted:
 			_, err = stmtCorrupted.ExecContext(ctx, update.ErrorMessage, update.ErrorDetails, filePath)
 		}

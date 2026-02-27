@@ -124,7 +124,7 @@ func readFileDescriptors(
 
 	// Create UsenetReader (provides retry, prefetch, and metrics for free)
 	rg := usenet.GetSegmentsInRange(ctx, 0, totalSize-1, loader)
-	r, err := usenet.NewUsenetReader(ctx, poolManager.GetPool, rg, 5, poolManager, "", nil)
+	r, err := usenet.NewUsenetReader(ctx, poolManager.GetPool, rg, 5, poolManager, "", nil, nil)
 	if err != nil {
 		return descriptors, fmt.Errorf("failed to create usenet reader: %w", err)
 	}

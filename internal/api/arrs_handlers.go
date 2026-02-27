@@ -91,10 +91,7 @@ func (s *Server) handleArrsWebhook(c *fiber.Ctx) error {
 
 	if s.arrsService == nil {
 		slog.ErrorContext(c.Context(), "Arrs service is not available for webhook")
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	var req ArrsWebhookRequest
@@ -439,10 +436,7 @@ type TestConnectionRequest struct {
 func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		slog.ErrorContext(c.Context(), "Arrs service is not available")
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	slog.DebugContext(c.Context(), "Listing arrs instances")
@@ -470,10 +464,7 @@ func (s *Server) handleListArrsInstances(c *fiber.Ctx) error {
 func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 	if s.arrsService == nil {
 		slog.ErrorContext(c.Context(), "Arrs service is not available")
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	instanceType := c.Params("type")
@@ -513,10 +504,7 @@ func (s *Server) handleGetArrsInstance(c *fiber.Ctx) error {
 // handleTestArrsConnection tests connection to an arrs instance
 func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	var req TestConnectionRequest
@@ -551,10 +539,7 @@ func (s *Server) handleTestArrsConnection(c *fiber.Ctx) error {
 // handleGetArrsStats returns arrs statistics
 func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	// Get all instances from configuration
@@ -596,10 +581,7 @@ func (s *Server) handleGetArrsStats(c *fiber.Ctx) error {
 // handleGetArrsHealth returns health checks from all ARR instances
 func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	health, err := s.arrsService.GetHealth(c.Context())
@@ -620,10 +602,7 @@ func (s *Server) handleGetArrsHealth(c *fiber.Ctx) error {
 // handleRegisterArrsWebhooks triggers automatic registration of webhooks in ARR instances
 func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	apiKey := s.getAPIKeyForConfig(c)
@@ -660,10 +639,7 @@ func (s *Server) handleRegisterArrsWebhooks(c *fiber.Ctx) error {
 // handleRegisterArrsDownloadClients triggers automatic registration of AltMount as a download client in ARR instances
 func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	apiKey := s.getAPIKeyForConfig(c)
@@ -725,10 +701,7 @@ func (s *Server) handleRegisterArrsDownloadClients(c *fiber.Ctx) error {
 // handleTestArrsDownloadClients tests the connection from ARR instances to AltMount
 func (s *Server) handleTestArrsDownloadClients(c *fiber.Ctx) error {
 	if s.arrsService == nil {
-		return c.Status(503).JSON(fiber.Map{
-			"success": false,
-			"message": "Arrs not available",
-		})
+		return RespondServiceUnavailable(c, "Arrs not available", "")
 	}
 
 	apiKey := s.getAPIKeyForConfig(c)

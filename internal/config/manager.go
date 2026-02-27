@@ -119,9 +119,16 @@ type MetadataBackupConfig struct {
 	Path          string `yaml:"path" mapstructure:"path" json:"path"`
 }
 
+// FailureMaskingConfig represents failure masking configuration
+type FailureMaskingConfig struct {
+	Enabled   *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	Threshold int   `yaml:"threshold" mapstructure:"threshold" json:"threshold"`
+}
+
 // StreamingConfig represents streaming and chunking configuration
 type StreamingConfig struct {
-	MaxPrefetch int `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
+	MaxPrefetch    int                  `yaml:"max_prefetch" mapstructure:"max_prefetch" json:"max_prefetch"`
+	FailureMasking FailureMaskingConfig `yaml:"failure_masking" mapstructure:"failure_masking" json:"failure_masking"`
 }
 
 // RCloneConfig represents rclone configuration
@@ -220,21 +227,30 @@ type LogConfig struct {
 	Compress   bool   `yaml:"compress" mapstructure:"compress" json:"compress,omitempty"`          // Compress old log files
 }
 
+// RepairConfig represents repair behavior configuration
+type RepairConfig struct {
+	Enabled             *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	IntervalMinutes     int   `yaml:"interval_minutes" mapstructure:"interval_minutes" json:"interval_minutes,omitempty"`
+	MaxCoolDownHours    int   `yaml:"max_cooldown_hours" mapstructure:"max_cooldown_hours" json:"max_cooldown_hours,omitempty"`
+	ExponentialBackoff  *bool `yaml:"exponential_backoff" mapstructure:"exponential_backoff" json:"exponential_backoff,omitempty"`
+}
+
 // HealthConfig represents health checker configuration
 type HealthConfig struct {
-	Enabled                       *bool   `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
-	LibraryDir                    *string `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
-	CleanupOrphanedMetadata       *bool   `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
-	CheckIntervalSeconds          int     `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
-	MaxConnectionsForHealthChecks int     `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
-	MaxConcurrentJobs             int     `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
-	SegmentSamplePercentage       int     `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
-	LibrarySyncIntervalMinutes    int     `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
-	LibrarySyncConcurrency        int     `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
-	ResolveRepairOnImport         *bool   `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
-	VerifyData                    *bool   `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
-	CheckAllSegments              *bool   `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
+	Enabled                       *bool        `yaml:"enabled" mapstructure:"enabled" json:"enabled,omitempty"`
+	LibraryDir                    *string      `yaml:"library_dir" mapstructure:"library_dir" json:"library_dir,omitempty"`
+	CleanupOrphanedMetadata       *bool        `yaml:"cleanup_orphaned_metadata" mapstructure:"cleanup_orphaned_metadata" json:"cleanup_orphaned_metadata,omitempty"`
+	CheckIntervalSeconds          int          `yaml:"check_interval_seconds" mapstructure:"check_interval_seconds" json:"check_interval_seconds,omitempty"`
+	MaxConnectionsForHealthChecks int          `yaml:"max_connections_for_health_checks" mapstructure:"max_connections_for_health_checks" json:"max_connections_for_health_checks,omitempty"`
+	MaxConcurrentJobs             int          `yaml:"max_concurrent_jobs" mapstructure:"max_concurrent_jobs" json:"max_concurrent_jobs,omitempty"`
+	SegmentSamplePercentage       int          `yaml:"segment_sample_percentage" mapstructure:"segment_sample_percentage" json:"segment_sample_percentage,omitempty"`
+	LibrarySyncIntervalMinutes    int          `yaml:"library_sync_interval_minutes" mapstructure:"library_sync_interval_minutes" json:"library_sync_interval_minutes,omitempty"`
+	LibrarySyncConcurrency        int          `yaml:"library_sync_concurrency" mapstructure:"library_sync_concurrency" json:"library_sync_concurrency,omitempty"`
+	ResolveRepairOnImport         *bool        `yaml:"resolve_repair_on_import" mapstructure:"resolve_repair_on_import" json:"resolve_repair_on_import,omitempty"`
+	VerifyData                    *bool        `yaml:"verify_data" mapstructure:"verify_data" json:"verify_data,omitempty"`
+	CheckAllSegments              *bool        `yaml:"check_all_segments" mapstructure:"check_all_segments" json:"check_all_segments,omitempty"`
 	AcceptableMissingSegmentsPercentage float64 `yaml:"acceptable_missing_segments_percentage" mapstructure:"acceptable_missing_segments_percentage" json:"acceptable_missing_segments_percentage,omitempty"`
+	Repair                        RepairConfig `yaml:"repair" mapstructure:"repair" json:"repair"`
 }
 
 // GenerateProviderID creates a unique ID based on host, port, and username
@@ -1085,6 +1101,9 @@ func DefaultConfig(configDir ...string) *Config {
 	watchIntervalSeconds := 10 // Default watch interval
 	cleanupAutomaticImportFailure := false
 	metadataBackupEnabled := false
+	failureMaskingEnabled := true
+	repairEnabled := true
+	repairExponentialBackoff := true
 
 	// Set paths based on whether we're running in Docker or have a specific config directory
 	var dbPath, metadataPath, logPath, rclonePath, cachePath, backupPath string
@@ -1134,12 +1153,16 @@ func DefaultConfig(configDir ...string) *Config {
 			Backup: MetadataBackupConfig{
 				Enabled:       &metadataBackupEnabled,
 				IntervalHours: 24,
-				KeepBackups:   10,
+				KeepBackups:   1,
 				Path:          backupPath,
 			},
 		},
 		Streaming: StreamingConfig{
 			MaxPrefetch: 30, // Default: 30 segments prefetched ahead
+			FailureMasking: FailureMaskingConfig{
+				Enabled:   &failureMaskingEnabled,
+				Threshold: 3,
+			},
 		},
 		RClone: RCloneConfig{
 			Path:         rclonePath,
@@ -1220,6 +1243,12 @@ func DefaultConfig(configDir ...string) *Config {
 			LibrarySyncIntervalMinutes:    360,                    // Default: sync every 6 hours
 			ResolveRepairOnImport:         &resolveRepairOnImport, // Enabled by default
 			AcceptableMissingSegmentsPercentage: 0,                // Default: no missing segments allowed
+			Repair: RepairConfig{
+				Enabled:            &repairEnabled,
+				IntervalMinutes:    60,
+				MaxCoolDownHours:   24,
+				ExponentialBackoff: &repairExponentialBackoff,
+			},
 		},
 		SABnzbd: SABnzbdConfig{
 			Enabled:               &sabnzbdEnabled,

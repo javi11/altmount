@@ -374,6 +374,17 @@ export const useSetHealthPriority = () => {
 	});
 };
 
+export const useUnmaskHealthItem = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: (id: number) => apiClient.unmaskHealthItem(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["health"] });
+		},
+	});
+};
+
 export const useCancelHealthCheck = () => {
 	const queryClient = useQueryClient();
 

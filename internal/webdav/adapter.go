@@ -24,6 +24,7 @@ type Handler struct {
 	handler      http.Handler
 	authCreds    *AuthCredentials
 	configGetter config.ConfigGetter
+	fileSystem   *fileSystem
 }
 
 // NewHandler creates a new WebDAV handler that can be used with Fiber adaptor
@@ -38,9 +39,18 @@ func NewHandler(
 	// Create dynamic auth credentials with initial values
 	authCreds := NewAuthCredentials(config.User, config.Pass)
 
+	importDir := ""
+	if configGetter != nil {
+		cfg := configGetter()
+		if cfg.Import.ImportDir != nil {
+			importDir = *cfg.Import.ImportDir
+		}
+	}
+
 	// Create custom error handler that maps our errors to proper HTTP status codes
+	webdavFS := nzbToWebdavFS(fs, importDir)
 	errorHandler := &customErrorHandler{
-		fileSystem: nzbToWebdavFS(fs),
+		fileSystem: webdavFS,
 	}
 
 	var finalFS webdav.FileSystem = errorHandler
@@ -235,6 +245,7 @@ func NewHandler(
 		handler:      mux,
 		authCreds:    authCreds,
 		configGetter: configGetter,
+		fileSystem:   webdavFS.(*fileSystem),
 	}, nil
 }
 
@@ -253,6 +264,11 @@ func (h *Handler) SyncAuthCredentials() {
 	if h.configGetter != nil {
 		currentConfig := h.configGetter()
 		h.authCreds.UpdateCredentials(currentConfig.WebDAV.User, currentConfig.WebDAV.Password)
-		slog.DebugContext(context.Background(), "WebDAV auth credentials synced from config")
+
+		if currentConfig.Import.ImportDir != nil {
+			h.fileSystem.importDir = *currentConfig.Import.ImportDir
+		}
+
+		slog.DebugContext(context.Background(), "WebDAV configuration synced from config")
 	}
 }

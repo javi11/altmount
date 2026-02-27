@@ -86,6 +86,22 @@ export function HealthConfigSection({
 		setValidationError(validateFormData(newData));
 	};
 
+	const handleRepairChange = (
+		field: keyof HealthConfig["repair"],
+		value: boolean | number | undefined,
+	) => {
+		const newData = {
+			...formData,
+			repair: {
+				...formData.repair,
+				[field]: value,
+			},
+		};
+		setFormData(newData);
+		setHasChanges(JSON.stringify(newData) !== JSON.stringify(config.health));
+		setValidationError(validateFormData(newData));
+	};
+
 	const handleSave = async () => {
 		if (onUpdate && hasChanges && !validationError) {
 			await onUpdate("health", formData);
@@ -156,6 +172,88 @@ export function HealthConfigSection({
 										</span>
 									</li>
 								</ul>
+							</div>
+						</div>
+					)}
+				</div>
+
+				{/* Repair & Back-off Configuration */}
+				<div className="rounded-2xl border-2 border-base-300/80 bg-base-200/60 p-6">
+					<div className="flex items-start justify-between gap-4">
+						<div className="min-w-0 flex-1">
+							<h4 className="break-words font-bold text-base-content text-sm">Repair Engine</h4>
+							<p className="mt-1 break-words text-[11px] text-base-content/50 leading-relaxed">
+								Automatically trigger redownloads in Radarr/Sonarr for corrupted files.
+							</p>
+						</div>
+						<input
+							type="checkbox"
+							className="toggle toggle-info mt-1 shrink-0"
+							checked={formData.repair?.enabled ?? true}
+							disabled={isReadOnly}
+							onChange={(e) => handleRepairChange("enabled", e.target.checked)}
+						/>
+					</div>
+
+					{formData.repair?.enabled && (
+						<div className="fade-in slide-in-from-top-2 mt-6 animate-in border-base-300/50 border-t pt-6">
+							<div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold">Base Interval (Minutes)</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
+										value={formData.repair?.interval_minutes ?? 60}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleRepairChange(
+												"interval_minutes",
+												Number.parseInt(e.target.value, 10) || 60,
+											)
+										}
+										min="1"
+									/>
+									<p className="label break-words text-base-content/50 text-[10px]">
+										Wait time before the first repair re-notification.
+									</p>
+								</fieldset>
+
+								<fieldset className="fieldset">
+									<legend className="fieldset-legend font-semibold">Max Cooldown (Hours)</legend>
+									<input
+										type="number"
+										className="input input-bordered w-full bg-base-100 font-mono text-sm"
+										value={formData.repair?.max_cooldown_hours ?? 24}
+										disabled={isReadOnly}
+										onChange={(e) =>
+											handleRepairChange(
+												"max_cooldown_hours",
+												Number.parseInt(e.target.value, 10) || 24,
+											)
+										}
+										min="1"
+									/>
+									<p className="label break-words text-base-content/50 text-[10px]">
+										Maximum delay between repair attempts.
+									</p>
+								</fieldset>
+							</div>
+
+							<div className="mt-6 flex items-start justify-between gap-4 rounded-xl bg-base-100/50 p-4">
+								<div className="min-w-0 flex-1">
+									<h5 className="font-bold text-xs">Exponential Back-off</h5>
+									<p className="mt-1 text-[10px] text-base-content/60 leading-relaxed">
+										Double the wait time after each failed repair attempt (e.g. 1h, 2h, 4h...) to
+										prevent API hammering.
+									</p>
+								</div>
+								<input
+									type="checkbox"
+									className="checkbox checkbox-info checkbox-sm mt-1"
+									checked={formData.repair?.exponential_backoff ?? true}
+									disabled={isReadOnly}
+									onChange={(e) => handleRepairChange("exponential_backoff", e.target.checked)}
+								/>
 							</div>
 						</div>
 					)}
