@@ -26,7 +26,7 @@ func TestRespondServiceUnavailable(t *testing.T) {
 	retryAfter := resp.Header.Get("Retry-After")
 	assert.Equal(t, "10", retryAfter, "Retry-After header should be set to 10")
 
-	var body map[string]interface{}
+	var body map[string]any
 	err = json.NewDecoder(resp.Body).Decode(&body)
 	assert.NoError(t, err)
 	assert.False(t, body["success"].(bool))

@@ -98,7 +98,7 @@ func (v *virtualDirInfo) Size() int64        { return 0 }
 func (v *virtualDirInfo) Mode() os.FileMode  { return os.ModeDir | 0755 }
 func (v *virtualDirInfo) ModTime() time.Time { return v.modTime }
 func (v *virtualDirInfo) IsDir() bool        { return true }
-func (v *virtualDirInfo) Sys() interface{}   { return nil }
+func (v *virtualDirInfo) Sys() any           { return nil }
 
 func (fs *fileSystem) RemoveAll(ctx context.Context, name string) error {
 	if path, isLibrary := fs.resolvePath(name); isLibrary {

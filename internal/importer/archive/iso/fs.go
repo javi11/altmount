@@ -235,10 +235,7 @@ func udfParseVDS(rs io.ReadSeeker, vdsExtent udfExtent) (partStart uint32, fsdAD
 			fsdAD = udfParseLongAD(buf, 248)
 			mapTableLen := binary.LittleEndian.Uint32(buf[264:268])
 			mapOff := 440
-			end := mapOff + int(mapTableLen)
-			if end > len(buf) {
-				end = len(buf)
-			}
+			end := min(mapOff+int(mapTableLen), len(buf))
 			for mapOff < end {
 				pmType := buf[mapOff]
 				pmLen := int(buf[mapOff+1])
@@ -392,10 +389,7 @@ func udfReadDirEntries(rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan,
 			if rerr != nil {
 				return nil, rerr
 			}
-			take := int(ad.length)
-			if take > len(sector) {
-				take = len(sector)
-			}
+			take := min(int(ad.length), len(sector))
 			dirData = append(dirData, sector[:take]...)
 		}
 	}
@@ -447,7 +441,7 @@ func udfReadDirEntries(rs io.ReadSeeker, physSect uint32, metaMap []udfMetaSpan,
 func udfScanForFSD(rs io.ReadSeeker, partStart uint32) uint32 {
 	const scanLimit = 1024
 	buf := make([]byte, 16)
-	for i := uint32(0); i < scanLimit; i++ {
+	for i := range uint32(scanLimit) {
 		sect := partStart + i
 		if _, err := rs.Seek(int64(sect)*iso9660SectorSize, io.SeekStart); err != nil {
 			return 0

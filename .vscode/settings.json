@@ -1,0 +1,4 @@
+{
+  "biome.lsp.bin": "frontend/node_modules/@biomejs/cli-darwin-arm64/biome",
+  "biome.configurationPath": "frontend/biome.json"
+}
