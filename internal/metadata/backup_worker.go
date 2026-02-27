@@ -75,14 +75,6 @@ func (w *BackupWorker) runWorker() {
 	ticker := time.NewTicker(w.configGetter().GetMetadataBackupInterval())
 	defer ticker.Stop()
 
-	// Initial backup after a short delay
-	select {
-	case <-time.After(1 * time.Minute):
-		w.performBackup()
-	case <-w.workerCtx.Done():
-		return
-	}
-
 	for {
 		select {
 		case <-ticker.C:

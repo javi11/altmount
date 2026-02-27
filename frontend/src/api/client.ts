@@ -491,6 +491,18 @@ export class APIClient {
 		});
 	}
 
+	async unmaskHealthItem(id: number) {
+		return this.request<{
+			message: string;
+			id: number;
+			file_path: string;
+			updated_at: string;
+			health_data: FileHealth;
+		}>(`/health/${id}/unmask`, {
+			method: "POST",
+		});
+	}
+
 	async cancelHealthCheck(id: number) {
 		return this.request<{
 			message: string;

@@ -203,7 +203,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// 9. Create HTTP server
-	customServer := createHTTPServer(app, webdavHandler, streamHandler, cfg.WebDAV.Port, cfg.ProfilerEnabled)
+	customServer := createHTTPServer(apiServer, app, webdavHandler, streamHandler, cfg.WebDAV.Port, cfg.ProfilerEnabled)
 
 	logger.Info("AltMount server started",
 		"port", cfg.WebDAV.Port,
@@ -265,6 +265,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// Auto-start FUSE mount if enabled
 		apiServer.AutoStartFuse()
 	}()
+
+	// Signal that the server is ready
+	apiServer.SetReady(true)
 
 	// Wait for shutdown signal or server error
 	select {

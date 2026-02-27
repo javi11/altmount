@@ -72,6 +72,7 @@ func (s *Server) handleGetSystemHealth(c *fiber.Ctx) error {
 		})
 	case "unhealthy":
 		// Return 503 Service Unavailable for unhealthy status
+		c.Set("Retry-After", "10")
 		return c.Status(503).JSON(fiber.Map{
 			"success": false,
 			"data":    healthCheck,

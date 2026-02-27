@@ -70,15 +70,30 @@ export function FileExplorer({
 
 	const historyFiles = useMemo(() => {
 		if (!history) return [];
-		return history.map((item) => ({
-			basename: item.virtual_path || item.nzb_name || "unknown",
-			filename: item.library_path || "",
-			size: item.file_size || 0,
-			lastmod: item.completed_at,
-			type: "file",
-			mime: "application/octet-stream",
-			etag: "",
-		})) as WebDAVFile[];
+		return history.map((item) => {
+			const virtualPath = item.virtual_path || "";
+			const fileName = item.file_name || "";
+			
+			// For folder imports, VirtualPath usually ends with FileName (the release folder)
+			// For single file imports, VirtualPath is the parent folder
+			let fullVirtualPath = virtualPath;
+			if (fileName && !virtualPath.endsWith(fileName)) {
+				fullVirtualPath = `${virtualPath}/${fileName}`.replace(/\/+/g, "/");
+			}
+			
+			if (!fullVirtualPath && item.nzb_name) {
+				fullVirtualPath = item.nzb_name;
+			}
+
+			return {
+				basename: fileName || item.nzb_name || "unknown",
+				filename: fullVirtualPath,
+				size: item.file_size || 0,
+				lastmod: item.completed_at,
+				type: "file" as const,
+				library_path: item.library_path,
+			};
+		});
 	}, [history]);
 
 	const {

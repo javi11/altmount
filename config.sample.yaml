@@ -25,10 +25,18 @@ database:
 metadata:
   root_path: '/config/metadata' # Directory to store metadata files (required)
   delete_source_nzb_on_removal: false # Delete source NZB file when metadata is removed (default: false)
+  backup:
+    enabled: false # Enable automatic metadata backups
+    interval_hours: 24 # Backup interval in hours
+    keep_backups: 1 # Number of old backups to keep
+    path: '/config/backups' # Absolute path to store backups
 
 # Streaming and download configuration
 streaming:
-  max_cache_size_mb: 32 # Maximum cache size in MB for ahead download chunks (default: 32MB)
+  max_prefetch: 30 # Number of segments to prefetch ahead of current read position
+  failure_masking:
+    enabled: true # Automatically hide files from mounts after repeated failures
+    threshold: 3 # Number of streaming failures before masking a file
 
 # RClone configuration (optional)
 rclone:

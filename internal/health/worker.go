@@ -426,12 +426,31 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 				return nil
 			}
 		} else {
+			// Calculate repair back-off
+			interval := hw.configGetter().GetRepairInterval()
+			if hw.configGetter().GetRepairExponentialBackoff() {
+				// Exponential backoff: interval * 2^retry_count
+				// e.g. 1h, 2h, 4h...
+				multiplier := 1 << fh.RepairRetryCount
+				interval = interval * time.Duration(multiplier)
+
+				// Cap at max cooldown
+				maxCoolDown := hw.configGetter().GetRepairMaxCoolDown()
+				if interval > maxCoolDown {
+					interval = maxCoolDown
+				}
+			}
+			nextCheck := time.Now().UTC().Add(interval)
+
 			update.Type = database.UpdateTypeRepairRetry
 			update.Status = database.HealthStatusRepairTriggered
+			update.ScheduledCheckAt = nextCheck
+
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Repair retry scheduled",
 					"file_path", fh.FilePath,
-					"repair_retry_count", fh.RepairRetryCount+1)
+					"repair_retry_count", fh.RepairRetryCount+1,
+					"next_check", nextCheck)
 				return nil
 			}
 		}
@@ -441,6 +460,8 @@ func (hw *HealthWorker) prepareUpdateForResult(ctx context.Context, fh *database
 		if fh.RetryCount >= fh.MaxRetries-1 {
 			update.Type = database.UpdateTypeRepairTrigger
 			update.Status = database.HealthStatusRepairTriggered
+			update.ScheduledCheckAt = time.Now().UTC().Add(hw.configGetter().GetRepairInterval())
+
 			sideEffect = func() error {
 				slog.InfoContext(ctx, "Health check retries exhausted, triggering repair", "file_path", fh.FilePath)
 				outcome, err := hw.triggerFileRepair(ctx, fh, errorMsg, event.Details)
@@ -490,9 +511,25 @@ func (hw *HealthWorker) prepareRepairNotificationUpdate(ctx context.Context, fh 
 		return update, sideEffect
 	}
 
+	// Calculate repair back-off
+	interval := hw.configGetter().GetRepairInterval()
+	if hw.configGetter().GetRepairExponentialBackoff() {
+		// Exponential backoff
+		multiplier := 1 << fh.RepairRetryCount
+		interval = interval * time.Duration(multiplier)
+
+		// Cap at max cooldown
+		maxCoolDown := hw.configGetter().GetRepairMaxCoolDown()
+		if interval > maxCoolDown {
+			interval = maxCoolDown
+		}
+	}
+	nextCheck := time.Now().UTC().Add(interval)
+
 	// Re-trigger ARR and increment repair_retry_count.
 	update.Type = database.UpdateTypeRepairRetry
 	update.Status = database.HealthStatusRepairTriggered
+	update.ScheduledCheckAt = nextCheck
 
 	sideEffect := func() error {
 		outcome, err := hw.retriggerFileRepair(ctx, fh)

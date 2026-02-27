@@ -27,6 +27,7 @@ import {
 	useResetAllHealthChecks,
 	useRestartBulkHealthItems,
 	useSetHealthPriority,
+	useUnmaskHealthItem,
 } from "../hooks/useApi";
 import { useConfig } from "../hooks/useConfig";
 import {
@@ -107,6 +108,7 @@ export function HealthPage() {
 	const cancelHealthCheck = useCancelHealthCheck();
 	const repairHealthItem = useRepairHealthItem();
 	const setHealthPriority = useSetHealthPriority();
+	const unmaskItem = useUnmaskHealthItem();
 	const { confirmAction } = useConfirm();
 	const { showToast } = useToast();
 
@@ -135,6 +137,24 @@ export function HealthPage() {
 		);
 		if (confirmed) {
 			await deleteItem.mutateAsync(id);
+		}
+	};
+
+	const handleUnmask = async (id: number) => {
+		try {
+			await unmaskItem.mutateAsync(id);
+			showToast({
+				title: "File Unmasked",
+				message: "The file has been unmasked and will now be visible in mounts.",
+				type: "success",
+			});
+		} catch (err) {
+			console.error("Failed to unmask file:", err);
+			showToast({
+				title: "Unmask Failed",
+				message: "Failed to unmask file health record",
+				type: "error",
+			});
 		}
 	};
 
@@ -792,6 +812,7 @@ export function HealthPage() {
 												isDirectCheckPending={directHealthCheck.isPending}
 												isRepairPending={repairHealthItem.isPending}
 												isDeletePending={deleteItem.isPending}
+												isUnmaskPending={unmaskItem.isPending}
 												onSelectItem={handleSelectItem}
 												onSelectAll={handleSelectAll}
 												onSort={handleSort}
@@ -799,6 +820,7 @@ export function HealthPage() {
 												onManualCheck={handleManualCheck}
 												onRepair={handleRepair}
 												onDelete={handleDelete}
+												onUnmask={handleUnmask}
 												onSetPriority={handleSetPriority}
 											/>
 										</div>

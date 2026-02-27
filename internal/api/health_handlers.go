@@ -917,6 +917,53 @@ func (s *Server) handleCancelHealthCheck(c *fiber.Ctx) error {
 	return RespondSuccess(c, response)
 }
 
+// handleUnmaskHealth handles POST /api/health/{id}/unmask
+func (s *Server) handleUnmaskHealth(c *fiber.Ctx) error {
+	// Extract ID from path parameter
+	idStr := c.Params("id")
+	if idStr == "" {
+		return RespondBadRequest(c, "Health record identifier is required", "")
+	}
+
+	// Parse as numeric ID
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return RespondBadRequest(c, "Invalid health record ID", "ID must be a valid integer")
+	}
+
+	// Check if item exists in health database
+	item, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
+	if err != nil {
+		return RespondInternalError(c, "Failed to check health record", err.Error())
+	}
+
+	if item == nil {
+		return RespondNotFound(c, "Health record", "")
+	}
+
+	// Unmask file
+	err = s.healthRepo.UnmaskFile(c.Context(), item.FilePath)
+	if err != nil {
+		return RespondInternalError(c, "Failed to unmask file", err.Error())
+	}
+
+	// Get the updated health record
+	updatedItem, err := s.healthRepo.GetFileHealthByID(c.Context(), id)
+	if err != nil {
+		return RespondInternalError(c, "Failed to retrieve updated health record", err.Error())
+	}
+
+	response := map[string]any{
+		"message":     "File unmasked successfully",
+		"id":          id,
+		"file_path":   item.FilePath,
+		"updated_at":  time.Now().Format(time.RFC3339),
+		"health_data": ToHealthItemResponse(updatedItem),
+	}
+
+	return RespondSuccess(c, response)
+}
+
 // handleSetHealthPriority handles POST /api/health/{id}/priority
 func (s *Server) handleSetHealthPriority(c *fiber.Ctx) error {
 	// Extract ID from path parameter

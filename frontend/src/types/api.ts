@@ -3,12 +3,12 @@ export interface APIResponse<T = unknown> {
 	success: boolean;
 	data?: T;
 	error?:
-		| string
-		| {
-				code: string;
-				message: string;
-				details: string;
-		  };
+	| string
+	| {
+		code: string;
+		message: string;
+		details: string;
+	};
 	meta?: APIMeta;
 }
 
@@ -188,6 +188,9 @@ export interface FileHealth {
 	updated_at: string;
 	scheduled_check_at?: string;
 	priority: HealthPriority;
+	// Failure masking fields
+	streaming_failure_count: number;
+	is_masked: boolean;
 }
 
 export interface HealthStats {

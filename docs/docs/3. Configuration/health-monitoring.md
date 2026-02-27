@@ -45,6 +45,32 @@ health:
 - **verify_data**: Verify downloaded data integrity during health checks (default: false)
 - **check_all_segments**: Check all file segments instead of sampling (default: false)
 
+### Automatic Repair & Exponential Back-off
+
+When AltMount detects a corrupted file, it can automatically coordinate a repair with your ARR applications. To prevent hammering APIs during persistent provider issues or missing content, AltMount uses an exponential back-off strategy for repair notifications.
+
+```yaml
+health:
+  repair:
+    enabled: true # Enable automatic repair coordination
+    interval_minutes: 60 # Base wait time before the first re-notification
+    max_cooldown_hours: 24 # Maximum delay between repair attempts
+    exponential_backoff: true # Double the wait time after each failure (1h, 2h, 4h...)
+```
+
+**Configuration Options:**
+
+- **enabled**: Master toggle for the repair engine.
+- **interval_minutes**: The initial delay before AltMount sends a subsequent repair request to ARR if the first one doesn't result in a healthy file.
+- **max_cooldown_hours**: The upper limit for the back-off delay.
+- **exponential_backoff**: When enabled, the wait time doubles after each failed repair attempt (e.g., 60m, 120m, 240m...) until it reaches the `max_cooldown_hours`.
+
+### Startup & Initialization (503 Handshake)
+
+During the startup phase, while AltMount is initializing its internal services and mounting filesystems, it will return an `HTTP 503 Service Unavailable` status for all API and WebDAV requests.
+
+To improve compatibility with Rclone and Plex, these 503 responses include a `Retry-After: 10` header. This header instructs the client to wait 10 seconds before polling again, preventing aggressive retry loops that can slow down the boot sequence.
+
 ### Choosing the Right `segment_sample_percentage`
 
 The `segment_sample_percentage` setting controls the trade-off between check speed and detection accuracy:

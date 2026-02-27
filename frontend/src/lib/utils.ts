@@ -106,6 +106,7 @@ export function getStatusColor(status: string): string {
 		case "repair_triggered":
 			return "info";
 		case "pending":
+		case "masked":
 			return "warning";
 		case "failed":
 		case "corrupted":

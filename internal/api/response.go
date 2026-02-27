@@ -116,6 +116,7 @@ func RespondInternalError(c *fiber.Ctx, message, details string) error {
 
 // RespondServiceUnavailable sends a 503 Service Unavailable error.
 func RespondServiceUnavailable(c *fiber.Ctx, message, details string) error {
+	c.Set("Retry-After", "10")
 	return RespondError(c, fiber.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", message, details)
 }
 

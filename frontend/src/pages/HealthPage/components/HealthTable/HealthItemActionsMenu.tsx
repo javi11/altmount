@@ -1,4 +1,4 @@
-import { MoreHorizontal, PlayCircle, Trash2, Wrench, X } from "lucide-react";
+import { Eye, MoreHorizontal, PlayCircle, Trash2, Wrench, X } from "lucide-react";
 import type { FileHealth } from "../../../../types/api";
 
 interface HealthItemActionsMenuProps {
@@ -7,10 +7,12 @@ interface HealthItemActionsMenuProps {
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
+	isUnmaskPending: boolean;
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onUnmask: (id: number) => void;
 }
 
 export function HealthItemActionsMenu({
@@ -19,10 +21,12 @@ export function HealthItemActionsMenu({
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
+	isUnmaskPending,
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onUnmask,
 }: HealthItemActionsMenuProps) {
 	return (
 		<div className="dropdown dropdown-end">
@@ -30,6 +34,19 @@ export function HealthItemActionsMenu({
 				<MoreHorizontal className="h-4 w-4" />
 			</button>
 			<ul className="dropdown-content menu z-[50] w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl">
+				{item.is_masked && (
+					<li>
+						<button
+							type="button"
+							onClick={() => onUnmask(item.id)}
+							disabled={isUnmaskPending}
+							className="text-success"
+						>
+							<Eye className="h-4 w-4" />
+							Unmask File
+						</button>
+					</li>
+				)}
 				{item.status === "checking" ? (
 					<li>
 						<button

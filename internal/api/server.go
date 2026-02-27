@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -62,6 +63,7 @@ type Server struct {
 	streamTracker       *StreamTracker
 	fuseManager         *FuseManager
 	segcacheMgr         *segcache.Manager // nil if segment cache is disabled
+	ready               atomic.Bool
 }
 
 // NewServer creates a new API server that can optionally register routes on the provided mux (for backwards compatibility)
@@ -121,6 +123,16 @@ func (s *Server) SetHealthWorker(healthWorker *health.HealthWorker) {
 // SetLibrarySyncWorker sets the library sync worker reference for the server
 func (s *Server) SetLibrarySyncWorker(librarySyncWorker *health.LibrarySyncWorker) {
 	s.librarySyncWorker = librarySyncWorker
+}
+
+// SetReady sets the server as ready to accept requests
+func (s *Server) SetReady(ready bool) {
+	s.ready.Store(ready)
+}
+
+// IsReady returns true if the server is ready to accept requests
+func (s *Server) IsReady() bool {
+	return s.ready.Load()
 }
 
 // SetRcloneClient sets the rclone client reference for the server
@@ -230,6 +242,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	api.Post("/health/check", s.handleAddHealthCheck)
 	api.Get("/health/worker/status", s.handleGetHealthWorkerStatus)
 	api.Post("/health/:id/repair", s.handleRepairHealth)
+	api.Post("/health/:id/unmask", s.handleUnmaskHealth)
 	api.Post("/health/:id/check-now", s.handleDirectHealthCheck)
 	api.Post("/health/:id/priority", s.handleSetHealthPriority)
 	api.Post("/health/:id/cancel", s.handleCancelHealthCheck)

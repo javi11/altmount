@@ -104,6 +104,9 @@ type FileHealth struct {
 	ReleaseDate      *time.Time     `db:"release_date"`       // Cached from metadata for scheduling
 	ScheduledCheckAt *time.Time     `db:"scheduled_check_at"` // Next check time
 	Priority         HealthPriority `db:"priority"`           // Priority level for health checks
+	// Failure masking fields
+	StreamingFailureCount int  `db:"streaming_failure_count"`
+	IsMasked              bool `db:"is_masked"`
 }
 
 // User represents a user account in the system
