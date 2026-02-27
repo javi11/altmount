@@ -90,6 +90,10 @@ type APIConfig struct {
 	Prefix         string   `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
 	KeyOverride    string   `yaml:"key_override" mapstructure:"key_override" json:"key_override,omitempty"`
 	AllowedOrigins []string `yaml:"allowed_origins" mapstructure:"allowed_origins" json:"allowed_origins,omitempty"`
+	// StremioNzbTTLHours controls how long a completed NZB result is cached by the
+	// POST /api/nzb/stremio-streams endpoint before the same NZB is re-processed on
+	// the next request. Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
+	StremioNzbTTLHours int `yaml:"stremio_nzb_ttl_hours" mapstructure:"stremio_nzb_ttl_hours" json:"stremio_nzb_ttl_hours,omitempty"`
 }
 
 // AuthConfig represents authentication configuration
@@ -1139,7 +1143,8 @@ func DefaultConfig(configDir ...string) *Config {
 			Password: "usenet",
 		},
 		API: APIConfig{
-			Prefix: "/api",
+			Prefix:             "/api",
+			StremioNzbTTLHours: 24,
 		},
 		Auth: AuthConfig{
 			LoginRequired: &loginRequired,

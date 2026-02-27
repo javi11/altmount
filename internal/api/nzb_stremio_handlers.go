@@ -124,10 +124,21 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 	tempPath := filepath.Join(uploadDir, safeFilename)
 
 	// --- Short-circuit: return cached streams if NZB was already processed ---
+	// Respect the configurable TTL: 0 means cache forever, >0 means re-process after N hours.
+	ttlHours := 24 // default fallback
+	if s.configManager != nil {
+		ttlHours = s.configManager.GetConfig().API.StremioNzbTTLHours
+	}
+
 	completedStatus := database.QueueStatusCompleted
 	existing, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, safeFilename, "", 1, 0, "updated_at", "desc")
 	if err == nil && len(existing) > 0 {
-		if prev := existing[0]; prev.StoragePath != nil && *prev.StoragePath != "" {
+		prev := existing[0]
+		cacheValid := prev.StoragePath != nil && *prev.StoragePath != ""
+		if cacheValid && ttlHours > 0 && prev.CompletedAt != nil {
+			cacheValid = time.Since(*prev.CompletedAt) < time.Duration(ttlHours)*time.Hour
+		}
+		if cacheValid {
 			if streams, err := s.buildStremioStreams(prev, baseURL, downloadKey, nzbName); err == nil {
 				slog.InfoContext(ctx, "Returning cached Stremio streams for already-processed NZB",
 					"nzb_name", nzbName, "queue_id", prev.ID)
