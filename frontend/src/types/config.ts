@@ -94,6 +94,14 @@ export interface HealthConfig {
 	resolve_repair_on_import?: boolean; // Automatically resolve pending repairs in the same directory when a new file is imported
 	verify_data?: boolean; // Verify 1 byte of data for each segment
 	acceptable_missing_segments_percentage?: number;
+	repair: RepairConfig;
+}
+
+export interface RepairConfig {
+	enabled: boolean;
+	interval_minutes: number;
+	max_cooldown_hours: number;
+	exponential_backoff: boolean;
 }
 
 // Library sync types
