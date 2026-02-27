@@ -120,9 +120,6 @@ func initializeFilesystem(
 		segmentStore = segcacheMgr.Cache()
 	}
 
-	// Create negative cache for failed segments
-	negativeCache := usenet.NewNegativeCache(60 * time.Second)
-
 	// Create metadata-based remote file handler
 	metadataRemoteFile := nzbfilesystem.NewMetadataRemoteFile(
 		metadataService,
@@ -131,7 +128,6 @@ func initializeFilesystem(
 		configGetter,
 		streamTracker,
 		segmentStore,
-		negativeCache,
 	)
 
 	// Create filesystem backed by metadata

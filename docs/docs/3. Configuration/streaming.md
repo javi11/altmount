@@ -34,10 +34,6 @@ If a file fails to stream (e.g., due to DMCA'd articles or provider errors) more
 2. **Flag as MASKED**: The file will remain visible in the AltMount Web UI with a `MASKED` badge.
 3. **Prevent retry loops**: Media players like Plex won't keep trying to read a file that is destined to fail, saving your outbound bandwidth and SSD life.
 
-### Negative Caching
-
-AltMount also implements **Negative Caching** for failed segment downloads. If a range request for a specific chunk fails with a permanent error, the failure is cached for **60 seconds**. Subsequent requests for the same chunk within this window will fail immediately without hitting your Usenet providers, further reducing redundant traffic.
-
 ### Manual Override
 
 If a file is masked, you can manually unmask it from the **Health Monitoring** page by clicking the **Unmask File** action in the item menu. This resets the failure counter and makes the file visible in your mounts again.
