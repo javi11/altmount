@@ -883,11 +883,6 @@ func (s *Service) ensurePersistentNzb(ctx context.Context, item *database.Import
 	return nil
 }
 
-// invalidateCategoryCache clears memoized category paths. Call on config reload.
-func (s *Service) invalidateCategoryCache() {
-	s.categoryPathCache.Clear()
-}
-
 // buildCategoryPath resolves a category name to its configured directory path (memoized).
 func (s *Service) buildCategoryPath(category string) string {
 	if category == "" {
