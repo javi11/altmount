@@ -77,7 +77,9 @@ docker-build-ci: build-frontend
 
 .PHONY: build-frontend
 build-frontend:
-	cd frontend && bun install --frozen-lockfile && bun run build
+	@VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \
+	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
+	cd frontend && bun install --frozen-lockfile && APP_VERSION=$$VERSION GIT_COMMIT=$$COMMIT bun run build
 
 .PHONY: build-docs
 build-docs:
