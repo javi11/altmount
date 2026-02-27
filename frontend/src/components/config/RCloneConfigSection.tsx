@@ -153,7 +153,7 @@ export function RCloneConfigSection({
 			async_read: config.rclone.async_read || true,
 			vfs_fast_fingerprint: config.rclone.vfs_fast_fingerprint || false,
 			use_mmap: config.rclone.use_mmap || false,
-		links: config.rclone.links || false,
+			links: config.rclone.links || false,
 		};
 		setMountFormData(newMountFormData);
 		setHasMountChanges(false);
