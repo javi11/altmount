@@ -39,6 +39,8 @@ type Processor struct {
 	maxImportConnections    int // Maximum concurrent NNTP connections for validation and archive processing
 	segmentSamplePercentage int // Percentage of segments to check when sampling (1-100)
 	validationTimeout       time.Duration
+	maxDownloadPrefetch     int           // Prefetch depth for Usenet segment reads (used by ISO reader)
+	readTimeout             time.Duration // Read timeout for Usenet data (used by ISO reader)
 	allowedFileExtensions   []string
 	log                     *slog.Logger
 	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
@@ -62,6 +64,8 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		maxImportConnections:    maxImportConnections,
 		segmentSamplePercentage: segmentSamplePercentage,
 		validationTimeout:       30 * time.Second, // Default validation timeout for imports
+		maxDownloadPrefetch:     maxDownloadPrefetch,
+		readTimeout:             readTimeout,
 		allowedFileExtensions:   allowedFileExtensions,
 		log:                     slog.Default().With("component", "nzb-processor"),
 		broadcaster:             broadcaster,
@@ -552,6 +556,8 @@ func (proc *Processor) processRarArchive(
 			allowedExtensions,
 			timeout,
 			extractedFiles,
+			proc.maxDownloadPrefetch,
+			proc.readTimeout,
 		)
 		if err != nil {
 			return nzbFolder, err
@@ -655,6 +661,8 @@ func (proc *Processor) processSevenZipArchive(
 			allowedExtensions,
 			timeout,
 			extractedFiles,
+			proc.maxDownloadPrefetch,
+			proc.readTimeout,
 		)
 		if err != nil {
 			return nzbFolder, err
