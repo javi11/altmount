@@ -2,7 +2,6 @@ package iso
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,8 +9,6 @@ import (
 )
 
 const iso9660SectorSize = 2048
-
-var errNotISO9660 = errors.New("not a valid ISO 9660 image")
 
 // isoFileEntry is one non-directory file returned by ListISOFiles.
 type isoFileEntry struct {
