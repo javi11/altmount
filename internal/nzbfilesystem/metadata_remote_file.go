@@ -37,7 +37,6 @@ type MetadataRemoteFile struct {
 	aesCipher        *aes.AesCipher      // For AES encryption/decryption
 	streamTracker    StreamTracker       // Stream tracker for monitoring active streams
 	segmentStore     usenet.SegmentStore // Optional segment cache (nil = disabled)
-	negativeCache    *usenet.NegativeCache
 }
 
 // Configuration is now accessed dynamically through config.ConfigGetter
@@ -51,7 +50,6 @@ func NewMetadataRemoteFile(
 	configGetter config.ConfigGetter,
 	streamTracker StreamTracker,
 	segmentStore usenet.SegmentStore,
-	negativeCache *usenet.NegativeCache,
 ) *MetadataRemoteFile {
 	// Initialize rclone cipher with global credentials for encrypted files
 	cfg := configGetter()
@@ -74,7 +72,6 @@ func NewMetadataRemoteFile(
 		aesCipher:        aesCipher,
 		streamTracker:    streamTracker,
 		segmentStore:     segmentStore,
-		negativeCache:    negativeCache,
 	}
 }
 
@@ -239,7 +236,6 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		streamTracker:    mrf.streamTracker,
 		streamID:         streamID,
 		segmentStore:     mrf.segmentStore,
-		negativeCache:    mrf.negativeCache,
 	}
 
 	return true, virtualFile, nil
@@ -754,8 +750,7 @@ type MetadataVirtualFile struct {
 	streamTracker    StreamTracker
 	streamID         string
 	segmentStore     usenet.SegmentStore // optional segment cache
-	negativeCache    *usenet.NegativeCache
-	segmentIndexOnce sync.Once // guards lazy init of segmentIndex
+	segmentIndexOnce sync.Once           // guards lazy init of segmentIndex
 
 	// Reader state and position tracking
 	reader            io.ReadCloser
@@ -1337,7 +1332,7 @@ func (mvf *MetadataVirtualFile) createUsenetReader(ctx context.Context, start, e
 		}
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore, mvf.negativeCache)
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
 }
 
 // createNestedReader creates a reader for files backed by nested RAR sources.
@@ -1455,7 +1450,7 @@ func (mvf *MetadataVirtualFile) createUsenetReaderFromSegments(ctx context.Conte
 		return nil, fmt.Errorf("no segments cover range [%d, %d]", start, end)
 	}
 
-	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore, mvf.negativeCache)
+	return usenet.NewUsenetReader(ctx, mvf.poolManager.GetPool, rg, mvf.maxPrefetch, mvf.streamTracker, mvf.streamID, mvf.segmentStore)
 }
 
 // nestedSourceSpec holds the parameters needed to lazily open one inner-volume reader.

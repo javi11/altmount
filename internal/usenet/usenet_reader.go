@@ -66,9 +66,8 @@ type UsenetReader struct {
 	poolGetter     func() (*nntppool.Client, error) // Dynamic pool getter
 	metricsTracker MetricsTracker
 	streamID       string
-	segmentStore   SegmentStore   // optional, nil = no caching
-	negativeCache  *NegativeCache // optional
-	cond           *sync.Cond     // Signals downloadManager when reader advances
+	segmentStore   SegmentStore // optional, nil = no caching
+	cond           *sync.Cond   // Signals downloadManager when reader advances
 
 	// Prefetch-based download tracking
 	nextToDownload int // Index of next segment to schedule
@@ -87,7 +86,6 @@ func NewUsenetReader(
 	metricsTracker MetricsTracker,
 	streamID string,
 	segmentStore SegmentStore,
-	negativeCache *NegativeCache,
 ) (*UsenetReader, error) {
 	log := slog.Default().With("component", "usenet-reader")
 	ctx, cancel := context.WithCancel(ctx)
@@ -107,7 +105,6 @@ func NewUsenetReader(
 		metricsTracker: metricsTracker,
 		streamID:       streamID,
 		segmentStore:   segmentStore,
-		negativeCache:  negativeCache,
 	}
 
 	ur.cond = sync.NewCond(&ur.mu)
@@ -300,12 +297,6 @@ func (b *UsenetReader) GetBufferedOffset() int64 {
 
 // downloadSegmentWithRetry attempts to download a segment with retry logic for pool unavailability
 func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segment) ([]byte, error) {
-	// Negative Cache HIT: skip NNTP entirely
-	if b.negativeCache != nil && b.negativeCache.Get(seg.Id) {
-		b.log.DebugContext(ctx, "negative cache hit", "segment_id", seg.Id)
-		return nil, nntppool.ErrArticleNotFound
-	}
-
 	// Cache HIT: skip NNTP entirely
 	if b.segmentStore != nil {
 		if data, ok := b.segmentStore.Get(seg.Id); ok {
@@ -399,10 +390,6 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 		}),
 		retry.RetryIf(func(err error) bool {
 			if errors.Is(err, nntppool.ErrArticleNotFound) {
-				// Record permanent failure in negative cache
-				if b.negativeCache != nil {
-					b.negativeCache.Put(seg.Id)
-				}
 				return false // permanent failure — do not retry
 			}
 			return true
