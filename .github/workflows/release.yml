@@ -129,6 +129,11 @@ jobs:
           name: frontend-build
           path: frontend/dist/
 
+      # Install macFUSE headers (required by cgofuse CGO dependency)
+      - name: Install macFUSE
+        if: matrix.goos == 'darwin'
+        run: brew install --cask macfuse
+
       # Extract version info
       - name: Extract version info
         id: version
