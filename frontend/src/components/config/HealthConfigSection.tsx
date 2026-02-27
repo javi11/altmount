@@ -422,7 +422,7 @@ export function HealthConfigSection({
 										min="1"
 										max="100"
 										value={formData.segment_sample_percentage}
-										className="range range-primary range-sm"
+										className="range range-primary range-sm w-full"
 										step="1"
 										disabled={isReadOnly}
 										onChange={(e) =>
@@ -466,7 +466,7 @@ export function HealthConfigSection({
 										min="0"
 										max="10"
 										value={formData.acceptable_missing_segments_percentage}
-										className="range range-primary range-sm"
+										className="range range-primary range-sm w-full"
 										step="0.1"
 										disabled={isReadOnly}
 										onChange={(e) =>

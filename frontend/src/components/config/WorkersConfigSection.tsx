@@ -203,7 +203,7 @@ export function ImportConfigSection({
 								min="1"
 								max="100"
 								value={formData.segment_sample_percentage}
-								className="range range-primary range-sm"
+								className="range range-primary range-sm w-full"
 								step="1"
 								disabled={isReadOnly}
 								onChange={(e) =>
