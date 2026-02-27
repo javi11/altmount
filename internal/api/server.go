@@ -154,6 +154,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 	// Public endpoints (authentication handled inside or not required)
 	api.Post("/import/file", s.handleManualImportFile)
 	api.Post("/arrs/webhook", s.handleArrsWebhook)
+	api.Post("/nzb/stremio-streams", s.handleNzbStremioStreams)
 
 	cfg := s.configManager.GetConfig()
 
