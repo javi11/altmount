@@ -124,6 +124,7 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 	}
 
 	safeFilename := filepath.Base(file.Filename)
+	nzbName := strings.TrimSuffix(safeFilename, filepath.Ext(safeFilename))
 	tempPath := filepath.Join(uploadDir, safeFilename)
 	if err := c.SaveFile(file, tempPath); err != nil {
 		return RespondInternalError(c, "Failed to save uploaded file", err.Error())
@@ -173,7 +174,7 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 
 		switch current.Status {
 		case database.QueueStatusCompleted:
-			streams, err := s.buildStremioStreams(current, baseURL, downloadKey)
+			streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName)
 			if err != nil {
 				return RespondInternalError(c, "Failed to list output media files", err.Error())
 			}
@@ -202,7 +203,7 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 
 // buildStremioStreams resolves the virtual paths from a completed queue item and
 // returns Stremio stream objects for all media files in the NZB output.
-func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, downloadKey string) ([]StremioStream, error) {
+func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, downloadKey, nzbName string) ([]StremioStream, error) {
 	if item.StoragePath == nil || *item.StoragePath == "" {
 		return nil, fmt.Errorf("completed queue item %d has no storage path", item.ID)
 	}
@@ -211,7 +212,7 @@ func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, do
 
 	// If the storage path already points to a media file, return it directly.
 	if isMediaExtension(filepath.Ext(storagePath)) {
-		return []StremioStream{stremioStreamFromPath(storagePath, baseURL, downloadKey)}, nil
+		return []StremioStream{stremioStreamFromPath(storagePath, baseURL, downloadKey, nzbName)}, nil
 	}
 
 	// Otherwise treat it as a virtual directory and list its media files.
@@ -230,20 +231,20 @@ func (s *Server) buildStremioStreams(item *database.ImportQueueItem, baseURL, do
 			continue
 		}
 		virtualPath := filepath.ToSlash(filepath.Join(storagePath, name))
-		streams = append(streams, stremioStreamFromPath(virtualPath, baseURL, downloadKey))
+		streams = append(streams, stremioStreamFromPath(virtualPath, baseURL, downloadKey, nzbName))
 	}
 
 	return streams, nil
 }
 
 // stremioStreamFromPath creates a StremioStream for a given virtual file path.
-func stremioStreamFromPath(virtualPath, baseURL, downloadKey string) StremioStream {
+func stremioStreamFromPath(virtualPath, baseURL, downloadKey, nzbName string) StremioStream {
 	streamURL := baseURL + "/api/files/stream?path=" +
 		url.QueryEscape(virtualPath) + "&download_key=" + url.QueryEscape(downloadKey)
 	return StremioStream{
 		URL:   streamURL,
 		Title: filepath.Base(virtualPath),
-		Name:  "AltMount",
+		Name:  nzbName,
 	}
 }
 
