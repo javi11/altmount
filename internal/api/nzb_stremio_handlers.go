@@ -117,15 +117,42 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 		}
 	}
 
-	// --- Save NZB to temp directory ---
+	// --- Derive stable names before touching the filesystem ---
 	uploadDir := filepath.Join(os.TempDir(), "altmount-uploads")
+	safeFilename := filepath.Base(file.Filename)
+	nzbName := strings.TrimSuffix(safeFilename, filepath.Ext(safeFilename))
+	tempPath := filepath.Join(uploadDir, safeFilename)
+
+	// --- Short-circuit: return cached streams if NZB was already processed ---
+	completedStatus := database.QueueStatusCompleted
+	existing, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, safeFilename, "", 1, 0, "updated_at", "desc")
+	if err == nil && len(existing) > 0 {
+		if prev := existing[0]; prev.StoragePath != nil && *prev.StoragePath != "" {
+			if streams, err := s.buildStremioStreams(prev, baseURL, downloadKey, nzbName); err == nil {
+				slog.InfoContext(ctx, "Returning cached Stremio streams for already-processed NZB",
+					"nzb_name", nzbName, "queue_id", prev.ID)
+				return c.JSON(StremioStreamsResponse{
+					Streams:     streams,
+					QueueItemID: prev.ID,
+					QueueStatus: string(prev.Status),
+				})
+			}
+		}
+	}
+
+	// --- Short-circuit: join existing active queue item instead of re-adding ---
+	if inQueue, _ := s.queueRepo.IsFileInQueue(ctx, tempPath); inQueue {
+		activeItems, err := s.queueRepo.ListQueueItems(ctx, nil, safeFilename, "", 1, 0, "updated_at", "desc")
+		if err == nil && len(activeItems) > 0 {
+			return s.pollAndRespond(c, activeItems[0].ID, baseURL, downloadKey, nzbName, timeoutSecs)
+		}
+	}
+
+	// --- Save NZB to temp directory ---
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return RespondInternalError(c, "Failed to create upload directory", err.Error())
 	}
 
-	safeFilename := filepath.Base(file.Filename)
-	nzbName := strings.TrimSuffix(safeFilename, filepath.Ext(safeFilename))
-	tempPath := filepath.Join(uploadDir, safeFilename)
 	if err := c.SaveFile(file, tempPath); err != nil {
 		return RespondInternalError(c, "Failed to save uploaded file", err.Error())
 	}
@@ -160,16 +187,22 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 		"nzb_path", tempPath,
 		"timeout_secs", timeoutSecs)
 
-	// --- Poll queue until processing completes or timeout is reached ---
+	return s.pollAndRespond(c, item.ID, baseURL, downloadKey, nzbName, timeoutSecs)
+}
+
+// pollAndRespond polls the queue item until it completes, fails, or times out,
+// then builds and returns the Stremio stream response.
+func (s *Server) pollAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, timeoutSecs int) error {
+	ctx := c.Context()
 	deadline := time.Now().Add(time.Duration(timeoutSecs) * time.Second)
 
 	for time.Now().Before(deadline) {
-		current, err := s.queueRepo.GetQueueItem(ctx, item.ID)
+		current, err := s.queueRepo.GetQueueItem(ctx, itemID)
 		if err != nil {
 			return RespondInternalError(c, "Failed to check queue status", err.Error())
 		}
 		if current == nil {
-			return RespondInternalError(c, "Queue item not found", fmt.Sprintf("item ID %d", item.ID))
+			return RespondInternalError(c, "Queue item not found", fmt.Sprintf("item ID %d", itemID))
 		}
 
 		switch current.Status {
@@ -198,7 +231,7 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 
 	return RespondError(c, fiber.StatusRequestTimeout, "TIMEOUT",
 		"NZB processing timed out",
-		fmt.Sprintf("Processing did not complete within %d seconds (queue_item_id: %d)", timeoutSecs, item.ID))
+		fmt.Sprintf("Processing did not complete within %d seconds (queue_item_id: %d)", timeoutSecs, itemID))
 }
 
 // buildStremioStreams resolves the virtual paths from a completed queue item and
