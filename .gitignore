@@ -38,3 +38,4 @@ example/
 *debug*
 rclone.conf
 db.sqlite
+config/config.yaml
