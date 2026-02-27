@@ -146,6 +146,7 @@ func ProcessArchive(
 	extractedFiles []parser.ExtractedFileInfo,
 	maxPrefetch int,
 	readTimeout time.Duration,
+	expandBlurayIso bool,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -166,7 +167,7 @@ func ProcessArchive(
 	slog.InfoContext(ctx, "Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
 
 	// Expand ISO files found inside the 7zip archive into their inner media files
-	sevenZipContents, err = expandISOContents(ctx, sevenZipContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
+	sevenZipContents, err = expandISOContents(ctx, expandBlurayIso, sevenZipContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
 	if err != nil {
 		slog.WarnContext(ctx, "ISO expansion failed, proceeding without ISO contents", "error", err)
 	}
@@ -405,12 +406,16 @@ func ProcessArchive(
 // non-fatal: on failure the original ISO Content is kept.
 func expandISOContents(
 	ctx context.Context,
+	expand bool,
 	contents []Content,
 	poolManager pool.Manager,
 	maxPrefetch int,
 	readTimeout time.Duration,
 	allowedExtensions []string,
 ) ([]Content, error) {
+	if !expand {
+		return contents, nil
+	}
 	var result []Content
 	for _, c := range contents {
 		if c.IsDirectory || strings.ToLower(filepath.Ext(c.Filename)) != ".iso" {

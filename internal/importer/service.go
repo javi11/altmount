@@ -193,9 +193,13 @@ func NewService(config ServiceConfig, metadataService *metadata.MetadataService,
 	if currentConfig.Import.AllowNestedRarExtraction != nil {
 		allowNestedRarExtraction = *currentConfig.Import.AllowNestedRarExtraction
 	}
+	expandBlurayIso := true
+	if currentConfig.Import.ExpandBlurayIso != nil {
+		expandBlurayIso = *currentConfig.Import.ExpandBlurayIso
+	}
 
 	// Create processor with poolManager for dynamic pool access
-	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction)
+	processor := NewProcessor(metadataService, poolManager, maxImportConnections, segmentSamplePercentage, allowedFileExtensions, maxDownloadPrefetch, readTimeout, broadcaster, configGetter, nil, allowNestedRarExtraction, expandBlurayIso)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

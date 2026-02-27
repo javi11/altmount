@@ -42,6 +42,7 @@ type Processor struct {
 	maxDownloadPrefetch     int           // Prefetch depth for Usenet segment reads (used by ISO reader)
 	readTimeout             time.Duration // Read timeout for Usenet data (used by ISO reader)
 	allowedFileExtensions   []string
+	expandBlurayIso         bool // Whether to expand Bluray ISO files inside archives
 	log                     *slog.Logger
 	broadcaster             *progress.ProgressBroadcaster // WebSocket progress broadcaster
 	recorder                HistoryRecorder
@@ -52,7 +53,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new NZB processor using metadata storage
-func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool) *Processor {
+func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Manager, maxImportConnections int, segmentSamplePercentage int, allowedFileExtensions []string, maxDownloadPrefetch int, readTimeout time.Duration, broadcaster *progress.ProgressBroadcaster, configGetter config.ConfigGetter, recorder HistoryRecorder, allowNestedRarExtraction bool, expandBlurayIso bool) *Processor {
 	return &Processor{
 		parser:                  parser.NewParser(poolManager),
 		strmParser:              parser.NewStrmParser(),
@@ -67,6 +68,7 @@ func NewProcessor(metadataService *metadata.MetadataService, poolManager pool.Ma
 		maxDownloadPrefetch:     maxDownloadPrefetch,
 		readTimeout:             readTimeout,
 		allowedFileExtensions:   allowedFileExtensions,
+		expandBlurayIso:         expandBlurayIso,
 		log:                     slog.Default().With("component", "nzb-processor"),
 		broadcaster:             broadcaster,
 		recorder:                recorder,
@@ -558,6 +560,7 @@ func (proc *Processor) processRarArchive(
 			extractedFiles,
 			proc.maxDownloadPrefetch,
 			proc.readTimeout,
+			proc.expandBlurayIso,
 		)
 		if err != nil {
 			return nzbFolder, err
@@ -663,6 +666,7 @@ func (proc *Processor) processSevenZipArchive(
 			extractedFiles,
 			proc.maxDownloadPrefetch,
 			proc.readTimeout,
+			proc.expandBlurayIso,
 		)
 		if err != nil {
 			return nzbFolder, err
