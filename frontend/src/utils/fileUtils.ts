@@ -96,7 +96,7 @@ export function getFileTypeInfo(filename: string, mimeType?: string): FileTypeIn
 	}
 
 	// Archive files
-	if (["zip", "rar", "7z", "tar", "gz", "bz2", "xz"].includes(extension)) {
+	if (["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso"].includes(extension)) {
 		return {
 			category: "archive",
 			isPreviewable: false,
@@ -177,6 +177,45 @@ export function getCodeLanguage(filename: string): string {
 	};
 
 	return languageMap[extension] || "text";
+}
+
+export function getFormatLabel(filename: string): string | null {
+	const extension = filename.split(".").pop()?.toLowerCase() || "";
+
+	const formatMap: Record<string, string> = {
+		rar: "RAR Archive",
+		"7z": "7-Zip Archive",
+		iso: "ISO Image",
+		zip: "ZIP Archive",
+		tar: "TAR Archive",
+		gz: "GZ Archive",
+		bz2: "BZ2 Archive",
+		xz: "XZ Archive",
+		mkv: "MKV Video",
+		mp4: "MP4 Video",
+		avi: "AVI Video",
+		mov: "MOV Video",
+		webm: "WebM Video",
+		wmv: "WMV Video",
+		flv: "FLV Video",
+		m4v: "M4V Video",
+		mp3: "MP3 Audio",
+		flac: "FLAC Audio",
+		wav: "WAV Audio",
+		aac: "AAC Audio",
+		ogg: "OGG Audio",
+		m4a: "M4A Audio",
+		wma: "WMA Audio",
+		jpg: "JPEG Image",
+		jpeg: "JPEG Image",
+		png: "PNG Image",
+		gif: "GIF Image",
+		webp: "WebP Image",
+		svg: "SVG Image",
+		pdf: "PDF Document",
+	};
+
+	return formatMap[extension] ?? null;
 }
 
 /**

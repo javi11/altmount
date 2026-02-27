@@ -11,7 +11,7 @@ import type {
 	SegmentInfo,
 } from "../../types/api";
 import type { WebDAVFile } from "../../types/webdav";
-import { formatFileSize } from "../../utils/fileUtils";
+import { formatFileSize, getFormatLabel } from "../../utils/fileUtils";
 import { HealthBadge } from "../ui/StatusBadge";
 
 interface FileInfoModalProps {
@@ -269,6 +269,12 @@ export function FileInfoModal({
 									{metadata.available_segments}
 								</span>
 							</div>
+							{getFormatLabel(file.basename) && (
+								<div className="flex justify-between">
+									<span className="text-base-content/70">Format:</span>
+									<span>{getFormatLabel(file.basename)}</span>
+								</div>
+							)}
 							<div className="flex justify-between">
 								<span className="text-base-content/70">Encryption:</span>
 								<div className="flex items-center gap-1">

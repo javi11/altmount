@@ -3,6 +3,7 @@ import { File, FileArchive, FileImage, FileText, FileVideo, Folder, Music } from
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WebDAVFile } from "../../types/webdav";
+import { getFormatLabel } from "../../utils/fileUtils";
 import { FileActions } from "./FileActions";
 
 interface FileListProps {
@@ -139,7 +140,7 @@ export function FileList({
 				return <FileVideo className={iconClass} />;
 			case ["mp3", "wav", "flac", "aac", "ogg"].includes(extension):
 				return <Music className={iconClass} />;
-			case ["zip", "rar", "7z", "tar", "gz"].includes(extension):
+			case ["zip", "rar", "7z", "tar", "gz", "iso"].includes(extension):
 				return <FileArchive className={iconClass} />;
 			case ["txt", "md", "log", "json", "xml", "csv"].includes(extension):
 				return <FileText className={iconClass} />;
@@ -359,7 +360,11 @@ function FileCard({
 					</div>
 					<div className="flex justify-between">
 						<span>Type:</span>
-						<span className="capitalize">{file.type}</span>
+						<span className="capitalize">
+							{file.type === "file"
+								? (getFormatLabel(file.basename) ?? file.mime ?? "File")
+								: file.type}
+						</span>
 					</div>
 				</div>
 			</div>
