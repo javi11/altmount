@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/javi11/altmount/internal/importer/archive/iso"
 	"github.com/javi11/altmount/internal/importer/parser"
 	"github.com/javi11/altmount/internal/importer/utils"
 	"github.com/javi11/altmount/internal/importer/validation"
@@ -142,6 +144,9 @@ func ProcessArchive(
 	allowedFileExtensions []string,
 	timeout time.Duration,
 	extractedFiles []parser.ExtractedFileInfo,
+	maxPrefetch int,
+	readTimeout time.Duration,
+	expandBlurayIso bool,
 ) error {
 	if len(archiveFiles) == 0 {
 		return nil
@@ -160,6 +165,12 @@ func ProcessArchive(
 	}
 
 	slog.InfoContext(ctx, "Successfully analyzed 7zip archive content", "files_in_archive", len(sevenZipContents))
+
+	// Expand ISO files found inside the 7zip archive into their inner media files
+	sevenZipContents, err = expandISOContents(ctx, expandBlurayIso, sevenZipContents, poolManager, maxPrefetch, readTimeout, allowedFileExtensions)
+	if err != nil {
+		slog.WarnContext(ctx, "ISO expansion failed, proceeding without ISO contents", "error", err)
+	}
 
 	// Validate file extensions before processing
 	if !hasAllowedFiles(sevenZipContents, allowedFileExtensions) {
@@ -195,6 +206,14 @@ func ProcessArchive(
 	nzbName := filepath.Base(nzbPath)
 	shouldNormalizeName := mediaFilesCount == 1
 
+	// Count ISO-expanded files so single-file ISOs omit the index suffix.
+	isoExpandedCount := 0
+	for _, c := range sevenZipContents {
+		if c.ISOExpansionIndex > 0 {
+			isoExpandedCount++
+		}
+	}
+
 	for _, sevenZipContent := range sevenZipContents {
 		// Skip directories
 		if sevenZipContent.IsDirectory {
@@ -212,10 +231,23 @@ func ProcessArchive(
 			continue
 		}
 
-		// Normalize filename to match NZB if it's the only media file
-		if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) ||
+		// Rename ISO-expanded files using the NZB release name.
+		// For multiple files: releaseName_1.ext (largest), releaseName_2.ext, ...
+		// For a single file: releaseName.ext (no index).
+		if sevenZipContent.ISOExpansionIndex > 0 {
+			ext := filepath.Ext(sevenZipContent.Filename)
+			releaseName := strings.TrimSuffix(filepath.Base(nzbPath), filepath.Ext(filepath.Base(nzbPath)))
+			if isoExpandedCount == 1 {
+				baseFilename = releaseName + ext
+			} else {
+				baseFilename = fmt.Sprintf("%s_%d%s", releaseName, sevenZipContent.ISOExpansionIndex, ext)
+			}
+			slog.InfoContext(ctx, "Renaming ISO-expanded file using NZB release name",
+				"original", sevenZipContent.Filename,
+				"renamed", baseFilename)
+		} else if shouldNormalizeName && (utils.IsAllowedFile(sevenZipContent.InternalPath, sevenZipContent.Size, allowedFileExtensions) ||
 			utils.IsAllowedFile(sevenZipContent.Filename, sevenZipContent.Size, allowedFileExtensions)) {
-			// Extract release name and combine with original extension
+			// Normalize filename to match NZB if it's the only media file (non-ISO archives)
 			baseFilename = normalizeArchiveReleaseFilename(nzbName, baseFilename)
 			slog.InfoContext(ctx, "Normalizing obfuscated filename in 7zip archive",
 				"original", sevenZipContent.Filename,
@@ -367,6 +399,81 @@ func ProcessArchive(
 	slog.InfoContext(ctx, "Successfully processed 7zip archive files", "files_processed", filesProcessed)
 
 	return nil
+}
+
+// expandISOContents replaces any .iso Content entries with the media files found
+// inside them. Non-ISO entries are passed through unchanged. Per-file errors are
+// non-fatal: on failure the original ISO Content is kept.
+func expandISOContents(
+	ctx context.Context,
+	expand bool,
+	contents []Content,
+	poolManager pool.Manager,
+	maxPrefetch int,
+	readTimeout time.Duration,
+	allowedExtensions []string,
+) ([]Content, error) {
+	if !expand {
+		return contents, nil
+	}
+	var result []Content
+	for _, c := range contents {
+		if c.IsDirectory || strings.ToLower(filepath.Ext(c.Filename)) != ".iso" {
+			result = append(result, c)
+			continue
+		}
+
+		src := iso.ISOSource{
+			Filename: c.Filename,
+			Segments: c.Segments,
+			AesKey:   c.AesKey,
+			AesIV:    c.AesIV,
+			Size:     c.Size,
+		}
+
+		isoFiles, err := iso.AnalyzeISOContent(ctx, src, poolManager, maxPrefetch, readTimeout, allowedExtensions)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to analyze ISO content, keeping ISO as-is",
+				"file", c.Filename, "error", err)
+			result = append(result, c)
+			continue
+		}
+
+		if len(isoFiles) == 0 {
+			result = append(result, c)
+			continue
+		}
+
+		// Sort ISO files by size descending so the largest (main feature) gets index 1.
+		sort.Slice(isoFiles, func(i, j int) bool {
+			return isoFiles[i].Size > isoFiles[j].Size
+		})
+
+		// Keep only the largest file (index 0 after sort); discard smaller streams.
+		f := isoFiles[0]
+		nc := Content{
+			InternalPath:      f.InternalPath,
+			Filename:          f.Filename,
+			Size:              f.Size,
+			PackedSize:        f.Size, // raw ISO data — packed == unpacked
+			NzbdavID:          c.NzbdavID,
+			ISOExpansionIndex: 1,
+		}
+		if f.NestedSource != nil {
+			nc.NestedSources = []NestedSource{{
+				Segments:        f.NestedSource.Segments,
+				AesKey:          f.NestedSource.AesKey,
+				AesIV:           f.NestedSource.AesIV,
+				InnerOffset:     f.NestedSource.InnerOffset,
+				InnerLength:     f.NestedSource.InnerLength,
+				InnerVolumeSize: f.NestedSource.InnerVolumeSize,
+			}}
+		} else {
+			nc.Segments = f.Segments
+		}
+		result = append(result, nc)
+	}
+	return result, nil
 }
 
 // normalizeArchiveReleaseFilename aligns the filename to the NZB basename while keeping the original extension.
