@@ -96,11 +96,11 @@ jobs:
           # macOS builds
           - goos: darwin
             goarch: amd64
-            runner: macos-13
+            runner: macos-latest
             cc: ''
           - goos: darwin
             goarch: arm64
-            runner: macos-13
+            runner: macos-latest
             cc: ''
           # Windows builds
           # - goos: windows
@@ -192,7 +192,7 @@ jobs:
           retention-days: 1
 
   create-universal-darwin:
-    runs-on: macos-13
+    runs-on: macos-latest
     needs: build-cli
     permissions:
       contents: write
