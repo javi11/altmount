@@ -46,6 +46,7 @@ type Config struct {
 	Log             LogConfig           `yaml:"log" mapstructure:"log" json:"log"`
 	SABnzbd         SABnzbdConfig       `yaml:"sabnzbd" mapstructure:"sabnzbd" json:"sabnzbd"`
 	Arrs            ArrsConfig          `yaml:"arrs" mapstructure:"arrs" json:"arrs"`
+	Stremio         StremioConfig       `yaml:"stremio" mapstructure:"stremio" json:"stremio"`
 	Fuse            FuseConfig          `yaml:"fuse" mapstructure:"fuse" json:"fuse"`
 	SegmentCache    SegmentCacheConfig  `yaml:"segment_cache" mapstructure:"segment_cache" json:"segment_cache"`
 	Providers       []ProviderConfig    `yaml:"providers" mapstructure:"providers" json:"providers"`
@@ -90,10 +91,17 @@ type APIConfig struct {
 	Prefix         string   `yaml:"prefix" mapstructure:"prefix" json:"prefix"`
 	KeyOverride    string   `yaml:"key_override" mapstructure:"key_override" json:"key_override,omitempty"`
 	AllowedOrigins []string `yaml:"allowed_origins" mapstructure:"allowed_origins" json:"allowed_origins,omitempty"`
-	// StremioNzbTTLHours controls how long a completed NZB result is cached by the
-	// POST /api/nzb/stremio-streams endpoint before the same NZB is re-processed on
-	// the next request. Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
-	StremioNzbTTLHours int `yaml:"stremio_nzb_ttl_hours" mapstructure:"stremio_nzb_ttl_hours" json:"stremio_nzb_ttl_hours,omitempty"`
+}
+
+// StremioConfig configures the Stremio NZB stream endpoint (POST /api/nzb/streams).
+type StremioConfig struct {
+	// Enabled controls whether the endpoint is active. Disabled by default.
+	// When false, the endpoint returns 404 Not Found.
+	Enabled *bool `yaml:"enabled" mapstructure:"enabled" json:"enabled"`
+	// NzbTTLHours controls how long a completed NZB result is cached before
+	// the same NZB is re-processed on the next request.
+	// Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
+	NzbTTLHours int `yaml:"nzb_ttl_hours" mapstructure:"nzb_ttl_hours" json:"nzb_ttl_hours,omitempty"`
 }
 
 // AuthConfig represents authentication configuration
@@ -1100,7 +1108,8 @@ func DefaultConfig(configDir ...string) *Config {
 	sabnzbdEnabled := false
 	scrapperEnabled := false
 	fuseEnabled := false
-	loginRequired := true // Require login by default
+	loginRequired := true  // Require login by default
+	stremioEnabled := false // Stremio endpoint disabled by default
 	skipHealthCheck := true
 	watchIntervalSeconds := 10 // Default watch interval
 	cleanupAutomaticImportFailure := false
@@ -1143,8 +1152,11 @@ func DefaultConfig(configDir ...string) *Config {
 			Password: "usenet",
 		},
 		API: APIConfig{
-			Prefix:             "/api",
-			StremioNzbTTLHours: 24,
+			Prefix: "/api",
+		},
+		Stremio: StremioConfig{
+			Enabled:     &stremioEnabled,
+			NzbTTLHours: 24,
 		},
 		Auth: AuthConfig{
 			LoginRequired: &loginRequired,

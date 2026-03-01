@@ -961,9 +961,9 @@ func (s *Service) handleProcessingSuccess(ctx context.Context, item *database.Im
 		return err
 	}
 
-	// Clear progress tracking
+	// Notify completion and clear progress tracking
 	if s.broadcaster != nil {
-		s.broadcaster.ClearProgress(int(item.ID))
+		s.broadcaster.NotifyComplete(int(item.ID), "completed")
 	}
 
 	s.log.InfoContext(ctx, "Successfully processed queue item", "queue_id", item.ID, "file", item.NzbPath)
@@ -1006,9 +1006,9 @@ func (s *Service) handleProcessingFailure(ctx context.Context, item *database.Im
 			"file", item.NzbPath)
 	}
 
-	// Clear progress tracking
+	// Notify failure and clear progress tracking
 	if s.broadcaster != nil {
-		s.broadcaster.ClearProgress(int(item.ID))
+		s.broadcaster.NotifyComplete(int(item.ID), "failed")
 	}
 
 	// Delegate fallback handling to post-processor

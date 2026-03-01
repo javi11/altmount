@@ -19,6 +19,7 @@ export interface ConfigResponse {
 	log: LogConfig;
 	sabnzbd: SABnzbdConfig;
 	arrs: ArrsConfig;
+	stremio: StremioConfig;
 	providers: ProviderConfig[];
 	mount_path: string;
 	mount_type: MountType;
@@ -474,6 +475,7 @@ export type ConfigSection =
 	| "fuse"
 	| "sabnzbd"
 	| "arrs"
+	| "stremio"
 	| "system";
 
 // Form data interfaces for UI components
@@ -742,6 +744,12 @@ export interface ArrsFormData {
 	cleanup_automatic_import_failure?: boolean;
 }
 
+// Stremio integration configuration
+export interface StremioConfig {
+	enabled: boolean;
+	nzb_ttl_hours: number;
+}
+
 // Helper type for configuration sections
 export interface ConfigSectionInfo {
 	title: string;
@@ -869,6 +877,12 @@ export const CONFIG_SECTIONS: Record<ConfigSection | "system", ConfigSectionInfo
 		description:
 			"Configure Radarr and Sonarr instances for movie and TV show file synchronization. This will allow to repair broken files by notifying the appropriate service.",
 		icon: "Cog",
+		canEdit: true,
+	},
+	stremio: {
+		title: "Stremio",
+		description: "Stremio NZB stream endpoint — upload an NZB and receive instant stream URLs",
+		icon: "Tv",
 		canEdit: true,
 	},
 	system: {

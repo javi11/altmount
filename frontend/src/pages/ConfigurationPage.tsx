@@ -12,11 +12,13 @@ import {
 	Settings,
 	Shield,
 	ShieldAlert,
+	Tv,
 	Wrench,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
+import { StremioConfigSection } from "../components/config/StremioConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
@@ -51,6 +53,7 @@ import type {
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
+	StremioConfig,
 	StreamingConfig,
 	WebDAVConfig,
 } from "../types/config";
@@ -70,6 +73,7 @@ const getIconComponent = (iconName: string) => {
 		Activity,
 		Wrench,
 		Server,
+		Tv,
 	};
 	return iconMap[iconName as keyof typeof iconMap] || Settings;
 };
@@ -86,7 +90,7 @@ const SECTION_GROUPS = [
 	},
 	{
 		title: "Automation",
-		sections: ["sabnzbd", "arrs", "health"],
+		sections: ["sabnzbd", "arrs", "health", "stremio"],
 	},
 	{
 		title: "System",
@@ -251,6 +255,11 @@ export function ConfigurationPage() {
 				await updateConfigSection.mutateAsync({
 					section: "health",
 					config: { health: data as unknown as HealthConfig },
+				});
+			} else if (section === "stremio") {
+				await updateConfigSection.mutateAsync({
+					section: "stremio",
+					config: { stremio: data as unknown as StremioConfig },
 				});
 			} else if (section === "providers") {
 				await updateConfigSection.mutateAsync({
@@ -535,6 +544,13 @@ export function ConfigurationPage() {
 										isUpdating={updateConfigSection.isPending}
 									/>
 								)}
+								{activeSection === "stremio" && (
+									<StremioConfigSection
+										config={config}
+										onUpdate={handleConfigUpdate}
+										isUpdating={updateConfigSection.isPending}
+									/>
+								)}
 								{![
 									"webdav",
 									"auth",
@@ -547,6 +563,7 @@ export function ConfigurationPage() {
 									"sabnzbd",
 									"arrs",
 									"health",
+									"stremio",
 								].includes(activeSection) && (
 									<ComingSoonSection
 										sectionName={CONFIG_SECTIONS[activeSection]?.title || activeSection}

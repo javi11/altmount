@@ -13,6 +13,7 @@ import (
 type ProgressUpdate struct {
 	QueueID    int       `json:"queue_id"`
 	Percentage int       `json:"percentage"`
+	Status     string    `json:"status,omitempty"` // "completed" or "failed" on terminal events
 	Timestamp  time.Time `json:"timestamp"`
 }
 
@@ -79,6 +80,31 @@ func (pb *ProgressBroadcaster) UpdateProgress(queueID int, percentage int) {
 		case ch <- update:
 		default:
 			pb.log.WarnContext(context.Background(), "subscriber channel full, skipping update", "subscriber_id", subID, "queue_id", queueID)
+		}
+	}
+	pb.subMu.RUnlock()
+}
+
+// NotifyComplete broadcasts a terminal completion or failure event for a queue item
+// and removes it from progress tracking. status should be "completed" or "failed".
+func (pb *ProgressBroadcaster) NotifyComplete(queueID int, status string) {
+	pb.mu.Lock()
+	delete(pb.progress, queueID)
+	pb.mu.Unlock()
+
+	update := ProgressUpdate{
+		QueueID:   queueID,
+		Status:    status,
+		Timestamp: time.Now(),
+	}
+
+	pb.subMu.RLock()
+	for subID, ch := range pb.subscribers {
+		select {
+		case ch <- update:
+		default:
+			pb.log.WarnContext(context.Background(), "subscriber channel full, skipping completion event",
+				"subscriber_id", subID, "queue_id", queueID)
 		}
 	}
 	pb.subMu.RUnlock()

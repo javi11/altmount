@@ -48,13 +48,22 @@ type StremioStreamsResponse struct {
 	QueueStatus string          `json:"_queue_status"`
 }
 
-// handleNzbStremioStreams handles POST /api/nzb/stremio-streams.
+// handleNzbStreams handles POST /api/nzb/streams.
 // Public endpoint — authenticated via the download_key form field (SHA256 of the user's API key).
 // Accepts an NZB file, adds it to the import queue with high priority, and waits synchronously
 // for processing to complete before returning Stremio-compatible stream URLs for all media files
 // found in the NZB output.
-func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
+func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 	ctx := c.Context()
+
+	// --- Gate on Stremio enabled flag ---
+	if s.configManager == nil {
+		return RespondServiceUnavailable(c, "Configuration not available", "")
+	}
+	cfg := s.configManager.GetConfig()
+	if cfg.Stremio.Enabled == nil || !*cfg.Stremio.Enabled {
+		return RespondNotFound(c, "Stremio endpoint", "Stremio integration is disabled in configuration")
+	}
 
 	// --- Authenticate via download_key ---
 	downloadKey := c.FormValue("download_key")
@@ -125,10 +134,7 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 
 	// --- Short-circuit: return cached streams if NZB was already processed ---
 	// Respect the configurable TTL: 0 means cache forever, >0 means re-process after N hours.
-	ttlHours := 24 // default fallback
-	if s.configManager != nil {
-		ttlHours = s.configManager.GetConfig().API.StremioNzbTTLHours
-	}
+	ttlHours := cfg.Stremio.NzbTTLHours
 
 	completedStatus := database.QueueStatusCompleted
 	existing, err := s.queueRepo.ListQueueItems(ctx, &completedStatus, safeFilename, "", 1, 0, "updated_at", "desc")
@@ -155,7 +161,7 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 	if inQueue, _ := s.queueRepo.IsFileInQueue(ctx, tempPath); inQueue {
 		activeItems, err := s.queueRepo.ListQueueItems(ctx, nil, safeFilename, "", 1, 0, "updated_at", "desc")
 		if err == nil && len(activeItems) > 0 {
-			return s.pollAndRespond(c, activeItems[0].ID, baseURL, downloadKey, nzbName, timeoutSecs)
+			return s.waitAndRespond(c, activeItems[0].ID, baseURL, downloadKey, nzbName, timeoutSecs)
 		}
 	}
 
@@ -180,10 +186,8 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 	}
 
 	var basePath *string
-	if s.configManager != nil {
-		if completeDir := s.configManager.GetConfig().SABnzbd.CompleteDir; completeDir != "" {
-			basePath = &completeDir
-		}
+	if completeDir := cfg.SABnzbd.CompleteDir; completeDir != "" {
+		basePath = &completeDir
 	}
 
 	priority := database.QueuePriorityHigh
@@ -198,51 +202,89 @@ func (s *Server) handleNzbStremioStreams(c *fiber.Ctx) error {
 		"nzb_path", tempPath,
 		"timeout_secs", timeoutSecs)
 
-	return s.pollAndRespond(c, item.ID, baseURL, downloadKey, nzbName, timeoutSecs)
+	return s.waitAndRespond(c, item.ID, baseURL, downloadKey, nzbName, timeoutSecs)
 }
 
-// pollAndRespond polls the queue item until it completes, fails, or times out,
-// then builds and returns the Stremio stream response.
-func (s *Server) pollAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, timeoutSecs int) error {
+// waitAndRespond subscribes to the progress broadcaster and waits for the queue item to
+// reach a terminal state (completed or failed), then returns the appropriate Stremio response.
+// This avoids polling by using an event-driven approach via the ProgressBroadcaster.
+func (s *Server) waitAndRespond(c *fiber.Ctx, itemID int64, baseURL, downloadKey, nzbName string, timeoutSecs int) error {
 	ctx := c.Context()
-	deadline := time.Now().Add(time.Duration(timeoutSecs) * time.Second)
 
-	for time.Now().Before(deadline) {
-		current, err := s.queueRepo.GetQueueItem(ctx, itemID)
-		if err != nil {
-			return RespondInternalError(c, "Failed to check queue status", err.Error())
-		}
-		if current == nil {
-			return RespondInternalError(c, "Queue item not found", fmt.Sprintf("item ID %d", itemID))
-		}
+	// Subscribe before the status check to eliminate the race between AddToQueue and the event.
+	subID, ch := s.progressBroadcaster.Subscribe()
+	defer s.progressBroadcaster.Unsubscribe(subID)
 
-		switch current.Status {
-		case database.QueueStatusCompleted:
-			streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName)
-			if err != nil {
-				return RespondInternalError(c, "Failed to list output media files", err.Error())
-			}
-			return c.JSON(StremioStreamsResponse{
-				Streams:     streams,
-				QueueItemID: current.ID,
-				QueueStatus: string(current.Status),
-			})
-
-		case database.QueueStatusFailed:
-			errMsg := ""
-			if current.ErrorMessage != nil {
-				errMsg = *current.ErrorMessage
-			}
-			return RespondInternalError(c, "NZB processing failed", errMsg)
-		}
-
-		// Still pending or processing — wait before polling again.
-		time.Sleep(2 * time.Second)
+	// Single upfront check — the item may have already reached a terminal state.
+	current, err := s.queueRepo.GetQueueItem(ctx, itemID)
+	if err != nil {
+		return RespondInternalError(c, "Failed to check queue status", err.Error())
+	}
+	if current == nil {
+		return RespondInternalError(c, "Queue item not found", fmt.Sprintf("item ID %d", itemID))
 	}
 
-	return RespondError(c, fiber.StatusRequestTimeout, "TIMEOUT",
-		"NZB processing timed out",
-		fmt.Sprintf("Processing did not complete within %d seconds (queue_item_id: %d)", timeoutSecs, itemID))
+	switch current.Status {
+	case database.QueueStatusCompleted:
+		streams, err := s.buildStremioStreams(current, baseURL, downloadKey, nzbName)
+		if err != nil {
+			return RespondInternalError(c, "Failed to list output media files", err.Error())
+		}
+		return c.JSON(StremioStreamsResponse{
+			Streams:     streams,
+			QueueItemID: current.ID,
+			QueueStatus: string(current.Status),
+		})
+	case database.QueueStatusFailed:
+		errMsg := ""
+		if current.ErrorMessage != nil {
+			errMsg = *current.ErrorMessage
+		}
+		return RespondInternalError(c, "NZB processing failed", errMsg)
+	}
+
+	// Wait for a completion event from the broadcaster.
+	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
+	defer timer.Stop()
+
+	for {
+		select {
+		case update, ok := <-ch:
+			if !ok {
+				return RespondInternalError(c, "Progress broadcaster closed unexpectedly", "")
+			}
+			if update.QueueID != int(itemID) {
+				continue
+			}
+			switch update.Status {
+			case "completed":
+				item, err := s.queueRepo.GetQueueItem(ctx, itemID)
+				if err != nil {
+					return RespondInternalError(c, "Failed to fetch completed item", err.Error())
+				}
+				streams, err := s.buildStremioStreams(item, baseURL, downloadKey, nzbName)
+				if err != nil {
+					return RespondInternalError(c, "Failed to list output media files", err.Error())
+				}
+				return c.JSON(StremioStreamsResponse{
+					Streams:     streams,
+					QueueItemID: item.ID,
+					QueueStatus: string(item.Status),
+				})
+			case "failed":
+				item, _ := s.queueRepo.GetQueueItem(ctx, itemID)
+				errMsg := "Processing failed"
+				if item != nil && item.ErrorMessage != nil {
+					errMsg = *item.ErrorMessage
+				}
+				return RespondInternalError(c, errMsg, "")
+			}
+		case <-timer.C:
+			return RespondError(c, fiber.StatusRequestTimeout, "TIMEOUT",
+				"NZB processing timed out",
+				fmt.Sprintf("Processing did not complete within %d seconds (queue_item_id: %d)", timeoutSecs, itemID))
+		}
+	}
 }
 
 // buildStremioStreams resolves the virtual paths from a completed queue item and
