@@ -178,7 +178,8 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 		if referenceSample != nil {
 			bytesDiff := bytesDownloaded - referenceSample.totalBytes
 			duration := now.Sub(referenceSample.timestamp).Seconds()
-			if duration > 0 && bytesDiff >= 0 {
+			// Only calculate speed if we have a significant duration to avoid spikes
+			if duration >= 1.0 && bytesDiff >= 0 {
 				downloadSpeed = float64(bytesDiff) / duration
 			}
 		} else {
@@ -187,7 +188,8 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 			oldest := mt.samples[0]
 			bytesDiff := bytesDownloaded - oldest.totalBytes
 			duration := now.Sub(oldest.timestamp).Seconds()
-			if duration > 0 && bytesDiff >= 0 {
+			// Only calculate speed if we have a significant duration to avoid spikes
+			if duration >= 1.0 && bytesDiff >= 0 {
 				downloadSpeed = float64(bytesDiff) / duration
 			}
 		}
@@ -336,23 +338,28 @@ func (mt *MetricsTracker) saveStats(ctx context.Context) {
 	}
 }
 
-// Reset resets all cumulative metrics both in memory and in the database
-func (mt *MetricsTracker) Reset(ctx context.Context) error {
+// Reset resets cumulative metrics both in memory and in the database based on flags
+func (mt *MetricsTracker) Reset(ctx context.Context, resetPeak bool, resetTotals bool) error {
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
 
-	mt.initialBytesDownloaded = 0
-	mt.initialArticlesDownloaded = 0
-	mt.initialBytesUploaded = 0
-	mt.initialArticlesPosted = 0
-	mt.articlesDownloaded.Store(0)
-	mt.articlesPosted.Store(0)
-	mt.liveBytesDownloaded.Store(0)
-	mt.maxDownloadSpeed = 0
-	mt.initialProviderErrors = make(map[string]int64)
+	if resetTotals {
+		mt.initialBytesDownloaded = 0
+		mt.initialArticlesDownloaded = 0
+		mt.initialBytesUploaded = 0
+		mt.initialArticlesPosted = 0
+		mt.articlesDownloaded.Store(0)
+		mt.articlesPosted.Store(0)
+		mt.liveBytesDownloaded.Store(0)
+		mt.initialProviderErrors = make(map[string]int64)
 
-	// Clear samples to reset speed calculation
-	mt.samples = make([]metricsample, 0, 60)
+		// Clear samples to reset speed calculation
+		mt.samples = make([]metricsample, 0, 60)
+	}
+
+	if resetPeak {
+		mt.maxDownloadSpeed = 0
+	}
 
 	// Persist the reset state to database
 	if mt.repo != nil {
@@ -362,23 +369,31 @@ func (mt *MetricsTracker) Reset(ctx context.Context) error {
 			mt.logger.ErrorContext(ctx, "Failed to fetch stats for reset", "error", err)
 		} else {
 			resetMap := make(map[string]int64)
-			for k := range currentStats {
-				resetMap[k] = 0
-			}
-			// Ensure core keys are present
-			resetMap["bytes_downloaded"] = 0
-			resetMap["articles_downloaded"] = 0
-			resetMap["bytes_uploaded"] = 0
-			resetMap["articles_posted"] = 0
-			resetMap["max_download_speed"] = 0
 
-			if err := mt.repo.BatchUpdateSystemStats(ctx, resetMap); err != nil {
-				mt.logger.ErrorContext(ctx, "Failed to persist reset stats", "error", err)
+			if resetTotals {
+				for k := range currentStats {
+					resetMap[k] = 0
+				}
+				// Ensure core keys are present
+				resetMap["bytes_downloaded"] = 0
+				resetMap["articles_downloaded"] = 0
+				resetMap["bytes_uploaded"] = 0
+				resetMap["articles_posted"] = 0
+			}
+
+			if resetPeak {
+				resetMap["max_download_speed"] = 0
+			}
+
+			if len(resetMap) > 0 {
+				if err := mt.repo.BatchUpdateSystemStats(ctx, resetMap); err != nil {
+					mt.logger.ErrorContext(ctx, "Failed to persist reset stats", "error", err)
+				}
 			}
 		}
 	}
 
-	mt.logger.InfoContext(ctx, "Pool metrics have been reset")
+	mt.logger.InfoContext(ctx, "Pool metrics have been reset", "reset_peak", resetPeak, "reset_totals", resetTotals)
 	return nil
 }
 
