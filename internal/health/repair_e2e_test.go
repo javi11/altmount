@@ -28,7 +28,7 @@ func (m *mockPoolManager) SetProviders(_ []nntppool.Provider) error  { return ni
 func (m *mockPoolManager) ClearPool() error                          { return nil }
 func (m *mockPoolManager) HasPool() bool                             { return false }
 func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) { return pool.MetricsSnapshot{}, nil }
-func (m *mockPoolManager) ResetMetrics(_ context.Context) error      { return nil }
+func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error { return nil }
 func (m *mockPoolManager) IncArticlesDownloaded()                    {}
 func (m *mockPoolManager) UpdateDownloadProgress(_ string, _ int64)  {}
 func (m *mockPoolManager) IncArticlesPosted()                        {}

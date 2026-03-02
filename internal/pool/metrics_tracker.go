@@ -179,7 +179,7 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 			bytesDiff := bytesDownloaded - referenceSample.totalBytes
 			duration := now.Sub(referenceSample.timestamp).Seconds()
 			// Only calculate speed if we have a significant duration to avoid spikes
-			if duration >= 1.0 && bytesDiff >= 0 {
+			if duration >= 2.0 && bytesDiff >= 0 {
 				downloadSpeed = float64(bytesDiff) / duration
 			}
 		} else {
@@ -189,7 +189,7 @@ func (mt *MetricsTracker) getSnapshot(now time.Time, stats nntppool.ClientStats)
 			bytesDiff := bytesDownloaded - oldest.totalBytes
 			duration := now.Sub(oldest.timestamp).Seconds()
 			// Only calculate speed if we have a significant duration to avoid spikes
-			if duration >= 1.0 && bytesDiff >= 0 {
+			if duration >= 2.0 && bytesDiff >= 0 {
 				downloadSpeed = float64(bytesDiff) / duration
 			}
 		}

@@ -361,7 +361,7 @@ func (m *mockPoolManager) GetMetrics() (pool.MetricsSnapshot, error) {
 	return pool.MetricsSnapshot{}, nil
 }
 
-func (m *mockPoolManager) ResetMetrics(_ context.Context) error {
+func (m *mockPoolManager) ResetMetrics(_ context.Context, _, _ bool) error {
 	return nil
 }
 
