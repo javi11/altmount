@@ -47,7 +47,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		TokenDuration:     24 * time.Hour,       // 24 hours
 		CookieDomain:      "",                   // Empty string allows browser to use current domain
-		CookieSecure:      true,                 // Set to false via COOKIE_SECURE=false for local HTTP dev
+		CookieSecure:      false,                // Set to true via COOKIE_SECURE=true for HTTPS deployments
 		CookieSameSite:    http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
 		DirectAuthEnabled: true,
 		Issuer:            "altmount",
@@ -70,8 +70,8 @@ func LoadConfigFromEnv() (*Config, error) {
 		config.CookieDomain = domain
 	}
 
-	if secure := os.Getenv("COOKIE_SECURE"); secure == "false" {
-		config.CookieSecure = false
+	if secure := os.Getenv("COOKIE_SECURE"); secure == "true" {
+		config.CookieSecure = true
 	}
 
 	if salt := os.Getenv("DIRECT_AUTH_SALT"); salt != "" {
