@@ -625,42 +625,6 @@ SQLITE_READONLY: attempt to write a readonly database
 
 _[Screenshot placeholder: Terminal showing database permission fix and successful AltMount startup]_
 
-## Auto-Update Issues
-
-### Auto-Update Button Disabled
-
-#### Symptoms
-
-- The "Update Now" button in the Web UI is grayed out or shows "Auto-update is not available".
-- Hovering over the button shows "Mount docker.sock into the container and ensure docker CLI is installed".
-
-**Cause:**
-
-The auto-update feature requires the container to have access to the host's Docker daemon to pull new images. This is done by mounting the Docker socket and providing the correct group permissions.
-
-**Solutions:**
-
-1. **Mount Docker Socket**: Ensure your `docker-compose.yml` includes the socket mount:
-
-   ```yaml
-   volumes:
-     - /var/run/docker.sock:/var/run/docker.sock
-   ```
-
-2. **Provide Group Permissions**: The user inside the container must be part of the group that owns the Docker socket on the host. Add the `group_add` option to your `docker-compose.yml`:
-
-   ```yaml
-   group_add:
-     - "999" # Replace with your host's docker group GID
-   ```
-
-   To find your host's docker GID, run:
-   ```bash
-   getent group docker | cut -d: -f3
-   ```
-
-3. **Verify Configuration**: After updating your compose file, restart the container and check the **System > Update** page in the Web UI. The button should now be enabled.
-
 ## Import Issues
 
 ### Imports Stuck in Processing State (Purple)
