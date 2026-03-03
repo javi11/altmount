@@ -10,6 +10,7 @@ import {
 	FolderOpen,
 	Link,
 	Play,
+	Search,
 	Square,
 	Upload,
 	UploadCloud,
@@ -23,6 +24,7 @@ import {
 	useNzbdavImportStatus,
 	useResetNzbdavImportStatus,
 	useScanStatus,
+	useSearchNZBByName,
 	useStartManualScan,
 	useUploadNZBLnks,
 	useUploadToQueue,
@@ -159,9 +161,13 @@ function EnhancedUploadSection() {
 	const [uploadedLinks, setUploadedLinks] = useState<UploadedLink[]>([]);
 	const [category, setCategory] = useState<string>("");
 	const [linkInput, setLinkInput] = useState<string>("");
-	const [uploadTab, setUploadTab] = useState<"files" | "nzblnk">("files");
+	const [nameInput, setNameInput] = useState<string>("");
+	const [passwordInput, setPasswordInput] = useState<string>("");
+	const [uploadTab, setUploadTab] = useState<"files" | "nzblnk" | "byname">("files");
 	const uploadMutation = useUploadToQueue();
 	const uploadLinksMutation = useUploadNZBLnks();
+	const searchByNameMutation = useSearchNZBByName();
+	const { showToast } = useToast();
 	const { data: config } = useConfig();
 
 	const categories = config?.sabnzbd?.categories ?? [];
@@ -327,6 +333,31 @@ function EnhancedUploadSection() {
 		}
 	}, [linkInput, category, uploadLinksMutation, parseLinks, validateNZBLink, extractTitleFromLink]);
 
+	const handleNameSubmit = useCallback(async () => {
+		const name = nameInput.trim();
+		if (!name) return;
+		try {
+			const result = await searchByNameMutation.mutateAsync({
+				name,
+				password: passwordInput || undefined,
+				category: category || undefined,
+			});
+			showToast({
+				title: "Added to Queue",
+				message: `"${result.title}" found via ${result.indexer} (ID: ${result.queue_id})`,
+				type: "success",
+			});
+			setNameInput("");
+			setPasswordInput("");
+		} catch (error) {
+			showToast({
+				title: "Search Failed",
+				message: error instanceof Error ? error.message : "Could not find NZB for the given name",
+				type: "error",
+			});
+		}
+	}, [nameInput, passwordInput, category, searchByNameMutation, showToast]);
+
 	const handleDragOver = useCallback((e: React.DragEvent) => {
 		e.preventDefault();
 		e.stopPropagation();
@@ -373,7 +404,7 @@ function EnhancedUploadSection() {
 	return (
 		<div className="space-y-8">
 			{/* Tab Selector */}
-			<div role="tablist" className="tabs tabs-boxed mb-4 max-w-sm">
+			<div role="tablist" className="tabs tabs-boxed mb-4 max-w-lg">
 				<button
 					type="button"
 					role="tab"
@@ -391,6 +422,15 @@ function EnhancedUploadSection() {
 				>
 					<Link className="mr-2 h-4 w-4" />
 					NZBLNK
+				</button>
+				<button
+					type="button"
+					role="tab"
+					className={`tab ${uploadTab === "byname" ? "tab-active" : ""}`}
+					onClick={() => setUploadTab("byname")}
+				>
+					<Search className="mr-2 h-4 w-4" />
+					By Name
 				</button>
 			</div>
 
@@ -463,6 +503,45 @@ function EnhancedUploadSection() {
 							<Download className="h-4 w-4" />
 						)}
 						Resolve & Queue
+					</button>
+				</div>
+			)}
+
+			{uploadTab === "byname" && (
+				<div className="space-y-4">
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-semibold">Name / Title</legend>
+						<input
+							type="text"
+							className="input w-full bg-base-200/50"
+							placeholder="e.g. Some.Show.S01E01.1080p"
+							value={nameInput}
+							onChange={(e) => setNameInput(e.target.value)}
+							onKeyDown={(e) => e.key === "Enter" && handleNameSubmit()}
+						/>
+					</fieldset>
+					<fieldset className="fieldset">
+						<legend className="fieldset-legend font-semibold">Password (optional)</legend>
+						<input
+							type="text"
+							className="input w-full bg-base-200/50"
+							placeholder="Archive password if required"
+							value={passwordInput}
+							onChange={(e) => setPasswordInput(e.target.value)}
+						/>
+					</fieldset>
+					<button
+						type="button"
+						className="btn btn-primary btn-sm"
+						onClick={handleNameSubmit}
+						disabled={!nameInput.trim() || searchByNameMutation.isPending}
+					>
+						{searchByNameMutation.isPending ? (
+							<LoadingSpinner size="sm" />
+						) : (
+							<Search className="h-4 w-4" />
+						)}
+						Search & Queue
 					</button>
 				</div>
 			)}

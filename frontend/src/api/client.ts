@@ -881,6 +881,25 @@ export class APIClient {
 		});
 	}
 
+	async searchNZBByName(
+		name: string,
+		password?: string,
+		category?: string,
+		priority?: number,
+		relativePath?: string,
+	): Promise<{ queue_id: number; title: string; indexer: string }> {
+		return this.request("/queue/upload-by-name", {
+			method: "POST",
+			body: JSON.stringify({
+				name,
+				password: password || undefined,
+				category: category || undefined,
+				priority: priority ?? undefined,
+				relative_path: relativePath || undefined,
+			}),
+		});
+	}
+
 	async addTestQueueItem(size: "100MB" | "1GB" | "10GB") {
 		return this.request<APIResponse<QueueItem>>("/queue/test", {
 			method: "POST",

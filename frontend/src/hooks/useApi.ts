@@ -535,6 +535,30 @@ export const useUploadNZBLnks = () => {
 	});
 };
 
+export const useSearchNZBByName = () => {
+	const queryClient = useQueryClient();
+
+	return useMutation({
+		mutationFn: ({
+			name,
+			password,
+			category,
+			priority,
+			relativePath,
+		}: {
+			name: string;
+			password?: string;
+			category?: string;
+			priority?: number;
+			relativePath?: string;
+		}) => apiClient.searchNZBByName(name, password, category, priority, relativePath),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["queue"] });
+			queryClient.invalidateQueries({ queryKey: ["queue", "stats"] });
+		},
+	});
+};
+
 export const useAddTestQueueItem = () => {
 	const queryClient = useQueryClient();
 
