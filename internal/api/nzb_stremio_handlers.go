@@ -111,8 +111,8 @@ func (s *Server) handleNzbStreams(c *fiber.Ctx) error {
 		return RespondValidationError(c, "File too large", "File size must be less than 100MB")
 	}
 
-	// --- Optional parameters ---
-	baseURL := strings.TrimRight(c.FormValue("base_url"), "/")
+	// --- Resolve base URL ---
+	baseURL := strings.TrimRight(cfg.Stremio.BaseURL, "/")
 	if baseURL == "" {
 		baseURL = c.Protocol() + "://" + c.Hostname()
 	}
