@@ -71,11 +71,10 @@ func (d *Dir) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) 
 
 	info, err := d.nzbfs.Stat(ctx, d.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return syscall.ENOENT
+		if !os.IsNotExist(err) {
+			d.logger.ErrorContext(ctx, "Getattr failed", "path", d.path, "error", err)
 		}
-		d.logger.ErrorContext(ctx, "Getattr failed", "path", d.path, "error", err)
-		return syscall.EIO
+		return translateError(err)
 	}
 
 	fillAttr(info, &out.Attr, d.uid, d.gid)
@@ -138,11 +137,10 @@ func (d *Dir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.
 
 	info, err := d.nzbfs.Stat(ctx, fullPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, syscall.ENOENT
+		if !os.IsNotExist(err) {
+			d.logger.ErrorContext(ctx, "Lookup failed", "path", fullPath, "error", err)
 		}
-		d.logger.ErrorContext(ctx, "Lookup failed", "path", fullPath, "error", err)
-		return nil, syscall.EIO
+		return nil, translateError(err)
 	}
 
 	fillAttr(info, &out.Attr, d.uid, d.gid)
@@ -208,23 +206,6 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 	}
 
 	return 0
-}
-
-// mapError maps os-level errors to FUSE errno values.
-func mapError(err error, logger *slog.Logger, ctx context.Context, msg string, args ...any) syscall.Errno {
-	if os.IsNotExist(err) {
-		return syscall.ENOENT
-	}
-	if os.IsPermission(err) {
-		return syscall.EACCES
-	}
-	if os.IsExist(err) {
-		return syscall.EEXIST
-	}
-	logArgs := append([]any{}, args...)
-	logArgs = append(logArgs, "error", err)
-	logger.ErrorContext(ctx, msg, logArgs...)
-	return syscall.EIO
 }
 
 // Readdir implements fs.NodeReaddirer.
