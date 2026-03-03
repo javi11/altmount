@@ -18,6 +18,7 @@ interface HealthTableProps {
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
+	isUnmaskPending: boolean;
 	onSelectItem: (filePath: string, checked: boolean) => void;
 	onSelectAll: (checked: boolean) => void;
 	onSort: (column: SortBy) => void;
@@ -25,6 +26,7 @@ interface HealthTableProps {
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onUnmask: (id: number) => void;
 	onSetPriority: (id: number, priority: HealthPriority) => void;
 }
 
@@ -40,6 +42,7 @@ export function HealthTable({
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
+	isUnmaskPending,
 	onSelectItem,
 	onSelectAll,
 	onSort,
@@ -47,6 +50,7 @@ export function HealthTable({
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onUnmask,
 	onSetPriority,
 }: HealthTableProps) {
 	// Helper functions for select all checkbox state
@@ -74,10 +78,12 @@ export function HealthTable({
 									onManualCheck={onManualCheck}
 									onRepair={onRepair}
 									onDelete={onDelete}
+									onUnmask={onUnmask}
 									isCancelPending={isCancelPending}
 									isDirectCheckPending={isDirectCheckPending}
 									isRepairPending={isRepairPending}
 									isDeletePending={isDeletePending}
+									isUnmaskPending={isUnmaskPending}
 								/>
 							))}
 						</div>
@@ -104,11 +110,13 @@ export function HealthTable({
 											isDirectCheckPending={isDirectCheckPending}
 											isRepairPending={isRepairPending}
 											isDeletePending={isDeletePending}
+											isUnmaskPending={isUnmaskPending}
 											onSelectChange={onSelectItem}
 											onCancelCheck={onCancelCheck}
 											onManualCheck={onManualCheck}
 											onRepair={onRepair}
 											onDelete={onDelete}
+											onUnmask={onUnmask}
 											onSetPriority={onSetPriority}
 										/>
 									))}

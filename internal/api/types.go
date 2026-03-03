@@ -411,6 +411,9 @@ type HealthItemResponse struct {
 	UpdatedAt        time.Time               `json:"updated_at"`
 	ScheduledCheckAt *time.Time              `json:"scheduled_check_at,omitempty"`
 	Priority         database.HealthPriority `json:"priority"`
+	// Failure masking fields
+	StreamingFailureCount int  `json:"streaming_failure_count"`
+	IsMasked              bool `json:"is_masked"`
 }
 
 // HealthListRequest represents request parameters for listing health records
@@ -719,6 +722,8 @@ func ToHealthItemResponse(item *database.FileHealth) *HealthItemResponse {
 		UpdatedAt:        item.UpdatedAt,
 		ScheduledCheckAt: item.ScheduledCheckAt,
 		Priority:         item.Priority,
+		StreamingFailureCount: item.StreamingFailureCount,
+		IsMasked:              item.IsMasked,
 	}
 }
 

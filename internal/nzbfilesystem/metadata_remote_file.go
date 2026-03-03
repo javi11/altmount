@@ -114,10 +114,12 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 	if mrf.metadataService.DirectoryExists(normalizedName) {
 		// Create a directory handle
 		virtualDir := &MetadataVirtualDirectory{
-			name:            name,
-			normalizedPath:  normalizedName,
-			metadataService: mrf.metadataService,
-			showCorrupted:   showCorrupted,
+			name:             name,
+			normalizedPath:   normalizedName,
+			metadataService:  mrf.metadataService,
+			healthRepository: mrf.healthRepository,
+			configGetter:     mrf.configGetter,
+			showCorrupted:    showCorrupted,
 		}
 		return true, virtualDir, nil
 	}
@@ -141,10 +143,12 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 			if mrf.isValidEmptyDirectory(normalizedName) {
 				// Create a directory handle for empty directory
 				virtualDir := &MetadataVirtualDirectory{
-					name:            name,
-					normalizedPath:  normalizedName,
-					metadataService: mrf.metadataService,
-					showCorrupted:   showCorrupted,
+					name:             name,
+					normalizedPath:   normalizedName,
+					metadataService:  mrf.metadataService,
+					healthRepository: mrf.healthRepository,
+					configGetter:     mrf.configGetter,
+					showCorrupted:    showCorrupted,
 				}
 				return true, virtualDir, nil
 			}
@@ -221,6 +225,7 @@ func (mrf *MetadataRemoteFile) OpenFile(ctx context.Context, name string) (bool,
 		fileMeta:         fileMeta,
 		metadataService:  mrf.metadataService,
 		healthRepository: mrf.healthRepository,
+		configGetter:     mrf.configGetter,
 		poolManager:      mrf.poolManager,
 		ctx:              ctx,
 		maxPrefetch:      maxPrefetch,
@@ -497,6 +502,23 @@ func (mrf *MetadataRemoteFile) Stat(ctx context.Context, name string) (bool, fs.
 		return false, nil, fs.ErrNotExist
 	}
 
+	// Extract showCorrupted flag from context
+	showCorrupted := false
+	if sc, ok := ctx.Value(utils.ShowCorrupted).(bool); ok {
+		showCorrupted = sc
+	}
+
+	// Filter out masked files if masking is enabled and not showing corrupted
+	if !showCorrupted {
+		cfg := mrf.configGetter()
+		if cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled {
+			health, err := mrf.healthRepository.GetFileHealth(ctx, normalizedName)
+			if err == nil && health != nil && health.IsMasked {
+				return false, nil, fs.ErrNotExist
+			}
+		}
+	}
+
 	// Convert to fs.FileInfo
 	info := &MetadataFileInfo{
 		name:    filepath.Base(normalizedName),
@@ -555,10 +577,12 @@ func (msl *MetadataSegmentLoader) GetSegment(index int) (segment usenet.Segment,
 
 // MetadataVirtualDirectory implements afero.File for metadata-backed virtual directories
 type MetadataVirtualDirectory struct {
-	name            string
-	normalizedPath  string
-	metadataService *metadata.MetadataService
-	showCorrupted   bool
+	name             string
+	normalizedPath   string
+	metadataService  *metadata.MetadataService
+	healthRepository *database.HealthRepository
+	configGetter     config.ConfigGetter
+	showCorrupted    bool
 }
 
 // Read implements afero.File.Read (not supported for directories)
@@ -615,6 +639,12 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 		return nil, err
 	}
 
+	// Check if failure masking is enabled
+	cfg := mvd.configGetter()
+	maskingEnabled := cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled
+
+	ctx := context.Background()
+
 	for _, fileName := range fileNames {
 		virtualFilePath := filepath.Join(mvd.normalizedPath, fileName)
 		fileMeta, err := mvd.metadataService.ReadFileMetadata(virtualFilePath)
@@ -625,6 +655,14 @@ func (mvd *MetadataVirtualDirectory) Readdir(count int) ([]fs.FileInfo, error) {
 		// Skip corrupted files unless showCorrupted flag is set
 		if !mvd.showCorrupted && fileMeta.Status == metapb.FileStatus_FILE_STATUS_CORRUPTED {
 			continue
+		}
+
+		// Skip masked files if masking is enabled
+		if maskingEnabled && !mvd.showCorrupted {
+			health, err := mvd.healthRepository.GetFileHealth(ctx, virtualFilePath)
+			if err == nil && health != nil && health.IsMasked {
+				continue
+			}
 		}
 
 		info := &MetadataFileInfo{
@@ -701,6 +739,7 @@ type MetadataVirtualFile struct {
 	fileMeta         *metapb.FileMetadata
 	metadataService  *metadata.MetadataService
 	healthRepository *database.HealthRepository
+	configGetter     config.ConfigGetter
 	poolManager      pool.Manager // Pool manager for dynamic pool access
 	ctx              context.Context
 	maxPrefetch      int // Maximum segments prefetched ahead of current read position
@@ -1567,6 +1606,17 @@ func (mvf *MetadataVirtualFile) updateFileHealthOnError(dataCorruptionErr *usene
 	// Create error details JSON
 	errorDetails := fmt.Sprintf(`{"missing_articles": %d, "total_articles": %d, "error_type": "ArticleNotFound"}`,
 		1, len(mvf.fileMeta.SegmentData))
+
+	// Increment streaming failure count and handle masking
+	cfg := mvf.configGetter()
+	if cfg.Streaming.FailureMasking.Enabled == nil || *cfg.Streaming.FailureMasking.Enabled {
+		isMasked, err := mvf.healthRepository.IncrementStreamingFailureCount(ctx, mvf.name, cfg.Streaming.FailureMasking.Threshold)
+		if err != nil {
+			slog.WarnContext(ctx, "Failed to increment streaming failure count", "file", mvf.name, "error", err)
+		} else if isMasked {
+			slog.InfoContext(ctx, "File masked due to repeated streaming failures", "file", mvf.name, "threshold", cfg.Streaming.FailureMasking.Threshold)
+		}
+	}
 
 	if err := mvf.healthRepository.UpdateFileHealth(
 		ctx,

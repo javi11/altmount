@@ -11,11 +11,13 @@ interface HealthTableRowProps {
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
+	isUnmaskPending: boolean;
 	onSelectChange: (filePath: string, checked: boolean) => void;
 	onCancelCheck: (id: number) => void;
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onUnmask: (id: number) => void;
 	onSetPriority: (id: number, priority: HealthPriority) => void;
 }
 
@@ -26,11 +28,13 @@ export function HealthTableRow({
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
+	isUnmaskPending,
 	onSelectChange,
 	onCancelCheck,
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onUnmask,
 	onSetPriority,
 }: HealthTableRowProps) {
 	const getNextPriority = (current: HealthPriority): HealthPriority => {
@@ -104,7 +108,7 @@ export function HealthTableRow({
 			</td>
 			<td>
 				<div className="flex items-center gap-2">
-					<HealthBadge status={item.status} />
+					<HealthBadge status={item.status} isMasked={item.is_masked} />
 				</div>
 				{/* Show last_error for repair failures and general errors */}
 				{item.last_error && (
@@ -183,10 +187,12 @@ export function HealthTableRow({
 					isDirectCheckPending={isDirectCheckPending}
 					isRepairPending={isRepairPending}
 					isDeletePending={isDeletePending}
+					isUnmaskPending={isUnmaskPending}
 					onCancelCheck={onCancelCheck}
 					onManualCheck={onManualCheck}
 					onRepair={onRepair}
 					onDelete={onDelete}
+					onUnmask={onUnmask}
 				/>
 			</td>
 		</tr>

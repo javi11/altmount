@@ -1,4 +1,4 @@
-import { CheckCircle, FileClock, FileScan, FileX, Wrench } from "lucide-react";
+import { CheckCircle, EyeOff, FileClock, FileScan, FileX, Wrench } from "lucide-react";
 import { cn, getStatusColor } from "../../lib/utils";
 
 interface StatusBadgeProps {
@@ -18,22 +18,27 @@ const icons = {
 	checking: <FileScan className="inline-block" />,
 	healthy: <CheckCircle className="inline-block" />,
 	repair_triggered: <Wrench className="inline-block" />,
+	masked: <EyeOff className="inline-block" />,
 };
 
-export function HealthBadge({ status, className }: StatusBadgeProps) {
-	const fileIcon = icons[status.toLowerCase() as keyof typeof icons];
-	const colorClass = getStatusColor(status);
+interface HealthBadgeProps extends StatusBadgeProps {
+	isMasked?: boolean;
+}
+
+export function HealthBadge({ status, isMasked, className }: HealthBadgeProps) {
+	const fileIcon = isMasked ? icons.masked : icons[status.toLowerCase() as keyof typeof icons];
+	const colorClass = isMasked ? "warning" : getStatusColor(status);
 
 	return (
 		<div className={cn(`badge badge-${colorClass}`, className)}>
-			{status.toLowerCase() === "checking" ? (
+			{!isMasked && status.toLowerCase() === "checking" ? (
 				<span className="loading loading-spinner loading-xs mr-1" />
-			) : status.toLowerCase() === "repair_triggered" ? (
+			) : !isMasked && status.toLowerCase() === "repair_triggered" ? (
 				<span className="loading loading-spinner loading-xs mr-1" />
 			) : (
 				<span className="mr-1">{fileIcon}</span>
 			)}
-			{status}
+			{isMasked ? "MASKED" : status}
 		</div>
 	);
 }

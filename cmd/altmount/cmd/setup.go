@@ -440,7 +440,7 @@ func startMountService(ctx context.Context, cfg *config.Config, mountService *rc
 }
 
 // createHTTPServer creates the HTTP server with routing
-func createHTTPServer(app *fiber.App, webdavHandler *webdav.Handler, streamHandler *api.StreamHandler, port int, profilerEnabled bool) *http.Server {
+func createHTTPServer(apiServer *api.Server, app *fiber.App, webdavHandler *webdav.Handler, streamHandler *api.StreamHandler, port int, profilerEnabled bool) *http.Server {
 	// Mount WebDAV handler directly (no Fiber adapter needed)
 	webdavHTTPHandler := webdavHandler.GetHTTPHandler()
 
@@ -453,6 +453,14 @@ func createHTTPServer(app *fiber.App, webdavHandler *webdav.Handler, streamHandl
 	// Create a handler that routes between WebDAV, Stream, and Fiber
 	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+
+		// Check if server is ready, but allow /live and /api/system/health
+		if !apiServer.IsReady() && path != "/live" && path != "/api/system/health" && !strings.HasPrefix(path, "/api/auth/config") {
+			w.Header().Set("Retry-After", "10")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("503 Service Unavailable: Server is initializing"))
+			return
+		}
 
 		// Route profiler requests if enabled
 		if profilerEnabled && strings.HasPrefix(path, "/debug/pprof") {

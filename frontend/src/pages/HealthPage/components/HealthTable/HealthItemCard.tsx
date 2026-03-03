@@ -23,10 +23,12 @@ interface HealthItemCardProps {
 	onManualCheck: (id: number) => void;
 	onRepair: (id: number) => void;
 	onDelete: (id: number) => void;
+	onUnmask: (id: number) => void;
 	isCancelPending: boolean;
 	isDirectCheckPending: boolean;
 	isRepairPending: boolean;
 	isDeletePending: boolean;
+	isUnmaskPending: boolean;
 }
 
 export function HealthItemCard({
@@ -38,10 +40,12 @@ export function HealthItemCard({
 	onManualCheck,
 	onRepair,
 	onDelete,
+	onUnmask,
 	isCancelPending,
 	isDirectCheckPending,
 	isRepairPending,
 	isDeletePending,
+	isUnmaskPending,
 }: HealthItemCardProps) {
 	const [isExpanded, setIsExpanded] = useState(false);
 
@@ -109,7 +113,7 @@ export function HealthItemCard({
 
 						{/* Quick Info Pills */}
 						<div className="mt-2 flex flex-wrap gap-2">
-							<HealthBadge status={item.status} />
+							<HealthBadge status={item.status} isMasked={item.is_masked} />
 
 							<button
 								type="button"
@@ -154,10 +158,12 @@ export function HealthItemCard({
 							isDirectCheckPending={isDirectCheckPending}
 							isRepairPending={isRepairPending}
 							isDeletePending={isDeletePending}
+							isUnmaskPending={isUnmaskPending}
 							onCancelCheck={onCancelCheck}
 							onManualCheck={onManualCheck}
 							onRepair={onRepair}
 							onDelete={onDelete}
+							onUnmask={onUnmask}
 						/>
 					</div>
 				</div>
