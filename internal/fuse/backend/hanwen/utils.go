@@ -1,7 +1,10 @@
 package hanwen
 
 import (
+	"context"
+	"errors"
 	"hash/fnv"
+	"log/slog"
 	"os"
 	"sync"
 	"syscall"
@@ -26,6 +29,33 @@ func hashPath(path string) uint64 {
 	h.Reset()
 	_, _ = h.Write([]byte(path))
 	return h.Sum64()
+}
+
+// translateError maps OS-level errors to FUSE syscall.Errno values.
+// Does not log; callers should log unexpected errors before calling.
+func translateError(err error) syscall.Errno {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, os.ErrNotExist):
+		return syscall.ENOENT
+	case errors.Is(err, os.ErrPermission):
+		return syscall.EACCES
+	case errors.Is(err, os.ErrExist):
+		return syscall.EEXIST
+	default:
+		return syscall.EIO
+	}
+}
+
+// mapError translates an error to a FUSE errno, logging unexpected errors.
+func mapError(err error, logger *slog.Logger, ctx context.Context, msg string, args ...any) syscall.Errno {
+	if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, os.ErrPermission) && !errors.Is(err, os.ErrExist) {
+		logArgs := append([]any{}, args...)
+		logArgs = append(logArgs, "error", err)
+		logger.ErrorContext(ctx, msg, logArgs...)
+	}
+	return translateError(err)
 }
 
 // fillAttr populates FUSE attributes from os.FileInfo.
