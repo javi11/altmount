@@ -121,9 +121,7 @@ export function Dashboard() {
 						<li>
 							<button
 								type="button"
-								onClick={() =>
-									handleResetStats({ reset_peak: true, label: "peak download speed" })
-								}
+								onClick={() => handleResetStats({ reset_peak: true, label: "peak download speed" })}
 							>
 								Reset Peak Speed
 							</button>

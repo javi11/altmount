@@ -18,7 +18,6 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrsConfigSection } from "../components/config/ArrsConfigSection";
-import { StremioConfigSection } from "../components/config/StremioConfigSection";
 import { AuthConfigSection } from "../components/config/AuthConfigSection";
 import { ComingSoonSection } from "../components/config/ComingSoonSection";
 import { HealthConfigSection } from "../components/config/HealthConfigSection";
@@ -27,6 +26,7 @@ import { MountConfigSection } from "../components/config/MountConfigSection";
 import { ProvidersConfigSection } from "../components/config/ProvidersConfigSection";
 import { SABnzbdConfigSection } from "../components/config/SABnzbdConfigSection";
 import { StreamingConfigSection } from "../components/config/StreamingConfigSection";
+import { StremioConfigSection } from "../components/config/StremioConfigSection";
 import { SystemConfigSection } from "../components/config/SystemConfigSection";
 import { WebDAVConfigSection } from "../components/config/WebDAVConfigSection";
 import { ImportConfigSection } from "../components/config/WorkersConfigSection";
@@ -53,8 +53,8 @@ import type {
 	ProviderConfig,
 	SABnzbdConfig,
 	SegmentCacheConfig,
-	StremioConfig,
 	StreamingConfig,
+	StremioConfig,
 	WebDAVConfig,
 } from "../types/config";
 import { CONFIG_SECTIONS } from "../types/config";

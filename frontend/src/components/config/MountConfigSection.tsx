@@ -120,7 +120,11 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 						if (result.success) {
 							showToast({ type: "success", title: "RClone cache cleared" });
 						} else {
-							showToast({ type: "error", title: "Failed to clear cache", message: result.error?.message });
+							showToast({
+								type: "error",
+								title: "Failed to clear cache",
+								message: result.error?.message,
+							});
 						}
 					} catch (err) {
 						showToast({

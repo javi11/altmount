@@ -287,6 +287,7 @@ export interface ConfigUpdateRequest {
 	log?: LogUpdateRequest;
 	sabnzbd?: SABnzbdUpdateRequest;
 	arrs?: ArrsConfig;
+	stremio?: Partial<StremioConfig>;
 	providers?: ProviderUpdateRequest[];
 	mount_path?: string;
 	mount_type?: MountType;
