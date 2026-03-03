@@ -1,0 +1,22 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug altmount server",
+			"type": "go",
+			"request": "launch",
+			"mode": "auto",
+			"program": "${workspaceFolder}/cmd/altmount",
+			"args": [
+				"serve",
+				"--config=/Users/javi/mio/altmount/example/config.yaml"
+			],
+			"env": {
+				"PORT": "8080",
+				"COOKIE_DOMAIN": "localhost",
+				"JWT_SECRET": "change-me-to-a-strong-random-secret"
+			},
+			"cwd": "${workspaceFolder}"
+		}
+	]
+}

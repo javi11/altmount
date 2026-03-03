@@ -28,6 +28,7 @@ AltMount exposes the following endpoint groups under the `/api` prefix:
 | **System** | `/api/system` | System stats, health, pool metrics, cleanup, restart |
 | **FUSE** | `/api/fuse` | FUSE mount start/stop/status |
 | **RClone** | `/api/rclone` | RClone connection test, mount management |
+| **Stremio** | `/api/nzb` | Upload NZB and receive Stremio-compatible stream URLs |
 | **Auth** | `/api/auth` | Login, registration, auth config |
 | **User** | `/api/user` | Current user info, token refresh, API key management |
 | **Users** | `/api/users` | User management (admin) |
