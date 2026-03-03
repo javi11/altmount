@@ -559,7 +559,13 @@ export const useResetSystemStats = () => {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (duration?: string) => apiClient.resetSystemStats(duration),
+		mutationFn: (params?: {
+			duration?: string;
+			reset_peak?: boolean;
+			reset_totals?: boolean;
+			reset_history?: boolean;
+			reset_queue?: boolean;
+		}) => apiClient.resetSystemStats(params),
 		onSuccess: () => {
 			// Invalidate all relevant metrics and history to show reset values
 			queryClient.invalidateQueries({ queryKey: ["system", "pool", "metrics"] });

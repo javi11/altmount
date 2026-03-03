@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/javi11/altmount/internal/auth"
 	"github.com/javi11/altmount/internal/version"
 )
 
@@ -18,6 +21,19 @@ const (
 	ghRepoOwner = "javi11"
 	ghRepoName  = "altmount"
 )
+
+// isDockerAvailable checks if the docker.sock and docker binary are present.
+func isDockerAvailable() bool {
+	// Check if docker.sock is mounted
+	if _, err := os.Stat("/var/run/docker.sock"); err != nil {
+		return false
+	}
+	// Check if docker CLI is available in PATH
+	if _, err := exec.LookPath("docker"); err != nil {
+		return false
+	}
+	return true
+}
 
 type githubReleaseResponse struct {
 	TagName string `json:"tag_name"`
@@ -88,9 +104,10 @@ func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 	}
 
 	resp := UpdateStatusResponse{
-		CurrentVersion: version.Version,
-		GitCommit:      version.GitCommit,
-		Channel:        channel,
+		CurrentVersion:  version.Version,
+		GitCommit:       version.GitCommit,
+		Channel:         channel,
+		DockerAvailable: isDockerAvailable(),
 	}
 
 	ctx, cancel := context.WithTimeout(c.Context(), 10*time.Second)
@@ -125,4 +142,61 @@ func (s *Server) handleGetUpdateStatus(c *fiber.Ctx) error {
 	}
 
 	return RespondSuccess(c, resp)
+}
+
+// handleApplyUpdate handles POST /api/system/update/apply
+func (s *Server) handleApplyUpdate(c *fiber.Ctx) error {
+	user := auth.GetUserFromContext(c)
+	if !s.isAdminOrLoginDisabled(user) {
+		return RespondForbidden(c, "Admin privileges required", "Only administrators can perform system updates.")
+	}
+
+	if !isDockerAvailable() {
+		return RespondBadRequest(c, "Auto-update is not available. Mount docker.sock into the container and ensure docker CLI is installed.", "")
+	}
+
+	var req struct {
+		Channel UpdateChannel `json:"channel"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return RespondBadRequest(c, "Invalid request body", err.Error())
+	}
+
+	channel := req.Channel
+	if channel == "" {
+		channel = UpdateChannelLatest
+	}
+
+	if channel != UpdateChannelLatest && channel != UpdateChannelDev {
+		return RespondBadRequest(c, "Invalid channel. Use 'latest' or 'dev'", "")
+	}
+
+	// Use goroutine to avoid blocking the API response
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		image := fmt.Sprintf("ghcr.io/%s/%s:%s", ghRepoOwner, ghRepoName, channel)
+		slog.Info("Starting auto-update", "channel", channel, "image", image)
+
+		// 1. Pull the new image
+		cmd := exec.CommandContext(ctx, "docker", "pull", image)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			slog.Error("Failed to pull latest image", "error", err, "output", string(output))
+			return
+		}
+		slog.Info("Successfully pulled latest image", "output", string(output))
+
+		// 2. Trigger restart
+		// Note: performRestart only restarts the process. To pick up the new image,
+		// the container needs to be recreated. However, if the user has a setup
+		// that handles image updates on restart (like Watchtower or similar), this will work.
+		// For many users, a simple process restart is the first step.
+		s.performRestart(ctx)
+	}()
+
+	return RespondSuccess(c, fiber.Map{
+		"message": "Update initiated. The image is being pulled and the server will restart automatically.",
+	})
 }

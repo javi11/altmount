@@ -35,6 +35,9 @@ services:
       - ./config:/config
       - /mnt:/mnt:rshared
       - /metadata:/metadata # This is optional you can still use /mnt
+      - /var/run/docker.sock:/var/run/docker.sock # Required for the auto-update feature
+    group_add:
+      - "999" # GID of the docker group on the host (run `getent group docker | cut -d: -f3` to find yours)
     ports:
       - "8080:8080"
     restart: unless-stopped
