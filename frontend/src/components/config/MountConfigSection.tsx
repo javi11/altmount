@@ -106,6 +106,31 @@ export function MountConfigSection({ config, onUpdate, isUpdating }: MountConfig
 				{ type: "warning", confirmText: "Switch", confirmButtonClass: "btn-warning" },
 			);
 			if (!confirmed) return;
+
+			if (mountType === "rclone") {
+				const clearCache = await confirmAction(
+					"Clear RClone Cache?",
+					"Do you want to delete the rclone VFS cache to free up disk space? This cannot be undone.",
+					{ type: "info", confirmText: "Clear Cache", confirmButtonClass: "btn-error" },
+				);
+				if (clearCache) {
+					try {
+						const response = await fetch("/api/rclone/cache", { method: "DELETE" });
+						const result = await response.json();
+						if (result.success) {
+							showToast({ type: "success", title: "RClone cache cleared" });
+						} else {
+							showToast({ type: "error", title: "Failed to clear cache", message: result.error?.message });
+						}
+					} catch (err) {
+						showToast({
+							type: "error",
+							title: "Failed to clear cache",
+							message: err instanceof Error ? err.message : "Unknown error",
+						});
+					}
+				}
+			}
 		}
 		setMountType(newType);
 		subSectionDataRef.current = {};

@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -152,12 +154,39 @@ func (h *RCloneHandlers) TestRCloneConnection(c *fiber.Ctx) error {
 	})
 }
 
+// ClearRCloneCache removes the rclone VFS cache directory and recreates it empty.
+func (h *RCloneHandlers) ClearRCloneCache(c *fiber.Ctx) error {
+	cfg := h.configGetter()
+	cacheDir := cfg.RClone.CacheDir
+	if cacheDir == "" {
+		return RespondBadRequest(c, "Cache directory is not configured", "")
+	}
+
+	slog.InfoContext(c.Context(), "Clearing rclone cache directory", "cache_dir", cacheDir)
+
+	if err := os.RemoveAll(cacheDir); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to remove rclone cache directory", "cache_dir", cacheDir, "error", err)
+		return RespondInternalError(c, "Failed to clear rclone cache", err.Error())
+	}
+
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		slog.ErrorContext(c.Context(), "Failed to recreate rclone cache directory", "cache_dir", cacheDir, "error", err)
+		return RespondInternalError(c, "Failed to recreate cache directory", err.Error())
+	}
+
+	slog.InfoContext(c.Context(), "Rclone cache directory cleared", "cache_dir", cacheDir)
+	return RespondSuccess(c, fiber.Map{"cache_dir": cacheDir})
+}
+
 // RegisterRCloneRoutes registers RClone-related routes
 func RegisterRCloneRoutes(apiGroup fiber.Router, handlers *RCloneHandlers) {
 	rcloneGroup := apiGroup.Group("/rclone")
 
 	// RC server testing
 	rcloneGroup.Post("/test", handlers.TestRCloneConnection)
+
+	// Cache management
+	rcloneGroup.Delete("/cache", handlers.ClearRCloneCache)
 
 	// Mount management
 	mountGroup := rcloneGroup.Group("/mount")

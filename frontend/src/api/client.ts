@@ -704,9 +704,19 @@ export class APIClient {
 		return this.request<SystemBrowseResponse>(`/system/browse${query ? `?${query}` : ""}`);
 	}
 
-	async resetSystemStats(duration?: string) {
+	async resetSystemStats(params?: {
+		duration?: string;
+		reset_peak?: boolean;
+		reset_totals?: boolean;
+		reset_history?: boolean;
+		reset_queue?: boolean;
+	}) {
 		const searchParams = new URLSearchParams();
-		if (duration) searchParams.set("duration", duration);
+		if (params?.duration) searchParams.set("duration", params.duration);
+		if (params?.reset_peak) searchParams.set("reset_peak", "true");
+		if (params?.reset_totals) searchParams.set("reset_totals", "true");
+		if (params?.reset_history) searchParams.set("reset_history", "true");
+		if (params?.reset_queue) searchParams.set("reset_queue", "true");
 
 		const query = searchParams.toString();
 		return this.request<{ message: string }>(`/system/stats/reset${query ? `?${query}` : ""}`, {

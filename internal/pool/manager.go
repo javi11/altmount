@@ -26,8 +26,8 @@ type Manager interface {
 	// GetMetrics returns the current pool metrics with calculated speeds
 	GetMetrics() (MetricsSnapshot, error)
 
-	// ResetMetrics resets all cumulative metrics
-	ResetMetrics(ctx context.Context) error
+	// ResetMetrics resets specific cumulative metrics
+	ResetMetrics(ctx context.Context, resetPeak bool, resetTotals bool) error
 
 	// IncArticlesDownloaded increments the count of articles successfully downloaded
 	IncArticlesDownloaded()
@@ -167,13 +167,13 @@ func (m *manager) GetMetrics() (MetricsSnapshot, error) {
 	return m.metricsTracker.GetSnapshot(), nil
 }
 
-// ResetMetrics resets all cumulative metrics
-func (m *manager) ResetMetrics(ctx context.Context) error {
+// ResetMetrics resets specific cumulative metrics
+func (m *manager) ResetMetrics(ctx context.Context, resetPeak bool, resetTotals bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.metricsTracker != nil {
-		return m.metricsTracker.Reset(ctx)
+		return m.metricsTracker.Reset(ctx, resetPeak, resetTotals)
 	}
 
 	// If tracker not available, still try to reset DB directly
@@ -182,14 +182,25 @@ func (m *manager) ResetMetrics(ctx context.Context) error {
 		if err == nil {
 			resetMap := make(map[string]int64)
 			for k := range currentStats {
-				resetMap[k] = 0
+				if resetTotals {
+					resetMap[k] = 0
+				}
 			}
-			resetMap["bytes_downloaded"] = 0
-			resetMap["articles_downloaded"] = 0
-			resetMap["bytes_uploaded"] = 0
-			resetMap["articles_posted"] = 0
-			resetMap["max_download_speed"] = 0
-			_ = m.repo.BatchUpdateSystemStats(ctx, resetMap)
+
+			if resetTotals {
+				resetMap["bytes_downloaded"] = 0
+				resetMap["articles_downloaded"] = 0
+				resetMap["bytes_uploaded"] = 0
+				resetMap["articles_posted"] = 0
+			}
+
+			if resetPeak {
+				resetMap["max_download_speed"] = 0
+			}
+
+			if len(resetMap) > 0 {
+				_ = m.repo.BatchUpdateSystemStats(ctx, resetMap)
+			}
 		}
 	}
 

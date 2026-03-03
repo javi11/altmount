@@ -26,6 +26,8 @@ docker run -d \
   -p 8080:8080 \
   -v /path/to/config:/config \
   -v /path/to/metadata:/metadata \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add 999 \
   your-registry/altmount:latest
 ```
 
@@ -105,6 +107,9 @@ services:
     volumes:
       - ./config:/config
       - ./metadata:/metadata
+      - /var/run/docker.sock:/var/run/docker.sock # Required for the auto-update feature
+    group_add:
+      - "999" # GID of the docker group on the host
     ports:
       - "8080:8080"
     restart: unless-stopped

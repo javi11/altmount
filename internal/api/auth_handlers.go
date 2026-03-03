@@ -388,6 +388,15 @@ func sameSiteToString(sameSite http.SameSite) string {
 }
 
 
+// resolveSecureFlag returns the Secure flag for a cookie, auto-detecting from the
+// request protocol when CookieSecureAutoDetect is enabled.
+func resolveSecureFlag(c *fiber.Ctx, cfg *auth.Config) bool {
+	if cfg.CookieSecureAutoDetect {
+		return c.Protocol() == "https"
+	}
+	return cfg.CookieSecure
+}
+
 // setJWTCookie sets the JWT cookie using Fiber's native cookie handling (merged config)
 func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 	cfg := s.authService.GetConfig()
@@ -398,7 +407,7 @@ func (s *Server) setJWTCookie(c *fiber.Ctx, tokenString string) error {
 		Path:     "/",
 		Domain:   cfg.CookieDomain,
 		Expires:  time.Now().Add(cfg.TokenDuration),
-		Secure:   cfg.CookieSecure,
+		Secure:   resolveSecureFlag(c, cfg),
 		HTTPOnly: true,
 		SameSite: sameSiteToString(cfg.CookieSameSite),
 	}
@@ -417,7 +426,7 @@ func (s *Server) clearJWTCookie(c *fiber.Ctx) {
 		Path:     "/",
 		Domain:   cfg.CookieDomain,
 		Expires:  time.Now().Add(-time.Hour), // Expire in the past
-		Secure:   cfg.CookieSecure,
+		Secure:   resolveSecureFlag(c, cfg),
 		HTTPOnly: true,
 		SameSite: sameSiteToString(cfg.CookieSameSite),
 	}

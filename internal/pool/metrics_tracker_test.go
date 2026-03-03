@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -57,4 +58,54 @@ func TestMetricsTracker_WindowedSpeed(t *testing.T) {
 	snapshot = mt.getSnapshot(now, nntppool.ClientStats{})
 	// Speed = (150 - 50) / 15 = 6.66 MB/s
 	assert.InDelta(t, float64(100*1024*1024)/15.0, snapshot.DownloadSpeedBytesPerSec, 0.001)
+
+	// Case 5: Sample too recent (under 2s)
+	mt.samples = []metricsample{{
+		totalBytes: 140 * 1024 * 1024,
+		timestamp:  now.Add(-1 * time.Second),
+	}}
+	mt.liveBytesDownloaded.Store(150 * 1024 * 1024)
+	snapshot = mt.getSnapshot(now, nntppool.ClientStats{})
+	assert.Equal(t, 0.0, snapshot.DownloadSpeedBytesPerSec)
+}
+
+func TestMetricsTracker_Reset(t *testing.T) {
+	mt := &MetricsTracker{
+		maxDownloadSpeed: 500.0,
+		samples: []metricsample{
+			{totalBytes: 100, timestamp: time.Now()},
+		},
+		initialProviderErrors: make(map[string]int64),
+		logger:                slog.Default(),
+	}
+	mt.liveBytesDownloaded.Store(1000)
+	mt.articlesDownloaded.Store(10)
+
+	// Case 1: Reset Peak only
+	err := mt.Reset(nil, true, false)
+	assert.NoError(t, err)
+	assert.Equal(t, 0.0, mt.maxDownloadSpeed)
+	assert.Equal(t, int64(1000), mt.liveBytesDownloaded.Load())
+	assert.Equal(t, int64(10), mt.articlesDownloaded.Load())
+	assert.Len(t, mt.samples, 1)
+
+	// Case 2: Reset Totals only
+	mt.maxDownloadSpeed = 500.0
+	err = mt.Reset(nil, false, true)
+	assert.NoError(t, err)
+	assert.Equal(t, 500.0, mt.maxDownloadSpeed)
+	assert.Equal(t, int64(0), mt.liveBytesDownloaded.Load())
+	assert.Equal(t, int64(0), mt.articlesDownloaded.Load())
+	assert.Len(t, mt.samples, 0)
+
+	// Case 3: Reset All
+	mt.liveBytesDownloaded.Store(1000)
+	mt.articlesDownloaded.Store(10)
+	mt.samples = []metricsample{{totalBytes: 100, timestamp: time.Now()}}
+	err = mt.Reset(nil, true, true)
+	assert.NoError(t, err)
+	assert.Equal(t, 0.0, mt.maxDownloadSpeed)
+	assert.Equal(t, int64(0), mt.liveBytesDownloaded.Load())
+	assert.Equal(t, int64(0), mt.articlesDownloaded.Load())
+	assert.Len(t, mt.samples, 0)
 }

@@ -304,12 +304,6 @@ func (b *UsenetReader) downloadSegmentWithRetry(ctx context.Context, seg *segmen
 				"segment_id", seg.Id,
 				"size_bytes", len(data),
 			)
-			if b.metricsTracker != nil {
-				b.metricsTracker.IncArticlesDownloaded()
-				if b.streamID != "" {
-					b.metricsTracker.UpdateDownloadProgress(b.streamID, int64(len(data)))
-				}
-			}
 			return data, nil
 		}
 	}

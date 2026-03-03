@@ -509,6 +509,7 @@ type UpdateStatusResponse struct {
 	LatestVersion   string        `json:"latest_version,omitempty"`
 	UpdateAvailable bool          `json:"update_available"`
 	ReleaseURL      string        `json:"release_url,omitempty"`
+	DockerAvailable bool          `json:"docker_available"`
 }
 
 // SystemHealthResponse represents system health check result

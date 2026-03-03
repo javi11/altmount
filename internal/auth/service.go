@@ -27,11 +27,12 @@ type Service struct {
 // Config represents authentication service configuration
 type Config struct {
 	// JWT configuration
-	JWTSecret      string        // JWT signing secret
-	TokenDuration  time.Duration // JWT token duration
-	CookieDomain   string        // Cookie domain
-	CookieSecure   bool          // Secure cookie flag
-	CookieSameSite http.SameSite // SameSite cookie attribute
+	JWTSecret              string        // JWT signing secret
+	TokenDuration          time.Duration // JWT token duration
+	CookieDomain           string        // Cookie domain
+	CookieSecure           bool          // Secure cookie flag (used only when CookieSecureAutoDetect is false)
+	CookieSecureAutoDetect bool          // When true, derive Secure flag from request protocol at runtime
+	CookieSameSite         http.SameSite // SameSite cookie attribute
 
 	// Direct authentication
 	DirectAuthEnabled bool   // Enable direct username/password authentication
@@ -45,13 +46,14 @@ type Config struct {
 // DefaultConfig returns default authentication configuration
 func DefaultConfig() *Config {
 	return &Config{
-		TokenDuration:     24 * time.Hour,       // 24 hours
-		CookieDomain:      "",                   // Empty string allows browser to use current domain
-		CookieSecure:      true,                 // Set to false via COOKIE_SECURE=false for local HTTP dev
-		CookieSameSite:    http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
-		DirectAuthEnabled: true,
-		Issuer:            "altmount",
-		Audience:          "altmount-api",
+		TokenDuration:          24 * time.Hour,       // 24 hours
+		CookieDomain:           "",                   // Empty string allows browser to use current domain
+		CookieSecure:           false,                // Only used when CookieSecureAutoDetect is false
+		CookieSecureAutoDetect: true,                 // Auto-detect Secure flag from request protocol
+		CookieSameSite:         http.SameSiteLaxMode, // Use Lax mode for Safari compatibility
+		DirectAuthEnabled:      true,
+		Issuer:                 "altmount",
+		Audience:               "altmount-api",
 	}
 }
 
@@ -70,8 +72,10 @@ func LoadConfigFromEnv() (*Config, error) {
 		config.CookieDomain = domain
 	}
 
-	if secure := os.Getenv("COOKIE_SECURE"); secure == "false" {
-		config.CookieSecure = false
+	if secure := os.Getenv("COOKIE_SECURE"); secure != "" {
+		// Explicit env var disables auto-detection and forces a fixed value
+		config.CookieSecureAutoDetect = false
+		config.CookieSecure = secure != "false"
 	}
 
 	if salt := os.Getenv("DIRECT_AUTH_SALT"); salt != "" {
@@ -109,6 +113,11 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 		urlDomain = "localhost"
 	}
 
+	// When auto-detect is enabled, the actual Secure flag is resolved per-request
+	// in setJWTCookie/clearJWTCookie. The go-pkgz/auth library option is set to false
+	// so it does not reject token reads on HTTP connections.
+	secureCookiesForLib := config.CookieSecure && !config.CookieSecureAutoDetect
+
 	opts := auth.Opts{
 		SecretReader: token.SecretFunc(func(string) (string, error) {
 			return config.JWTSecret, nil
@@ -116,7 +125,7 @@ func NewService(config *Config, userRepo *database.UserRepository) (*Service, er
 		TokenDuration:   config.TokenDuration,
 		CookieDuration:  config.TokenDuration,
 		DisableXSRF:     true, // SameSite: Lax cookie already prevents CSRF
-		SecureCookies:   config.CookieSecure,
+		SecureCookies:   secureCookiesForLib,
 		JWTCookieName:   "JWT",
 		JWTCookieDomain: config.CookieDomain,
 		SameSiteCookie:  config.CookieSameSite,
