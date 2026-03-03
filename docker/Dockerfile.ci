@@ -76,10 +76,12 @@ COPY --from=backend-builder /app/altmount /app/altmount
 COPY --from=backend-builder /app/frontend/dist ./frontend/dist
 
 # Install required packages for runtime (mime-support already in custom-base)
+# docker.io provides docker CLI for the auto-update feature (requires /var/run/docker.sock mount)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         wget \
-        ca-certificates && \
+        ca-certificates \
+        docker.io && \
     rm -rf /var/lib/apt/lists/*
 
 # Install rclone and FUSE support for internal mount functionality

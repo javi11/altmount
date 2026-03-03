@@ -25,19 +25,27 @@ export function Dashboard() {
 
 	const hasError = queueError || healthError;
 
-	const handleResetStats = async (duration?: string) => {
-		const durationLabel = !duration || duration === "all" ? "all time" : `last ${duration}`;
-		if (
-			confirm(
-				`Are you sure you want to reset all NNTP errors and import history stats for ${durationLabel}?`,
-			)
-		) {
+	const handleResetStats = async (options: {
+		duration?: string;
+		reset_peak?: boolean;
+		reset_totals?: boolean;
+		reset_history?: boolean;
+		reset_queue?: boolean;
+		label: string;
+	}) => {
+		if (confirm(`Are you sure you want to reset ${options.label}?`)) {
 			try {
-				await resetStats.mutateAsync(duration);
+				await resetStats.mutateAsync({
+					duration: options.duration,
+					reset_peak: options.reset_peak,
+					reset_totals: options.reset_totals,
+					reset_history: options.reset_history,
+					reset_queue: options.reset_queue,
+				});
 				showToast({
 					type: "success",
 					title: "Statistics Reset",
-					message: `System statistics and import history for ${durationLabel} have been reset.`,
+					message: `${options.label} have been reset.`,
 				});
 			} catch (error) {
 				showToast({
@@ -49,13 +57,17 @@ export function Dashboard() {
 		}
 	};
 
-	const handleCustomReset = async () => {
+	const handleCustomHistoryReset = async () => {
 		const customDuration = prompt(
-			"Enter duration to reset (e.g., 12h, 2d, 1w):\nUse 'h' for hours, 'd' for days.",
+			"Enter duration to reset history (e.g., 12h, 2d, 1w):\nUse 'h' for hours, 'd' for days.",
 			"12h",
 		);
 		if (customDuration && customDuration.trim() !== "") {
-			await handleResetStats(customDuration.trim().toLowerCase());
+			await handleResetStats({
+				duration: customDuration.trim().toLowerCase(),
+				reset_history: true,
+				label: `import history for last ${customDuration}`,
+			});
 		}
 	};
 
@@ -102,39 +114,82 @@ export function Dashboard() {
 						Reset Stats
 						<ChevronDown className="h-3 w-3 text-base-content/70" />
 					</button>
-					<ul className="dropdown-content menu z-[50] mt-1 w-52 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
+					<ul className="dropdown-content menu z-[50] mt-1 w-64 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
+						<div className="px-3 py-1 font-bold text-base-content/50 text-xs uppercase">
+							Download Metrics
+						</div>
 						<li>
-							<button type="button" onClick={() => handleResetStats("1h")}>
-								Last 1 Hour
+							<button
+								type="button"
+								onClick={() =>
+									handleResetStats({ reset_peak: true, label: "peak download speed" })
+								}
+							>
+								Reset Peak Speed
 							</button>
 						</li>
 						<li>
-							<button type="button" onClick={() => handleResetStats("2h")}>
-								Last 2 Hours
+							<button
+								type="button"
+								onClick={() =>
+									handleResetStats({ reset_totals: true, label: "total download metrics" })
+								}
+							>
+								Reset Download Totals
 							</button>
 						</li>
+						<div className="divider my-1" />
+						<div className="px-3 py-1 font-bold text-base-content/50 text-xs uppercase">
+							Import History
+						</div>
 						<li>
-							<button type="button" onClick={() => handleResetStats("24h")}>
+							<button
+								type="button"
+								onClick={() =>
+									handleResetStats({
+										duration: "24h",
+										reset_history: true,
+										label: "import history for last 24h",
+									})
+								}
+							>
 								Last 24 Hours
 							</button>
 						</li>
 						<li>
 							<button
 								type="button"
-								onClick={handleCustomReset}
+								onClick={handleCustomHistoryReset}
 								className="font-medium text-info italic"
 							>
 								Custom Range...
+							</button>
+						</li>
+						<li>
+							<button
+								type="button"
+								onClick={() =>
+									handleResetStats({ reset_history: true, label: "all import history" })
+								}
+							>
+								Reset All History
 							</button>
 						</li>
 						<div className="divider my-1" />
 						<li>
 							<button
 								type="button"
-								onClick={() => handleResetStats("all")}
+								onClick={() =>
+									handleResetStats({
+										reset_peak: true,
+										reset_totals: true,
+										reset_history: true,
+										label: "ALL system statistics",
+									})
+								}
 								className="font-bold text-error italic"
 							>
-								All Time (Full Reset)
+								Full Reset (Everything)
 							</button>
 						</li>
 					</ul>

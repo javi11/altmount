@@ -280,6 +280,7 @@ func (s *Server) SetupRoutes(app *fiber.App) {
 
 	// Update endpoints
 	api.Get("/system/update/status", s.handleGetUpdateStatus)
+	api.Post("/system/update/apply", s.handleApplyUpdate)
 
 	api.Get("/config", s.handleGetConfig)
 	api.Put("/config", s.handleUpdateConfig)
