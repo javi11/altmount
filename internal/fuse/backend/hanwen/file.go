@@ -36,11 +36,10 @@ type File struct {
 func (f *File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	info, err := f.nzbfs.Stat(ctx, f.path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return syscall.ENOENT
+		if !os.IsNotExist(err) {
+			f.logger.ErrorContext(ctx, "File Getattr failed", "path", f.path, "error", err)
 		}
-		f.logger.ErrorContext(ctx, "File Getattr failed", "path", f.path, "error", err)
-		return syscall.EIO
+		return translateError(err)
 	}
 
 	fillAttr(info, &out.Attr, f.uid, f.gid)
@@ -90,7 +89,14 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 	}
 
 	handle := NewHandle(aferoFile, f.logger, f.path, stream, f.streamTracker)
-	return handle, fuse.FOPEN_KEEP_CACHE, 0
+
+	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
+	// from caching pages with stale size metadata (rclone mount2 pattern).
+	fuseFlags := uint32(fuse.FOPEN_KEEP_CACHE)
+	if f.size <= 0 {
+		fuseFlags = uint32(fuse.FOPEN_DIRECT_IO)
+	}
+	return handle, fuseFlags, 0
 }
 
 // Read implements fs.NodeReader.

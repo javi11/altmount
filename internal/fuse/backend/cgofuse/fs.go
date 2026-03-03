@@ -290,8 +290,14 @@ func (f *FS) OpenEx(path string, fi *cgofuse.FileInfo_t) int {
 	}
 
 	fi.Fh = f.allocHandle(h)
-	fi.DirectIo = false
-	fi.KeepCache = true
+
+	// Use DIRECT_IO when file size is unknown/zero to prevent the kernel
+	// from caching pages with stale size metadata (rclone mount2 pattern).
+	if info.Size() <= 0 {
+		fi.DirectIo = true
+	} else {
+		fi.KeepCache = true
+	}
 
 	return 0
 }
