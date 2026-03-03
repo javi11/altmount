@@ -102,6 +102,10 @@ type StremioConfig struct {
 	// the same NZB is re-processed on the next request.
 	// Set to 0 to disable expiry (cache forever). Defaults to 24 hours.
 	NzbTTLHours int `yaml:"nzb_ttl_hours" mapstructure:"nzb_ttl_hours" json:"nzb_ttl_hours,omitempty"`
+	// BaseURL is the public base URL used when building Stremio stream links
+	// (e.g. "https://altmount.example.com"). Falls back to the auto-detected
+	// request origin when not set.
+	BaseURL string `yaml:"base_url" mapstructure:"base_url" json:"base_url,omitempty"`
 }
 
 // AuthConfig represents authentication configuration

@@ -25,12 +25,14 @@ Add the following block to your `config.yaml`:
 stremio:
   enabled: true
   nzb_ttl_hours: 24   # 0 = keep cached streams forever
+  base_url: ""        # optional — set if auto-detection gives the wrong origin
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable the `/api/nzb/streams` endpoint |
 | `nzb_ttl_hours` | int | `24` | Hours before a cached NZB result expires. `0` means never expire. |
+| `base_url` | string | `""` | Public base URL used when building stream links (e.g. `https://altmount.example.com`). When empty, AltMount auto-detects the origin from the incoming request. Set this when running behind a reverse proxy or when the detected origin is wrong. |
 
 When `nzb_ttl_hours` is greater than zero, submitting the same NZB filename within the TTL window returns the cached stream URLs immediately without re-queueing or re-downloading.
 
@@ -66,7 +68,6 @@ Submit an NZB and receive stream URLs.
 |-------|----------|-------------|
 | `download_key` | Yes | SHA-256 of your API key (lowercase hex) |
 | `file` | Yes | The `.nzb` file to process (max 100 MB) |
-| `base_url` | No | Base URL for stream links (defaults to the request origin, e.g. `http://192.168.1.10:8080`) |
 | `category` | No | Download category (e.g. `movies`, `tv`) |
 | `timeout` | No | Seconds to wait before returning a 408 (default: `300`) |
 
@@ -127,7 +128,6 @@ DOWNLOAD_KEY=$(echo -n "YOUR_API_KEY" | sha256sum | awk '{print $1}')
 curl -s -X POST "http://localhost:8080/api/nzb/streams" \
   -F "download_key=${DOWNLOAD_KEY}" \
   -F "file=@/path/to/release.nzb" \
-  -F "base_url=http://localhost:8080" \
   -F "category=movies" \
   -F "timeout=300" | jq .
 ```
