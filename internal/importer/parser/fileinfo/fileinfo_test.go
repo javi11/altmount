@@ -1,6 +1,8 @@
 package fileinfo
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestIsProbablyObfuscated(t *testing.T) {
 	tests := []struct {
@@ -91,6 +93,7 @@ func TestSelectBestFilename(t *testing.T) {
 		par2Filename    string
 		subjectFilename string
 		headerFilename  string
+		subjectHeader   string
 		want            string
 	}{
 		{
@@ -121,13 +124,75 @@ func TestSelectBestFilename(t *testing.T) {
 			headerFilename:  "Movie.mkv",
 			want:            "Movie.mkv",
 		},
+		{
+			name:            "Subject header used when all others obfuscated",
+			par2Filename:    "",
+			subjectFilename: "b082fa0beaa644d3aa01045d5b8d0b36.mkv",
+			headerFilename:  "",
+			subjectHeader:   "Movie.Name.2023.1080p.BluRay",
+			want:            "Movie.Name.2023.1080p.BluRay",
+		},
+		{
+			name:            "Clear subject wins over subject header",
+			par2Filename:    "",
+			subjectFilename: "Good.Movie.Name.mkv",
+			headerFilename:  "",
+			subjectHeader:   "Movie.Name.2023.1080p.BluRay",
+			want:            "Good.Movie.Name.mkv",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := selectBestFilename(tt.par2Filename, tt.subjectFilename, tt.headerFilename)
+			got := selectBestFilename(tt.par2Filename, tt.subjectFilename, tt.headerFilename, tt.subjectHeader)
 			if got != tt.want {
 				t.Errorf("selectBestFilename() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCorrectExtensionFromMagicBytes(t *testing.T) {
+	rar4Header := append([]byte(nil), Rar4Magic...)
+	sevenZipHeader := append([]byte(nil), SevenZipMagic...)
+
+	tests := []struct {
+		name     string
+		filename string
+		data     []byte
+		want     string
+	}{
+		{
+			name:     "obfuscated .bin with RAR magic → .rar",
+			filename: "b082fa0beaa644d3aa01045d5b8d0b36.bin",
+			data:     rar4Header,
+			want:     "b082fa0beaa644d3aa01045d5b8d0b36.rar",
+		},
+		{
+			name:     "obfuscated .dat with 7z magic → .7z",
+			filename: "0675e29e9abfd2.f7d069dab0b853283cc1b069a25f82.dat",
+			data:     sevenZipHeader,
+			want:     "0675e29e9abfd2.f7d069dab0b853283cc1b069a25f82.7z",
+		},
+		{
+			name:     "clear filename not changed even with RAR magic",
+			filename: "Movie.Name.2023.mkv",
+			data:     rar4Header,
+			want:     "Movie.Name.2023.mkv",
+		},
+		{
+			name:     "no magic bytes — no change",
+			filename: "b082fa0beaa644d3aa01045d5b8d0b36.bin",
+			data:     []byte{0x00, 0x01, 0x02},
+			want:     "b082fa0beaa644d3aa01045d5b8d0b36.bin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := correctExtensionFromMagicBytes(tt.filename, tt.data)
+			if got != tt.want {
+				t.Errorf("correctExtensionFromMagicBytes(%q) = %q, want %q", tt.filename, got, tt.want)
 			}
 		})
 	}
