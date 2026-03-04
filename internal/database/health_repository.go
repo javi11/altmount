@@ -11,13 +11,15 @@ import (
 
 // HealthRepository handles file health database operations
 type HealthRepository struct {
-	db *sql.DB
+	db      *dialectAwareDB
+	dialect dialectHelper
 }
 
 // NewHealthRepository creates a new health repository
-func NewHealthRepository(db *sql.DB) *HealthRepository {
+func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 	return &HealthRepository{
-		db: db,
+		db:      newDialectAwareDB(db, d),
+		dialect: dialectHelper{d: d},
 	}
 }
 
@@ -282,15 +284,15 @@ func (r *HealthRepository) IncrementRetryCount(ctx context.Context, filePath str
 
 // SetRepairTriggered sets a file's status to repair_triggered
 func (r *HealthRepository) SetRepairTriggered(ctx context.Context, filePath string, errorMessage *string, errorDetails *string) error {
-	query := `
+	query := fmt.Sprintf(`
 		UPDATE file_health
 		SET status = 'repair_triggered',
 		    last_error = ?,
 		    error_details = ?,
-			scheduled_check_at = datetime('now', '+1 hour'),
+			scheduled_check_at = %s,
 		    updated_at = datetime('now')
 		WHERE file_path = ?
-	`
+	`, r.dialect.DatetimePlusHour())
 
 	result, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, filePath)
 	if err != nil {
@@ -420,15 +422,15 @@ func (r *HealthRepository) GetHealthStats(ctx context.Context) (map[HealthStatus
 
 // SetRepairTriggeredByID sets a file's status to repair_triggered by ID
 func (r *HealthRepository) SetRepairTriggeredByID(ctx context.Context, id int64, errorMessage *string, errorDetails *string) error {
-	query := `
+	query := fmt.Sprintf(`
 		UPDATE file_health
 		SET status = 'repair_triggered',
 		    last_error = ?,
 		    error_details = ?,
-			scheduled_check_at = datetime('now', '+1 hour'),
+			scheduled_check_at = %s,
 		    updated_at = datetime('now')
 		WHERE id = ?
-	`
+	`, r.dialect.DatetimePlusHour())
 
 	result, err := r.db.ExecContext(ctx, query, errorMessage, errorDetails, id)
 	if err != nil {

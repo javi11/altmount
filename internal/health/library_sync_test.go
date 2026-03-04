@@ -60,7 +60,7 @@ func TestSyncLibrary_WorkerPool(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	healthRepo := database.NewHealthRepository(db)
+	healthRepo := database.NewHealthRepository(db, database.DialectSQLite)
 	metadataService := metadata.NewMetadataService(tempDir)
 
 	// Setup configuration

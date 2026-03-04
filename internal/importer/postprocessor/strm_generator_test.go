@@ -39,7 +39,7 @@ func setupTestDB(t *testing.T) *database.UserRepository {
 	`)
 	require.NoError(t, err)
 
-	return database.NewUserRepository(db)
+	return database.NewUserRepository(db, database.DialectSQLite)
 }
 
 func TestCreateStrmFiles_HostConfiguration(t *testing.T) {

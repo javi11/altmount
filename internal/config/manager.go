@@ -115,7 +115,13 @@ type AuthConfig struct {
 
 // DatabaseConfig represents database configuration
 type DatabaseConfig struct {
+	// Type selects the database backend: "sqlite" (default) or "postgres".
+	Type string `yaml:"type" mapstructure:"type" json:"type"`
+	// Path is the SQLite database file path (sqlite only).
 	Path string `yaml:"path" mapstructure:"path" json:"path"`
+	// DSN is the PostgreSQL connection string (postgres only).
+	// Example: "postgres://user:password@localhost:5432/altmount?sslmode=disable"
+	DSN string `yaml:"dsn" mapstructure:"dsn" json:"dsn,omitempty"`
 }
 
 // MetadataConfig represents metadata filesystem configuration
@@ -1166,6 +1172,7 @@ func DefaultConfig(configDir ...string) *Config {
 			LoginRequired: &loginRequired,
 		},
 		Database: DatabaseConfig{
+			Type: "sqlite",
 			Path: dbPath,
 		},
 		Metadata: MetadataConfig{

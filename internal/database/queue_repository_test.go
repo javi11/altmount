@@ -31,7 +31,7 @@ func TestResetStaleItems_ResetsAllProcessingItems(t *testing.T) {
 	// Item 3: Already pending (should remain unchanged)
 	insertQueueItemWithTime(t, db, 3, "pending.nzb", "pending", now)
 
-	repo := NewQueueRepository(db)
+	repo := NewQueueRepository(db, DialectSQLite)
 
 	// Test: Reset stale items
 	err = repo.ResetStaleItems(context.Background())
@@ -60,7 +60,7 @@ func TestResetStaleItems_NoItemsToReset(t *testing.T) {
 	defer db.Close()
 
 	setupQueueSchema(t, db)
-	repo := NewQueueRepository(db)
+	repo := NewQueueRepository(db, DialectSQLite)
 
 	// Test: Reset with no items
 	err = repo.ResetStaleItems(context.Background())
@@ -87,7 +87,7 @@ func TestResetStaleItems_MixedStatuses(t *testing.T) {
 	insertQueueItemWithTime(t, db, 3, "old-failed.nzb", "failed", now.Add(-20*time.Minute))
 	insertQueueItemWithTime(t, db, 4, "old-pending.nzb", "pending", now.Add(-20*time.Minute))
 
-	repo := NewQueueRepository(db)
+	repo := NewQueueRepository(db, DialectSQLite)
 
 	// Test: Reset stale items
 	err = repo.ResetStaleItems(context.Background())
@@ -120,7 +120,7 @@ func TestResetStaleItems_VeryOldItems(t *testing.T) {
 	insertQueueItemWithTime(t, db, 2, "1day-old.nzb", "processing", now.Add(-24*time.Hour))
 	insertQueueItemWithTime(t, db, 3, "1week-old.nzb", "processing", now.Add(-7*24*time.Hour))
 
-	repo := NewQueueRepository(db)
+	repo := NewQueueRepository(db, DialectSQLite)
 
 	// Test: Reset stale items
 	err = repo.ResetStaleItems(context.Background())
@@ -162,7 +162,7 @@ func TestResetStaleItems_UpdatedAtFieldUpdated(t *testing.T) {
 	// Wait 1 second to ensure time difference (SQLite datetime has second precision)
 	time.Sleep(1 * time.Second)
 
-	repo := NewQueueRepository(db)
+	repo := NewQueueRepository(db, DialectSQLite)
 
 	// Test: Reset stale items
 	err = repo.ResetStaleItems(context.Background())
